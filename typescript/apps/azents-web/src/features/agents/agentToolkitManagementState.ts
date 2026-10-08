@@ -2,17 +2,32 @@ import type { AgentToolkitManagementItemResponse } from "@azents/public-client";
 
 export type AgentToolkitEditorState =
   | { type: "CLOSED" }
-  | { type: "SELECT_TYPE"; toolkitType: string | null }
+  | { type: "CATALOG"; tab: "new" | "workspace" }
   | { type: "CREATE"; toolkitType: string }
+  | { type: "DETAIL"; toolkitConfigId: string }
   | { type: "EDIT"; toolkitConfigId: string };
 
 export type AgentToolkitMutationState =
   { type: "IDLE" } | { type: "ERROR"; message: string };
 
+/** A write completes only the editor that submitted it. */
+export function completedToolkitEditor(
+  current: AgentToolkitEditorState,
+  submitted: AgentToolkitEditorState,
+): AgentToolkitEditorState {
+  if (current !== submitted) {
+    return current;
+  }
+  return submitted.type === "EDIT"
+    ? { type: "DETAIL", toolkitConfigId: submitted.toolkitConfigId }
+    : { type: "CLOSED" };
+}
+
 export interface AgentToolkitSharedOption {
   value: string;
   label: string;
   toolkitType: string;
+  description?: string | null;
 }
 
 export type AgentToolkitManagementState =
@@ -73,6 +88,7 @@ export interface AgentToolkitManagementQuerySnapshot {
       id: string;
       name: string;
       toolkit_type: string;
+      description?: string | null;
     }>;
   };
   toolkitDefinitions?: Array<{
@@ -104,8 +120,9 @@ export function projectAgentToolkitManagementState({
       })),
     availableShared: (data?.available_shared ?? []).map((toolkit) => ({
       value: toolkit.id,
-      label: `${toolkit.name} (${toolkit.toolkit_type})`,
+      label: toolkit.name,
       toolkitType: toolkit.toolkit_type,
+      description: toolkit.description ?? null,
     })),
   };
 }

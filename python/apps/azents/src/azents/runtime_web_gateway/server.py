@@ -33,14 +33,24 @@ from azents_runtime_control.runtime_stream_session import (
 from mypy_boto3_rds import RDSClient
 from sqlalchemy import event
 from sqlalchemy import text as sql_text
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from azents.core.config import PostgreSQLConfig
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import (
+    WriteSession,
+    create_read_write_session_manager,
+)
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.runtime_web.data import RuntimeWebServiceRecord
+from azents.repos.runtime_web.gateway_auth_operations import (
+    RuntimeWebGatewayAuthOperationsRepository,
+)
+from azents.repos.runtime_web.gateway_authority_operations import (
+    RuntimeWebGatewayAuthorityOperationsRepository,
+)
 from azents.repos.runtime_web.gateway_data import (
     RuntimeWebBrokerBinding,
     RuntimeWebDesiredConfiguration,
@@ -73,16 +83,12 @@ from azents.runtime_web_gateway.operations import (
     render_openmetrics,
 )
 from azents.runtime_web_gateway.policy import (
-    RuntimeWebCorsDecision,
     RuntimeWebPolicyCode,
     RuntimeWebPolicyError,
-    canonical_origin,
-    evaluate_actual_origin,
-    evaluate_preflight,
     normalize_request_headers,
     normalize_response_headers,
+    parse_return_target,
     parse_target_host,
-    reject_service_worker_request,
 )
 from azents.runtime_web_gateway.session_runtime import (
     RuntimeWebGatewayControlSessions,
@@ -209,13 +215,6 @@ class RuntimeWebGatewayAuthorityProvider(Protocol):
         *,
         service_id: str,
     ) -> RuntimeWebServiceRecord | None: ...
-
-    async def source_service_matches_agent(
-        self,
-        *,
-        source_hostname_key: str,
-        target_service: RuntimeWebServiceRecord,
-    ) -> bool: ...
 
     async def authorize(
         self,
@@ -348,23 +347,27 @@ async def runtime_web_gateway_lifespan(
         fingerprint=settings.security_fingerprint(),
     )
     auth = RuntimeWebGatewayAuthService(
-        session_manager=session_manager,
-        repository=gateway_repository,
-        agent_repository=AgentRepository(),
-        agent_admin_repository=AgentAdminRepository(),
-        workspace_user_repository=WorkspaceUserRepository(),
+        operations=RuntimeWebGatewayAuthOperationsRepository(
+            session_manager=session_manager,
+            repository=gateway_repository,
+            agent_repository=AgentRepository(),
+            agent_admin_repository=AgentAdminRepository(),
+            workspace_user_repository=WorkspaceUserRepository(),
+        ),
         identity_lifetime=datetime.timedelta(seconds=config.identity_lifetime_seconds),
         desired_configuration=desired_configuration,
     )
     await auth.synchronize_configuration(desired_configuration)
     authority = RuntimeWebGatewayAuthorityService(
-        session_manager=session_manager,
-        gateway_repository=gateway_repository,
-        runtime_web_repository=RuntimeWebRepository(),
-        agent_repository=AgentRepository(),
-        agent_admin_repository=AgentAdminRepository(),
-        workspace_user_repository=WorkspaceUserRepository(),
-        runtime_repository=AgentRuntimeRepository(),
+        operations=RuntimeWebGatewayAuthorityOperationsRepository(
+            session_manager=session_manager,
+            gateway_repository=gateway_repository,
+            runtime_web_repository=RuntimeWebRepository(),
+            agent_repository=AgentRepository(),
+            agent_admin_repository=AgentAdminRepository(),
+            workspace_user_repository=WorkspaceUserRepository(),
+            runtime_repository=AgentRuntimeRepository(),
+        ),
     )
     control_endpoint = settings.runtime_web_gateway_control_endpoint
     if control_endpoint is None:
@@ -687,6 +690,7 @@ async def _broker_bind(
     _require_broker_request(request, state)
     form = await request.post()
     initiation_id = form.get("initiation_id")
+    return_target = parse_return_target(form.get("return_target"))
     if not isinstance(initiation_id, str) or len(initiation_id) != 32:
         raise RuntimeWebPolicyError(RuntimeWebPolicyCode.BAD_REQUEST)
     try:
@@ -705,7 +709,7 @@ async def _broker_bind(
     response = web.Response(
         text=_auto_post_document(
             destination=destination,
-            fields={"initiation_id": initiation_id},
+            fields={"initiation_id": initiation_id, "return_target": return_target},
         ),
         content_type="text/html",
         headers=_security_page_headers(
@@ -740,6 +744,7 @@ async def _broker_redeem(
         )
     form = await request.post()
     ticket = form.get("ticket")
+    return_target = parse_return_target(form.get("return_target"))
     if not isinstance(ticket, str):
         raise RuntimeWebPolicyError(RuntimeWebPolicyCode.BAD_REQUEST)
     try:
@@ -767,7 +772,7 @@ async def _broker_redeem(
         )
     destination = (
         f"{_public_scheme(state.config)}://"
-        f"{service.hostname_key}.{state.config.service_suffix}/"
+        f"{service.hostname_key}.{state.config.service_suffix}{return_target}"
     )
     response = web.Response(
         text=_completion_document(destination),
@@ -800,7 +805,6 @@ async def _endpoint(
     *,
     endpoint_key: str,
 ) -> web.StreamResponse:
-    reject_service_worker_request(request.headers)
     service = await state.authority.resolve_service(hostname_key=endpoint_key)
     if service is None:
         return _bounded_error(
@@ -808,25 +812,6 @@ async def _endpoint(
             state.config,
             status=404,
             code="not_found",
-        )
-    origin = request.headers.get("Origin")
-    requested_method = request.headers.get("Access-Control-Request-Method")
-    if request.method == "OPTIONS" and origin and requested_method:
-        source_key = _source_endpoint_key(origin, state.config)
-        if source_key is None or not await state.authority.source_service_matches_agent(
-            source_hostname_key=source_key,
-            target_service=service,
-        ):
-            raise RuntimeWebPolicyError(RuntimeWebPolicyCode.FORBIDDEN)
-        decision = evaluate_preflight(
-            origin=origin,
-            requested_method=requested_method,
-            requested_headers=request.headers.get("Access-Control-Request-Headers"),
-            source_origins=frozenset({canonical_origin(origin)}),
-        )
-        return web.Response(
-            status=204,
-            headers=(dict(decision.headers) | _security_headers(state.config)),
         )
     identity_secret = _exact_cookie(
         request,
@@ -840,7 +825,7 @@ async def _endpoint(
     navigation = _safe_navigation(request)
     if identity_secret is None:
         if navigation:
-            return _auth_navigation(state.config, service.id)
+            return _auth_navigation(state.config, service.id, request.raw_path)
         return _bounded_error(
             request,
             state.config,
@@ -864,30 +849,30 @@ async def _endpoint(
         f"{_public_scheme(state.config)}://"
         f"{service.hostname_key}.{state.config.service_suffix}"
     )
-    source_origins: frozenset[str] = frozenset()
-    if origin is not None and canonical_origin(origin) != target_origin:
-        source_key = _source_endpoint_key(origin, state.config)
-        if source_key is None or not await state.authority.source_service_matches_agent(
-            source_hostname_key=source_key,
-            target_service=service,
-        ):
-            raise RuntimeWebPolicyError(RuntimeWebPolicyCode.FORBIDDEN)
-        source_origins = frozenset({canonical_origin(origin)})
-    cors = evaluate_actual_origin(
-        origin=origin,
-        fetch_site=request.headers.get("Sec-Fetch-Site"),
-        fetch_mode=request.headers.get("Sec-Fetch-Mode"),
-        method=request.method,
-        target_origin=target_origin,
-        source_origins=source_origins,
-    )
     now = datetime.datetime.now(datetime.UTC)
     headers = normalize_request_headers(
         request.raw_headers,
         port=service.port,
-        target_origin=target_origin,
+        websocket=protocol is StreamProtocol.WEBSOCKET,
         maximum_bytes=state.config.request_header_bytes,
     )
+    if (
+        protocol is StreamProtocol.HTTP
+        and request.headers.get("Transfer-Encoding") is None
+    ):
+        content_length = request.content_length
+        # Carry parsed ingress framing across the stream rather than treating an
+        # unframed, bodyless request as an unknown-length body at the next hop.
+        headers = tuple(
+            (name, value)
+            for name, value in headers
+            if name.lower() != b"content-length"
+        ) + (
+            (
+                b"Content-Length",
+                str(content_length if content_length is not None else 0).encode(),
+            ),
+        )
     target = request.raw_path.encode("ascii", errors="strict")
     if not target.startswith(b"/") or target.startswith(b"//"):
         raise RuntimeWebPolicyError(RuntimeWebPolicyCode.BAD_REQUEST)
@@ -947,7 +932,6 @@ async def _endpoint(
                 state,
                 bridge=bridge,
                 head=head,
-                cors=cors,
                 target_origin=target_origin,
                 authority=authority,
             )
@@ -957,7 +941,6 @@ async def _endpoint(
             bridge=bridge,
             head=head,
             registration=registration,
-            cors=cors,
             target_origin=target_origin,
             authority=authority,
         )
@@ -989,7 +972,6 @@ async def _proxy_http(
     bridge: RuntimeWebBrowserStreamBridge,
     head: RequestHead,
     registration: RuntimeWebDrainRegistration,
-    cors: RuntimeWebCorsDecision,
     target_origin: str,
     authority: RuntimeWebGatewayAuthorityData,
 ) -> web.StreamResponse:
@@ -1038,10 +1020,9 @@ async def _proxy_http(
                         status=event.status,
                         headers=normalize_response_headers(
                             ((header.name, header.value) for header in event.headers),
-                            config=state.config,
-                            cors=cors,
                             target_origin=target_origin,
                             port=authority.service.port,
+                            websocket=False,
                         ),
                     )
                     await response.prepare(request)
@@ -1224,7 +1205,6 @@ async def _proxy_websocket(
     *,
     bridge: RuntimeWebBrowserStreamBridge,
     head: RequestHead,
-    cors: RuntimeWebCorsDecision,
     target_origin: str,
     authority: RuntimeWebGatewayAuthorityData,
 ) -> web.StreamResponse:
@@ -1260,10 +1240,9 @@ async def _proxy_websocket(
                                     (header.name, header.value)
                                     for header in event.headers
                                 ),
-                                config=state.config,
-                                cors=cors,
                                 target_origin=target_origin,
                                 port=authority.service.port,
+                                websocket=False,
                             ),
                         )
                     try:
@@ -1288,6 +1267,14 @@ async def _proxy_websocket(
                         ),
                         max_msg_size=MAX_WEBSOCKET_MESSAGE_BYTES,
                         compress=False,
+                    )
+                    websocket.headers.extend(
+                        normalize_response_headers(
+                            ((header.name, header.value) for header in event.headers),
+                            target_origin=target_origin,
+                            port=authority.service.port,
+                            websocket=True,
+                        )
                     )
                     await websocket.prepare(request)
                     client_task = asyncio.create_task(
@@ -1596,13 +1583,13 @@ def _authority_error(
 ) -> web.StreamResponse:
     if code is RuntimeWebGatewayAuthorityCode.UNAUTHENTICATED:
         if _safe_navigation(request):
-            return _auth_navigation(config, service_id)
+            return _auth_navigation(config, service_id, request.raw_path)
         return _bounded_error(request, config, status=401, code=code.value)
     if code is RuntimeWebGatewayAuthorityCode.NOT_FOUND:
         return _bounded_error(request, config, status=404, code=code.value)
     if code is RuntimeWebGatewayAuthorityCode.GONE:
         if _safe_navigation(request):
-            return _activation_navigation(config, service_id)
+            return _activation_navigation(config, service_id, request.raw_path)
         return _bounded_error(request, config, status=410, code=code.value)
     return _bounded_error(request, config, status=503, code=code.value)
 
@@ -1616,7 +1603,6 @@ def _policy_error(
         RuntimeWebPolicyCode.BAD_REQUEST: 400,
         RuntimeWebPolicyCode.FORBIDDEN: 403,
         RuntimeWebPolicyCode.HEADER_TOO_LARGE: 431,
-        RuntimeWebPolicyCode.METHOD_NOT_ALLOWED: 405,
     }[code]
     return _bounded_error(request, config, status=status, code=code.value)
 
@@ -1665,11 +1651,12 @@ def _bounded_error(
 def _auth_navigation(
     config: RuntimeWebGatewayConfig,
     service_id: str,
+    return_target: str,
 ) -> web.Response:
-    destination = (
-        f"{config.main_web_origin}/runtime-web/auth?"
-        f"service_id={urllib.parse.quote(service_id, safe='')}"
+    query = urllib.parse.urlencode(
+        {"service_id": service_id, "return_to": parse_return_target(return_target)}
     )
+    destination = f"{config.main_web_origin}/runtime-web/auth?{query}"
     return web.HTTPSeeOther(
         destination,
         headers=_security_headers(config),
@@ -1679,11 +1666,12 @@ def _auth_navigation(
 def _activation_navigation(
     config: RuntimeWebGatewayConfig,
     service_id: str,
+    return_target: str,
 ) -> web.Response:
-    destination = (
-        f"{config.main_web_origin}/runtime-web/activate?"
-        f"service_id={urllib.parse.quote(service_id, safe='')}"
+    query = urllib.parse.urlencode(
+        {"service_id": service_id, "return_to": parse_return_target(return_target)}
     )
+    destination = f"{config.main_web_origin}/runtime-web/activate?{query}"
     return web.HTTPSeeOther(
         destination,
         headers=_security_headers(config),
@@ -1745,30 +1733,14 @@ def _completion_document(destination: str) -> str:
     return (
         "<!doctype html><meta charset=utf-8><title>Runtime Web</title>"
         f'<a id="continue" href="{encoded}">Continue</a>'
-        '<script nonce="runtime-web">document.getElementById("continue").click()'
+        '<script nonce="runtime-web">window.location.replace('
+        'document.getElementById("continue").href)'
         "</script>"
     )
 
 
 def _public_scheme(config: RuntimeWebGatewayConfig) -> str:
     return urllib.parse.urlparse(config.broker_origin).scheme
-
-
-def _source_endpoint_key(
-    origin: str,
-    config: RuntimeWebGatewayConfig,
-) -> str | None:
-    canonical = canonical_origin(origin)
-    parsed = urllib.parse.urlparse(canonical)
-    if parsed.scheme != _public_scheme(config) or parsed.port is not None:
-        return None
-    try:
-        target = parse_target_host(parsed.netloc, config=config)
-    except RuntimeWebPolicyError:
-        return None
-    if target.broker:
-        return None
-    return target.endpoint_label
 
 
 def _public_request_secure(
@@ -1853,18 +1825,5 @@ def _create_engine(settings: RuntimeWebGatewaySettings) -> AsyncEngine:
     )
 
 
-def _session_manager(
-    engine: AsyncEngine,
-) -> SessionManager[AsyncSession]:
-    @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession]:
-        async with AsyncSession(engine, expire_on_commit=False) as session:
-            try:
-                yield session
-            except Exception:
-                await session.rollback()
-                raise
-            else:
-                await session.commit()
-
-    return session_manager
+def _session_manager(engine: AsyncEngine) -> SessionManager[WriteSession]:
+    return create_read_write_session_manager(engine)

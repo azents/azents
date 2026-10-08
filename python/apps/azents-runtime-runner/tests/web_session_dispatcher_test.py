@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator, Callable
 from typing import Literal
 
 import h11
+import httpcore
 import pytest
 from azents_runtime_control.grpc_runner_stream_session_client import (
     EnvelopeHandler,
@@ -33,6 +34,7 @@ from azents_runtime_control.runtime_stream_session import (
 from wsproto.events import Event
 from wsproto.utilities import RemoteProtocolError as WsprotoRemoteProtocolError
 
+from azents_runtime_runner.main import StructuredLogFormatter
 from azents_runtime_runner.stream_session import (
     RunnerStreamSessionManager,
     RunnerWebLoopbackPool,
@@ -398,7 +400,9 @@ async def test_late_terminal_control_for_completed_stream_preserves_session(
     assert dispatcher.tombstone_set == {7}
 
 
-async def test_tombstoned_stream_rejects_new_data_and_reused_open() -> None:
+async def test_tombstoned_stream_discards_in_flight_data_but_rejects_reused_open() -> (
+    None
+):
     offer = _offer()
     client = _RecordingClient()
     manager = _manager(client_factory=None)
@@ -418,8 +422,9 @@ async def test_tombstoned_stream_rejects_new_data_and_reused_open() -> None:
     opening = _envelope(offer, stream_id=7)
     opening.open.SetInParent()
 
-    with pytest.raises(ValueError, match="tombstoned"):
-        await dispatcher(data)
+    await dispatcher(data)
+    assert dispatcher.accepting_envelopes
+    assert dispatcher.accepting_streams
     with pytest.raises(ValueError, match="stream ID"):
         await dispatcher(opening)
 
@@ -744,6 +749,117 @@ async def test_websocket_protocol_failure_emits_stream_reset(
     )
     assert "Runtime Web Runner WebSocket protocol failed" in caplog.text
     assert "raw handshake detail" not in caplog.text
+
+
+async def test_failed_responses_restore_shared_credit_beyond_one_window() -> None:
+    offer = _offer()
+    client = _RecordingClient()
+    manager = _manager(client_factory=None)
+    manager.loopback = _FailingHandshakePool(maximum_connections=1)
+    dispatcher = _dispatcher(manager)
+    for stream_id in range(1, 11):
+        stream = _stream(
+            offer=offer,
+            client=client,
+            session_credit=dispatcher.response_session_credit,
+        )
+        stream.response_credit.reserve(4 * MANDATORY_DATA_FRAME_BYTES)
+        dispatcher.streams[stream_id] = stream
+        await dispatcher._run(stream_id, stream)
+        assert dispatcher.response_session_credit.available_bytes == (
+            APPROVED_SESSION_PROFILE.response_session_window_bytes
+        )
+    assert dispatcher.response_session_credit.sent_total > (
+        APPROVED_SESSION_PROFILE.response_session_window_bytes
+    )
+    assert not dispatcher.streams
+
+
+@pytest.mark.parametrize(
+    ("failure_type", "reason", "message"),
+    [
+        (
+            TimeoutError,
+            CloseReason.DEADLINE,
+            "Runtime Web Runner stream deadline reached",
+        ),
+        (
+            OSError,
+            CloseReason.APPLICATION_UNAVAILABLE,
+            "Runtime Web Runner loopback stream failed",
+        ),
+        (
+            httpcore.NetworkError,
+            CloseReason.APPLICATION_UNAVAILABLE,
+            "Runtime Web Runner loopback stream failed",
+        ),
+        (
+            httpcore.ProtocolError,
+            CloseReason.APPLICATION_UNAVAILABLE,
+            "Runtime Web Runner loopback stream failed",
+        ),
+        (
+            ValueError,
+            CloseReason.PROTOCOL_VIOLATION,
+            "Runtime Web Runner stream protocol failed",
+        ),
+        (
+            UnicodeError,
+            CloseReason.PROTOCOL_VIOLATION,
+            "Runtime Web Runner stream protocol failed",
+        ),
+    ],
+)
+async def test_loopback_failures_keep_bounded_origin_and_close_reason(
+    caplog: pytest.LogCaptureFixture,
+    failure_type: type[Exception],
+    reason: CloseReason,
+    message: str,
+) -> None:
+    """Synthetic loopback errors retain reset behavior and safe provenance."""
+
+    class FailurePool(RunnerWebLoopbackPool):
+        async def websocket(
+            self,
+            *,
+            target: bytes,
+            headers: tuple[tuple[bytes, bytes], ...],
+            port: int,
+            timeout_seconds: float,
+        ) -> RunnerWebSocket:
+            del target, headers, port, timeout_seconds
+            raise failure_type("WEB_PRIVATE_VALUE") from RuntimeError(
+                "WEB_PRIVATE_CAUSE"
+            )
+
+    offer = _offer()
+    client = _RecordingClient()
+    manager = _manager(client_factory=None)
+    manager.loopback = FailurePool(maximum_connections=1)
+    dispatcher = _dispatcher(manager)
+    stream = _stream(
+        offer=offer,
+        client=client,
+        session_credit=dispatcher.response_session_credit,
+    )
+    dispatcher.streams[1] = stream
+    caplog.set_level(
+        logging.INFO, logger="azents_runtime_runner.web_session_dispatcher"
+    )
+    await dispatcher._run(1, stream)
+    record = next(record for record in caplog.records if record.getMessage() == message)
+    rendered = StructuredLogFormatter().format(record)
+    assert stream.close_reason is reason
+    assert dispatcher.streams == {}
+    assert len(client.sent) == 1
+    assert client.sent[0].WhichOneof("payload") == "reset"
+    assert record.__dict__["error_type"] == failure_type.__name__
+    assert record.__dict__["error_frames"][-1]["function"] == "websocket"
+    assert "WEB_PRIVATE_VALUE" not in rendered
+    assert "WEB_PRIVATE_CAUSE" not in rendered
+    assert "raise failure_type" not in rendered
+    assert record.exc_info is not None
+    assert record.exc_info[2] is None
 
 
 def test_runner_resource_tracker_rejects_and_releases_process_ceilings() -> None:

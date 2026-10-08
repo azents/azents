@@ -6,13 +6,13 @@ from typing import Annotated
 from azcommon.datetime import tznow
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentRuntimeCapability, WorkspaceUserRole
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.runtime_profile import RuntimeReconcileSourceKind
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import (
     Agent,
@@ -136,7 +136,7 @@ class AgentOperationsRepository:
     """Own complete Agent service database transactions."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
@@ -408,7 +408,7 @@ class AgentOperationsRepository:
     ]:
         """Request Agent decommission in one completed transaction."""
         async with self.session_manager() as session:
-            settings = await self.archived_session_retention_repository.lock_settings(
+            settings = await self.archived_session_retention_repository.get_settings(
                 session
             )
             if settings.archived_session_retention_days is None:
@@ -528,7 +528,7 @@ class AgentOperationsRepository:
 
     async def _authorize_mutation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         workspace_id: str,
@@ -539,13 +539,13 @@ class AgentOperationsRepository:
         | AgentOperationWorkspaceMismatch
         | AgentOperationNotAdmin,
     ]:
-        """Lock and revalidate current Workspace and Agent mutation authority."""
-        agent = await self.agent_repository.lock_by_id(session, agent_id)
+        """Read exact Workspace and Agent mutation permissions without parent locks."""
+        agent = await self.agent_repository.get_by_id(session, agent_id)
         if agent is None:
             return Failure(AgentOperationNotFound(agent_id=agent_id))
         if agent.workspace_id != workspace_id:
             return Failure(AgentOperationWorkspaceMismatch(agent_id=agent_id))
-        workspace_user = await self.workspace_user_repository.get_for_update(
+        workspace_user = await self.workspace_user_repository.get(
             session,
             workspace_user_id,
         )
@@ -553,7 +553,7 @@ class AgentOperationsRepository:
             return Failure(AgentOperationNotAdmin(agent_id=agent_id))
         if workspace_user.role is WorkspaceUserRole.OWNER:
             return Success(agent)
-        admin = await self.admin_repository.is_admin_for_update(
+        admin = await self.admin_repository.is_admin(
             session,
             agent_id,
             workspace_user_id,

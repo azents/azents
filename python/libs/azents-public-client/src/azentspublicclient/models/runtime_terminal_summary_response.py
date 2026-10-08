@@ -19,7 +19,7 @@ import json
 
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, ClassVar, Dict, Optional
 from typing_extensions import Annotated
 from azentspublicclient.models.runtime_terminal_lifecycle import RuntimeTerminalLifecycle
 from typing import Optional, Set
@@ -38,7 +38,6 @@ class RuntimeTerminalSummaryResponse(BaseModel):
     input_bytes: Annotated[int, Field(strict=True, ge=0)]
     output_bytes: Annotated[int, Field(strict=True, ge=0)]
     replay_truncated: StrictBool
-    additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["terminal_id", "lifecycle", "attached", "started_at", "ended_at", "final_reason", "input_bytes", "output_bytes", "replay_truncated"]
 
     model_config = ConfigDict(
@@ -71,10 +70,8 @@ class RuntimeTerminalSummaryResponse(BaseModel):
         * `None` is only added to the output dict for nullable fields that
           were set at model initialization. Other fields with value `None`
           are ignored.
-        * Fields in `self.additional_properties` are added to the output dict.
         """
         excluded_fields: Set[str] = set([
-            "additional_properties",
         ])
 
         _dict = self.model_dump(
@@ -82,11 +79,6 @@ class RuntimeTerminalSummaryResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # puts key-value pairs in additional_properties in the top level
-        if self.additional_properties is not None:
-            for _key, _value in self.additional_properties.items():
-                _dict[_key] = _value
-
         # set to None if ended_at (nullable) is None
         # and model_fields_set contains the field
         if self.ended_at is None and "ended_at" in self.model_fields_set:
@@ -108,7 +100,9 @@ class RuntimeTerminalSummaryResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "terminal_id": obj.get("terminal_id"),
             "lifecycle": obj.get("lifecycle"),
             "attached": obj.get("attached"),
@@ -118,12 +112,8 @@ class RuntimeTerminalSummaryResponse(BaseModel):
             "input_bytes": obj.get("input_bytes"),
             "output_bytes": obj.get("output_bytes"),
             "replay_truncated": obj.get("replay_truncated")
+            }.items() if _key in obj
         })
-        # store additional fields in additional_properties
-        for _key in obj.keys():
-            if _key not in cls.__properties:
-                _obj.additional_properties[_key] = obj.get(_key)
-
         return _obj
 
 

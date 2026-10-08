@@ -6,22 +6,30 @@ import dataclasses
 import datetime
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from typing import Annotated, Any
+from typing import Annotated, Any, assert_never
 
 from azcommon.datetime import tznow
 from azcommon.logging import bind_extra
 from azcommon.result import Failure, Result, Success
-from azcommon.uuid import uuid7
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.broker.broadcast import WebSocketBroadcast
+from azents.broker.broadcast import (
+    BaseWebSocketBroadcast,
+    WebSocketBroadcastPublishError,
+)
 from azents.broker.types import (
-    PublishedEvent,
     SessionBroker,
     SessionWakeUp,
 )
+from azents.core.action_execution_data import ActionExecution, ActionExecutionProjection
 from azents.core.agent import AgentModelSelection
+from azents.core.agent_session_data import AgentSession, PendingSessionCommand
+from azents.core.chat_data import (
+    ChatLiveRunOperation,
+    ChatLiveRunRetryAttempt,
+    ChatLiveRunRetryState,
+    ChatLiveRunState,
+)
 from azents.core.enums import (
     ActionExecutionStatus,
     AgentRunPhase,
@@ -36,25 +44,40 @@ from azents.core.inference_profile import (
     InferenceProfileSource,
     RequestedInferenceProfile,
     SessionInferenceState,
-    validate_requested_profile_against_options,
+    adapt_inference_profile_to_model,
+)
+from azents.core.mailbox_errors import (
+    MailboxOwnerGenerationStaleError,
+    MailboxPreparationStaleError,
 )
 from azents.core.model_operation import (
-    ModelOperationChainExhaustedError,
     ModelOperationKind,
     ModelOperationSnapshot,
-    ModelOperationState,
-    build_model_operation,
-    mark_current_candidate_quota_and_advance,
 )
 from azents.core.runtime_capabilities import (
     RuntimeCapability,
     RuntimeCapabilityResolver,
     RuntimeCapabilitySnapshot,
 )
+from azents.core.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionExecutionOwnerBindable,
+    SessionResourceAuthority,
+)
 from azents.core.tools import (
     ToolkitContext,
     ToolkitExecutionMode,
     ToolkitProvider,
+)
+from azents.core.worker_model_profile import (
+    ModelCandidateChainExhausted,
+    ModelQuotaAdvanceResult,
+    ProfileResolutionFailure,
+    ProfileResolutionRuntimeError,
+    RequestedProfileSelection,
+    agent_default_inference_profile,
+    normalize_profile_selection_for_agent,
+    profile_resolution_failure,
 )
 from azents.engine.context.window import (
     compute_auto_compaction_threshold_tokens,
@@ -70,7 +93,7 @@ from azents.engine.events.engine_events import (
     RunStopped,
     SubagentTreeChanged,
 )
-from azents.engine.events.types import Event
+from azents.engine.events.types import Event, ScheduledTaskTriggerPayload
 from azents.engine.hooks.dispatcher import (
     RuntimeHookDispatcher,
     RuntimeHookProviderRef,
@@ -91,7 +114,7 @@ from azents.engine.run.contracts import (
     ToolAdmissionBarrier,
     ToolkitBinding,
 )
-from azents.engine.run.emit import Emit, handle_engine_event
+from azents.engine.run.emit import Emit, PublishedEvent, handle_engine_event
 from azents.engine.run.errors import (
     CompactionModelStreamTimeoutError,
     ModelCallError,
@@ -118,14 +141,11 @@ from azents.engine.run.provider_failure import (
     model_provider_error_log_fields,
 )
 from azents.engine.run.resolve import (
-    ExecutionOptionUnsupported,
-    ModelTargetNotFound,
-    ReasoningEffortUnsupported,
     resolve_agent_tools,
-    resolve_invoke_input_with_profile,
     resolve_invoke_input_with_resolved_profile,
     resolve_model_candidate_runtime,
 )
+from azents.engine.run.task_supervision import SESSION_OWNER_HEARTBEAT_INTERVAL
 from azents.engine.run.turn_action_bridge import TurnActionBridgeBoundary
 from azents.engine.run.types import (
     SHUTDOWN_CANCEL_MESSAGE,
@@ -156,67 +176,53 @@ from azents.engine.tools.skill import SkillToolkitProvider
 from azents.engine.tools.subagent import SubagentToolkitProvider
 from azents.engine.tools.todo import TodoToolkitProvider
 from azents.engine.tools.wait import WaitToolkit
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.action_execution.data import (
-    ActionExecution,
-    ActionExecutionProjection,
-)
-from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
-from azents.repos.agent_execution import EventTranscriptRepository
-from azents.repos.agent_execution.data import AgentRunPatch
-from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession, PendingSessionCommand
-from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
-from azents.repos.llm_provider_integration.deps import (
-    get_llm_provider_integration_repository,
+from azents.repos.engine_read import EngineModelReadRepository
+from azents.repos.engine_read_deps import get_engine_model_read_repository
+from azents.repos.engine_resolve import (
+    EngineResolveRepositories,
+    get_engine_resolve_repositories,
 )
-from azents.repos.model_candidate_health import ModelCandidateHealthRepository
-from azents.repos.model_candidate_health.data import ModelCandidateIdentity
+from azents.repos.model_metadata_source_data import (
+    CapturedContextSource,
+    ContextModelRequest,
+)
 from azents.repos.model_operation_completion import (
     ModelOperationCompletion,
-    ModelOperationCompletionRepository,
 )
-from azents.repos.toolkit import ToolkitRepository
+from azents.repos.session_execution import (
+    CanonicalExecutionOwnerGenerationStaleError,
+)
+from azents.repos.session_execution.data import CanonicalExecutionSnapshot
+from azents.repos.worker_executor_model import WorkerExecutorModelOperationRepository
+from azents.repos.worker_executor_model_data import agent_model_configuration_signature
+from azents.repos.worker_executor_read import WorkerExecutorReadRepository
+from azents.repos.worker_session_data import CanonicalExecutionWorkDriftError
 from azents.runtime.types import RuntimeDomainConfig
 from azents.services.agent_wait import AgentWaitService
-from azents.services.chat.data import (
-    ChatLiveRunOperation,
-    ChatLiveRunRetryAttempt,
-    ChatLiveRunRetryState,
-    ChatLiveRunState,
-)
+from azents.services.engine_runtime_tokens import EngineRuntimeTokenResolver
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.image_generation_catalog import (
     ImageGenerationCatalogService,
     ImageGenerationRuntimeConfigurationError,
 )
 from azents.services.mailbox import (
-    MailboxOwnerGenerationStaleError,
-    MailboxPreparationStaleError,
     MailboxService,
     OperationActionInput,
     PendingInputInferenceProfile,
     PromotedMailboxItems,
-    ScheduledMailboxAdmission,
     TurnEffect,
     fold_turn_eligibility,
 )
-from azents.services.model_candidate_selection import (
-    select_model_operation_candidate,
-)
 from azents.services.model_file import ModelFileService
-from azents.services.model_metadata import CapturedContextSource, ModelMetadataService
+from azents.services.model_metadata import ModelMetadataService
+from azents.services.oauth_runtime_clients import (
+    RuntimeOAuthClientFactories,
+    create_runtime_oauth_client_factories,
+)
 from azents.services.session_git_worktree import (
     GitWorktreeActionExecutionResult,
     SessionGitWorktreeService,
-)
-from azents.services.session_resource_authority import (
-    SessionExecutionOwner,
-    SessionExecutionOwnerBindable,
-    SessionResourceAuthority,
 )
 from azents.services.session_title import SessionTitleService
 from azents.services.vfs import VfsProjectionService
@@ -236,7 +242,6 @@ from azents.worker.deps import (
     get_exchange_file_service,
     get_skill_toolkit_provider,
     get_subagent_toolkit_provider,
-    get_toolkit_repository,
     get_worker_broker,
     get_worker_config,
     get_worker_external_channel_toolkit_provider,
@@ -257,18 +262,13 @@ from azents.worker.run.turn_action_executor import (
     OperationActionExecutorRegistry,
 )
 from azents.worker.session.contracts import PrepareToolkits
-from azents.worker.session.execution_snapshot import (
-    CanonicalExecutionOwnerGenerationStaleError,
-    CanonicalExecutionSnapshot,
-    CanonicalExecutionWorkDriftError,
-)
 from azents.worker.session.lifecycle import SessionLifecycleService
 from azents.worker.session.mailbox_activity import MailboxActivityObserver
 from azents.worker.session.user_stop_finalizer import UserStopFinalizer
 
 logger = logging.getLogger(__name__)
 _INTERNAL_ERROR_MESSAGE = "An internal error occurred."
-_RUN_HEARTBEAT_INTERVAL_SECONDS = 30.0
+_RUN_HEARTBEAT_INTERVAL_SECONDS = SESSION_OWNER_HEARTBEAT_INTERVAL
 _FAILED_RUN_RETRY_WAIT_POLL_SECONDS = 0.2
 _FAILED_RUN_NO_FIXTURE_MATCH_CODE = "no_fixture_match"
 _OWNERSHIP_LOSS_CANCEL_MESSAGE = "Session ownership was revoked."
@@ -304,100 +304,6 @@ class RunInputPollResult:
 
 
 @dataclasses.dataclass(frozen=True)
-class RequestedProfileSelection:
-    """Requested profile and its durable source for a new run."""
-
-    profile: RequestedInferenceProfile
-    source: InferenceProfileSource
-
-
-def _agent_default_inference_profile(agent: Agent) -> RequestedInferenceProfile:
-    """Build the Agent default profile from its current main option."""
-    if not agent.selectable_model_options:
-        raise ValueError("Agent has no selectable model options")
-    option = next(
-        (
-            candidate
-            for candidate in agent.selectable_model_options
-            if candidate.label == agent.main_model_label
-        ),
-        agent.selectable_model_options[0],
-    )
-    return RequestedInferenceProfile(
-        model_target_label=option.label,
-        reasoning_effort=(
-            agent.model_parameters.reasoning_effort
-            if agent.model_parameters is not None
-            else None
-        ),
-        enabled_execution_options=[],
-    )
-
-
-def _agent_fallback_inference_profile(agent: Agent) -> RequestedInferenceProfile:
-    """Build a fallback profile with only reasoning supported by the fallback model."""
-    profile = _agent_default_inference_profile(agent)
-    option = next(
-        option
-        for option in agent.selectable_model_options
-        if option.label == profile.model_target_label
-    )
-    reasoning = option.candidates[0].model_selection.normalized_capabilities.reasoning
-    if profile.reasoning_effort is not None and (
-        not reasoning.supported
-        or profile.reasoning_effort not in reasoning.effort_levels
-    ):
-        return profile.model_copy(update={"reasoning_effort": None})
-    return profile
-
-
-def _normalize_profile_selection_for_agent(
-    agent: Agent,
-    selected: RequestedProfileSelection,
-) -> RequestedProfileSelection:
-    """Fallback stale Agent-owned labels to the current Agent default."""
-    if any(
-        option.label == selected.profile.model_target_label
-        for option in agent.selectable_model_options
-    ):
-        return selected
-    fallback = _agent_fallback_inference_profile(agent)
-    if selected.source in {
-        InferenceProfileSource.PARENT_RUN,
-        InferenceProfileSource.SPAWN_OVERRIDE,
-        InferenceProfileSource.RETRY_ORIGINAL,
-    }:
-        return dataclasses.replace(selected, profile=fallback)
-    return RequestedProfileSelection(
-        profile=fallback,
-        source=InferenceProfileSource.AGENT_DEFAULT,
-    )
-
-
-@dataclasses.dataclass(frozen=True)
-class ProfileResolutionFailure:
-    """Safe durable profile-resolution failure projection."""
-
-    code: InferenceProfileFailureCode
-    message: str
-
-
-@dataclasses.dataclass(frozen=True)
-class ModelCandidateChainExhausted:
-    """No compatible candidate remains in one frozen model operation."""
-
-    operation: ModelOperationSnapshot
-
-
-class ProfileResolutionRuntimeError(UserVisibleRuntimeError):
-    """Deterministic profile failure that must not enter automatic retry."""
-
-    def __init__(self, failure: ProfileResolutionFailure) -> None:
-        super().__init__(failure.message)
-        self.failure_code = failure.code.value
-
-
-@dataclasses.dataclass(frozen=True)
 class FreshTurnPreparation:
     """Fresh main-model request and its committed prepared Session state."""
 
@@ -405,6 +311,7 @@ class FreshTurnPreparation:
     inference_state: SessionInferenceState
     profile: RequestedInferenceProfile
     source: InferenceProfileSource
+    configuration_signature: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -413,14 +320,6 @@ class OperationActionProcessResult:
 
     context_invalidated: bool
     complete_run: bool
-
-
-@dataclasses.dataclass(frozen=True)
-class ModelQuotaAdvanceResult:
-    """Durable quota progression result for one Run operation slot."""
-
-    operation: ModelOperationSnapshot
-    exhausted: bool
 
 
 def _operation_cancellation_reason(exc: asyncio.CancelledError) -> str:
@@ -484,20 +383,29 @@ class RunExecutor:
     """Resolve a session wake-up and execute the engine run lifecycle."""
 
     broker: Annotated[SessionBroker, Depends(get_worker_broker)]
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+    read_repository: Annotated[
+        WorkerExecutorReadRepository, Depends(WorkerExecutorReadRepository)
     ]
+    resolve_repositories: Annotated[
+        EngineResolveRepositories, Depends(get_engine_resolve_repositories)
+    ]
+    model_read_repository: Annotated[
+        EngineModelReadRepository, Depends(get_engine_model_read_repository)
+    ]
+    runtime_token_resolver: Annotated[
+        EngineRuntimeTokenResolver, Depends(EngineRuntimeTokenResolver)
+    ]
+    oauth_clients: Annotated[
+        RuntimeOAuthClientFactories, Depends(create_runtime_oauth_client_factories)
+    ]
+    agent_wait_service: Annotated[AgentWaitService, Depends(AgentWaitService)]
     engine: Annotated[AgentEngineProtocol, Depends(AgentEngineAdapter)]
-    agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
     command_registry: Annotated[
         Mapping[str, CommandHandler], Depends(get_command_registry)
     ]
-    integration_repository: Annotated[
-        LLMProviderIntegrationRepository,
-        Depends(get_llm_provider_integration_repository),
-    ]
-    model_candidate_health_repository: Annotated[
-        ModelCandidateHealthRepository, Depends(ModelCandidateHealthRepository)
+    model_operation_repository: Annotated[
+        WorkerExecutorModelOperationRepository,
+        Depends(WorkerExecutorModelOperationRepository),
     ]
     model_metadata_service: Annotated[
         ModelMetadataService, Depends(ModelMetadataService)
@@ -506,17 +414,7 @@ class RunExecutor:
         dict[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)
     ]
     vfs_projection_service: Annotated[
-        VfsProjectionService[AsyncSession], Depends(get_vfs_projection_service)
-    ]
-    toolkit_repository: Annotated[ToolkitRepository, Depends(get_toolkit_repository)]
-    agent_runtime_repository: Annotated[
-        AgentRuntimeRepository, Depends(AgentRuntimeRepository)
-    ]
-    agent_session_repository: Annotated[
-        AgentSessionRepository, Depends(AgentSessionRepository)
-    ]
-    event_transcript_repository: Annotated[
-        EventTranscriptRepository, Depends(EventTranscriptRepository)
+        VfsProjectionService, Depends(get_vfs_projection_service)
     ]
     session_lifecycle: Annotated[
         SessionLifecycleService, Depends(SessionLifecycleService)
@@ -570,7 +468,7 @@ class RunExecutor:
         DynamicWorktreeToolkitProvider,
         Depends(get_dynamic_worktree_toolkit_provider),
     ]
-    broadcast: Annotated[WebSocketBroadcast, Depends(get_broadcast)]
+    broadcast: Annotated[BaseWebSocketBroadcast, Depends(get_broadcast)]
     failed_run_finalizer: Annotated[
         FailedRunErrorFinalizer, Depends(FailedRunErrorFinalizer)
     ]
@@ -589,16 +487,18 @@ class RunExecutor:
     ) -> None:
         """Cancel live operations left by a processing boundary."""
 
+        operation_logger = bind_extra(logger, {"session_id": session_id})
+
         async def publish_history_event(event: Event) -> None:
             try:
                 await self.broadcast.publish(
                     session_id,
                     chat_history_event_appended_dump(event),
                 )
-            except Exception:
-                logger.exception(
+            except WebSocketBroadcastPublishError:
+                operation_logger.exception(
                     "Failed to broadcast recovered action execution history event",
-                    extra={"session_id": session_id, "event_id": event.id},
+                    extra={"event_id": event.id},
                 )
 
         async def publish_removal(action_execution_id: str) -> None:
@@ -610,11 +510,10 @@ class RunExecutor:
                         action_execution_id,
                     ),
                 )
-            except Exception:
-                logger.exception(
+            except WebSocketBroadcastPublishError:
+                operation_logger.exception(
                     "Failed to broadcast recovered action execution removal",
                     extra={
-                        "session_id": session_id,
                         "action_execution_id": action_execution_id,
                     },
                 )
@@ -725,11 +624,7 @@ class RunExecutor:
         """Build a capability resolver fenced by the current Agent version."""
 
         async def current_snapshot_provider() -> RuntimeCapabilitySnapshot:
-            async with self.session_manager() as session:
-                current_agent = await self.agent_repository.get_by_id(
-                    session,
-                    agent_id,
-                )
+            current_agent = await self.read_repository.get_agent(agent_id)
             if current_agent is None:
                 raise RuntimeError(
                     "Agent was not found while resolving Runtime capability."
@@ -762,8 +657,7 @@ class RunExecutor:
         async def publish_event(event: PublishedEvent) -> None:
             await dispatch_event(snapshot.session_id, event)
 
-        async with self.session_manager() as session:
-            agent = await self.agent_repository.get_by_id(session, snapshot.agent_id)
+        agent = await self.read_repository.get_agent(snapshot.agent_id)
         runtime_capability_resolver = self._runtime_capability_resolver(
             agent_id=snapshot.agent_id,
             agent=agent,
@@ -785,8 +679,7 @@ class RunExecutor:
             context,
             execution_mode=execution_mode,
             toolkit_registry=self.toolkit_registry,
-            toolkit_repository=self.toolkit_repository,
-            session_manager=self.session_manager,
+            repositories=self.resolve_repositories,
             web_url=self.worker_config.web_url,
             oauth_secret_key=self.worker_config.oauth_secret_key,
             mcp_proxy_url=self.worker_config.mcp_proxy_url,
@@ -893,6 +786,7 @@ class RunExecutor:
         :param dispatch_event: Event publication callback.
         :return: Session-managed toolkits used by execution.
         """
+        operation_logger = bind_extra(logger, {"session_id": snapshot.session_id})
         owner_generation = snapshot.owner_generation
         await self._cancel_leftover_action_executions(
             snapshot.session_id,
@@ -921,7 +815,9 @@ class RunExecutor:
             )
             command_handler = self.command_registry.get(command.name)
             if command_handler is None:
-                logger.warning("Unknown command", extra={"command": command.name})
+                operation_logger.warning(
+                    "Unknown command", extra={"command": command.name}
+                )
                 await self._clear_pending_command(
                     snapshot.session_id,
                     owner_generation=owner_generation,
@@ -954,14 +850,16 @@ class RunExecutor:
                 "Canonical recoverable AgentRun claim is stale"
             )
         actionable_transcript_pending = False
-        scheduled_admission: ScheduledMailboxAdmission | None = None
         created_run = recoverable_run is None
-        async with self.session_manager() as db_session:
-            session_state = await self.agent_session_repository.get_by_id(
-                db_session, snapshot.session_id
-            )
+        session_state = await self.read_repository.get_session(snapshot.session_id)
         if session_state is None:
             raise ValueError("AgentSession not found")
+        configured_agent = await self.read_repository.get_agent(snapshot.agent_id)
+        turn_configuration_signature = (
+            agent_model_configuration_signature(configured_agent)
+            if configured_agent is not None
+            else None
+        )
         if (
             recoverable_run is not None
             and recoverable_run.status == AgentRunStatus.RUNNING
@@ -999,12 +897,9 @@ class RunExecutor:
                     and not actionable_transcript_pending
                     and recoverable_run is None
                 ):
-                    logger.info(
+                    operation_logger.info(
                         "Session wake-up ignored because no runtime input is pending",
-                        extra={
-                            "session_id": snapshot.session_id,
-                            "agent_id": snapshot.agent_id,
-                        },
+                        extra={"agent_id": snapshot.agent_id},
                     )
                     return RunExecutionResult(
                         toolkits=[],
@@ -1056,53 +951,19 @@ class RunExecutor:
                     agent_id=snapshot.agent_id,
                     session_id=snapshot.session_id,
                     explicit_profile=explicit_profile,
+                    run_id=recoverable_run.id if recoverable_run is not None else None,
                 )
             turn_inference_state = None
 
-            scheduled_admission = None
-            if command is None and recoverable_run is None:
-                scheduled_admission = (
-                    await self.mailbox_item_service.admit_scheduled_mailbox_head(
-                        session_id=snapshot.session_id,
-                        owner_generation=owner_generation,
-                        expected_buffer_id=pending_input.mailbox_item_id,
-                    )
+            agent_run = recoverable_run or (
+                await self.session_lifecycle.create_pending_agent_run(
+                    snapshot.session_id,
+                    owner_generation=owner_generation,
+                    input_event_ids=[],
                 )
-            if scheduled_admission is not None:
-                if scheduled_admission.stale or scheduled_admission.run is None:
-                    return RunExecutionResult(
-                        toolkits=[],
-                        terminal_event_observed=False,
-                        no_actionable_work=True,
-                    )
-                agent_run = scheduled_admission.run
-            else:
-                agent_run = recoverable_run or (
-                    await self.session_lifecycle.create_pending_agent_run(
-                        snapshot.session_id,
-                        owner_generation=owner_generation,
-                        input_event_ids=[],
-                    )
-                )
+            )
 
         run_id = agent_run.id
-        if (
-            scheduled_admission is not None
-            and agent_run.scheduled_task_cycle_id is not None
-        ):
-            channel_service = (
-                self.scheduled_toolkit_provider.channel_service.for_execution(
-                    SessionExecutionOwner(
-                        session_id=snapshot.session_id,
-                        owner_generation=owner_generation,
-                    )
-                )
-            )
-            await channel_service.create_initial_tracker(
-                agent_id=snapshot.agent_id,
-                session_id=snapshot.session_id,
-                cycle_id=agent_run.scheduled_task_cycle_id,
-            )
         execution_vfs_projection_service = self.vfs_projection_service.for_execution(
             SessionExecutionOwner(
                 session_id=snapshot.session_id,
@@ -1121,33 +982,19 @@ class RunExecutor:
             ),
         )
         if command is None:
-            if scheduled_admission is not None:
-                promoted = scheduled_admission.promoted
-                if promoted is None:
-                    raise RuntimeError("Scheduled admission returned no promotion")
-                initial_input = RunInputPollResult(
-                    user_messages=promoted.user_messages,
-                    requested_inference_profile=None,
-                    promoted_event_ids=promoted.promoted_event_ids,
-                    has_actionable_work=True,
-                    context_invalidated=False,
-                    complete_run=False,
-                    suppress_parent_result=False,
-                )
-            else:
-                initial_input = await self.poll_run_inputs(
-                    agent_id=snapshot.agent_id,
-                    session_id=snapshot.session_id,
-                    model=None,
-                    required_inference_profile=selected_profile.profile,
-                    active_run_id=run_id,
-                    owner_generation=owner_generation,
-                    tool_admission_barrier=tool_admission_barrier,
-                    initial_turn_eligible=actionable_transcript_pending,
-                    poll_fn=None,
-                    process_actions=True,
-                    dispatch_event=dispatch_event,
-                )
+            initial_input = await self.poll_run_inputs(
+                agent_id=snapshot.agent_id,
+                session_id=snapshot.session_id,
+                model=None,
+                required_inference_profile=selected_profile.profile,
+                active_run_id=run_id,
+                owner_generation=owner_generation,
+                tool_admission_barrier=tool_admission_barrier,
+                initial_turn_eligible=actionable_transcript_pending,
+                poll_fn=None,
+                process_actions=True,
+                dispatch_event=dispatch_event,
+            )
             if initial_input.requested_inference_profile is not None:
                 selected_profile = RequestedProfileSelection(
                     profile=initial_input.requested_inference_profile,
@@ -1192,11 +1039,9 @@ class RunExecutor:
                     run_id=run_id,
                 )
             if initial_input.context_invalidated:
-                async with self.session_manager() as db_session:
-                    prepared_session = await self.agent_session_repository.get_by_id(
-                        db_session,
-                        snapshot.session_id,
-                    )
+                prepared_session = await self.read_repository.get_session(
+                    snapshot.session_id
+                )
                 if prepared_session is None:
                     await self.session_lifecycle.send_session_wake_up(
                         SessionWakeUp(session_id=snapshot.session_id)
@@ -1223,10 +1068,9 @@ class RunExecutor:
                     no_actionable_work=True,
                 )
 
-        logger.info(
+        operation_logger.info(
             "Run execution started",
             extra={
-                "session_id": snapshot.session_id,
                 "agent_id": snapshot.agent_id,
                 "run_id": run_id,
                 "model_target_label": selected_profile.profile.model_target_label,
@@ -1286,6 +1130,7 @@ class RunExecutor:
             prepared_value = prepared.value
             run_request = prepared_value.run_request
             turn_inference_state = prepared_value.inference_state
+            turn_configuration_signature = prepared_value.configuration_signature
             selected_profile = RequestedProfileSelection(
                 profile=prepared_value.profile,
                 source=prepared_value.source,
@@ -1300,10 +1145,9 @@ class RunExecutor:
                 resolved_enabled_execution_options=(
                     turn_inference_state.enabled_execution_options
                 ),
-                agent_repository=self.agent_repository,
-                integration_repository=self.integration_repository,
+                repositories=self.resolve_repositories,
                 model_metadata_service=self.model_metadata_service,
-                session_manager=self.session_manager,
+                oauth_clients=self.oauth_clients,
                 exchange_file_service=self.exchange_file_service,
                 model_file_service=self.model_file_service,
                 image_generation_catalog_service=(
@@ -1376,10 +1220,9 @@ class RunExecutor:
 
         inference_profile = turn_inference_state.applied_profile
         now = loop.time()
-        logger.info(
+        operation_logger.info(
             "Run invoke input resolved",
             extra={
-                "session_id": snapshot.session_id,
                 "agent_id": snapshot.agent_id,
                 "run_id": run_id,
                 "workspace_id": run_request.workspace_id,
@@ -1394,30 +1237,22 @@ class RunExecutor:
             event: SubagentTreeChanged,
         ) -> None:
             """Forward a tree invalidation to every other SessionAgent view."""
-            async with self.session_manager() as session:
-                tree_agents = (
-                    await self.agent_session_repository.list_session_agent_tree(
-                        session,
-                        root_session_agent_id=event.root_session_agent_id,
-                    )
-                )
+            target_ids = await self.read_repository.list_tree_session_ids(
+                root_session_agent_id=event.root_session_agent_id
+            )
             target_session_ids = {
-                agent.agent_session_id
-                for agent in tree_agents
-                if agent.agent_session_id != snapshot.session_id
+                session_id
+                for session_id in target_ids
+                if session_id != snapshot.session_id
             }
             for target_session_id in sorted(target_session_ids):
                 await dispatch_event(target_session_id, event)
 
         async def publish_session_tree_changed() -> None:
             """Publish current run status changes to current and root tree viewers."""
-            async with self.session_manager() as session:
-                current_agent = (
-                    await self.agent_session_repository.get_session_agent_by_session_id(
-                        session,
-                        snapshot.session_id,
-                    )
-                )
+            current_agent = await self.read_repository.get_session_agent(
+                snapshot.session_id
+            )
             if current_agent is None:
                 return
             event = SubagentTreeChanged(
@@ -1431,19 +1266,6 @@ class RunExecutor:
             await dispatch_event(snapshot.session_id, event)
             if isinstance(event, SubagentTreeChanged):
                 await dispatch_tree_change_to_tree(event)
-
-        async def complete_model_operation_in_session(
-            session: AsyncSession,
-            operation_kind: ModelOperationKind,
-        ) -> None:
-            await self._complete_model_operation_success_in_session(
-                session,
-                session_id=snapshot.session_id,
-                run_id=run_id,
-                owner_generation=owner_generation,
-                workspace_id=snapshot.workspace_id,
-                operation_kind=operation_kind,
-            )
 
         async def prepare_compaction_request(
             current_request: RunRequest,
@@ -1475,7 +1297,13 @@ class RunExecutor:
                 owner_generation=owner_generation,
             ),
             mailbox_activity_observer=mailbox_activity_observer,
-            complete_model_operation_in_session=(complete_model_operation_in_session),
+            model_operation_completion=ModelOperationCompletion(
+                workspace_id=snapshot.workspace_id,
+                session_id=snapshot.session_id,
+                run_id=run_id,
+                owner_generation=owner_generation,
+                operation_kind=ModelOperationKind.FOREGROUND,
+            ),
             prepare_compaction_request=prepare_compaction_request,
         )
         context = ToolkitContext(
@@ -1486,35 +1314,31 @@ class RunExecutor:
             publish_event=publish_event,
         )
 
-        async with self.session_manager() as session:
-            agent = await self.agent_repository.get_by_id(
-                session, invoke_input.agent_id
+        agent = await self.read_repository.get_agent(invoke_input.agent_id)
+        execution_mode = (
+            ToolkitExecutionMode.SUBAGENT
+            if snapshot.execution_mode is AgentSessionKind.SUBAGENT
+            else ToolkitExecutionMode.ROOT
+        )
+        agent_memory_enabled = agent.memory_enabled if agent else True
+        runtime_capability_resolver = self._runtime_capability_resolver(
+            agent_id=invoke_input.agent_id,
+            agent=agent,
+        )
+        runtime_tools_projected = runtime_capability_resolver.project(
+            (
+                RuntimeCapability.WORKSPACE,
+                RuntimeCapability.RUNTIME_FILESYSTEM,
+                RuntimeCapability.PROCESS_EXECUTION,
             )
-            execution_mode = (
-                ToolkitExecutionMode.SUBAGENT
-                if snapshot.execution_mode is AgentSessionKind.SUBAGENT
-                else ToolkitExecutionMode.ROOT
-            )
-            agent_memory_enabled = agent.memory_enabled if agent else True
-            runtime_capability_resolver = self._runtime_capability_resolver(
-                agent_id=invoke_input.agent_id,
-                agent=agent,
-            )
-            runtime_tools_projected = runtime_capability_resolver.project(
-                (
-                    RuntimeCapability.WORKSPACE,
-                    RuntimeCapability.RUNTIME_FILESYSTEM,
-                    RuntimeCapability.PROCESS_EXECUTION,
-                )
-            )
-            runtime_domain_config = RuntimeDomainConfig(
-                allowed_domains=(), denied_domains=()
-            )
+        )
+        runtime_domain_config = RuntimeDomainConfig(
+            allowed_domains=(), denied_domains=()
+        )
 
-        logger.info(
+        operation_logger.info(
             "Run agent tools resolve started",
             extra={
-                "session_id": snapshot.session_id,
                 "agent_id": invoke_input.agent_id,
                 "run_id": run_id,
                 "workspace_id": run_request.workspace_id,
@@ -1535,8 +1359,7 @@ class RunExecutor:
             context,
             execution_mode=execution_mode,
             toolkit_registry=self.toolkit_registry,
-            toolkit_repository=self.toolkit_repository,
-            session_manager=self.session_manager,
+            repositories=self.resolve_repositories,
             web_url=self.worker_config.web_url,
             oauth_secret_key=self.worker_config.oauth_secret_key,
             mcp_proxy_url=self.worker_config.mcp_proxy_url,
@@ -1557,26 +1380,17 @@ class RunExecutor:
         )
         toolkits.append(
             ToolkitBinding(
-                WaitToolkit(
-                    wait_service=AgentWaitService(
-                        session_manager=self.session_manager,
-                        agent_session_repository=self.agent_session_repository,
-                        agent_run_repository=(
-                            self.session_lifecycle.agent_run_repository
-                        ),
-                        mailbox_item_service=self.mailbox_item_service,
-                    )
-                ),
+                WaitToolkit(wait_service=self.agent_wait_service),
+                "wait",
                 "wait",
                 False,
             )
         )
 
         now = loop.time()
-        logger.info(
+        operation_logger.info(
             "Run agent tools resolved",
             extra={
-                "session_id": snapshot.session_id,
                 "agent_id": invoke_input.agent_id,
                 "run_id": run_id,
                 "workspace_id": run_request.workspace_id,
@@ -1605,10 +1419,9 @@ class RunExecutor:
         )
 
         if prepare_toolkits is not None:
-            logger.info(
+            operation_logger.info(
                 "Run session toolkits prepare started",
                 extra={
-                    "session_id": snapshot.session_id,
                     "agent_id": invoke_input.agent_id,
                     "run_id": run_id,
                     "workspace_id": run_request.workspace_id,
@@ -1628,10 +1441,9 @@ class RunExecutor:
         )
 
         now = loop.time()
-        logger.info(
+        operation_logger.info(
             "Run session toolkits prepared",
             extra={
-                "session_id": snapshot.session_id,
                 "agent_id": invoke_input.agent_id,
                 "run_id": run_id,
                 "workspace_id": run_request.workspace_id,
@@ -1646,10 +1458,9 @@ class RunExecutor:
 
         hook_dispatcher = RuntimeHookDispatcher()
         hook_providers = _runtime_hook_provider_refs(run_request.toolkits)
-        logger.info(
+        operation_logger.info(
             "Run lifecycle hooks dispatch started",
             extra={
-                "session_id": snapshot.session_id,
                 "agent_id": invoke_input.agent_id,
                 "run_id": run_id,
                 "workspace_id": run_request.workspace_id,
@@ -1686,10 +1497,9 @@ class RunExecutor:
         )
 
         now = loop.time()
-        logger.info(
+        operation_logger.info(
             "Run lifecycle hooks dispatched",
             extra={
-                "session_id": snapshot.session_id,
                 "agent_id": invoke_input.agent_id,
                 "run_id": run_id,
                 "workspace_id": run_request.workspace_id,
@@ -1763,6 +1573,7 @@ class RunExecutor:
             """Replace the active request with one freshly prepared model turn."""
             nonlocal inference_profile, run_request, selected_profile
             nonlocal turn_inference_state
+            nonlocal turn_configuration_signature
             current_request = run_request
             if current_request is None:
                 raise RuntimeError("Active model request is not prepared")
@@ -1785,6 +1596,7 @@ class RunExecutor:
                 inference_state=next_inference_state,
             )
             turn_inference_state = next_inference_state
+            turn_configuration_signature = prepared_value.configuration_signature
             selected_profile = RequestedProfileSelection(
                 profile=prepared_value.profile,
                 source=prepared_value.source,
@@ -1846,9 +1658,9 @@ class RunExecutor:
                 workspace_id=current_request.workspace_id,
                 selection=candidate.model_selection,
                 settings=candidate.settings,
-                integration_repository=self.integration_repository,
+                model_read_repository=self.model_read_repository,
                 model_metadata_service=self.model_metadata_service,
-                session_manager=self.session_manager,
+                runtime_token_resolver=self.runtime_token_resolver,
             )
             if runtime.failure:
                 raise ProfileResolutionRuntimeError(
@@ -1862,9 +1674,7 @@ class RunExecutor:
                     compaction_model=value.model,
                     compaction_provider=value.provider,
                     compaction_credential_kwargs=value.credential_kwargs,
-                    compaction_assembly_metadata=ModelAssemblyMetadata.from_selection(
-                        candidate.model_selection
-                    ),
+                    compaction_candidate=candidate.model_copy(deep=True),
                     compaction_max_input_tokens=value.effective_input_tokens,
                 ),
                 context_source=context_source,
@@ -1893,10 +1703,9 @@ class RunExecutor:
         )
         await publish_session_tree_changed()
         now = loop.time()
-        logger.info(
+        operation_logger.info(
             "Run started dispatched",
             extra={
-                "session_id": snapshot.session_id,
                 "agent_id": invoke_input.agent_id,
                 "run_id": run_id,
                 "workspace_id": run_request.workspace_id,
@@ -2133,6 +1942,7 @@ class RunExecutor:
                             model=run_request.model,
                             requested_inference_profile=selected_profile.profile,
                             prepared_inference_state=turn_inference_state,
+                            configuration_signature=turn_configuration_signature,
                             run_id=run_id,
                             poll_fn=poll_fn,
                             owner_generation=owner_generation,
@@ -2371,10 +2181,9 @@ class RunExecutor:
                     if await record_user_stop_if_requested():
                         break
                     if isinstance(exc, CompactionModelStreamTimeoutError):
-                        logger.warning(
+                        operation_logger.warning(
                             "Compaction model stream attempt timed out",
                             extra={
-                                "session_id": snapshot.session_id,
                                 "run_id": run_id,
                                 "attempt_number": attempt_number,
                                 "error_type": exc.__class__.__name__,
@@ -2394,7 +2203,7 @@ class RunExecutor:
                             error_log_fields.update(
                                 model_provider_error_log_fields(exc)
                             )
-                        logger.exception(
+                        operation_logger.exception(
                             "Internal error during engine run attempt",
                             extra=error_log_fields,
                         )
@@ -2454,12 +2263,9 @@ class RunExecutor:
                 terminal_run_status=terminal_run_status,
             )
             if not terminal_event_observed:
-                logger.info(
+                operation_logger.info(
                     "Leaving agent run RUNNING until terminal event recovery",
-                    extra={
-                        "session_id": snapshot.session_id,
-                        "run_id": run_id,
-                    },
+                    extra={"run_id": run_id},
                 )
             elif not terminal_state_persisted:
                 await self.session_lifecycle.mark_agent_run_terminal_if_running(
@@ -2480,9 +2286,8 @@ class RunExecutor:
                 ),
             )
             if not terminal_event_observed:
-                logger.info(
-                    "Keeping session activity until terminal event recovery",
-                    extra={"session_id": snapshot.session_id},
+                operation_logger.info(
+                    "Keeping session activity until terminal event recovery"
                 )
             else:
                 await self.live_event_projector.publish_live_run_cleared(
@@ -2699,6 +2504,7 @@ class RunExecutor:
         owner_generation: int,
     ) -> None:
         """Refresh session heartbeat while the engine run is active."""
+        operation_logger = bind_extra(logger, {"session_id": session_id})
         while True:
             try:
                 await self.session_lifecycle.heartbeat_session(
@@ -2708,16 +2514,13 @@ class RunExecutor:
             except asyncio.CancelledError:
                 raise
             except CanonicalExecutionOwnerGenerationStaleError:
-                logger.info(
-                    "Session ownership revoked during active run heartbeat",
-                    extra={"session_id": session_id},
+                operation_logger.info(
+                    "Session ownership revoked during active run heartbeat"
                 )
                 raise
             except Exception:
-                logger.warning(
-                    "Failed to update run heartbeat",
-                    extra={"session_id": session_id},
-                    exc_info=True,
+                operation_logger.warning(
+                    "Failed to update run heartbeat", exc_info=True
                 )
             await asyncio.sleep(_RUN_HEARTBEAT_INTERVAL_SECONDS)
 
@@ -2727,43 +2530,15 @@ class RunExecutor:
         agent_id: str,
         session_id: str,
         explicit_profile: RequestedInferenceProfile | None,
+        run_id: str | None = None,
     ) -> RequestedProfileSelection:
-        """Apply explicit, Session-applied, then Agent-default profile precedence."""
-        async with self.session_manager() as session:
-            agent = await self.agent_repository.lock_by_id(session, agent_id)
-            if not isinstance(agent, Agent):
-                raise ValueError("Agent not found")
-            agent_session = await self.agent_session_repository.lock_by_id(
-                session,
-                session_id,
-            )
-            if not isinstance(agent_session, AgentSession):
-                raise ValueError("AgentSession not found")
-            if agent_session.agent_id != agent_id:
-                raise ValueError("AgentSession does not belong to Agent")
-
-            if explicit_profile is not None:
-                selected = RequestedProfileSelection(
-                    profile=explicit_profile,
-                    source=InferenceProfileSource.EXPLICIT_INPUT,
-                )
-            elif agent_session.applied_inference_profile is not None:
-                applied = agent_session.applied_inference_profile
-                selected = RequestedProfileSelection(
-                    profile=RequestedInferenceProfile(
-                        model_target_label=applied.model_target_label,
-                        reasoning_effort=applied.reasoning_effort,
-                        enabled_execution_options=applied.enabled_execution_options,
-                    ),
-                    source=InferenceProfileSource.SESSION_LAST_USED,
-                )
-            else:
-                selected = RequestedProfileSelection(
-                    profile=_agent_default_inference_profile(agent),
-                    source=InferenceProfileSource.AGENT_DEFAULT,
-                )
-
-            return _normalize_profile_selection_for_agent(agent, selected)
+        """Delegate the completed model-operation phase."""
+        return await self.model_operation_repository.select_requested_profile(
+            agent_id=agent_id,
+            session_id=session_id,
+            explicit_profile=explicit_profile,
+            run_id=run_id,
+        )
 
     async def _advance_model_operation_after_quota(
         self,
@@ -2774,200 +2549,13 @@ class RunExecutor:
         workspace_id: str,
         failure: ModelProviderFailure,
     ) -> ModelQuotaAdvanceResult:
-        """Renew candidate health and advance before the generic retry budget."""
-        if failure.operation == "sampling":
-            operation_kind = ModelOperationKind.FOREGROUND
-        elif failure.operation == "compaction":
-            operation_kind = ModelOperationKind.COMPACTION
-        else:
-            raise ValueError("Run quota transition received an unsupported operation")
-
-        async with self.session_manager() as session:
-            await self.session_lifecycle.assert_owner_generation(
-                session,
-                session_id=session_id,
-                owner_generation=owner_generation,
-            )
-            locked_session = await self.agent_session_repository.lock_by_id(
-                session,
-                session_id,
-            )
-            locked_run = await self.session_lifecycle.agent_run_repository.lock_by_id(
-                session,
-                run_id,
-            )
-            if locked_session is None or locked_run is None:
-                raise ValueError("AgentSession or AgentRun not found")
-            state = locked_run.model_operation_state
-            if state is None:
-                raise CanonicalExecutionWorkDriftError(
-                    "Quota failure has no durable model operation"
-                )
-            operation = (
-                state.foreground
-                if operation_kind is ModelOperationKind.FOREGROUND
-                else state.compaction
-            )
-            if operation is None:
-                raise CanonicalExecutionWorkDriftError(
-                    "Quota failure has no matching model operation slot"
-                )
-            candidate = operation.current_candidate
-            selection = candidate.model_selection
-            runtime_model = selection.model_identifier
-            if (
-                failure.route_integration != selection.llm_provider_integration_id
-                or failure.route_provider != selection.provider.value
-                or failure.route_model != runtime_model
-            ):
-                raise CanonicalExecutionWorkDriftError(
-                    "Quota failure does not match the active model candidate"
-                )
-            identity = ModelCandidateIdentity(
-                workspace_id=workspace_id,
-                llm_provider_integration_id=(selection.llm_provider_integration_id),
-                model_identifier=selection.model_identifier,
-            )
-            claim = operation.transferred_probe_claim
-            if claim is None:
-                observation = (
-                    await self.model_candidate_health_repository.renew_quota_in_session(
-                        session,
-                        identity,
-                    )
-                )
-            else:
-                health_repository = self.model_candidate_health_repository
-                renew_claimed_quota = health_repository.renew_claimed_quota_in_session
-                (
-                    _,
-                    observation,
-                ) = await renew_claimed_quota(
-                    session,
-                    identity,
-                    expected_generation=claim.health_generation,
-                    expected_claim_kind=claim.kind,
-                    expected_owner_id=claim.claim_owner_id,
-                    expected_claim_token=claim.claim_token,
-                )
-            exhausted = False
-            try:
-                advanced = mark_current_candidate_quota_and_advance(
-                    operation,
-                    recorded_at=observation.server_time,
-                )
-                selected = await select_model_operation_candidate(
-                    session,
-                    operation=advanced,
-                    workspace_id=workspace_id,
-                    health_repository=self.model_candidate_health_repository,
-                    recorded_at=observation.server_time,
-                    session_id=(
-                        session_id
-                        if operation_kind is ModelOperationKind.FOREGROUND
-                        else None
-                    ),
-                    reservation=(
-                        locked_session.primary_model_reservation
-                        if operation_kind is ModelOperationKind.FOREGROUND
-                        else None
-                    ),
-                )
-                resulting_operation = selected.operation
-                if selected.reservation_consumed:
-                    reservation = locked_session.primary_model_reservation
-                    if reservation is None:
-                        raise CanonicalExecutionWorkDriftError(
-                            "Transferred reservation disappeared"
-                        )
-                    set_reservation = (
-                        self.agent_session_repository.set_primary_model_reservation
-                    )
-                    cleared = await set_reservation(
-                        session,
-                        session_id=session_id,
-                        reservation=None,
-                        expected_reservation_generation=(
-                            reservation.reservation_generation
-                        ),
-                    )
-                    if cleared is None:
-                        raise CanonicalExecutionWorkDriftError(
-                            "Transferred reservation changed"
-                        )
-            except ModelOperationChainExhaustedError as exc:
-                resulting_operation = exc.operation
-                exhausted = True
-            next_state = ModelOperationState(
-                foreground=(
-                    resulting_operation
-                    if operation_kind is ModelOperationKind.FOREGROUND
-                    else state.foreground
-                ),
-                compaction=(
-                    resulting_operation
-                    if operation_kind is ModelOperationKind.COMPACTION
-                    else state.compaction
-                ),
-            )
-            await self.session_lifecycle.agent_run_repository.update(
-                session,
-                run_id,
-                AgentRunPatch(
-                    model_operation_state=next_state,
-                    retry_state=None,
-                    model_call_started_at=None,
-                ),
-            )
-        return ModelQuotaAdvanceResult(
-            operation=resulting_operation,
-            exhausted=exhausted,
-        )
-
-    async def _complete_model_operation_success(
-        self,
-        *,
-        session_id: str,
-        run_id: str,
-        owner_generation: int,
-        workspace_id: str,
-        operation_kind: ModelOperationKind,
-    ) -> None:
-        """Settle an exact probe success and close the matching operation."""
-        async with self.session_manager() as session:
-            await self._complete_model_operation_success_in_session(
-                session,
-                session_id=session_id,
-                run_id=run_id,
-                owner_generation=owner_generation,
-                workspace_id=workspace_id,
-                operation_kind=operation_kind,
-            )
-
-    async def _complete_model_operation_success_in_session(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-        run_id: str,
-        owner_generation: int,
-        workspace_id: str,
-        operation_kind: ModelOperationKind,
-    ) -> None:
-        """Settle operation success inside the caller's output transaction."""
-        await ModelOperationCompletionRepository(
-            agent_session_repository=self.agent_session_repository,
-            agent_run_repository=self.session_lifecycle.agent_run_repository,
-            model_candidate_health_repository=(self.model_candidate_health_repository),
-        ).complete_success_in_session(
-            session,
-            ModelOperationCompletion(
-                workspace_id=workspace_id,
-                session_id=session_id,
-                run_id=run_id,
-                owner_generation=owner_generation,
-                operation_kind=operation_kind,
-            ),
+        """Delegate the completed model-operation phase."""
+        return await self.model_operation_repository.advance_after_quota(
+            session_id=session_id,
+            run_id=run_id,
+            owner_generation=owner_generation,
+            workspace_id=workspace_id,
+            failure=failure,
         )
 
     async def _capture_compaction_context(
@@ -2977,14 +2565,24 @@ class RunExecutor:
         selection: AgentModelSelection,
     ) -> CapturedContextSource:
         """Capture one source after selecting the actual compaction candidate."""
-        return CapturedContextSource(
-            snapshot=await self.model_metadata_service.capture_for_context(
-                capability_maximums=[
-                    current_request.model_capabilities.context_window.max_input_tokens,
-                    selection.normalized_capabilities.context_window.max_input_tokens,
-                ]
-            ),
+        main_selection = (
+            current_request.inference_state.model_selection
+            if current_request.inference_state is not None
+            else None
         )
+        requests = list(self.model_metadata_service.context_requests([selection]))
+        if main_selection is not None:
+            requests.extend(
+                self.model_metadata_service.context_requests([main_selection])
+            )
+        elif current_request.model_capabilities.context_window.max_input_tokens is None:
+            requests.append(
+                ContextModelRequest(
+                    provider=current_request.provider,
+                    model_identifier=current_request.model,
+                )
+            )
+        return await self.model_metadata_service.capture_for_context(requests=requests)
 
     def _with_shared_compaction_context(
         self,
@@ -3007,7 +2605,7 @@ class RunExecutor:
             foreground_window.default_input_tokens,
             foreground_window.max_input_tokens,
             self.model_metadata_service.maximum_input_tokens(
-                context_source.snapshot,
+                context_source,
                 provider=(
                     foreground_selection.provider
                     if foreground_selection is not None
@@ -3072,19 +2670,17 @@ class RunExecutor:
             InferenceProfileSource.RETRY_ORIGINAL,
         }
         for _attempt in range(3):
-            async with self.session_manager() as session:
-                session_state = await self.agent_session_repository.get_by_id(
-                    session,
-                    session_id,
+            snapshot = (
+                await self.model_operation_repository.load_fresh_profile_snapshot(
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    run_id=run_id,
+                    override=override,
+                    replace_operation=replace_operation,
                 )
-                agent = await self.agent_repository.get_by_id(session, agent_id)
-            if session_state is None or agent is None:
-                raise ValueError("AgentSession or Agent not found")
-            if not isinstance(session_state, AgentSession) or not isinstance(
-                agent, Agent
-            ):
-                raise ValueError("AgentSession or Agent has invalid persisted data")
-
+            )
+            session_state = snapshot.session
+            agent = snapshot.agent
             if override is not None and override.source in override_sources:
                 selected = override
             elif session_state.applied_inference_profile is not None:
@@ -3099,299 +2695,62 @@ class RunExecutor:
                 )
             else:
                 selected = RequestedProfileSelection(
-                    profile=_agent_default_inference_profile(agent),
+                    profile=agent_default_inference_profile(agent),
                     source=InferenceProfileSource.AGENT_DEFAULT,
                 )
-            selected = _normalize_profile_selection_for_agent(agent, selected)
+            selected = normalize_profile_selection_for_agent(agent, selected)
 
-            async with self.session_manager() as session:
-                locked_agent = await self.agent_repository.lock_by_id(
-                    session,
-                    agent_id,
-                )
-                locked_session = await self.agent_session_repository.lock_by_id(
-                    session,
-                    session_id,
-                )
-                locked_run = (
-                    await self.session_lifecycle.agent_run_repository.lock_by_id(
-                        session,
-                        run_id,
-                    )
-                )
-                if locked_agent is None or locked_session is None or locked_run is None:
-                    raise ValueError("AgentSession, Agent, or AgentRun not found")
-                if locked_session.owner_generation != owner_generation:
-                    raise CanonicalExecutionOwnerGenerationStaleError(
-                        "Session owner generation is stale"
-                    )
-                if locked_session.agent_id != agent_id:
-                    raise ValueError("AgentSession does not belong to Agent")
-                if locked_run.session_id != session_id:
-                    raise ValueError("AgentRun does not belong to AgentSession")
-
-                stale_profile_was_replaced = False
-                if override is not None and override.source in override_sources:
-                    expected_selection = _normalize_profile_selection_for_agent(
-                        locked_agent,
-                        override,
-                    )
-                    expected = expected_selection.profile
-                    stale_profile_was_replaced = expected != override.profile
-                elif locked_session.applied_inference_profile is not None:
-                    applied = locked_session.applied_inference_profile
-                    applied_selection = RequestedProfileSelection(
-                        profile=RequestedInferenceProfile(
-                            model_target_label=applied.model_target_label,
-                            reasoning_effort=applied.reasoning_effort,
-                            enabled_execution_options=(
-                                applied.enabled_execution_options
-                            ),
-                        ),
-                        source=InferenceProfileSource.SESSION_LAST_USED,
-                    )
-                    expected_selection = _normalize_profile_selection_for_agent(
-                        locked_agent,
-                        applied_selection,
-                    )
-                    expected = expected_selection.profile
-                    stale_profile_was_replaced = expected != applied_selection.profile
-                else:
-                    expected = _agent_default_inference_profile(locked_agent)
-
-                if expected != selected.profile:
-                    continue
-                if stale_profile_was_replaced and (
-                    override is None
-                    or override.source
-                    not in {
-                        InferenceProfileSource.PARENT_RUN,
-                        InferenceProfileSource.SPAWN_OVERRIDE,
-                    }
-                ):
-                    await self.agent_session_repository.set_applied_inference_profile(
-                        session,
-                        session_id=session_id,
-                        model_target_label=expected.model_target_label,
-                        reasoning_effort=expected.reasoning_effort,
-                        enabled_execution_options=expected.enabled_execution_options,
-                    )
-
-                option = validate_requested_profile_against_options(
-                    locked_agent.selectable_model_options,
-                    expected,
-                )
-                if option is None:
-                    return Failure(
-                        ModelTargetNotFound(
-                            model_target_label=expected.model_target_label
-                        )
-                    )
-                operation_state = (
-                    locked_run.model_operation_state
-                    or ModelOperationState(
-                        foreground=None,
-                        compaction=None,
-                    )
-                )
-                existing = operation_state.foreground
-                if (
-                    replace_operation
-                    or existing is None
-                    or existing.semantic_label != expected.model_target_label
-                    or existing.requested_reasoning_effort != expected.reasoning_effort
-                    or existing.requested_execution_options
-                    != expected.enabled_execution_options
-                    or existing.terminal_reason is not None
-                ):
-                    operation = build_model_operation(
-                        option=option,
-                        profile=expected,
-                        kind=ModelOperationKind.FOREGROUND,
-                        operation_id=uuid7().hex,
-                        recorded_at=datetime.datetime.now(datetime.UTC),
-                    )
-                else:
-                    operation = existing
-                try:
-                    selection = await select_model_operation_candidate(
-                        session,
-                        operation=operation,
-                        workspace_id=locked_agent.workspace_id,
-                        health_repository=self.model_candidate_health_repository,
-                        recorded_at=datetime.datetime.now(datetime.UTC),
-                        session_id=session_id,
-                        reservation=locked_session.primary_model_reservation,
-                    )
-                except ModelOperationChainExhaustedError as exc:
-                    exhausted_state = ModelOperationState(
-                        foreground=exc.operation,
-                        compaction=operation_state.compaction,
-                    )
-                    await self.session_lifecycle.agent_run_repository.update(
-                        session,
-                        run_id,
-                        AgentRunPatch(model_operation_state=exhausted_state),
-                    )
-                    return Failure(ModelCandidateChainExhausted(exc.operation))
-                lightweight_option = next(
-                    (
-                        candidate
-                        for candidate in locked_agent.selectable_model_options
-                        if candidate.label == locked_agent.lightweight_model_label
-                    ),
-                    None,
-                )
-                if lightweight_option is None:
-                    return Failure(
-                        ModelTargetNotFound(
-                            model_target_label=locked_agent.lightweight_model_label
-                        )
-                    )
-                compaction_operation = operation_state.compaction
-                if (
-                    compaction_operation is None
-                    or compaction_operation.terminal_reason is not None
-                ):
-                    compaction_profile = RequestedInferenceProfile(
-                        model_target_label=lightweight_option.label,
-                        reasoning_effort=None,
-                        enabled_execution_options=[],
-                    )
-                    compaction_operation = build_model_operation(
-                        option=lightweight_option,
-                        profile=compaction_profile,
-                        kind=ModelOperationKind.COMPACTION,
-                        operation_id=uuid7().hex,
-                        recorded_at=datetime.datetime.now(datetime.UTC),
-                    )
-                try:
-                    compaction_selection = await select_model_operation_candidate(
-                        session,
-                        operation=compaction_operation,
-                        workspace_id=locked_agent.workspace_id,
-                        health_repository=self.model_candidate_health_repository,
-                        recorded_at=datetime.datetime.now(datetime.UTC),
-                        session_id=None,
-                        reservation=None,
-                    )
-                except ModelOperationChainExhaustedError as exc:
-                    exhausted_state = ModelOperationState(
-                        foreground=selection.operation,
-                        compaction=exc.operation,
-                    )
-                    await self.session_lifecycle.agent_run_repository.update(
-                        session,
-                        run_id,
-                        AgentRunPatch(model_operation_state=exhausted_state),
-                    )
-                    return Failure(ModelCandidateChainExhausted(exc.operation))
-                next_operation_state = ModelOperationState(
-                    foreground=selection.operation,
-                    compaction=compaction_selection.operation,
-                )
-                await self.session_lifecycle.agent_run_repository.update(
-                    session,
-                    run_id,
-                    AgentRunPatch(model_operation_state=next_operation_state),
-                )
-                if selection.reservation_consumed:
-                    set_reservation = (
-                        self.agent_session_repository.set_primary_model_reservation
-                    )
-                    cleared = await set_reservation(
-                        session,
-                        session_id=session_id,
-                        reservation=None,
-                        expected_reservation_generation=(
-                            locked_session.primary_model_reservation.reservation_generation
-                            if locked_session.primary_model_reservation is not None
-                            else None
-                        ),
-                    )
-                    if cleared is None:
-                        raise CanonicalExecutionWorkDriftError(
-                            "Primary reservation changed during transfer"
-                        )
+            prepared = await self.model_operation_repository.prepare_fresh(
+                agent_id=agent_id,
+                session_id=session_id,
+                run_id=run_id,
+                owner_generation=owner_generation,
+                selected=selected,
+                override=override,
+                replace_operation=replace_operation,
+                prepared_snapshot=snapshot,
+            )
+            if prepared.failure:
+                return Failure(prepared.error)
+            if prepared.value is None:
+                continue
+            selection = prepared.value.selection
+            compaction_selection = prepared.value.compaction_selection
 
             candidate = selection.candidate
+            applied_profile = adapt_inference_profile_to_model(
+                selected.profile, candidate.model_selection
+            )
             compaction_candidate = compaction_selection.candidate
-            context_source = CapturedContextSource(
-                snapshot=await self.model_metadata_service.capture_for_context(
-                    capability_maximums=[
-                        candidate.model_selection.normalized_capabilities.context_window.max_input_tokens,
-                        compaction_candidate.model_selection.normalized_capabilities.context_window.max_input_tokens,
+            context_source = await self.model_metadata_service.capture_for_context(
+                requests=self.model_metadata_service.context_requests(
+                    [
+                        candidate.model_selection,
+                        compaction_candidate.model_selection,
                     ]
+                )
+            )
+            resolved = await resolve_invoke_input_with_resolved_profile(
+                invoke_input,
+                context_source=context_source,
+                resolved_model_selection=candidate.model_selection,
+                resolved_model_settings=candidate.settings,
+                resolved_reasoning_effort=applied_profile.reasoning_effort,
+                resolved_enabled_execution_options=(
+                    applied_profile.enabled_execution_options
+                ),
+                repositories=self.resolve_repositories,
+                model_metadata_service=self.model_metadata_service,
+                oauth_clients=self.oauth_clients,
+                exchange_file_service=self.exchange_file_service,
+                model_file_service=self.model_file_service,
+                image_generation_catalog_service=(
+                    self.image_generation_catalog_service
                 ),
             )
-            if candidate.ordinal == 1:
-                primary = await resolve_invoke_input_with_profile(
-                    invoke_input,
-                    context_source=context_source,
-                    requested_profile=selected.profile,
-                    agent_repository=self.agent_repository,
-                    integration_repository=self.integration_repository,
-                    model_metadata_service=self.model_metadata_service,
-                    session_manager=self.session_manager,
-                    exchange_file_service=self.exchange_file_service,
-                    model_file_service=self.model_file_service,
-                    image_generation_catalog_service=(
-                        self.image_generation_catalog_service
-                    ),
-                )
-                if primary.failure:
-                    return Failure(primary.error)
-                if (
-                    primary.value.model_selection == candidate.model_selection
-                    and primary.value.model_settings == candidate.settings
-                ):
-                    resolved_request = primary.value.run_request
-                else:
-                    frozen = await resolve_invoke_input_with_resolved_profile(
-                        invoke_input,
-                        context_source=context_source,
-                        resolved_model_selection=candidate.model_selection,
-                        resolved_model_settings=candidate.settings,
-                        resolved_reasoning_effort=selected.profile.reasoning_effort,
-                        resolved_enabled_execution_options=(
-                            selected.profile.enabled_execution_options
-                        ),
-                        agent_repository=self.agent_repository,
-                        integration_repository=self.integration_repository,
-                        model_metadata_service=self.model_metadata_service,
-                        session_manager=self.session_manager,
-                        exchange_file_service=self.exchange_file_service,
-                        model_file_service=self.model_file_service,
-                        image_generation_catalog_service=(
-                            self.image_generation_catalog_service
-                        ),
-                    )
-                    if frozen.failure:
-                        return Failure(frozen.error)
-                    resolved_request = frozen.value
-            else:
-                resolved = await resolve_invoke_input_with_resolved_profile(
-                    invoke_input,
-                    context_source=context_source,
-                    resolved_model_selection=candidate.model_selection,
-                    resolved_model_settings=candidate.settings,
-                    resolved_reasoning_effort=selected.profile.reasoning_effort,
-                    resolved_enabled_execution_options=(
-                        selected.profile.enabled_execution_options
-                    ),
-                    agent_repository=self.agent_repository,
-                    integration_repository=self.integration_repository,
-                    model_metadata_service=self.model_metadata_service,
-                    session_manager=self.session_manager,
-                    exchange_file_service=self.exchange_file_service,
-                    model_file_service=self.model_file_service,
-                    image_generation_catalog_service=(
-                        self.image_generation_catalog_service
-                    ),
-                )
-                if resolved.failure:
-                    return Failure(resolved.error)
-                resolved_request = resolved.value
+            if resolved.failure:
+                return Failure(resolved.error)
+            resolved_request = resolved.value
             compaction_model = compaction_candidate.model_selection.model_identifier
             compaction_capabilities = (
                 compaction_candidate.model_selection.normalized_capabilities
@@ -3401,7 +2760,7 @@ class RunExecutor:
                 compaction_context_window.default_input_tokens,
                 compaction_context_window.max_input_tokens,
                 self.model_metadata_service.maximum_input_tokens(
-                    context_source.snapshot,
+                    context_source,
                     provider=compaction_candidate.model_selection.provider,
                     model_identifier=(
                         compaction_candidate.model_selection.model_identifier
@@ -3424,9 +2783,9 @@ class RunExecutor:
                     workspace_id=resolved_request.workspace_id,
                     selection=compaction_candidate.model_selection,
                     settings=compaction_candidate.settings,
-                    integration_repository=self.integration_repository,
+                    model_read_repository=self.model_read_repository,
                     model_metadata_service=self.model_metadata_service,
-                    session_manager=self.session_manager,
+                    runtime_token_resolver=self.runtime_token_resolver,
                 )
                 if compaction_runtime.failure:
                     return Failure(compaction_runtime.error)
@@ -3443,9 +2802,7 @@ class RunExecutor:
                 )
             resolved_request = dataclasses.replace(
                 resolved_request,
-                compaction_assembly_metadata=ModelAssemblyMetadata.from_selection(
-                    compaction_candidate.model_selection
-                ),
+                compaction_candidate=compaction_candidate.model_copy(deep=True),
             )
             effective_context_window_tokens = (
                 resolved_request.effective_max_input_tokens
@@ -3459,8 +2816,8 @@ class RunExecutor:
                 model_target_label=selected.profile.model_target_label,
                 model_selection=candidate.model_selection,
                 model_settings=candidate.settings,
-                reasoning_effort=selected.profile.reasoning_effort,
-                enabled_execution_options=selected.profile.enabled_execution_options,
+                reasoning_effort=applied_profile.reasoning_effort,
+                enabled_execution_options=applied_profile.enabled_execution_options,
                 effective_context_window_tokens=effective_context_window_tokens,
                 effective_auto_compaction_threshold_tokens=(
                     effective_compaction_threshold_tokens
@@ -3483,43 +2840,22 @@ class RunExecutor:
                     ),
                 ),
             )
-            async with self.session_manager() as session:
-                locked_session = await self.agent_session_repository.lock_by_id(
-                    session,
-                    session_id,
-                )
-                locked_run = (
-                    await self.session_lifecycle.agent_run_repository.lock_by_id(
-                        session,
-                        run_id,
-                    )
-                )
-                if locked_session is None or locked_run is None:
-                    raise ValueError("AgentSession or AgentRun not found")
-                if locked_session.owner_generation != owner_generation:
-                    raise CanonicalExecutionOwnerGenerationStaleError(
-                        "Session owner generation is stale"
-                    )
-                persisted = locked_run.model_operation_state
-                if (
-                    persisted is None
-                    or persisted.foreground is None
-                    or persisted.foreground.operation_id
-                    != selection.operation.operation_id
-                    or persisted.foreground.cursor != selection.operation.cursor
-                ):
-                    continue
-                await self.agent_session_repository.set_inference_state(
-                    session,
-                    session_id=session_id,
-                    inference_state=inference_state,
-                )
+            finalized = await self.model_operation_repository.finalize_fresh(
+                session_id=session_id,
+                run_id=run_id,
+                owner_generation=owner_generation,
+                operation=selection.operation,
+                inference_state=inference_state,
+            )
+            if not finalized:
+                continue
             return Success(
                 FreshTurnPreparation(
                     run_request=resolved_request,
                     inference_state=inference_state,
                     profile=selected.profile,
                     source=selected.source,
+                    configuration_signature=prepared.value.configuration_signature,
                 )
             )
         raise CanonicalExecutionWorkDriftError(
@@ -3536,100 +2872,14 @@ class RunExecutor:
         current_request: RunRequest,
     ) -> RunRequest:
         """Persist and resolve the current Lightweight compaction operation."""
-        async with self.session_manager() as session:
-            locked_agent = await self.agent_repository.lock_by_id(session, agent_id)
-            locked_session = await self.agent_session_repository.lock_by_id(
-                session,
-                session_id,
-            )
-            locked_run = await self.session_lifecycle.agent_run_repository.lock_by_id(
-                session,
-                run_id,
-            )
-            if locked_agent is None or locked_session is None or locked_run is None:
-                raise ValueError("AgentSession, Agent, or AgentRun not found")
-            if locked_session.owner_generation != owner_generation:
-                raise CanonicalExecutionOwnerGenerationStaleError(
-                    "Session owner generation is stale"
-                )
-            if locked_session.agent_id != agent_id:
-                raise ValueError("AgentSession does not belong to Agent")
-            if locked_run.session_id != session_id:
-                raise ValueError("AgentRun does not belong to AgentSession")
-            if locked_agent.workspace_id != current_request.workspace_id:
-                raise ValueError("Run request does not belong to Agent Workspace")
-
-            operation_state = locked_run.model_operation_state or ModelOperationState(
-                foreground=None,
-                compaction=None,
-            )
-            operation = operation_state.compaction
-            if operation is None or operation.terminal_reason is not None:
-                option = next(
-                    (
-                        candidate
-                        for candidate in locked_agent.selectable_model_options
-                        if candidate.label == locked_agent.lightweight_model_label
-                    ),
-                    None,
-                )
-                if option is None:
-                    raise ProfileResolutionRuntimeError(
-                        _profile_resolution_failure(
-                            ModelTargetNotFound(
-                                model_target_label=locked_agent.lightweight_model_label
-                            )
-                        )
-                    )
-                profile = RequestedInferenceProfile(
-                    model_target_label=option.label,
-                    reasoning_effort=None,
-                    enabled_execution_options=[],
-                )
-                operation = build_model_operation(
-                    option=option,
-                    profile=profile,
-                    kind=ModelOperationKind.COMPACTION,
-                    operation_id=uuid7().hex,
-                    recorded_at=datetime.datetime.now(datetime.UTC),
-                )
-            try:
-                selection = await select_model_operation_candidate(
-                    session,
-                    operation=operation,
-                    workspace_id=locked_agent.workspace_id,
-                    health_repository=self.model_candidate_health_repository,
-                    recorded_at=datetime.datetime.now(datetime.UTC),
-                    session_id=None,
-                    reservation=None,
-                )
-            except ModelOperationChainExhaustedError as exc:
-                await self.session_lifecycle.agent_run_repository.update(
-                    session,
-                    run_id,
-                    AgentRunPatch(
-                        model_operation_state=ModelOperationState(
-                            foreground=operation_state.foreground,
-                            compaction=exc.operation,
-                        )
-                    ),
-                )
-                raise ProfileResolutionRuntimeError(
-                    _profile_resolution_failure(
-                        ModelCandidateChainExhausted(exc.operation)
-                    )
-                ) from exc
-            await self.session_lifecycle.agent_run_repository.update(
-                session,
-                run_id,
-                AgentRunPatch(
-                    model_operation_state=ModelOperationState(
-                        foreground=operation_state.foreground,
-                        compaction=selection.operation,
-                    )
-                ),
-            )
-            candidate = selection.candidate
+        selection = await self.model_operation_repository.prepare_compaction(
+            agent_id=agent_id,
+            session_id=session_id,
+            run_id=run_id,
+            owner_generation=owner_generation,
+            workspace_id=current_request.workspace_id,
+        )
+        candidate = selection.candidate
 
         context_source = await self._capture_compaction_context(
             current_request=current_request,
@@ -3641,9 +2891,9 @@ class RunExecutor:
             workspace_id=current_request.workspace_id,
             selection=candidate.model_selection,
             settings=candidate.settings,
-            integration_repository=self.integration_repository,
+            model_read_repository=self.model_read_repository,
             model_metadata_service=self.model_metadata_service,
-            session_manager=self.session_manager,
+            runtime_token_resolver=self.runtime_token_resolver,
         )
         if runtime.failure:
             raise ProfileResolutionRuntimeError(
@@ -3657,9 +2907,7 @@ class RunExecutor:
                 compaction_model=value.model,
                 compaction_provider=value.provider,
                 compaction_credential_kwargs=value.credential_kwargs,
-                compaction_assembly_metadata=ModelAssemblyMetadata.from_selection(
-                    candidate.model_selection
-                ),
+                compaction_candidate=candidate.model_copy(deep=True),
                 compaction_max_input_tokens=value.effective_input_tokens,
             ),
             context_source=context_source,
@@ -3676,39 +2924,14 @@ class RunExecutor:
         if not unique_ids:
             return
 
-        async with self.session_manager() as session:
-            changed_agents = [
-                agent
-                for session_agent_id in unique_ids
-                if (
-                    agent
-                    := await self.agent_session_repository.get_session_agent_by_id(
-                        session,
-                        session_agent_id,
-                    )
-                )
-                is not None
-            ]
-            session_ids_by_root: dict[str, list[str]] = {}
-            for agent in changed_agents:
-                if agent.root_session_agent_id in session_ids_by_root:
-                    continue
-                tree_agents = (
-                    await self.agent_session_repository.list_session_agent_tree(
-                        session,
-                        root_session_agent_id=agent.root_session_agent_id,
-                    )
-                )
-                session_ids_by_root[agent.root_session_agent_id] = sorted(
-                    {tree_agent.agent_session_id for tree_agent in tree_agents}
-                )
+        routes = await self.read_repository.tree_change_routes(unique_ids)
 
-        for agent in changed_agents:
+        for route in routes:
             event = SubagentTreeChanged(
-                root_session_agent_id=agent.root_session_agent_id,
-                changed_session_agent_id=agent.id,
+                root_session_agent_id=route.root_session_agent_id,
+                changed_session_agent_id=route.changed_session_agent_id,
             )
-            for target_session_id in session_ids_by_root[agent.root_session_agent_id]:
+            for target_session_id in route.target_session_ids:
                 try:
                     await dispatch_event(target_session_id, event)
                 except Exception:
@@ -3716,8 +2939,8 @@ class RunExecutor:
                         "Failed to publish committed SessionAgent tree change",
                         extra={
                             "target_session_id": target_session_id,
-                            "changed_session_agent_id": agent.id,
-                            "root_session_agent_id": agent.root_session_agent_id,
+                            "changed_session_agent_id": route.changed_session_agent_id,
+                            "root_session_agent_id": route.root_session_agent_id,
                         },
                     )
 
@@ -3728,14 +2951,14 @@ class RunExecutor:
         session_id: str,
         requested_profile: RequestedInferenceProfile,
         prepared_inference_state: SessionInferenceState,
+        configuration_signature: str | None = None,
     ) -> bool:
         """Return whether current model intent or label mapping supersedes a turn."""
-        async with self.session_manager() as session:
-            current_agent = await self.agent_repository.get_by_id(session, agent_id)
-            current_session = await self.agent_session_repository.get_by_id(
-                session,
-                session_id,
-            )
+        snapshot = await self.read_repository.model_configuration_snapshot(
+            agent_id=agent_id, session_id=session_id
+        )
+        current_agent = snapshot.agent
+        current_session = snapshot.session
         if not isinstance(current_agent, Agent) or not isinstance(
             current_session, AgentSession
         ):
@@ -3749,9 +2972,20 @@ class RunExecutor:
                 enabled_execution_options=applied_profile.enabled_execution_options,
             )
             if applied_profile is not None
-            else _agent_default_inference_profile(current_agent)
+            else agent_default_inference_profile(current_agent)
         )
-        if current_profile != requested_profile:
+        prepared_profile = RequestedInferenceProfile(
+            model_target_label=prepared_inference_state.model_target_label,
+            reasoning_effort=prepared_inference_state.reasoning_effort,
+            enabled_execution_options=prepared_inference_state.enabled_execution_options,
+        )
+        if current_profile not in (requested_profile, prepared_profile):
+            return True
+        if (
+            configuration_signature is not None
+            and agent_model_configuration_signature(current_agent)
+            != configuration_signature
+        ):
             return True
 
         current_option = next(
@@ -3770,8 +3004,12 @@ class RunExecutor:
             return True
         current_candidate = current_option.candidates[candidate_ordinal - 1]
         return (
-            current_candidate.model_selection
-            != prepared_inference_state.model_selection
+            current_candidate.model_selection.llm_provider_integration_id
+            != prepared_inference_state.model_selection.llm_provider_integration_id
+            or current_candidate.model_selection.provider
+            != prepared_inference_state.model_selection.provider
+            or current_candidate.model_selection.model_identifier
+            != prepared_inference_state.model_selection.model_identifier
             or current_candidate.settings != prepared_inference_state.model_settings
         )
 
@@ -3788,6 +3026,7 @@ class RunExecutor:
         tool_admission_barrier: ToolAdmissionBarrier,
         mark_context_invalidated: Callable[[], None],
         dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
+        configuration_signature: str | None = None,
     ) -> PollMessages:
         """Combine model-call boundary polling with turn action processing."""
         # AgentRunExecution polls before its first model call and before later turns.
@@ -3820,6 +3059,7 @@ class RunExecutor:
                     session_id=snapshot.session_id,
                     requested_profile=requested_inference_profile,
                     prepared_inference_state=prepared_inference_state,
+                    configuration_signature=configuration_signature,
                 )
             )
             if result.context_invalidated:
@@ -4008,14 +3248,9 @@ class RunExecutor:
                 complete_run=complete_run,
             )
 
-        async with self.session_manager() as session:
-            list_projections = (
-                self.session_git_worktree_service.list_action_execution_projections
-            )
-            projections = await list_projections(
-                session,
-                session_id=session_id,
-            )
+        projections = await self.read_repository.action_execution_projections(
+            session_id
+        )
         pending = [
             projection.execution
             for projection in projections
@@ -4056,6 +3291,10 @@ class RunExecutor:
     ) -> GitWorktreeActionExecutionResult:
         """Execute one atomically claimed operation action."""
 
+        operation_logger = bind_extra(
+            logger, {"session_id": session_id, "action_execution_id": execution.id}
+        )
+
         async def publish_projection(
             projection: ActionExecutionProjection,
         ) -> None:
@@ -4068,13 +3307,9 @@ class RunExecutor:
                     session_id,
                     chat_action_execution_updated_dump(projection),
                 )
-            except Exception:
-                logger.exception(
+            except WebSocketBroadcastPublishError:
+                operation_logger.exception(
                     "Failed to broadcast action execution projection",
-                    extra={
-                        "session_id": session_id,
-                        "action_execution_id": projection.execution.id,
-                    },
                 )
 
         async def publish_history_event(event: Event) -> None:
@@ -4087,23 +3322,19 @@ class RunExecutor:
                     session_id,
                     chat_history_event_appended_dump(event),
                 )
-            except Exception:
-                logger.exception(
+            except WebSocketBroadcastPublishError:
+                operation_logger.exception(
                     "Failed to broadcast action execution history event",
-                    extra={"session_id": session_id, "event_id": event.id},
+                    extra={"event_id": event.id},
                 )
             try:
                 await self.broadcast.publish(
                     session_id,
                     chat_action_execution_removed_dump(session_id, execution.id),
                 )
-            except Exception:
-                logger.exception(
+            except WebSocketBroadcastPublishError:
+                operation_logger.exception(
                     "Failed to broadcast action execution removal",
-                    extra={
-                        "session_id": session_id,
-                        "action_execution_id": execution.id,
-                    },
                 )
 
         if execution.owner_generation != owner_generation:
@@ -4168,11 +3399,11 @@ class RunExecutor:
         include_action_messages: bool,
     ) -> PromotedMailboxItems:
         """Promote input buffers and publish the matching live-state changes."""
-        started_at = asyncio.get_running_loop().time()
-        logger.info(
-            "Input buffer flush started before model boundary",
-            extra={"session_id": session_id, "model": model},
+        operation_logger = bind_extra(
+            logger, {"session_id": session_id, "model": model}
         )
+        started_at = asyncio.get_running_loop().time()
+        operation_logger.info("Input buffer flush started before model boundary")
         profile_resolution_failure: str | None = None
         try:
             promoted = await self.mailbox_item_service.flush_session_mailbox_items(
@@ -4190,14 +3421,11 @@ class RunExecutor:
             raise CanonicalExecutionOwnerGenerationStaleError(str(exc)) from exc
         except MailboxPreparationStaleError as exc:
             raise CanonicalExecutionWorkDriftError(str(exc)) from exc
-        logger.info(
+        operation_logger.info(
             "Input buffer flush completed before model boundary",
             extra={
-                "session_id": session_id,
-                "model": model,
                 "duration_seconds": round(
-                    asyncio.get_running_loop().time() - started_at,
-                    3,
+                    asyncio.get_running_loop().time() - started_at, 3
                 ),
                 "promoted_event_count": len(promoted.events),
                 "promoted_user_message_count": len(promoted.user_messages),
@@ -4206,6 +3434,17 @@ class RunExecutor:
         )
         for event in promoted.events:
             self._schedule_initial_prompt_title_generation(session_id, event)
+            if isinstance(event.payload, ScheduledTaskTriggerPayload):
+                channel_service = (
+                    self.scheduled_toolkit_provider.channel_service.for_execution(
+                        SessionExecutionOwner(session_id, owner_generation)
+                    )
+                )
+                await channel_service.create_initial_tracker(
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    cycle_id=event.payload.cycle_id,
+                )
         try:
             for event in promoted.events:
                 await self.broadcast.publish(
@@ -4230,30 +3469,16 @@ class RunExecutor:
                     session_id,
                     chat_mailbox_item_removed_dump(session_id, buffer_id),
                 )
-        except Exception:
-            logger.exception(
-                "Failed to broadcast promoted input buffer events",
-                extra={"session_id": session_id},
+        except WebSocketBroadcastPublishError:
+            operation_logger.exception(
+                "Failed to broadcast promoted input buffer events"
             )
         return promoted
 
     async def _has_actionable_model_input(self, session_id: str) -> bool:
         """Return whether transcript state after the latest run marker needs a run."""
-        async with self.session_manager() as session:
-            session_state = await self.agent_session_repository.get_by_id(
-                session,
-                session_id,
-            )
-            head_event_id = (
-                session_state.model_input_head_event_id
-                if session_state is not None
-                else None
-            )
-            events = await self.event_transcript_repository.list_for_model_input(
-                session,
-                session_id,
-                head_event_id=head_event_id,
-            )
+        snapshot = await self.read_repository.model_input_transcript(session_id)
+        events = snapshot.events
         return has_actionable_tail(events)
 
 
@@ -4272,27 +3497,7 @@ def has_actionable_tail(events: Sequence[Event]) -> bool:
 
 
 def _profile_resolution_failure(error: object) -> ProfileResolutionFailure:
-    """Map internal routing errors to safe durable failure details."""
-    if isinstance(error, ModelCandidateChainExhausted):
-        return ProfileResolutionFailure(
-            code=InferenceProfileFailureCode.MODEL_CANDIDATE_CHAIN_EXHAUSTED,
-            message="All compatible model candidates are temporarily unavailable.",
-        )
-    if isinstance(error, ModelTargetNotFound):
-        return ProfileResolutionFailure(
-            code=InferenceProfileFailureCode.MODEL_TARGET_NOT_FOUND,
-            message="The selected model is no longer available.",
-        )
-    if isinstance(error, ReasoningEffortUnsupported):
-        return ProfileResolutionFailure(
-            code=InferenceProfileFailureCode.REASONING_EFFORT_UNSUPPORTED,
-            message="The selected reasoning effort is not supported by this model.",
-        )
-    if isinstance(error, ExecutionOptionUnsupported):
-        return ProfileResolutionFailure(
-            code=InferenceProfileFailureCode.EXECUTION_OPTION_UNSUPPORTED,
-            message="The selected execution option is not supported by this model.",
-        )
+    """Map external image errors, otherwise use canonical pure profile mapping."""
     if isinstance(error, ImageGenerationRuntimeConfigurationError):
         match error.reason:
             case "integration_disabled":
@@ -4301,12 +3506,14 @@ def _profile_resolution_failure(error: object) -> ProfileResolutionFailure:
                 code = InferenceProfileFailureCode.IMAGE_EXPLICIT_SELECTION_UNSUPPORTED
             case "catalog_unavailable":
                 code = InferenceProfileFailureCode.IMAGE_CATALOG_UNAVAILABLE
-            case "catalog_generation_mismatch":
-                code = InferenceProfileFailureCode.IMAGE_CATALOG_GENERATION_MISMATCH
+            case "catalog_unusable":
+                code = InferenceProfileFailureCode.IMAGE_CATALOG_UNUSABLE
             case "model_unavailable":
                 code = InferenceProfileFailureCode.IMAGE_MODEL_UNAVAILABLE
             case "provider_model_mismatch":
                 code = InferenceProfileFailureCode.IMAGE_PROVIDER_MODEL_MISMATCH
+            case _:
+                assert_never(error.reason)
         return ProfileResolutionFailure(
             code=code,
             message=(
@@ -4314,10 +3521,7 @@ def _profile_resolution_failure(error: object) -> ProfileResolutionFailure:
                 "Choose another model, use the default, or disable image generation."
             ),
         )
-    return ProfileResolutionFailure(
-        code=InferenceProfileFailureCode.MODEL_TARGET_RESOLUTION_FAILED,
-        message="The selected model could not be prepared for this run.",
-    )
+    return profile_resolution_failure(error)
 
 
 def _chat_live_retry_state(

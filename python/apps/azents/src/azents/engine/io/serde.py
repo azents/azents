@@ -190,10 +190,6 @@ def serialize_usage(usage: TokenUsage | None) -> dict[str, Any] | None:
         d["reasoning_tokens"] = usage.reasoning_tokens
     if usage.cost_usd is not None:
         d["cost_usd"] = usage.cost_usd
-    if usage.raw is not None:
-        d["raw"] = usage.raw
-    if usage.raw_hidden_params is not None:
-        d["raw_hidden_params"] = usage.raw_hidden_params
     return d
 
 
@@ -209,6 +205,4 @@ def deserialize_usage(data: dict[str, Any] | None) -> TokenUsage | None:
         cache_creation_tokens=data.get("cache_creation_tokens"),
         reasoning_tokens=data.get("reasoning_tokens"),
         cost_usd=data.get("cost_usd"),
-        raw=data.get("raw"),
-        raw_hidden_params=data.get("raw_hidden_params"),
     )

@@ -684,6 +684,7 @@ export function GithubConfigFields({
         color="orange"
         icon={<IconAlertTriangle size={16} />}
         title={t("runtimeEnvironmentWarningTitle")}
+        styles={{ body: { minWidth: 0, overflowWrap: "anywhere" } }}
       >
         <Stack gap="xs">
           <Text size="sm">{t("runtimeEnvironmentWarningBody")}</Text>
@@ -699,6 +700,10 @@ export function GithubConfigFields({
             }
             label={t("runtimeEnvironmentToggle")}
             description={t("runtimeEnvironmentToggleDescription")}
+            styles={{
+              labelWrapper: { minWidth: 0 },
+              description: { overflowWrap: "anywhere" },
+            }}
             disabled={
               !runtimeEnvironmentAck && !config.inject_runtime_environment
             }

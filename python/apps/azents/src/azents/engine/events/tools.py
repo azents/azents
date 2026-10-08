@@ -1,12 +1,11 @@
 """Event runtime client tool catalog."""
 
 import asyncio
-import contextlib
 import json
 import logging
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 
 from pydantic import TypeAdapter
@@ -48,6 +47,7 @@ from azents.engine.tooling.tool_search import (
     ToolExposure,
     classify_tool_exposure,
 )
+from azents.utils.logging import sanitized_exception_info
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,7 @@ class ToolCatalog:
     entries: Mapping[str, CatalogTool]
     static_prompt_fragment_inputs: list[ToolkitPromptInput]
     dynamic_prompt_fragment_inputs: list[ToolkitPromptInput]
+    native_replay_context: str | None
     active_toolkit_bindings: list[ToolkitBinding]
 
     @property
@@ -127,6 +128,8 @@ class ToolCatalog:
                     toolkit_type=entry.source.toolkit_type,
                     toolkit_name=entry.source.label,
                     toolkit_slug=entry.source.slug,
+                    toolkit_namespace=entry.source.namespace,
+                    source_identity=dict(entry.source.source_identity),
                 )
             }
         )
@@ -228,6 +231,7 @@ def project_tool_catalog_for_client_compatibility(
             *variant_prompt_inputs,
         ],
         dynamic_prompt_fragment_inputs=catalog.dynamic_prompt_fragment_inputs,
+        native_replay_context=catalog.native_replay_context,
         active_toolkit_bindings=catalog.active_toolkit_bindings,
     )
 
@@ -265,6 +269,8 @@ def _wire_variant_prompt_input(
         metadata["required_client_tool_model_profile"] = required_model_profile.value
     if entry.source.slug:
         metadata["slug"] = entry.source.slug
+    if entry.source.namespace:
+        metadata["namespace"] = entry.source.namespace
     if entry.source.toolkit_type is not None:
         metadata["toolkit_type"] = entry.source.toolkit_type
     if entry.source.display_name:
@@ -306,6 +312,7 @@ def extend_tool_catalog_candidates(
         entries=MappingProxyType(entries),
         static_prompt_fragment_inputs=catalog.static_prompt_fragment_inputs,
         dynamic_prompt_fragment_inputs=catalog.dynamic_prompt_fragment_inputs,
+        native_replay_context=catalog.native_replay_context,
         active_toolkit_bindings=catalog.active_toolkit_bindings,
     )
 
@@ -352,6 +359,7 @@ def extend_prepared_tool_catalog_with_json_functions(
         entries=MappingProxyType(entries),
         static_prompt_fragment_inputs=catalog.static_prompt_fragment_inputs,
         dynamic_prompt_fragment_inputs=catalog.dynamic_prompt_fragment_inputs,
+        native_replay_context=catalog.native_replay_context,
         active_toolkit_bindings=catalog.active_toolkit_bindings,
     )
 
@@ -360,6 +368,7 @@ def _runtime_builtin_source() -> ToolCatalogSource:
     """Return source metadata for runtime-provided client tools."""
     return ToolCatalogSource(
         slug="builtin",
+        namespace="builtin",
         toolkit_type=None,
         toolkit_class="RuntimeBuiltinTool",
         display_name="Runtime",
@@ -378,6 +387,7 @@ async def build_tool_catalog(
     entries: dict[str, CatalogTool] = {}
     static_prompt_fragment_inputs: list[ToolkitPromptInput] = []
     dynamic_prompt_fragment_inputs: list[ToolkitPromptInput] = []
+    native_replay_contexts: list[str] = []
     active_toolkit_bindings: list[ToolkitBinding] = []
     for index, binding in enumerate(toolkit_bindings):
         update_started_at = time.monotonic()
@@ -412,7 +422,10 @@ async def build_tool_catalog(
                     content=prompt,
                 )
             )
-        dynamic_prompt = (await binding.toolkit.get_dynamic_prompt(context)).strip()
+        prepared_prompt = await binding.toolkit.prepare_dynamic_prompt(context)
+        dynamic_prompt = prepared_prompt.text.strip()
+        if prepared_prompt.native_replay_context is not None:
+            native_replay_contexts.append(prepared_prompt.native_replay_context)
         if dynamic_prompt:
             dynamic_prompt_fragment_inputs.append(
                 _toolkit_prompt_input(
@@ -428,6 +441,24 @@ async def build_tool_catalog(
             bound = (
                 tool.with_prefix(f"{binding.slug}__") if binding.use_prefix else tool
             )
+            if binding.toolkit_config_id is not None:
+                qualifier = _registered_source_qualifier(source)
+                bound = replace(
+                    bound,
+                    spec=bound.spec.model_copy(
+                        update={
+                            "description": (
+                                f"{bound.spec.description}\n\nSource: {qualifier}"
+                            )
+                        }
+                    ),
+                )
+            if bound.spec.name in tools:
+                previous = entries[bound.spec.name].source.toolkit_config_id
+                raise ValueError(
+                    "Duplicate final Toolkit tool name "
+                    f"{bound.spec.name}: {previous}, {binding.toolkit_config_id}"
+                )
             tools[bound.spec.name] = bound
             entries[bound.spec.name] = CatalogTool(
                 tool=bound,
@@ -443,6 +474,11 @@ async def build_tool_catalog(
         entries=MappingProxyType(entries),
         static_prompt_fragment_inputs=static_prompt_fragment_inputs,
         dynamic_prompt_fragment_inputs=dynamic_prompt_fragment_inputs,
+        native_replay_context=(
+            json.dumps(sorted(native_replay_contexts), separators=(",", ":"))
+            if native_replay_contexts
+            else None
+        ),
         active_toolkit_bindings=active_toolkit_bindings,
     )
 
@@ -450,20 +486,46 @@ async def build_tool_catalog(
 def _tool_catalog_source(binding: ToolkitBinding) -> ToolCatalogSource:
     """Retain searchable source and routing metadata for one Toolkit binding."""
     routing_metadata: list[tuple[str, str]] = []
+    if binding.base_slug:
+        routing_metadata.append(("slug", binding.base_slug))
     if binding.slug:
-        routing_metadata.append(("slug", binding.slug))
+        routing_metadata.append(("namespace", binding.slug))
     if binding.toolkit_type is not None:
         routing_metadata.append(("toolkit_type", binding.toolkit_type))
+    routing_metadata.extend(binding.toolkit.source_identity)
     return ToolCatalogSource(
-        slug=binding.slug,
+        slug=binding.base_slug,
+        namespace=binding.slug,
         toolkit_type=binding.toolkit_type,
         toolkit_class=binding.toolkit.__class__.__name__,
         display_name=binding.toolkit.display_name.strip(),
         use_prefix=binding.use_prefix,
         always_expose_tools=binding.always_expose_tools,
         toolkit_config_id=binding.toolkit_config_id,
+        source_identity=binding.toolkit.source_identity,
         routing_metadata=tuple(routing_metadata),
     )
+
+
+def _registered_source_qualifier(source: ToolCatalogSource) -> str:
+    """Return one bounded provider-visible registered Toolkit source qualifier."""
+    parts = [
+        _bounded_source_component(source.label, limit=96),
+        f"namespace {_bounded_source_component(source.namespace, limit=128)}",
+    ]
+    parts.extend(
+        f"{_bounded_source_component(key, limit=32)} "
+        f"{_bounded_source_component(value, limit=96)}"
+        for key, value in source.source_identity[:4]
+    )
+    return "; ".join(parts)
+
+
+def _bounded_source_component(value: str, *, limit: int) -> str:
+    """Bound one source component without removing later identity fields."""
+    if len(value) <= limit:
+        return value
+    return f"{value[: limit - 1]}…"
 
 
 def _toolkit_prompt_input(
@@ -499,7 +561,8 @@ def _toolkit_update_context_log_extra(
         "model": context.model,
         "run_index": context.run_index,
         "toolkit_index": index,
-        "toolkit_slug": binding.slug,
+        "toolkit_slug": binding.base_slug,
+        "toolkit_namespace": binding.slug,
         "toolkit_type": binding.toolkit_type,
         "toolkit_class": binding.toolkit.__class__.__name__,
         "toolkit_display_name": binding.toolkit.display_name,
@@ -527,8 +590,10 @@ def _toolkit_prompt_metadata(binding: ToolkitBinding) -> dict[str, str]:
         "use_prefix": str(binding.use_prefix).lower(),
         "always_expose_tools": str(binding.always_expose_tools).lower(),
     }
+    if binding.base_slug:
+        metadata["slug"] = binding.base_slug
     if binding.slug:
-        metadata["slug"] = binding.slug
+        metadata["namespace"] = binding.slug
     if binding.toolkit_type is not None:
         metadata["toolkit_type"] = binding.toolkit_type
     display_name = binding.toolkit.display_name.strip()
@@ -678,8 +743,18 @@ async def _call_cancel_handler(
     """Isolate cancellation hook failures so they do not block run stop."""
     if tool.cancel_handler is None:
         return
-    with contextlib.suppress(Exception):
+    try:
         await tool.cancel_handler(request)
+    except asyncio.CancelledError:
+        raise
+    except Exception as error:
+        logger.warning(
+            "Tool cancellation handler failed",
+            extra={"tool_name": tool.spec.name, "failure_kind": type(error).__name__},
+            exc_info=sanitized_exception_info(
+                error, message="Tool cancellation handler failed"
+            ),
+        )
 
 
 def _tool_result_payload(

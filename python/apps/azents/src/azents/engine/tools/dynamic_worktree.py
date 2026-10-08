@@ -1,10 +1,16 @@
 """Agent-facing dynamic Git worktree Toolkit."""
 
 import json
+from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from azents.broker.types import SessionBroker, SessionWakeUp
+from azents.broker.types import BrokerMessage, SessionBroker, SessionWakeUp
+from azents.core.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
+    accepts_execution_owner,
+)
 from azents.core.tools import (
     ResolveContext,
     Toolkit,
@@ -18,11 +24,18 @@ from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.execution_context import get_client_tool_execution_context
 from azents.engine.tooling.make_tool import make_tool
 from azents.services.session_git_worktree import SessionGitWorktreeService
-from azents.services.session_resource_authority import (
-    SessionExecutionOwner,
-    SessionResourceAuthority,
-    accepts_execution_owner,
-)
+
+
+class DynamicWorktreeBroker(Protocol):
+    """The two routing operations needed by managed-worktree admission."""
+
+    async def notify_mailbox_activity(self, session_id: str) -> None:
+        """Notify the already-running Session owner."""
+        ...
+
+    async def send_message(self, message: BrokerMessage) -> None:
+        """Route the admitted Session wake."""
+        ...
 
 
 class DynamicWorktreeToolkitConfig(BaseModel):
@@ -76,7 +89,7 @@ class DynamicWorktreeToolkit(Toolkit[DynamicWorktreeToolkitConfig]):
         self,
         *,
         service: SessionGitWorktreeService,
-        broker: SessionBroker,
+        broker: DynamicWorktreeBroker,
         agent_id: str,
         session_id: str,
     ) -> None:
@@ -125,15 +138,13 @@ class DynamicWorktreeToolkit(Toolkit[DynamicWorktreeToolkitConfig]):
         if context.resource_authority is not None:
             self.bind_execution_authority(context.resource_authority)
         tools: list[FunctionTool] = []
-        if await self.service.agent_create_git_worktree_available(
+        availability = await self.service.project_agent_git_worktree_availability(
             agent_id=self.agent_id,
             session_id=self.session_id,
-        ):
+        )
+        if availability.create:
             tools.append(self._create_git_worktree_tool())
-        if await self.service.agent_remove_git_worktree_available(
-            agent_id=self.agent_id,
-            session_id=self.session_id,
-        ):
+        if availability.remove:
             tools.append(self._remove_git_worktree_tool())
         return ToolkitState(
             status=ToolkitStatus.ENABLED,

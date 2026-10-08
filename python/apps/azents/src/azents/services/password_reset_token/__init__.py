@@ -4,12 +4,11 @@ import dataclasses
 import datetime
 import hashlib
 import secrets
-from typing import Annotated, assert_never
+from typing import Annotated
 
 from azcommon.datetime import tznow
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.auth.password import (
     WeakPasswordError,
@@ -18,19 +17,10 @@ from azents.core.auth.password import (
 )
 from azents.core.config import Config
 from azents.core.deps import get_config
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.password_login import PasswordLoginRepository
-from azents.repos.password_login.data import PasswordLoginCreate
-from azents.repos.password_reset_token import PasswordResetTokenRepository
-from azents.repos.password_reset_token.data import (
-    PasswordResetTokenCreate,
-    PasswordResetTokenRedemptionCreate,
-    PasswordResetTokenUnavailable,
+from azents.repos.password_reset_token.operations import (
+    PasswordResetOperationRepository,
+    ResetRedemption,
 )
-from azents.repos.session import SessionRepository
-from azents.repos.user import UserRepository
-from azents.repos.user_email import UserEmailRepository
 from azents.services.runtime_terminal.invalidation import (
     RuntimeTerminalInvalidationPublisherDependency,
 )
@@ -75,14 +65,7 @@ def mask_password_reset_email(email: str) -> str:
 class PasswordResetTokenService:
     """Password reset token service."""
 
-    password_reset_token_repo: Annotated[PasswordResetTokenRepository, Depends()]
-    user_repo: Annotated[UserRepository, Depends()]
-    user_email_repo: Annotated[UserEmailRepository, Depends()]
-    password_login_repo: Annotated[PasswordLoginRepository, Depends()]
-    session_repo: Annotated[SessionRepository, Depends()]
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ]
+    operation_repository: Annotated[PasswordResetOperationRepository, Depends()]
     terminal_invalidation_publisher: RuntimeTerminalInvalidationPublisherDependency
     config: Annotated[Config, Depends(get_config)]
 
@@ -98,24 +81,15 @@ class PasswordResetTokenService:
             now + datetime.timedelta(hours=_DEFAULT_PASSWORD_RESET_EXPIRE_HOURS)
         )
 
-        async with self.session_manager() as session:
-            user = None
-            if input.user_id is not None:
-                user = await self.user_repo.get(session, input.user_id)
-            elif input.email is not None:
-                user = await self.user_repo.get_by_email(session, input.email)
-            if user is None:
-                return Failure(PasswordResetUserNotFound())
-
-            token = await self.password_reset_token_repo.create(
-                session,
-                PasswordResetTokenCreate(
-                    token_hash=token_hash,
-                    user_id=user.id,
-                    created_by_user_id=input.created_by_user_id,
-                    expires_at=expires_at,
-                ),
-            )
+        token = await self.operation_repository.create(
+            user_id=input.user_id,
+            email=input.email,
+            token_hash=token_hash,
+            created_by_user_id=input.created_by_user_id,
+            expires_at=expires_at,
+        )
+        if token is None:
+            return Failure(PasswordResetUserNotFound())
 
         return Success(
             PasswordResetTokenWithPlaintextOutput(
@@ -132,12 +106,7 @@ class PasswordResetTokenService:
         limit: int = 50,
     ) -> PasswordResetTokenListOutput:
         """Fetch Password reset token list."""
-        async with self.session_manager() as session:
-            result = await self.password_reset_token_repo.list_all(
-                session,
-                offset=offset,
-                limit=limit,
-            )
+        result = await self.operation_repository.list_all(offset=offset, limit=limit)
         return PasswordResetTokenListOutput(
             items=[
                 PasswordResetTokenOutput.convert_from(token) for token in result.items
@@ -152,40 +121,17 @@ class PasswordResetTokenService:
         """Preview Password reset token status."""
         token_hash = hash_password_reset_token(input.token)
         now = tznow()
-        async with self.session_manager() as session:
-            token = await self.password_reset_token_repo.get_by_token_hash(
-                session,
-                token_hash,
+        preview = await self.operation_repository.preview(
+            token_hash=token_hash, now=now
+        )
+        if preview is None:
+            return PreviewPasswordResetTokenOutput(
+                valid=False, email=None, expires_at=None
             )
-            if token is None:
-                return PreviewPasswordResetTokenOutput(
-                    valid=False,
-                    email=None,
-                    expires_at=None,
-                )
-            if token.revoked_at is not None or token.used_at is not None:
-                return PreviewPasswordResetTokenOutput(
-                    valid=False,
-                    email=None,
-                    expires_at=None,
-                )
-            if token.expires_at <= now:
-                return PreviewPasswordResetTokenOutput(
-                    valid=False,
-                    email=None,
-                    expires_at=None,
-                )
-            user = await self.user_repo.get(session, token.user_id)
-            if user is None:
-                return PreviewPasswordResetTokenOutput(
-                    valid=False,
-                    email=None,
-                    expires_at=None,
-                )
         return PreviewPasswordResetTokenOutput(
             valid=True,
-            email=mask_password_reset_email(user.primary_email),
-            expires_at=token.expires_at,
+            email=mask_password_reset_email(preview.email),
+            expires_at=preview.expires_at,
         )
 
     async def redeem(
@@ -202,115 +148,25 @@ class PasswordResetTokenService:
         now = tznow()
         password_hash = hash_password(input.password)
 
-        async with self.session_manager() as session:
-            available_result = (
-                await self.password_reset_token_repo.get_available_by_token_hash(
-                    session,
-                    token_hash,
-                    now=now,
-                )
-            )
-            if available_result.success:
-                token = available_result.value
-                pass
-            else:
-                error = available_result.error
-                match error:
-                    case PasswordResetTokenUnavailable():
-                        return Failure(InvalidPasswordResetToken())
-                    case _:
-                        assert_never(error)
-
-            user = await self.user_repo.get(session, token.user_id)
-            if user is None:
-                return Failure(InvalidPasswordResetToken())
-
-            claim_result = await self.password_reset_token_repo.claim_for_redemption(
-                session,
-                token_hash,
+        user_id = await self.operation_repository.redeem(
+            command=ResetRedemption(
+                token_hash=token_hash,
+                password_hash=password_hash,
                 now=now,
+                ip_address=input.ip_address,
+                user_agent=input.user_agent,
             )
-            if claim_result.success:
-                token = claim_result.value
-                pass
-            else:
-                error = claim_result.error
-                match error:
-                    case PasswordResetTokenUnavailable():
-                        return Failure(InvalidPasswordResetToken())
-                    case _:
-                        assert_never(error)
-
-            existing = await self.password_login_repo.get_by_user_id(
-                session,
-                token.user_id,
-            )
-            if existing is not None:
-                update_result = await self.password_login_repo.update_password_hash(
-                    session,
-                    token.user_id,
-                    password_hash,
-                )
-                match update_result:
-                    case Success():
-                        pass
-                    case Failure():
-                        return Failure(InvalidPasswordResetToken())
-                    case _:
-                        assert_never(update_result)
-            else:
-                create_result = await self.password_login_repo.create(
-                    session,
-                    PasswordLoginCreate(
-                        user_id=token.user_id,
-                        password_hash=password_hash,
-                    ),
-                )
-                match create_result:
-                    case Success():
-                        pass
-                    case Failure():
-                        update_result = (
-                            await self.password_login_repo.update_password_hash(
-                                session,
-                                token.user_id,
-                                password_hash,
-                            )
-                        )
-                        match update_result:
-                            case Success():
-                                pass
-                            case Failure():
-                                return Failure(InvalidPasswordResetToken())
-                            case _:
-                                assert_never(update_result)
-                    case _:
-                        assert_never(create_result)
-
-            await self.session_repo.revoke_all_by_user(session, token.user_id)
-            await self.password_reset_token_repo.create_redemption(
-                session,
-                PasswordResetTokenRedemptionCreate(
-                    password_reset_token_id=token.id,
-                    user_id=token.user_id,
-                    ip_address=input.ip_address,
-                    user_agent=input.user_agent,
-                    redeemed_at=now,
-                ),
-            )
+        )
+        if user_id is None:
+            return Failure(InvalidPasswordResetToken())
         await self.terminal_invalidation_publisher.publish_user_terminal_invalidation(
-            token.user_id
+            user_id
         )
         return Success(None)
 
     async def revoke(self, token_id: str) -> bool:
         """Revoke Password reset token."""
-        async with self.session_manager() as session:
-            return await self.password_reset_token_repo.revoke(
-                session,
-                token_id,
-                revoked_at=tznow(),
-            )
+        return await self.operation_repository.revoke(token_id=token_id)
 
     def build_reset_url(self, token: str) -> str:
         """Create Password reset URL."""

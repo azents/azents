@@ -16,6 +16,7 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     WorkspaceUserRole,
 )
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent, AgentCreate
 from azents.repos.agent_admin import AgentAdminRepository
@@ -78,11 +79,12 @@ def _agent() -> Agent:
 
 async def test_agent_atomic_operations_close_before_returning() -> None:
     """Create, update, and admin removal finish their shared transactions."""
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
     transaction_active = False
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         nonlocal transaction_active
         transaction_active = True
         try:
@@ -96,14 +98,14 @@ async def test_agent_atomic_operations_close_before_returning() -> None:
     agent_session_repository = AsyncMock(spec=AgentSessionRepository)
     workspace_user_repository = AsyncMock(spec=WorkspaceUserRepository)
     availability_repository = AsyncMock(spec=RuntimeProfileAvailabilityRepository)
-    agent_repository.lock_by_id.return_value = agent
-    workspace_user_repository.get_for_update.return_value = SimpleNamespace(
+    agent_repository.get_by_id.return_value = agent
+    workspace_user_repository.get.return_value = SimpleNamespace(
         workspace_id=agent.workspace_id,
         role=WorkspaceUserRole.OWNER,
     )
 
     async def create_agent(
-        current_session: AsyncSession,
+        current_session: WriteSession,
         create: AgentCreate,
     ) -> Agent:
         assert transaction_active
@@ -112,7 +114,7 @@ async def test_agent_atomic_operations_close_before_returning() -> None:
         return agent
 
     async def create_admin(
-        current_session: AsyncSession,
+        current_session: WriteSession,
         create: AgentAdminCreate,
     ) -> object:
         assert transaction_active
@@ -121,7 +123,7 @@ async def test_agent_atomic_operations_close_before_returning() -> None:
         return object()
 
     async def update_agent(
-        current_session: AsyncSession,
+        current_session: WriteSession,
         agent_id: str,
         update: object,
     ) -> Success[Agent]:
@@ -132,7 +134,7 @@ async def test_agent_atomic_operations_close_before_returning() -> None:
         return Success(agent)
 
     async def replace_profiles(
-        current_session: AsyncSession,
+        current_session: WriteSession,
         **kwargs: object,
     ) -> None:
         assert transaction_active
@@ -140,7 +142,7 @@ async def test_agent_atomic_operations_close_before_returning() -> None:
         assert kwargs["agent_id"] == agent.id
 
     async def count_admins(
-        current_session: AsyncSession,
+        current_session: WriteSession,
         agent_id: str,
     ) -> int:
         assert transaction_active
@@ -149,7 +151,7 @@ async def test_agent_atomic_operations_close_before_returning() -> None:
         return 2
 
     async def delete_admin(
-        current_session: AsyncSession,
+        current_session: WriteSession,
         agent_id: str,
         workspace_user_id: str,
     ) -> bool:
@@ -240,22 +242,23 @@ async def test_agent_atomic_operations_close_before_returning() -> None:
 
 async def test_update_rejects_revoked_admin_before_mutation() -> None:
     """Final Agent mutation rechecks current authority in its transaction."""
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         yield session
 
     agent = _agent()
     agent_repository = AsyncMock(spec=AgentRepository)
     admin_repository = AsyncMock(spec=AgentAdminRepository)
     workspace_user_repository = AsyncMock(spec=WorkspaceUserRepository)
-    agent_repository.lock_by_id.return_value = agent
-    workspace_user_repository.get_for_update.return_value = SimpleNamespace(
+    agent_repository.get_by_id.return_value = agent
+    workspace_user_repository.get.return_value = SimpleNamespace(
         workspace_id=agent.workspace_id,
         role=WorkspaceUserRole.MEMBER,
     )
-    admin_repository.is_admin_for_update.return_value = False
+    admin_repository.is_admin.return_value = False
     repository = AgentOperationsRepository(
         session_manager=session_manager,
         agent_repository=agent_repository,

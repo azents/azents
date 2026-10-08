@@ -1,18 +1,144 @@
 """MCP Toolkit OAuth refresh transaction tests."""
 
 import datetime
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import MCPOAuthConnectionStatus
 from azents.core.oauth2 import OAuthTokenResponse
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
 from azents.repos.mcp_oauth_connection.data import MCPOAuthConnection
+from azents.repos.mcp_oauth_connection.operations import (
+    MCPOAuthRuntimeOperationRepository,
+)
 
 from . import mcp as mcp_module
+
+
+@pytest.mark.parametrize(
+    ("auth_type", "header_name", "credentials", "expected"),
+    [
+        (
+            "header",
+            "X-Api-Key",
+            {"type": "header", "value": "key"},
+            {"X-Api-Key": "key"},
+        ),
+        ("header", None, {"type": "header", "value": "key"}, {"Authorization": "key"}),
+        (
+            "bearer",
+            None,
+            {"type": "bearer", "token": "token"},
+            {"Authorization": "Bearer token"},
+        ),
+        ("none", None, {"type": "bearer", "token": "token"}, {}),
+        ("header", "X-Api-Key", None, {}),
+        ("bearer", None, {"type": "bearer", "token": 7}, {}),
+    ],
+)
+def test_connection_test_headers_match_typed_runtime_credentials(
+    auth_type: str,
+    header_name: str | None,
+    credentials: object,
+    expected: dict[str, str],
+) -> None:
+    """Current header value and bearer token fields use runtime header semantics."""
+    config = mcp_module.McpToolkitConfig(
+        server_url="https://mcp.example.test",
+        auth_type=auth_type,
+        header_name=header_name,
+    )
+    encoded = None if credentials is None else json.dumps(credentials)
+    assert mcp_module._build_test_auth_headers(config, encoded) == expected
+
+
+@pytest.mark.parametrize("encoded", ["{", "[]", "null", '{"token": 7}'])
+def test_invalid_connection_credentials_keep_empty_auth_headers(encoded: str) -> None:
+    config = mcp_module.McpToolkitConfig(
+        server_url="https://mcp.example.test", auth_type="bearer"
+    )
+    assert mcp_module._build_test_auth_headers(config, encoded) == {}
+
+
+async def test_header_connection_test_passes_the_configured_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exercise the public provider method with an entirely local transport seam."""
+    seen: list[dict[str, str]] = []
+
+    async def test_transport(
+        server_url: str,
+        headers: dict[str, str],
+        timeout: float,
+        *,
+        proxy_url: str | None,
+    ) -> mcp_module.TestConnectionResult:
+        del server_url, timeout, proxy_url
+        seen.append(headers)
+        return mcp_module.TestConnectionResult(
+            success=True,
+            message="Local test",
+            discovered_auth_url=None,
+            discovered_token_url=None,
+            supports_dcr=None,
+        )
+
+    monkeypatch.setattr(mcp_module, "test_mcp_transport", test_transport)
+    result = await mcp_module.McpToolkitProvider().test_connection(
+        mcp_module.McpToolkitConfig(
+            server_url="https://mcp.example.test",
+            auth_type="header",
+            header_name="X-Api-Key",
+        ),
+        '{"type":"header","value":"key"}',
+    )
+    assert result.success
+    assert seen == [{"X-Api-Key": "key"}]
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "expected"),
+    [
+        (400, '{"error":"invalid_grant","description":"provider extension"}', True),
+        (401, '{"error":"invalid_grant"}', True),
+        (400, '{"error":"temporarily_unavailable"}', False),
+        (401, "{}", False),
+        (400, '{"error":null}', False),
+        (401, '{"error":7}', False),
+        (400, '{"error":["invalid_grant"]}', False),
+        (400, "[]", True),
+        (401, "null", True),
+        (400, "{", True),
+        (403, '{"error":"invalid_grant"}', False),
+        (500, "{", False),
+    ],
+)
+def test_refresh_reconnect_decoder_preserves_the_decision_table(
+    status: int, body: str, expected: bool
+) -> None:
+    """Malformed/nonobject bodies preserve only the existing status fallback."""
+    request = httpx.Request("POST", "https://auth.example.test/token")
+    response = httpx.Response(status, request=request, content=body)
+    error = httpx.HTTPStatusError("Owned fixture", request=request, response=response)
+    assert mcp_module._refresh_failure_requires_reconnect(error) is expected
+
+
+def test_source_identity_exposes_only_mcp_server_origin() -> None:
+    """Exclude paths, query parameters, and credentials from catalog identity."""
+    identity = mcp_module.McpToolkitProvider.source_identity(
+        mcp_module.McpToolkitConfig(
+            server_url="https://user:secret@mcp.example.test:8443/private?token=secret",
+            auth_type="none",
+        )
+    )
+
+    assert identity == (("server", "https://mcp.example.test:8443"),)
 
 
 def _connection(*, access_token: str, updated_second: int = 0) -> MCPOAuthConnection:
@@ -53,20 +179,20 @@ class _ConnectionRepository(MCPOAuthConnectionRepository):
         assert self.active[0] == 1
 
     async def get_by_toolkit_id(
-        self, session: AsyncSession, toolkit_id: str
+        self, session: ReadSession, toolkit_id: str
     ) -> MCPOAuthConnection:
         del session, toolkit_id
         self._assert_session()
         return self.connection.model_copy(deep=True)
 
     async def get_by_toolkit_id_for_update(
-        self, session: AsyncSession, toolkit_id: str
+        self, session: ReadSession, toolkit_id: str
     ) -> MCPOAuthConnection:
         return await self.get_by_toolkit_id(session, toolkit_id)
 
     async def update_tokens(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         toolkit_id: str,
         access_token: str,
@@ -88,7 +214,7 @@ class _ConnectionRepository(MCPOAuthConnectionRepository):
         return self.connection.model_copy(deep=True)
 
     async def mark_reconnect_required(
-        self, session: AsyncSession, *, toolkit_id: str
+        self, session: ReadSession, *, toolkit_id: str
     ) -> None:
         del session, toolkit_id
         self._assert_session()
@@ -106,10 +232,10 @@ async def test_oauth_fresh_token_returns_without_http_or_write(
     active = [0]
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         active[0] += 1
         try:
-            yield AsyncSession()
+            yield ReadWriteSession(AsyncSession())
         finally:
             active[0] -= 1
 
@@ -127,10 +253,11 @@ async def test_oauth_fresh_token_returns_without_http_or_write(
     repository = _ConnectionRepository(fresh, active)
 
     connection = await mcp_module._ensure_oauth_connection_token(
-        connection_repo=repository,
-        session_manager=session_manager,
         toolkit_id="toolkit-1",
         proxy_url=None,
+        operations=MCPOAuthRuntimeOperationRepository(
+            session_manager=session_manager, connection_repository=repository
+        ),
     )
 
     assert connection is not None
@@ -148,10 +275,10 @@ async def test_oauth_refresh_closes_db_session_during_http(
     active = [0]
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         active[0] += 1
         try:
-            yield AsyncSession()
+            yield ReadWriteSession(AsyncSession())
         finally:
             active[0] -= 1
 
@@ -175,10 +302,11 @@ async def test_oauth_refresh_closes_db_session_during_http(
     repository = _ConnectionRepository(_connection(access_token="access-1"), active)
 
     refreshed = await mcp_module._ensure_oauth_connection_token(
-        connection_repo=repository,
-        session_manager=session_manager,
         toolkit_id="toolkit-1",
         proxy_url=None,
+        operations=MCPOAuthRuntimeOperationRepository(
+            session_manager=session_manager, connection_repository=repository
+        ),
     )
 
     assert refreshed is not None
@@ -195,10 +323,10 @@ async def test_oauth_refresh_keeps_concurrent_newer_credentials(
     active = [0]
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         active[0] += 1
         try:
-            yield AsyncSession()
+            yield ReadWriteSession(AsyncSession())
         finally:
             active[0] -= 1
 
@@ -227,10 +355,11 @@ async def test_oauth_refresh_keeps_concurrent_newer_credentials(
     monkeypatch.setattr(mcp_module, "refresh_access_token", refresh_access_token)
 
     refreshed = await mcp_module._ensure_oauth_connection_token(
-        connection_repo=repository,
-        session_manager=session_manager,
         toolkit_id="toolkit-1",
         proxy_url=None,
+        operations=MCPOAuthRuntimeOperationRepository(
+            session_manager=session_manager, connection_repository=repository
+        ),
     )
 
     assert refreshed is not None
@@ -245,10 +374,10 @@ async def test_oauth_missing_refresh_token_marks_reconnect_required() -> None:
     active = [0]
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         active[0] += 1
         try:
-            yield AsyncSession()
+            yield ReadWriteSession(AsyncSession())
         finally:
             active[0] -= 1
 
@@ -258,10 +387,11 @@ async def test_oauth_missing_refresh_token_marks_reconnect_required() -> None:
     repository = _ConnectionRepository(expired, active)
 
     connection = await mcp_module._ensure_oauth_connection_token(
-        connection_repo=repository,
-        session_manager=session_manager,
         toolkit_id="toolkit-1",
         proxy_url=None,
+        operations=MCPOAuthRuntimeOperationRepository(
+            session_manager=session_manager, connection_repository=repository
+        ),
     )
 
     assert connection is not None

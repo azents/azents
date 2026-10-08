@@ -7,15 +7,12 @@ import logging
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.job_runtime.deps import get_job_runtime
 from azents.job_runtime.local import JobRuntimeClosedError
 from azents.job_runtime.types import JobRuntime
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.external_channel.ingress_queue import (
-    ExternalChannelIngressQueueRepository,
+from azents.repos.external_channel.ingress_recovery_read import (
+    ExternalChannelIngressRecoveryReadRepository,
 )
 from azents.services.external_channel.ingress_queue import (
     build_external_channel_ingress_job_request,
@@ -31,13 +28,9 @@ _RECOVERY_SCAN_LIMIT = 100
 class ExternalChannelIngressRecoveryService:
     """Resubmit due active Session domain state without claiming generic jobs."""
 
-    session_manager: Annotated[
-        SessionManager[AsyncSession],
-        Depends(get_session_manager),
-    ]
-    queue_repository: Annotated[
-        ExternalChannelIngressQueueRepository,
-        Depends(ExternalChannelIngressQueueRepository),
+    repository: Annotated[
+        ExternalChannelIngressRecoveryReadRepository,
+        Depends(ExternalChannelIngressRecoveryReadRepository),
     ]
     job_runtime: Annotated[JobRuntime, Depends(get_job_runtime)]
 
@@ -55,13 +48,9 @@ class ExternalChannelIngressRecoveryService:
 
     async def run_once(self, *, now: datetime.datetime) -> list[str]:
         """Submit one bounded set of due or reclaimable Session identities."""
-        async with self.session_manager() as session:
-            owners = await self.queue_repository.list_recoverable_owners(
-                session,
-                now=now,
-                limit=_RECOVERY_SCAN_LIMIT,
-            )
-            await session.commit()
+        owners = await self.repository.list_recoverable_owners(
+            now=now, limit=_RECOVERY_SCAN_LIMIT
+        )
         submitted: list[str] = []
         for owner in owners:
             try:

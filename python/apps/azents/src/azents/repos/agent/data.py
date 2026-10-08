@@ -1,6 +1,5 @@
 """Agent repository data models."""
 
-import dataclasses
 import datetime
 from typing import Annotated, TypeAlias
 
@@ -19,7 +18,7 @@ from azents.core.enums import (
     AgentType,
     ExternalChannelResponseMode,
 )
-from azents.services.uploads.schema import StoredImage
+from azents.core.upload_images import StoredImage
 
 AgentAvatar: TypeAlias = StoredImage
 
@@ -194,10 +193,3 @@ class AgentList(BaseModel):
     """Agent list."""
 
     items: list[Agent] = Field(description="Agent list")
-
-
-@dataclasses.dataclass(frozen=True)
-class NotFound:
-    """Agent not found."""
-
-    agent_id: str

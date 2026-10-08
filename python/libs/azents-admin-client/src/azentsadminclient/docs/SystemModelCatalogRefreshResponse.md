@@ -1,6 +1,5 @@
 # SystemModelCatalogRefreshResponse
 
-System model catalog refresh response.
 
 ## Properties
 
@@ -8,7 +7,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **provider** | [**SystemCatalogProvider**](SystemCatalogProvider.md) |  | 
 **catalog_id** | **str** |  | 
-**snapshot_id** | **str** |  | 
+**last_success_at** | **datetime** |  | 
 **visible_count** | **int** |  | 
 **hidden_count** | **int** |  | 
 **status** | **str** |  | 

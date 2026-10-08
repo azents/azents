@@ -760,6 +760,247 @@
         }
       }
     },
+    "/debug/v1/sessions/{session_id}": {
+      "get": {
+        "tags": [
+          "Debug v1"
+        ],
+        "summary": "Get Session Diagnostics",
+        "description": "Inspect retained common metadata under authenticated operational authority.",
+        "operationId": "debug_v1_get_session_diagnostics",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 32,
+              "maxLength": 32,
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionDiagnosticMetadata"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/debug/v1/sessions/{session_id}/events": {
+      "get": {
+        "tags": [
+          "Debug v1"
+        ],
+        "summary": "Get Session Diagnostic Events",
+        "description": "Page safe canonical audit records without exposing native model artifacts.",
+        "operationId": "debug_v1_get_session_diagnostic_events",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 32,
+              "maxLength": 32,
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 32,
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionDiagnosticEventPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/debug/v1/sessions/{session_id}/file": {
+      "get": {
+        "tags": [
+          "Debug v1"
+        ],
+        "summary": "Get Session Diagnostic File",
+        "description": "Read retained current file content without file versions or restoration.",
+        "operationId": "debug_v1_get_session_diagnostic_file",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 32,
+              "maxLength": 32,
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "title": "Path"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 65536,
+              "minimum": 1,
+              "default": 10000,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionDiagnosticFile"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/invitation/v1/workspaces/{handle}/invitations": {
       "get": {
         "tags": [
@@ -3107,6 +3348,86 @@
         ]
       }
     },
+    "/system-setting/v1/sections/historical-memory-execution": {
+      "get": {
+        "tags": [
+          "System Settings v1"
+        ],
+        "summary": "Get Historical Memory Execution Setting",
+        "operationId": "system_settings_v1_get_historical_memory_execution_setting",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoricalMemoryExecutionDetailResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "System Settings v1"
+        ],
+        "summary": "Patch Historical Memory Execution Setting",
+        "operationId": "system_settings_v1_patch_historical_memory_execution_setting",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HistoricalMemoryExecutionPatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoricalMemoryExecutionDetailResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The expected System Settings version is stale.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemSettingVersionConflictResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/system-setting/v1/sections/external-account-oauth/{provider}": {
       "get": {
         "tags": [
@@ -4559,6 +4880,24 @@
         "title": "AdminWorkspaceRuntimeProfileDetailResponse",
         "description": "System-Admin read-only Workspace Runtime Profile detail."
       },
+      "AgentSessionRunState": {
+        "type": "string",
+        "enum": [
+          "idle",
+          "running"
+        ],
+        "title": "AgentSessionRunState",
+        "description": "Engine execution status of AgentSession."
+      },
+      "AgentSessionStatus": {
+        "type": "string",
+        "enum": [
+          "active",
+          "archived"
+        ],
+        "title": "AgentSessionStatus",
+        "description": "AgentSession lifecycle status."
+      },
       "ArchiveRetentionApplicationResponse": {
         "properties": {
           "id": {
@@ -5218,6 +5557,39 @@
         "title": "ErrorLevel",
         "description": "Test error level."
       },
+      "EventKind": {
+        "type": "string",
+        "enum": [
+          "user_message",
+          "goal_continuation",
+          "external_channel_continuation",
+          "scheduled_task_trigger",
+          "scheduled_task_continuation",
+          "scheduled_task_result",
+          "goal_updated",
+          "action_message",
+          "agent_message",
+          "external_channel_message",
+          "action_execution_result",
+          "skill_loaded",
+          "goal_briefing",
+          "assistant_message",
+          "reasoning",
+          "client_tool_call",
+          "client_tool_result",
+          "provider_tool_call",
+          "turn_marker",
+          "run_marker",
+          "interrupted",
+          "compaction_marker",
+          "compaction_summary",
+          "system_reminder",
+          "system_error",
+          "unknown_adapter_output"
+        ],
+        "title": "EventKind",
+        "description": "Event transcript event kind."
+      },
       "ExternalAccountOAuthDetailResponse": {
         "properties": {
           "section": {
@@ -5699,6 +6071,80 @@
         ],
         "title": "HealthStatus",
         "description": "Server status response model."
+      },
+      "HistoricalMemoryExecutionDetailResponse": {
+        "properties": {
+          "section": {
+            "type": "string",
+            "title": "Section"
+          },
+          "schema_version": {
+            "type": "integer",
+            "title": "Schema Version"
+          },
+          "admin_version": {
+            "type": "integer",
+            "title": "Admin Version"
+          },
+          "max_turns": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Turns"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "title": "Timeout Seconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "section",
+          "schema_version",
+          "admin_version",
+          "max_turns",
+          "timeout_seconds"
+        ],
+        "title": "HistoricalMemoryExecutionDetailResponse",
+        "description": "Effective memory execution cutoffs with the admin mutation version."
+      },
+      "HistoricalMemoryExecutionPatchRequest": {
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Version"
+          },
+          "max_turns": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Turns"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Timeout Seconds"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_version"
+        ],
+        "title": "HistoricalMemoryExecutionPatchRequest",
+        "description": "Optimistic update of the system-owned memory execution cutoffs."
       },
       "InvitationListResponse": {
         "properties": {
@@ -8442,6 +8888,282 @@
         "title": "SentryDiagnostics",
         "description": "Sentry SDK diagnostics."
       },
+      "SessionDiagnosticEvent": {
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "title": "Event Id"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/EventKind"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "reverted": {
+            "type": "boolean",
+            "title": "Reverted"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "tool_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Name"
+          },
+          "call_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Call Id"
+          },
+          "tool_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Status"
+          },
+          "arguments": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arguments"
+          },
+          "arguments_omitted": {
+            "type": "boolean",
+            "title": "Arguments Omitted"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event_id",
+          "kind",
+          "created_at",
+          "reverted",
+          "text",
+          "tool_name",
+          "call_id",
+          "tool_status",
+          "arguments",
+          "arguments_omitted",
+          "truncated"
+        ],
+        "title": "SessionDiagnosticEvent",
+        "description": "Safe canonical event projection, including retained reverted records."
+      },
+      "SessionDiagnosticEventPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SessionDiagnosticEvent"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "SessionDiagnosticEventPage",
+        "description": "Forward cursor page of canonical diagnostic event projections."
+      },
+      "SessionDiagnosticFile": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "writable": {
+            "type": "boolean",
+            "title": "Writable"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "next_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "writable",
+          "content",
+          "next_offset"
+        ],
+        "title": "SessionDiagnosticFile",
+        "description": "Bounded current durable file content; not file history or restoration."
+      },
+      "SessionDiagnosticMetadata": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "workspace_id": {
+            "type": "string",
+            "title": "Workspace Id"
+          },
+          "lifecycle_root_session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lifecycle Root Session Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AgentSessionStatus"
+          },
+          "run_state": {
+            "$ref": "#/components/schemas/AgentSessionRunState"
+          },
+          "owner_generation": {
+            "type": "integer",
+            "title": "Owner Generation"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "archived_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "purge_after": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purge After"
+          },
+          "archive_retention_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archive Retention Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "agent_id",
+          "workspace_id",
+          "lifecycle_root_session_id",
+          "status",
+          "run_state",
+          "owner_generation",
+          "created_at",
+          "started_at",
+          "ended_at",
+          "archived_at",
+          "purge_after",
+          "archive_retention_days"
+        ],
+        "title": "SessionDiagnosticMetadata",
+        "description": "Common retained execution metadata; no public Conversation identity."
+      },
       "SignupTokenDeliveryMethod": {
         "type": "string",
         "enum": [
@@ -8672,8 +9394,7 @@
         "required": [
           "items"
         ],
-        "title": "SystemModelCatalogListResponse",
-        "description": "System model catalog list response."
+        "title": "SystemModelCatalogListResponse"
       },
       "SystemModelCatalogRefreshListResponse": {
         "properties": {
@@ -8689,8 +9410,7 @@
         "required": [
           "items"
         ],
-        "title": "SystemModelCatalogRefreshListResponse",
-        "description": "System model catalog refresh list response."
+        "title": "SystemModelCatalogRefreshListResponse"
       },
       "SystemModelCatalogRefreshResponse": {
         "properties": {
@@ -8701,16 +9421,17 @@
             "type": "string",
             "title": "Catalog Id"
           },
-          "snapshot_id": {
+          "last_success_at": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "date-time"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Snapshot Id"
+            "title": "Last Success At"
           },
           "visible_count": {
             "type": "integer",
@@ -8762,7 +9483,7 @@
         "required": [
           "provider",
           "catalog_id",
-          "snapshot_id",
+          "last_success_at",
           "visible_count",
           "hidden_count",
           "status",
@@ -8770,8 +9491,7 @@
           "failure_message",
           "action_hint"
         ],
-        "title": "SystemModelCatalogRefreshResponse",
-        "description": "System model catalog refresh response."
+        "title": "SystemModelCatalogRefreshResponse"
       },
       "SystemModelCatalogResponse": {
         "properties": {
@@ -8789,16 +9509,17 @@
             ],
             "title": "Catalog Id"
           },
-          "snapshot_id": {
+          "last_success_at": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "date-time"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Snapshot Id"
+            "title": "Last Success At"
           },
           "visible_count": {
             "type": "integer",
@@ -8808,10 +9529,10 @@
             "type": "integer",
             "title": "Hidden Count"
           },
-          "latest_attempt": {
+          "latest_sync": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/SystemModelCatalogSyncAttemptResponse"
+                "$ref": "#/components/schemas/SystemModelCatalogSyncStatusResponse"
               },
               {
                 "type": "null"
@@ -8823,20 +9544,15 @@
         "required": [
           "provider",
           "catalog_id",
-          "snapshot_id",
+          "last_success_at",
           "visible_count",
           "hidden_count",
-          "latest_attempt"
+          "latest_sync"
         ],
-        "title": "SystemModelCatalogResponse",
-        "description": "System model catalog response."
+        "title": "SystemModelCatalogResponse"
       },
-      "SystemModelCatalogSyncAttemptResponse": {
+      "SystemModelCatalogSyncStatusResponse": {
         "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
           "status": {
             "type": "string",
             "title": "Status"
@@ -8910,7 +9626,6 @@
         },
         "type": "object",
         "required": [
-          "id",
           "status",
           "started_at",
           "finished_at",
@@ -8922,8 +9637,8 @@
           "skipped_count",
           "hidden_count"
         ],
-        "title": "SystemModelCatalogSyncAttemptResponse",
-        "description": "Latest model catalog sync attempt response."
+        "title": "SystemModelCatalogSyncStatusResponse",
+        "description": "Latest operational state, excluding opaque active work ownership."
       },
       "SystemSettingAuditEventListResponse": {
         "properties": {

@@ -4,6 +4,7 @@ import datetime
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import NamedTuple
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -21,6 +22,12 @@ from azents.core.runtime_profile import (
     RuntimeInfrastructureProfileKind,
     RuntimeProfileLifecycle,
 )
+from azents.core.runtime_provider_data import RuntimeProvider
+from azents.rdb.session_capabilities import WriteSession
+from azents.repos.runtime_profile.admin_operations import (
+    RuntimeProfileAdminOperationsRepository,
+    _infrastructure_terminal_only_change,
+)
 from azents.repos.runtime_profile.data import (
     RuntimeInfrastructureProfile,
     RuntimeInfrastructureProfileDeleteOutcome,
@@ -30,11 +37,10 @@ from azents.repos.runtime_profile.data import (
     WorkspaceRuntimeProfile,
     WorkspaceRuntimeProfileUsage,
 )
-from azents.repos.runtime_provider.data import RuntimeProvider
 from azents.repos.runtime_provider_policy.repository import (
     RuntimeProviderPolicyRepository,
 )
-from azents.repos.workspace.data import Workspace
+from azents.repos.workspace.data import Workspace, WorkspaceSnapshot
 from azents.services.terminal_policy.invalidation import (
     NoopTerminalPolicyInvalidationPublisher,
 )
@@ -43,7 +49,6 @@ from azents.testing.types import require_instance
 from .service import (
     RuntimeProfileAdminService,
     RuntimeProfileAdminUnavailable,
-    _infrastructure_terminal_only_change,
 )
 
 
@@ -118,18 +123,22 @@ def _workspace_profile() -> WorkspaceRuntimeProfile:
     )
 
 
-def _service() -> tuple[
-    RuntimeProfileAdminService,
-    AsyncMock,
-    AsyncMock,
-    AsyncMock,
-    dict[str, bool],
-]:
+class _ProfileFixture(NamedTuple):
+    """Profile deletion dependencies and transaction observation."""
+
+    service: RuntimeProfileAdminService
+    profiles: AsyncMock
+    providers: AsyncMock
+    workspaces: AsyncMock
+    transaction: dict[str, bool]
+
+
+def _service() -> _ProfileFixture:
     """Build the service with transaction-state tracking dependencies."""
     transaction = {"committed": False, "rolled_back": False}
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
         try:
             yield AsyncMock(spec=AsyncSession)
         except Exception:
@@ -142,20 +151,23 @@ def _service() -> tuple[
     provider_repository = AsyncMock()
     workspace_repository = AsyncMock()
     service = RuntimeProfileAdminService(
-        session_manager=session_manager,
-        profile_repository=profile_repository,
-        provider_repository=provider_repository,
-        policy_repository=require_instance(
-            MagicMock(spec=RuntimeProviderPolicyRepository),
-            RuntimeProviderPolicyRepository,
+        repository=RuntimeProfileAdminOperationsRepository(
+            session_manager=session_manager,
+            read_session_manager=session_manager,
+            profile_repository=profile_repository,
+            provider_repository=provider_repository,
+            policy_repository=require_instance(
+                MagicMock(spec=RuntimeProviderPolicyRepository),
+                RuntimeProviderPolicyRepository,
+            ),
+            workspace_repository=workspace_repository,
         ),
-        workspace_repository=workspace_repository,
         terminal_policy_invalidation_publisher=(
             NoopTerminalPolicyInvalidationPublisher()
         ),
     )
     provider_repository.get_by_provider_id.return_value = _provider()
-    return (
+    return _ProfileFixture(
         service,
         profile_repository,
         provider_repository,
@@ -353,7 +365,10 @@ async def test_admin_detail_uses_system_admin_projection_without_membership() ->
         selected_agent_count=4,
         running_runtime_count=2,
     )
-    workspaces.get_with_id_by_handle.return_value = ("workspace-1", workspace)
+    workspaces.get_with_id_by_handle.return_value = WorkspaceSnapshot(
+        workspace_id="workspace-1",
+        workspace=workspace,
+    )
     profiles.get_workspace_runtime_profile.return_value = workspace_profile
     profiles.get_infrastructure_profile.return_value = infrastructure
     profiles.get_workspace_runtime_profile_usage.return_value = usage

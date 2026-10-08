@@ -6,7 +6,13 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [toolkit, user-auth, agent]
 code_paths:
+  - python/apps/azents/src/azents/core/toolkit_errors.py
+  - python/apps/azents/src/azents/repos/engine_tool_repositories.py
   - python/apps/azents/src/azents/services/toolkit/**
+  - python/apps/azents/src/azents/services/toolkit_oauth/**
+  - python/apps/azents/src/azents/repos/toolkit_oauth_operations.py
+  - python/apps/azents/src/azents/repos/toolkit_oauth_data.py
+  - python/apps/azents/src/azents/repos/account_access.py
   - python/apps/azents/src/azents/engine/tools/mcp_base.py
   - python/apps/azents/src/azents/engine/tools/mcp.py
   - python/apps/azents/src/azents/core/mcp_transport.py
@@ -17,10 +23,11 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/toolkit.py
   - typescript/apps/azents-web/src/app/(app)/oauth/mcp/callback/**
   - typescript/apps/azents-web/src/features/agents/components/AgentToolkitSection.tsx
+  - typescript/apps/azents-web/src/features/agents/components/ManagedAgentToolkitSection.tsx
   - typescript/apps/azents-web/src/features/toolkits/**
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
-last_verified_at: 2026-10-01
-spec_version: 8
+last_verified_at: 2026-10-08
+spec_version: 13
 ---
 
 # MCP OAuth Flow
@@ -48,6 +55,48 @@ The flow supports OAuth authorization code + PKCE S256, RFC 8414 metadata discov
 - Final refresh success or failure locks the current row, compares the loaded
   credential snapshot, and yields to a concurrently committed credential change.
 - A refresh failure with `invalid_grant` marks the connection `reconnect_required`.
+- Encrypted callback state rejects malformed encoding, invalid authenticated
+  ciphertext, and malformed decoded JSON. Unexpected state-processing failures
+  propagate instead of being classified as an invalid callback.
+- Internal PKCE, verified shared callback state, and MCP discovery results expose
+  named immutable fields. Their wire formats and transport selection are unchanged.
+- Authlib public APIs own authorization URL construction and authorization-code
+  and refresh grant encoding. A public HTTP transport adapter retains configured
+  proxy routing and the existing `httpx` error family. Response compliance
+  validation preserves typed tokens, HTTP-200 provider errors, and missing/null
+  refresh-token fields before SDK token-state normalization.
+
+## Shared Setup Transaction Boundaries
+
+Workspace-shared setup routes call a session-free service. Completed repository
+operations own the paired Toolkit/connection reads, full connection stores, and
+shared Toolkit eligibility plus local disconnect. Metadata discovery, DCR,
+authorization-code exchange, and response construction run after database scopes
+close. Paired reads preserve Toolkit-before-connection order, including a missing
+Toolkit result.
+
+After external work, shared connect and exchange repeat the existing exact active
+User/Auth Session, admitted immutable Workspace ID, current membership, and
+`TOOLKITS_WRITE` projection in the final store transaction. They then repeat the
+exact shared Toolkit/Workspace predicate before the full upsert. Expected denial
+precedence is inactive subject (401 with Bearer), missing Workspace (404), missing
+membership (403), missing write permission (403), and missing or ineligible
+Toolkit (404). Database and cipher failures remain transparent.
+
+These plain database reads detect already committed invalidation when evaluated;
+they do not serialize authority through commit. Setup retains captured metadata
+and credentials without a new configuration, connection-version, or credential
+comparison. Shared connect stores `connected` even without an access token and
+retains preflight token/expiry fields. Exchange fully replaces token fields, so a
+missing refresh token clears the stored refresh token. Runtime refresh retains its
+separate row-lock/snapshot policy.
+
+Shared exchange checks encrypted Toolkit and Workspace identities and uses the
+encrypted redirect URI. Its encoded initiating User is not compared with the
+current requester; Agent-owned callback checks remain the stronger exact
+User/Agent/redirect/callback-target contract described below. Shared disconnect
+keeps its original eligibility read and idempotent local delete together, without
+an external gap or remote token revocation.
 
 ## Preconditions
 
@@ -136,7 +185,7 @@ sequenceDiagram
     else Agent owned
         FE->>API: POST /agents/{agent_id}/toolkit-configs/{id}/oauth/exchange
     end
-    API->>API: Verify state, path identities, requester, redirect URI, PKCE binding, and current authority
+    API->>API: Verify ownership-specific state and PKCE context
     API->>AS: Exchange authorization code + PKCE verifier
     AS-->>API: access_token/refresh_token/expires_in
     API->>DB: Upsert connected token fields
@@ -259,6 +308,13 @@ Runtime `list_tools` failure is not a run-startup failure. If a previous success
 the old snapshot remains model-visible. If no snapshot exists, no MCP tools are exposed and no MCP
 loading/error prompt or retry pseudo-tool is added to the model-visible surface.
 
+Expected authentication and transport failures retain that nonfatal snapshot
+behavior. Unexpected programming/invariant errors are observed once at the
+background task boundary with sanitized origin evidence rather than classified
+as remote unavailability. Mixed exception groups retain unexpected leaves, and
+cancellation remains cancellation. AWS, GCP and GitHub share this distinction
+without adding model-visible loading/error text or retry pseudo-tools.
+
 ## Cryptography
 
 | Mechanism | Target | Purpose |
@@ -281,10 +337,14 @@ Displayed fields:
 - expiration
 - connect/reconnect/disconnect actions
 
-The UI does not display account identity. An Agent-owned callback posts only a fixed event type and success boolean to its opener, refreshes the Agent management projection, and offers a fallback return link to the owning Agent settings Toolkit section.
+The compact Agent connection list keeps readiness and applicable authorize/reconnect actions visible. Details expose existing granted token scope/expiration separately from configured requested scopes, without performing remote grant introspection. A persisted Toolkit may be added before OAuth completes; addition does not claim connected external authorization. Parent Agent settings do not require another save. The UI does not display account identity. An Agent-owned callback posts only a fixed event type and success boolean to its opener, refreshes the Agent management projection, and offers a fallback return link to the owning Agent settings Toolkit section.
 
 ## Changelog
 
+- **2026-10-02** (spec_version 9) — Completed shared setup read/store/disconnect
+  transaction ownership and repeated existing requester/Workspace/Toolkit
+  authority after external work, preserving shared versus Agent callback rules,
+  full-upsert token semantics, and the separate runtime refresh policy.
 - **2026-10-01** (spec_version 8) — Moved runtime OAuth connection loads and
   refresh success/failure finalization into completed repository-owned
   transactions while keeping provider HTTP refresh outside transactions and

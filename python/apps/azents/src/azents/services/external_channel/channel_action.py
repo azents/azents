@@ -8,13 +8,12 @@ from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from dataclasses import replace as dataclass_replace
 from pathlib import PurePosixPath
-from typing import Annotated, Literal, NotRequired, TypedDict, assert_never
+from typing import Annotated, NotRequired, TypedDict, assert_never
 from urllib.parse import urlparse
 
 import httpx
 from fastapi import Depends
 from pydantic import ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
 from azents.core.deps import get_config
@@ -30,10 +29,14 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelWorkStatus,
 )
+from azents.core.external_channel_effect_intent import ProviderEffectIntent
 from azents.core.external_channel_file import (
     MAX_EXTERNAL_CHANNEL_FILES,
     ExternalChannelOutboundFileManifest,
     ExternalChannelOutboundFileSource,
+)
+from azents.core.external_channel_progress import (
+    ExternalChannelWorkTask as ChannelWorkTask,
 )
 from azents.core.external_channel_projection import is_external_channel_projection
 from azents.core.external_channel_provider_effect import (
@@ -48,21 +51,23 @@ from azents.core.external_channel_session_presence import (
     build_external_channel_scheduled_task_url,
     build_external_channel_session_url,
 )
+from azents.core.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
+)
 from azents.core.slack_external_channel_progress import (
     render_slack_session_actions,
     render_slack_session_presence,
     render_slack_setup_required,
 )
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.external_channel.work import ExternalChannelWorkRepository
+from azents.repos.external_channel.action_operations import (
+    ExternalChannelActionOperations,
+)
 from azents.repos.external_channel.work_data import (
     ChannelActionEffectPlan,
     ChannelActionResult,
     ChannelWorkSnapshot,
-    ChannelWorkTask,
 )
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.runtime.transfer.runtime_to_provider import (
     RuntimeToProviderBatch,
     RuntimeToProviderCleanupError,
@@ -126,10 +131,6 @@ from azents.services.file_storage import FileStorage, RangedFileStorage
 from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.scheduled_task.control import (
     render_scheduled_task_discord_controls,
-)
-from azents.services.session_resource_authority import (
-    SessionExecutionOwner,
-    SessionResourceAuthority,
 )
 
 logger = logging.getLogger(__name__)
@@ -240,13 +241,9 @@ class _SlackSelectorControlPresentation:
 class ExternalChannelActionService:
     """Commit Channel Work before attempting provider operations once."""
 
-    session_manager: Annotated[
-        SessionManager[AsyncSession],
-        Depends(get_session_manager),
-    ]
-    repository: Annotated[
-        ExternalChannelWorkRepository,
-        Depends(ExternalChannelWorkRepository.create),
+    operations: Annotated[
+        ExternalChannelActionOperations,
+        Depends(ExternalChannelActionOperations.create),
     ]
     credentials_codec: Annotated[
         ExternalChannelCredentialsCodec,
@@ -271,6 +268,38 @@ class ExternalChannelActionService:
         repr=False,
     )
 
+    @classmethod
+    def create(
+        cls,
+        operations: Annotated[
+            ExternalChannelActionOperations,
+            Depends(ExternalChannelActionOperations.create),
+        ],
+        credentials_codec: Annotated[
+            ExternalChannelCredentialsCodec,
+            Depends(get_external_channel_credentials_codec),
+        ],
+        slack_client: Annotated[
+            SlackConversationClient, Depends(get_slack_delivery_client)
+        ],
+        discord_client: Annotated[
+            DiscordDeliveryClient, Depends(get_discord_delivery_client)
+        ],
+        exchange_file_service: Annotated[
+            ExchangeFileService, Depends(ExchangeFileService)
+        ],
+        config: Annotated[Config, Depends(get_config)],
+    ) -> "ExternalChannelActionService":
+        """Construct the provider orchestrator from completed repository operations."""
+        return cls(
+            operations=operations,
+            credentials_codec=credentials_codec,
+            slack_client=slack_client,
+            discord_client=discord_client,
+            exchange_file_service=exchange_file_service,
+            config=config,
+        )
+
     def for_execution_owner(
         self,
         owner: SessionExecutionOwner,
@@ -278,11 +307,7 @@ class ExternalChannelActionService:
         """Return a request-local service bound to one durable execution owner."""
         bound = dataclass_replace(
             self,
-            session_manager=OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            ),
+            operations=self.operations.for_execution(owner),
         )
         bound.binding_locks = self.binding_locks
         return bound
@@ -294,37 +319,21 @@ class ExternalChannelActionService:
         """Bind direct Channel Work operations to complete execution authority."""
         return self.for_execution_owner(authority.execution_owner)
 
-    def _session_manager_for_authority(
+    def _operations_for_authority(
         self,
         authority: SessionResourceAuthority | None,
-    ) -> SessionManager[AsyncSession]:
-        """Resolve an owner-bound DB scope when execution authority is available."""
+    ) -> ExternalChannelActionOperations:
+        """Select completed persistence operations for the execution authority."""
         if authority is None:
-            return self.session_manager
-        owner = authority.execution_owner
-        if isinstance(self.session_manager, OwnerBoundSessionManager):
-            if (
-                self.session_manager.session_id != owner.session_id
-                or self.session_manager.owner_generation != owner.owner_generation
-            ):
-                raise ValueError(
-                    "External Channel execution authority does not match service"
-                )
-            return self.session_manager
-        return OwnerBoundSessionManager(
-            session_manager=self.session_manager,
-            session_id=owner.session_id,
-            owner_generation=owner.owner_generation,
-        )
+            return self.operations
+        return self.operations.for_execution(authority.execution_owner)
 
     async def has_active_binding(self, *, session_id: str, agent_id: str) -> bool:
         """Return whether the tool should be exposed for this root Session."""
-        async with self.session_manager() as session:
-            return await self.repository.has_active_binding(
-                session,
-                session_id=session_id,
-                agent_id=agent_id,
-            )
+        return await self.operations.has_active_binding(
+            session_id=session_id,
+            agent_id=agent_id,
+        )
 
     async def snapshot(
         self,
@@ -333,12 +342,10 @@ class ExternalChannelActionService:
         agent_id: str,
     ) -> list[ChannelWorkSnapshot]:
         """Load the canonical active-work snapshot."""
-        async with self.session_manager() as session:
-            return await self.repository.list_active_work(
-                session,
-                session_id=session_id,
-                agent_id=agent_id,
-            )
+        return await self.operations.list_active_work(
+            session_id=session_id,
+            agent_id=agent_id,
+        )
 
     async def execute(
         self,
@@ -405,27 +412,20 @@ class ExternalChannelActionService:
         resolve_runtime_target: RuntimeTargetResolver | None = None,
     ) -> ChannelActionResult:
         """Commit canonical state, then execute ordered provider effects once."""
-        session_manager = (
-            self.session_manager
-            if authority is None
-            else self._session_manager_for_authority(authority)
+        operations = self._operations_for_authority(authority)
+        transition = await operations.commit_direct_action(
+            session_id=session_id,
+            agent_id=agent_id,
+            run_id=run_id,
+            client_tool_call_id=client_tool_call_id,
+            binding_id=binding_id,
+            mode=mode,
+            message=message,
+            title=title,
+            tasks=tasks,
+            files=files,
+            now=datetime.datetime.now(datetime.UTC),
         )
-        async with session_manager() as session:
-            transition = await self.repository.commit_direct_action(
-                session,
-                session_id=session_id,
-                agent_id=agent_id,
-                run_id=run_id,
-                client_tool_call_id=client_tool_call_id,
-                binding_id=binding_id,
-                mode=mode,
-                message=message,
-                title=title,
-                tasks=tasks,
-                files=files,
-                now=datetime.datetime.now(datetime.UTC),
-            )
-            await session.commit()
         reply_requested = any(
             effect.provider.target.operation is ExternalChannelDeliveryOperation.REPLY
             for effect in transition.effects
@@ -487,17 +487,14 @@ class ExternalChannelActionService:
             and reply_requested
             and reply_delivered
         ):
-            async with session_manager() as session:
-                settlement = await self.repository.settle_awaiting_input(
-                    session,
-                    session_id=session_id,
-                    agent_id=agent_id,
-                    binding_id=binding_id,
-                    run_id=run_id,
-                    work_cycle_id=transition.work_id,
-                    expected_state_revision=transition.state_revision,
-                )
-                await session.commit()
+            settlement = await operations.settle_awaiting_input(
+                session_id=session_id,
+                agent_id=agent_id,
+                binding_id=binding_id,
+                run_id=run_id,
+                work_cycle_id=transition.work_id,
+                expected_state_revision=transition.state_revision,
+            )
             awaiting_input = settlement.established
             state_revision = settlement.state_revision
         return ChannelActionResult(
@@ -548,16 +545,10 @@ class ExternalChannelActionService:
             agent_id=agent_id,
             session_id=session_id,
         )
-        session_manager = (
-            self.session_manager
-            if authority is None
-            else self._session_manager_for_authority(authority)
+        operations = self._operations_for_authority(authority)
+        current = await operations.revalidate_direct_effect(
+            effect=effect,
         )
-        async with session_manager() as session:
-            current = await self.repository.revalidate_direct_effect(
-                session,
-                effect=effect,
-            )
         if current is None:
             return ProviderEffectOutcome(
                 operation=effect.provider.target.operation,
@@ -575,13 +566,10 @@ class ExternalChannelActionService:
             provider_delivery_service=provider_delivery_service,
             resolve_runtime_target=resolve_runtime_target,
         )
-        async with session_manager() as session:
-            await self.repository.apply_direct_effect_outcome(
-                session,
-                effect=effect,
-                outcome=result,
-            )
-            await session.commit()
+        await operations.apply_direct_effect_outcome(
+            effect=effect,
+            outcome=result,
+        )
         return ProviderEffectOutcome(
             operation=current.target.operation,
             part=effect.part,
@@ -595,11 +583,9 @@ class ExternalChannelActionService:
         plan: ProviderEffectPlan,
     ) -> ProviderMutationOutcome | None:
         """Execute one post-commit provider control without durable work state."""
-        async with self.session_manager() as session:
-            current = await self.repository.revalidate_direct_control(
-                session,
-                plan=plan,
-            )
+        current = await self.operations.revalidate_direct_control(
+            plan=plan,
+        )
         if current is None:
             return None
         outcome = await self._deliver(
@@ -611,43 +597,27 @@ class ExternalChannelActionService:
             provider_delivery_service=None,
             resolve_runtime_target=None,
         )
-        work_id = current.target.request_payload.get("work_id")
-        desired_revision = current.target.request_payload.get(
-            "desired_progress_revision"
-        )
-        part = current.target.request_payload.get("part_ordinal", 0)
-        if (
-            isinstance(work_id, str)
-            and isinstance(desired_revision, int)
-            and isinstance(part, int)
-        ):
-            async with self.session_manager() as session:
-                await self.repository.apply_direct_effect_outcome(
-                    session,
-                    effect=ChannelActionEffectPlan(
-                        provider=current,
-                        part=part,
-                        work_cycle_id=work_id,
-                        expected_desired_progress_revision=desired_revision,
-                        dependencies=(),
-                        projection_host_kind=_tracker_host_kind(
-                            current.target.request_payload
-                        ),
-                    ),
-                    outcome=outcome,
-                )
-                await session.commit()
-        elif isinstance(
-            current.target.request_payload.get("access_request_id"),
-            str,
-        ):
-            async with self.session_manager() as session:
-                await self.repository.apply_access_control_outcome(
-                    session,
-                    plan=current,
-                    outcome=outcome,
-                )
-                await session.commit()
+        intent = current.target.decode_intent()
+        work_id = intent.work_id
+        desired_revision = intent.desired_progress_revision
+        part = intent.part_ordinal
+        if work_id is not None and desired_revision is not None and part is not None:
+            await self.operations.apply_direct_effect_outcome(
+                effect=ChannelActionEffectPlan(
+                    provider=current,
+                    part=part,
+                    work_cycle_id=work_id,
+                    expected_desired_progress_revision=desired_revision,
+                    dependencies=(),
+                    projection_host_kind=intent.tracker_host_kind,
+                ),
+                outcome=outcome,
+            )
+        elif intent.access_request_id is not None:
+            await self.operations.apply_access_control_outcome(
+                plan=current,
+                outcome=outcome,
+            )
         return outcome
 
     async def execute_binding_effect(
@@ -668,16 +638,10 @@ class ExternalChannelActionService:
             agent_id=agent_id,
             session_id=session_id,
         )
-        session_manager = (
-            self.session_manager
-            if authority is None
-            else self._session_manager_for_authority(authority)
+        operations = self._operations_for_authority(authority)
+        current = await operations.revalidate_binding_effect(
+            plan=plan,
         )
-        async with session_manager() as session:
-            current = await self.repository.revalidate_binding_effect(
-                session,
-                plan=plan,
-            )
         if current is None:
             return None
         return await self._deliver(
@@ -695,11 +659,9 @@ class ExternalChannelActionService:
         plan: ProviderEffectPlan,
     ) -> ProviderMutationOutcome | None:
         """Execute one captured cleanup after canonical terminal commit."""
-        async with self.session_manager() as session:
-            current = await self.repository.revalidate_terminal_control(
-                session,
-                plan=plan,
-            )
+        current = await self.operations.revalidate_terminal_control(
+            plan=plan,
+        )
         if current is None:
             return None
         outcome = await self._deliver(
@@ -711,32 +673,22 @@ class ExternalChannelActionService:
             provider_delivery_service=None,
             resolve_runtime_target=None,
         )
-        work_id = current.target.request_payload.get("work_id")
-        desired_revision = current.target.request_payload.get(
-            "desired_progress_revision"
-        )
-        part = current.target.request_payload.get("part_ordinal", 0)
-        if (
-            isinstance(work_id, str)
-            and isinstance(desired_revision, int)
-            and isinstance(part, int)
-        ):
-            async with self.session_manager() as session:
-                await self.repository.apply_direct_effect_outcome(
-                    session,
-                    effect=ChannelActionEffectPlan(
-                        provider=current,
-                        part=part,
-                        work_cycle_id=work_id,
-                        expected_desired_progress_revision=desired_revision,
-                        dependencies=(),
-                        projection_host_kind=_tracker_host_kind(
-                            current.target.request_payload
-                        ),
-                    ),
-                    outcome=outcome,
-                )
-                await session.commit()
+        intent = current.target.decode_intent()
+        work_id = intent.work_id
+        desired_revision = intent.desired_progress_revision
+        part = intent.part_ordinal
+        if work_id is not None and desired_revision is not None and part is not None:
+            await self.operations.apply_direct_effect_outcome(
+                effect=ChannelActionEffectPlan(
+                    provider=current,
+                    part=part,
+                    work_cycle_id=work_id,
+                    expected_desired_progress_revision=desired_revision,
+                    dependencies=(),
+                    projection_host_kind=intent.tracker_host_kind,
+                ),
+                outcome=outcome,
+            )
         return outcome
 
     async def _deliver(
@@ -825,6 +777,7 @@ class ExternalChannelActionService:
     ) -> DiscordDeliveryResult:
         """Deliver one Discord text, multipart file, or control mutation."""
         payload = target.request_payload
+        intent = target.decode_intent()
         guild_id = payload.get("guild_id")
         channel_id = payload.get("channel_id")
         configuration = target.provider_configuration
@@ -913,10 +866,11 @@ class ExternalChannelActionService:
             ):
                 if (
                     target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
-                    and payload.get("control_kind") == "session_presence"
+                    and intent.control_kind == "session_presence"
                 ):
                     presence = _session_presence_context(
                         target,
+                        intent=intent,
                         web_url=self.config.web_url,
                     )
                     if presence is None or files:
@@ -949,7 +903,7 @@ class ExternalChannelActionService:
                     )
                 if (
                     target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
-                    and payload.get("control_kind") == "setup_required"
+                    and intent.control_kind == "setup_required"
                 ):
                     setup_claim_id = payload.get("setup_claim_id")
                     claim_generation = payload.get("claim_generation")
@@ -1000,7 +954,7 @@ class ExternalChannelActionService:
                     )
                 if (
                     target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
-                    and payload.get("control_kind") == "scheduled_task_registration"
+                    and intent.control_kind == "scheduled_task_registration"
                 ):
                     text = payload.get("text")
                     embeds = _discord_embeds(payload.get("embeds"))
@@ -1039,7 +993,7 @@ class ExternalChannelActionService:
                     )
                 if (
                     target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
-                    and payload.get("control_kind") == "scheduled_task_deletion"
+                    and intent.control_kind == "scheduled_task_deletion"
                 ):
                     text = payload.get("text")
                     embeds = _discord_embeds(payload.get("embeds"))
@@ -1085,6 +1039,7 @@ class ExternalChannelActionService:
                         return _discord_invalid_payload()
                     components = _discord_tracker_components(
                         target,
+                        intent=intent,
                         session_url=context.session_url,
                         secret=self.config.auth.jwt.secret_key,
                     )
@@ -1207,7 +1162,7 @@ class ExternalChannelActionService:
                     payload.get("provider_message_key"),
                     guild_id=guild_id,
                 )
-                host_kind = _tracker_host_kind(payload)
+                host_kind = intent.tracker_host_kind
                 if (
                     not isinstance(text, str)
                     or embeds is None
@@ -1217,6 +1172,7 @@ class ExternalChannelActionService:
                     return _discord_invalid_payload()
                 components = _discord_tracker_components(
                     target,
+                    intent=intent,
                     session_url=context.session_url,
                     secret=self.config.auth.jwt.secret_key,
                 )
@@ -1245,7 +1201,7 @@ class ExternalChannelActionService:
                 )
                 if message_id is None:
                     return _discord_invalid_payload()
-                if _tracker_host_kind(payload) == "reply":
+                if intent.tracker_host_kind == "reply":
                     return await discord_client.update_message(
                         bot_token=bot_token,
                         guild_id=guild_id,
@@ -1274,19 +1230,12 @@ class ExternalChannelActionService:
         authority: SessionResourceAuthority | None,
     ) -> None:
         """Persist a provisioned Discord thread outside the provider mutation."""
-        session_manager = (
-            self.session_manager
-            if authority is None
-            else self._session_manager_for_authority(authority)
+        operations = self._operations_for_authority(authority)
+        await operations.record_discord_delivery_channel(
+            resource_id=resource_id,
+            delivery_channel_id=delivery_channel_id,
+            initial_thread_title=initial_thread_title,
         )
-        async with session_manager() as session:
-            await self.repository.record_discord_delivery_channel(
-                session,
-                resource_id=resource_id,
-                delivery_channel_id=delivery_channel_id,
-                initial_thread_title=initial_thread_title,
-            )
-            await session.commit()
 
     async def _deliver_slack(
         self,
@@ -1302,6 +1251,7 @@ class ExternalChannelActionService:
         resolve_runtime_target: RuntimeTargetResolver | None,
     ) -> SlackControlMessageResult:
         payload = target.request_payload
+        intent = target.decode_intent()
         presentation = resolve_slack_agent_presentation(
             target,
             avatar_cdn_base_url=self.config.avatar_cdn_base_url,
@@ -1373,6 +1323,7 @@ class ExternalChannelActionService:
                     return _invalid_payload()
                 blocks.append(
                     _slack_progress_actions(
+                        intent=intent,
                         target=target,
                         channel_id=channel_id,
                         session_url=context.session_url,
@@ -1405,6 +1356,7 @@ class ExternalChannelActionService:
                     return _invalid_payload()
                 blocks.append(
                     _slack_progress_actions(
+                        intent=intent,
                         target=target,
                         channel_id=channel_id,
                         session_url=context.session_url,
@@ -1453,10 +1405,11 @@ class ExternalChannelActionService:
     ) -> SlackControlMessageResult:
         """Deliver one validated selector, notice, or approval control."""
         payload = target.request_payload
+        intent = target.decode_intent()
         payload_tenant_id = payload.get("tenant_id")
         if payload_tenant_id is not None and payload_tenant_id != tenant_id:
             return _invalid_payload()
-        control_kind = payload.get("control_kind")
+        control_kind = intent.control_kind
         if control_kind in {
             "scheduled_task_registration",
             "scheduled_task_deletion",
@@ -1515,6 +1468,7 @@ class ExternalChannelActionService:
         if control_kind == "session_presence":
             context = _session_presence_context(
                 target,
+                intent=intent,
                 web_url=self.config.web_url,
             )
             if context is None:
@@ -1828,13 +1782,6 @@ class ExternalChannelActionService:
         return result
 
 
-def _tracker_host_kind(
-    payload: dict[str, object],
-) -> Literal["standalone", "reply"]:
-    """Return the persisted Tracker host kind with standalone compatibility."""
-    return "reply" if payload.get("tracker_host_kind") == "reply" else "standalone"
-
-
 def _provider_mutation_outcome(
     result: SlackControlMessageResult | DiscordDeliveryResult,
 ) -> ProviderMutationOutcome:
@@ -1898,16 +1845,13 @@ def _discord_agent_content(target: ProviderTarget, text: str) -> str:
 def _session_presence_context(
     target: ProviderTarget,
     *,
-    web_url: str,
+    intent: ProviderEffectIntent,
+    web_url: str | None,
 ) -> _SessionPresenceContext | None:
     """Resolve one presence control without trusting persisted display content."""
-    match target.request_payload.get("presence_state"):
-        case "joined":
-            state: ExternalChannelSessionPresenceState = "joined"
-        case "left":
-            state = "left"
-        case _:
-            return None
+    state = intent.presence_state
+    if state is None:
+        return None
     context = _session_navigation_context(target, web_url=web_url)
     if context is None:
         return None
@@ -1921,7 +1865,7 @@ def _session_presence_context(
 def _session_navigation_context(
     target: ProviderTarget,
     *,
-    web_url: str,
+    web_url: str | None,
 ) -> _SessionNavigationContext | None:
     """Resolve one current Session URL without trusting persisted display content."""
     if (
@@ -1953,11 +1897,12 @@ def _slack_progress_actions(
     *,
     target: ProviderTarget,
     channel_id: str,
+    intent: ProviderEffectIntent,
     session_url: str,
     jwt_secret: str,
 ) -> dict[str, object]:
     """Render Slack Tracker controls from exact current target authority."""
-    if target.request_payload.get("tracker_kind") == "scheduled_task":
+    if intent.scheduled_tracker:
         return render_slack_session_actions(
             session_url=session_url,
             settings_action_id=None,
@@ -1981,11 +1926,12 @@ def _slack_progress_actions(
 def _discord_tracker_components(
     target: ProviderTarget,
     *,
+    intent: ProviderEffectIntent,
     session_url: str,
     secret: str,
 ) -> list[dict[str, object]] | None:
     """Render current Discord Tracker controls from exact target authority."""
-    if target.request_payload.get("tracker_kind") == "scheduled_task":
+    if intent.scheduled_tracker:
         return render_discord_session_navigation_components(
             session_url,
             settings_custom_id=None,
@@ -2004,7 +1950,7 @@ def _discord_tracker_components(
 def _scheduled_task_edit_url(
     target: ProviderTarget,
     *,
-    web_url: str,
+    web_url: str | None,
     task_id: str,
 ) -> str | None:
     """Resolve one exact Scheduled Task Web editor from current target authority."""

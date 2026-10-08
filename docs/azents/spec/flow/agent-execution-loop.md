@@ -4,8 +4,43 @@ created: 2026-04-20
 tags: [backend, engine]
 spec_type: flow
 owner: "@Hardtack"
-touches_domains: [agent, conversation, toolkit, external-channel]
+touches_domains: [agent, conversation, toolkit, external-channel, memory]
 code_paths:
+  - python/apps/azents/src/azents/core/active_model_capabilities.py
+  - python/apps/azents/src/azents/repos/active_model_capabilities.py
+  - python/apps/azents/src/azents/repos/active_model_capabilities_data.py
+  - python/apps/azents/src/azents/services/active_model_capabilities.py
+  - python/apps/azents/src/azents/engine/events/effective_model_request.py
+  - python/apps/azents/src/azents/engine/events/model_support_contract.py
+  - python/apps/azents/src/azents/engine/events/final_capability_lowering_test.py
+  - python/apps/azents/src/azents/core/agent_errors.py
+  - python/apps/azents/src/azents/core/agent_session_input_data.py
+  - python/apps/azents/src/azents/core/chat_data.py
+  - python/apps/azents/src/azents/core/chat_write_data.py
+  - python/apps/azents/src/azents/core/exchange_file_errors.py
+  - python/apps/azents/src/azents/core/historical_memory_settings.py
+  - python/apps/azents/src/azents/core/mailbox_errors.py
+  - python/apps/azents/src/azents/core/memory_scope.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/core/session_workspace_items.py
+  - python/apps/azents/src/azents/core/session_workspace_paths.py
+  - python/apps/azents/src/azents/core/toolkit_errors.py
+  - python/apps/azents/src/azents/repos/agent_session_input_operations.py
+  - python/apps/azents/src/azents/repos/chat_write_operations.py
+  - python/apps/azents/src/azents/repos/engine_event_contracts.py
+  - python/apps/azents/src/azents/repos/engine_event_repositories.py
+  - python/apps/azents/src/azents/repos/engine_resolve.py
+  - python/apps/azents/src/azents/repos/engine_tool_repositories.py
+  - python/apps/azents/src/azents/repos/image_generation_catalog_operations.py
+  - python/apps/azents/src/azents/repos/kimi_oauth_runtime.py
+  - python/apps/azents/src/azents/repos/llm_catalog_operations.py
+  - python/apps/azents/src/azents/repos/mailbox_runtime_operations.py
+  - python/apps/azents/src/azents/repos/model_metadata_operations.py
+  - python/apps/azents/src/azents/repos/skill_state_store.py
+  - python/apps/azents/src/azents/repos/vfs_projection_operations.py
+  - python/apps/azents/src/azents/repos/vfs_read_authority.py
+  - python/apps/azents/src/azents/repos/worker_toolkit_repositories.py
+  - python/apps/azents/src/azents/repos/user_stop.py
   - python/apps/azents/src/azents/broker/types.py
   - python/apps/azents/src/azents/broker/redis.py
   - python/apps/azents/src/azents/core/vfs.py
@@ -32,15 +67,27 @@ code_paths:
   - python/apps/azents/src/azents/engine/tools/**
   - python/apps/azents/src/azents/runtime/transfer/runtime_to_provider.py
   - python/apps/azents/src/azents/services/external_channel/channel_action.py
-  - python/apps/azents/src/azents/services/external_channel/mailbox_ingestion_store.py
+  - python/apps/azents/src/azents/repos/external_channel/mailbox_ingestion.py
   - python/apps/azents/src/azents/services/mailbox.py
-  - python/apps/azents/src/azents/services/terminal_finalization.py
+  - python/apps/azents/src/azents/repos/terminal_finalization.py
+  - python/apps/azents/src/azents/repos/hierarchy_contention.py
+  - python/apps/azents/src/azents/repos/subagent_tool_operations.py
+  - python/apps/azents/src/azents/repos/terminal_finalization_data.py
+  - python/apps/azents/src/azents/core/terminal_result.py
   - python/apps/azents/src/azents/services/turn_action.py
   - python/apps/azents/src/azents/repos/external_channel/repository.py
   - python/apps/azents/src/azents/repos/external_channel/work.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - python/apps/azents/src/azents/repos/idle_continuation.py
   - python/apps/azents/src/azents/engine/context/compaction.py
+  - python/apps/azents/src/azents/worker/run/memory_execution.py
+  - python/apps/azents/src/azents/services/historical_memory/consolidation_host.py
+  - python/apps/azents/src/azents/services/historical_memory/consolidation_tools.py
+  - python/apps/azents/src/azents/services/historical_memory/execution_context.py
+  - python/apps/azents/src/azents/repos/historical_memory_consolidation/execution.py
+  - python/apps/azents/src/azents/repos/memory_execution_events.py
+  - python/apps/azents/src/azents/repos/session_execution_file.py
+  - python/apps/azents/src/azents/engine/provider_model_operation.py
   - python/apps/azents/src/azents/engine/context/window.py
   - python/apps/azents/src/azents/engine/model_stream.py
   - python/apps/azents/src/azents/engine/model_assembly.py
@@ -48,7 +95,6 @@ code_paths:
   - python/apps/azents/src/azents/engine/providers/model_factory.py
   - python/apps/azents/src/azents/utils/logging.py
   - python/apps/azents/src/azents/engine/responses.py
-  - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/hooks/**
   - python/apps/azents/src/azents/engine/run/resolve.py
   - python/apps/azents/src/azents/api/public/chat/v1/**
@@ -56,19 +102,28 @@ code_paths:
   - python/apps/azents/src/azents/core/inference_profile.py
   - python/apps/azents/src/azents/core/model_availability.py
   - python/apps/azents/src/azents/core/model_operation.py
+  - python/apps/azents/src/azents/core/model_capability_contract.py
+  - python/apps/azents/src/azents/core/model_capability_projection.py
+  - python/apps/azents/src/azents/core/model_catalog_source.py
+  - python/apps/azents/src/azents/core/catalog_price_rules.py
   - python/apps/azents/src/azents/core/image_generation_catalog.py
   - python/apps/azents/src/azents/core/image_generation_config.py
   - python/apps/azents/src/azents/services/agent_session_input.py
   - python/apps/azents/src/azents/services/chat_write.py
   - python/apps/azents/src/azents/services/archived_session_purge.py
   - python/apps/azents/src/azents/services/session_git_worktree/**
-  - python/apps/azents/src/azents/services/action_execution.py
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/runtime_web/**
   - python/apps/azents/src/azents/services/vfs.py
+  - python/apps/azents/src/azents/services/vfs_read.py
+  - python/apps/azents/src/azents/services/memory_vfs.py
+  - python/apps/azents/src/azents/services/historical_memory/**
+  - python/apps/azents/src/azents/repos/historical_memory/**
+  - python/apps/azents/src/azents/repos/memory_vfs/**
   - python/apps/azents/src/azents/repos/toolkit/**
   - python/apps/azents/src/azents/services/toolkit/**
-  - python/apps/azents/src/azents/services/agent_mailbox.py
+  - python/apps/azents/src/azents/repos/agent_mailbox.py
+  - python/apps/azents/src/azents/repos/subagent_terminal_result.py
   - python/apps/azents/src/azents/services/subagent_terminal_result.py
   - python/apps/azents/src/azents/services/subagent_coordination.py
   - python/apps/azents/src/azents/services/model_file.py
@@ -77,7 +132,7 @@ code_paths:
   - python/apps/azents/src/azents/services/xai_oauth/runtime.py
   - python/apps/azents/src/azents/services/kimi_oauth/runtime.py
   - python/apps/azents/src/azents/services/session_title.py
-  - python/apps/azents/src/azents/services/session_resource_authority.py
+  - python/apps/azents/src/azents/repos/session_resource_authority.py
   - python/apps/azents/src/azents/repos/mailbox/**
   - python/apps/azents/src/azents/repos/goal/**
   - python/apps/azents/src/azents/repos/skill_state/**
@@ -91,7 +146,28 @@ code_paths:
   - python/apps/azents/src/azents/repos/engine_event_operation.py
   - python/apps/azents/src/azents/repos/engine_execution_operation.py
   - python/apps/azents/src/azents/repos/engine_tool_result_operation.py
+  - python/apps/azents/src/azents/repos/engine_event_mutation.py
+  - python/apps/azents/src/azents/repos/engine_output_operation.py
+  - python/apps/azents/src/azents/repos/engine_run_finalization_operation.py
+  - python/apps/azents/src/azents/repos/failed_run_finalization_operation.py
+  - python/apps/azents/src/azents/repos/provider_output_operation.py
+  - python/apps/azents/src/azents/engine/events/terminal_projection.py
+  - python/apps/azents/src/azents/repos/engine_model_input_operation.py
+  - python/apps/azents/src/azents/repos/engine_input_projection.py
+  - python/apps/azents/src/azents/engine/events/input_projection.py
+  - python/apps/azents/src/azents/engine/events/tool_results.py
   - python/apps/azents/src/azents/repos/session_execution/**
+  - python/apps/azents/src/azents/repos/worker_session*.py
+  - python/apps/azents/src/azents/repos/user_stop*.py
+  - python/apps/azents/src/azents/repos/live_projection_authority.py
+  - python/apps/azents/src/azents/core/worker_model_profile.py
+  - python/apps/azents/src/azents/repos/worker_executor_*.py
+  - python/apps/azents/src/azents/repos/model_candidate_selection.py
+  - python/apps/azents/src/azents/repos/agent_wait_read*.py
+  - python/apps/azents/src/azents/repos/model_metadata_read.py
+  - python/apps/azents/src/azents/repos/kimi_oauth_runtime*.py
+  - python/apps/azents/src/azents/repos/engine_read_deps.py
+  - python/apps/azents/src/azents/services/engine_runtime_tokens.py
   - python/apps/azents/src/azents/repos/model_candidate_health/**
   - python/apps/azents/src/azents/services/model_listing/**
   - python/apps/azents/src/azents/rdb/models/event.py
@@ -116,8 +192,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-10-01
-spec_version: 195
+last_verified_at: 2026-10-07
+spec_version: 219
 ---
 
 # Agent Execution Loop
@@ -125,6 +201,24 @@ spec_version: 195
 This is the current execution loop specification in which the agent repeatedly receives user input,
 invokes the model, executes tools, stores events, and publishes UI updates. The production path is
 not the OpenAI Agents SDK Runner or legacy `runtime/llm.py`, but the azents-owned event runtime.
+
+The foreground `AgentRunExecution` binds a `ForegroundIterationHost` to the
+execution-neutral `ModelToolIterationCore`. The common core orders preparation,
+model invocation, output admission, tool execution, follow-up and completion;
+its interface contains no public Session/Run identity, durable Event or database
+dependency. The foreground host retains mailbox/stop admission, compaction,
+provider normalization, repository-owned atomic groups, output delivery and
+terminal effects. Adapter closure occurs on every core exit, and hard turn
+exhaustion is interruption rather than successful completion. The internal Memory
+purpose host also uses this core while binding common
+Session/Run/Event ownership and its private file/submission domain. Provider
+dialects remain owned by the same shared lowerers/adapters.
+
+Native stream consumption/partial-stop normalization and parallel call/result
+matching, independent settlement and cancellation also use identity-neutral
+shared primitives. Foreground adapters supply their existing normalizer,
+watchdog-wrapped provider iterator and result-admission operations; no second
+parallel-batch or native-stream iteration algorithm is kept in the foreground host.
 
 ## 1. Overview
 
@@ -140,8 +234,12 @@ Main steps:
    another execution boundary stops consumption. The canonical
    execution snapshot does not pin a mailbox head. For each row, the Worker resolves the requested
    profile and attachment metadata outside a database session and then locks the same head for atomic
-   preparation. After the Worker creates or claims the AgentRun, it ensures that run's immutable
-   managed-file projection before calling input promotion or resolving a managed SkillAction.
+   preparation. Scheduled triggers and continuations use the same FIFO promotion path as other
+   inputs, binding their cycle to the consuming Run and appending their typed Event atomically
+   with mailbox consumption. Reading Scheduled input does not complete or replace an active Run.
+   After the Worker creates or claims the AgentRun, it ensures
+   that run's immutable managed-file projection before calling input promotion or resolving a managed
+   SkillAction.
 2. A closed TurnAction capability registry classifies inference requirements and
    prepares attachments, managed VFS Skills, and detached Goal/Skill semantics
    without holding the final database transaction. A composing Mailbox repository
@@ -174,11 +272,16 @@ Main steps:
    profiles take precedence. The metadata does not authorize tools, modalities, reasoning options,
    version-specific features or new routes, and never changes the raw model/ARN or compatibility
    identity. No mutable catalog or source lookup is performed to fill missing family authority.
+   Compaction also carries the complete captured candidate settings into the
+   shared provider operation; output intent uses the same explicit-setting
+   clamp as foreground. Its SDK lifetime is operation-scoped while transport
+   fallback policy remains owned by the enclosing Run. Historical Memory
+   preparation and consolidation reuse this same request/adapter composition.
 9. The matching `AdapterOutputNormalizer` incrementally processes native output into typed,
    provider-neutral UI stream projections while retaining only the state needed to build durable
    output at completion. Provider-native hosted-tool stages are adapter-local and become canonical
    provider-tool activity snapshots when observed.
-10. Before a normalized client-tool call is appended or admitted for execution, the immutable prepared Tool Catalog snapshots its DB-attached Toolkit source (`toolkit_config_id`, `toolkit_type`, `toolkit_name`, and `toolkit_slug`) onto the call. The same snapshot is retained by `active_tool_calls` and their live projections; built-in and auto-bound calls remain source-less.
+10. Before a normalized client-tool call is appended or admitted for execution, the immutable prepared Tool Catalog snapshots its DB-attached Toolkit source (`toolkit_config_id`, `toolkit_type`, `toolkit_name`, stored `toolkit_slug`, effective `toolkit_namespace`, and bounded safe connection identity) onto the call. The same snapshot is retained by `active_tool_calls` and their live projections; built-in and auto-bound calls remain source-less.
 11. Foreground client tools execute in parallel and results are appended as event `client_tool_result`.
     Runtime Web calls are server-side auto-bound client tools available only for an
     Agent with managed Runtime capability. They may request, list, or close
@@ -230,7 +333,9 @@ User trees. A stale Worker cannot resume ordinary work after the capability vers
 
 ### Run-scoped managed-file projection
 
-`agent_runs.vfs_projection` is the durable authorization and content snapshot for `azents://` files. `RunExecutor` calls `VfsProjectionService.ensure_run_projection(...)` after it has selected the pending or recoverable run and before the first `poll_run_inputs(...)` call. The repository writes a candidate projection only when the run column is empty; an existing projection is returned unchanged. This ordering also applies to recovery, so an older nullable run receives its projection before any newly promoted input can consume a managed URI.
+`agent_runs.vfs_projection` is the durable authorization and content snapshot for
+managed Skills files. It does not contain the live `azents://memory` mount.
+`RunExecutor` calls `VfsProjectionService.ensure_run_projection(...)` after it has selected the pending or recoverable run and before the first `poll_run_inputs(...)` call. The repository writes a candidate projection only when the run column is empty; an existing projection is returned unchanged. This ordering also applies to recovery, so an older nullable run receives its projection before any newly promoted input can consume a managed Skill URI.
 
 The initial projection source set is the global Azents release bundle plus release bundles owned by Toolkit Providers in the canonical enabled effective Toolkit relation for the run's Agent and Workspace. That relation unions enabled Workspace-shared `AgentToolkit` attachments with enabled direct Agent-owned ToolkitConfigs. Projection construction reads only local package resources and authoritative effective-relation metadata; it does not call provider APIs or inspect credentials or connection health. The flattened projection stores exact file bytes inline, so retries, process restart, worker takeover, and resume do not depend on the currently deployed package after the projection has been persisted.
 
@@ -244,7 +349,7 @@ associated user message. Failure to find or authorize the URI produces the
 unavailable-Skill system input and does not fall back to an idle preview or
 current package resources.
 
-During toolkit resolution, the Skill Toolkit renders the ordered union of filesystem and managed Skill entrypoints. `load_skill` uses the exact current run ID for managed URI resolution. Runtime tool construction registers an `azents` import resolver with the same run, Agent, Session, and Workspace identity; `import_file` verifies projection membership and integrity before creating a Runtime file. Other Runtime file tools remain unaware of the VFS.
+During toolkit resolution, the Skill Toolkit renders the ordered union of filesystem and managed Skill entrypoints. `load_skill` uses the exact current run ID for managed URI resolution. Runtime tool construction registers an `azents` import resolver with the same run, Agent, Session, and Workspace identity; `import_file` verifies Skill projection membership and integrity before creating a Runtime file. One Runtime-independent readable-storage binding owns generic `read`, `grep`, and `glob`: managed URIs route to their registered backend, while absolute Runtime paths use the capability-gated filesystem adapter. Memory reads use live authority and cannot be imported or transferred.
 
 The composer action endpoint has no run snapshot while idle, so it builds a current non-persisted release preview. While a run is active, it reads that run's stored projection. The preview is advisory: action execution always validates against the projection ensured before promotion. Each subagent run follows the same ensure boundary and owns its own projection rather than inheriting the parent run's projection row.
 
@@ -267,7 +372,11 @@ credentials, headers, request/model output, and stream frames never cross the fa
 Supported SDK/model boundaries retain only allowlisted typed provider evidence; opaque exception
 serialization is not a durable failure contract. Every provider-attributed error
 emits the common structured provider fields, including the sanitized message and stable fingerprint,
-at the boundary that handles it. Every classified provider failure receives the complete configured
+at the boundary that handles it. Short UTF-8 plain-text and JSON-string HTTP errors preserve
+their provider message through the same bounded redaction as object-shaped errors. Oversized
+text, HTML debug pages, non-text scalar bodies, and invalid UTF-8 do not become diagnostic
+messages; raw body bytes still never cross the failure/logging boundary.
+Every classified provider failure receives the complete configured
 Run retry budget regardless of category or diagnostic retryability. An unclassified SDK exception is
 normalized into a credential-safe `UnclassifiedModelProviderError` and follows the ordinary internal-
 error traceback path, bypassing provider retry state and user-visible provider failure presentation;
@@ -502,8 +611,16 @@ maximum-only snapshot as having that same default, and clamps an explicit cap to
 the normalized maximum before the smaller-window calculation. An explicit empty
 built-in tool list remains all-off. Ordinary same-candidate retry rebuilds from the
 Session-owned selection and settings snapshot. Quota progression advances the frozen
-operation cursor and prepares the next compatible candidate without weakening the
-requested effort or execution options. Recovery and Worker takeover preserve the
+operation cursor and prepares the next assigned model. A reasoning or execution-option
+mismatch never skips or drops an otherwise available model. Actual controls are
+adapted to that model: preserve a supported reasoning effort, otherwise use the
+greatest supported lower level, otherwise the smallest supported level, or null
+without explicit levels; an explicit no-override null stays null. Unsupported
+execution options are removed while supported options remain. The operation keeps
+original requested intent, and the prepared Session/turn snapshot records the
+effective controls actually sent. This adaptation is not configuration drift.
+Frozen-model validation uses effective reasoning before checking the request,
+instead of reapplying an incompatible Agent-global effort. Recovery and Worker takeover preserve the
 frozen chain, cursor, attempted identities, and transferred probe/reservation claims
 rather than rematching the mutable Agent option list.
 
@@ -667,6 +784,11 @@ OpenAI-compatible SDK; OpenRouter retains Responses and Kimi OAuth uses Chat Com
 existing device headers. Native OpenAI/ChatGPT execution and its HTTP/WebSocket continuation
 policy remain independent.
 
+xAI API-key and OAuth native search declarations use the public model setting
+`openai_native_tools` to omit OpenAI-only `search_context_size`. Saved search authorization,
+other search options, client function declarations, and SDK serialization remain intact.
+Other providers retain their existing SDK-native search translation.
+
 An operation-local observed SDK stream supplies acquisition, parsed-native-event progress, native
 terminal evidence, usage and authorized supplementary artifacts while stock public model assembly
 supplies common parts. The normalizer does not promote common completion state to native success
@@ -685,13 +807,19 @@ compaction. Scheduler-owned file cleanup does not run in run input preparation. 
 is still too large, `NativeRequestSizeGuard` remains the final post-lower hard guard.
 
 `AgentWorker` resolves the requested main target before the engine starts. The target label is
-resolved only against the current Agent-owned selectable option snapshots; Workspace defaults and
-model catalogs are not consulted. The selected requested target label and nullable effort are
-persisted when the pending `AgentRun` activates. Fresh foreground and compaction operations freeze
-independent ordered candidate chains. The Session inference state holds the current candidate
-snapshot and effective limits, while the Run operation state owns candidate progression and recovery.
-The execution core receives one physical selection and its limits in each `RunRequest`, never the
-target label or complete fallback order.
+resolved against the Agent-owned identities and ordered settings. NEW foreground
+and compaction operations capture exact authorized LOCAL catalog declarations and
+source evidence, compile schema-3 capabilities, and normalize effective controls
+before their owner-fenced write. Local input equality is revalidated at
+preparation; changed inputs use the existing drift/retry boundary. Workspace
+defaults do not select another model during preparation.
+
+An existing operation is a separate frozen preparation path: candidate snapshots,
+cursor, requested intent and limits survive retry, takeover and quota progression.
+Current metadata is not consulted to reinterpret that path. Configuration drift
+compares user identities, order and settings rather than incidental compiled
+metadata. The execution core receives one captured physical selection and its
+limits in each `RunRequest`, never the complete fallback order.
 
 The selected lowerer owns the full provider-native request surface: generation options, client
 function tool passthrough, and provider-hosted tool lowering. OpenAI logical requests preserve
@@ -725,16 +853,25 @@ client execution, the bound Images SDK call uses `gpt-image-2` for the maintaine
 default or the exact validated explicit image-model identifier. Neither choice
 is forwarded as a provider-hosted image tool or placed in model-visible arguments.
 
-OpenAI SDK completion usage maps directly into the existing turn-marker token fields. Its raw usage is
-the SDK usage object serialized to plain JSON and does not synthesize adapter-private hidden parameters.
-Azents captures the selected generic `genai_prices` DB snapshot before each physical model call and
-normalizes immutable pricing using the exact semantic provider/model and source key. The output
-stream freezes this view and the requested tier at start; a source refresh or later call cannot
-change an in-flight operation's price provenance. Local `cost_usd` estimation uses normalized usage
-and the captured generic source's conditional token, cache, context-threshold, tool, and media rules
-without model output content. The current generic contract has no provider service-tier price
-dimension, so actual Priority, Ultrafast, and other premium tiers remain unpriced rather than using
-Standard prices. A missing, empty, or `auto` actual tier on an explicitly Fast or Ultrafast request
+OpenAI SDK completion usage is normalized into turn-marker token fields. All output paths retain
+native usage receipts only through normalization and pricing, passing them explicitly into the
+directed billing-quantity decoder. Durable usage and run-usage serialization contain normalized
+counts and finalized cost/provenance, not raw receipts, attribution or adapter-private hidden
+parameters. Existing stored receipts are omitted by typed projections but are not physically
+rewritten by this change.
+Azents captures the actual selected candidate's saved normalized pricing definition
+and aware request time before each physical model call. Exact hosting/API scope and
+literal model identity accompany immutable typed price rules, descriptive source/model
+key, collection time, and code estimator version. Capture performs no price DB read,
+whole-source restore, raw-price interpretation, hashing, or caching. Primary/fallback and
+lightweight candidates retain their own prices; Responses and PydanticAI output paths
+use the same cheap capture contract. The output stream freezes this view and requested
+tier and never rematches after catalog refresh. Decimal evaluation uses per-token/named-unit amounts and
+explicit usage inclusion flags, TTL writes, whole-request context brackets,
+applicable service tiers, media/tool quantities and bounded off-peak windows without
+model content. Every used specialized dimension needs its price; unknown required
+rules make the whole total unavailable. Missing premium tariffs do not fall back to
+Standard. A missing, empty, or `auto` actual tier on an explicitly Fast or Ultrafast request
 also leaves local cost unavailable. The `fast` response alias still normalizes to Priority for
 nullable provenance. An explicitly mapped provider-reported charge remains authoritative.
 Missing, unmapped, invalid or unsupported required prices/quantities leave cost unset without
@@ -743,10 +880,64 @@ Installed price maps, SDK estimates and private hidden-response costs are not es
 ChatGPT OAuth cost remains an API-price estimate, not subscription billing.
 
 Known costs carry optional `cost_provenance` with `provider_reported` or `estimated` method,
-semantic provider/model, applicable tier, and snapshot/hash/key/estimator version for estimates.
+semantic provider/model, applicable tier, descriptive source/model key, collection time,
+and code estimator version for estimates. New estimates carry no snapshot ID, hash,
+catalog foreign key, or archived full price payload.
 Explicit native OpenRouter `usage.cost` remains a separately reported charge even without source
 prices. It is not added to an estimate for the same usage. Historical amounts without provenance
-stay unlabeled; this metadata does not introduce a new cost UI or retroactive history rewrite.
+stay unlabeled; old opaque provenance remains readable without resolving deleted history.
+Missing historical selected-model pricing decodes read-only as absent and leaves local
+estimation unavailable at dispatch, with no lazy fill. This metadata does not introduce
+a new cost UI or retroactive history rewrite.
+
+Captured final capability fields authorize requests independently from pricing.
+Configuration uses supported membership; actual client/hosted execution evaluates
+conditions against the provider-encoded request. Only genuine effort omission
+can use a known captured default for evaluation. Explicit clear, disabled or
+adaptive thinking and budget-only requests retain their encoded meaning; they do
+not acquire a guessed scalar level. Absent features or unmet conditions fail
+before HTTP without silently removing selected controls.
+
+`EffectiveModelRequest` is the shared typed normalization boundary after SDK
+customization and body-over-option replacement. It preserves null, false, zero,
+empty collections, provider effort/budget distinctions and the actual tool/output
+envelope. Replacement `tools` and reasoning objects replace preceding objects
+rather than unioning discarded declarations. Native custom client tools count as
+function use but do not acquire JSON-schema strictness. SDK synthetic output tools
+count as actual function declarations; native output objects remain distinct
+structured-response requests.
+
+Unspecified client/output-tool strict preferences become explicit false before
+SDK customization so a codec default cannot invent requested strict support.
+Explicit strict preferences and native structured-output objects are preserved.
+The same normalization/gate serves foreground, titles, compaction and historical
+Memory. Native OpenAI/ChatGPT use native codecs; other routes retain SDK
+formatting without stock model profiles becoming feature authority. Existing
+native artifact/replay fingerprints and captured history remain unchanged.
+
+For compatible xAI, xAI OAuth, OpenRouter and Kimi routes, explicit sampling
+values authorized by the saved contract are carried through the public SDK body
+extension instead of being removed by generic OpenAI reasoning codec policy.
+Body-over-option presence/null precedence and zero values are preserved, along
+with reasoning and unrelated options. Support validation reads the effective
+support-relevant scalar/format body envelope; explicit effort conflicts still fail.
+Native Responses supplies `parallel_tool_calls=false` when the caller omits it
+and the actual captured condition denies parallel calls. Final support and actual
+conditions determine omitted parallel-call encoding; explicit accepted options
+retain their meaning.
+
+The Agent-local `top_k` value is carried explicitly through `RunRequest`,
+EngineAdapter and every lowerer. Google maps it to `generationConfig.topK`;
+Anthropic uses the official SDK body extension for `top_k`; Bedrock uses the
+actual resolved Anthropic or Nova additional-model-field encoding. A missing
+Bedrock variant fails before the SDK request, including wrapped models. Native
+OpenAI/ChatGPT and compatible OpenAI Chat/Responses codecs reject canonical top-k
+instead of silently omitting it. A null selection adds no canonical control.
+Actual saved predicates/denials still apply. Anthropic and Bedrock codec profiles
+preserve accepted temperature, top-p and top-k, including historical unknown
+requests, instead of library model-name policy silently removing them. Explicit
+SDK body/additional-model fields retain their existing override precedence;
+representability alone does not advertise model support.
 
 Both `xai` and `xai_oauth` use the xAI transport target in this lowerer. For either identity, system instructions become the first `system` input item instead of top-level `instructions`, hosted `web_search` uses the xAI Responses tool target, and Anthropic cache-control hints are omitted. Credential refresh is resolved before the adapter pipeline and remains exclusive to `xai_oauth`; the lowerer does not own OAuth lifecycle state.
 
@@ -909,13 +1100,20 @@ runner and locked idle transition consider only pending commands, active Runs, i
 mailbox input remains. A later wake-producing input starts one Run and normal FIFO preparation
 promotes the older queue-only rows before or with the triggering input.
 
-Mailbox enqueue holds the root `SessionAgent` row lock, then locks the target `AgentSession`. Every
+Mailbox enqueue admits the exact active target `AgentSession` mutation without a
+generic root `SessionAgent` gate. Every
 mailbox target must still be active; `spawn_agent` and `followup_task` additionally reject a target
 whose stop request is already present before they create input or wake side effects.
 
-When a current subagent Run becomes terminal, `SubagentTerminalResultService` locks the root
-`SessionAgent` tree boundary before locking the Run, validates its direct parent, inserts one
-idempotent queue-only `agent_result`, and writes the Run delivery marker in the same transaction.
+Normal terminal database finalization composes `TerminalRunFinalizationRepository`
+and `AgentMailboxRepository`: exact critical Session authority is fenced before the Run
+mutation, and an eligible direct-parent delivery inserts one idempotent queue-only
+`agent_result` with activity and Run delivery markers in the same transaction.
+Best-effort historical repair uses separate completed
+`SubagentTerminalResultRepository` candidate, direct-child, and delivery operations.
+Its exact completed-Run disposition and active-target mutation ordering, and
+parent-validation failure semantics, remain distinct
+from normal finalization's ineligible-parent suppression and User Stop convergence.
 Normal terminal handling attempts this side effect before idle evaluation. Parent `wait_agent`
 polling repairs eligible results from direct children, and a later Run in the source child session
 repairs older eligible terminal results. Delivery failure is logged but does not roll the Run back or
@@ -939,21 +1137,71 @@ target agent's current run after rejecting the root and the caller itself.
 
 ## 5. Tool Loop
 
-Memory-enabled runs expose three read-only Session-history tools through the
-Memory read binding in root and subagent execution. Each tool is bound to the
-concrete executing Session ID and rechecks its active root's Agent/Workspace and
-Team/User boundary for every target. `search_sessions` accepts `current` as the
-concrete execution Session and can return matching visible event IDs from a
-specified authorized Session. `read_session_history` presents newest pages
-oldest-to-newest with older/newer cursors or a matching event anchor. It filters
-internal and reverted events before paging. `read_session_tool_result` returns
-only a selected client/hosted tool event's text in bounded chunks, never a
-native artifact or file bytes. Archived targets are unavailable on subsequent
-calls even if their IDs were previously observed. The canonical event
-transcript remains the only history source; no new event or write path is added.
-Memory CRUD/search and prompt summary loads, plus each Session-history authority
-and read composition, return from completed repository transactions before the
-Engine renders model-visible output.
+Azents-owned executable tool inputs reject undeclared fields at runtime,
+including nested External Channel task/source inputs. Function schemas expose
+the same policy in OpenAI Responses and Pydantic AI paths. Existing required,
+omitted, null, default, coercion and cross-field semantics are retained.
+Provider-extensible SDK documents, opaque foreign MCP arguments and historical
+event projections remain separate boundaries.
+
+Memory-enabled root and subagent executions receive a prompt-only Memory
+Context binding. Root `on_run_start` preparation reselects a deterministic
+`memory/context_snapshot` containing the Saved index and independently framed
+whole Team/personal consolidated documents before the Run loop starts, reusing unchanged selection without a
+state write. Independently, `on_session_compact` invalidates Memory for the next
+model-context reconstruction, which refreshes after the new compaction-summary
+head commits even inside the same Run. Child lifecycle hooks inherit rather
+than reselect the root snapshot. Other model/tool turns reauthorize and filter
+the existing selection without refreshing text or selecting replacement entries.
+Saved mutation or newly published history is admitted at the next root preparation
+or successful compaction boundary, not silently during a tool loop.
+
+Explicit inspection uses generic `read`, `grep`, and `glob` over the live
+read-only `azents://memory` mount. Each operation independently checks Memory
+enablement, the concrete execution's active root, same Agent/Workspace, and
+current Team/associated-User source access. Paths use authorized database IDs
+or exact `consolidated/{team,user}/summary.md` aliases bound to that root.
+Live aggregate reads can observe newer scope-authorized current results without
+replacing the boundary bytes. Selected Historical scope authority uses current
+Agent/Workspace/personal membership, not source revisions or dependency manifests.
+Changed/denied semantic prefix resets incompatible opaque native replay and
+stored-response continuation; compatibility carries the actual permitted text,
+not aggregate revision identities. Durable visible Events remain unchanged.
+The canonical Session event store remains source evidence. Broad grep excludes
+tool-result bodies; an exact result path yields bounded persisted text only,
+never artifacts, file bytes, or native result payloads. Archive/access loss
+applies to the next operation even after a path was previously observed.
+
+Root execution retains only `save_memory` and `delete_memory` as Memory domain
+tools. Subagents have context/generic reads but no Saved mutation. Dedicated
+Memory/history read factories are removed without aliases. Snapshot, mutation,
+and VFS read composition return from completed repository transactions before
+model-visible rendering. Background source preparation uses the Agent Lightweight chain. Summary-only
+integration runs as an internal common Session through the ordinary Worker,
+using the same owner generation, broker lock/heartbeat, Run/Event store,
+stop/shutdown supervision, provider contracts and compaction. Its common model
+operation kind is `FOREGROUND`, but its requested route is the Agent Lightweight
+label; no Main fallback or second Memory owner/semaphore is introduced.
+
+The internal host receives only read-only prepared summary files in
+`azents://execution/inputs/`, plus a task README. Its closed generic execution-file
+catalog has no original-source, previous aggregate, Runtime, Saved mutation or
+attached Toolkit backend. It authors a fresh writable Markdown file and calls
+`submit_memory` with the file path. Correctable format/size feedback or final prose
+without acceptance continues the same dialogue/files/deadline. Only accepted
+submission durably stores the current result and settles associated supplied
+work; late unassociated work remains pending. Secondary audit/close/archive faults
+do not reverse the original accepted outcome.
+
+Every physical native SDK send rechecks common ownership and stop admission;
+admission denial remains distinct from provider/quota failure even through native
+SDK wrappers. Takeover starts a clean successor with the original deadline,
+policy and consumed turns. Canonical diagnostic dialogue, tool results and
+execution files remain until common retention purge; current result and original
+accepted scalars survive audit purge. Internal Sessions are unavailable through
+public Conversation APIs. Summaries remain untrusted reference data, not Saved
+Memory or current instruction.
+See [`memory.md`](../domain/memory.md) for selection, authorization, and bounds.
 
 `AgentRunExecution` executes foreground client tool calls in parallel. Each tool result is normalized
 to a `client_tool_result` with status:
@@ -1118,6 +1366,12 @@ and an immutable tuple of wire variants. Each variant declares its dialect and o
 Ordinary tools implicitly declare one JSON-function variant. Prefixing changes only the model-visible
 name and preserves the profile, variants, schema identity, handler, and cancellation route.
 
+Registered Toolkit candidates carry the stored base Slug separately from their durable
+Agent+Toolkit effective namespace. Catalog construction prefixes local names only with the effective
+namespace, rejects duplicate final names before publication, and freezes that same source for Tool
+Search, executor routing, hooks, events, and activity. Duplicate stored Slugs therefore remain
+management metadata and never create an ambiguous prepared catalog.
+
 Preparation resolves semantic model profiles from the immutable selected-model snapshot using
 normalized developer, family, and exact model identifier rules; exact-model rules take precedence
 over family rules. It separately resolves an adapter profile from provider, adapter, and native
@@ -1174,8 +1428,10 @@ An unmatched request path is unlimited. Preparation does not invent a global sof
 Remaining explicit capacity is filled from the AgentSession's shared deferred working set in most-recent-first order. A smaller model path hides the non-fitting tail without deleting it; a later larger or unlimited path can expose that same state. Tool Search activates only the highest-ranked results that can become visible on the next call under the current explicit deferred capacity and reports when the requested result count was reduced. With no explicit limit, all active currently available deferred names are visible.
 
 Working-set load, activation, invocation touch, and independent clear operations
-complete inside repository-owned transactions. Owner-bound execution uses the
-same persisted identity and optimistic conflict retry behavior.
+complete inside repository-owned transactions with the same persisted identity
+and optimistic conflict retry behavior. These private projections do not inherit
+an execution-tree ownership gate. The successful compaction reset remains part
+of the separately fenced summary/head commit.
 
 Successful manual or automatic context compaction atomically replaces the Session's shared Tool Search working set with an empty list while committing the summary and new model-input head. The reset applies even when Tool Search is disabled at that boundary, so later opt-in cannot recover pre-compaction activation. Skipped, failed, cancelled, or stale compaction preserves the existing working set. The next enabled prepared call after a successful reset contains direct tools and `tool_search`, with deferred tools requiring new activation.
 
@@ -1271,6 +1527,12 @@ transaction commits without gating or changing the Agent Run.
 
 Production dependency injection returns `AgentEngineAdapter`. Worker and service
 entrypoints depend on `AgentEngineProtocol`, not SDK concrete adapters.
+
+Existing-session Human input admission locks Agent before Session, matching the
+worker profile-commit prefix. Session identity, status and root-kind rejection
+precedence remains unchanged, followed by Agent lifecycle/Workspace validation.
+This prevents admission from holding Session while waiting for a worker-held
+Agent; it does not relax authority fences or retry hidden database failures.
 
 Web chat user writes enter through REST commit endpoints. Message writes create or reuse an
 `AgentSession`, materialize user input attachments, record the accepted write under
@@ -1426,21 +1688,90 @@ Primary checks:
 
 ## Database session boundaries
 
-Execution-local database scopes lock and validate the exact Session owner generation
-before durable operations. Model output, tool results, compaction, tool-search
-working sets, phase changes, and terminal transitions share that authority. Shared
-adapter dependencies remain immutable; per-execution compactor and working-set
-bindings carry the owner scope. Tool handlers run after the admission transaction
-closes, and completed results are fenced again. A stale generation propagates as
-ownership loss rather than a failed tool result or model error.
+Executor capability, Session, tree, drift, action and transcript reads return
+detached facts from completed repositories. Requested-profile selection, quota
+advancement, fresh model preparation/finalization and compaction preparation own
+their exact database groups without returning live Sessions. Engine request,
+candidate and Toolkit resolution receive concrete completed read collaborators;
+runtime token preparation follows those reads. Optional context capture reads only
+requested exact current source-model maxima, groups missing saved maxima within the
+existing paired-operation boundary, and preserves saved maximum/default/cap/fallback
+precedence without complete source restoration. These exact reads and Wait
+descendant snapshots also close before their external continuations.
 
-The existing root SessionAgent lifecycle gate precedes Agent and Session locks;
-root, parent, and executing Sessions are acquired before Run finalization. Contended
-non-blocking acquisition rolls back its savepoint, and only clean admission scopes
-retry, so a caller holding other locks cannot retry indefinitely inside the same
-transaction.
+Fresh preparation retains its separate unlocked snapshot, locked chain/claim
+preparation, external materialization and final inference-write fence, with the
+existing three-attempt limit. Normal fresh failure results commit already reached
+profile, health, claim and operation changes. Quota exhaustion is caught inside
+its transaction and commits the reached renewal/slot/retry-clear group. Explicit
+compaction exhaustion instead raises inside preparation and rolls its writes
+back. A later external failure does not undo an earlier committed preparation.
+These distinct existing outcomes are retained rather than unified by extraction.
 
-Run execution uses short database sessions around one durable read or state transition. Model
+Kimi runtime refresh finishes its existing bounded HTTP call before separate
+completed success/failure persistence. The existing integration row lock and
+secrets-only identity comparison protect concurrent refresh outcomes. Other
+provider token flows retain their completed persistence collaborators; resolution
+adds no new provider, retry, lock or token policy.
+
+Worker Session lifecycle, canonical snapshot loading, stuck-Session selection,
+Runner pending-command reads, and live projection authority reads complete in
+repository-owned scopes. Hierarchy mutations retain their tree ordering;
+execution-owned critical groups fence the exact executing Session. A missing
+Session raises `ValueError("AgentSession not found")`,
+a changed generation raises `CanonicalExecutionOwnerGenerationStaleError`, and
+invalid canonical snapshots retain `CanonicalExecutionSnapshotError`. Snapshot
+loading remains an unlocked projection after ownership claim. Broker renewal,
+parent-result notification, recovery wake-up, and volatile projection effects
+follow database context closure.
+
+User Stop retains separate committed stages for eligible idempotent partials,
+cancelled durable active-call results, terminal Run/parent-result convergence,
+the interrupted/Run-marker pair, and later Stop-request clearing. Live cleanup
+and event dispatch run between completed stages. Cancelled results compose the
+ordinary tool-result finalization primitive in the same guarded transaction;
+interrupted and marker Events commit or roll back together. A later-stage failure
+does not roll back earlier committed stages, and Stop intent is cleared only
+after the existing dispatch sequence. Passed or Redis-only tool calls do not
+replace durable running-Run ownership.
+
+Owner identity is passed explicitly to critical completed operations rather than
+every transaction manager. Model output, tool-result publication, mailbox
+consumption, active-call changes, compaction and terminal/Stop groups conditionally
+fence the exact Session ID and owner generation through commit. The no-op owner
+UPDATE preserves `updated_at`; an earlier read or unrelated INSERT with an
+owner-generation EXISTS predicate is not a commit fence. Ordinary preparation,
+phase descriptions and private Toolkit state do not acquire root, Agent, parent
+or executing-Session gates. Shared adapter dependencies remain immutable;
+execution compactor binding carries the captured owner.
+
+Pre-I/O owner validation is a plain observation and holds no transaction across
+tool execution. Actual operation/resource admission and completed results retain
+their own exact mutation conditions. A stale generation propagates as ownership
+loss rather than a failed tool result or model error.
+
+Hierarchy-changing operations retain mutation-only ancestor ordering where
+needed. Multi-Session tool operations acquire their exact Session set in stable
+order with ordinary waiting locks. Complete tree admission retains its root
+membership gate and never accepts a partial subtree. Database-confirmed deadlock
+or serialization aborts recover only after the complete owning operation closes
+and releases every partial row set. This finite recovery boundary covers four
+Subagent mutations, seven tree lifecycle operations, twelve owned terminal
+operations and two standalone terminal-repair operations, including either
+possible deadlock victim. Original owner generation, Run/task identity and
+detached inputs are retained; current authority and lifecycle are rechecked.
+Cancellation, stale authority and uncertain commit do not retry. No model, tool,
+provider, broker notification or cleanup service is replayed, and no new retry
+count or timeout is added. Composing in-session helpers do not retry outer live
+transactions. Terminal delivery atomically fences its Run disposition and
+active parent mailbox target; an archived target is suppressed by coordinator
+finalization. Standalone completed-Run repair does not require a source Worker
+owner. PostgreSQL foreign-key and unique constraints remain authoritative and
+can still block real critical writes; removing explicit parent gates does not
+promise lock-free mutation commits.
+
+Run execution sequences completed repository operations for durable reads and
+state transitions; execution itself owns no live database session. Model
 preparation callbacks, model streaming, runtime hooks, foreground tools, Toolkit provider resolution,
 OAuth token HTTP requests, broker calls, and live event publication run only after the preceding
 database session has closed. Boundary input polling also completes its external queue read before it
@@ -1459,8 +1790,36 @@ Ordinary client tool results and generated-file admission failures use one
 completed repository operation that appends the deterministic result Event,
 locks the Run, removes only the matching active call, and selects
 `executing_tools` or `appending_events` before returning. Successful
-generated-file metadata admission retains the same in-session primitive so file
-metadata and the result Event remain one atomic transaction.
+generated-file metadata admission composes the same result primitive inside a
+completed output operation, so file metadata and the result Event remain one
+atomic transaction.
+
+Model-input preparation completes in one repository-owned transaction: capture
+the input head, load its transcript, reconcile unresolved durable tool calls,
+reload from the same head when results were repaired, update `preparing_input`,
+and persist attachment availability and unavailable ModelFile placeholders.
+Scheduled terminal-tool recovery retains its committed-result identity rather
+than replaying the tool. Repaired-result publication, phase publication, and
+automatic compaction follow transaction completion. Availability projection is
+an explicit database-only repository composition, not an Engine callback that
+receives a live session.
+
+Model output admission atomically persists generated metadata, normalized Events,
+usage provenance, the prompt snapshot replacement or deletion, retry-state
+clearing, and active-tool ownership/phase. Prepared output supplies detached
+metadata authority and create records, not a persistence callback or materializer.
+Normal terminal completion remains a separate later transaction. Its marker,
+foreground model-operation success, terminal parent delivery, and ModelFile pin
+release commit together. Foreground settlement is not added to early stop,
+bridge transfer, turn-limit interruption, or partial-stream interruption.
+
+RunContext carries typed model-operation completion authority instead of a
+live-session callback. Owner-bound repository operations retain the same
+generation fences and lock order. Tool admission still spans completed output
+admission and post-commit phase publication before prepared-output acknowledgement;
+publication failure uses the existing protected compensation cleanup. Generated
+metadata authority failures retain their existing Engine error classification
+after the repository transaction has closed.
 
 ExchangeFile, ModelFile, and Artifact creation preallocates the entity ID and object key, closes its
 authorization snapshot, uploads the blob without an open database session, and then revalidates
@@ -1488,10 +1847,9 @@ clears an earlier pointer because that earlier terminal boundary did not remain 
 `AgentSession.run_state` may become `idle` only after the runner has confirmed that no follow-up work
 exists: no pending command, no pending wake-producing input buffer, no active Run, and no queued
 actionable wake-up. For a completed boundary, the runner dispatches idle hooks only after that
-follow-up check. Both the pre-hook eligibility check and the post-hook commit recheck start fresh
-transactions with the existing tree-ordered execution admission: the root SessionAgent lifecycle
-gate, Agent parent rows, then the root, direct-parent, and executing Session rows. A contended
-non-blocking attempt releases its savepoint locks before retrying. Hook evaluation remains outside
+follow-up check. The pre-hook eligibility check is an ordinary owner-scoped read.
+The post-hook commit recheck fences only the exact executing Session generation
+and repeats mutation predicates under that fence. Hook evaluation remains outside
 these transactions. Owner-generation, Session status, pending pointer, command, wake-producing input,
 active Run, and archived Scheduled Task cycle checks retain their existing semantics. The commit
 recheck confirms that the same pointer remains and that the Session is still free of follow-up work,
@@ -1511,6 +1869,13 @@ publishing the matching terminal control event. A delayed Run A event cannot ter
 newer Run B. Generic SessionRunner error reporting does not synthesize `RunComplete`: failures that
 escape an active Run use durable failed-run finalization, while failures before Run activation remain
 error observations without a terminal Run event.
+
+Failed-run finalization uses one completed repository operation for the owned
+Session lock and Stop predicate, failure metadata/Events, conditional failed Run
+transition, and direct-parent terminal delivery. Durable Stop wins before any
+failure output is appended. Missing Session and stale-owner errors remain distinct.
+Worker publication follows commit in error Event, marker, and RunComplete order;
+the Worker facade neither owns a session nor calls a lifecycle DB claim helper.
 
 The required run-completion order is:
 
@@ -1568,7 +1933,7 @@ Scheduled Toolkit is another idle hook provider. It returns one
 deterministic order. The common idle-continuation transaction converts each input
 to a typed `scheduled_task_continuation` Mailbox item with a deterministic
 provider-local identity. Promotion appends the corresponding dedicated Event and
-binds the fresh AgentRun back to the same cycle. Admitted or terminalized cycles
+binds the consuming AgentRun back to the same cycle. Admitted or terminalized cycles
 do not continue.
 
 When `submit_scheduled_task_result` returns a terminal client-tool result, the
@@ -1630,6 +1995,71 @@ icon.
 
 ## Changelog
 
+- **2026-10-07** (spec_version 219) — Bind summary-only explicit Memory submission to common Worker Session/Run/Event ownership, native physical admission, compaction and audit retention; select aggregates by current scope.
+
+- **2026-10-06** (spec_version 217) — Replaced hierarchy partial NOWAIT admission
+  with exact waiting locks and finite whole-DB-operation recovery covering both
+  hierarchy/terminal deadlock victims, while preserving original authority and
+  post-commit external effects.
+
+- **2026-10-05** (spec_version 215) — Reconciled code-path discovery with current
+  defining modules; system behavior is unchanged.
+
+- **2026-10-05** (spec_version 214) — Replaced blanket execution-tree gates
+  with exact critical commit fences, independent private/preparation operations,
+  mutation-only hierarchy ordering and atomic parent admission.
+
+- **2026-10-04** (spec_version 211) — Promoted isolated RAM-only consolidation
+  hosts on the shared core, independent whole-document context and exact revision
+  filtering, latest-live aliases and safe native continuation reset.
+
+- **2026-10-04** (spec_version 210) — Routed foreground execution through one
+  execution-neutral model/tool iteration core while retaining foreground
+  admission, persistence, delivery, cancellation and terminal semantics.
+
+- **2026-10-03** (spec_version 209) — Froze saved candidate pricing and physical
+  call time without source/price lookup; replaced whole-source context captures with
+  exact current model reads while preserving operation boundaries and historical usage.
+- **2026-10-03** (spec_version 207) — Completed top-k request carriers,
+  actual family codec encoding and sampling no-loss guards.
+- **2026-10-03** (spec_version 206) — Preserved saved-authorized compatible
+  sampling through SDK encoding, validated effective body controls and carried
+  native parallel denial without changing saved predicates or historical defaults.
+- **2026-10-03** (spec_version 205) — Omitted OpenAI-only search context size
+  from xAI native search declarations and retained bounded, redacted scalar HTTP
+  error messages without changing retry or user-visible error policy.
+- **2026-10-02** (spec_version 204) — Completed Executor model/read boundaries,
+  local metadata and Wait snapshots, explicit Engine resolve dependencies and
+  Kimi refresh persistence while retaining separate failure commit/rollback
+  outcomes, existing fences and external-effect order.
+- **2026-10-02** (spec_version 203) — Moved Worker Session lifecycle, snapshot,
+  recovery, Runner command, live projection authority, and separate User Stop
+  stages into completed repository operations while preserving Worker errors,
+  generation fencing, lock order, and post-commit effects.
+- **2026-10-03** (spec_version 202) — Promoted exact data-only source captures,
+  complete typed estimates, saved v2 request predicates and lossless codec/tool
+  admission while retaining descriptor-absent behavior and transitive counters.
+- **2026-10-02** (spec_version 201) — Completed the assigned Event Engine
+  output and terminal repository operations, replaced prepared-output and
+  model-operation live-session callbacks with typed data, and moved the Worker
+  Stop-fenced failed-run atomic group into a completed repository operation.
+- **2026-10-02** (spec_version 200) — Prepared Memory selection before each root
+  Run loop and refreshed independently on post-compaction context reconstruction,
+  preserving unchanged content, child inheritance, and per-turn access filtering.
+- **2026-10-02** (spec_version 199) — Moved Mailbox admission and terminal
+  database composition into canonical repositories and completed the historical
+  terminal-result repair boundaries, preserving parent delivery atomicity,
+  single-attempt execution prelocks, and distinct repair failure semantics.
+- **2026-10-02** (spec_version 198) — Moved the complete model-input preparation
+  atomic group and availability projection into repository-owned database work,
+  replacing the live-session Engine pre-lower filter interface.
+- **2026-10-02** (spec_version 197) — Promoted persisted Memory boundary
+  snapshots, prompt-only context and mutation-only domain tools, and generic
+  Runtime-independent live Memory VFS reads distinct from immutable Skills.
+- **2026-10-01** (spec_version 196) — Promoted durable effective Toolkit
+  namespaces and source snapshots as the shared final-name, Tool Search,
+  routing, hook, event, and activity authority while allowing duplicate stored
+  base Slugs.
 - **2026-10-01** (spec_version 195) — Made the selected generic `genai_prices`
   snapshot the sole local pricing authority and documented nullable premium-tier
   estimates after removal of the former source schema and calculator.

@@ -1,7 +1,7 @@
 ---
 title: "System Settings"
 created: 2026-07-19
-updated: 2026-07-30
+updated: 2026-10-04
 tags: [backend, frontend, admin, scheduler, security, infra]
 spec_type: domain
 domain: system-settings
@@ -9,8 +9,14 @@ owner: "@Hardtack"
 code_paths:
   - python/apps/azents/src/azents/core/system_setting.py
   - python/apps/azents/src/azents/core/system_setting_registry.py
+  - python/apps/azents/src/azents/core/system_setting_data.py
+  - python/apps/azents/src/azents/core/system_setting_payload.py
+  - python/apps/azents/src/azents/core/system_setting_deps.py
   - python/apps/azents/src/azents/core/github_system_setting.py
+  - python/apps/azents/src/azents/core/github_system_setting_data.py
   - python/apps/azents/src/azents/core/external_channel_file_system_setting.py
+  - python/apps/azents/src/azents/core/historical_memory_system_setting.py
+  - python/apps/azents/src/azents/services/historical_memory/execution_policy.py
   - python/apps/azents/src/azents/core/external_account_oauth_system_setting.py
   - python/apps/azents/src/azents/api/admin/system_setting/**
   - python/apps/azents/src/azents/services/system_setting/**
@@ -40,6 +46,7 @@ code_paths:
 api_routes:
   - /system-setting/v1/sections
   - /system-setting/v1/sections/external-channel-files
+  - /system-setting/v1/sections/historical-memory-execution
   - /system-setting/v1/sections/external-account-oauth/{provider}
   - /system-setting/v1/sections/external-account-oauth/{provider}/health-check
   - /system-setting/v1/sections/platform-github-app
@@ -51,8 +58,8 @@ api_routes:
   - /system/v1/settings/file-lifecycle
   - /system/v1/settings/file-lifecycle/archive-retention/preview
   - /system/v1/settings/file-lifecycle/retention-applications/{application_id}
-last_verified_at: 2026-09-30
-spec_version: 7
+last_verified_at: 2026-10-04
+spec_version: 9
 ---
 
 # System Settings
@@ -64,6 +71,8 @@ independent setting families currently use this domain:
 
 - the provider-neutral Section lifecycle, whose first compiled Section is the Platform GitHub App;
 - the direct-activation `external_channel_files` Section for provider-neutral transfer policy;
+- the direct-activation `historical_memory_execution` Section for consolidation
+  maximum logical turns and elapsed-time policy;
 - the direct-activation Slack and Discord identity OAuth Sections;
 - archived-session retention under the file-lifecycle API; and
 - the confirmed `platform_runtime` Section, whose typed non-secret configuration stores the
@@ -119,6 +128,31 @@ processes restart.
 PostgreSQL is read at each operation boundary. Redis, process-local cache, and notification delivery are
 not required for correctness.
 
+### Database operation ownership
+
+Section reads, mutations, candidate preparation/finalization, health persistence
+and audit reads complete inside domain repository operations before returning
+detached typed results to services. Pure schema migration, cipher decoding,
+environment overlays and effective-generation projection share canonical core
+helpers and definitions. Services do not own or receive live database sessions.
+
+The same Section lock and existing identity, version, generation, expiry, impact
+and action predicates remain authoritative. GitHub confirmation composes its
+concrete binding/impact queries and generic lifecycle mutations in the same
+locked database transaction rather than invoking service session callbacks.
+Provider HTTP validation and health checks occur only between completed
+operations; final persistence retains the existing stale-authority checks.
+
+Expired-candidate prepare, confirm, cancel and validation-record paths finish
+ciphertext deletion before the service reports the existing expiry error.
+Cleanup performed inside mutate or state projection retains the same rollback
+group when a later payload/cipher validation fails. Activation, validation,
+current/candidate replacement, audit and health atomic groups are unchanged.
+
+The unused generic service migration runner and its session callback interface
+are removed. Executed migrations, durable outcome markers and repository query
+infrastructure remain intact; no new migration framework is introduced.
+
 ### Mutation, validation, and confirmation
 
 A patch requires `expected_version`. Omitted fields remain unchanged; explicit null on a non-secret
@@ -142,6 +176,22 @@ A direct Section mutation validates and activates the merged Admin base in the s
 serialized transaction. It still requires `expected_version`, increments the Admin
 version, and appends the normal activation audit event, but it creates no candidate,
 confirmation, or health workflow.
+
+Ordinary current/candidate/state descriptions use independent read-only scopes;
+an expired candidate is absent in the description without cleanup writes.
+Current publication is conditioned on its existing version, candidate replacement
+is atomic at the unique Section, and activation consumes the exact candidate ID
+before current-version publication in the same transaction. A replaced candidate
+or stale current version cannot win activation; failure rolls back consumption.
+Generic Section advisory serialization is not inherited by these reads.
+
+Slack/Discord identity OAuth publication retains the same narrow Section fence
+as exact callback claim and link finalization, including environment-backed
+absent current rows. Optional platform default initialization and pending
+PLATFORM_RUNTIME candidate creation share only their actual initialization claim;
+ordinary administrator current writes retain version CAS. A losing optional
+initializer leaves the concurrently configured default and provider reconciliation
+intact.
 
 ### Health and audit
 
@@ -243,6 +293,27 @@ whole-MiB values, see exact effective bytes and version, receive explicit unsave
 state, and save directly. Successful save invalidates both detail and audit queries. The
 card intentionally has no candidate validation or health-check controls.
 
+## Historical Memory Execution Section
+
+`historical_memory_execution` is schema version 1 and activates directly, without
+secrets or environment bindings. Its configuration is `max_turns` (positive
+integer or null, default null/unlimited) and `timeout_seconds` (positive integer,
+default 600). No per-Agent execution cutoff or alternate spend budget is added.
+
+Dedicated GET/PATCH at `/system-setting/v1/sections/historical-memory-execution`
+returns effective values, schema version and Admin version. PATCH requires
+`expected_version`, preserves omitted values and uses explicit `max_turns: null`
+to select unlimited turns. Empty patches, null timeout and non-positive or
+non-integer values return 422; stale versions return the typed
+`409 stale_system_setting_version` envelope.
+
+Admin Web provides independent maximum-turn and timeout controls with loading,
+validation, unsaved, version, saving and conflict states. Blank maximum turns
+means unlimited. A conflict requires reloading the latest settings before retry.
+Successful save invalidates detail and audit queries. New consolidation jobs
+snapshot the effective policy and one absolute deadline; running attempts retain
+their original policy/deadline through candidate handoffs.
+
 ## Archived-session retention policy
 
 `system_file_lifecycle_settings` is a singleton row. A fresh installation starts at 30 whole days.
@@ -334,6 +405,12 @@ page resumes the application returned by the settings endpoint.
   [`../flow/file-exchange-storage.md`](../flow/file-exchange-storage.md).
 
 ## Changelog
+
+- **2026-10-02** — v8. Moved Section lifecycle, concrete GitHub impact/confirmation
+  and audit lifetimes into completed database-only repository operations, with
+  canonical shared payload/DI contracts and unchanged committed-expiry, fencing,
+  redaction and external validation behavior. Removed the dormant generic service
+  migration callback capability while preserving migration infrastructure.
 
 - **2026-09-30** — v7. Retired the persisted inbound file limit in schema version 2,
   preserved outbound policy, and documented the shared 128 MiB ingress authority.

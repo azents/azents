@@ -40,6 +40,29 @@ export function toolkitSourceFromValue(
   const toolkitType = stringField(value, "toolkit_type");
   const toolkitName = stringField(value, "toolkit_name");
   const toolkitSlug = stringField(value, "toolkit_slug");
+  const toolkitNamespaceValue = value.toolkit_namespace;
+  const toolkitNamespace =
+    typeof toolkitNamespaceValue === "string" ? toolkitNamespaceValue : null;
+  const sourceIdentityValue = value.source_identity;
+  const sourceIdentity: Record<string, string> = {};
+  if (typeof sourceIdentityValue !== "undefined") {
+    if (!isRecord(sourceIdentityValue)) {
+      return { kind: "invalid" };
+    }
+    for (const [key, fieldValue] of Object.entries(sourceIdentityValue)) {
+      if (typeof fieldValue !== "string") {
+        return { kind: "invalid" };
+      }
+      sourceIdentity[key] = fieldValue;
+    }
+  }
+  if (
+    toolkitNamespaceValue !== null &&
+    typeof toolkitNamespaceValue !== "undefined" &&
+    toolkitNamespace === null
+  ) {
+    return { kind: "invalid" };
+  }
   if (
     toolkitConfigId === null ||
     toolkitType === null ||
@@ -53,6 +76,8 @@ export function toolkitSourceFromValue(
     toolkit_type: toolkitType,
     toolkit_name: toolkitName,
     toolkit_slug: toolkitSlug,
+    toolkit_namespace: toolkitNamespace,
+    source_identity: sourceIdentity,
   };
 }
 

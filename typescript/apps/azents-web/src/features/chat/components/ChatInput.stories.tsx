@@ -1,8 +1,10 @@
 import { rem } from "@mantine/core";
 import { expect, fn, spyOn, userEvent, waitFor, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
+import { useChatInputContainer } from "../containers/useChatInputContainer";
 import { longUploadErrorFile, pendingFiles } from "../story-fixtures";
 import { ChatInput } from "./ChatInput";
+import type { ChatInputProps } from "../containers/useChatInputContainer";
 import type {
   ChatLiveRunState,
   InputActionDefinition,
@@ -35,6 +37,7 @@ const reasoningModel: AgentModelSelection = {
   },
   supported_execution_options: ["fast", "ultrafast"],
   model_snapshot: {},
+  pricing: null,
   source_metadata: null,
   last_refreshed_at: "2026-05-14T00:00:00Z",
 };
@@ -201,8 +204,12 @@ const inputActions: InputActionDefinition[] = [
   },
 ];
 
+function ChatInputStory(props: ChatInputProps): React.ReactElement {
+  return <ChatInput view={useChatInputContainer(props)} />;
+}
+
 const meta = {
-  component: ChatInput,
+  component: ChatInputStory,
   decorators: [
     (Story) => (
       <StorybookCanvas maxWidth={rem(860)}>
@@ -210,7 +217,7 @@ const meta = {
       </StorybookCanvas>
     ),
   ],
-} satisfies Meta<typeof ChatInput>;
+} satisfies Meta<typeof ChatInputStory>;
 
 export default meta;
 
@@ -289,6 +296,104 @@ const activeFallbackRun = {
 
 export const Ready = {
   args: baseArgs,
+} satisfies Story;
+
+const noSpeedModelOptions = selectableModelOptions.map<
+  AgentResponse["selectable_model_options"][number]
+>((option) => ({
+  ...option,
+  candidates: option.candidates.map((candidate) => ({
+    ...candidate,
+    model_selection: {
+      ...candidate.model_selection,
+      supported_execution_options: [],
+    },
+  })),
+  execution_option_definitions: [],
+}));
+
+const staleFastProfile: RequestedInferenceProfile = {
+  model_target_label: "Default",
+  reasoning_effort: "low",
+  enabled_execution_options: ["fast"],
+};
+
+export const MobileEffortDropsUnsupportedOptions = {
+  args: {
+    ...baseArgs,
+    isMobile: true,
+    sessionId: "mobile-stale-speed-effort",
+    selectableModelOptions: noSpeedModelOptions,
+    appliedInferenceProfile: staleFastProfile,
+    onInferenceProfileChange: fn(),
+    onApplyInferenceProfile: fn(() => Promise.resolve(false)),
+    onSendInput: fn(() => Promise.resolve(true)),
+  },
+  decorators: [
+    (Story) => (
+      <StorybookCanvas maxWidth={rem(390)}>
+        <Story />
+      </StorybookCanvas>
+    ),
+  ],
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(canvas.getByRole("button", { name: "Model" }));
+    await userEvent.click(await page.findByRole("button", { name: "high" }));
+    const profile: RequestedInferenceProfile = {
+      model_target_label: "Default",
+      reasoning_effort: "high",
+      enabled_execution_options: [],
+    };
+    await expect(args.onInferenceProfileChange).toHaveBeenLastCalledWith(
+      profile,
+    );
+    await userEvent.click(canvas.getByRole("button", { name: "Model" }));
+    const apply = canvas.getByRole("button", { name: "Apply model change" });
+    await userEvent.click(apply);
+    await expect(args.onApplyInferenceProfile).toHaveBeenCalledWith(profile);
+    await expect(
+      await canvas.findByText(
+        "Model settings could not be applied. Try again.",
+      ),
+    ).toBeVisible();
+    await expect(
+      canvas.queryByText("Message failed to send. Try again."),
+    ).toBeNull();
+    await expect(args.onSendInput).not.toHaveBeenCalled();
+    await userEvent.click(apply);
+    await waitFor(async () => {
+      await expect(args.onApplyInferenceProfile).toHaveBeenCalledTimes(2);
+    });
+    await expect(args.onSendInput).not.toHaveBeenCalled();
+  },
+} satisfies Story;
+
+export const MessageDropsUnsupportedOptions = {
+  args: {
+    ...baseArgs,
+    sessionId: "message-stale-speed-profile",
+    selectableModelOptions: noSpeedModelOptions,
+    appliedInferenceProfile: staleFastProfile,
+    initialInputValue: "Synthetic message",
+    onSendInput: fn(() => Promise.resolve(true)),
+    onApplyInferenceProfile: fn(() => Promise.resolve(true)),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: "Send" }));
+    await expect(args.onSendInput).toHaveBeenCalledWith(
+      "Synthetic message",
+      null,
+      {
+        model_target_label: "Default",
+        reasoning_effort: "low",
+        enabled_execution_options: [],
+      },
+    );
+    await expect(args.onApplyInferenceProfile).not.toHaveBeenCalled();
+  },
 } satisfies Story;
 
 export const ActiveFallback = {

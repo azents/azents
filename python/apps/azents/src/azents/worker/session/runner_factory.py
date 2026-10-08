@@ -5,19 +5,20 @@ import dataclasses
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.engine.events.engine_adapter import AgentEngineAdapter
 from azents.engine.run.contracts import AgentEngineProtocol
 from azents.engine.run.model_transport import InMemoryModelTransportState
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.historical_memory_consolidation.execution import (
+    MemoryExecutionRepository,
+)
+from azents.repos.worker_session import WorkerSessionOperationRepository
 from azents.services.mailbox import MailboxService
 from azents.worker.config import AgentWorkerConfig
 from azents.worker.deps import get_worker_config
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.run.executor import RunExecutor
+from azents.worker.run.memory_execution import MemoryRunExecutor
 from azents.worker.session.execution_snapshot import CanonicalExecutionSnapshotLoader
 from azents.worker.session.idle_continuation import IdleContinuationService
 from azents.worker.session.lifecycle import SessionLifecycleService
@@ -37,11 +38,8 @@ class SessionRunnerFactory:
     execution_snapshot_loader: Annotated[
         CanonicalExecutionSnapshotLoader, Depends(CanonicalExecutionSnapshotLoader)
     ]
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ]
-    agent_session_repository: Annotated[
-        AgentSessionRepository, Depends(AgentSessionRepository)
+    worker_session_repository: Annotated[
+        WorkerSessionOperationRepository, Depends(WorkerSessionOperationRepository)
     ]
     mailbox_item_service: Annotated[MailboxService, Depends(MailboxService)]
     idle_continuation_service: Annotated[
@@ -49,6 +47,10 @@ class SessionRunnerFactory:
     ]
     user_stop_finalizer: Annotated[UserStopFinalizer, Depends(UserStopFinalizer)]
     run_executor: Annotated[RunExecutor, Depends(RunExecutor)]
+    memory_execution_repository: Annotated[
+        MemoryExecutionRepository, Depends(MemoryExecutionRepository)
+    ]
+    memory_run_executor: Annotated[MemoryRunExecutor, Depends(MemoryRunExecutor)]
     engine: Annotated[AgentEngineProtocol, Depends(AgentEngineAdapter)]
 
     def create(self, *, shutdown_event: asyncio.Event) -> SessionRunner:
@@ -58,12 +60,13 @@ class SessionRunnerFactory:
             event_publisher=self.event_publisher,
             session_lifecycle=self.session_lifecycle,
             execution_snapshot_loader=self.execution_snapshot_loader,
-            session_manager=self.session_manager,
-            agent_session_repository=self.agent_session_repository,
+            worker_session_repository=self.worker_session_repository,
             mailbox_item_service=self.mailbox_item_service,
             idle_continuation_service=self.idle_continuation_service,
             user_stop_finalizer=self.user_stop_finalizer,
             run_executor=self.run_executor,
+            memory_execution_repository=self.memory_execution_repository,
+            memory_run_executor=self.memory_run_executor,
             engine=self.engine,
             model_transport_state=InMemoryModelTransportState(
                 websocket_enabled=(

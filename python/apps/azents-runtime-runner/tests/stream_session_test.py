@@ -173,7 +173,9 @@ async def test_loopback_http_preserves_raw_target_headers_and_connection() -> No
                     return
                 requests.append(head)
                 writer.write(
-                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nX-Raw: \xff\r\n\r\nok"
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nX-Raw: \xff\r\n"
+                    b"Set-Cookie: session=first; HttpOnly\r\n"
+                    b"Set-Cookie: session=second; Path=/other\r\n\r\nok"
                 )
                 await writer.drain()
         finally:
@@ -193,6 +195,10 @@ async def test_loopback_http_preserves_raw_target_headers_and_connection() -> No
                     (b"X-Order", b"first"),
                     (b"X-Raw", b"\xff"),
                     (b"X-Order", b"second"),
+                    (b"Cookie", b"session=first"),
+                    (b"Cookie", b"session=second; theme=dark"),
+                    (b"Origin", b"https://app.example"),
+                    (b"Referer", b"https://app.example/login"),
                 ),
                 port=port,
                 body=None,
@@ -200,6 +206,14 @@ async def test_loopback_http_preserves_raw_target_headers_and_connection() -> No
             ) as response:
                 assert response.status == 200
                 assert (b"X-Raw", b"\xff") in response.headers
+                assert tuple(
+                    value
+                    for name, value in response.headers
+                    if name.lower() == b"set-cookie"
+                ) == (
+                    b"session=first; HttpOnly",
+                    b"session=second; Path=/other",
+                )
                 assert b"".join([chunk async for chunk in response.body]) == b"ok"
     finally:
         await pool.close()
@@ -212,6 +226,100 @@ async def test_loopback_http_preserves_raw_target_headers_and_connection() -> No
         assert request.startswith(b"GET /%7euser?x=a%2fb HTTP/1.1\r\n")
         assert b"\r\nHost: 127.0.0.1:" in request
         assert (b"\r\nX-Order: first\r\nX-Raw: \xff\r\nX-Order: second\r\n") in request
+        assert (
+            b"Cookie: session=first\r\nCookie: session=second; theme=dark\r\n"
+            in request
+        )
+        assert b"Origin: https://app.example\r\n" in request
+        assert b"Referer: https://app.example/login\r\n" in request
+
+
+@pytest.mark.parametrize("method", [b"GET", b"POST"])
+@pytest.mark.parametrize("content_length", [0, 7, None])
+async def test_loopback_stream_preserves_zero_fixed_and_unknown_lengths(
+    method: bytes,
+    content_length: int | None,
+) -> None:
+    request_head = b""
+    request_body = b""
+    received_head = asyncio.Event()
+    permit_body = asyncio.Event()
+    payload = b"" if content_length == 0 else b"example"
+
+    async def body() -> AsyncIterator[bytes]:
+        await permit_body.wait()
+        if payload:
+            yield payload[:3]
+            yield payload[3:]
+
+    async def handle(
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        nonlocal request_head, request_body
+        try:
+            request_head = await reader.readuntil(b"\r\n\r\n")
+            received_head.set()
+            if content_length is not None:
+                request_body = await reader.readexactly(content_length)
+            else:
+                chunks = []
+                while True:
+                    size = int(await reader.readline(), 16)
+                    if size == 0:
+                        await reader.readline()
+                        break
+                    chunks.append(await reader.readexactly(size))
+                    assert await reader.readexactly(2) == b"\r\n"
+                request_body = b"".join(chunks)
+            writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+            await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    server = await asyncio.start_server(handle, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    pool = RunnerWebLoopbackPool(maximum_connections=1)
+
+    async def request() -> None:
+        async with pool.request(
+            method=method,
+            target=b"/",
+            headers=(
+                ((b"Content-Length", str(content_length).encode()),)
+                if content_length is not None
+                else ()
+            ),
+            port=port,
+            body=body(),
+            timeout_seconds=5,
+        ) as response:
+            assert response.status == 200
+            assert b"".join([chunk async for chunk in response.body]) == b"ok"
+
+    await pool.start()
+    task = asyncio.create_task(request())
+    try:
+        await asyncio.wait_for(received_head.wait(), timeout=2)
+        # Headers reach the app before the producer yields a body chunk.
+        assert not permit_body.is_set()
+        permit_body.set()
+        await task
+        assert request_body == payload
+        if content_length is None:
+            assert b"transfer-encoding: chunked" in request_head.lower()
+        else:
+            assert b"transfer-encoding:" not in request_head.lower()
+            assert f"content-length: {content_length}".encode() in request_head.lower()
+    finally:
+        permit_body.set()
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        await pool.close()
+        server.close()
+        await server.wait_closed()
 
 
 async def test_loopback_http_does_not_follow_redirects() -> None:
@@ -280,7 +388,9 @@ async def test_loopback_websocket_preserves_target_and_rejects_fragment() -> Non
             b"Connection: Upgrade\r\n"
             b"Sec-WebSocket-Accept: "
             + accept
-            + b"\r\nSec-WebSocket-Protocol: Chat.V2\r\n\r\n"
+            + b"\r\nSec-WebSocket-Protocol: Chat.V2\r\n"
+            b"Set-Cookie: socket=app; HttpOnly\r\n"
+            b"X-App: first\r\nX-App: second\r\n\r\n"
         )
         await writer.drain()
         await reader.read()
@@ -296,6 +406,8 @@ async def test_loopback_websocket_preserves_target_and_rejects_fragment() -> Non
                 (b"host", f"localhost:{port}".encode()),
                 (b"sec-websocket-protocol", b"chat.v1, Chat.V2"),
                 (b"X-Raw", b"\xff"),
+                (b"Cookie", b"session=app"),
+                (b"Origin", b"https://app.example"),
             ),
             port=port,
             timeout_seconds=1,
@@ -304,6 +416,12 @@ async def test_loopback_websocket_preserves_target_and_rejects_fragment() -> Non
             b"sec-websocket-protocol",
             b"Chat.V2",
         ) in websocket.response_headers
+        assert (b"set-cookie", b"socket=app; HttpOnly") in websocket.response_headers
+        assert tuple(
+            value
+            for name, value in websocket.response_headers
+            if name.lower() == b"x-app"
+        ) == (b"first", b"second")
         await websocket.close()
         with pytest.raises(ValueError, match="origin form"):
             await pool.websocket(
@@ -323,6 +441,8 @@ async def test_loopback_websocket_preserves_target_and_rejects_fragment() -> Non
     assert request_head.lower().count(b"\r\nsec-websocket-protocol:") == 1
     assert b"\r\nSec-WebSocket-Protocol: chat.v1, Chat.V2\r\n" in request_head
     assert b"\r\nX-Raw: \xff\r\n" in request_head
+    assert b"\r\nCookie: session=app\r\n" in request_head
+    assert b"\r\nOrigin: https://app.example\r\n" in request_head
 
 
 async def test_loopback_websocket_rejects_unoffered_selected_subprotocol() -> None:

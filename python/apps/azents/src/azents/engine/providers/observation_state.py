@@ -4,6 +4,7 @@ import asyncio
 import dataclasses
 import threading
 from collections.abc import Awaitable, Callable
+from concurrent.futures import CancelledError as ThreadCancelledError
 from concurrent.futures import Future
 
 from pydantic_ai.exceptions import ModelHTTPError
@@ -15,8 +16,10 @@ from azents.engine.events.pydantic_ai_types import (
     SDKFailureMapper,
 )
 from azents.engine.model_stream import (
+    ModelDispatchAdmissionError,
     ModelStreamCallContext,
     ModelStreamTimeoutPolicy,
+    admit_model_dispatch,
 )
 from azents.engine.providers.native_observation import observe_native_payload
 from azents.engine.run.provider_failure import (
@@ -75,6 +78,7 @@ class NativeObservationState:
         self.response_acquired: asyncio.Future[None] = self.loop.create_future()
         self.dispatch_count = 0
         self.dispatch_blocked = False
+        self.admission_failure: ModelDispatchAdmissionError | None = None
         self.response_retry_after: str | None = None
         self.original_failure: (
             ModelProviderFailure | UnclassifiedModelProviderError | None
@@ -113,6 +117,39 @@ class NativeObservationState:
                 raise self.original_failure from None
             raise UnauthorizedModelDispatchError() from None
         self.dispatch_count += 1
+
+    async def authorize_dispatch_with_admission(self) -> None:
+        """Keep generation and common execution admission ahead of physical I/O."""
+        try:
+            if self.closing:
+                raise ModelDispatchAdmissionError("ownership")
+            self.authorize_dispatch()
+            await admit_model_dispatch(self.call_context)
+        except asyncio.CancelledError:
+            self.dispatch_blocked = True
+            raise
+        except ModelDispatchAdmissionError as error:
+            self.dispatch_blocked = True
+            self.admission_failure = error
+            raise
+
+    def authorize_dispatch_from_thread(self) -> None:
+        """Backpressure a public synchronous SDK on event-loop-owned admission."""
+        future = asyncio.run_coroutine_threadsafe(
+            self.authorize_dispatch_with_admission(), self.loop
+        )
+        with self.thread_lock:
+            if self.closing:
+                future.cancel()
+            else:
+                self.thread_emissions.add(future)
+        try:
+            future.result()
+        except ThreadCancelledError:
+            raise asyncio.CancelledError from None
+        finally:
+            with self.thread_lock:
+                self.thread_emissions.discard(future)
 
     def acquired(self) -> None:
         """Signal real SDK response acquisition, before stock first-event peeks."""

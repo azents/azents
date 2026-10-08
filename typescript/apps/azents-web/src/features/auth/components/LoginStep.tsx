@@ -3,84 +3,79 @@
 /**
  * Login step: Email input component
  */
-import { Alert, Button, Stack, Text, TextInput, Title } from "@mantine/core";
+import {
+  Alert,
+  Button,
+  PasswordInput,
+  Stack,
+  Text,
+  TextInput,
+  Title,
+} from "@mantine/core";
 import { useTranslations } from "next-intl";
-import { useEffect, useRef, useState } from "react";
 import { FormPageLayout } from "@/shared/components/FormPageLayout";
-import type { LoginStepContainerProps } from "../containers/useLoginStep";
+import type { LoginStepContainerProps, LoginStepFormState } from "../types";
 
 /** Email input form (pure UI) */
 function LoginStepForm({
   error,
   isPending,
+  emailAvailable,
   signupEmailAvailable,
   signupEmailSent,
-  onRequestSignupEmail,
-  onSubmit,
+  form,
 }: {
   error: string | null;
   isPending: boolean;
+  emailAvailable: boolean;
   signupEmailAvailable: boolean;
   signupEmailSent: boolean;
-  onRequestSignupEmail: (email: string) => void;
-  onSubmit: (email: string) => void;
+  form: LoginStepFormState;
 }): React.ReactElement {
   const t = useTranslations("auth");
-  const formRef = useRef<HTMLFormElement | null>(null);
-  const [isEmailValid, setIsEmailValid] = useState(false);
-  const [currentEmail, setCurrentEmail] = useState("");
-
-  function syncEmailState(): void {
-    const input = formRef.current?.elements.namedItem("email");
-    if (!(input instanceof HTMLInputElement)) {
-      return;
-    }
-    const nextEmail = input.value;
-    const trimmedEmail = nextEmail.trim();
-    setCurrentEmail(trimmedEmail);
-    setIsEmailValid(trimmedEmail.length > 0 && trimmedEmail.includes("@"));
-  }
-
-  useEffect(() => {
-    syncEmailState();
-    const intervalId = window.setInterval(syncEmailState, 250);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, []);
-
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>): void {
-    e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-    const email = formData.get("email");
-    if (typeof email === "string" && email.trim()) {
-      onSubmit(email.trim());
-    }
-  }
 
   return (
-    <form ref={formRef} onSubmit={handleSubmit}>
+    <form ref={form.formRef} onSubmit={form.onSubmit}>
       <Stack gap="lg">
         <Stack gap="xs" align="center">
-          <Title order={2}>{t("loginStep.headline")}</Title>
-          <Text c="dimmed">{t("loginStep.description")}</Text>
+          <Title order={2}>
+            {t(emailAvailable ? "loginStep.headline" : "passwordStep.submit")}
+          </Title>
+          {emailAvailable ? (
+            <Text c="dimmed">{t("loginStep.description")}</Text>
+          ) : null}
         </Stack>
 
         <TextInput
           type="text"
           inputMode="email"
           name="email"
-          autoComplete="email"
+          autoComplete={emailAvailable ? "email" : "username"}
+          label={emailAvailable ? null : t("signup.emailLabel")}
           placeholder={t("loginStep.placeholder")}
-          onChange={syncEmailState}
-          onInput={syncEmailState}
-          error={error}
+          onChange={form.onInput}
+          onInput={form.onInput}
+          error={emailAvailable ? error : null}
           size="lg"
           disabled={isPending}
         />
 
-        {signupEmailSent ? (
+        {!emailAvailable ? (
+          <PasswordInput
+            name="password"
+            autoComplete="current-password"
+            label={t("signup.passwordLabel")}
+            placeholder={t("passwordStep.placeholder")}
+            onChange={form.onInput}
+            onInput={form.onInput}
+            error={error}
+            size="lg"
+            required
+            disabled={isPending}
+          />
+        ) : null}
+
+        {emailAvailable && signupEmailSent ? (
           <Alert color="green">{t("loginStep.signupLinkSent")}</Alert>
         ) : null}
 
@@ -88,17 +83,21 @@ function LoginStepForm({
           type="submit"
           size="lg"
           loading={isPending}
-          disabled={isPending || !isEmailValid}
+          disabled={
+            isPending ||
+            !form.emailValid ||
+            (!emailAvailable && !form.passwordPresent)
+          }
         >
-          {t("loginStep.submit")}
+          {t(emailAvailable ? "loginStep.submit" : "passwordStep.submit")}
         </Button>
-        {signupEmailAvailable ? (
+        {emailAvailable && signupEmailAvailable ? (
           <Button
             type="button"
             size="lg"
             variant="light"
-            disabled={isPending || !isEmailValid}
-            onClick={() => onRequestSignupEmail(currentEmail)}
+            disabled={isPending || !form.emailValid}
+            onClick={form.onRequestSignupEmail}
           >
             {t("loginStep.requestSignupLink")}
           </Button>
@@ -111,22 +110,20 @@ function LoginStepForm({
 /** Container -> Component mapping (including FormPageLayout) */
 export function LoginStep({
   state,
+  emailAvailable,
   signupEmailAvailable,
   signupEmailSent,
-  onRequestSignupEmail,
-  onSubmit,
+  form,
 }: LoginStepContainerProps): React.ReactElement {
   return (
     <FormPageLayout>
       <LoginStepForm
         error={state.type === "IDLE" ? state.error : null}
-        isPending={
-          state.type === "SENDING" || state.type === "CHECKING_METHODS"
-        }
+        isPending={state.type !== "IDLE"}
+        emailAvailable={emailAvailable}
         signupEmailAvailable={signupEmailAvailable}
         signupEmailSent={signupEmailSent}
-        onRequestSignupEmail={onRequestSignupEmail}
-        onSubmit={onSubmit}
+        form={form}
       />
     </FormPageLayout>
   );

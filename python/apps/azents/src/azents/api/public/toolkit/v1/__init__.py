@@ -10,23 +10,22 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.auth.permissions import Permissions
-from azents.core.tools import ToolkitProvider
-from azents.engine.tools.deps import get_toolkit_registry
-from azents.repos.toolkit.data import (
+from azents.core.toolkit_errors import (
     DuplicateAgentToolkit,
     DuplicateScope,
     NotFound,
     ScopeNotFound,
 )
+from azents.core.tools import ToolkitProvider
+from azents.engine.tools.deps import get_toolkit_registry
 from azents.services.agent.data import NotAdmin
 from azents.services.toolkit import ToolkitService
 from azents.services.toolkit.data import (
     AgentNotBelongToWorkspace,
     AgentToolkitNotBelongToAgent,
-    DuplicateSlug,
-    EffectiveSlugConflict,
     InvalidConfig,
     InvalidCredentials,
+    InvalidIdentifier,
     InvalidToolkitType,
     NotBelongToWorkspace,
     ScopeNotBelongToToolkit,
@@ -56,6 +55,20 @@ from .data import (
 from .oauth import router as oauth_router
 
 router = APIRouter()
+
+
+def _identifier_validation_detail(
+    error: InvalidIdentifier,
+) -> list[dict[str, object]]:
+    """Build a FastAPI-compatible field validation detail."""
+    return [
+        {
+            "type": "value_error",
+            "loc": ["body", error.field],
+            "msg": error.detail,
+            "input": None,
+        }
+    ]
 
 
 # ------------------------------------------------------------------ #
@@ -119,10 +132,10 @@ async def create_toolkit_config(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail="Invalid tool config.",
                 )
-            case DuplicateSlug():
+            case InvalidIdentifier():
                 raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Duplicate toolkit slug in workspace.",
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=_identifier_validation_detail(error),
                 )
             case InvalidCredentials(detail=detail):
                 raise HTTPException(
@@ -256,15 +269,10 @@ async def update_toolkit_config(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail="Invalid tool config.",
                 )
-            case DuplicateSlug():
+            case InvalidIdentifier():
                 raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Duplicate toolkit slug in workspace.",
-                )
-            case EffectiveSlugConflict():
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Toolkit slug conflicts with another toolkit for an agent.",
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=_identifier_validation_detail(error),
                 )
             case InvalidCredentials(detail=detail):
                 raise HTTPException(
@@ -434,15 +442,10 @@ async def create_agent_toolkit_config(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Invalid tool config.",
             )
-        case DuplicateSlug():
+        case InvalidIdentifier():
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Duplicate toolkit slug for this agent.",
-            )
-        case EffectiveSlugConflict():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Toolkit slug conflicts with another toolkit for this agent.",
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=_identifier_validation_detail(error),
             )
         case InvalidCredentials(detail=detail):
             raise HTTPException(
@@ -525,15 +528,10 @@ async def update_agent_toolkit_config(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Invalid tool config.",
             )
-        case DuplicateSlug():
+        case InvalidIdentifier():
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Duplicate toolkit slug for this agent.",
-            )
-        case EffectiveSlugConflict():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Toolkit slug conflicts with another toolkit for this agent.",
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=_identifier_validation_detail(error),
             )
         case InvalidCredentials(detail=detail):
             raise HTTPException(
@@ -798,13 +796,6 @@ async def attach_toolkit_to_agent(
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="Agent already has this toolkit attached.",
-                )
-            case EffectiveSlugConflict():
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=(
-                        "Toolkit slug conflicts with another toolkit for this agent."
-                    ),
                 )
             case _:
                 assert_never(error)

@@ -1,108 +1,39 @@
-"""Active replacement system catalog projection service tests."""
+"""Current system catalog service composition tests."""
 
 from unittest.mock import AsyncMock
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.enums import LLMProvider
-from azents.core.model_metadata_source import (
-    ModelMetadataSourcePayload,
-    SourceEqualsClause,
-    SourceModelRecord,
-    SourceProviderRecord,
-)
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
+from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.llm_catalog import LLMCatalogRepository
+from azents.repos.llm_catalog_operations import LLMCatalogOperationsRepository
+from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.model_metadata_source import ModelMetadataSourceRepository
 from azents.services.llm_catalog import SystemCatalogProjectionService
-from azents.services.model_metadata_projection import (
-    SystemCatalogReplacementProjectionService,
-)
-from azents.services.model_metadata_source import (
-    FetchedModelMetadataSource,
-    GenAIPricesSourceAdapter,
-    ModelMetadataSourceSyncService,
-)
-
-
-def _payload(model_count: int) -> ModelMetadataSourcePayload:
-    return ModelMetadataSourcePayload(
-        providers=[
-            SourceProviderRecord(
-                id="openai",
-                name="OpenAI",
-                api_pattern=r"https://api\.openai\.com/.*",
-                model_match=None,
-                provider_match=None,
-                fallback_model_providers=None,
-                models=[
-                    SourceModelRecord(
-                        id=f"gpt-test-{index}",
-                        name=f"GPT Test {index}",
-                        match=SourceEqualsClause(value=f"gpt-test-{index}"),
-                        context_window=128_000,
-                        deprecated=False,
-                        prices=[],
-                    )
-                    for index in range(model_count)
-                ],
-            )
-        ]
-    )
-
-
-def _fetched(payload: ModelMetadataSourcePayload) -> FetchedModelMetadataSource:
-    return FetchedModelMetadataSource(
-        source_kind="genai_prices",
-        source_schema_version="1",
-        source_url="https://metadata.example/data.json",
-        source_hash=payload.content_hash(),
-        producer_name="genai-prices",
-        producer_version="0.1.9",
-        provider_count=payload.provider_count,
-        model_count=payload.model_count,
-        payload=payload,
-    )
-
-
-def _service(
-    *,
-    rdb_session_manager: SessionManager[AsyncSession],
-    adapter: GenAIPricesSourceAdapter,
-    catalog_repository: LLMCatalogRepository,
-) -> SystemCatalogProjectionService:
-    replacement = SystemCatalogReplacementProjectionService(
-        session_manager=rdb_session_manager,
-        catalog_repository=catalog_repository,
-        source_sync_service=ModelMetadataSourceSyncService(
-            session_manager=rdb_session_manager,
-            repository=ModelMetadataSourceRepository(),
-            source_adapter=adapter,
-        ),
-    )
-    return SystemCatalogProjectionService(
-        session_manager=rdb_session_manager,
-        catalog_repository=catalog_repository,
-        replacement_projection_service=replacement,
-    )
+from azents.services.model_metadata_source import ModelMetadataSourceSyncService
 
 
 async def test_system_catalogs_exclude_integration_scoped_providers(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
-    """Expose only providers with system-owned model visibility."""
-    adapter = AsyncMock(spec=GenAIPricesSourceAdapter)
-    service = _service(
-        rdb_session_manager=rdb_session_manager,
-        adapter=adapter,
-        catalog_repository=LLMCatalogRepository(),
+    """Listing local current state never starts remote source collection."""
+    source = AsyncMock(spec=ModelMetadataSourceSyncService)
+    service = SystemCatalogProjectionService(
+        operations=LLMCatalogOperationsRepository(
+            session_manager=rdb_session_manager,
+            read_session_manager=rdb_session_manager,
+            catalog_repository=LLMCatalogRepository(),
+            integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+            source_repository=ModelMetadataSourceRepository(),
+            active_repository=AsyncMock(spec=ActiveModelCapabilitiesRepository),
+        ),
+        source_sync_service=source,
     )
-
     items = await service.list_system_catalogs()
-
     assert {item.provider for item in items} == {
         LLMProvider.OPENAI,
         LLMProvider.ANTHROPIC,
         LLMProvider.GOOGLE_GEMINI,
     }
-    adapter.fetch.assert_not_awaited()
+    source.sync_current_source.assert_not_awaited()

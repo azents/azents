@@ -18,9 +18,6 @@ from testenv.client import build_client_from_env  # noqa: E402
 from testenv.seed.types import Integration, User, Workspace  # noqa: E402
 from testenv.state import state_from_env  # noqa: E402
 
-DUMMY_SLUG = "gpt-4o-mini"
-"""Dummy agent model slug used by tests."""
-
 
 def main() -> int:
     """Create a dummy-key agent."""
@@ -35,7 +32,7 @@ def main() -> int:
         not u.get("access_token")
         or not w.get("handle")
         or not i.get("id")
-        or not i.get("model_config_id")
+        or not i.get("model_identifier")
     ):
         print(
             "ERROR: run test-user-workspace + llm-provider-dummy setups first",
@@ -60,14 +57,13 @@ def main() -> int:
         user,
         ws,
         integration,
-        DUMMY_SLUG,
-        model_config_id=i["model_config_id"],
+        i["model_identifier"],
     )
 
     bucket.setdefault("agent", {}).update(
         {
             "id": agent.id,
-            "model_slug": DUMMY_SLUG,
+            "model_slug": agent.model_slug,
         }
     )
     state.save()

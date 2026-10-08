@@ -6,17 +6,22 @@ from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentProjectCatalogStatus
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
+from azents.core.session_workspace_paths import (
+    InvalidProjectPath,
+    normalize_agent_workspace_root,
+    normalize_session_workspace_path,
+    normalize_session_workspace_project_paths,
+)
 from azents.repos.agent_project_catalog.data import (
     AgentProjectCatalogEntry,
     AgentProjectCatalogStatusPatch,
 )
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
+from azents.repos.agent_project_catalog.operations import (
+    AgentProjectCatalogOperationsRepository,
+    ProjectCatalogStatusApplication,
+)
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeFileStatResult,
     RuntimeRunnerOperationClient,
@@ -31,12 +36,6 @@ from azents.services.agent_runtime.lifecycle_data import (
 )
 from azents.services.agent_runtime.service import AgentRuntimeService
 from azents.services.runtime_storage_error import RuntimeStorageError
-from azents.services.session_workspace_project import (
-    InvalidProjectPath,
-    normalize_agent_workspace_root,
-    normalize_session_workspace_path,
-    normalize_session_workspace_project_paths,
-)
 
 _PROJECT_STATUS_SYNC_TIMEOUT_SECONDS = 120
 
@@ -50,12 +49,9 @@ def _project_status_sync_deadline() -> datetime:
 class AgentProjectCatalogService:
     """Manage Agent Project catalog candidates and status projection."""
 
-    catalog_repository: Annotated[
-        AgentProjectCatalogRepository,
-        Depends(AgentProjectCatalogRepository),
-    ]
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+    repository: Annotated[
+        AgentProjectCatalogOperationsRepository,
+        Depends(AgentProjectCatalogOperationsRepository),
     ]
     runtime_target_resolver: Annotated[
         RuntimeOperationTargetResolver,
@@ -79,21 +75,16 @@ class AgentProjectCatalogService:
             )
         except RuntimeStorageError as exc:
             return Failure(InvalidProjectPath(path=path, reason=str(exc)))
-        async with self.session_manager() as session:
-            try:
-                normalized = normalize_session_workspace_path(
-                    path,
-                    workspace_root=runtime.workspace_path,
-                )
-            except ValueError as exc:
-                return Failure(InvalidProjectPath(path=path, reason=str(exc)))
-            entry = await self.catalog_repository.upsert_entry(
-                session,
-                agent_id=agent_id,
-                path=normalized,
+        try:
+            normalized = normalize_session_workspace_path(
+                path, workspace_root=runtime.workspace_path
             )
-            await session.commit()
-            return Success(entry)
+        except ValueError as exc:
+            return Failure(InvalidProjectPath(path=path, reason=str(exc)))
+        entries = await self.repository.upsert_candidates(
+            agent_id=agent_id, paths=(normalized,)
+        )
+        return Success(entries[0])
 
     async def upsert_project_candidates(
         self,
@@ -108,25 +99,16 @@ class AgentProjectCatalogService:
             )
         except RuntimeStorageError as exc:
             return Failure(InvalidProjectPath(path="", reason=str(exc)))
-        async with self.session_manager() as session:
-            try:
-                normalized_paths = normalize_session_workspace_project_paths(
-                    paths,
-                    workspace_root=runtime.workspace_path,
-                )
-            except ValueError as exc:
-                return Failure(InvalidProjectPath(path="", reason=str(exc)))
-            entries: list[AgentProjectCatalogEntry] = []
-            for path in normalized_paths:
-                entries.append(
-                    await self.catalog_repository.upsert_entry(
-                        session,
-                        agent_id=agent_id,
-                        path=path,
-                    )
-                )
-            await session.commit()
-            return Success(entries)
+        try:
+            normalized_paths = normalize_session_workspace_project_paths(
+                paths, workspace_root=runtime.workspace_path
+            )
+        except ValueError as exc:
+            return Failure(InvalidProjectPath(path="", reason=str(exc)))
+        entries = await self.repository.upsert_candidates(
+            agent_id=agent_id, paths=tuple(normalized_paths)
+        )
+        return Success(entries)
 
     async def list_catalog_entries(
         self,
@@ -134,11 +116,7 @@ class AgentProjectCatalogService:
         agent_id: str,
     ) -> list[AgentProjectCatalogEntry]:
         """Fetch catalog entries for an Agent."""
-        async with self.session_manager() as session:
-            return await self.catalog_repository.list_entries(
-                session,
-                agent_id=agent_id,
-            )
+        return await self.repository.list_entries(agent_id=agent_id)
 
     async def list_catalog_entries_by_paths(
         self,
@@ -155,21 +133,17 @@ class AgentProjectCatalogService:
             )
         except RuntimeStorageError as exc:
             return Failure(InvalidProjectPath(path="", reason=str(exc)))
-        async with self.session_manager() as session:
-            try:
-                normalized_paths = normalize_session_workspace_project_paths(
-                    paths,
-                    workspace_root=runtime.workspace_path,
-                )
-            except ValueError as exc:
-                return Failure(InvalidProjectPath(path="", reason=str(exc)))
-            return Success(
-                await self.catalog_repository.list_entries_by_paths(
-                    session,
-                    agent_id=agent_id,
-                    paths=normalized_paths,
-                )
+        try:
+            normalized_paths = normalize_session_workspace_project_paths(
+                paths, workspace_root=runtime.workspace_path
             )
+        except ValueError as exc:
+            return Failure(InvalidProjectPath(path="", reason=str(exc)))
+        return Success(
+            await self.repository.list_entries_by_paths(
+                agent_id=agent_id, paths=tuple(normalized_paths)
+            )
+        )
 
     async def refresh_project_status(
         self,
@@ -184,71 +158,23 @@ class AgentProjectCatalogService:
             )
         except RuntimeStorageError as error:
             return Failure(InvalidProjectPath(path=path, reason=str(error)))
-        async with self.session_manager() as session:
-            try:
-                workspace_root = normalize_agent_workspace_root(
-                    runtime.workspace_path
-                ).as_posix()
-                normalized = normalize_session_workspace_path(
-                    path,
-                    workspace_root=workspace_root,
-                )
-            except ValueError as exc:
-                return Failure(InvalidProjectPath(path=path, reason=str(exc)))
-        patch = await self._status_patch(
-            runtime,
-            normalized,
-        )
-        async with self.session_manager() as session:
-            entry = await self.catalog_repository.update_status(
-                session,
-                agent_id=agent_id,
-                path=normalized,
-                patch=patch,
-            )
-            await session.commit()
-            return Success(entry)
-
-    async def refresh_project_status_for_execution(
-        self,
-        *,
-        agent_id: str,
-        session_id: str,
-        owner_generation: int,
-        path: str,
-    ) -> Result[AgentProjectCatalogEntry, InvalidProjectPath]:
-        """Refresh one status while fencing its final execution-owned write."""
-        try:
-            runtime = await self.runtime_target_resolver.resolve_operation_target(
-                agent_id
-            )
-        except RuntimeStorageError as error:
-            return Failure(InvalidProjectPath(path=path, reason=str(error)))
         try:
             workspace_root = normalize_agent_workspace_root(
                 runtime.workspace_path
             ).as_posix()
             normalized = normalize_session_workspace_path(
-                path,
-                workspace_root=workspace_root,
+                path, workspace_root=workspace_root
             )
         except ValueError as exc:
             return Failure(InvalidProjectPath(path=path, reason=str(exc)))
         patch = await self._status_patch(runtime, normalized)
-        owner_session_manager = OwnerBoundSessionManager(
-            session_manager=self.session_manager,
-            session_id=session_id,
-            owner_generation=owner_generation,
+        entries = await self.repository.apply_statuses(
+            agent_id=agent_id,
+            applications=(
+                ProjectCatalogStatusApplication(path=normalized, patch=patch),
+            ),
         )
-        async with owner_session_manager() as session:
-            entry = await self.catalog_repository.update_status(
-                session,
-                agent_id=agent_id,
-                path=normalized,
-                patch=patch,
-            )
-            await session.commit()
-            return Success(entry)
+        return Success(entries[0])
 
     async def refresh_project_statuses(
         self,
@@ -263,37 +189,27 @@ class AgentProjectCatalogService:
             )
         except RuntimeStorageError as error:
             return Failure(InvalidProjectPath(path="", reason=str(error)))
-        async with self.session_manager() as session:
-            try:
-                workspace_root = normalize_agent_workspace_root(
-                    runtime.workspace_path
-                ).as_posix()
-                normalized_paths = normalize_session_workspace_project_paths(
-                    paths,
-                    workspace_root=workspace_root,
-                )
-            except ValueError as exc:
-                return Failure(InvalidProjectPath(path="", reason=str(exc)))
-        patches = [
-            await self._status_patch(
-                runtime,
-                path,
+        try:
+            workspace_root = normalize_agent_workspace_root(
+                runtime.workspace_path
+            ).as_posix()
+            normalized_paths = normalize_session_workspace_project_paths(
+                paths, workspace_root=workspace_root
             )
-            for path in normalized_paths
-        ]
-        async with self.session_manager() as session:
-            entries: list[AgentProjectCatalogEntry] = []
-            for path, patch in zip(normalized_paths, patches, strict=True):
-                entries.append(
-                    await self.catalog_repository.update_status(
-                        session,
-                        agent_id=agent_id,
-                        path=path,
-                        patch=patch,
-                    )
+        except ValueError as exc:
+            return Failure(InvalidProjectPath(path="", reason=str(exc)))
+        applications = tuple(
+            [
+                ProjectCatalogStatusApplication(
+                    path=path, patch=await self._status_patch(runtime, path)
                 )
-            await session.commit()
-            return Success(entries)
+                for path in normalized_paths
+            ]
+        )
+        entries = await self.repository.apply_statuses(
+            agent_id=agent_id, applications=applications
+        )
+        return Success(entries)
 
     async def _status_patch(
         self,

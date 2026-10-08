@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.engine_runtime_tool_read import EngineRuntimeToolReadRepository
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
@@ -17,12 +18,13 @@ from azents.repos.session_workspace_project import (
 
 async def test_runtime_tool_reads_close_transactions_before_returning() -> None:
     """Runtime projections return only after their read transactions close."""
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
     transaction_active = False
     transaction_count = 0
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         nonlocal transaction_active, transaction_count
         assert not transaction_active
         transaction_active = True
@@ -40,7 +42,7 @@ async def test_runtime_tool_reads_close_transactions_before_returning() -> None:
     projects = AsyncMock(spec=SessionWorkspaceProjectRepository)
 
     async def get_runtime(
-        current_session: AsyncSession,
+        current_session: WriteSession,
         agent_id: str,
     ) -> object:
         assert transaction_active
@@ -49,7 +51,7 @@ async def test_runtime_tool_reads_close_transactions_before_returning() -> None:
         return runtime
 
     async def get_configuration(
-        current_session: AsyncSession,
+        current_session: WriteSession,
         *,
         runtime_id: str,
     ) -> object:
@@ -59,7 +61,7 @@ async def test_runtime_tool_reads_close_transactions_before_returning() -> None:
         return configuration
 
     async def list_projects(
-        current_session: AsyncSession,
+        current_session: WriteSession,
         *,
         session_id: str,
     ) -> list[object]:

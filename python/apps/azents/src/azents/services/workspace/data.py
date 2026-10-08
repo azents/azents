@@ -3,11 +3,8 @@
 from pydantic import BaseModel, Field
 from typing_extensions import Self
 
-from azents.repos.workspace.data import (
-    Workspace,
-    WorkspaceCreate,
-    WorkspaceUpdate,
-)
+from azents.core.workspace import WorkspaceCreate, WorkspaceUpdate
+from azents.repos.workspace.data import Workspace
 
 
 class WorkspaceOutput(Workspace):
@@ -32,15 +29,6 @@ class WorkspaceListOutput(BaseModel):
     """Workspace list output model."""
 
     items: list[WorkspaceOutput] = Field(description="Workspace list")
-
-
-class CreateWithOwnerInput(BaseModel):
-    """Workspace + Owner create input model."""
-
-    user_id: str = Field(description="User ID")
-    workspace_name: str = Field(description="Workspace name")
-    workspace_handle: str = Field(description="Workspace handle")
-    owner_name: str = Field(description="Owner display name")
 
 
 class CreateWithOwnerOutput(BaseModel):

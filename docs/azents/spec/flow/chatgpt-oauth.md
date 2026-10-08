@@ -6,6 +6,14 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, user-auth, workspace]
 code_paths:
+  - python/apps/azents/src/azents/core/active_model_capabilities.py
+  - python/apps/azents/src/azents/core/model_provider_declarations.py
+  - python/apps/azents/src/azents/services/active_model_capabilities.py
+  - python/apps/azents/src/azents/engine/events/effective_model_request.py
+  - python/apps/azents/src/azents/repos/engine_event_repositories.py
+  - python/apps/azents/src/azents/repos/engine_resolve.py
+  - python/apps/azents/src/azents/repos/llm_catalog_operations.py
+  - python/apps/azents/src/azents/repos/model_metadata_operations.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/841e7188d527_bind_oauth_reauthentication_targets.py
   - python/apps/azents/src/azents/core/chatgpt_oauth.py
   - python/apps/azents/src/azents/core/credentials.py
@@ -13,6 +21,7 @@ code_paths:
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/**
   - python/apps/azents/src/azents/services/chatgpt_oauth/**
   - python/apps/azents/src/azents/services/subscription_usage/**
+  - python/apps/azents/src/azents/repos/subscription_usage_read.py
   - python/apps/azents/src/azents/repos/chatgpt_oauth_runtime/**
   - python/apps/azents/src/azents/repos/chatgpt_oauth_session/**
   - python/apps/azents/src/azents/repos/oauth_persistence_errors.py
@@ -23,17 +32,20 @@ code_paths:
   - python/apps/azents/src/azents/core/llm_mapping.py
   - python/apps/azents/src/azents/core/model_execution_options.py
   - python/apps/azents/src/azents/core/model_pricing.py
+  - python/apps/azents/src/azents/core/model_catalog_identity.py
+  - python/apps/azents/src/azents/core/model_capability_contract.py
   - python/apps/azents/src/azents/services/model_metadata.py
   - python/apps/azents/src/azents/engine/events/model_usage_pricing.py
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/context/compaction.py
+  - python/apps/azents/src/azents/engine/provider_model_operation.py
   - python/apps/azents/src/azents/services/session_title.py
-  - typescript/apps/azents-web/src/features/agents/components/ModelCatalogPicker.tsx
+  - typescript/apps/azents-web/src/shared/model-options/components/ModelCatalogPicker.tsx
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-10-01
-spec_version: 29
+last_verified_at: 2026-10-06
+spec_version: 35
 ---
 
 # ChatGPT OAuth Flow
@@ -158,9 +170,22 @@ GET https://chatgpt.com/backend-api/codex/models?client_version=99.99.99
 
 The model listing uses the provider's full-catalog discovery client version rather than tracking each Codex release version. This sentinel is scoped only to catalog discovery and does not declare a ChatGPT runtime protocol version. The request includes the connected account id and Azents client identity. Models are selectable only when backend metadata marks them API-supported and picker-visible. The backend model payload supplies reasoning, modality, context-window, and tool metadata. Request-dialect hints are not projected into normalized capabilities. A backend model remains selectable without a matching generic metadata source record.
 
-Picker reads use only the stored integration catalog and do not call ChatGPT. Before the first snapshot exists, the catalog returns an empty status-aware result; ChatGPT OAuth has no system-catalog fallback. Failed sync attempts preserve the last successful snapshot.
+Picker reads use only current stored integration entries and do not call ChatGPT.
+Before the first successful publication, the catalog returns an empty status-aware
+result; ChatGPT OAuth has no system-catalog fallback. Failed synchronization preserves
+last-success time, current entries, and their prices. Responses expose latest sync state
+without a catalog snapshot/data generation or current work identifier.
 
-Catalog refresh does not mutate Agent or Workspace model selection snapshots. ChatGPT OAuth execution uses the standard Responses contract independently of catalog metadata copied into a saved model selection.
+Catalog refresh preserves configured Agent/Workspace identities and settings.
+Active reads and NEW operations compile exact account-scoped LOCAL declarations
+and source facts into one final schema-3 support contract. Existing operations
+retain captured candidates, conditions and replay metadata. Native OpenAI twins
+do not provide account support. Request normalization uses the actual Responses
+envelope, including strictness and output-tool shape.
+
+Account effort arrays remain original source evidence. Canonical controls contain
+only `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`; `ultra` is
+excluded with the pre-Pydantic handling rather than mapped to another effort.
 
 ## Runtime Refresh and Execution
 
@@ -203,8 +228,9 @@ Rules:
 - Primary sampling prefers the persistent Responses WebSocket when
   `AZ_OPENAI_RESPONSES_WEBSOCKET_ENABLED` is enabled and the resolved base URL exactly matches the
   ChatGPT OAuth backend. One sampling execution opens the socket lazily, serially reuses it across its
-  model/tool turns, and closes it on every execution exit. Context compaction and automatic Session
-  title generation remain streaming HTTP operations.
+  model/tool turns, and closes it on every execution exit. Context compaction
+  reuses that execution's keyed transport policy through an operation-scoped
+  SDK; automatic Session title generation remains streaming HTTP.
 - A classified WebSocket transport failure activates HTTP-only state for the resolved ChatGPT OAuth
   integration in the owning `SessionRunner` and fails through the shared failed-Run retry boundary.
   The next attempt sends the complete logical request over HTTP. There is no inline transport replay,
@@ -223,12 +249,25 @@ Rules:
 - Typed terminal events, SDK exceptions, and transport failures use the common `ModelProviderFailure` contract only when their typed status or identifiers map to a known category. Only the bounded, redacted provider-authored reason may reach retry state, UI, or provider-failure logs. Every classified category receives the complete current Run retry budget; category and retryability remain diagnostic metadata. Unclassified outcomes raise through the ordinary internal-error path and do not create provider retry state or generic provider-error presentation.
 - Runtime requests use `originator: azents`, an `azents/<version>` User-Agent, and the connected `ChatGPT-Account-Id` rather than impersonating Codex CLI identity.
 - Sampling always uses the standard Responses contract regardless of model name or backend request-dialect hints. Tools remain in the top-level `tools` field and instructions remain in the top-level `instructions` field.
-- Compaction and title generation use the same standard Responses dialect. They send ordinary user input plus top-level instructions, no sampling tools, and omit `max_output_tokens` while retaining `store=false`, encrypted reasoning inclusion, and common client identity headers.
-- Completed SDK usage maps directly into the existing turn marker. Azents captures a validated
-  retained-source DB pricing view for the physical operation and computes `cost_usd` from
+- Compaction and title generation use the standard Responses dialect with
+  ordinary user input, top-level instructions, no sampling tools, `store=false`,
+  encrypted reasoning inclusion, and common client identity headers. Compaction
+  uses its captured candidate's selected output setting through foreground
+  lowering and admission; title generation retains its text-helper policy.
+- Completed SDK usage is normalized into the turn marker without retaining native raw usage,
+  attribution or hidden parameters. The receipt remains transient through pricing. Azents captures the physical
+  candidate's saved normalized ChatGPT-scoped pricing definition and aware call time without a
+  price DB lookup, source restore, or hashing, then computes `cost_usd` from
   content-free usage and billing metadata. Optional typed provenance distinguishes an estimate
-  from a provider-reported charge. These estimates represent public API pricing rather than
-  ChatGPT subscription billing; missing, invalid or unsupported tier pricing remains unset.
+  from a provider-reported charge. These descriptive source-price estimates do not
+  represent ChatGPT subscription billing; missing, invalid or unsupported tier pricing remains unset.
+  Native OpenAI source records are not borrowed by model name or alias. No exact
+  ChatGPT price match at selection means an unavailable definition. Historical selections
+  without embedded prices remain read-only and produce unavailable local estimates;
+  neither reads nor execution fill them from a newer catalog. Final compiled
+  account support and captured request conditions remain independent of source
+  pricing. Native ChatGPT codecs do not use Pydantic model profiles as feature
+  authority. Historical operation metadata remains captured.
 
 ## Processing-speed execution options
 
@@ -273,6 +312,14 @@ An enabled `chatgpt_oauth` integration exposes a live subscription-usage snapsho
 integration child endpoint. The read is integration-scoped and read-through: Azents does not persist
 usage snapshots, collect history, poll in the background, aggregate workspaces, or use usage to change
 Agent execution entitlement.
+
+The integration and decrypted typed secrets are loaded by one completed native
+PostgreSQL read-only repository operation. Missing integration is classified
+before foreign-Workspace access, preserving the existing error and privacy
+contract. Provider OAuth freshness/refresh, one-retry handling and usage-client
+calls run only after that read closes; existing OAuth persistence operations own
+their separate writes. The refactor does not persist usage, add refresh retries,
+change financial-field authorization, or expose raw provider/secrets material.
 
 The endpoint requires `LLM_INTEGRATIONS_READ`. It returns operational limits and reset metadata to
 readers. Subscription-usage timestamps without timezone information are interpreted as UTC before the
@@ -363,6 +410,8 @@ error boundary.
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
+| 2026-10-03 | 31 | Replaced catalog snapshot state with current rows/latest sync and froze saved ChatGPT candidate prices at physical call time | Preserve account identity, visibility and subscription separation without dispatch source lookup |
+| 2026-10-03 | 30 | Adopted exact ChatGPT-scoped data-only pricing and saved v2 account support independently from native OpenAI/profile facts | Preserve host identity, subscription separation and historical selections |
 | 2026-10-01 | 29 | Removed the former metadata-source compatibility path while retaining account catalog visibility authority | Keep generic metadata optional for ChatGPT model visibility |
 | 2026-09-30 | 27 | Retained the native OpenAI runtime while replacing executable price-map access with captured DB pricing provenance | Keep OAuth/subscription authority separate from API cost estimates |
 | 2026-09-25 | 26 | Routed new subscription image requests through the client Images tool while retaining historical hosted-image replay | Make client image generation independent of conversation-model hosted-tool support |

@@ -11,12 +11,12 @@ from collections.abc import Awaitable, Callable
 from typing import Annotated, ClassVar, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, BeforeValidator, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.mailbox_activity import MailboxActivityObserverProtocol
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.hooks.types import RuntimeHooks
 from azents.engine.run.emit import PublishedEvent
 from azents.engine.run.types import CheckStop, FunctionTool
-from azents.services.session_resource_authority import SessionResourceAuthority
 
 # ---------------------------------------------------------------------------
 # Toolkit State Machine types
@@ -35,6 +35,14 @@ class ToolkitStatus(enum.StrEnum):
 
     ENABLED = "enabled"
     DISABLED = "disabled"
+
+
+@dataclasses.dataclass(frozen=True)
+class PreparedDynamicPrompt:
+    """Model-visible text with optional server-only native replay compatibility."""
+
+    text: str
+    native_replay_context: str | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -69,12 +77,12 @@ class TurnContext:
     model: str
     run_id: str
     publish_event: PublishEventFn
-    session_id: str = ""
+    session_id: str | None = None
     run_index: int = 1
     tool_search_enabled: bool = False
     check_stop: CheckStop | None = None
     resource_authority: SessionResourceAuthority | None = None
-    mailbox_activity_observer: object | None = None
+    mailbox_activity_observer: MailboxActivityObserverProtocol | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -162,8 +170,6 @@ class ResolveContext:
     :param credentials_json: Decrypted credential JSON; None means no authentication
     :param agent_id: Agent ID owning the current AgentSession
     :param session_id: Current AgentSession ID
-    :param session: Optional caller-owned DB session. Run-time Toolkit resolution
-        passes None so providers cannot retain a snapshot transaction across I/O.
     :param web_url: Frontend URL for building OAuth redirect_uri
     :param oauth_secret_key: OAuth HMAC signing key
     :param workspace_id: Workspace ID
@@ -176,11 +182,10 @@ class ResolveContext:
     credentials_json: str | None
     agent_id: str
     session_id: str
-    session: AsyncSession | None
-    web_url: str
-    oauth_secret_key: str
+    web_url: str | None
+    oauth_secret_key: str | None
     workspace_id: str
-    workspace_handle: str
+    workspace_handle: str | None
     mcp_proxy_url: str | None = None
 
 
@@ -201,6 +206,9 @@ class Toolkit(ABC, Generic[ConfigT]):
 
     display_name: str = ""
     """Name displayed in toolkit prompt. Injected by Provider.resolve()."""
+
+    source_identity: tuple[tuple[str, str], ...] = ()
+    """Bounded non-secret connection identity included in catalog source metadata."""
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Receive current turn context and immediately return tool state.
@@ -232,6 +240,15 @@ class Toolkit(ABC, Generic[ConfigT]):
         """
         del context
         return ""
+
+    async def prepare_dynamic_prompt(
+        self, context: TurnContext
+    ) -> PreparedDynamicPrompt:
+        """Capture text and replay identity together when a toolkit owns both."""
+        return PreparedDynamicPrompt(
+            text=await self.get_dynamic_prompt(context),
+            native_replay_context=None,
+        )
 
     async def __aenter__(self) -> Toolkit[ConfigT]:
         """Start background work when session starts, optional."""
@@ -362,6 +379,12 @@ class ToolkitProvider(ABC, Generic[ConfigT]):
         return McpToolkitConfig.model_validate(
             config.model_dump() if isinstance(config, BaseModel) else config
         )
+
+    @classmethod
+    def source_identity(cls, config: ConfigT) -> tuple[tuple[str, str], ...]:
+        """Return bounded non-secret connection identity for catalog source metadata."""
+        del config
+        return ()
 
     async def validate_credentials(
         self,

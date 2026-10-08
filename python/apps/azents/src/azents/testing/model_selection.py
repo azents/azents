@@ -28,6 +28,7 @@ def make_test_model_selection(
         model_developer=model_developer,
         model_family=None,
         normalized_capabilities=ModelCapabilities(),
+        pricing=None,
         model_snapshot={"id": model_identifier},
         source_metadata=None,
         last_refreshed_at=None,
@@ -86,6 +87,14 @@ def make_test_model_settings() -> SelectableModelSettings:
         context_window_tokens=None,
         max_output_tokens=None,
         builtin_tools=[],
+    )
+
+
+def make_test_model_candidate() -> SelectableModelCandidate:
+    """Return one complete captured route for internal model operation fixtures."""
+    return SelectableModelCandidate(
+        model_selection=make_test_model_selection(),
+        settings=make_test_model_settings(),
     )
 
 

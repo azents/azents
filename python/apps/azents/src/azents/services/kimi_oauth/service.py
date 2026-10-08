@@ -8,26 +8,18 @@ from typing import Annotated, assert_never
 import httpx
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.credentials import KimiOAuthConfig, KimiOAuthSecrets
-from azents.core.crypto import CredentialCipher
-from azents.core.deps import get_credential_cipher
-from azents.core.enums import LLMProvider
 from azents.core.kimi_oauth import (
     KimiOAuthConnectionMethod,
     KimiOAuthConnectionStatus,
     KimiOAuthSessionStatus,
 )
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
 from azents.repos.kimi_oauth_session.data import (
     KimiOAuthSessionCreate,
     KimiOAuthSessionWithSecrets,
 )
-from azents.repos.kimi_oauth_session.repository import KimiOAuthSessionRepository
-from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
-from azents.repos.llm_provider_integration.data import LLMProviderIntegrationCreate
+from azents.repos.kimi_oauth_session.operations import KimiOAuthOperations
 
 from .client import KimiOAuthClient
 from .data import (
@@ -55,20 +47,6 @@ async def _get_http_client() -> AsyncIterator[httpx.AsyncClient]:
         yield client
 
 
-def _get_session_repo(
-    cipher: Annotated[CredentialCipher, Depends(get_credential_cipher)],
-) -> KimiOAuthSessionRepository:
-    """Create Kimi OAuth session repository dependency."""
-    return KimiOAuthSessionRepository(cipher)
-
-
-def _get_integration_repo(
-    cipher: Annotated[CredentialCipher, Depends(get_credential_cipher)],
-) -> LLMProviderIntegrationRepository:
-    """Create LLM provider integration repository dependency."""
-    return LLMProviderIntegrationRepository(cipher)
-
-
 def _get_client(
     http_client: Annotated[httpx.AsyncClient, Depends(_get_http_client)],
 ) -> KimiOAuthClient:
@@ -81,19 +59,11 @@ class KimiOAuthService:
 
     def __init__(
         self,
-        session_manager: Annotated[
-            SessionManager[AsyncSession], Depends(get_session_manager)
-        ],
-        session_repo: Annotated[KimiOAuthSessionRepository, Depends(_get_session_repo)],
-        integration_repo: Annotated[
-            LLMProviderIntegrationRepository, Depends(_get_integration_repo)
-        ],
+        operations: Annotated[KimiOAuthOperations, Depends(KimiOAuthOperations)],
         client: Annotated[KimiOAuthClient, Depends(_get_client)],
     ) -> None:
         """Inject service dependencies."""
-        self.session_manager = session_manager
-        self.session_repository = session_repo
-        self.integration_repository = integration_repo
+        self.operations = operations
         self.client = client
 
     async def start_device(
@@ -111,21 +81,19 @@ class KimiOAuthService:
                     _SESSION_TTL,
                     datetime.timedelta(seconds=user_code.expires_in_seconds),
                 )
-                async with self.session_manager() as session:
-                    created = await self.session_repository.create(
-                        session,
-                        KimiOAuthSessionCreate(
-                            workspace_id=workspace_id,
-                            user_id=user_id,
-                            method=KimiOAuthConnectionMethod.DEVICE,
-                            device_code=user_code.device_code,
-                            device_id=device_id,
-                            user_code=user_code.user_code,
-                            verification_uri=user_code.verification_uri,
-                            interval_seconds=user_code.interval_seconds,
-                            expires_at=expires_at,
-                        ),
-                    )
+                created = await self.operations.create(
+                    KimiOAuthSessionCreate(
+                        workspace_id=workspace_id,
+                        user_id=user_id,
+                        method=KimiOAuthConnectionMethod.DEVICE,
+                        device_code=user_code.device_code,
+                        device_id=device_id,
+                        user_code=user_code.user_code,
+                        verification_uri=user_code.verification_uri,
+                        interval_seconds=user_code.interval_seconds,
+                        expires_at=expires_at,
+                    ),
+                )
                 return Success(
                     KimiOAuthDeviceStartOutput(
                         session_id=created.id,
@@ -193,14 +161,9 @@ class KimiOAuthService:
                     )
                 )
             case Failure(ProviderSlowDown()):
-                async with self.session_manager() as session:
-                    interval_result = (
-                        await self.session_repository.increase_poll_interval(
-                            session,
-                            session_id,
-                            seconds=_SLOW_DOWN_INCREMENT_SECONDS,
-                        )
-                    )
+                interval_result = await self.operations.increase_poll_interval(
+                    session_id, seconds=_SLOW_DOWN_INCREMENT_SECONDS
+                )
                 match interval_result:
                     case Success(value):
                         return Success(
@@ -231,8 +194,7 @@ class KimiOAuthService:
         )
         if isinstance(check, Failure):
             return Failure(check.error)
-        async with self.session_manager() as session:
-            result = await self.session_repository.cancel(session, session_id)
+        result = await self.operations.cancel(session_id)
         match result:
             case Success(value):
                 return Success(
@@ -256,10 +218,7 @@ class KimiOAuthService:
         expected_method: KimiOAuthConnectionMethod,
     ) -> Result[KimiOAuthSessionWithSecrets, SessionNotFound | InvalidSession]:
         """Fetch pending session belonging to requesting user and workspace."""
-        async with self.session_manager() as session:
-            oauth_session = await self.session_repository.get_by_id_with_secrets(
-                session, session_id
-            )
+        oauth_session = await self.operations.get_by_id_with_secrets(session_id)
         if oauth_session is None:
             return Failure(SessionNotFound(session_id=session_id))
         if (
@@ -298,49 +257,19 @@ class KimiOAuthService:
                     last_failed_at=None,
                     last_failure_reason=None,
                 )
-                async with self.session_manager() as session:
-                    consume_result = await self.session_repository.consume(
-                        session, session_id
-                    )
-                    if isinstance(consume_result, Failure):
+                save_result = await self.operations.consume_and_save_tokens(
+                    workspace_id=workspace_id,
+                    session_id=session_id,
+                    secrets=secrets,
+                    config=config,
+                )
+                match save_result:
+                    case Success(integration):
+                        pass
+                    case Failure():
                         return Failure(SessionTransitionFailed(session_id=session_id))
-                    integrations = await self.integration_repository.list_by_workspace(
-                        session, workspace_id
-                    )
-                    existing = next(
-                        (
-                            item
-                            for item in integrations.items
-                            if item.provider == LLMProvider.KIMI_OAUTH
-                        ),
-                        None,
-                    )
-                    if existing is None:
-                        integration = await self.integration_repository.create(
-                            session,
-                            LLMProviderIntegrationCreate(
-                                workspace_id=workspace_id,
-                                provider=LLMProvider.KIMI_OAUTH,
-                                name="Kimi subscription",
-                                secrets=secrets,
-                                config=config,
-                            ),
-                        )
-                    else:
-                        update_result = await self.integration_repository.update_by_id(
-                            session,
-                            existing.id,
-                            {"secrets": secrets, "config": config},
-                        )
-                        match update_result:
-                            case Success(integration):
-                                pass
-                            case Failure():
-                                return Failure(
-                                    SessionTransitionFailed(session_id=session_id)
-                                )
-                            case _:
-                                assert_never(update_result)
+                    case _:
+                        assert_never(save_result)
                 return Success(KimiOAuthExchangeOutput(integration=integration))
             case Failure(error):
                 return Failure(error)

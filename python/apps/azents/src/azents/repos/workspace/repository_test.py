@@ -1,16 +1,22 @@
 """Workspace repository tests."""
 
 from azcommon.result import Failure, Success
-from sqlalchemy.ext.asyncio import AsyncSession
+
+from azents.core.workspace import (
+    HandleConflict,
+    NotFound,
+    WorkspaceCreate,
+    WorkspaceUpdate,
+)
+from azents.rdb.session_capabilities import WriteSession
 
 from . import WorkspaceRepository
-from .data import HandleConflict, NotFound, WorkspaceCreate, WorkspaceUpdate
 
 
 class TestWorkspaceRepository:
     """WorkspaceRepository tests."""
 
-    async def test_create(self, rdb_session: AsyncSession) -> None:
+    async def test_create(self, rdb_session: WriteSession) -> None:
         """Create Workspace."""
         # Given: prepare create data
         repo = WorkspaceRepository()
@@ -27,7 +33,7 @@ class TestWorkspaceRepository:
         assert workspace.created_at
         assert workspace.updated_at
 
-    async def test_create_duplicate_handle(self, rdb_session: AsyncSession) -> None:
+    async def test_create_duplicate_handle(self, rdb_session: WriteSession) -> None:
         """duplicate handle Workspace when creating HandleConflict return."""
         # Given: same handle Workspace already exist
         repo = WorkspaceRepository()
@@ -45,7 +51,7 @@ class TestWorkspaceRepository:
         assert isinstance(result.error, HandleConflict)
         assert result.error.handle == "duplicate-handle"
 
-    async def test_get_by_handle(self, rdb_session: AsyncSession) -> None:
+    async def test_get_by_handle(self, rdb_session: WriteSession) -> None:
         """handle Workspace fetch."""
         # Given: Workspace create
         repo = WorkspaceRepository()
@@ -62,7 +68,7 @@ class TestWorkspaceRepository:
         assert workspace.handle == "by-handle-test"
         assert workspace.name == "handle fetch"
 
-    async def test_get_by_handle_not_found(self, rdb_session: AsyncSession) -> None:
+    async def test_get_by_handle_not_found(self, rdb_session: WriteSession) -> None:
         """nonexistent handle fetch when None return."""
         # Given: nonexistent handle
         repo = WorkspaceRepository()
@@ -75,7 +81,7 @@ class TestWorkspaceRepository:
 
     async def test_get_with_id_by_handle_returns_one_row_snapshot(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Workspace ID and projection come from the same handle lookup."""
         repo = WorkspaceRepository()
@@ -88,11 +94,10 @@ class TestWorkspaceRepository:
         snapshot = await repo.get_with_id_by_handle(rdb_session, "atomic-handle")
 
         assert snapshot is not None
-        workspace_id, workspace = snapshot
-        assert workspace_id
-        assert workspace == create_result.value
+        assert snapshot.workspace_id
+        assert snapshot.workspace == create_result.value
 
-    async def test_list_all(self, rdb_session: AsyncSession) -> None:
+    async def test_list_all(self, rdb_session: WriteSession) -> None:
         """Fetch all Workspace list."""
         # Given: multiple Workspace create
         repo = WorkspaceRepository()
@@ -109,7 +114,7 @@ class TestWorkspaceRepository:
         # Then: two or more exist
         assert len(workspace_list.items) >= 2
 
-    async def test_update_by_handle(self, rdb_session: AsyncSession) -> None:
+    async def test_update_by_handle(self, rdb_session: WriteSession) -> None:
         """Workspace Update."""
         # Given: Workspace create
         repo = WorkspaceRepository()
@@ -127,7 +132,7 @@ class TestWorkspaceRepository:
         assert result.value.name == "After update"
         assert result.value.handle == "update-test"
 
-    async def test_update_by_handle_not_found(self, rdb_session: AsyncSession) -> None:
+    async def test_update_by_handle_not_found(self, rdb_session: WriteSession) -> None:
         """nonexistent Workspace when updating return NotFound."""
         # Given: nonexistent handle
         repo = WorkspaceRepository()
@@ -140,7 +145,7 @@ class TestWorkspaceRepository:
         assert isinstance(result, Failure)
         assert isinstance(result.error, NotFound)
 
-    async def test_update_by_handle_empty(self, rdb_session: AsyncSession) -> None:
+    async def test_update_by_handle_empty(self, rdb_session: WriteSession) -> None:
         """empty update data when existing data as-is return."""
         # Given: Workspace create
         repo = WorkspaceRepository()
@@ -159,7 +164,7 @@ class TestWorkspaceRepository:
         assert result.value.name == "empty update"
 
     async def test_update_by_handle_duplicate_handle(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """when updating duplicate handle HandleConflict return."""
         # Given: two Workspace create
@@ -184,7 +189,7 @@ class TestWorkspaceRepository:
         assert isinstance(result, Failure)
         assert isinstance(result.error, HandleConflict)
 
-    async def test_resolve_id(self, rdb_session: AsyncSession) -> None:
+    async def test_resolve_id(self, rdb_session: WriteSession) -> None:
         """Fetch internal ID by handle"""
         # Given: Workspace create
         repo = WorkspaceRepository()
@@ -199,7 +204,7 @@ class TestWorkspaceRepository:
         assert workspace_id is not None
         assert len(workspace_id) == 32  # UUID7 hex
 
-    async def test_resolve_id_not_found(self, rdb_session: AsyncSession) -> None:
+    async def test_resolve_id_not_found(self, rdb_session: WriteSession) -> None:
         """nonexistent handle resolve_id when None return."""
         # Given: nonexistent handle
         repo = WorkspaceRepository()

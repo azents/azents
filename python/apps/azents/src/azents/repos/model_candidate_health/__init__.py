@@ -8,12 +8,12 @@ import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from fastapi import Depends
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ModelCandidateClaimKind
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.model_candidate_health import RDBModelCandidateHealth
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import (
     CandidateClaimTransfer,
@@ -45,7 +45,7 @@ class ModelCandidateHealthRepository:
     """Own short database-only candidate health transactions."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
     async def snapshot(
@@ -58,11 +58,11 @@ class ModelCandidateHealthRepository:
 
     async def snapshot_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         identity: ModelCandidateIdentity,
     ) -> ModelCandidateHealthObservation:
         """Read candidate health inside one caller-owned transaction."""
-        row = await session.get(
+        row = await session.read_session.get(
             RDBModelCandidateHealth,
             self._primary_key(identity),
         )
@@ -78,7 +78,7 @@ class ModelCandidateHealthRepository:
 
     async def snapshot_for_background_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         identity: ModelCandidateIdentity,
     ) -> ModelCandidateHealthObservation:
         """Read background eligibility inside one caller-owned transaction."""
@@ -94,7 +94,7 @@ class ModelCandidateHealthRepository:
 
     async def renew_quota_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         identity: ModelCandidateIdentity,
     ) -> ModelCandidateHealthObservation:
         """Record quota inside the caller's transaction."""
@@ -112,7 +112,7 @@ class ModelCandidateHealthRepository:
             updated_at=server_time,
         )
         row = (
-            await session.execute(
+            await session.read_session.execute(
                 statement.on_conflict_do_update(
                     index_elements=[
                         RDBModelCandidateHealth.workspace_id,
@@ -155,7 +155,7 @@ class ModelCandidateHealthRepository:
 
     async def renew_claimed_quota_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         identity: ModelCandidateIdentity,
         *,
         expected_generation: int,
@@ -166,7 +166,7 @@ class ModelCandidateHealthRepository:
         """Renew an exact claimed quota result inside the caller's transaction."""
         server_time = await self._database_time(session)
         row = (
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBModelCandidateHealth)
                 .where(
                     *self._identity_predicates(identity),
@@ -188,7 +188,7 @@ class ModelCandidateHealthRepository:
             )
         ).scalar_one_or_none()
         if row is None:
-            current = await session.get(
+            current = await session.write_session.get(
                 RDBModelCandidateHealth,
                 self._primary_key(identity),
             )
@@ -217,7 +217,7 @@ class ModelCandidateHealthRepository:
 
     async def claim_foreground_probe_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         identity: ModelCandidateIdentity,
         *,
         owner_id: str,
@@ -246,7 +246,7 @@ class ModelCandidateHealthRepository:
             owner_id=owner_id,
             server_time=server_time,
         )
-        await session.flush()
+        await session.write_session.flush()
         return ForegroundProbeResult(
             outcome=ForegroundProbeOutcome.CLAIMED,
             observation=self._observe(row, server_time=server_time),
@@ -268,7 +268,7 @@ class ModelCandidateHealthRepository:
 
     async def claim_reservation_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         identity: ModelCandidateIdentity,
         *,
         session_id: str,
@@ -300,7 +300,7 @@ class ModelCandidateHealthRepository:
             owner_id=session_id,
             server_time=server_time,
         )
-        await session.flush()
+        await session.write_session.flush()
         return ReservationClaimResult(
             outcome=ReservationClaimOutcome.CLAIMED,
             observation=self._observe(row, server_time=server_time),
@@ -328,7 +328,7 @@ class ModelCandidateHealthRepository:
 
     async def transfer_reservation_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         identity: ModelCandidateIdentity,
         *,
         expected_generation: int,
@@ -340,7 +340,7 @@ class ModelCandidateHealthRepository:
         server_time = await self._database_time(session)
         claim_token = uuid7().hex
         row = (
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBModelCandidateHealth)
                 .where(
                     *self._identity_predicates(identity),
@@ -388,7 +388,7 @@ class ModelCandidateHealthRepository:
 
     async def cancel_reservation_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         identity: ModelCandidateIdentity,
         *,
         expected_generation: int,
@@ -428,7 +428,7 @@ class ModelCandidateHealthRepository:
 
     async def expire_claim_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         identity: ModelCandidateIdentity,
         *,
         expected_generation: int,
@@ -467,7 +467,7 @@ class ModelCandidateHealthRepository:
 
     async def complete_probe_success_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         identity: ModelCandidateIdentity,
         *,
         expected_generation: int,
@@ -475,7 +475,7 @@ class ModelCandidateHealthRepository:
         expected_claim_token: str,
     ) -> CandidateHealthSettlement:
         """Delete successful probe health inside the caller's transaction."""
-        deleted = await session.scalar(
+        deleted = await session.write_session.scalar(
             sa.delete(RDBModelCandidateHealth)
             .where(
                 *self._identity_predicates(identity),
@@ -492,7 +492,7 @@ class ModelCandidateHealthRepository:
 
     async def _clear_claim_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         identity: ModelCandidateIdentity,
         *,
         expected_generation: int,
@@ -511,7 +511,7 @@ class ModelCandidateHealthRepository:
         ]
         if require_expired:
             predicates.append(RDBModelCandidateHealth.claim_until <= server_time)
-        cleared = await session.scalar(
+        cleared = await session.write_session.scalar(
             sa.update(RDBModelCandidateHealth)
             .where(*predicates)
             .values(
@@ -529,19 +529,21 @@ class ModelCandidateHealthRepository:
 
     async def _lock(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         identity: ModelCandidateIdentity,
     ) -> RDBModelCandidateHealth | None:
         return (
-            await session.execute(
+            await session.write_session.execute(
                 sa.select(RDBModelCandidateHealth)
                 .where(*self._identity_predicates(identity))
                 .with_for_update()
             )
         ).scalar_one_or_none()
 
-    async def _database_time(self, session: AsyncSession) -> datetime.datetime:
-        server_time = await session.scalar(sa.select(sa.func.clock_timestamp()))
+    async def _database_time(self, session: ReadSession) -> datetime.datetime:
+        server_time = await session.read_session.scalar(
+            sa.select(sa.func.clock_timestamp())
+        )
         if server_time is None:
             raise RuntimeError("PostgreSQL did not return candidate-health time")
         return server_time

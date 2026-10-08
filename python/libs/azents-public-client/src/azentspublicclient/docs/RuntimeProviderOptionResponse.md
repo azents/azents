@@ -11,7 +11,7 @@ Name | Type | Description | Notes
 **kind** | **str** |  | 
 **scope** | **str** |  | 
 **availability_mode** | **str** |  | 
-**capabilities** | **Dict[str, object]** |  | 
+**capabilities** | **object** |  | 
 **current_contract_revision_id** | **str** |  | 
 **active_config_revision_id** | **str** |  | 
 

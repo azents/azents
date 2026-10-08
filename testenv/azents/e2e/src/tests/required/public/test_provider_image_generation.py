@@ -359,7 +359,7 @@ class TestProviderImageGeneration:
         )
         assert catalog.get("default_available") is True
         assert catalog.get("explicit_selection_supported") is True
-        assert catalog.get("generation_current") is True
+        assert catalog.get("usable") is True
         assert catalog.get("total") == 2
 
         requests.delete(

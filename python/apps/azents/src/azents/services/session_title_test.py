@@ -1,6 +1,7 @@
 """Session title helper tests."""
 
 import datetime
+import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -12,12 +13,17 @@ from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.services.session_title as session_title_module
+from azents.core.active_model_capabilities import (
+    CapturedStoredChoice,
+    ConfiguredModelIdentity,
+)
 from azents.core.agent import (
     DEFAULT_MAIN_MODEL_OPTION_LABEL,
     AgentModelSelection,
     SelectableModelCandidate,
     SelectableModelOption,
 )
+from azents.core.agent_session_data import AgentSession
 from azents.core.credentials import ApiKeySecrets
 from azents.core.enums import (
     AgentLifecycleStatus,
@@ -37,7 +43,12 @@ from azents.core.enums import (
     LLMProvider,
 )
 from azents.core.inference_profile import RequestedInferenceProfile
-from azents.core.llm_catalog import ModelCapabilities, ModelToolCallingCapabilities
+from azents.core.llm_catalog import (
+    ModelCapabilities,
+    ModelToolCallingCapabilities,
+)
+from azents.core.model_catalog_identity import catalog_source_keys
+from azents.core.model_catalog_source import decode_catalog_source
 from azents.core.model_operation import (
     ModelOperationCandidateOutcomeReason,
     ModelOperationKind,
@@ -61,11 +72,15 @@ from azents.engine.run.provider_failure import (
 from azents.engine.run.resolve import ResolvedModelCandidateRuntime
 from azents.engine.run.retry_policy import FailedRunRetryPolicy
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
+from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
+from azents.repos.active_model_capabilities_data import CapturedActiveChoiceInputs
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
+from azents.repos.engine_read import EngineModelReadRepository
+from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.repos.model_candidate_health.data import (
@@ -74,9 +89,12 @@ from azents.repos.model_candidate_health.data import (
 )
 from azents.repos.session_title import SessionTitleRepository
 from azents.repos.session_title.data import SessionTitleGenerationSnapshot
+from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
+from azents.services.engine_runtime_tokens import EngineRuntimeTokenResolver
 from azents.services.external_channel.thread_title import (
     ExternalChannelThreadTitleService,
 )
+from azents.services.oauth_runtime_clients import create_runtime_oauth_client_factories
 from azents.services.session_title import (
     SessionTitleService,
     TitleOutputContractError,
@@ -334,16 +352,15 @@ class TestSessionTitleHelpers:
         [
             (True, TitleOutputMode.STRUCTURED),
             (False, TitleOutputMode.PLAIN_TEXT),
-            (None, TitleOutputMode.STRUCTURED),
         ],
     )
     async def test_generate_title_selects_mode_from_saved_capability(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        capability: bool | None,
+        capability: bool,
         expected_mode: TitleOutputMode,
     ) -> None:
-        """The saved tri-state capability selects the initial title mode."""
+        """The saved structured-response feature selects the initial title mode."""
         modes: list[TitleOutputMode] = []
 
         async def generate(**kwargs: object) -> str:
@@ -367,6 +384,52 @@ class TestSessionTitleHelpers:
             snapshot=_generation_snapshot(capability),
         )
 
+        assert result == "Generated title"
+        assert modes == [expected_mode]
+
+    @pytest.mark.parametrize(
+        ("strict", "structured", "expected_mode"),
+        [
+            (True, False, TitleOutputMode.PLAIN_TEXT),
+            (False, True, TitleOutputMode.STRUCTURED),
+            (True, True, TitleOutputMode.STRUCTURED),
+            (False, False, TitleOutputMode.PLAIN_TEXT),
+        ],
+    )
+    async def test_title_uses_response_support_independently_from_strict_tools(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        strict: bool,
+        structured: bool,
+        expected_mode: TitleOutputMode,
+    ) -> None:
+        modes: list[TitleOutputMode] = []
+
+        async def generate(**kwargs: object) -> str:
+            mode = kwargs["output_mode"]
+            assert isinstance(mode, TitleOutputMode)
+            modes.append(mode)
+            return "Generated title"
+
+        monkeypatch.setattr(
+            session_title_module, "generate_session_title_with_model", generate
+        )
+        snapshot = _generation_snapshot(strict)
+        caps = ModelCapabilities(
+            structured_response=structured,
+            tool_calling=ModelToolCallingCapabilities(
+                supported=True, strict_json_schema=strict
+            ),
+        )
+        snapshot.operation.current_candidate.model_selection.normalized_capabilities = (
+            caps
+        )
+        result = await _title_service(strict)._generate_title(
+            session_id="session-001",
+            generation_event_id="0" * 32,
+            context="Compare two insurance options",
+            snapshot=snapshot,
+        )
         assert result == "Generated title"
         assert modes == [expected_mode]
 
@@ -499,13 +562,11 @@ class TestSessionTitleHelpers:
         assert attempts == [("gpt-primary", 1), ("gpt-fallback", 1)]
         service.session_title_repository.advance_after_quota.assert_awaited_once()
 
-    @pytest.mark.parametrize("capability", [True, None])
-    async def test_contract_rejection_fallback_is_unknown_only(
+    async def test_supported_contract_rejection_does_not_change_mode(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        capability: bool | None,
     ) -> None:
-        """Only unknown capability changes mode after typed contract rejection."""
+        """A typed rejection cannot silently bypass a saved supported contract."""
         calls: list[dict[str, object]] = []
         rejection = model_provider_failure(
             operation="session_title",
@@ -531,30 +592,18 @@ class TestSessionTitleHelpers:
             generate,
         )
 
-        result = await _title_service(
-            capability
-        )._generate_title(  # Exercise the bounded compatibility transition.
+        result = await _title_service(True)._generate_title(
             session_id="session-001",
             generation_event_id="0" * 32,
             context="Compare two insurance options",
-            snapshot=_generation_snapshot(capability),
+            snapshot=_generation_snapshot(True),
         )
 
-        if capability is None:
-            assert result == "Plain compatibility title"
-            assert [call["output_mode"] for call in calls] == [
-                TitleOutputMode.STRUCTURED,
-                TitleOutputMode.PLAIN_TEXT,
-            ]
-            assert [call["attempt_number"] for call in calls] == [1, 1]
-            assert {call["model"] for call in calls} == {"gpt-test"}
-        else:
-            assert result is None
-            assert [call["output_mode"] for call in calls] == [
-                TitleOutputMode.STRUCTURED
-            ]
+        assert result is None
+        assert [call["output_mode"] for call in calls] == [TitleOutputMode.STRUCTURED]
+        assert [call["attempt_number"] for call in calls] == [1]
 
-    async def test_unknown_operational_failure_retries_structured_mode(
+    async def test_operational_failure_retries_structured_mode(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -587,34 +636,24 @@ class TestSessionTitleHelpers:
         )
 
         result = await _title_service(
-            None, max_retries=1
+            True, max_retries=1
         )._generate_title(  # Exercise retry interaction with the active mode.
             session_id="session-001",
             generation_event_id="0" * 32,
             context="Compare two insurance options",
-            snapshot=_generation_snapshot(None),
+            snapshot=_generation_snapshot(True),
         )
 
         assert result == "Retried structured title"
         assert modes == [TitleOutputMode.STRUCTURED, TitleOutputMode.STRUCTURED]
 
-    async def test_retry_after_transition_stays_in_plain_text_mode(
+    async def test_unsupported_structured_response_retries_plain_text_mode(
         self,
         monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """A transient failure after transition retries only plain text."""
+        """A plain-text operation retries without attempting a structured schema."""
         calls: list[dict[str, object]] = []
-        rejection = model_provider_failure(
-            operation="session_title",
-            provider="openai",
-            model="gpt-test",
-            integration="integration-001",
-            provider_message="Unsupported response format.",
-            status_code=400,
-            provider_code="invalid_request",
-            provider_error_type="invalid_request_error",
-            provider_error_param="text.format",
-        )
         rate_limit = model_provider_failure(
             operation="session_title",
             provider="openai",
@@ -630,8 +669,6 @@ class TestSessionTitleHelpers:
         async def generate(**kwargs: object) -> str:
             calls.append(kwargs)
             if len(calls) == 1:
-                raise rejection
-            if len(calls) == 2:
                 raise rate_limit
             return "Plain title after retry"
 
@@ -641,30 +678,39 @@ class TestSessionTitleHelpers:
             generate,
         )
 
-        result = await _title_service(
-            None, max_retries=1
-        )._generate_title(  # Exercise retry after the one-way transition.
+        result = await _title_service(False, max_retries=1)._generate_title(
             session_id="session-001",
             generation_event_id="0" * 32,
             context="Compare two insurance options",
-            snapshot=_generation_snapshot(None),
+            snapshot=_generation_snapshot(False),
         )
 
         assert result == "Plain title after retry"
         assert [call["output_mode"] for call in calls] == [
-            TitleOutputMode.STRUCTURED,
             TitleOutputMode.PLAIN_TEXT,
             TitleOutputMode.PLAIN_TEXT,
         ]
-        assert [call["attempt_number"] for call in calls] == [1, 1, 2]
+        assert [call["attempt_number"] for call in calls] == [1, 2]
+        records = [
+            record
+            for record in caplog.records
+            if record.name == session_title_module.logger.name
+        ]
+        assert [record.__dict__["title_output_mode"] for record in records] == [
+            "plain_text",
+        ]
+        assert len(records) == 1
+        assert all(record.__dict__["session_id"] == "session-001" for record in records)
+        assert all(record.__dict__["agent_id"] == "agent-001" for record in records)
+        assert all(record.__dict__["provider"] == "openai" for record in records)
+        assert all(record.__dict__["model"] == "gpt-test" for record in records)
+        assert all(record.exc_info is not None for record in records)
 
-    @pytest.mark.parametrize("capability", [True, None])
-    async def test_schema_decode_fallback_is_unknown_only(
+    async def test_supported_schema_decode_failure_does_not_change_mode(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        capability: bool | None,
     ) -> None:
-        """Only unknown capability changes mode after schema decode failure."""
+        """Schema decoding failure does not silently bypass the output contract."""
         modes: list[TitleOutputMode] = []
 
         async def generate(**kwargs: object) -> str:
@@ -681,24 +727,15 @@ class TestSessionTitleHelpers:
             generate,
         )
 
-        result = await _title_service(
-            capability
-        )._generate_title(  # Exercise schema-decode transition policy.
+        result = await _title_service(True)._generate_title(
             session_id="session-001",
             generation_event_id="0" * 32,
             context="Compare two insurance options",
-            snapshot=_generation_snapshot(capability),
+            snapshot=_generation_snapshot(True),
         )
 
-        if capability is None:
-            assert result == "Plain title after decode failure"
-            assert modes == [
-                TitleOutputMode.STRUCTURED,
-                TitleOutputMode.PLAIN_TEXT,
-            ]
-        else:
-            assert result is None
-            assert modes == [TitleOutputMode.STRUCTURED]
+        assert result is None
+        assert modes == [TitleOutputMode.STRUCTURED]
 
     async def test_openrouter_structured_title_requires_routable_parameters(
         self,
@@ -750,13 +787,10 @@ class TestSessionTitleHelpers:
         """Model call failures are logged by the title service and not re-raised."""
         service = SessionTitleService(
             sdk_factories=get_model_sdk_factories(),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             session_title_repository=_session_title_repository(
-                strict_json_schema=None,
+                structured_response=False,
                 session_manager=_session_manager,
-            ),
-            chatgpt_oauth_runtime_repository=_chatgpt_oauth_runtime_repository(
-                _session_manager
             ),
             model_stream_watchdog=make_test_model_stream_watchdog(),
             retry_policy=FailedRunRetryPolicy(
@@ -766,6 +800,34 @@ class TestSessionTitleHelpers:
                 max_backoff_seconds=0,
             ),
             external_channel_thread_title_service=_ThreadTitleService(),
+            model_read_repository=EngineModelReadRepository(
+                session_manager=(
+                    _chatgpt_oauth_runtime_repository(_session_manager)
+                ).session_manager,
+                integration_repository=(
+                    _chatgpt_oauth_runtime_repository(_session_manager)
+                ).integration_repository,
+            ),
+            runtime_token_resolver=EngineRuntimeTokenResolver(
+                oauth_clients=create_runtime_oauth_client_factories(),
+                chatgpt_repository=_chatgpt_oauth_runtime_repository(_session_manager),
+                xai_repository=XaiOAuthRuntimeRepository(
+                    session_manager=(
+                        _chatgpt_oauth_runtime_repository(_session_manager)
+                    ).session_manager,
+                    integration_repository=(
+                        _chatgpt_oauth_runtime_repository(_session_manager)
+                    ).integration_repository,
+                ),
+                kimi_repository=KimiOAuthRuntimeRepository(
+                    session_manager=(
+                        _chatgpt_oauth_runtime_repository(_session_manager)
+                    ).session_manager,
+                    integration_repository=(
+                        _chatgpt_oauth_runtime_repository(_session_manager)
+                    ).integration_repository,
+                ),
+            ),
         )
 
         failure = model_provider_failure(
@@ -833,6 +895,10 @@ class TestSessionTitleHelpers:
         assert fields["provider_failure_message"] == "Stream must be set to true"
         assert fields["provider_failure_fingerprint"] == failure.fingerprint
         assert fields["provider_failure_retry_outcome"] == "exhausted"
+        assert fields["provider"] == "openai"
+        # Bound selection context remains distinct from provider error diagnostics.
+        assert fields["model"] == "gpt-test"
+        assert records[0].exc_info is not None
 
     async def test_generate_title_propagates_unclassified_provider_failure(
         self,
@@ -842,13 +908,10 @@ class TestSessionTitleHelpers:
         """Standalone title generation does not retry unclassified outcomes."""
         service = SessionTitleService(
             sdk_factories=get_model_sdk_factories(),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             session_title_repository=_session_title_repository(
-                strict_json_schema=None,
+                structured_response=False,
                 session_manager=_session_manager,
-            ),
-            chatgpt_oauth_runtime_repository=_chatgpt_oauth_runtime_repository(
-                _session_manager
             ),
             model_stream_watchdog=make_test_model_stream_watchdog(),
             retry_policy=FailedRunRetryPolicy(
@@ -858,6 +921,34 @@ class TestSessionTitleHelpers:
                 max_backoff_seconds=0,
             ),
             external_channel_thread_title_service=_ThreadTitleService(),
+            model_read_repository=EngineModelReadRepository(
+                session_manager=(
+                    _chatgpt_oauth_runtime_repository(_session_manager)
+                ).session_manager,
+                integration_repository=(
+                    _chatgpt_oauth_runtime_repository(_session_manager)
+                ).integration_repository,
+            ),
+            runtime_token_resolver=EngineRuntimeTokenResolver(
+                oauth_clients=create_runtime_oauth_client_factories(),
+                chatgpt_repository=_chatgpt_oauth_runtime_repository(_session_manager),
+                xai_repository=XaiOAuthRuntimeRepository(
+                    session_manager=(
+                        _chatgpt_oauth_runtime_repository(_session_manager)
+                    ).session_manager,
+                    integration_repository=(
+                        _chatgpt_oauth_runtime_repository(_session_manager)
+                    ).integration_repository,
+                ),
+                kimi_repository=KimiOAuthRuntimeRepository(
+                    session_manager=(
+                        _chatgpt_oauth_runtime_repository(_session_manager)
+                    ).session_manager,
+                    integration_repository=(
+                        _chatgpt_oauth_runtime_repository(_session_manager)
+                    ).integration_repository,
+                ),
+            ),
         )
         attempts: list[int] = []
 
@@ -890,7 +981,7 @@ class TestSessionTitleHelpers:
                 session_id="session-001",
                 generation_event_id="0" * 32,
                 context="Compare two insurance options",
-                snapshot=_generation_snapshot(None),
+                snapshot=_generation_snapshot(False),
             )
 
         assert attempts == [1]
@@ -911,7 +1002,7 @@ class TestSessionTitleHelpers:
 
             async def get_by_id(
                 self,
-                session: AsyncSession,
+                session: ReadSession,
                 agent_session_id: str,
             ) -> AgentSession:
                 current = await super().get_by_id(session, agent_session_id)
@@ -920,15 +1011,15 @@ class TestSessionTitleHelpers:
         title_repository = MutableTitleRepository()
         service = SessionTitleService(
             sdk_factories=get_model_sdk_factories(),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             session_title_repository=SessionTitleRepository(
                 agent_repository=_AgentRepository(),
                 agent_session_repository=title_repository,
                 health_repository=_healthy_health_repository(),
+                active_capabilities_repository=_active_metadata_repository(
+                    structured_output=False
+                ),
                 session_manager=_session_manager,
-            ),
-            chatgpt_oauth_runtime_repository=_chatgpt_oauth_runtime_repository(
-                _session_manager
             ),
             model_stream_watchdog=make_test_model_stream_watchdog(),
             retry_policy=FailedRunRetryPolicy(
@@ -938,6 +1029,34 @@ class TestSessionTitleHelpers:
                 max_backoff_seconds=0,
             ),
             external_channel_thread_title_service=_ThreadTitleService(),
+            model_read_repository=EngineModelReadRepository(
+                session_manager=(
+                    _chatgpt_oauth_runtime_repository(_session_manager)
+                ).session_manager,
+                integration_repository=(
+                    _chatgpt_oauth_runtime_repository(_session_manager)
+                ).integration_repository,
+            ),
+            runtime_token_resolver=EngineRuntimeTokenResolver(
+                oauth_clients=create_runtime_oauth_client_factories(),
+                chatgpt_repository=_chatgpt_oauth_runtime_repository(_session_manager),
+                xai_repository=XaiOAuthRuntimeRepository(
+                    session_manager=(
+                        _chatgpt_oauth_runtime_repository(_session_manager)
+                    ).session_manager,
+                    integration_repository=(
+                        _chatgpt_oauth_runtime_repository(_session_manager)
+                    ).integration_repository,
+                ),
+                kimi_repository=KimiOAuthRuntimeRepository(
+                    session_manager=(
+                        _chatgpt_oauth_runtime_repository(_session_manager)
+                    ).session_manager,
+                    integration_repository=(
+                        _chatgpt_oauth_runtime_repository(_session_manager)
+                    ).integration_repository,
+                ),
+            ),
         )
         failure = model_provider_failure(
             operation="session_title",
@@ -970,7 +1089,7 @@ class TestSessionTitleHelpers:
                 session_id="session-001",
                 generation_event_id="0" * 32,
                 context="Compare two insurance options",
-                snapshot=_generation_snapshot(None),
+                snapshot=_generation_snapshot(False),
             )
         )
 
@@ -987,7 +1106,7 @@ class TestSessionTitleHelpers:
         class WinningRepository(_AgentSessionRepository):
             async def replace_initial_auto_title(
                 self,
-                session: AsyncSession,
+                session: WriteSession,
                 *,
                 session_id: str,
                 title: str,
@@ -1008,10 +1127,10 @@ class TestSessionTitleHelpers:
                 calls.append("commit")
 
         @asynccontextmanager
-        async def session_manager() -> AsyncIterator[RecordingSession]:
+        async def session_manager() -> AsyncIterator[WriteSession]:
             session = RecordingSession()
             try:
-                yield session
+                yield ReadWriteSession(session)
             except Exception:
                 raise
             else:
@@ -1033,15 +1152,15 @@ class TestSessionTitleHelpers:
         repository = WinningRepository()
         service = SessionTitleService(
             sdk_factories=get_model_sdk_factories(),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             session_title_repository=SessionTitleRepository(
                 agent_repository=_AgentRepository(),
                 agent_session_repository=repository,
                 health_repository=_healthy_health_repository(),
+                active_capabilities_repository=_active_metadata_repository(
+                    structured_output=False
+                ),
                 session_manager=session_manager,
-            ),
-            chatgpt_oauth_runtime_repository=_chatgpt_oauth_runtime_repository(
-                session_manager
             ),
             model_stream_watchdog=make_test_model_stream_watchdog(),
             retry_policy=FailedRunRetryPolicy(
@@ -1051,6 +1170,34 @@ class TestSessionTitleHelpers:
                 max_backoff_seconds=0,
             ),
             external_channel_thread_title_service=RecordingThreadTitleService(),
+            model_read_repository=EngineModelReadRepository(
+                session_manager=(
+                    _chatgpt_oauth_runtime_repository(session_manager)
+                ).session_manager,
+                integration_repository=(
+                    _chatgpt_oauth_runtime_repository(session_manager)
+                ).integration_repository,
+            ),
+            runtime_token_resolver=EngineRuntimeTokenResolver(
+                oauth_clients=create_runtime_oauth_client_factories(),
+                chatgpt_repository=_chatgpt_oauth_runtime_repository(session_manager),
+                xai_repository=XaiOAuthRuntimeRepository(
+                    session_manager=(
+                        _chatgpt_oauth_runtime_repository(session_manager)
+                    ).session_manager,
+                    integration_repository=(
+                        _chatgpt_oauth_runtime_repository(session_manager)
+                    ).integration_repository,
+                ),
+                kimi_repository=KimiOAuthRuntimeRepository(
+                    session_manager=(
+                        _chatgpt_oauth_runtime_repository(session_manager)
+                    ).session_manager,
+                    integration_repository=(
+                        _chatgpt_oauth_runtime_repository(session_manager)
+                    ).integration_repository,
+                ),
+            ),
         )
 
         async def generate_title(**kwargs: object) -> str:
@@ -1083,18 +1230,18 @@ class TestSessionTitleHelpers:
         calls: list[str] = []
 
         @asynccontextmanager
-        async def session_manager() -> AsyncIterator[AsyncSession]:
+        async def session_manager() -> AsyncIterator[WriteSession]:
             nonlocal active_contexts
             active_contexts += 1
             try:
-                yield AsyncMock(spec=AsyncSession)
+                yield ReadWriteSession(AsyncMock(spec=AsyncSession))
             finally:
                 active_contexts -= 1
 
         class WinningRepository(_AgentSessionRepository):
             async def replace_initial_auto_title(
                 self,
-                session: AsyncSession,
+                session: WriteSession,
                 *,
                 session_id: str,
                 title: str,
@@ -1102,7 +1249,9 @@ class TestSessionTitleHelpers:
             ) -> AgentSession:
                 del session, session_id, event_id
                 return (
-                    await self.get_by_id(AsyncMock(spec=AsyncSession), "session-001")
+                    await self.get_by_id(
+                        ReadWriteSession(AsyncMock(spec=AsyncSession)), "session-001"
+                    )
                 ).model_copy(
                     update={
                         "title": title,
@@ -1152,15 +1301,15 @@ class TestSessionTitleHelpers:
         )
         service = SessionTitleService(
             sdk_factories=get_model_sdk_factories(),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
             session_title_repository=SessionTitleRepository(
                 agent_repository=_AgentRepository(),
                 agent_session_repository=WinningRepository(),
                 health_repository=_healthy_health_repository(),
+                active_capabilities_repository=_active_metadata_repository(
+                    structured_output=False
+                ),
                 session_manager=session_manager,
-            ),
-            chatgpt_oauth_runtime_repository=_chatgpt_oauth_runtime_repository(
-                session_manager
             ),
             model_stream_watchdog=make_test_model_stream_watchdog(),
             retry_policy=FailedRunRetryPolicy(
@@ -1170,6 +1319,34 @@ class TestSessionTitleHelpers:
                 max_backoff_seconds=0,
             ),
             external_channel_thread_title_service=RecordingThreadTitleService(),
+            model_read_repository=EngineModelReadRepository(
+                session_manager=(
+                    _chatgpt_oauth_runtime_repository(session_manager)
+                ).session_manager,
+                integration_repository=(
+                    _chatgpt_oauth_runtime_repository(session_manager)
+                ).integration_repository,
+            ),
+            runtime_token_resolver=EngineRuntimeTokenResolver(
+                oauth_clients=create_runtime_oauth_client_factories(),
+                chatgpt_repository=_chatgpt_oauth_runtime_repository(session_manager),
+                xai_repository=XaiOAuthRuntimeRepository(
+                    session_manager=(
+                        _chatgpt_oauth_runtime_repository(session_manager)
+                    ).session_manager,
+                    integration_repository=(
+                        _chatgpt_oauth_runtime_repository(session_manager)
+                    ).integration_repository,
+                ),
+                kimi_repository=KimiOAuthRuntimeRepository(
+                    session_manager=(
+                        _chatgpt_oauth_runtime_repository(session_manager)
+                    ).session_manager,
+                    integration_repository=(
+                        _chatgpt_oauth_runtime_repository(session_manager)
+                    ).integration_repository,
+                ),
+            ),
         )
 
         result = await service.generate_from_initial_prompt(
@@ -1288,7 +1465,7 @@ def _external_channel_event(
 
 
 def _model_selection(
-    strict_json_schema: bool | None = None,
+    structured_response: bool = False,
 ) -> AgentModelSelection:
     return AgentModelSelection(
         llm_provider_integration_id="integration-001",
@@ -1296,23 +1473,22 @@ def _model_selection(
         model_identifier="gpt-test",
         model_display_name="GPT Test",
         model_developer=LLMModelDeveloper.OPENAI,
+        pricing=None,
         normalized_capabilities=ModelCapabilities(
-            tool_calling=ModelToolCallingCapabilities(
-                strict_json_schema=strict_json_schema
-            )
+            structured_response=structured_response is True
         ),
         model_snapshot={},
     )
 
 
 class _AgentRepository(AgentRepository):
-    def __init__(self, strict_json_schema: bool | None = None) -> None:
-        self.strict_json_schema = strict_json_schema
+    def __init__(self, structured_response: bool = False) -> None:
+        self.structured_response = structured_response
 
-    async def get_by_id(self, session: AsyncSession, agent_id: str) -> Agent:
+    async def get_by_id(self, session: ReadSession, agent_id: str) -> Agent:
         del session, agent_id
         now = datetime.datetime.now(datetime.UTC)
-        selection = _model_selection(self.strict_json_schema)
+        selection = _model_selection(self.structured_response)
         return Agent(
             id="agent-001",
             workspace_id="workspace-001",
@@ -1349,7 +1525,7 @@ class _AgentRepository(AgentRepository):
             updated_at=now,
         )
 
-    async def lock_by_id(self, session: AsyncSession, agent_id: str) -> Agent:
+    async def lock_by_id(self, session: WriteSession, agent_id: str) -> Agent:
         """Return the same test Agent under the repository lock seam."""
         return await self.get_by_id(session, agent_id)
 
@@ -1360,7 +1536,7 @@ class _IntegrationRepository(LLMProviderIntegrationRepository):
 
     async def get_by_id_with_secrets(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         integration_id: str,
     ) -> LLMProviderIntegrationWithSecrets:
         del session, integration_id
@@ -1398,19 +1574,16 @@ class _ThreadTitleService(ExternalChannelThreadTitleService):
 
 
 def _title_service(
-    strict_json_schema: bool | None,
+    structured_response: bool,
     *,
     max_retries: int = 0,
 ) -> SessionTitleService:
     return SessionTitleService(
         sdk_factories=get_model_sdk_factories(),
-        model_metadata_service=make_test_model_metadata_service(snapshot=None),
+        model_metadata_service=make_test_model_metadata_service(source=None),
         session_title_repository=_session_title_repository(
-            strict_json_schema=strict_json_schema,
+            structured_response=structured_response,
             session_manager=_session_manager,
-        ),
-        chatgpt_oauth_runtime_repository=_chatgpt_oauth_runtime_repository(
-            _session_manager
         ),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         retry_policy=FailedRunRetryPolicy(
@@ -1420,19 +1593,50 @@ def _title_service(
             max_backoff_seconds=0,
         ),
         external_channel_thread_title_service=_ThreadTitleService(),
+        model_read_repository=EngineModelReadRepository(
+            session_manager=(
+                _chatgpt_oauth_runtime_repository(_session_manager)
+            ).session_manager,
+            integration_repository=(
+                _chatgpt_oauth_runtime_repository(_session_manager)
+            ).integration_repository,
+        ),
+        runtime_token_resolver=EngineRuntimeTokenResolver(
+            oauth_clients=create_runtime_oauth_client_factories(),
+            chatgpt_repository=_chatgpt_oauth_runtime_repository(_session_manager),
+            xai_repository=XaiOAuthRuntimeRepository(
+                session_manager=(
+                    _chatgpt_oauth_runtime_repository(_session_manager)
+                ).session_manager,
+                integration_repository=(
+                    _chatgpt_oauth_runtime_repository(_session_manager)
+                ).integration_repository,
+            ),
+            kimi_repository=KimiOAuthRuntimeRepository(
+                session_manager=(
+                    _chatgpt_oauth_runtime_repository(_session_manager)
+                ).session_manager,
+                integration_repository=(
+                    _chatgpt_oauth_runtime_repository(_session_manager)
+                ).integration_repository,
+            ),
+        ),
     )
 
 
 def _session_title_repository(
     *,
-    strict_json_schema: bool | None,
-    session_manager: SessionManager[AsyncSession],
+    structured_response: bool,
+    session_manager: SessionManager[WriteSession],
 ) -> SessionTitleRepository:
     """Create the title database operation repository for tests."""
     return SessionTitleRepository(
-        agent_repository=_AgentRepository(strict_json_schema),
+        agent_repository=_AgentRepository(structured_response),
         agent_session_repository=_AgentSessionRepository(),
         health_repository=_healthy_health_repository(),
+        active_capabilities_repository=_active_metadata_repository(
+            structured_output=structured_response is True
+        ),
         session_manager=session_manager,
     )
 
@@ -1451,7 +1655,7 @@ def _healthy_health_repository() -> AsyncMock:
 
 
 def _chatgpt_oauth_runtime_repository(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
 ) -> ChatGPTOAuthRuntimeRepository:
     """Create the OAuth runtime persistence repository for tests."""
     return ChatGPTOAuthRuntimeRepository(
@@ -1461,10 +1665,10 @@ def _chatgpt_oauth_runtime_repository(
 
 
 def _generation_snapshot(
-    strict_json_schema: bool | None,
+    structured_response: bool,
 ) -> SessionTitleGenerationSnapshot:
     """Create a completed title generation database snapshot."""
-    selection = _model_selection(strict_json_schema)
+    selection = _model_selection(structured_response)
     option = SelectableModelOption(
         label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
         candidates=[
@@ -1500,15 +1704,16 @@ def _generation_snapshot(
 
 
 @asynccontextmanager
-async def _session_manager() -> AsyncIterator[AsyncSession]:
-    session: AsyncSession = AsyncMock(spec=AsyncSession)
+async def _session_manager() -> AsyncIterator[WriteSession]:
+    _raw_session: AsyncSession = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
     yield session
 
 
 class _AgentSessionRepository(AgentSessionRepository):
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> AgentSession:
         del session, agent_session_id
@@ -1541,7 +1746,7 @@ class _AgentSessionRepository(AgentSessionRepository):
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_session_id: str,
     ) -> AgentSession:
         """Return the same Session under the title operation lock seam."""
@@ -1549,7 +1754,7 @@ class _AgentSessionRepository(AgentSessionRepository):
 
     async def set_title_model_operation_state(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         generation_event_id: str,
@@ -1561,7 +1766,7 @@ class _AgentSessionRepository(AgentSessionRepository):
 
     async def replace_initial_auto_title(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         title: str,
@@ -1569,3 +1774,59 @@ class _AgentSessionRepository(AgentSessionRepository):
     ) -> AgentSession | None:
         del session, session_id, title, event_id
         raise AssertionError("replace should not be called when generation fails")
+
+
+def _active_metadata_repository(*, structured_output: bool) -> AsyncMock:
+    """Capture synthetic exact declarations, never the saved capability object."""
+    repository = AsyncMock(spec=ActiveModelCapabilitiesRepository)
+
+    async def capture(
+        session: WriteSession,
+        *,
+        workspace_id: str,
+        identities: tuple[ConfiguredModelIdentity, ...],
+    ) -> CapturedActiveChoiceInputs:
+        del session
+        choices = []
+        for identity in identities:
+            key = catalog_source_keys(
+                provider=identity.provider, model_identifier=identity.model_identifier
+            )[0]
+            source = decode_catalog_source(
+                json.dumps(
+                    {
+                        key.source_model_key: {
+                            "litellm_provider": key.provider,
+                            "mode": "chat",
+                            "supported_endpoints": ["/v1/responses"],
+                            "supported_modalities": ["text"],
+                            "supported_output_modalities": ["text"],
+                            "supports_function_calling": True,
+                            "supports_response_schema": structured_output,
+                            "max_input_tokens": 128000,
+                            "max_output_tokens": 16384,
+                        }
+                    }
+                ).encode()
+            ).models[0]
+            choices.append(
+                CapturedStoredChoice(
+                    identity=identity,
+                    source_metadata=None,
+                    source_models=(source,),
+                    supported_execution_options=(),
+                    model_developer=None,
+                    catalog_id="synthetic-local-catalog",
+                )
+            )
+        return CapturedActiveChoiceInputs(
+            workspace_id=workspace_id,
+            choices=tuple(choices),
+            catalog_choices=(),
+            source_metadata=None,
+            source_expectations=(),
+        )
+
+    repository.capture_exact_choices_in_session.side_effect = capture
+    repository.inputs_match_in_session.return_value = True
+    return repository

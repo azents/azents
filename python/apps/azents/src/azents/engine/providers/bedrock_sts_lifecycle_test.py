@@ -100,12 +100,12 @@ class STSBoundary:
         # over-narrow Callable[..., None] signature.
         self.session.events.register(
             "before-send.sts.AssumeRole",
-            self.sts_response,  # ty: ignore[invalid-argument-type]
+            self.sts_response,  # ty: ignore[invalid-argument-type] — public before-send accepts AWSResponse, but the SDK stub narrows hook results to None.
         )
         self.session.events.register("after-call.sts.AssumeRole", self.sts_parsed)
         self.session.events.register(
             "before-send.bedrock-runtime.ConverseStream",
-            self.bedrock_response,  # ty: ignore[invalid-argument-type]
+            self.bedrock_response,  # ty: ignore[invalid-argument-type] — public before-send accepts AWSResponse, but the SDK stub narrows hook results to None.
         )
 
     def client_class(self, *, base_classes: list[type], **_: object) -> None:
@@ -169,6 +169,7 @@ class STSCall:
             event
             async for event in self.adapter.stream(
                 PydanticAIRequest(
+                    native_replay_context=None,
                     provider="aws_bedrock",
                     model=_MODEL,
                     assembly_metadata=None,

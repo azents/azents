@@ -6,7 +6,6 @@ from typing import Annotated
 
 import sqlalchemy as sa
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
@@ -20,17 +19,18 @@ from azents.core.system_setting import (
     SystemSettingRegistry,
     SystemSettingSection,
 )
+from azents.core.system_setting_deps import (
+    get_system_setting_environment,
+    get_system_setting_generation_hasher,
+)
 from azents.core.system_setting_registry import get_system_setting_registry
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.external_account_oauth import RDBExternalAccountOAuthAttempt
 from azents.rdb.models.session import RDBSession
 from azents.rdb.models.user import RDBUser
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.system_setting.repository import SystemSettingRepository
-from azents.services.system_setting.service import (
-    get_system_setting_environment,
-    get_system_setting_generation_hasher,
-)
 
 from .data import (
     ExternalAccountOAuthAttempt,
@@ -45,7 +45,7 @@ class ExternalAccountOAuthAttemptRepository:
     def __init__(
         self,
         session_manager: Annotated[
-            SessionManager[AsyncSession],
+            SessionManager[WriteSession],
             Depends(get_session_manager),
         ],
         system_setting_repository: Annotated[
@@ -96,8 +96,8 @@ class ExternalAccountOAuthAttemptRepository:
                 failure_code=None,
             )
             row.id = create.id
-            session.add(row)
-            await session.flush()
+            session.write_session.add(row)
+            await session.write_session.flush()
             return _build(row)
 
     async def claim_open(
@@ -122,18 +122,20 @@ class ExternalAccountOAuthAttemptRepository:
                 session,
                 section=section,
             )
-            user = await session.scalar(
+            user = await session.write_session.scalar(
                 sa.select(RDBUser)
                 .where(RDBUser.id == user_id)
-                .with_for_update(nowait=True)
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
-            auth_session = await session.scalar(
+            auth_session = await session.write_session.scalar(
                 sa.select(RDBSession)
                 .where(
                     RDBSession.id == auth_session_id,
                     RDBSession.user_id == user_id,
                 )
-                .with_for_update(nowait=True)
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
             if (
                 user is None
@@ -144,7 +146,7 @@ class ExternalAccountOAuthAttemptRepository:
                 or current_generation != setting_generation
             ):
                 return None
-            row = await session.scalar(
+            row = await session.write_session.scalar(
                 sa.select(RDBExternalAccountOAuthAttempt)
                 .where(
                     RDBExternalAccountOAuthAttempt.state_hash == state_hash,
@@ -158,13 +160,26 @@ class ExternalAccountOAuthAttemptRepository:
                     == ExternalAccountOAuthAttemptStatus.OPEN,
                     RDBExternalAccountOAuthAttempt.expires_at > now,
                 )
-                .with_for_update(nowait=True)
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
             if row is None:
                 return None
+            current_time = await session.write_session.scalar(
+                sa.select(sa.func.clock_timestamp())
+            )
+            if not isinstance(current_time, datetime.datetime):
+                raise TypeError("Database clock did not return a datetime.")
+            current_time = max(now, current_time)
+            if (
+                auth_session.expires_at <= current_time
+                or row.expires_at <= current_time
+                or row.status is not ExternalAccountOAuthAttemptStatus.OPEN
+            ):
+                return None
             row.status = ExternalAccountOAuthAttemptStatus.CLAIMED
-            row.claimed_at = now
-            await session.flush()
+            row.claimed_at = current_time
+            await session.write_session.flush()
             return _build(row)
 
     async def complete(
@@ -175,7 +190,7 @@ class ExternalAccountOAuthAttemptRepository:
     ) -> bool:
         """Mark one claimed attempt complete."""
         async with self.session_manager() as session:
-            result = await session.execute(
+            result = await session.write_session.execute(
                 sa.update(RDBExternalAccountOAuthAttempt)
                 .where(
                     RDBExternalAccountOAuthAttempt.id == attempt_id,
@@ -199,7 +214,7 @@ class ExternalAccountOAuthAttemptRepository:
     ) -> bool:
         """Mark one claimed attempt failed with a sanitized code."""
         async with self.session_manager() as session:
-            result = await session.execute(
+            result = await session.write_session.execute(
                 sa.update(RDBExternalAccountOAuthAttempt)
                 .where(
                     RDBExternalAccountOAuthAttempt.id == attempt_id,
@@ -228,7 +243,7 @@ class ExternalAccountOAuthAttemptRepository:
     ) -> str:
         """Classify a rejected callback without disclosing durable attempt data."""
         async with self.session_manager() as session:
-            row = await session.scalar(
+            row = await session.write_session.scalar(
                 sa.select(RDBExternalAccountOAuthAttempt).where(
                     RDBExternalAccountOAuthAttempt.state_hash == state_hash,
                 )
@@ -243,8 +258,10 @@ class ExternalAccountOAuthAttemptRepository:
                 return "invalid_callback"
             if row.setting_generation != setting_generation:
                 return "configuration_changed"
-            user = await session.scalar(sa.select(RDBUser).where(RDBUser.id == user_id))
-            auth_session = await session.scalar(
+            user = await session.write_session.scalar(
+                sa.select(RDBUser).where(RDBUser.id == user_id)
+            )
+            auth_session = await session.write_session.scalar(
                 sa.select(RDBSession).where(
                     RDBSession.id == auth_session_id,
                     RDBSession.user_id == user_id,
@@ -274,28 +291,22 @@ class ExternalAccountOAuthAttemptRepository:
         if limit <= 0:
             return ExternalAccountOAuthAttemptCleanupSummary(deleted_count=0)
         async with self.session_manager() as session:
-            rows = (
-                await session.scalars(
-                    sa.select(RDBExternalAccountOAuthAttempt.id)
-                    .where(
-                        sa.or_(
-                            RDBExternalAccountOAuthAttempt.created_at <= cutoff,
-                            RDBExternalAccountOAuthAttempt.expires_at <= cutoff,
-                        )
-                    )
-                    .order_by(
-                        RDBExternalAccountOAuthAttempt.created_at,
-                        RDBExternalAccountOAuthAttempt.id,
-                    )
-                    .with_for_update(skip_locked=True)
-                    .limit(limit)
+            expired = sa.or_(
+                RDBExternalAccountOAuthAttempt.created_at <= cutoff,
+                RDBExternalAccountOAuthAttempt.expires_at <= cutoff,
+            )
+            candidates = (
+                sa.select(RDBExternalAccountOAuthAttempt.id)
+                .where(expired)
+                .order_by(
+                    RDBExternalAccountOAuthAttempt.created_at,
+                    RDBExternalAccountOAuthAttempt.id,
                 )
-            ).all()
-            if not rows:
-                return ExternalAccountOAuthAttemptCleanupSummary(deleted_count=0)
-            result = await session.execute(
+                .limit(limit)
+            )
+            result = await session.write_session.execute(
                 sa.delete(RDBExternalAccountOAuthAttempt)
-                .where(RDBExternalAccountOAuthAttempt.id.in_(rows))
+                .where(RDBExternalAccountOAuthAttempt.id.in_(candidates), expired)
                 .returning(RDBExternalAccountOAuthAttempt.id)
             )
             return ExternalAccountOAuthAttemptCleanupSummary(
@@ -304,7 +315,7 @@ class ExternalAccountOAuthAttemptRepository:
 
     async def _current_setting_generation(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         section: SystemSettingSection,
     ) -> str:

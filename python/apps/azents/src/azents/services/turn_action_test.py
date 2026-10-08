@@ -1,7 +1,5 @@
 """TurnAction capability registry tests."""
 
-from typing import cast
-
 import pytest
 from pydantic import ValidationError
 
@@ -24,7 +22,7 @@ from azents.engine.events.action_messages import (
     SkillAction,
     TurnAction,
 )
-from azents.engine.tools.skill import SkillStateStore
+from azents.repos.skill_state_store import SkillStateStore
 
 from .turn_action import (
     TurnActionAdmissionError,
@@ -41,7 +39,7 @@ _PROFILE = RequestedInferenceProfile(
 )
 
 
-class _SkillStore:
+class _SkillStore(SkillStateStore):
     """Skill projection store test double."""
 
     def __init__(self, state: SkillProjectionState | None = None) -> None:
@@ -58,7 +56,7 @@ def _registry(
 ) -> TurnActionCapabilityRegistry:
     """Create a registry whose stateful dependencies are not used by policy tests."""
     return TurnActionCapabilityRegistry(
-        skill_store=cast(SkillStateStore, skill_store or _SkillStore()),
+        skill_store=skill_store or _SkillStore(),
         vfs_projection_service=None,
     )
 

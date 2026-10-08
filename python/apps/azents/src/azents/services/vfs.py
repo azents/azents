@@ -7,16 +7,15 @@ import mimetypes
 import pathlib
 import posixpath
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from importlib import resources
 from importlib.resources.abc import Traversable
-from typing import Any, AsyncContextManager, Generic, Protocol, TypeVar
+from typing import Any
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.tools import ToolkitExecutionMode, ToolkitProvider
 from azents.core.vfs import (
-    AZENTS_VFS_SUPPORTED_MOUNTS,
+    AZENTS_VFS_SKILLS_MOUNT,
     VfsFileEntry,
     VfsProjection,
     VfsSourceRevision,
@@ -27,16 +26,9 @@ from azents.core.vfs import (
     make_vfs_source_revision,
     make_vfs_uri,
 )
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
-from azents.services.session_resource_authority import SessionExecutionOwner
+from azents.repos.vfs_projection_operations import VfsProjectionOperationProtocol
 
 logger = logging.getLogger(__name__)
-
-VfsSessionT_contra = TypeVar(
-    "VfsSessionT_contra",
-    bound="VfsSession",
-    contravariant=True,
-)
 
 GLOBAL_RELEASE_SOURCE = VfsSourceSpec(
     source_id="release:azents",
@@ -72,119 +64,6 @@ class VfsResolvedFile:
     projection_revision_id: str
     projection_hash: str
     entry: VfsFileEntry
-
-
-class VfsSession(Protocol):
-    """Database session operation used by VFS projection persistence."""
-
-    async def commit(self) -> None:
-        """Commit a persisted projection."""
-        ...
-
-
-class VfsRun(Protocol):
-    """Run fields used to validate one VFS projection."""
-
-    @property
-    def session_id(self) -> str:
-        """Return the owning Session id."""
-        ...
-
-    @property
-    def vfs_projection(self) -> VfsProjection | None:
-        """Return the persisted VFS projection."""
-        ...
-
-
-class VfsSessionRecord(Protocol):
-    """Session ownership fields used by VFS projection lookup."""
-
-    @property
-    def agent_id(self) -> str:
-        """Return the owning Agent id."""
-        ...
-
-    @property
-    def workspace_id(self) -> str:
-        """Return the owning Workspace id."""
-        ...
-
-
-class VfsToolkitConfig(Protocol):
-    """Toolkit configuration fields used to select VFS release sources."""
-
-    @property
-    def enabled(self) -> bool:
-        """Return whether the toolkit is enabled."""
-        ...
-
-    @property
-    def workspace_id(self) -> str:
-        """Return the owning Workspace id."""
-        ...
-
-    @property
-    def toolkit_type(self) -> str:
-        """Return the registered Toolkit provider type."""
-        ...
-
-
-class VfsEffectiveToolkitConfig(Protocol):
-    """Effective Toolkit projection used to select release sources."""
-
-    @property
-    def toolkit(self) -> VfsToolkitConfig:
-        """Return the effective ToolkitConfig."""
-        ...
-
-
-class VfsRunRepository(Protocol[VfsSessionT_contra]):
-    """Run repository operations used by VFS projection service."""
-
-    async def get_by_id(
-        self,
-        session: VfsSessionT_contra,
-        run_id: str,
-    ) -> VfsRun | None:
-        """Load one Agent run."""
-        ...
-
-    async def set_vfs_projection_if_unset(
-        self,
-        session: VfsSessionT_contra,
-        *,
-        run_id: str,
-        session_id: str,
-        projection: VfsProjection,
-    ) -> VfsProjection:
-        """Persist a VFS projection exactly once."""
-        ...
-
-
-class VfsSessionRepository(Protocol[VfsSessionT_contra]):
-    """Session repository operation used by VFS projection service."""
-
-    async def get_by_id(
-        self,
-        session: VfsSessionT_contra,
-        agent_session_id: str,
-    ) -> VfsSessionRecord | None:
-        """Load one Agent session."""
-        ...
-
-
-class VfsToolkitRepository(Protocol[VfsSessionT_contra]):
-    """Effective Toolkit operation used by VFS projection service."""
-
-    async def list_effective_for_agent(
-        self,
-        session: VfsSessionT_contra,
-        agent_id: str,
-        *,
-        workspace_id: str,
-    ) -> Sequence[VfsEffectiveToolkitConfig]:
-        """List enabled ToolkitConfigs effective for one Agent."""
-        ...
 
 
 class ReleaseVfsCatalog:
@@ -228,29 +107,22 @@ class ReleaseVfsCatalog:
 
 
 @dataclasses.dataclass(frozen=True)
-class VfsProjectionService(Generic[VfsSessionT_contra]):
+class VfsProjectionService:
     """Build and persist immutable VFS projections for Agent runs."""
 
-    session_manager: Callable[[], AsyncContextManager[VfsSessionT_contra]]
+    operations: VfsProjectionOperationProtocol
     toolkit_registry: Mapping[str, ToolkitProvider[Any]]
     catalog: ReleaseVfsCatalog
-    agent_run_repository: VfsRunRepository[VfsSessionT_contra]
-    agent_session_repository: VfsSessionRepository[VfsSessionT_contra]
-    toolkit_repository: VfsToolkitRepository[VfsSessionT_contra]
     required_provider_sources: Mapping[str, ToolkitProvider[Any]]
 
     def for_execution(
-        self: "VfsProjectionService[AsyncSession]",
+        self,
         owner: SessionExecutionOwner,
-    ) -> "VfsProjectionService[AsyncSession]":
+    ) -> "VfsProjectionService":
         """Return an execution-local service with owner-fenced DB scopes."""
         return dataclasses.replace(
             self,
-            session_manager=OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            ),
+            operations=self.operations.with_owner(owner),
         )
 
     async def build_preview(
@@ -312,36 +184,22 @@ class VfsProjectionService(Generic[VfsSessionT_contra]):
         execution_mode: ToolkitExecutionMode,
     ) -> VfsProjection:
         """Return the run's immutable projection, creating it exactly once."""
-        async with self.session_manager() as session:
-            run = await self.agent_run_repository.get_by_id(session, run_id)
-            agent_session = await self.agent_session_repository.get_by_id(
-                session,
-                session_id,
-            )
-        if run is None or run.session_id != session_id or agent_session is None:
+        snapshot = await self.operations.read_run(run_id=run_id, session_id=session_id)
+        if snapshot is None or snapshot.run_session_id != session_id:
             raise ValueError("AgentRun not found in session")
-        if (
-            agent_session.agent_id != agent_id
-            or agent_session.workspace_id != workspace_id
-        ):
+        if snapshot.agent_id != agent_id or snapshot.workspace_id != workspace_id:
             raise ValueError("AgentRun ownership mismatch")
-        if run.vfs_projection is not None:
-            return run.vfs_projection
+        if snapshot.projection is not None:
+            return snapshot.projection
 
         candidate = await self._build_projection(
             agent_id=agent_id,
             workspace_id=workspace_id,
             include_required_sources=execution_mode is ToolkitExecutionMode.ROOT,
         )
-        async with self.session_manager() as session:
-            projection = await self.agent_run_repository.set_vfs_projection_if_unset(
-                session,
-                run_id=run_id,
-                session_id=session_id,
-                projection=candidate,
-            )
-            await session.commit()
-        return projection
+        return await self.operations.publish_projection(
+            run_id=run_id, session_id=session_id, projection=candidate
+        )
 
     async def load_run_projection(
         self,
@@ -352,28 +210,20 @@ class VfsProjectionService(Generic[VfsSessionT_contra]):
         workspace_id: str,
     ) -> VfsProjection:
         """Load one run projection after validating its complete ownership chain."""
-        async with self.session_manager() as session:
-            run = await self.agent_run_repository.get_by_id(session, run_id)
-            agent_session = await self.agent_session_repository.get_by_id(
-                session,
-                session_id,
-            )
-        if run is None or run.session_id != session_id or agent_session is None:
+        snapshot = await self.operations.read_run(run_id=run_id, session_id=session_id)
+        if snapshot is None or snapshot.run_session_id != session_id:
             raise VfsFileResolutionError("not_found", "Run VFS projection not found")
-        if (
-            agent_session.agent_id != agent_id
-            or agent_session.workspace_id != workspace_id
-        ):
+        if snapshot.agent_id != agent_id or snapshot.workspace_id != workspace_id:
             raise VfsFileResolutionError(
                 "permission_denied",
                 "Run VFS projection access denied",
             )
-        if run.vfs_projection is None:
+        if snapshot.projection is None:
             raise VfsFileResolutionError(
                 "storage_unavailable",
                 "Run VFS projection is unavailable",
             )
-        return run.vfs_projection
+        return snapshot.projection
 
     async def projection_for_actions(
         self,
@@ -443,7 +293,7 @@ class VfsProjectionService(Generic[VfsSessionT_contra]):
         except VfsUriError as exc:
             raise VfsFileResolutionError("invalid_uri", str(exc)) from exc
         mount = canonical_uri.split("://", 1)[1].split("/", 1)[0]
-        if mount not in AZENTS_VFS_SUPPORTED_MOUNTS:
+        if mount != AZENTS_VFS_SKILLS_MOUNT:
             raise VfsFileResolutionError(
                 "unsupported_mount",
                 f"Unsupported azents:// mount: {mount}",
@@ -474,17 +324,13 @@ class VfsProjectionService(Generic[VfsSessionT_contra]):
         include_required_sources: bool,
     ) -> list[VfsSourceSpec]:
         """Return enabled Provider release sources eligible for one Agent."""
-        async with self.session_manager() as session:
-            effective_toolkits = await self.toolkit_repository.list_effective_for_agent(
-                session,
-                agent_id,
-                workspace_id=workspace_id,
-            )
+        effective_toolkits = await self.operations.list_effective_toolkits(
+            agent_id=agent_id, workspace_id=workspace_id
+        )
         eligible_providers: dict[str, ToolkitProvider[Any]] = (
             dict(self.required_provider_sources) if include_required_sources else {}
         )
-        for effective in effective_toolkits:
-            toolkit = effective.toolkit
+        for toolkit in effective_toolkits:
             if not toolkit.enabled or toolkit.workspace_id != workspace_id:
                 continue
             provider = self.toolkit_registry.get(toolkit.toolkit_type)
@@ -522,7 +368,7 @@ def _load_release_source(spec: VfsSourceSpec) -> VfsSourceRevision:
             raise ValueError(
                 f"VFS source file must be below a mount directory: {relative_path}"
             )
-        if mount not in AZENTS_VFS_SUPPORTED_MOUNTS:
+        if mount != AZENTS_VFS_SKILLS_MOUNT:
             raise ValueError(f"Unsupported VFS source mount: {mount}")
         canonical_uri = make_vfs_uri(mount, spec.namespace, mount_relative)
         body = item.read_bytes()

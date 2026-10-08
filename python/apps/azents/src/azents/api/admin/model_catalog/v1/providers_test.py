@@ -19,7 +19,7 @@ async def test_anthropic_supports_system_catalog_refresh() -> None:
         return_value=SystemCatalogProjectionSummary(
             provider=LLMProvider.ANTHROPIC,
             catalog_id="catalog-id",
-            snapshot_id="snapshot-id",
+            last_success_at=None,
             visible_count=1,
             hidden_count=0,
         )

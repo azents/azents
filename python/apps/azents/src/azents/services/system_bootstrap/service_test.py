@@ -1,6 +1,7 @@
 """SystemBootstrapService tests."""
 
 import asyncio
+import dataclasses
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -10,10 +11,10 @@ import sqlalchemy as sa
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
-    AsyncSession,
     async_sessionmaker,
 )
 
+import azents.services.system_bootstrap.service as bootstrap_module
 from azents.core.config import (
     AuthConfig,
     JWTConfig,
@@ -24,8 +25,10 @@ from azents.core.config import (
 from azents.core.enums import SystemUserRole
 from azents.rdb.models.system_user_role import RDBSystemBootstrapState
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.password_login import PasswordLoginRepository
 from azents.repos.session import SessionRepository
+from azents.repos.system_bootstrap.operations import SystemBootstrapOperationRepository
 from azents.repos.system_bootstrap.repository import SystemBootstrapRepository
 from azents.repos.system_user_role.repository import SystemUserRoleRepository
 from azents.repos.user import UserRepository
@@ -54,17 +57,20 @@ _TEST_AUTH_CONFIG = AuthConfig(
 
 
 def _service(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     *,
     setup_token: str | None,
 ) -> SystemBootstrapService:
     return SystemBootstrapService(
-        bootstrap_repository=SystemBootstrapRepository(),
-        system_role_repository=SystemUserRoleRepository(),
-        user_repository=UserRepository(),
-        password_login_repository=PasswordLoginRepository(),
-        session_repository=SessionRepository(),
-        session_manager=session_manager,
+        operation_repository=SystemBootstrapOperationRepository(
+            bootstrap_repository=SystemBootstrapRepository(),
+            role_repository=SystemUserRoleRepository(),
+            user_repository=UserRepository(),
+            password_repository=PasswordLoginRepository(),
+            session_repository=SessionRepository(),
+            session_manager=session_manager,
+            read_session_manager=session_manager,
+        ),
         auth_config=_TEST_AUTH_CONFIG,
         bootstrap_config=SystemBootstrapConfig(setup_token=setup_token),
     )
@@ -72,20 +78,21 @@ def _service(
 
 def _make_committing_session_manager(
     rdb_engine: AsyncEngine,
-) -> SessionManager[AsyncSession]:
+) -> SessionManager[WriteSession]:
     """Create independent committing sessions for concurrency tests."""
     session_factory = async_sessionmaker(rdb_engine, expire_on_commit=False)
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        async with session_factory.begin() as session:
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
+        async with session_factory.begin() as raw_session:
+            session = ReadWriteSession(raw_session)
             yield session
 
     return session_manager
 
 
 class _FailingConsumeRepository(SystemBootstrapRepository):
-    async def consume(self, session: AsyncSession) -> None:
+    async def consume(self, session: WriteSession) -> None:
         """Fail after all account records have been staged."""
         del session
         raise RuntimeError("Injected bootstrap consume failure")
@@ -102,7 +109,7 @@ def _input(setup_token: str, *, password: str = "Aa123456!") -> SystemBootstrapI
 
 
 async def test_generated_token_is_logged_once_and_bootstraps_without_workspace(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     service = _service(rdb_session_manager, setup_token=None)
@@ -152,7 +159,7 @@ async def test_generated_token_is_logged_once_and_bootstraps_without_workspace(
 
 
 async def test_invalid_token_and_weak_password_do_not_consume_bootstrap(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     setup_token = "configured-bootstrap-token-0123456789"
@@ -186,7 +193,7 @@ async def test_invalid_token_and_weak_password_do_not_consume_bootstrap(
 
 
 async def test_configured_token_replaces_an_unconsumed_generated_token(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     generated_service = _service(rdb_session_manager, setup_token=None)
@@ -216,12 +223,14 @@ async def test_configured_token_replaces_an_unconsumed_generated_token(
 
 
 async def test_failed_transaction_rolls_back_and_leaves_token_usable(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     setup_token = "rollback-bootstrap-token-0123456789"
     service = _service(rdb_session_manager, setup_token=setup_token)
     await service.initialize()
-    service.bootstrap_repository = _FailingConsumeRepository()
+    service.operation_repository = dataclasses.replace(
+        service.operation_repository, bootstrap_repository=_FailingConsumeRepository()
+    )
 
     with pytest.raises(RuntimeError, match="Injected bootstrap consume failure"):
         await service.bootstrap(_input(setup_token))
@@ -230,7 +239,9 @@ async def test_failed_transaction_rolls_back_and_leaves_token_usable(
     async with rdb_session_manager() as session:
         assert await UserRepository().count(session) == 0
 
-    service.bootstrap_repository = SystemBootstrapRepository()
+    service.operation_repository = dataclasses.replace(
+        service.operation_repository, bootstrap_repository=SystemBootstrapRepository()
+    )
     result = await service.bootstrap(_input(setup_token))
     assert isinstance(result, Success)
 
@@ -269,4 +280,57 @@ async def test_concurrent_bootstrap_creates_exactly_one_system_admin(
             user = await UserRepository().get_by_email(session, "admin@example.com")
             if user is not None:
                 await UserRepository().delete(session, user.id)
-            await session.execute(sa.delete(RDBSystemBootstrapState))
+            await session.write_session.execute(sa.delete(RDBSystemBootstrapState))
+
+
+async def test_hashing_and_jwt_are_outside_sql_and_jwt_failure_keeps_commit(
+    rdb_session_manager: SessionManager[WriteSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prepared secrets and failed JWT never execute inside or compensate SQL."""
+    active = 0
+
+    @asynccontextmanager
+    async def tracked_manager() -> AsyncGenerator[WriteSession, None]:
+        nonlocal active
+        async with rdb_session_manager() as session:
+            active += 1
+            try:
+                yield session
+            finally:
+                active -= 1
+
+    service = _service(
+        tracked_manager, setup_token="sql-closure-token-0123456789012345"
+    )
+    await service.initialize()
+    original_hash = bootstrap_module.hash_password
+    hashed = False
+
+    def observed_hash(password: str) -> str:
+        nonlocal hashed
+        assert active == 0
+        hashed = True
+        return original_hash(password)
+
+    def failing_jwt(*, config: JWTConfig, user_id: str, session_id: str) -> str:
+        del config, user_id, session_id
+        assert active == 0 and hashed
+        raise RuntimeError("isolated postcommit JWT failure")
+
+    monkeypatch.setattr(bootstrap_module, "hash_password", observed_hash)
+    monkeypatch.setattr(bootstrap_module, "create_access_token", failing_jwt)
+    with pytest.raises(RuntimeError, match="postcommit JWT"):
+        await service.bootstrap(_input("sql-closure-token-0123456789012345"))
+    assert not (await service.get_status()).available
+    async with rdb_session_manager() as session:
+        user = await UserRepository().get_by_email(session, "admin@example.com")
+        assert user is not None
+        assert (
+            await PasswordLoginRepository().get_by_user_id(session, user.id) is not None
+        )
+        assert await SystemUserRoleRepository().has_role(
+            session, user.id, SystemUserRole.SYSTEM_ADMIN
+        )
+        state = await SystemBootstrapRepository().get(session)
+        assert state is not None and state.consumed_at is not None

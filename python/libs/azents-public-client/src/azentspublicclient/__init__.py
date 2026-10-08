@@ -169,6 +169,11 @@ __all__ = [
     "AwsConfig",
     "AwsSecrets",
     "BuiltinToolConfig",
+    "CatalogOffPeakRule",
+    "CatalogPriceIssue",
+    "CatalogPriceRate",
+    "CatalogPriceRules",
+    "CatalogTimeWindow",
     "ChatEditMessageWriteRequest",
     "ChatEventPageResponse",
     "ChatEventResponse",
@@ -197,6 +202,7 @@ __all__ = [
     "CleanupSessionGitWorktreeRequest",
     "CommandAction",
     "ConnectionAccessPolicyRequest",
+    "ConsolidatedMemoryResponse",
     "CreateGitWorktreeAction",
     "CreateInvitationRequest",
     "CreateJoinRequestRequest",
@@ -267,9 +273,12 @@ __all__ = [
     "GoalUpdateRequest",
     "HTTPValidationError",
     "HealthStatus",
+    "HistoricalMemoryListResponse",
+    "HistoricalMemoryResponse",
+    "HistoricalMemorySettingsScope",
     "ImageFile",
-    "ImageGenerationCatalogAttemptResponse",
     "ImageGenerationCatalogEntryResponse",
+    "ImageGenerationCatalogSyncStatusResponse",
     "ImageGenerationModelCatalogResponse",
     "ImageThumbnails",
     "InputActionAttachmentPolicyResponse",
@@ -343,20 +352,25 @@ __all__ = [
     "ModelBuiltInToolCapabilities",
     "ModelCandidateIdentity",
     "ModelCapabilities",
+    "ModelCapabilityFeature",
     "ModelCatalogEntryListResponse",
     "ModelCatalogEntryResponse",
-    "ModelCatalogSyncAttemptResponse",
     "ModelCatalogSyncResponse",
+    "ModelCatalogSyncStatusResponse",
     "ModelCompatibilityCapabilities",
     "ModelContextWindow",
     "ModelExecutionOptionDefinition",
     "ModelExecutionOptionId",
+    "ModelFeatureCondition",
     "ModelModalities",
     "ModelModality",
     "ModelParameterCapabilities",
     "ModelParameters",
+    "ModelPricingDefinition",
+    "ModelPricingUnavailableReason",
     "ModelReasoningCapabilities",
     "ModelReasoningEffort",
+    "ModelRequestConstraints",
     "ModelToolCallingCapabilities",
     "MultiChannelDefaultRequest",
     "MultiDiscordThreadAutoArchiveDurationRequest",
@@ -386,6 +400,8 @@ __all__ = [
     "PreviewPasswordResetTokenResponse",
     "PreviewSignupTokenRequest",
     "PreviewSignupTokenResponse",
+    "PriceMetric",
+    "PriceTier",
     "PrimaryModelReservation",
     "ProjectBrowserEmptyStateResponse",
     "ProjectBrowserEntryCapabilitiesResponse",
@@ -395,6 +411,7 @@ __all__ = [
     "ProjectBrowserManifestPreviewRequest",
     "ProjectBrowserManifestResponse",
     "ProjectBrowserModeResponse",
+    "ReasoningEffortValue",
     "ReceivedInvitationListResponse",
     "ReceivedInvitationResponse",
     "RedeemPasswordResetTokenRequest",
@@ -743,6 +760,11 @@ from azentspublicclient.models.avatar_upload_ticket_response import AvatarUpload
 from azentspublicclient.models.aws_config import AwsConfig as AwsConfig
 from azentspublicclient.models.aws_secrets import AwsSecrets as AwsSecrets
 from azentspublicclient.models.builtin_tool_config import BuiltinToolConfig as BuiltinToolConfig
+from azentspublicclient.models.catalog_off_peak_rule import CatalogOffPeakRule as CatalogOffPeakRule
+from azentspublicclient.models.catalog_price_issue import CatalogPriceIssue as CatalogPriceIssue
+from azentspublicclient.models.catalog_price_rate import CatalogPriceRate as CatalogPriceRate
+from azentspublicclient.models.catalog_price_rules import CatalogPriceRules as CatalogPriceRules
+from azentspublicclient.models.catalog_time_window import CatalogTimeWindow as CatalogTimeWindow
 from azentspublicclient.models.chat_edit_message_write_request import ChatEditMessageWriteRequest as ChatEditMessageWriteRequest
 from azentspublicclient.models.chat_event_page_response import ChatEventPageResponse as ChatEventPageResponse
 from azentspublicclient.models.chat_event_response import ChatEventResponse as ChatEventResponse
@@ -771,6 +793,7 @@ from azentspublicclient.models.cleanup_orphan_git_worktrees_action import Cleanu
 from azentspublicclient.models.cleanup_session_git_worktree_request import CleanupSessionGitWorktreeRequest as CleanupSessionGitWorktreeRequest
 from azentspublicclient.models.command_action import CommandAction as CommandAction
 from azentspublicclient.models.connection_access_policy_request import ConnectionAccessPolicyRequest as ConnectionAccessPolicyRequest
+from azentspublicclient.models.consolidated_memory_response import ConsolidatedMemoryResponse as ConsolidatedMemoryResponse
 from azentspublicclient.models.create_git_worktree_action import CreateGitWorktreeAction as CreateGitWorktreeAction
 from azentspublicclient.models.create_invitation_request import CreateInvitationRequest as CreateInvitationRequest
 from azentspublicclient.models.create_join_request_request import CreateJoinRequestRequest as CreateJoinRequestRequest
@@ -841,9 +864,12 @@ from azentspublicclient.models.goal_status_update_request import GoalStatusUpdat
 from azentspublicclient.models.goal_update_request import GoalUpdateRequest as GoalUpdateRequest
 from azentspublicclient.models.http_validation_error import HTTPValidationError as HTTPValidationError
 from azentspublicclient.models.health_status import HealthStatus as HealthStatus
+from azentspublicclient.models.historical_memory_list_response import HistoricalMemoryListResponse as HistoricalMemoryListResponse
+from azentspublicclient.models.historical_memory_response import HistoricalMemoryResponse as HistoricalMemoryResponse
+from azentspublicclient.models.historical_memory_settings_scope import HistoricalMemorySettingsScope as HistoricalMemorySettingsScope
 from azentspublicclient.models.image_file import ImageFile as ImageFile
-from azentspublicclient.models.image_generation_catalog_attempt_response import ImageGenerationCatalogAttemptResponse as ImageGenerationCatalogAttemptResponse
 from azentspublicclient.models.image_generation_catalog_entry_response import ImageGenerationCatalogEntryResponse as ImageGenerationCatalogEntryResponse
+from azentspublicclient.models.image_generation_catalog_sync_status_response import ImageGenerationCatalogSyncStatusResponse as ImageGenerationCatalogSyncStatusResponse
 from azentspublicclient.models.image_generation_model_catalog_response import ImageGenerationModelCatalogResponse as ImageGenerationModelCatalogResponse
 from azentspublicclient.models.image_thumbnails import ImageThumbnails as ImageThumbnails
 from azentspublicclient.models.input_action_attachment_policy_response import InputActionAttachmentPolicyResponse as InputActionAttachmentPolicyResponse
@@ -917,20 +943,25 @@ from azentspublicclient.models.memory_update_request import MemoryUpdateRequest 
 from azentspublicclient.models.model_built_in_tool_capabilities import ModelBuiltInToolCapabilities as ModelBuiltInToolCapabilities
 from azentspublicclient.models.model_candidate_identity import ModelCandidateIdentity as ModelCandidateIdentity
 from azentspublicclient.models.model_capabilities import ModelCapabilities as ModelCapabilities
+from azentspublicclient.models.model_capability_feature import ModelCapabilityFeature as ModelCapabilityFeature
 from azentspublicclient.models.model_catalog_entry_list_response import ModelCatalogEntryListResponse as ModelCatalogEntryListResponse
 from azentspublicclient.models.model_catalog_entry_response import ModelCatalogEntryResponse as ModelCatalogEntryResponse
-from azentspublicclient.models.model_catalog_sync_attempt_response import ModelCatalogSyncAttemptResponse as ModelCatalogSyncAttemptResponse
 from azentspublicclient.models.model_catalog_sync_response import ModelCatalogSyncResponse as ModelCatalogSyncResponse
+from azentspublicclient.models.model_catalog_sync_status_response import ModelCatalogSyncStatusResponse as ModelCatalogSyncStatusResponse
 from azentspublicclient.models.model_compatibility_capabilities import ModelCompatibilityCapabilities as ModelCompatibilityCapabilities
 from azentspublicclient.models.model_context_window import ModelContextWindow as ModelContextWindow
 from azentspublicclient.models.model_execution_option_definition import ModelExecutionOptionDefinition as ModelExecutionOptionDefinition
 from azentspublicclient.models.model_execution_option_id import ModelExecutionOptionId as ModelExecutionOptionId
+from azentspublicclient.models.model_feature_condition import ModelFeatureCondition as ModelFeatureCondition
 from azentspublicclient.models.model_modalities import ModelModalities as ModelModalities
 from azentspublicclient.models.model_modality import ModelModality as ModelModality
 from azentspublicclient.models.model_parameter_capabilities import ModelParameterCapabilities as ModelParameterCapabilities
 from azentspublicclient.models.model_parameters import ModelParameters as ModelParameters
+from azentspublicclient.models.model_pricing_definition import ModelPricingDefinition as ModelPricingDefinition
+from azentspublicclient.models.model_pricing_unavailable_reason import ModelPricingUnavailableReason as ModelPricingUnavailableReason
 from azentspublicclient.models.model_reasoning_capabilities import ModelReasoningCapabilities as ModelReasoningCapabilities
 from azentspublicclient.models.model_reasoning_effort import ModelReasoningEffort as ModelReasoningEffort
+from azentspublicclient.models.model_request_constraints import ModelRequestConstraints as ModelRequestConstraints
 from azentspublicclient.models.model_tool_calling_capabilities import ModelToolCallingCapabilities as ModelToolCallingCapabilities
 from azentspublicclient.models.multi_channel_default_request import MultiChannelDefaultRequest as MultiChannelDefaultRequest
 from azentspublicclient.models.multi_discord_thread_auto_archive_duration_request import MultiDiscordThreadAutoArchiveDurationRequest as MultiDiscordThreadAutoArchiveDurationRequest
@@ -960,6 +991,8 @@ from azentspublicclient.models.preview_password_reset_token_request import Previ
 from azentspublicclient.models.preview_password_reset_token_response import PreviewPasswordResetTokenResponse as PreviewPasswordResetTokenResponse
 from azentspublicclient.models.preview_signup_token_request import PreviewSignupTokenRequest as PreviewSignupTokenRequest
 from azentspublicclient.models.preview_signup_token_response import PreviewSignupTokenResponse as PreviewSignupTokenResponse
+from azentspublicclient.models.price_metric import PriceMetric as PriceMetric
+from azentspublicclient.models.price_tier import PriceTier as PriceTier
 from azentspublicclient.models.primary_model_reservation import PrimaryModelReservation as PrimaryModelReservation
 from azentspublicclient.models.project_browser_empty_state_response import ProjectBrowserEmptyStateResponse as ProjectBrowserEmptyStateResponse
 from azentspublicclient.models.project_browser_entry_capabilities_response import ProjectBrowserEntryCapabilitiesResponse as ProjectBrowserEntryCapabilitiesResponse
@@ -969,6 +1002,7 @@ from azentspublicclient.models.project_browser_entry_status_response import Proj
 from azentspublicclient.models.project_browser_manifest_preview_request import ProjectBrowserManifestPreviewRequest as ProjectBrowserManifestPreviewRequest
 from azentspublicclient.models.project_browser_manifest_response import ProjectBrowserManifestResponse as ProjectBrowserManifestResponse
 from azentspublicclient.models.project_browser_mode_response import ProjectBrowserModeResponse as ProjectBrowserModeResponse
+from azentspublicclient.models.reasoning_effort_value import ReasoningEffortValue as ReasoningEffortValue
 from azentspublicclient.models.received_invitation_list_response import ReceivedInvitationListResponse as ReceivedInvitationListResponse
 from azentspublicclient.models.received_invitation_response import ReceivedInvitationResponse as ReceivedInvitationResponse
 from azentspublicclient.models.redeem_password_reset_token_request import RedeemPasswordResetTokenRequest as RedeemPasswordResetTokenRequest

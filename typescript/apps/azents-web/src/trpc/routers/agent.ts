@@ -15,9 +15,12 @@ import {
   agentV1DeleteAgentMemory,
   agentV1FinalizeAvatar,
   agentV1GetAgent,
+  agentV1GetAgentConsolidatedMemory,
+  agentV1GetAgentHistoricalMemory,
   agentV1GetAgentMemory,
   agentV1GetAutomaticSessionProjects,
   agentV1ListAgentAdmins,
+  agentV1ListAgentHistoricalMemories,
   agentV1ListAgentMemories,
   agentV1ListAgents,
   agentV1RemoveAgentAdmin,
@@ -36,6 +39,7 @@ import {
 } from "../model-settings-input-schemas";
 
 const memoryScopeEnum = z.enum(["agent", "user"]);
+const historicalMemoryScopeEnum = z.enum(["team", "user"]);
 
 export const agentRouter = router({
   /** workspace of Agent list fetch */
@@ -262,6 +266,8 @@ export const agentRouter = router({
         scope: memoryScopeEnum,
         type: z.string().min(1).nullable().optional(),
         query: z.string().nullable().optional(),
+        cursor: z.string().nullable().optional(),
+        limit: z.number().int().min(1).max(100).optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -273,6 +279,103 @@ export const agentRouter = router({
             scope: input.scope,
             type: input.type ?? null,
             query: input.query ?? null,
+            cursor: input.cursor ?? null,
+            limit: input.limit ?? 20,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          422: "BAD_REQUEST",
+        });
+      }
+    }),
+
+  /** Current integrated Historical Memory for the selected visible scope. */
+  getConsolidatedMemory: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        agentId: z.string().min(1),
+        scope: historicalMemoryScopeEnum,
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await agentV1GetAgentConsolidatedMemory({
+          client: ctx.apiClient,
+          path: { handle: input.handle, agent_id: input.agentId },
+          query: { scope: input.scope },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          422: "BAD_REQUEST",
+        });
+      }
+    }),
+
+  /** Historical Memory settings list fetch */
+  listHistoricalMemories: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        agentId: z.string().min(1),
+        scope: historicalMemoryScopeEnum,
+        query: z.string().nullable().optional(),
+        cursor: z.string().nullable().optional(),
+        limit: z.number().int().min(1).max(100).optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await agentV1ListAgentHistoricalMemories({
+          client: ctx.apiClient,
+          path: { handle: input.handle, agent_id: input.agentId },
+          query: {
+            scope: input.scope,
+            query: input.query ?? null,
+            cursor: input.cursor ?? null,
+            limit: input.limit ?? 20,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          422: "BAD_REQUEST",
+        });
+      }
+    }),
+
+  /** Historical Memory settings detail fetch */
+  getHistoricalMemory: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        agentId: z.string().min(1),
+        sourceSessionId: z.string().min(1),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await agentV1GetAgentHistoricalMemory({
+          client: ctx.apiClient,
+          path: {
+            handle: input.handle,
+            agent_id: input.agentId,
+            source_session_id: input.sourceSessionId,
           },
           throwOnError: true,
         });

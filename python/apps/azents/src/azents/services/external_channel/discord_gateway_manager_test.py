@@ -19,9 +19,19 @@ from azents.core.config import (
     ExternalChannelIngressQuiesceConfig,
 )
 from azents.core.deps import get_config
+from azents.core.external_channel_ingestion import (
+    ExternalChannelIngestionOutcome,
+    ExternalChannelIngestionOutcomeKind,
+    ExternalChannelIngestionReason,
+    ExternalChannelIngressAuthority,
+)
 from azents.core.external_channel_provider import DiscordConnectionCredentials
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.rdb.deps import get_session_manager
+from azents.rdb.session_capabilities import ReadWriteSession
+from azents.repos.discord_connection_operations import (
+    DiscordConnectionOperationRepository,
+)
 from azents.repos.external_channel.data import (
     DiscordGatewayTypingTarget,
     ExternalChannelIngressLease,
@@ -48,12 +58,6 @@ from azents.services.external_channel.discord_gateway_manager import (
     DiscordGatewayLeaseLost,
     DiscordGatewayManagerService,
 )
-from azents.services.external_channel.ingestion import (
-    ExternalChannelIngestionOutcome,
-    ExternalChannelIngestionOutcomeKind,
-    ExternalChannelIngestionReason,
-    ExternalChannelIngressAuthority,
-)
 from azents.services.external_channel.provider_control import (
     get_external_channel_provider_control_service,
 )
@@ -67,11 +71,13 @@ class _SessionManager:
     """Yield one mock session without database I/O."""
 
     def __init__(self) -> None:
-        self.session = MagicMock()
-        self.session.commit = AsyncMock()
+        raw_session = MagicMock()
+        raw_session.commit = AsyncMock()
+        self.raw_session = raw_session
+        self.session = ReadWriteSession(raw_session)
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[MagicMock]:
+    async def __call__(self) -> AsyncIterator[ReadWriteSession]:
         yield self.session
 
 
@@ -520,8 +526,10 @@ def _service(
             testenv_external_channel_gateway_lease=None,
         )
     return DiscordGatewayManagerService(
-        session_manager=sessions,
-        repository=repository,  # ty: ignore[invalid-argument-type] — test fake exposes only the lease-fenced repository surface exercised by this manager.
+        operations=DiscordConnectionOperationRepository(
+            session_manager=sessions,
+            external_channel_repository=repository,  # ty: ignore[invalid-argument-type]  # Test fake exposes only the lease-fenced repository methods.
+        ),
         credentials_codec=(
             credentials_codec if credentials_codec is not None else MagicMock()
         ),  # ty: ignore[invalid-argument-type] — test fake supplies only the codec calls exercised by this manager.
@@ -611,7 +619,7 @@ async def test_admits_typed_event_under_current_lease() -> None:
     assert isinstance(create, ExternalChannelTrigger)
     assert create.connection_id == "connection-1"
     assert create.provider_event_id == "discord:discord_message_create:300:200:100"
-    sessions.session.commit.assert_not_awaited()
+    sessions.raw_session.commit.assert_not_awaited()
 
 
 @pytest.mark.asyncio

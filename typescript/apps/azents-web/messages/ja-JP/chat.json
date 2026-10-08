@@ -831,6 +831,7 @@
     "retryUnavailable": "セッションがアイドルで、この失敗が最新の実行である場合のみ再試行できます。"
   },
   "composerProfile": {
+    "applyError": "モデル設定を適用できませんでした。もう一度お試しください。",
     "model": "モデル",
     "effortLabel": "推論レベル",
     "done": "完了",

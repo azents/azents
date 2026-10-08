@@ -1,154 +1,197 @@
-"""Operation pricing capture uses only explicit local generic source authority."""
+"""Physical pricing capture uses saved rules without any dataset authority."""
 
-import dataclasses
 import datetime
-from decimal import Decimal
+from collections.abc import Callable
+from typing import Never
+
+import pytest
+from pydantic_ai.usage import RequestUsage
 
 from azents.core.enums import LLMProvider
-from azents.core.model_metadata_source import (
-    ModelMetadataSourcePayload,
-    SourceEqualsClause,
-    SourceModelRecord,
-    SourcePriceSet,
-    SourceProviderRecord,
-    SourceScalarPrice,
+from azents.core.model_catalog_source import decode_catalog_source
+from azents.core.model_pricing import (
+    ModelPricingDefinition,
+    ModelPricingUnavailableReason,
+    normalize_model_pricing,
 )
-from azents.core.model_pricing import ModelPricingUnavailableReason
 from azents.engine.events.engine_adapter import _capture_model_pricing
-from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
-from azents.services.model_metadata import ModelMetadataService
-from azents.testing.model_metadata import make_test_model_metadata_service
+from azents.engine.events.model_usage_pricing import apply_model_usage_pricing
+from azents.engine.events.types import TokenUsagePayload
 
 
-@dataclasses.dataclass(frozen=True)
-class _ObservedMetadataService(ModelMetadataService):
-    """Count authoritative local captures without adding a remote path."""
-
-    captures: list[str]
-
-    async def capture(self) -> ModelMetadataSourceSnapshot | None:
-        """Observe one call and delegate to the static test source."""
-        self.captures.append("capture")
-        return await super().capture()
-
-
-def _source(
-    *,
-    provider_id: str = "openai",
-    model_id: str = "model",
-) -> ModelMetadataSourceSnapshot:
-    payload = ModelMetadataSourcePayload(
-        providers=[
-            SourceProviderRecord(
-                id=provider_id,
-                name=provider_id,
-                api_pattern=f"https://{provider_id}.example/.*",
-                model_match=None,
-                provider_match=None,
-                fallback_model_providers=None,
-                models=[
-                    SourceModelRecord(
-                        id=model_id,
-                        name=model_id,
-                        match=SourceEqualsClause(value=model_id),
-                        context_window=128_000,
-                        deprecated=False,
-                        prices=[
-                            SourcePriceSet(
-                                constraint=None,
-                                prices={
-                                    "input_mtok": SourceScalarPrice(value=Decimal("1")),
-                                    "output_mtok": SourceScalarPrice(
-                                        value=Decimal("2")
-                                    ),
-                                },
-                            )
-                        ],
-                    )
-                ],
-            )
-        ]
-    )
-    return ModelMetadataSourceSnapshot(
-        id="a" * 32,
-        source_key="genai_prices",
-        source_kind="genai_prices",
-        source_schema_version="1",
-        source_url="https://metadata.example/data.json",
-        source_hash=payload.content_hash(),
-        producer_name="genai-prices",
-        producer_version="0.1.9",
-        provider_count=payload.provider_count,
-        model_count=payload.model_count,
-        payload=payload,
-        created_at=datetime.datetime.now(datetime.UTC),
+def _definition(rate: str = "0.000001") -> ModelPricingDefinition:
+    model = decode_catalog_source(
+        (
+            '{"model":{"litellm_provider":"openai",'
+            f'"input_cost_per_token":{rate},"output_cost_per_token":0.000002}}}}'
+        ).encode()
+    ).models[0]
+    return normalize_model_pricing(
+        source_key="litellm_catalog",
+        source_model=model,
+        collected_at=datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC),
     )
 
 
-def _observed_source(
-    snapshot: ModelMetadataSourceSnapshot | None,
-) -> _ObservedMetadataService:
-    """Build a deterministic explicit source reader for operation tests."""
-    base = make_test_model_metadata_service(snapshot=snapshot)
-    return _ObservedMetadataService(
-        session_manager=base.session_manager,
-        source_snapshot_repository=base.source_snapshot_repository,
-        captures=[],
+def _usage() -> TokenUsagePayload:
+    return TokenUsagePayload(
+        prompt_tokens=10,
+        completion_tokens=5,
+        total_tokens=15,
+        cached_tokens=None,
+        cache_creation_tokens=None,
+        reasoning_tokens=None,
+        cost_usd=None,
     )
 
 
-async def test_pricing_captures_source_once_with_semantic_identity() -> None:
-    """The estimator input uses exact selected model and snapshot provenance."""
-    source = _source()
-    metadata = _observed_source(source)
-    pricing = await _capture_model_pricing(
-        metadata_service=metadata,
-        provider=LLMProvider.OPENAI,
+def _forbidden_price_callback(
+    entrypoint: str, calls: list[str]
+) -> Callable[..., Never]:
+    def forbidden(*_args: object, **_kwargs: object) -> Never:
+        calls.append(entrypoint)
+        raise AssertionError(f"Forbidden price authority invoked: {entrypoint}")
+
+    return forbidden
+
+
+@pytest.mark.parametrize("price_available", [True, False])
+def test_capture_has_zero_source_reads_or_price_interpretation(
+    monkeypatch: pytest.MonkeyPatch, price_available: bool
+) -> None:
+    """Even missing saved prices cannot trigger a source restore or lazy fill."""
+    definition = _definition() if price_available else None
+    calls: list[str] = []
+    for entrypoint in (
+        "azents.services.model_metadata.ModelMetadataService.capture_for_context",
+        "azents.repos.model_metadata_read.ModelMetadataReadRepository.capture_for_context",
+        "azents.core.catalog_price_rules.decode_catalog_price_rules",
+        "azents.core.model_pricing.decode_catalog_price_rules",
+        "azents.core.model_catalog_source.decode_catalog_source",
+        "hashlib.sha256",
+    ):
+        monkeypatch.setattr(entrypoint, _forbidden_price_callback(entrypoint, calls))
+    for _ in range(3):
+        pricing = _capture_model_pricing(
+            definition=definition,
+            provider=LLMProvider.OPENAI,
+            model_identifier="model",
+        )
+        assert pricing.provider is LLMProvider.OPENAI
+        assert pricing.model_identifier == "model"
+        assert pricing.request_timestamp.utcoffset() is not None
+        assert pricing.rules is (definition.rules if definition is not None else None)
+    assert calls == []
+
+
+def test_capture_keeps_saved_prices_after_current_definition_changes() -> None:
+    """The current catalog is not an execution pricing authority."""
+    saved = _definition()
+    current = _definition("0.000003")
+    assert saved != current
+    pricing = _capture_model_pricing(
+        definition=saved, provider=LLMProvider.OPENAI, model_identifier="model"
+    )
+    result = apply_model_usage_pricing(
+        _usage(),
+        raw_usage={},
+        provider="openai",
         model_identifier="model",
+        pricing=pricing,
+        service_tier=None,
+        output_item_types=["message"],
+        reported_charge=None,
     )
-    assert metadata.captures == ["capture"]
-    assert pricing.provider is LLMProvider.OPENAI
-    assert pricing.model_identifier == "model"
-    assert pricing.source_snapshot_id == source.id
-    assert pricing.source_hash == source.source_hash
-    assert pricing.source_model_key == "openai/model"
-    assert pricing.unavailable_reason is None
+    assert result.cost_usd == pytest.approx(0.000020)
+    assert result.cost_provenance is not None
+    assert result.cost_provenance.collected_at == saved.collected_at
+    assert "source_snapshot_id" not in result.cost_provenance.model_dump()
+    assert "source_hash" not in result.cost_provenance.model_dump()
 
 
-async def test_missing_source_preserves_semantic_charge_identity() -> None:
-    """Missing prices are explicit evidence rather than an execution failure."""
-    metadata = _observed_source(None)
-    pricing = await _capture_model_pricing(
-        metadata_service=metadata,
+def test_missing_definition_preserves_semantic_charge_identity() -> None:
+    pricing = _capture_model_pricing(
+        definition=None,
         provider=LLMProvider.OPENROUTER,
         model_identifier="publisher/exact-model",
     )
-    assert metadata.captures == ["capture"]
     assert pricing.provider is LLMProvider.OPENROUTER
     assert pricing.model_identifier == "publisher/exact-model"
-    assert pricing.source_snapshot_id is None
-    assert pricing.source_hash is None
+    assert pricing.source_key is None
     assert pricing.source_model_key is None
-    assert pricing.unavailable_reason is not None
-
-
-async def test_conflicting_provider_does_not_borrow_price_source() -> None:
-    """One provider cannot borrow another provider's canonical model price."""
-    source = _source(model_id="same")
-    metadata = _observed_source(source)
-    pricing = await _capture_model_pricing(
-        metadata_service=metadata,
-        provider=LLMProvider.OPENAI,
-        model_identifier="same",
-    )
-    assert metadata.captures == ["capture"]
-    assert pricing.source_model_key == "openai/same"
-    assert pricing.unavailable_reason is None
-    conflicting = await _capture_model_pricing(
-        metadata_service=metadata,
-        provider=LLMProvider.GOOGLE_GEMINI,
-        model_identifier="same",
-    )
+    assert pricing.rules is None
     assert (
-        conflicting.unavailable_reason is ModelPricingUnavailableReason.MODEL_UNMATCHED
+        pricing.unavailable_reason is ModelPricingUnavailableReason.SOURCE_UNAVAILABLE
     )
+
+
+@pytest.mark.parametrize("price_available", [True, False])
+def test_capture_and_estimate_do_not_use_transitive_price_authority(
+    monkeypatch: pytest.MonkeyPatch, price_available: bool
+) -> None:
+    """Stock counter extraction is independent of every transitive price helper."""
+    definition = _definition() if price_available else None
+    forbidden_calls: list[str] = []
+    for entrypoint in (
+        "genai_prices.calc_price",
+        "genai_prices.data_snapshot.DataSnapshot.calc",
+        "genai_prices.types.ExtractedUsage.calc_price",
+        "genai_prices.types.ModelInfo.calc_price",
+        "genai_prices.types.ModelPrice.calc_price",
+        "genai_prices.update_prices.UpdatePrices.fetch",
+        "genai_prices.update_prices.UpdatePrices.start",
+    ):
+        monkeypatch.setattr(
+            entrypoint, _forbidden_price_callback(entrypoint, forbidden_calls)
+        )
+    extracted = RequestUsage.extract(
+        {
+            "model": "usage-extraction-fixture",
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+            },
+        },
+        provider="openai",
+        provider_url="https://api.openai.com/v1",
+        provider_fallback="openai",
+        api_flavor="chat",
+    )
+    assert extracted.input_tokens == 10
+    assert extracted.output_tokens == 5
+    pricing = _capture_model_pricing(
+        definition=definition, provider=LLMProvider.OPENAI, model_identifier="model"
+    )
+    result = apply_model_usage_pricing(
+        _usage(),
+        raw_usage={},
+        provider="openai",
+        model_identifier="model",
+        pricing=pricing,
+        service_tier=None,
+        output_item_types=["message"],
+        reported_charge=None,
+    )
+    if price_available:
+        assert result.cost_usd == pytest.approx(0.000020)
+        assert result.cost_provenance is not None
+        assert result.cost_provenance.method == "estimated"
+    else:
+        assert result.cost_usd is None
+        assert result.cost_provenance is None
+    reported = apply_model_usage_pricing(
+        _usage(),
+        raw_usage={},
+        provider="openai",
+        model_identifier="model",
+        pricing=pricing,
+        service_tier="priority",
+        output_item_types=["image_generation_call"],
+        reported_charge=0.0,
+    )
+    assert reported.cost_usd == 0.0
+    assert reported.cost_provenance is not None
+    assert reported.cost_provenance.method == "provider_reported"
+    assert reported.cost_provenance.source_key is None
+    assert forbidden_calls == []

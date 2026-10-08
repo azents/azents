@@ -1,6 +1,6 @@
 ---
 id: llm-provider-dummy
-summary: Register dummy-key OpenAI LLM integration and ModelConfig for LLM-bypass pipeline tests
+summary: Register dummy-key OpenAI integration and choose a current model for LLM-bypass pipeline tests
 handler: testenv/setup_handlers/llm_provider_dummy.py
 scope: run
 requires:
@@ -9,7 +9,7 @@ provides:
   - integration.id
   - integration.provider
   - integration.name
-  - integration.model_config_id
+  - integration.model_identifier
 idempotent: false
 verify: |
   python3 -c "
@@ -23,12 +23,12 @@ created: 2026-04-11
 
 # setup: llm-provider-dummy
 
-Create the dummy-key OpenAI integration and ModelConfig used by the `agent-basic` fixture. The deterministic testenv model-listing path makes this setup independent from live LLM credentials.
+Create the dummy-key OpenAI integration used by the `agent-basic` fixture and wait for its initial integration-scoped catalog publication before choosing the exact first model through the public API. The bounded wait observes current sync state; terminal failure and successful-empty catalogs fail explicitly. The deterministic testenv model-listing path makes this setup independent from live LLM credentials.
 
 ## Provides / Requires
 
 - `requires`: `test-user-workspace`
-- `provides`: `integration.id`, `integration.provider`, `integration.name`, `integration.model_config_id`
+- `provides`: `integration.id`, `integration.provider`, `integration.name`, `integration.model_identifier`
 - `idempotent: false`
 
 ## Run
@@ -40,7 +40,7 @@ cd testenv/azents
 uv run testenv fixture up agent-basic --json
 ```
 
-The handler reconstructs the user and workspace from fixture state, creates an OpenAI integration using the deterministic testenv name, creates a ModelConfig from the first available candidate, and stores the resulting identifiers under `integration` in `state.json`.
+The handler reconstructs the user and workspace from fixture state, creates an OpenAI integration using the deterministic testenv name, reads the current selectable catalog, and stores the actual selected model identifier under `integration` in `state.json`. An empty or mismatched catalog fails preparation instead of substituting an unrelated Workspace default.
 
 ## Verify
 

@@ -6,13 +6,13 @@ from typing import NamedTuple
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ExternalChannelIngressItemState
 from azents.rdb.models.external_channel_ingress import (
     RDBExternalChannelIngressItem,
     RDBExternalChannelIngressOwner,
 )
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.external_channel.ingress_queue_data import (
     ExternalChannelIngressAdmission,
     ExternalChannelIngressBatch,
@@ -40,18 +40,18 @@ class ExternalChannelIngressQueueRepository:
 
     async def admit(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         owner_create: ExternalChannelIngressOwnerCreate,
         item_create: ExternalChannelIngressItemCreate,
     ) -> ExternalChannelIngressAdmission:
         """Insert or reuse one compatible owner and active item."""
-        await session.execute(
+        await session.write_session.execute(
             pg_insert(RDBExternalChannelIngressOwner)
             .values(id=uuid7().hex, **owner_create.model_dump())
             .on_conflict_do_nothing(index_elements=["target_resource_id"])
         )
-        owner = await session.scalar(
+        owner = await session.write_session.scalar(
             sa.select(RDBExternalChannelIngressOwner)
             .where(
                 RDBExternalChannelIngressOwner.target_resource_id
@@ -63,15 +63,15 @@ class ExternalChannelIngressQueueRepository:
             raise RuntimeError("External Channel ingress owner could not be created.")
         replaced_stale_owner = False
         if not self._reconcile_owner(owner, expected=owner_create):
-            await session.delete(owner)
-            await session.flush()
+            await session.write_session.delete(owner)
+            await session.write_session.flush()
             owner = RDBExternalChannelIngressOwner(
                 **owner_create.model_dump(),
             )
-            session.add(owner)
-            await session.flush()
+            session.write_session.add(owner)
+            await session.write_session.flush()
             replaced_stale_owner = True
-        existing = await session.scalar(
+        existing = await session.write_session.scalar(
             sa.select(RDBExternalChannelIngressItem).where(
                 RDBExternalChannelIngressItem.owner_id == owner.id,
                 RDBExternalChannelIngressItem.deduplication_key
@@ -85,8 +85,8 @@ class ExternalChannelIngressQueueRepository:
                 owner_id=owner.id,
                 queue_key=uuid7().hex,
             )
-            session.add(existing)
-            await session.flush()
+            session.write_session.add(existing)
+            await session.write_session.flush()
         return ExternalChannelIngressAdmission(
             owner=ExternalChannelIngressOwner.model_validate(owner),
             item=ExternalChannelIngressItem.model_validate(existing),
@@ -139,12 +139,12 @@ class ExternalChannelIngressQueueRepository:
 
     async def get_active_owner(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         owner_id: str,
     ) -> ExternalChannelIngressOwner | None:
         """Return one active owner lifecycle without acquiring ownership."""
-        owner = await session.get(RDBExternalChannelIngressOwner, owner_id)
+        owner = await session.read_session.get(RDBExternalChannelIngressOwner, owner_id)
         return (
             ExternalChannelIngressOwner.model_validate(owner)
             if owner is not None
@@ -153,7 +153,7 @@ class ExternalChannelIngressQueueRepository:
 
     async def claim_lease(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         owner_id: str,
         lease_owner: str,
@@ -161,7 +161,7 @@ class ExternalChannelIngressQueueRepository:
         lease_expires_at: datetime.datetime,
     ) -> ExternalChannelIngressLeaseClaim | None:
         """Acquire or reclaim one conversation-owner drain lease."""
-        owner = await session.scalar(
+        owner = await session.write_session.scalar(
             sa.select(RDBExternalChannelIngressOwner)
             .where(
                 RDBExternalChannelIngressOwner.id == owner_id,
@@ -188,7 +188,7 @@ class ExternalChannelIngressQueueRepository:
         owner.lease_expires_at = lease_expires_at
         owner.current_batch_id = None
         owner.current_batch_started_at = None
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBExternalChannelIngressItem)
             .where(
                 RDBExternalChannelIngressItem.owner_id == owner_id,
@@ -202,15 +202,15 @@ class ExternalChannelIngressQueueRepository:
                 batch_id=None,
             )
         )
-        await session.flush()
-        await session.refresh(owner, attribute_names=["updated_at"])
+        await session.write_session.flush()
+        await session.write_session.refresh(owner, attribute_names=["updated_at"])
         return ExternalChannelIngressLeaseClaim(
             owner=ExternalChannelIngressOwner.model_validate(owner)
         )
 
     async def lock_leased_owner(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         owner_id: str,
         lease_owner: str,
@@ -218,7 +218,7 @@ class ExternalChannelIngressQueueRepository:
         now: datetime.datetime,
     ) -> RDBExternalChannelIngressOwner | None:
         """Lock one current owner under its unexpired lease fence."""
-        return await session.scalar(
+        return await session.write_session.scalar(
             sa.select(RDBExternalChannelIngressOwner)
             .where(
                 RDBExternalChannelIngressOwner.id == owner_id,
@@ -229,19 +229,18 @@ class ExternalChannelIngressQueueRepository:
             .with_for_update()
         )
 
-    async def lock_first_authoritative_item(
+    async def get_first_authoritative_item(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         owner_id: str,
     ) -> ExternalChannelIngressItem | None:
-        """Lock the oldest retained trigger while the caller owns the owner lease."""
-        item = await session.scalar(
+        """Observe the oldest retained trigger without claiming or changing it."""
+        item = await session.read_session.scalar(
             sa.select(RDBExternalChannelIngressItem)
             .where(RDBExternalChannelIngressItem.owner_id == owner_id)
             .order_by(RDBExternalChannelIngressItem.queue_key)
             .limit(1)
-            .with_for_update()
         )
         return (
             ExternalChannelIngressItem.model_validate(item)
@@ -251,7 +250,7 @@ class ExternalChannelIngressQueueRepository:
 
     async def mark_owner_ready(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         owner: RDBExternalChannelIngressOwner,
         binding_id: str,
@@ -263,7 +262,7 @@ class ExternalChannelIngressQueueRepository:
         owner.session_id = session_id
         owner.preparation_next_attempt_at = None
         if initial_title_eligible:
-            first_invocation = await session.scalar(
+            first_invocation = await session.write_session.scalar(
                 sa.select(RDBExternalChannelIngressItem)
                 .where(
                     RDBExternalChannelIngressItem.owner_id == owner.id,
@@ -275,11 +274,11 @@ class ExternalChannelIngressQueueRepository:
             )
             if first_invocation is not None:
                 first_invocation.initial_title_eligible = True
-        await session.flush()
+        await session.write_session.flush()
 
     async def schedule_preparation_retry(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         owner: RDBExternalChannelIngressOwner,
         next_attempt_at: datetime.datetime,
@@ -292,21 +291,21 @@ class ExternalChannelIngressQueueRepository:
         owner.lease_expires_at = None
         owner.current_batch_id = None
         owner.current_batch_started_at = None
-        await session.flush()
+        await session.write_session.flush()
 
     async def delete_owner(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         owner: RDBExternalChannelIngressOwner,
     ) -> None:
         """Delete one terminal active owner and all retained items."""
-        await session.delete(owner)
-        await session.flush()
+        await session.write_session.delete(owner)
+        await session.write_session.flush()
 
     async def claim_due_batch(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         owner_id: str,
         lease_owner: str,
@@ -325,7 +324,7 @@ class ExternalChannelIngressQueueRepository:
             return None
         limit = 1 if owner.first_batch_pending else 10
         items = list(
-            await session.scalars(
+            await session.write_session.scalars(
                 sa.select(RDBExternalChannelIngressItem)
                 .where(
                     RDBExternalChannelIngressItem.owner_id == owner_id,
@@ -357,9 +356,9 @@ class ExternalChannelIngressQueueRepository:
         owner.first_batch_pending = False
         owner.current_batch_id = batch_id
         owner.current_batch_started_at = now
-        await session.flush()
+        await session.write_session.flush()
         for item in items:
-            await session.refresh(item, attribute_names=["updated_at"])
+            await session.write_session.refresh(item, attribute_names=["updated_at"])
         return ExternalChannelIngressBatch(
             owner_id=owner_id,
             target_resource_id=owner.target_resource_id,
@@ -375,13 +374,13 @@ class ExternalChannelIngressQueueRepository:
 
     async def lock_claimed_batch(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         claim: ExternalChannelIngressBatch,
         now: datetime.datetime,
     ) -> ExternalChannelClaimedBatch | None:
         """Lock and validate one current processing batch."""
-        owner = await session.scalar(
+        owner = await session.write_session.scalar(
             sa.select(RDBExternalChannelIngressOwner)
             .where(
                 RDBExternalChannelIngressOwner.id == claim.owner_id,
@@ -398,7 +397,7 @@ class ExternalChannelIngressQueueRepository:
             return None
         item_ids = [item.id for item in claim.items]
         items = list(
-            await session.scalars(
+            await session.write_session.scalars(
                 sa.select(RDBExternalChannelIngressItem)
                 .where(
                     RDBExternalChannelIngressItem.id.in_(item_ids),
@@ -420,13 +419,13 @@ class ExternalChannelIngressQueueRepository:
 
     async def list_active_correlations(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         connection_id: str,
         conversation_position_id: str,
     ) -> dict[str, ExternalChannelIngressCorrelation]:
         """Map active provider message identities to invocation identities."""
-        rows = await session.execute(
+        rows = await session.read_session.execute(
             sa.select(
                 RDBExternalChannelIngressItem.trigger_provider_message_key,
                 RDBExternalChannelIngressItem.invocation_id,
@@ -447,7 +446,7 @@ class ExternalChannelIngressQueueRepository:
 
     async def reset_batch_for_coordination(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         owner: RDBExternalChannelIngressOwner,
         items: list[RDBExternalChannelIngressItem],
@@ -461,11 +460,11 @@ class ExternalChannelIngressQueueRepository:
             item.batch_id = None
         owner.current_batch_id = None
         owner.current_batch_started_at = None
-        await session.flush()
+        await session.write_session.flush()
 
     async def move_to_retry_tail(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         item: RDBExternalChannelIngressItem,
         next_attempt_at: datetime.datetime,
@@ -477,41 +476,41 @@ class ExternalChannelIngressQueueRepository:
         item.processing_owner = None
         item.processing_generation = None
         item.batch_id = None
-        await session.flush()
+        await session.write_session.flush()
 
     async def finish_batch(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         owner: RDBExternalChannelIngressOwner,
         deleted_items: list[RDBExternalChannelIngressItem],
     ) -> None:
         """Delete completed active rows and retain or delete their owner."""
         for item in deleted_items:
-            await session.delete(item)
-        await session.flush()
-        remaining = await session.scalar(
+            await session.write_session.delete(item)
+        await session.write_session.flush()
+        remaining = await session.write_session.scalar(
             sa.select(sa.func.count())
             .select_from(RDBExternalChannelIngressItem)
             .where(RDBExternalChannelIngressItem.owner_id == owner.id)
         )
         if remaining == 0:
-            await session.delete(owner)
+            await session.write_session.delete(owner)
             return
         owner.current_batch_id = None
         owner.current_batch_started_at = None
-        await session.flush()
+        await session.write_session.flush()
 
     async def release_lease(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         owner_id: str,
         lease_owner: str,
         lease_generation: int,
     ) -> bool:
         """Release one current owner lease while retaining active queue state."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBExternalChannelIngressOwner)
             .where(
                 RDBExternalChannelIngressOwner.id == owner_id,
@@ -531,7 +530,7 @@ class ExternalChannelIngressQueueRepository:
 
     async def list_recoverable_owners(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         now: datetime.datetime,
         limit: int,
@@ -570,7 +569,7 @@ class ExternalChannelIngressQueueRepository:
                 RDBExternalChannelIngressOwner.preparation_next_attempt_at <= now,
             ),
         )
-        result = await session.scalars(
+        result = await session.read_session.scalars(
             sa.select(RDBExternalChannelIngressOwner)
             .where(
                 sa.or_(
@@ -586,7 +585,7 @@ class ExternalChannelIngressQueueRepository:
 
     async def inspect_active(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         now: datetime.datetime,
         limit: int,
@@ -595,7 +594,7 @@ class ExternalChannelIngressQueueRepository:
         if limit < 1 or limit > 1000:
             raise ValueError("Active ingress diagnostic limit must be from 1 to 1000.")
         summary = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(
                     sa.func.count(sa.distinct(RDBExternalChannelIngressItem.owner_id)),
                     sa.func.count().filter(
@@ -619,7 +618,7 @@ class ExternalChannelIngressQueueRepository:
             summary
         )
         rows = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(
                     RDBExternalChannelIngressItem,
                     RDBExternalChannelIngressOwner,

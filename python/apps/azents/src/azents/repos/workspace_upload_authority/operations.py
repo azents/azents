@@ -5,11 +5,11 @@ from typing import Annotated
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentLifecycleStatus, AgentType, WorkspaceUserRole
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.workspace_upload_authority.data import (
@@ -34,7 +34,7 @@ class WorkspaceUploadAuthorizationRepository:
         Depends(WorkspaceUserRepository),
     ]
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
 

@@ -14,6 +14,7 @@ from PIL import Image
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.engine.events.provider_output as provider_output
+from azents.core.agent_session_data import AgentSession, SessionAgent
 from azents.core.config import Config, FileLifecycleConfig, WorkspaceS3Config
 from azents.core.enums import (
     AgentRunStatus,
@@ -21,6 +22,7 @@ from azents.core.enums import (
     EventKind,
     ExchangeFileProvenanceKind,
 )
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.events.protocols import NormalizedAdapterOutput
 from azents.engine.events.provider_output import (
     ProviderOutputMaterializer,
@@ -40,22 +42,25 @@ from azents.engine.events.types import (
     build_native_compat_key,
 )
 from azents.engine.run.errors import ModelCallError
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.exchange_file.data import ExchangeFile, ExchangeFileCreate
 from azents.repos.exchange_file.operations import ExchangeFileOperationRepository
 from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_file.data import ModelFile, ModelFileCreate
 from azents.repos.model_file.operations import ModelFileOperationRepository
-from azents.repos.provider_output_operation import ProviderOutputOperationRepository
+from azents.repos.provider_output_operation import (
+    ProviderOutputMetadataAdmission,
+    ProviderOutputOperationError,
+    ProviderOutputOperationRepository,
+)
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUser
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
-from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.testing.types import require_instance
 
 _PNG_BASE64 = (
@@ -75,15 +80,15 @@ class _Session(AsyncSession):
     """No-op AsyncSession test value."""
 
 
-class _SessionContext(AbstractAsyncContextManager[AsyncSession]):
+class _SessionContext(AbstractAsyncContextManager[WriteSession]):
     """Return one no-op session."""
 
     def __init__(self, manager: "_SessionManager") -> None:
         self.manager = manager
 
-    async def __aenter__(self) -> AsyncSession:
+    async def __aenter__(self) -> WriteSession:
         self.manager.active_sessions += 1
-        return _Session()
+        return ReadWriteSession(_Session())
 
     async def __aexit__(
         self,
@@ -101,7 +106,7 @@ class _SessionManager:
     def __init__(self) -> None:
         self.active_sessions = 0
 
-    def __call__(self) -> AbstractAsyncContextManager[AsyncSession]:
+    def __call__(self) -> AbstractAsyncContextManager[WriteSession]:
         return _SessionContext(self)
 
 
@@ -113,7 +118,7 @@ class _AgentSessionRepository(AgentSessionRepository):
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> AgentSession | None:
         del session, agent_session_id
@@ -127,7 +132,7 @@ class _AgentSessionRepository(AgentSessionRepository):
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> AgentSession | None:
         """Lock and return the provider-output Session scope."""
@@ -135,7 +140,7 @@ class _AgentSessionRepository(AgentSessionRepository):
 
     async def get_root_session_agent_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> SessionAgent | None:
         """Return the root retention owner for generated output."""
@@ -148,7 +153,7 @@ class _WorkspaceUserRepository(WorkspaceUserRepository):
 
     async def get_by_workspace_and_user(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         workspace_id: str,
         user_id: str,
     ) -> WorkspaceUser | None:
@@ -168,7 +173,7 @@ class _AgentRunRepository(AgentRunRepository):
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
     ) -> AgentRunState | None:
         """Return the active synthetic Run."""
@@ -182,7 +187,7 @@ class _AgentRunRepository(AgentRunRepository):
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
     ) -> AgentRunState | None:
         self.lock_calls += 1
@@ -198,7 +203,7 @@ class _ExchangeFileRepository(ExchangeFileRepository):
 
     async def create(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         create: ExchangeFileCreate,
     ) -> ExchangeFile:
         del session
@@ -207,7 +212,7 @@ class _ExchangeFileRepository(ExchangeFileRepository):
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         file_id: str,
     ) -> ExchangeFile | None:
         del session
@@ -235,7 +240,7 @@ class _ExchangeFileRepository(ExchangeFileRepository):
 
     async def set_preview_thumbnail_file_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         file_id: str,
         preview_thumbnail_file_id: str,
@@ -263,7 +268,7 @@ class _ModelFileRepository(ModelFileRepository):
 
     async def create(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         create: ModelFileCreate,
     ) -> ModelFile:
         del session
@@ -272,7 +277,7 @@ class _ModelFileRepository(ModelFileRepository):
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         model_file_id: str,
     ) -> ModelFile | None:
         del session
@@ -448,6 +453,7 @@ def _materializer(
             agent_run_repository=exchange_run_repository,
             workspace_user_repository=workspace_user_repository,
             session_manager=session_manager,
+            read_session_manager=session_manager,
         ),
         exchange_file_repository=exchange_repository,
         agent_session_repository=session_repository,
@@ -496,6 +502,22 @@ def _materializer(
         model_repository=model_repository,
         s3_service=s3_service,
     )
+
+
+async def _admit_metadata(
+    session: WriteSession,
+    admission: ProviderOutputMetadataAdmission,
+    repository: ProviderOutputOperationRepository,
+) -> None:
+    """Compose detached metadata in an infrastructure-only test transaction."""
+    try:
+        await repository.persist_in_session(
+            session,
+            authority=admission.authority,
+            generated_images=admission.generated_images,
+        )
+    except ProviderOutputOperationError as exc:
+        raise ModelCallError(str(exc)) from None
 
 
 def test_decodes_valid_data_url_and_excludes_bytes_from_serialization() -> None:
@@ -612,7 +634,11 @@ async def test_materializes_exchange_and_model_file_in_one_admission() -> None:
     assert "generated-image:" not in serialized
 
     async with s3_service.session_manager() as session:
-        await prepared.persist(session)
+        await _admit_metadata(
+            session,
+            prepared.metadata_admission,
+            fixture.materializer.operation_repository,
+        )
     prepared.admitted = True
     await prepared.cleanup()
 
@@ -665,7 +691,11 @@ async def test_materializes_client_tool_image_with_shared_storage_contract() -> 
     assert _PNG_BASE64 not in serialized
 
     async with s3_service.session_manager() as session:
-        await prepared.persist(session)
+        await _admit_metadata(
+            session,
+            prepared.metadata_admission,
+            fixture.materializer.operation_repository,
+        )
     prepared.admitted = True
     await prepared.cleanup()
 
@@ -751,7 +781,11 @@ async def test_materializes_ordered_client_images_in_one_result() -> None:
     assert output[0].model_file_id != output[3].model_file_id
 
     async with fixture.s3_service.session_manager() as session:
-        await prepared.persist(session)
+        await _admit_metadata(
+            session,
+            prepared.metadata_admission,
+            fixture.materializer.operation_repository,
+        )
     prepared.admitted = True
     assert len(fixture.model_repository.created) == 2
     assert len(fixture.exchange_repository.created) == 4
@@ -804,7 +838,11 @@ async def test_failed_multi_image_admission_compensates_every_object() -> None:
         wire_dialect="json_function",
     )
     prepared = await fixture.materializer.prepare_client_result(result)
-    await prepared.persist(_Session())
+    await _admit_metadata(
+        ReadWriteSession(_Session()),
+        prepared.metadata_admission,
+        fixture.materializer.operation_repository,
+    )
     fixture.exchange_repository.created.clear()
     fixture.exchange_repository.preview_links.clear()
     fixture.model_repository.created.clear()
@@ -823,7 +861,11 @@ async def test_retry_reuses_metadata_and_preserves_admitted_objects() -> None:
     model_repository = fixture.model_repository
     s3_service = fixture.s3_service
     first = await materializer.prepare(_normalized_output())
-    await first.persist(_Session())
+    await _admit_metadata(
+        ReadWriteSession(_Session()),
+        first.metadata_admission,
+        fixture.materializer.operation_repository,
+    )
     first.admitted = True
     original_upload_calls = list(s3_service.upload_calls)
 
@@ -832,7 +874,11 @@ async def test_retry_reuses_metadata_and_preserves_admitted_objects() -> None:
     assert s3_service.deleted == []
 
     admitted_retry = await materializer.prepare(_normalized_output())
-    await admitted_retry.persist(_Session())
+    await _admit_metadata(
+        ReadWriteSession(_Session()),
+        admitted_retry.metadata_admission,
+        fixture.materializer.operation_repository,
+    )
     admitted_retry.admitted = True
 
     assert s3_service.upload_calls == original_upload_calls
@@ -848,7 +894,11 @@ async def test_retry_rejects_changed_bytes_before_overwriting_objects() -> None:
     materializer = fixture.materializer
     s3_service = fixture.s3_service
     first = await materializer.prepare(_normalized_output())
-    await first.persist(_Session())
+    await _admit_metadata(
+        ReadWriteSession(_Session()),
+        first.metadata_admission,
+        fixture.materializer.operation_repository,
+    )
     first.admitted = True
     original_objects = dict(s3_service.uploaded)
     original_upload_calls = list(s3_service.upload_calls)
@@ -865,7 +915,11 @@ async def test_cleanup_preserves_metadata_after_lost_commit_acknowledgement() ->
     fixture = _materializer()
     prepared = await fixture.materializer.prepare(_normalized_output())
     async with fixture.s3_service.session_manager() as session:
-        await prepared.persist(session)
+        await _admit_metadata(
+            session,
+            prepared.metadata_admission,
+            fixture.materializer.operation_repository,
+        )
 
     assert not prepared.admitted
     assert len(prepared.uploaded_keys) == 3
@@ -891,7 +945,11 @@ async def test_failed_admission_compensates_every_uploaded_object() -> None:
         _AgentRunRepository,
     )
     prepared = await materializer.prepare(_normalized_output())
-    await prepared.persist(_Session())
+    await _admit_metadata(
+        ReadWriteSession(_Session()),
+        prepared.metadata_admission,
+        fixture.materializer.operation_repository,
+    )
     exchange_repository.created.clear()
     exchange_repository.preview_links.clear()
     model_repository.created.clear()
@@ -958,7 +1016,11 @@ async def test_rejects_provider_output_after_owner_generation_changes() -> None:
         ModelCallError,
         match="Generated image output scope is unavailable",
     ):
-        await prepared.persist(_Session())
+        await _admit_metadata(
+            ReadWriteSession(_Session()),
+            prepared.metadata_admission,
+            fixture.materializer.operation_repository,
+        )
 
     assert exchange_repository.created == []
     assert model_repository.created == []
@@ -988,12 +1050,20 @@ async def test_stale_cleanup_preserves_new_generation_output() -> None:
     new_keys = set(fixture.s3_service.uploaded) - stale_keys
     assert len(new_keys) == 3
     async with fixture.s3_service.session_manager() as session:
-        await new_output.persist(session)
+        await _admit_metadata(
+            session,
+            new_output.metadata_admission,
+            fixture.materializer.operation_repository,
+        )
     new_output.admitted = True
 
     with pytest.raises(ModelCallError, match="scope is unavailable"):
         async with fixture.s3_service.session_manager() as session:
-            await stale_output.persist(session)
+            await _admit_metadata(
+                session,
+                stale_output.metadata_admission,
+                fixture.materializer.operation_repository,
+            )
     await stale_output.cleanup()
 
     assert set(fixture.s3_service.deleted) == stale_keys

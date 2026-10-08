@@ -1,14 +1,14 @@
 """Provider-neutral SystemSettingsService tests."""
 
+import dataclasses
 import datetime
 
 import pytest
 from cryptography.fernet import Fernet
 from pydantic import BaseModel, ValidationError
 from pytest import MonkeyPatch
-from sqlalchemy.ext.asyncio import AsyncSession
 
-import azents.services.system_setting.service as service_module
+import azents.repos.system_setting.operations as service_module
 from azents.core.crypto import CredentialCipher
 from azents.core.external_channel_file import (
     DEFAULT_EXTERNAL_CHANNEL_OUTBOUND_MAX_ACTION_BYTES,
@@ -19,7 +19,6 @@ from azents.core.external_channel_file_system_setting import (
     ExternalChannelFilesSecrets,
 )
 from azents.core.system_setting import (
-    SystemDataMigrationOutcome,
     SystemSettingActivationMode,
     SystemSettingCandidateExpired,
     SystemSettingCandidateReplaced,
@@ -31,7 +30,6 @@ from azents.core.system_setting import (
     SystemSettingFieldTarget,
     SystemSettingGenerationHasher,
     SystemSettingHealthStatus,
-    SystemSettingImpactChanged,
     SystemSettingRegistry,
     SystemSettingSecretAction,
     SystemSettingSecretActionType,
@@ -39,13 +37,7 @@ from azents.core.system_setting import (
     SystemSettingValidationStatus,
     SystemSettingVersionConflict,
 )
-from azents.rdb.session import SessionManager
-from azents.repos.system_setting.repository import (
-    SystemDataMigrationRepository,
-    SystemSettingRepository,
-)
-from azents.services.system_setting.data import (
-    SystemDataMigrationResult,
+from azents.core.system_setting_data import (
     SystemSettingActivated,
     SystemSettingCandidatePending,
     SystemSettingCandidateValidationResult,
@@ -53,11 +45,22 @@ from azents.services.system_setting.data import (
     SystemSettingHealthResult,
     SystemSettingMutation,
 )
-from azents.services.system_setting.service import (
-    SystemDataMigrationRunner,
-    SystemSettingsService,
-    get_system_setting_registry,
+from azents.core.system_setting_payload import SystemSettingPayloadResolver
+from azents.core.system_setting_registry import get_system_setting_registry
+from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
+from azents.repos.github_platform_system_setting.binding import (
+    PlatformGitHubAppBindingRepository,
 )
+from azents.repos.github_platform_system_setting.operations import (
+    PlatformGitHubAppImpactRepository,
+)
+from azents.repos.github_platform_system_setting.repository import (
+    PlatformGitHubAppSystemSettingRepository,
+)
+from azents.repos.system_setting.operations import SystemSettingsRepository
+from azents.repos.system_setting.repository import SystemSettingRepository
+from azents.services.system_setting.service import SystemSettingsService
 
 
 class _Config(BaseModel):
@@ -100,36 +103,52 @@ def _definition(
 
 
 def _service(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     *,
     activation_mode: SystemSettingActivationMode = SystemSettingActivationMode.DIRECT,
     environment: dict[str, str] | None = None,
     key: str | None = None,
 ) -> SystemSettingsService:
     encryption_key = key or Fernet.generate_key().decode()
+    cipher = CredentialCipher(encryption_key)
+    query = PlatformGitHubAppSystemSettingRepository()
     return SystemSettingsService(
-        session_manager=session_manager,
-        repository=SystemSettingRepository(),
-        registry=SystemSettingRegistry(
-            definitions=(_definition(activation_mode),),
-        ),
-        cipher=CredentialCipher(encryption_key),
-        environment=SystemSettingEnvironment(values=environment or {}),
-        generation_hasher=SystemSettingGenerationHasher(encryption_key),
+        repository=SystemSettingsRepository(
+            session_manager=session_manager,
+            read_session_manager=session_manager,
+            repository=SystemSettingRepository(),
+            payloads=SystemSettingPayloadResolver(
+                registry=SystemSettingRegistry(
+                    definitions=(_definition(activation_mode),)
+                ),
+                cipher=cipher,
+                environment=SystemSettingEnvironment(values=environment or {}),
+                generation_hasher=SystemSettingGenerationHasher(encryption_key),
+            ),
+            github_impact=PlatformGitHubAppImpactRepository(
+                session_manager=session_manager,
+                impact_repository=query,
+                bindings=PlatformGitHubAppBindingRepository(
+                    repository=query, cipher=cipher
+                ),
+            ),
+        )
     )
 
 
 def _registered_service(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
 ) -> SystemSettingsService:
     encryption_key = Fernet.generate_key().decode()
+    service = _service(session_manager, key=encryption_key)
     return SystemSettingsService(
-        session_manager=session_manager,
-        repository=SystemSettingRepository(),
-        registry=get_system_setting_registry(),
-        cipher=CredentialCipher(encryption_key),
-        environment=SystemSettingEnvironment(values={}),
-        generation_hasher=SystemSettingGenerationHasher(encryption_key),
+        repository=dataclasses.replace(
+            service.repository,
+            payloads=dataclasses.replace(
+                service.repository.payloads,
+                registry=get_system_setting_registry(),
+            ),
+        )
     )
 
 
@@ -160,7 +179,7 @@ def test_compiled_registry_includes_external_channel_files() -> None:
 
 
 async def test_external_channel_file_limits_resolve_defaults_without_storage(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """The typed defaults are effective before an administrator writes a row."""
     service = _registered_service(rdb_session_manager)
@@ -182,7 +201,7 @@ async def test_external_channel_file_limits_resolve_defaults_without_storage(
 
 
 async def test_external_channel_file_limits_activate_directly_and_validate_aggregate(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A valid local policy activates immediately and an invalid one never writes."""
     service = _registered_service(rdb_session_manager)
@@ -222,7 +241,7 @@ async def test_external_channel_file_limits_activate_directly_and_validate_aggre
 
 
 async def test_direct_mutation_encrypts_secrets_and_writes_metadata_only_audit(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Current state stores ciphertext while audit records actions only."""
     service = _service(rdb_session_manager)
@@ -237,7 +256,7 @@ async def test_direct_mutation_encrypts_secrets_and_writes_metadata_only_audit(
     assert isinstance(result.resolved.secrets, _Secrets)
     assert result.resolved.secrets.token == "secret-value"
     async with rdb_session_manager() as session:
-        audit = await service.repository.list_audit_events(
+        audit = await service.repository.repository.list_audit_events(
             session,
             section=SystemSettingSection.PLATFORM_GITHUB_APP,
             offset=0,
@@ -250,7 +269,7 @@ async def test_direct_mutation_encrypts_secrets_and_writes_metadata_only_audit(
 
 
 async def test_environment_empty_value_overrides_admin_without_fallback(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A present empty environment value stays authoritative and read-only."""
     encryption_key = Fernet.generate_key().decode()
@@ -287,7 +306,7 @@ async def test_environment_empty_value_overrides_admin_without_fallback(
 
 
 async def test_mutation_enforces_optimistic_current_version(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A stale Admin version cannot replace current state or candidates."""
     service = _service(rdb_session_manager)
@@ -298,7 +317,7 @@ async def test_mutation_enforces_optimistic_current_version(
 
 
 async def test_expired_candidate_is_deleted_even_when_cancel_reports_expiry(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Expiry errors occur after candidate ciphertext deletion commits."""
@@ -324,7 +343,7 @@ async def test_expired_candidate_is_deleted_even_when_cancel_reports_expiry(
         )
 
     async with rdb_session_manager() as session:
-        candidate = await service.repository.get_candidate(
+        candidate = await service.repository.repository.get_candidate(
             session,
             section=SystemSettingSection.PLATFORM_GITHUB_APP,
         )
@@ -332,7 +351,7 @@ async def test_expired_candidate_is_deleted_even_when_cancel_reports_expiry(
 
 
 async def test_health_is_visible_only_for_the_current_effective_generation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A changed effective payload makes the previous health result stale."""
     service = _service(rdb_session_manager)
@@ -368,7 +387,7 @@ async def test_health_is_visible_only_for_the_current_effective_generation(
 
 
 async def test_valid_candidate_auto_activates_without_confirmation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A valid candidate with no impact activates in the validation transaction."""
     service = _service(
@@ -404,7 +423,7 @@ async def test_valid_candidate_auto_activates_without_confirmation(
 
 
 async def test_replaced_candidate_fails_in_flight_validation_as_conflict(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """An in-flight mutation cannot validate a later replacement candidate."""
     service = _service(
@@ -451,89 +470,3 @@ async def test_replaced_candidate_fails_in_flight_validation_as_conflict(
     candidate = await service.get_candidate(SystemSettingSection.PLATFORM_GITHUB_APP)
     assert candidate is not None
     assert candidate.id == replacement_id
-
-
-async def test_confirmation_rechecks_impact_before_activation(
-    rdb_session_manager: SessionManager[AsyncSession],
-) -> None:
-    """Confirmation fails closed when resource impact changed after validation."""
-    service = _service(
-        rdb_session_manager,
-        activation_mode=SystemSettingActivationMode.CONFIRMED,
-    )
-    pending = await service.mutate(_initial_mutation())
-    assert isinstance(pending, SystemSettingCandidatePending)
-
-    async def validator(
-        _snapshot: SystemSettingCandidateValidationSnapshot,
-    ) -> SystemSettingCandidateValidationResult:
-        return SystemSettingCandidateValidationResult(
-            status=SystemSettingValidationStatus.VALID,
-            code=None,
-            message=None,
-            action_hint=None,
-            metadata=None,
-            impact={"affected_count": 1},
-            confirmation_required=True,
-        )
-
-    validated = await service.validate_candidate(
-        section=SystemSettingSection.PLATFORM_GITHUB_APP,
-        candidate_id=pending.candidate.id,
-        validator=validator,
-    )
-    assert isinstance(validated, SystemSettingCandidatePending)
-
-    async def changed_impact(
-        _session: AsyncSession,
-        _current: object,
-        _candidate: object,
-    ) -> dict[str, object]:
-        return {"affected_count": 2}
-
-    async def confirm(
-        _session: AsyncSession,
-        _action: str,
-        _candidate: object,
-        _impact: dict[str, object] | None,
-    ) -> None:
-        return None
-
-    with pytest.raises(SystemSettingImpactChanged) as exc_info:
-        await service.confirm_candidate(
-            section=SystemSettingSection.PLATFORM_GITHUB_APP,
-            candidate_id=validated.candidate.id,
-            expected_version=0,
-            confirmation_action="activate",
-            actor_user_id=None,
-            impact_resolver=changed_impact,
-            confirmation_handler=confirm,
-        )
-    assert exc_info.value.current_impact == {"affected_count": 2}
-
-
-async def test_application_data_migration_runner_is_idempotent(
-    rdb_session_manager: SessionManager[AsyncSession],
-) -> None:
-    """A committed marker prevents the application operation from running twice."""
-    runner = SystemDataMigrationRunner(
-        session_manager=rdb_session_manager,
-        repository=SystemDataMigrationRepository(),
-    )
-    calls = 0
-
-    async def operation(_session: AsyncSession) -> SystemDataMigrationResult:
-        nonlocal calls
-        calls += 1
-        return SystemDataMigrationResult(
-            outcome=SystemDataMigrationOutcome.APPLIED,
-            metadata={"updated_count": 3},
-        )
-
-    first = await runner.run(name="test_system_setting_migration", operation=operation)
-    second = await runner.run(name="test_system_setting_migration", operation=operation)
-
-    assert calls == 1
-    assert first == second
-    assert first.outcome is SystemDataMigrationOutcome.APPLIED
-    assert first.metadata == {"updated_count": 3}

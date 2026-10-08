@@ -207,6 +207,10 @@ def _create_fastapi_instance(
     if (appctx is None) != (container is None):
         raise ValueError("AppContext and DI container must be supplied together.")
     owns_resources = appctx is None
+    if config.session_broker_backend == "memory" and owns_resources:
+        raise ValueError(
+            "Memory Session broker requires the co-located application context"
+        )
     if appctx is None:
         appctx = AppContext(config)
         container = create_container(appctx)

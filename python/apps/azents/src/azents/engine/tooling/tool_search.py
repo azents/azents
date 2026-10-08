@@ -9,7 +9,7 @@ import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from azents.core.engine_tool_state import ToolWorkingSetState
 from azents.engine.run.tool_budget import (
@@ -45,12 +45,14 @@ class ToolCatalogSource:
     """Toolkit source metadata retained for one executable tool."""
 
     slug: str
+    namespace: str
     toolkit_type: str | None
     toolkit_class: str
     display_name: str
     use_prefix: bool
     always_expose_tools: bool = False
     toolkit_config_id: str | None = None
+    source_identity: tuple[tuple[str, str], ...] = ()
     routing_metadata: tuple[tuple[str, str], ...] = ()
 
     @property
@@ -170,6 +172,8 @@ class DeferredToolSearchIndex:
 
 class ToolSearchInput(BaseModel):
     """Tool Search input schema."""
+
+    model_config = ConfigDict(extra="forbid")
 
     query: str = Field(
         min_length=1,

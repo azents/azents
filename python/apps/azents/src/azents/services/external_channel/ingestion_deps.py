@@ -4,9 +4,12 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from azents.services.external_channel.conversation import (
+from azents.core.external_channel_conversation_data import (
     ExternalChannelConversationLock,
     ExternalChannelParticipationLock,
+)
+from azents.repos.external_channel.mailbox_ingestion import (
+    ExternalChannelMailboxIngestionRepository,
 )
 from azents.services.external_channel.conversation_provisioning import (
     ExternalChannelConversationProvisioningService,
@@ -20,9 +23,6 @@ from azents.services.external_channel.ingestion import (
 )
 from azents.services.external_channel.ingestion_history import (
     ExternalChannelProviderHistoryReader,
-)
-from azents.services.external_channel.mailbox_ingestion_store import (
-    ExternalChannelMailboxIngestionStore,
 )
 from azents.services.external_channel.mailbox_wake import (
     ExternalChannelMailboxWakeDispatcher,
@@ -43,8 +43,8 @@ def get_external_channel_conversation_ingestion_service(
         Depends(ExternalChannelProviderHistoryReader),
     ],
     store: Annotated[
-        ExternalChannelMailboxIngestionStore,
-        Depends(ExternalChannelMailboxIngestionStore),
+        ExternalChannelMailboxIngestionRepository,
+        Depends(ExternalChannelMailboxIngestionRepository),
     ],
     conversation_provisioning: Annotated[
         ExternalChannelConversationProvisioningService,

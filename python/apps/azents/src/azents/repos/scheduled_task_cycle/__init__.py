@@ -6,10 +6,10 @@ from typing import Annotated
 
 import sqlalchemy as sa
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ExternalChannelWorkProjectionStatus
 from azents.rdb.models.toolkit_state import RDBToolkitState
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.toolkit_state import ToolkitStateConflictError, ToolkitStateRepository
 from azents.repos.toolkit_state.data import ToolkitStateRecord, ToolkitStateUpsert
 
@@ -38,7 +38,7 @@ class ScheduledTaskCycleRepository:
 
     async def get(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         session_id: str,
@@ -56,14 +56,14 @@ class ScheduledTaskCycleRepository:
 
     async def lock(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
         cycle_id: str,
     ) -> ScheduledTaskCycleRecord | None:
         """Lock one cycle row for an admission/deletion transaction."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBToolkitState)
             .where(
                 RDBToolkitState.agent_id == agent_id,
@@ -78,7 +78,7 @@ class ScheduledTaskCycleRepository:
 
     async def create_admitted(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         snapshot: ScheduledTaskCycleSnapshot,
     ) -> ScheduledTaskCycleRecord:
         """Create an immutable admitted occurrence snapshot."""
@@ -120,7 +120,7 @@ class ScheduledTaskCycleRepository:
 
     async def start(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         record: ScheduledTaskCycleRecord,
         run_id: str,
@@ -152,7 +152,7 @@ class ScheduledTaskCycleRepository:
 
     async def delete_if_admitted(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -167,7 +167,7 @@ class ScheduledTaskCycleRepository:
         )
         if record is None or record.state.phase != "admitted":
             return False
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.delete(RDBToolkitState)
             .where(RDBToolkitState.id == record.toolkit_state_id)
             .returning(RDBToolkitState.id)
@@ -176,7 +176,7 @@ class ScheduledTaskCycleRepository:
 
     async def bind_run(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         record: ScheduledTaskCycleRecord,
         run_id: str,
@@ -201,7 +201,7 @@ class ScheduledTaskCycleRepository:
 
     async def update_progress(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         record: ScheduledTaskCycleRecord,
         progress_title: str,
@@ -231,7 +231,7 @@ class ScheduledTaskCycleRepository:
 
     async def claim_tracker_projection(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -302,7 +302,7 @@ class ScheduledTaskCycleRepository:
 
     async def settle_tracker_projection(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -384,7 +384,7 @@ class ScheduledTaskCycleRepository:
 
     async def get_started(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         session_id: str,
@@ -403,13 +403,13 @@ class ScheduledTaskCycleRepository:
 
     async def list_started(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         session_id: str,
     ) -> list[ScheduledTaskCycleRecord]:
         """List current started cycles in deterministic occurrence order."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBToolkitState).where(
                 RDBToolkitState.agent_id == agent_id,
                 RDBToolkitState.session_id == session_id,
@@ -432,14 +432,14 @@ class ScheduledTaskCycleRepository:
 
     async def delete_started(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         record: ScheduledTaskCycleRecord,
     ) -> bool:
         """Delete one exact locked started cycle after terminal commit."""
         if record.state.phase != "started":
             raise ValueError("Scheduled Task cycle is not started")
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.delete(RDBToolkitState)
             .where(
                 RDBToolkitState.id == record.toolkit_state_id,
@@ -465,7 +465,7 @@ class ScheduledTaskCycleRepository:
 
     async def _save_state(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         state: ScheduledTaskCycleState,
         expected_version: int,
@@ -486,11 +486,4 @@ class ScheduledTaskCycleRepository:
         return self._build(updated)
 
 
-__all__ = [
-    "ScheduledTaskCycleRecord",
-    "ScheduledTaskCycleRepository",
-    "ScheduledTaskCycleSnapshot",
-    "ScheduledTaskCycleState",
-    "ScheduledTrackerProjectionPart",
-    "ToolkitStateConflictError",
-]
+__all__ = ["ScheduledTaskCycleRepository"]

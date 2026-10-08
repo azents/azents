@@ -95,3 +95,72 @@ def test_slack_response_mode_title_request_match_is_specific() -> None:
             ],
         }
     )
+
+
+def test_provider_title_retry_fixture_honors_both_output_modes() -> None:
+    """Keep the retry failure and emit an envelope matching the captured mode."""
+    fixture_path = (
+        Path(proxy.__file__).parent / "aimock_fixtures" / "agents_md_loader.json"
+    )
+    document = json.loads(fixture_path.read_text())
+    attempts = {
+        fixture["match"]["sequenceIndex"]: fixture["response"]
+        for fixture in document["fixtures"]
+        if fixture["match"].get("userMessage") == "Provider title retry"
+        and fixture["match"].get("systemMessage")
+        == "Create a brief title from the request"
+    }
+    assert attempts[0]["status"] == 429
+    assert attempts[0]["error"]["type"] == "rate_limit_error"
+    assert json.loads(attempts[1]["content"]) == {
+        "title": "Provider title retry recovered"
+    }
+    plain_instruction = (
+        "Return only the title as plain text without JSON, labels, quotes"
+    )
+    plain = [
+        fixture
+        for fixture in document["fixtures"]
+        if fixture["match"].get("userMessage") == "Provider title retry"
+        and fixture["match"].get("systemMessage") == plain_instruction
+    ]
+    assert len(plain) == 2
+    assert [fixture["match"]["sequenceIndex"] for fixture in plain] == [0, 1]
+    assert plain[0]["response"]["status"] == 429
+    assert plain[1]["response"]["content"] == "Provider title retry recovered"
+    assert {
+        key: value for key, value in plain[0]["match"].items() if key != "sequenceIndex"
+    } == {
+        key: value for key, value in plain[1]["match"].items() if key != "sequenceIndex"
+    }
+    structured = next(
+        fixture
+        for fixture in document["fixtures"]
+        if fixture["match"].get("userMessage") == "Provider title retry"
+        and fixture["match"].get("systemMessage")
+        == "Create a brief title from the request"
+        and fixture["match"].get("sequenceIndex") == 1
+    )
+    structured_first = next(
+        fixture
+        for fixture in document["fixtures"]
+        if fixture["match"].get("userMessage") == "Provider title retry"
+        and fixture["match"].get("systemMessage")
+        == "Create a brief title from the request"
+        and fixture["match"].get("sequenceIndex") == 0
+    )
+    assert document["fixtures"].index(plain[1]) < document["fixtures"].index(
+        structured_first
+    )
+    assert document["fixtures"].index(structured_first) < document["fixtures"].index(
+        structured
+    )
+    known_unsupported = [
+        fixture
+        for fixture in document["fixtures"]
+        if fixture["match"].get("userMessage") == "Structured title fallback"
+        and fixture["match"].get("systemMessage") is not None
+    ]
+    assert len(known_unsupported) == 1
+    assert known_unsupported[0]["match"]["systemMessage"] == plain_instruction
+    assert "error" not in known_unsupported[0]["response"]

@@ -26,16 +26,28 @@ from azents.core.runtime_profile import (
     RuntimeProfileLifecycle,
     RuntimeReconcileSourceKind,
 )
+from azents.core.runtime_provider_data import RuntimeProvider
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.runtime_profile import (
     RDBRuntimeConfigurationReconcileTask,
     RDBRuntimeConfigurationState,
+    RDBRuntimeInfrastructureProfile,
+    RDBWorkspaceRuntimeProfile,
 )
 from azents.rdb.models.runtime_provider import RDBRuntimeProvider
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import (
+    ReadOnlySession,
+    ReadSession,
+    ReadWriteSession,
+    WriteSession,
+    create_read_only_session_manager,
+    create_read_write_session_manager,
+)
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime import (
@@ -50,16 +62,22 @@ from azents.repos.runtime_profile.data import (
     WorkspaceRuntimeProfileCreate,
 )
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
-from azents.repos.runtime_provider.data import RuntimeProvider, RuntimeProviderCreate
+from azents.repos.runtime_profile_reconciliation_operations import (
+    RuntimeProfileReconciliationOperationRepository,
+)
+from azents.repos.runtime_profile_resolution_operations import (
+    RuntimeProfileResolutionOperationRepository,
+)
+from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_policy.data import (
+    RuntimeProviderConfigRevisionCreate,
     RuntimeProviderContractRevisionCreate,
 )
 from azents.repos.runtime_provider_policy.repository import (
     RuntimeProviderPolicyRepository,
 )
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.services.runtime_profile_reconciliation.service import (
     RuntimeProfileReconciliationService,
 )
@@ -84,7 +102,7 @@ class _LockFreeAgentRepository(AgentRepository):
 
     async def get_runtime_selection_input_for_update(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
     ) -> Agent | None:
         del session, agent_id
@@ -103,34 +121,28 @@ class _LockFreeRuntimeProfileRepository(RuntimeProfileRepository):
 
     async def get_workspace_runtime_profile(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         profile_id: str,
-        for_update: bool,
     ) -> WorkspaceRuntimeProfile | None:
-        assert not for_update
         self.source_read_count[0] += 1
         return await super().get_workspace_runtime_profile(
             session,
             workspace_id=workspace_id,
             profile_id=profile_id,
-            for_update=for_update,
         )
 
     async def get_infrastructure_profile(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         profile_id: str,
-        for_update: bool,
     ) -> RuntimeInfrastructureProfile | None:
-        assert not for_update
         self.source_read_count[0] += 1
         return await super().get_infrastructure_profile(
             session,
             profile_id=profile_id,
-            for_update=for_update,
         )
 
 
@@ -139,16 +151,13 @@ class _LockFreeRuntimeProviderRepository(RuntimeProviderRepository):
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         provider_id: str,
-        for_update: bool,
     ) -> RuntimeProvider | None:
-        assert not for_update
         return await super().get_by_id(
             session,
             provider_id=provider_id,
-            for_update=for_update,
         )
 
 
@@ -157,7 +166,7 @@ class _SelectionRacingAgentRuntimeRepository(AgentRuntimeRepository):
 
     def __init__(
         self,
-        session_manager: SessionManager[AsyncSession],
+        session_manager: SessionManager[WriteSession],
         replacement_profile_id: str,
     ) -> None:
         self.session_manager = session_manager
@@ -166,7 +175,7 @@ class _SelectionRacingAgentRuntimeRepository(AgentRuntimeRepository):
 
     async def attach_desired_configuration_state(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         expected_configuration_sequence: int,
@@ -189,7 +198,7 @@ class _SelectionRacingAgentRuntimeRepository(AgentRuntimeRepository):
         if not self.raced:
             self.raced = True
             async with self.session_manager() as race_session:
-                await race_session.execute(
+                await race_session.write_session.execute(
                     sa.update(RDBAgent)
                     .where(RDBAgent.id == agent_id)
                     .values(
@@ -300,7 +309,7 @@ def _profile_spec() -> dict[str, object]:
 
 
 async def _seed_selected_agent(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     handle: str,
     provider_protocol_version: str,
@@ -399,8 +408,8 @@ async def _seed_selected_agent(
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
     selection = make_test_model_selection_dict(
         integration_id=integration.id,
         provider=LLMProvider.ANTHROPIC,
@@ -419,8 +428,8 @@ async def _seed_selected_agent(
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     return _SelectedAgentFixture(
         agent_id=agent.id,
         provider_id=provider.id,
@@ -428,20 +437,22 @@ async def _seed_selected_agent(
 
 
 def _service(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
 ) -> RuntimeProfileResolutionService:
     return RuntimeProfileResolutionService(
-        session_manager=session_manager,
-        agent_repository=AgentRepository(),
-        runtime_repository=AgentRuntimeRepository(),
-        profile_repository=RuntimeProfileRepository(),
-        provider_repository=RuntimeProviderRepository(),
-        provider_policy_repository=RuntimeProviderPolicyRepository(),
+        operations=RuntimeProfileResolutionOperationRepository(
+            session_manager=session_manager,
+            agent_repository=AgentRepository(),
+            runtime_repository=AgentRuntimeRepository(),
+            profile_repository=RuntimeProfileRepository(),
+            provider_repository=RuntimeProviderRepository(),
+            provider_policy_repository=RuntimeProviderPolicyRepository(),
+        )
     )
 
 
 async def _cleanup_independent_resolution_fixture(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     agent_id: str,
 ) -> None:
@@ -449,31 +460,33 @@ async def _cleanup_independent_resolution_fixture(
     runtime_ids = sa.select(RDBAgentRuntime.id).where(
         RDBAgentRuntime.agent_id == agent_id
     )
-    await session.execute(
+    await session.write_session.execute(
         sa.delete(RDBSessionAgentContext).where(
             RDBSessionAgentContext.agent_runtime_id.in_(runtime_ids)
         )
     )
-    await session.execute(
+    await session.write_session.execute(
         sa.delete(RDBRuntimeConfigurationState).where(
             RDBRuntimeConfigurationState.runtime_id.in_(runtime_ids)
         )
     )
-    await session.execute(
+    await session.write_session.execute(
         sa.delete(RDBAgentRuntime).where(RDBAgentRuntime.agent_id == agent_id)
     )
-    await session.execute(
+    await session.write_session.execute(
         sa.delete(RDBRuntimeConfigurationReconcileTask).where(
             RDBRuntimeConfigurationReconcileTask.source_type
             == RuntimeReconcileSourceKind.AGENT_SELECTION,
             RDBRuntimeConfigurationReconcileTask.source_id == agent_id,
         )
     )
-    await session.execute(sa.delete(RDBAgent).where(RDBAgent.id == agent_id))
+    await session.write_session.execute(
+        sa.delete(RDBAgent).where(RDBAgent.id == agent_id)
+    )
 
 
 async def test_resolution_creates_ready_state_and_reuses_same_digest(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Durable configuration resolution does not require a live Provider stream."""
     async with rdb_session_manager() as session:
@@ -504,7 +517,7 @@ async def test_resolution_creates_ready_state_and_reuses_same_digest(
 
 
 async def test_resolution_records_effective_proxy_profile_and_capabilities(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Legacy direct infrastructure can resolve to strict effective Profile v3."""
     async with rdb_session_manager() as session:
@@ -558,7 +571,7 @@ async def test_resolution_records_effective_proxy_profile_and_capabilities(
 
 
 async def test_resolution_blocks_effective_proxy_profile_without_capabilities(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Strict Workspace policy never falls back through a direct-only Provider."""
     async with rdb_session_manager() as session:
@@ -597,7 +610,7 @@ async def test_resolution_blocks_effective_proxy_profile_without_capabilities(
 
 
 async def test_resolution_recovers_transient_disconnection_blocked_state(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A prior transient connection block converges to the retained ready identity."""
     async with rdb_session_manager() as session:
@@ -633,7 +646,7 @@ async def test_resolution_recovers_transient_disconnection_blocked_state(
 
 
 async def test_resolution_reads_sources_without_row_locks(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Resolution reads each mutable source as a lock-free snapshot."""
     async with rdb_session_manager() as session:
@@ -645,16 +658,123 @@ async def test_resolution_reads_sources_without_row_locks(
 
     source_read_count = [0]
     service = _service(rdb_session_manager)
-    service.agent_repository = _LockFreeAgentRepository()
-    service.profile_repository = _LockFreeRuntimeProfileRepository(
+    service.operations.agent_repository = _LockFreeAgentRepository()
+    service.operations.profile_repository = _LockFreeRuntimeProfileRepository(
         source_read_count=source_read_count
     )
-    service.provider_repository = _LockFreeRuntimeProviderRepository()
+    service.operations.provider_repository = _LockFreeRuntimeProviderRepository()
 
     resolution = await service.ensure_for_agent(agent_id)
 
     assert resolution.desired.status is RuntimeConfigurationStateStatus.READY
     assert source_read_count == [2]
+
+
+async def test_independent_getters_allow_read_only_while_writer_holds_rows(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+) -> None:
+    """Descriptive reads return committed evidence without waiting on a writer."""
+    writes = create_read_write_session_manager(rdb_engine)
+    reads = create_read_only_session_manager(rdb_engine)
+    profile_repository = RuntimeProfileRepository()
+    policy_repository = RuntimeProviderPolicyRepository()
+    async with writes() as session:
+        agent_id, provider_id = await _seed_selected_agent(
+            session,
+            handle=f"readonly-profile-{uuid7().hex}",
+            provider_protocol_version="agent-runtime-provider-kubernetes-v2",
+        )
+        provider = await RuntimeProviderRepository().get_by_id(
+            session, provider_id=provider_id
+        )
+        assert provider is not None
+        assert provider.current_contract_revision_id is not None
+        contract_id = provider.current_contract_revision_id
+        config = await policy_repository.create_config_candidate(
+            session,
+            create=RuntimeProviderConfigRevisionCreate(
+                provider_id=provider_id,
+                base_revision_id=None,
+                contract_revision_id=contract_id,
+                config={},
+                encrypted_secrets=None,
+                secret_metadata={},
+                created_by_user_id=None,
+                validation_request_id=None,
+            ),
+        )
+    try:
+        resolution = await _service(writes).ensure_for_agent(agent_id)
+        document = resolution.desired.document
+        assert document is not None
+        async with writes() as writer:
+            await writer.write_session.execute(
+                sa.select(RDBRuntimeConfigurationState)
+                .where(RDBRuntimeConfigurationState.runtime_id == resolution.runtime.id)
+                .with_for_update()
+            )
+            await writer.write_session.execute(
+                sa.select(RDBRuntimeInfrastructureProfile)
+                .where(
+                    RDBRuntimeInfrastructureProfile.id
+                    == document.infrastructure_profile_id
+                )
+                .with_for_update()
+            )
+            await writer.write_session.execute(
+                sa.update(RDBWorkspaceRuntimeProfile)
+                .where(
+                    RDBWorkspaceRuntimeProfile.id
+                    == document.workspace_runtime_profile_id
+                )
+                .values(display_name="Uncommitted rename")
+            )
+            async with reads() as reader:
+                assert isinstance(reader, ReadOnlySession)
+                await reader.read_session.execute(
+                    sa.text("SET LOCAL statement_timeout = '2s'")
+                )
+                assert (
+                    await policy_repository.get_contract_by_id(
+                        reader, contract_revision_id=contract_id
+                    )
+                    is not None
+                )
+                assert (
+                    await policy_repository.get_config_by_id(
+                        reader, config_revision_id=config.id
+                    )
+                    is not None
+                )
+                assert (
+                    await profile_repository.get_infrastructure_profile(
+                        reader, profile_id=document.infrastructure_profile_id
+                    )
+                    is not None
+                )
+                profile = await profile_repository.get_workspace_runtime_profile(
+                    reader,
+                    workspace_id=resolution.runtime.workspace_id,
+                    profile_id=document.workspace_runtime_profile_id,
+                )
+                assert profile is not None
+                assert profile.display_name != "Uncommitted rename"
+                assert (
+                    await profile_repository.get_configuration_state(
+                        reader, runtime_id=resolution.runtime.id
+                    )
+                    is not None
+                )
+                assert (
+                    await policy_repository.get_contract_by_id(
+                        reader, contract_revision_id="missing-revision"
+                    )
+                    is None
+                )
+    finally:
+        async with writes() as session:
+            await _cleanup_independent_resolution_fixture(session, agent_id=agent_id)
 
 
 async def test_runtime_resolution_lock_allows_session_context_fk_reference(
@@ -665,15 +785,16 @@ async def test_runtime_resolution_lock_allows_session_context_fk_reference(
     del latest_db_schema
 
     @asynccontextmanager
-    async def independent_session_manager() -> AsyncGenerator[AsyncSession]:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+    async def independent_session_manager() -> AsyncGenerator[WriteSession]:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as raw_session:
+            session = ReadWriteSession(raw_session)
             try:
                 yield session
             except Exception:
-                await session.rollback()
+                await session.write_session.rollback()
                 raise
             else:
-                await session.commit()
+                await session.write_session.commit()
 
     async with independent_session_manager() as session:
         agent_id, _ = await _seed_selected_agent(
@@ -707,8 +828,8 @@ async def test_runtime_resolution_lock_allows_session_context_fk_reference(
                 root_session_agent_id=None,
             )
             context.id = uuid7().hex
-            context_session.add(context)
-            await asyncio.wait_for(context_session.flush(), timeout=5)
+            context_session.write_session.add(context)
+            await asyncio.wait_for(context_session.write_session.flush(), timeout=5)
     async with independent_session_manager() as session:
         await _cleanup_independent_resolution_fixture(session, agent_id=agent_id)
 
@@ -721,15 +842,16 @@ async def test_runtime_reconciliation_lock_allows_session_context_fk_reference(
     del latest_db_schema
 
     @asynccontextmanager
-    async def independent_session_manager() -> AsyncGenerator[AsyncSession]:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+    async def independent_session_manager() -> AsyncGenerator[WriteSession]:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as raw_session:
+            session = ReadWriteSession(raw_session)
             try:
                 yield session
             except Exception:
-                await session.rollback()
+                await session.write_session.rollback()
                 raise
             else:
-                await session.commit()
+                await session.write_session.commit()
 
     async with independent_session_manager() as session:
         agent_id, _ = await _seed_selected_agent(
@@ -763,8 +885,8 @@ async def test_runtime_reconciliation_lock_allows_session_context_fk_reference(
                 root_session_agent_id=None,
             )
             context.id = uuid7().hex
-            context_session.add(context)
-            await asyncio.wait_for(context_session.flush(), timeout=5)
+            context_session.write_session.add(context)
+            await asyncio.wait_for(context_session.write_session.flush(), timeout=5)
     async with independent_session_manager() as session:
         await _cleanup_independent_resolution_fixture(session, agent_id=agent_id)
 
@@ -777,15 +899,16 @@ async def test_resolution_selection_cas_loss_retries_and_reconcile_converges(
     del latest_db_schema
 
     @asynccontextmanager
-    async def independent_session_manager() -> AsyncGenerator[AsyncSession]:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+    async def independent_session_manager() -> AsyncGenerator[WriteSession]:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as raw_session:
+            session = ReadWriteSession(raw_session)
             try:
                 yield session
             except Exception:
-                await session.rollback()
+                await session.write_session.rollback()
                 raise
             else:
-                await session.commit()
+                await session.write_session.commit()
 
     agent_id: str | None = None
     try:
@@ -802,7 +925,6 @@ async def test_resolution_selection_cas_loss_retries_and_reconcile_converges(
                 session,
                 workspace_id=agent.workspace_id,
                 profile_id=agent.runtime_profile_id or "",
-                for_update=False,
             )
             assert selected is not None
             replacement = await profile_repository.create_workspace_runtime_profile(
@@ -827,7 +949,7 @@ async def test_resolution_selection_cas_loss_retries_and_reconcile_converges(
             independent_session_manager,
             replacement.id,
         )
-        service.runtime_repository = racing_repository
+        service.operations.runtime_repository = racing_repository
 
         resolution = await service.ensure_for_agent(agent_id)
 
@@ -840,7 +962,7 @@ async def test_resolution_selection_cas_loss_retries_and_reconcile_converges(
         assert resolution.desired.document.agent_selection_version == 2
 
         async with independent_session_manager() as session:
-            task = await session.scalar(
+            task = await session.read_session.scalar(
                 sa.select(RDBRuntimeConfigurationReconcileTask).where(
                     RDBRuntimeConfigurationReconcileTask.source_type
                     == RuntimeReconcileSourceKind.AGENT_SELECTION,
@@ -851,9 +973,11 @@ async def test_resolution_selection_cas_loss_retries_and_reconcile_converges(
             assert task is not None
 
         reconciliation = RuntimeProfileReconciliationService(
-            session_manager=independent_session_manager,
-            profile_repository=RuntimeProfileRepository(),
-            resolution_service=_service(independent_session_manager),
+            operations=RuntimeProfileReconciliationOperationRepository(
+                session_manager=independent_session_manager,
+                profile_repository=RuntimeProfileRepository(),
+                resolution_operations=_service(independent_session_manager).operations,
+            )
         )
         outcome = await reconciliation.reconcile_once(task_limit=1, page_size=1)
 
@@ -877,7 +1001,7 @@ async def test_resolution_selection_cas_loss_retries_and_reconcile_converges(
 
 
 async def test_resolution_records_blocked_state_without_losing_prior_desired(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     async with rdb_session_manager() as session:
         agent_id, provider_id = await _seed_selected_agent(
@@ -889,7 +1013,7 @@ async def test_resolution_records_blocked_state_without_losing_prior_desired(
     service = _service(rdb_session_manager)
     ready = await service.ensure_for_agent(agent_id)
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBRuntimeProvider)
             .where(RDBRuntimeProvider.id == provider_id)
             .values(enabled=False)
@@ -906,7 +1030,7 @@ async def test_resolution_records_blocked_state_without_losing_prior_desired(
 
 
 async def test_resolution_requires_explicit_agent_profile(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     async with rdb_session_manager() as session:
         agent_id, _ = await _seed_selected_agent(
@@ -914,7 +1038,7 @@ async def test_resolution_requires_explicit_agent_profile(
             handle="runtime-resolution-required",
             provider_protocol_version="agent-runtime-provider-kubernetes-v2",
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgent)
             .where(RDBAgent.id == agent_id)
             .values(runtime_profile_id=None)

@@ -19,24 +19,18 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     ExternalChannelTransport,
 )
-from azents.core.external_channel_provider import (
-    DiscordConnectionConfiguration,
-    DiscordConnectionCredentials,
-    DiscordThreadAutoArchiveDurationMinutes,
-    ExternalChannelConnectionCredentialPayload,
-    ExternalChannelConnectionStatusSnapshot,
-    SlackConnectionCredentials,
+from azents.core.external_channel_conversation_data import (
+    ExternalChannelConversationLock,
+    ExternalChannelConversationScope,
+    ExternalChannelOperationDeadline,
+    ExternalChannelParticipationLock,
+    ExternalChannelParticipationScope,
 )
-from azents.repos.agent.data import Agent
-from azents.repos.external_channel.data import (
-    ExternalChannelMultiConnectionDisconnect,
+from azents.core.external_channel_impact import (
     ExternalChannelMultiConnectionImpact,
     ExternalChannelMultiRouteImpact,
 )
-from azents.repos.external_channel.management import (
-    ExternalChannelChannelDefaultTransition,
-)
-from azents.repos.external_channel.management_data import (
+from azents.core.external_channel_management import (
     ManagedApprovalRequest,
     ManagedBinding,
     ManagedChannelDefault,
@@ -48,10 +42,23 @@ from azents.repos.external_channel.management_data import (
     ManagedMultiRoute,
     ManagedSlackManagementHandoff,
 )
-from azents.repos.external_channel.management_operation_data import (
+from azents.core.external_channel_management_errors import (
     ExternalChannelManagementNotFound,
-    ManagedAgentAccess,
 )
+from azents.core.external_channel_provider import (
+    DiscordConnectionConfiguration,
+    DiscordConnectionCredentials,
+    DiscordThreadAutoArchiveDurationMinutes,
+    ExternalChannelConnectionCredentialPayload,
+    ExternalChannelConnectionStatusSnapshot,
+    SlackConnectionCredentials,
+)
+from azents.repos.agent.data import Agent
+from azents.repos.external_channel.data import ExternalChannelMultiConnectionDisconnect
+from azents.repos.external_channel.management import (
+    ExternalChannelChannelDefaultTransition,
+)
+from azents.repos.external_channel.management_operation_data import ManagedAgentAccess
 from azents.repos.external_channel.management_operations import (
     ExternalChannelManagementOperationRepository,
 )
@@ -59,13 +66,6 @@ from azents.services.external_channel.access import ExternalChannelAccessService
 from azents.services.external_channel.channel_action import ExternalChannelActionService
 from azents.services.external_channel.connection import (
     ExternalChannelConnectionService,
-)
-from azents.services.external_channel.conversation import (
-    ExternalChannelConversationLock,
-    ExternalChannelConversationScope,
-    ExternalChannelOperationDeadline,
-    ExternalChannelParticipationLock,
-    ExternalChannelParticipationScope,
 )
 from azents.services.external_channel.deps import (
     get_external_channel_conversation_lock,
@@ -171,7 +171,7 @@ class ExternalChannelManagementService:
     ]
     action_service: Annotated[
         ExternalChannelActionService,
-        Depends(ExternalChannelActionService),
+        Depends(ExternalChannelActionService.create),
     ]
     access_service: Annotated[
         ExternalChannelAccessService,

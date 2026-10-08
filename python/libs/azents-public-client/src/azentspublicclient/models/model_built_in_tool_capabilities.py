@@ -24,7 +24,7 @@ from typing_extensions import Self
 
 class ModelBuiltInToolCapabilities(BaseModel):
     """
-    Represents provider built-in tool capability.
+    Supported route-projected built-in tools.
     """ # noqa: E501
     supported: Optional[List[StrictStr]] = None
     additional_properties: Dict[str, Any] = {}
@@ -87,8 +87,11 @@ class ModelBuiltInToolCapabilities(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "supported": obj.get("supported")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

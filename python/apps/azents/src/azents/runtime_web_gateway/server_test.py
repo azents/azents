@@ -2,9 +2,11 @@
 
 import asyncio
 import dataclasses
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import NamedTuple
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from aiohttp import WSMessage, WSMsgType, WSServerHandshakeError, web
@@ -49,6 +51,7 @@ from azents.runtime_web_gateway.operations import (
 from azents.runtime_web_gateway.server import (
     LinuxProcResidentMemorySampler,
     _assemble_websocket_response_event,
+    _completion_document,
     _response_is_sse,
     _selected_websocket_subprotocol,
     _send_websocket_frames,
@@ -103,6 +106,32 @@ _SETTINGS = RuntimeWebGatewaySettings.model_validate(
     }
 )
 _NOW = datetime.now(UTC)
+
+
+def test_completion_replaces_history_with_fixed_script() -> None:
+    document = _completion_document(
+        "https://endpoint.services.example.net/catalog?tag=one&tag=two#details"
+    )
+    assert (
+        'href="https://endpoint.services.example.net/catalog?tag=one&amp;tag=two#details"'
+        in document
+    )
+    assert (
+        'window.location.replace(document.getElementById("continue").href)' in document
+    )
+    assert ".click()" not in document
+    assert ">Continue</a>" in document
+
+
+def test_completion_escapes_attribute_content_and_keeps_inline_script_fixed() -> None:
+    document = _completion_document('https://endpoint.test/?q="</script><script>bad')
+    assert (
+        'href="https://endpoint.test/?q=&quot;&lt;/script&gt;&lt;script&gt;bad"'
+        in document
+    )
+    assert document.count("<script") == 1
+
+
 _SERVICE = RuntimeWebServiceRecord(
     id="e" * 32,
     workspace_id="w" * 32,
@@ -157,14 +186,6 @@ class _Authority:
         hostname_key: str,
     ) -> RuntimeWebServiceRecord | None:
         return _SERVICE if hostname_key == "endpoint" else None
-
-    async def source_service_matches_agent(
-        self,
-        *,
-        source_hostname_key: str,
-        target_service: RuntimeWebServiceRecord,
-    ) -> bool:
-        return source_hostname_key == "source" and target_service.id == _SERVICE.id
 
     async def resolve_service_by_id(
         self,
@@ -905,8 +926,8 @@ async def test_public_websocket_handshake_returns_exact_selected_subprotocol(
         else ()
     ) + (
         (b"Sec-WebSocket-Extensions", b"permessage-deflate"),
-        (b"Set-Cookie", b"upstream=forbidden"),
-        (b"X-Upstream-Handshake", b"forbidden"),
+        (b"Set-Cookie", b"upstream=application"),
+        (b"X-Upstream-Handshake", b"application"),
     )
     harness = await _websocket_harness(response_headers, response_frames=())
     try:
@@ -925,8 +946,8 @@ async def test_public_websocket_handshake_returns_exact_selected_subprotocol(
         else:
             assert websocket._response.headers["Sec-WebSocket-Protocol"] == selected
         assert "Sec-WebSocket-Extensions" not in websocket._response.headers
-        assert "Set-Cookie" not in websocket._response.headers
-        assert "X-Upstream-Handshake" not in websocket._response.headers
+        assert websocket._response.headers["Set-Cookie"] == "upstream=application"
+        assert websocket._response.headers["X-Upstream-Handshake"] == "application"
 
         await websocket.close()
         await asyncio.wait_for(harness.transport.unbound.wait(), timeout=1)
@@ -949,6 +970,60 @@ async def test_public_websocket_handshake_returns_exact_selected_subprotocol(
 
 
 @pytest.mark.asyncio
+async def test_public_websocket_preserves_application_headers_and_cookies() -> None:
+    harness = await _websocket_harness(
+        (
+            (b"Sec-WebSocket-Protocol", b"chat.v1"),
+            (b"Sec-WebSocket-Accept", b"upstream-hop-key"),
+            (b"Content-Length", b"123"),
+            (b"Set-Cookie", b"__Http-Azents-Runtime-Web=replace-platform"),
+            (b"Set-Cookie", b"session=app; HttpOnly; Path=/"),
+            (b"Set-Cookie", b"second=app; Path=/"),
+            (b"X-App", b"first"),
+            (b"X-App", b"second"),
+            (b"Connection", b"Upgrade, X-Transport"),
+            (b"X-Transport", b"hop-only"),
+        ),
+        response_frames=((WebSocketOpcode.TEXT, True, b"app-ready"),),
+    )
+    try:
+        websocket = await harness.client.ws_connect(
+            "/socket",
+            headers={
+                "Host": "endpoint.services.example.net",
+                "Cookie": "__Http-Azents-Runtime-Web=opaque-secret; session=app",
+                "Origin": "https://external.example.com",
+                "Authorization": "Bearer app",
+            },
+            protocols=("chat.v1",),
+        )
+        assert websocket.protocol == "chat.v1"
+        response = websocket._response
+        assert response.headers.getall("Set-Cookie") == [
+            "session=app; HttpOnly; Path=/",
+            "second=app; Path=/",
+        ]
+        assert response.headers.getall("X-App") == ["first", "second"]
+        assert response.headers["Sec-WebSocket-Accept"] != "upstream-hop-key"
+        assert "Content-Length" not in response.headers
+        assert "X-Transport" not in response.headers
+        opened = next(
+            item.open for item in harness.transport.sent if item.HasField("open")
+        )
+        forwarded = {
+            item.name.lower(): item.value for item in opened.request_head.headers
+        }
+        assert forwarded[b"cookie"] == b"session=app"
+        assert forwarded[b"origin"] == b"https://external.example.com"
+        assert forwarded[b"authorization"] == b"Bearer app"
+        assert b"sec-websocket-key" not in forwarded
+        message = await asyncio.wait_for(websocket.receive(), timeout=1)
+        assert message.data == "app-ready"
+        await websocket.close()
+    finally:
+        await harness.client.close()
+
+
 async def test_public_websocket_close_discards_incomplete_response_message() -> None:
     harness = await _websocket_harness(
         (),
@@ -1195,26 +1270,158 @@ async def test_websocket_input_rejects_application_buffer_ceiling_without_leak()
     assert resources.scheduler_waiters == 0
 
 
-async def test_valid_same_root_preflight_is_local_and_credentialed() -> None:
+class _HttpTransport(_WebSocketTransport):
+    async def send(
+        self, envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+    ) -> None:
+        copied = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope()
+        copied.CopyFrom(envelope)
+        self.sent.append(copied)
+        handler = self.handlers.get(envelope.stream_id)
+        if handler is None:
+            return
+        payload = envelope.WhichOneof("payload")
+        if payload == "open":
+            await handler.receive(self._accepted(envelope.stream_id))
+        elif payload == "direction_end":
+            head = self._response_head(envelope.stream_id)
+            head.response_head.status = 200
+            await handler.receive(head)
+            end = self._base(envelope.stream_id)
+            end.direction_end.direction = (
+                runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
+            )
+            end.direction_end.final_sequence = 0
+            await handler.receive(end)
+            terminal = self._base(envelope.stream_id)
+            terminal.stream_end.SetInParent()
+            await handler.receive(terminal)
+
+
+@pytest.mark.parametrize(
+    "method", ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+)
+@pytest.mark.parametrize("body_mode", ["absent", "fixed", "chunked"])
+@pytest.mark.parametrize(
+    "origin",
+    [
+        None,
+        "null",
+        "https://external.example.com",
+        "https://endpoint.services.example.net",
+    ],
+)
+@pytest.mark.parametrize(
+    "destination_headers",
+    [
+        {},
+        {"Service-Worker": "script"},
+        {"Sec-Fetch-Dest": "serviceworker"},
+        {"Sec-Fetch-Dest": "sharedworker"},
+    ],
+)
+async def test_authenticated_application_methods_reach_transport(
+    method: str,
+    origin: str | None,
+    destination_headers: dict[str, str],
+    body_mode: str,
+) -> None:
+    operations, operational_state = _operations()
     proxy = _ControlSessions()
-    client = await _client(proxy)
+    transport = _HttpTransport(
+        resources=operational_state.resources,
+        response_headers=(
+            (b"Access-Control-Allow-Origin", b"https://external.example.com"),
+            (b"Access-Control-Allow-Headers", b"X-App-Token"),
+            (b"Referrer-Policy", b"strict-origin-when-cross-origin"),
+            (b"Cache-Control", b"private, max-age=60"),
+            (b"Permissions-Policy", b"camera=(self)"),
+            (b"Cross-Origin-Opener-Policy", b"unsafe-none"),
+        ),
+        response_frames=(),
+    )
+    await proxy.pool.register(
+        identity=SessionIdentity(
+            session_id="gateway-session",
+            peer_boot_id="gateway-boot",
+            role=SessionPeerRole.GATEWAY,
+            owner=None,
+            session_nonce="nonce",
+            deadline_at=_NOW + timedelta(minutes=5),
+        ),
+        profile=APPROVED_SESSION_PROFILE,
+        transport=transport,
+    )
+    application = create_runtime_web_gateway_application(
+        config=_CONFIG,
+        settings=_SETTINGS,
+        auth=_Auth(),
+        authority=_HttpAuthority(),
+        control_sessions=proxy,
+        operations=operations,
+        operational_state=operational_state,
+    )
+    client = TestClient(TestServer(application))
+    await client.start_server()
+    headers = {
+        "Host": "endpoint.services.example.net",
+        "Cookie": (
+            "__Http-Azents-Runtime-Web=opaque-secret; session=application-session"
+        ),
+        "Sec-Fetch-Site": "cross-site",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "X-App-Token",
+        "X-App-Token": "application-value",
+    }
+    if origin is not None:
+        headers["Origin"] = origin
+    headers.update(destination_headers)
+    body = b"value=example"
+
+    async def chunks() -> AsyncIterator[bytes]:
+        yield body[:5]
+        yield body[5:]
+
     try:
-        response = await client.options(
-            "/api",
-            headers={
-                "Host": "endpoint.services.example.net",
-                "Origin": "https://source.services.example.net",
-                "Access-Control-Request-Method": "POST",
-                "Access-Control-Request-Headers": "Content-Type, Authorization",
-            },
+        response = await client.request(
+            method,
+            "/create",
+            headers=headers,
+            data=(
+                chunks()
+                if body_mode == "chunked"
+                else body
+                if body_mode == "fixed"
+                else None
+            ),
         )
-        assert response.status == 204
-        assert (
-            response.headers["Access-Control-Allow-Origin"]
-            == "https://source.services.example.net"
-        )
-        assert response.headers["Access-Control-Allow-Credentials"] == "true"
-        assert not proxy.opened
+        assert response.status == 200
+        await response.read()
+        for name, value in transport.response_headers:
+            assert response.headers.getall(name.decode()) == [value.decode()]
+        opened = next(item.open for item in transport.sent if item.HasField("open"))
+        assert opened.request_head.method == method.encode()
+        forwarded = {
+            item.name.lower(): item.value for item in opened.request_head.headers
+        }
+        assert forwarded[b"x-app-token"] == b"application-value"
+        assert forwarded[b"cookie"] == b"session=application-session"
+        assert b"transfer-encoding" not in forwarded
+        if body_mode == "chunked":
+            assert b"content-length" not in forwarded
+        else:
+            assert forwarded[b"content-length"] == (
+                str(len(body)).encode() if body_mode == "fixed" else b"0"
+            )
+        for name, value in destination_headers.items():
+            assert forwarded[name.lower().encode()] == value.encode()
+        if origin is None:
+            assert b"origin" not in forwarded
+        else:
+            assert forwarded[b"origin"] == origin.encode()
+        assert b"".join(
+            item.data.data for item in transport.sent if item.HasField("data")
+        ) == (b"" if body_mode == "absent" else body)
     finally:
         await client.close()
 
@@ -1229,7 +1436,10 @@ async def test_broker_auto_post_preserves_only_its_origin() -> None:
                 "Host": "auth.services.example.net",
                 "Origin": "https://app.example.com",
             },
-            data={"initiation_id": "i" * 32},
+            data={
+                "initiation_id": "i" * 32,
+                "return_target": "/catalog/item?tag=one&tag=two#details",
+            },
         )
         assert response.status == 200
         assert response.headers["Referrer-Policy"] == "strict-origin"
@@ -1238,6 +1448,10 @@ async def test_broker_auto_post_preserves_only_its_origin() -> None:
         assert "frame-ancestors 'none'" in content_security_policy
         assert "script-src 'nonce-runtime-web'" in content_security_policy
         assert "https://app.example.com/runtime-web/auth/bound" in await response.text()
+        assert (
+            'name="return_target" value="/catalog/item?tag=one&amp;tag=two#details"'
+            in await response.text()
+        )
         assert not proxy.opened
     finally:
         await client.close()
@@ -1254,7 +1468,7 @@ async def test_broker_auto_post_preserves_only_its_origin() -> None:
         "http://source.services.example.net:443",
     ],
 )
-async def test_preflight_rejects_origin_aliases_before_authority_lookup(
+async def test_application_preflight_requires_platform_identity(
     origin: str,
 ) -> None:
     proxy = _ControlSessions()
@@ -1268,7 +1482,7 @@ async def test_preflight_rejects_origin_aliases_before_authority_lookup(
                 "Access-Control-Request-Method": "POST",
             },
         )
-        assert response.status == 403
+        assert response.status == 401
         assert "Access-Control-Allow-Origin" not in response.headers
         assert not proxy.opened
     finally:
@@ -1283,7 +1497,7 @@ async def test_preflight_rejects_origin_aliases_before_authority_lookup(
                 "Host": "endpoint.services.example.net",
                 "Service-Worker": "script",
             },
-            403,
+            401,
         ),
         (
             {
@@ -1438,9 +1652,58 @@ async def test_duplicate_broker_binding_cookie_is_rejected_before_ticket_redeem(
         response = await client.post(
             "/redeem",
             headers=headers,
-            data={"ticket": "ticket-secret"},
+            data={"ticket": "ticket-secret", "return_target": "/"},
         )
         assert response.status == 400
         assert not proxy.opened
+    finally:
+        await client.close()
+
+
+async def test_authentication_navigation_preserves_original_path_and_query() -> None:
+    client = await _client(_ControlSessions())
+    target = "/catalog/item?tag=one&tag=two"
+    try:
+        response = await client.get(
+            target,
+            headers={
+                "Host": "endpoint.services.example.net",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Dest": "document",
+            },
+            allow_redirects=False,
+        )
+        assert response.status == 303
+        location = urlsplit(response.headers["Location"])
+        assert location.scheme == "https"
+        assert location.netloc == "app.example.com"
+        assert location.path == "/runtime-web/auth"
+        assert parse_qs(location.query) == {
+            "service_id": [_SERVICE.id],
+            "return_to": [target],
+        }
+        assert location.fragment == ""
+    finally:
+        await client.close()
+
+
+@pytest.mark.parametrize(
+    "target", ["https://evil.test/", "//evil.test/", "/\\evil.test/", "/\nfoo"]
+)
+async def test_broker_rejects_unsafe_target_before_ticket_redemption(
+    target: str,
+) -> None:
+    client = await _client(_ControlSessions())
+    try:
+        response = await client.post(
+            "/redeem",
+            headers={
+                "Host": "auth.services.example.net",
+                "Origin": "https://app.example.com",
+                "Cookie": "__Host-Azents-Runtime-Web-Broker-Binding=broker-secret",
+            },
+            data={"ticket": "ticket-secret", "return_target": target},
+        )
+        assert response.status == 400
     finally:
         await client.close()

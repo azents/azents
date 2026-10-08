@@ -23,7 +23,13 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelTransport,
 )
+from azents.core.external_channel_ingestion import (
+    ExternalChannelIngestionOutcome,
+    ExternalChannelIngestionOutcomeKind,
+    ExternalChannelIngestionReason,
+)
 from azents.core.external_channel_provider import SlackConnectionCredentials
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
     ExternalChannelInteraction,
@@ -31,6 +37,9 @@ from azents.repos.external_channel.data import (
     ExternalChannelInteractionCreate,
     ExternalChannelPrincipalCreate,
     ExternalChannelTrigger,
+)
+from azents.repos.external_channel.http_admission_read import (
+    ExternalChannelHTTPAdmissionReadRepository,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.admission import ExternalChannelAdmissionService
@@ -42,11 +51,6 @@ from azents.services.external_channel.http_admission import (
     SlackHTTPAdmissionService,
     SlackHTTPMessageIngressQuiesced,
     SlackHTTPRetryableIngestion,
-)
-from azents.services.external_channel.ingestion import (
-    ExternalChannelIngestionOutcome,
-    ExternalChannelIngestionOutcomeKind,
-    ExternalChannelIngestionReason,
 )
 from azents.services.external_channel.interaction import (
     ExternalChannelInteractionHandoff,
@@ -78,7 +82,7 @@ class _RepositoryDouble:
 
     async def get_slack_http_configuration_by_provider_identity(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         provider_app_id: str,
         provider_tenant_id: str,
@@ -290,7 +294,7 @@ def _service(
     config: Config | None = None,
 ) -> _AdmissionServiceFixture:
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
         yield MagicMock(spec=AsyncSession)
 
     repository = _RepositoryDouble(configuration)
@@ -308,8 +312,10 @@ def _service(
     )
     return _AdmissionServiceFixture(
         service=SlackHTTPAdmissionService(
-            session_manager=session_manager,
-            repository=MagicMock(spec=ExternalChannelRepository, wraps=repository),
+            read_operations=ExternalChannelHTTPAdmissionReadRepository(
+                session_manager=session_manager,
+                repository=MagicMock(spec=ExternalChannelRepository, wraps=repository),
+            ),
             credentials_codec=codec,
             admission_service=admission_service,
             interaction_processor=(

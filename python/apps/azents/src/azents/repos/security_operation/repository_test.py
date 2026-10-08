@@ -3,11 +3,11 @@
 import datetime
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.models.password_login import RDBPasswordLogin
 from azents.rdb.models.user_email import RDBUserEmail
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.password_login import PasswordLoginRepository
 from azents.repos.security_operation import (
     PasswordRemovalOutcome,
@@ -18,7 +18,7 @@ from azents.repos.user.data import UserCreate
 
 
 def _repository(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
 ) -> SecurityOperationRepository:
     return SecurityOperationRepository(
         user_repository=UserRepository(),
@@ -28,7 +28,7 @@ def _repository(
 
 
 async def test_password_upsert_preserves_identity_and_replaces_hash(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Repeated setup changes the hash without creating a second credential."""
     repository = _repository(rdb_session_manager)
@@ -47,7 +47,7 @@ async def test_password_upsert_preserves_identity_and_replaces_hash(
     assert second.id == first.id
     assert second.password_hash == "second-hash"
     async with rdb_session_manager() as session:
-        count = await session.scalar(
+        count = await session.read_session.scalar(
             sa.select(sa.func.count())
             .select_from(RDBPasswordLogin)
             .where(RDBPasswordLogin.user_id == user.id)
@@ -57,7 +57,7 @@ async def test_password_upsert_preserves_identity_and_replaces_hash(
 
 
 async def test_removal_rechecks_email_after_earlier_eligible_snapshot(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A stale eligible read cannot delete the last valid credential."""
     repository = _repository(rdb_session_manager)
@@ -69,7 +69,7 @@ async def test_removal_rechecks_email_after_earlier_eligible_snapshot(
         )
     assert await repository.set_password(user.id, "stored-hash")
     async with rdb_session_manager() as session:
-        assert await session.scalar(
+        assert await session.read_session.scalar(
             sa.select(
                 sa.exists().where(
                     RDBUserEmail.user_id == user.id,
@@ -77,7 +77,7 @@ async def test_removal_rechecks_email_after_earlier_eligible_snapshot(
                 )
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBUserEmail)
             .where(RDBUserEmail.user_id == user.id)
             .values(verified_at=None)
@@ -91,7 +91,7 @@ async def test_removal_rechecks_email_after_earlier_eligible_snapshot(
     )
     assert await repository.get_password(user.id) is not None
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBUserEmail)
             .where(RDBUserEmail.user_id == user.id)
             .values(verified_at=datetime.datetime.now(datetime.UTC))

@@ -36,6 +36,7 @@ from pydantic_ai.providers.google_cloud import GoogleCloudProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from azents.core.enums import LLMProvider
+from azents.core.model_provider_protocol import vertex_model_family
 from azents.core.type_guards import is_string_object_dict, is_string_string_dict
 from azents.engine.events.pydantic_ai_types import NativeModelProtocol, SDKFailureMapper
 from azents.engine.providers.bedrock_output import BedrockOutputCompatibilityModel
@@ -43,7 +44,6 @@ from azents.engine.providers.http_observation import ObservedHTTPX2Transport
 from azents.engine.providers.model_profiles import (
     protocol_for_provider,
     resolve_runtime_model_profile,
-    vertex_model_family,
 )
 from azents.engine.providers.observation_state import NativeObservationState
 
@@ -305,17 +305,31 @@ class ProviderModelFactory:
                     self.provider is LLMProvider.GOOGLE_VERTEX_AI
                     and vertex_model_family(model) == "anthropic"
                 ):
-                    return self._anthropic(model=model, state=state, vertex=True)
-                return self._google(model=model, state=state)
+                    return self._anthropic(
+                        model=model,
+                        assembly_metadata=assembly_metadata,
+                        state=state,
+                        vertex=True,
+                    )
+                return self._google(
+                    model=model, assembly_metadata=assembly_metadata, state=state
+                )
             case LLMProvider.ANTHROPIC:
-                return self._anthropic(model=model, state=state, vertex=False)
+                return self._anthropic(
+                    model=model,
+                    assembly_metadata=assembly_metadata,
+                    state=state,
+                    vertex=False,
+                )
             case (
                 LLMProvider.XAI
                 | LLMProvider.XAI_OAUTH
                 | LLMProvider.OPENROUTER
                 | LLMProvider.KIMI_OAUTH
             ):
-                return self._compatible(model=model, state=state)
+                return self._compatible(
+                    model=model, assembly_metadata=assembly_metadata, state=state
+                )
             case LLMProvider.OPENAI | LLMProvider.CHATGPT_OAUTH:
                 raise ValueError("Native OpenAI providers retain their own adapter.")
             case _:
@@ -335,7 +349,11 @@ class ProviderModelFactory:
         return client
 
     def _compatible(
-        self, *, model: str, state: NativeObservationState
+        self,
+        *,
+        model: str,
+        assembly_metadata: ModelAssemblyMetadata | None,
+        state: NativeObservationState,
     ) -> ProviderModelBinding:
         values = self.credential_kwargs
         key = _api_key(values)
@@ -354,7 +372,7 @@ class ProviderModelFactory:
             provider=self.provider,
             model=model,
             profile_model=model,
-            assembly_metadata=None,
+            assembly_metadata=assembly_metadata,
             context_window=None,
             context_window_explicit=False,
             source_model=None,
@@ -390,7 +408,12 @@ class ProviderModelFactory:
         )
 
     def _anthropic(
-        self, *, model: str, state: NativeObservationState, vertex: bool
+        self,
+        *,
+        model: str,
+        assembly_metadata: ModelAssemblyMetadata | None,
+        state: NativeObservationState,
+        vertex: bool,
     ) -> ProviderModelBinding:
         values = self.credential_kwargs
         if vertex:
@@ -424,7 +447,7 @@ class ProviderModelFactory:
             provider=self.provider,
             model=model,
             profile_model=sdk_model,
-            assembly_metadata=None,
+            assembly_metadata=assembly_metadata,
             context_window=None,
             context_window_explicit=False,
             source_model=None,
@@ -437,7 +460,11 @@ class ProviderModelFactory:
         return ProviderModelBinding(model=public_model, close=sdk.close)
 
     def _google(
-        self, *, model: str, state: NativeObservationState
+        self,
+        *,
+        model: str,
+        assembly_metadata: ModelAssemblyMetadata | None,
+        state: NativeObservationState,
     ) -> ProviderModelBinding:
         values = self.credential_kwargs
         client = self._httpx2(state)
@@ -462,7 +489,7 @@ class ProviderModelFactory:
             provider=self.provider,
             model=model,
             profile_model=model,
-            assembly_metadata=None,
+            assembly_metadata=assembly_metadata,
             context_window=None,
             context_window_explicit=False,
             source_model=None,
@@ -534,7 +561,7 @@ class ProviderModelFactory:
         register_bedrock_cache_ttl_compatibility(client)
 
         def before_send(**_: object) -> None:
-            state.authorize_dispatch()
+            state.authorize_dispatch_from_thread()
             state.worker_started()
 
         def after_call(*, parsed: dict[str, object], **_: object) -> None:

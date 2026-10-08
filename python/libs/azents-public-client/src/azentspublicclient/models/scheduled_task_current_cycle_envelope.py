@@ -96,8 +96,11 @@ class ScheduledTaskCurrentCycleEnvelope(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "current_cycle": ScheduledTaskCurrentCycleResponse.from_dict(obj["current_cycle"]) if obj.get("current_cycle") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

@@ -4,8 +4,7 @@ import datetime
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from types import SimpleNamespace
-from typing import cast
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from cryptography.fernet import Fernet
@@ -24,7 +23,10 @@ from azents.core.external_channel_provider import (
     DiscordConnectionCredentials,
     ExternalChannelCapabilitySnapshot,
 )
-from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
+from azents.repos.discord_connection_operations import (
+    DiscordConnectionOperationRepository,
+)
 from azents.repos.external_channel.data import (
     ExternalChannelConnection,
     ExternalChannelConnectionConfiguration,
@@ -43,6 +45,7 @@ from azents.services.external_channel.discord_api import (
     DiscordGuildCommandRole,
     DiscordGuildCommandSetCapability,
 )
+from azents.testing.types import require_instance
 
 _NOW = datetime.datetime(2026, 7, 26, 1, 0, tzinfo=datetime.UTC)
 
@@ -77,7 +80,7 @@ class _RepositoryDouble:
 
     async def get_connection_configuration(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         connection_id: str,
     ) -> ExternalChannelConnectionConfiguration:
@@ -88,7 +91,7 @@ class _RepositoryDouble:
 
     async def activate_discord_connection(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         **kwargs: object,
     ) -> ExternalChannelConnection | None:
         del session
@@ -98,7 +101,7 @@ class _RepositoryDouble:
 
     async def prepare_discord_callback(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         **kwargs: object,
     ) -> bool:
         """Record durable PING verification preparation."""
@@ -109,7 +112,7 @@ class _RepositoryDouble:
 
     async def clear_prepared_discord_callback(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         **kwargs: object,
     ) -> bool:
         """Record provisional callback cleanup without retaining its selector."""
@@ -120,7 +123,7 @@ class _RepositoryDouble:
 
     async def record_discord_activation_failure(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         **kwargs: object,
     ) -> ExternalChannelConnection:
         """Record the safe durable reason without exposing credentials."""
@@ -294,18 +297,24 @@ def _service(
     session = _SessionDouble(events)
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        yield cast(AsyncSession, session)
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
+        yield ReadWriteSession(AsyncMock(spec=AsyncSession, wraps=session))
 
     return DiscordConnectionActivationService(
-        config=cast(
-            Config,
-            SimpleNamespace(external_channel_discord_callback_url=callback_url),
+        config=Config.model_construct(
+            external_channel_discord_callback_url=callback_url,
         ),
-        session_manager=cast(SessionManager[AsyncSession], session_manager),
-        repository=cast(ExternalChannelRepository, repository),
+        operations=DiscordConnectionOperationRepository(
+            session_manager=session_manager,
+            external_channel_repository=require_instance(
+                MagicMock(spec=ExternalChannelRepository, wraps=repository),
+                ExternalChannelRepository,
+            ),
+        ),
         credentials_codec=codec,
-        discord_client=cast(DiscordAPIClient, client),
+        discord_client=require_instance(
+            MagicMock(spec=DiscordAPIClient, wraps=client), DiscordAPIClient
+        ),
     )
 
 

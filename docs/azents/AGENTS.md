@@ -1,7 +1,7 @@
 ---
 title: "azents documentation structure"
 created: 2026-02-25
-updated: 2026-10-01
+updated: 2026-10-02
 tags: [documentation, process]
 ---
 # azents Documentation Structure
@@ -33,7 +33,7 @@ Requirements, ADR, and design documents use their location and content as their 
 | Directory | Use When | Examples | Required Frontmatter |
 | --- | --- | --- | --- |
 | `requirements/` | Confirmed user needs, scope, constraints, and acceptance criteria for one development snapshot. | `slack-260721-channel-agent-conversation.md` | `title`, `created`, `tags`; add `implemented` after verified implementation |
-| `adr/` | Material architecture or product-contract decisions for one development snapshot. Keep all snapshot decisions in one append-only ADR. | `slack-260721-channel-agent-conversation.md`; legacy `NNNN-{slug}.md` remains valid | `title`, `created`, `tags` |
+| `adr/` | Material architecture or product-contract decisions for one development snapshot. Keep all snapshot decisions in one append-only ADR. | `slack-260721-channel-agent-conversation.md` | `title`, `created`, `tags` |
 | `spec/domain/` | Current domain model specs such as Agent, Session, Team, Memory. | `agent.md`, `workspace.md` | plus `spec_type: domain`, `domain`, `code_paths`, `last_verified_at`, `spec_version` |
 | `spec/flow/` | Current flow specs such as the ReAct loop or message routing. | `agent-execution-loop.md`, `message-routing.md` | plus `spec_type: flow`, `code_paths`, `last_verified_at`, `spec_version` |
 | `design/` | Primary development-snapshot Designs and supporting design-time records. | `slack-260721-channel-agent-conversation.md`, `feature-audit-report-YYYY-MM-DD.md` | `title`, `created`, `tags`; use `updated` while drafting and add `implemented` after verified implementation |
@@ -226,7 +226,7 @@ tags: [backend, engine]
 - Add subdirectories only when a document family is large enough. Current examples include `design/agent-session-sandbox-scenarios/`.
 - Keep filenames descriptive:
   - New primary snapshot Design: `{word}-{YYMMDD}-{slug}.md`, matching Requirements and ADR
-  - Existing legacy Design: keep its current descriptive filename unchanged
+  - Supporting Design record: descriptive filename with `document_role: supporting` and `document_type: supporting-*`
   - Audit/verification report: `{feature}-audit-report-YYYY-MM-DD.md`, `{feature}-spec-sync-YYYY-MM-DD.md`, `{feature}-testenv-report-YYYY-MM-DD.md`
 - When searching for a document, prefer catalog queries by filename prefix, slug,
   or `tags` frontmatter over browsing directory-wide indexes.
@@ -273,7 +273,16 @@ The pre-commit hooks run catalog tests and `python scripts/docs_catalog.py
 validate`. Validation reads `docs/azents/**/*.md` frontmatter without generating
 or modifying tracked indexes.
 
-For new-format snapshot documents, validation enforces the Requirements filename/date relationship, valid ADR/Design `created` dates, per-type short-ID uniqueness, same-basename siblings, and the progressive Requirements → ADR → Design lifecycle. Requirements-only and Requirements-plus-ADR states are valid while design work is in progress. An implemented snapshot must contain the full trio, and Requirements and Design must use the same implementation date. Legacy ADR and Design filenames continue through the existing common-frontmatter validation.
+Validation requires canonical `{word}-{YYMMDD}-{slug}.md` filenames for
+Requirements, ADRs, and primary Designs. It enforces the Requirements
+filename/date relationship, ADR/Design `created` date formatting, per-type
+short-ID uniqueness, same-basename siblings, and the progressive Requirements
+→ ADR → Design lifecycle. Requirements-only and Requirements-plus-ADR states
+are valid while design work is in progress. An implemented snapshot must contain
+the full trio, and Requirements and Design must use the same implementation date.
+Supporting Design records may use descriptive filenames when explicitly
+classified with `document_role: supporting` and
+`document_type: supporting-*`.
 
 Spec validation continues to enforce `spec_type`, `code_paths`, `last_verified_at`, and `spec_version`.
 

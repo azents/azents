@@ -17,7 +17,7 @@ import zlib
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager, contextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import NamedTuple
 
@@ -25,6 +25,7 @@ import azentsadminclient
 import azentspublicclient
 import pytest
 import requests
+from azentspublicclient.api.agent_runtime_v1_api import AgentRuntimeV1Api
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import (
     LLMProviderIntegrationV1Api,
@@ -66,6 +67,11 @@ from websockets.asyncio.client import connect as async_connect
 from websockets.sync.client import connect
 from websockets.typing import Origin
 
+from support.observations import (
+    BrowserTransportObservation,
+    decode_browser_transport,
+    decode_session,
+)
 from support.runtime_profiles import create_workspace_runtime_profile
 from support.system_bootstrap import SystemBootstrapEvidence
 from support.utils import (
@@ -78,6 +84,7 @@ from tests.required.public.test_runtime_terminal import (
     _start_runtime,
     _TerminalSocket,
     _TerminalWorkspace,
+    _wait_runtime,
     _wait_terminal_projection,
 )
 
@@ -190,6 +197,32 @@ class _RuntimeApplicationCommands:
                 ),
                 message="Runtime Web fixture Terminal did not detach after command",
             )
+
+    def terminate(self) -> None:
+        """End the setup PTY so later commands acquire current Runner authority."""
+        terminal = _TerminalSocket.connect(
+            public_api_client=self.public_api_client,
+            workspace=self.workspace,
+            server_url=self.server_url,
+            origin=_TERMINAL_ORIGIN,
+            last_output_sequence=self.last_output_sequence,
+        )
+        terminal_id = terminal.accepted.terminal_id
+        try:
+            terminal.terminate()
+        finally:
+            terminal.close()
+        _wait_terminal_projection(
+            public_api_client=self.public_api_client,
+            workspace=self.workspace,
+            predicate=lambda projection: (
+                projection.state == "ended"
+                and projection.terminal is not None
+                and projection.terminal.terminal_id == terminal_id
+            ),
+            message="Runtime Web setup Terminal did not end",
+        )
+        self.last_output_sequence = None
 
 
 @dataclass(frozen=True)
@@ -928,7 +961,7 @@ def runtime_web_stack_factory(
         str,
         tuple[DockerContainer, DockerContainer, str, str],
     ] = {}
-    for mode in ("shared_cookie",):
+    for mode in ("shared_cookie", "separate_domain"):
         alias_suffix = mode.replace("_", "-")
         public_api_alias = f"runtime-web-public-{alias_suffix}"
         main_web_alias = f"runtime-web-main-{alias_suffix}"
@@ -1113,9 +1146,7 @@ def _create_workspace(
         timeout=10,
     )
     primary.raise_for_status()
-    session_id = primary.json()["id"]
-    if not isinstance(session_id, str):
-        raise AssertionError("Team primary Session omitted its ID")
+    session_id = decode_session(primary.json()).id
     workspace = _RuntimeWebWorkspace(
         token=token,
         email=email,
@@ -1159,14 +1190,57 @@ async def index(request):
         text=(
             '<!doctype html><title>Runtime Web E2E</title>'
             '<h1 id="ready">Runtime Web E2E ready</h1>'
+            '<form id="native-form" method="post" action="/form-result" '
+            'target="form-frame"><input name="value" value="native-form"></form>'
+            '<iframe id="form-frame" name="form-frame"></iframe>'
         ),
         content_type='text/html',
-        headers={'X-Runtime-App': 'loopback'},
+        headers={
+            'X-Runtime-App': 'loopback',
+            'Referrer-Policy': 'no-referrer',
+        },
     )
 
 async def echo(request):
     body = await request.read()
     return web.json_response({'body': body.decode(), 'method': request.method})
+
+async def framing(request):
+    body = await request.read()
+    return web.json_response({
+        'method': request.method,
+        'bytes': len(body),
+        'content_length': request.headers.get('Content-Length'),
+        'transfer_encoding': request.headers.get('Transfer-Encoding'),
+    })
+
+async def app_login(request):
+    response = web.json_response({'logged_in': True})
+    response.set_cookie('session', 'runtime-app-session', httponly=True, secure=True)
+    response.set_cookie('theme', 'dark', secure=True)
+    return response
+
+async def app_session(request):
+    if request.cookies.get('session') != 'runtime-app-session':
+        raise web.HTTPUnauthorized()
+    return web.json_response({
+        'session': request.cookies.get('session'),
+        'theme': request.cookies.get('theme'),
+        'socket_session': request.cookies.get('socket_session'),
+        'platform_cookie_received': '__Http-Azents-Runtime-Web' in request.cookies,
+        'authorization': request.headers.get('Authorization'),
+        'origin': request.headers.get('Origin'),
+        'referer': request.headers.get('Referer'),
+        'custom': request.headers.get('X-App-Test'),
+    })
+
+async def form_result(request):
+    body = await request.read()
+    return web.json_response({
+        'body': body.decode(),
+        'method': request.method,
+        'origin': request.headers.get('Origin'),
+    })
 
 async def upload(request):
     global upload_invocations
@@ -1267,6 +1341,9 @@ async def websocket(request):
     active_websockets += 1
     websocket_connections += 1
     socket = web.WebSocketResponse(autoping=False, compress=False)
+    socket.set_cookie(
+        'socket_session', 'runtime-app-socket', httponly=True, secure=True,
+    )
     await socket.prepare(request)
     try:
         async for message in socket:
@@ -1282,7 +1359,12 @@ async def websocket(request):
 
 application = web.Application()
 application.router.add_get('/', index)
+application.router.add_get('/catalog/{item}', index)
 application.router.add_post('/echo', echo)
+application.router.add_route('*', '/framing', framing)
+application.router.add_post('/app-login', app_login)
+application.router.add_post('/app-session', app_session)
+application.router.add_post('/form-result', form_result)
 application.router.add_post('/upload', upload)
 application.router.add_get('/download', download)
 application.router.add_get('/hold', hold)
@@ -1324,11 +1406,16 @@ def _runtime_application(
     encoded = base64.b64encode(
         zlib.compress(_runtime_application_script().encode(), level=9)
     ).decode()
+    # Terminal invalidation terminates every process group in its session.
+    # The application must outlive that session when Control reconnects.
     commands.command(
         (
-            f'{_RUNTIME_RUNNER_PYTHON} -c "import base64,zlib;'
-            "exec(zlib.decompress(base64.b64decode('"
-            f"{encoded}')))\" >/tmp/runtime-web-e2e.log 2>&1 & disown"
+            f'{_RUNTIME_RUNNER_PYTHON} -c "import base64,zlib,subprocess,sys;'
+            "subprocess.Popen([sys.executable,'-c',"
+            f"zlib.decompress(base64.b64decode('{encoded}')).decode()],"
+            "stdin=subprocess.DEVNULL,"
+            "stdout=open('/tmp/runtime-web-e2e.log','ab'),"
+            'stderr=subprocess.STDOUT,start_new_session=True)"'
         ),
         f"APP_STARTED_{unique()}",
     )
@@ -1356,6 +1443,7 @@ while True:
         f"APP_PROBE_DONE_{unique()}",
     )
     assert ready_marker.encode() in probe_output, probe_output[-4_096:]
+    commands.terminate()
     yield commands
 
 
@@ -1417,14 +1505,21 @@ def _browser(
 
 def _login(driver: WebDriver, *, email: str) -> None:
     """Authenticate through the exact configured Main Web origin."""
-    wait = WebDriverWait(driver, 30)
     driver.get(f"{_MAIN_ORIGIN}/login")
+    _submit_password_login(driver, email=email)
+    WebDriverWait(driver, 30).until(ec.url_contains("/workspaces"))
+
+
+def _submit_password_login(driver: WebDriver, *, email: str) -> None:
+    """Submit the current login form without changing its return destination."""
+    wait = WebDriverWait(driver, 30)
     email_input = wait.until(ec.element_to_be_clickable((By.NAME, "email")))
-    email_input.send_keys(email, Keys.ENTER)
-    wait.until(ec.url_contains("/login/password"))
+    email_input.send_keys(email)
+    if not driver.find_elements(By.NAME, "password"):
+        email_input.send_keys(Keys.ENTER)
+        wait.until(ec.url_contains("/login/password"))
     password = wait.until(ec.element_to_be_clickable((By.NAME, "password")))
     password.send_keys(_SIGNUP_PASSWORD, Keys.ENTER)
-    wait.until(ec.url_contains("/workspaces"))
 
 
 def _activate_in_browser(driver: WebDriver, *, service_url: str) -> None:
@@ -1693,7 +1788,7 @@ def _open_application_in_browser(
 
 def _browser_transport_evidence(
     driver: WebDriver,
-) -> dict[str, object]:
+) -> BrowserTransportObservation:
     """Exercise bounded browser transfer, fan-out, SSE, and WebSocket behavior."""
     result = driver.execute_async_script(
         """
@@ -1709,6 +1804,54 @@ const done = arguments[arguments.length - 1];
     }
     return response;
   };
+  const bodyless = await checkedFetch('/framing');
+  const bodylessEvidence = await bodyless.json();
+  if (
+    bodylessEvidence.bytes !== 0 ||
+    bodylessEvidence.content_length !== '0' ||
+    bodylessEvidence.transfer_encoding !== null
+  ) {
+    throw new Error(`Bodyless framing changed: ${JSON.stringify(bodylessEvidence)}`);
+  }
+  await checkedFetch('/app-login', {method: 'POST'});
+  const appSession = await checkedFetch('/app-session', {
+    method: 'POST',
+    referrerPolicy: 'origin',
+    headers: {'Authorization': 'Bearer app-test', 'X-App-Test': 'custom-value'},
+  });
+  const appEvidence = await appSession.json();
+  if (
+    appEvidence.session !== 'runtime-app-session' ||
+    appEvidence.theme !== 'dark' ||
+    appEvidence.platform_cookie_received ||
+    appEvidence.authorization !== 'Bearer app-test' ||
+    appEvidence.origin !== location.origin ||
+    appEvidence.referer !== `${location.origin}/` ||
+    appEvidence.custom !== 'custom-value'
+  ) {
+    throw new Error(
+      `App cookie/header round-trip failed: ${JSON.stringify(appEvidence)}`,
+    );
+  }
+  const formResult = await new Promise((resolve, reject) => {
+    const frame = document.getElementById('form-frame');
+    frame.onload = () => {
+      try {
+        if (frame.contentWindow.location.pathname !== '/form-result') return;
+        resolve(JSON.parse(frame.contentDocument.body.textContent));
+      } catch (error) {
+        reject(error);
+      }
+    };
+    document.getElementById('native-form').submit();
+  });
+  if (
+    formResult.body !== 'value=native-form' ||
+    formResult.method !== 'POST' ||
+    formResult.origin !== 'null'
+  ) {
+    throw new Error(`Native form POST failed: ${JSON.stringify(formResult)}`);
+  }
   const echo = await checkedFetch(
     '/echo',
     {method: 'POST', body: 'runtime-web-body'},
@@ -1792,6 +1935,11 @@ const done = arguments[arguments.length - 1];
       }
     };
   });
+  const afterSocket = await checkedFetch('/app-session', {method: 'POST'});
+  const socketEvidence = await afterSocket.json();
+  if (socketEvidence.socket_session !== 'runtime-app-socket') {
+    throw new Error('WebSocket Set-Cookie was not retained by the browser');
+  }
   done({
     echoBody,
     expectedUploadDigest,
@@ -1810,9 +1958,7 @@ const done = arguments[arguments.length - 1];
         _BROWSER_TRANSFER_BYTES,
         _BROWSER_ASSET_COUNT,
     )
-    if not isinstance(result, dict):
-        raise AssertionError(f"Browser transport evidence was invalid: {result!r}")
-    return result
+    return decode_browser_transport(result)
 
 
 def _decode_runtime_application_state(payload: object) -> _RuntimeApplicationState:
@@ -1948,8 +2094,6 @@ def _browser_neutral_transport_evidence(
         "Host": endpoint_host,
         "Cookie": cookie,
         "User-Agent": firefox_user_agent,
-        "Sec-Fetch-Site": "same-origin",
-        "Sec-Fetch-Mode": "cors",
     }
     response = requests.post(
         f"{stack.edge_host_url}/echo",
@@ -2121,6 +2265,109 @@ def _assert_redis_capacity_fallback(
         assert websocket.recv(timeout=10) == "echo:after-redis-recovery"
 
 
+@pytest.mark.parametrize("auth_mode", ["shared_cookie", "separate_domain"])
+def test_runtime_web_authentication_without_next_assets(
+    runtime_web_application: _RuntimeWebApplication,
+    runtime_web_stack_factory: _RuntimeWebStackFactory,
+    auth_mode: str,
+) -> None:
+    """Authenticate a cold service navigation without Main Web bundle hydration."""
+    workspace = runtime_web_application.workspace
+    with runtime_web_stack_factory.start(
+        auth_mode,
+        maximum_active_exchanges=512,
+        maximum_application_buffer_bytes=16 * 1024 * 1024,
+        maintenance=False,
+        relay_path=False,
+    ) as stack:
+        with azentspublicclient.ApiClient(
+            configuration=azentspublicclient.Configuration(host=stack.public_api_url)
+        ) as client:
+            api = RuntimeWebV1Api(client)
+            _delete_existing_runtime_web_services(api=api, workspace=workspace)
+            service = api.runtime_web_v1_create_runtime_web_service(
+                handle=workspace.handle,
+                agent_id=workspace.agent_id,
+                runtime_web_create_request=RuntimeWebCreateRequest(
+                    port=_RUNTIME_WEB_PORT,
+                    label=f"Cold browser {auth_mode}",
+                    selected_duration_seconds=3_600,
+                    turn_on=True,
+                    operation_key=f"request-{unique()}",
+                ),
+                _headers=_headers(workspace.token),
+            )
+            assert service.url is not None
+            driver = _browser(selenium_url=stack.selenium_url, edge_ip=stack.edge_ip)
+            try:
+                _login(driver, email=workspace.email)
+                driver.execute_cdp_cmd("Network.enable", {})
+                driver.execute_cdp_cmd("Network.clearBrowserCache", {})
+                driver.execute_cdp_cmd(
+                    "Network.setBlockedURLs",
+                    {"urls": [f"{_MAIN_ORIGIN}/_next/static/*"]},
+                )
+                destination = (
+                    f"{service.url}catalog/%E2%9C%93?"
+                    "view=grid&tag=one&tag=two&next=%2Fbasket#details"
+                )
+                previous_url = driver.current_url
+                _open_application_in_browser(driver, endpoint_url=destination)
+                assert driver.current_url == destination
+                assert driver.get_cookie("__Http-Azents-Runtime-Web") is not None
+                driver.back()
+                WebDriverWait(driver, 30).until(ec.url_to_be(previous_url))
+                driver.forward()
+                WebDriverWait(driver, 60).until(
+                    ec.visibility_of_element_located((By.ID, "ready"))
+                )
+                assert driver.current_url == destination
+                # Main Web login must carry the inherited browser fragment too.
+                driver.execute_cdp_cmd("Network.setBlockedURLs", {"urls": []})
+                driver.execute_cdp_cmd("Network.clearBrowserCookies", {})
+                # Leaving the current document avoids a same-document hash navigation.
+                driver.get("about:blank")
+                driver.get(destination)
+                WebDriverWait(driver, 30).until(ec.url_contains("/login"))
+                _submit_password_login(driver, email=workspace.email)
+                WebDriverWait(driver, 60).until(
+                    ec.visibility_of_element_located((By.ID, "ready"))
+                )
+                assert driver.current_url == destination
+                # Repeat with normal asset loading and only Runtime identity absent.
+                driver.delete_cookie("__Http-Azents-Runtime-Web")
+                driver.get(f"{_MAIN_ORIGIN}/workspaces")
+                WebDriverWait(driver, 30).until(ec.url_contains("/workspaces"))
+                previous_url = driver.current_url
+                # A real click ensures this is not Chrome's automatic skipping of
+                # non-user-activated history entries after scripted navigation.
+                driver.execute_script(
+                    """
+                    const link = document.createElement('a');
+                    link.id = 'history-service-link';
+                    link.href = arguments[0];
+                    link.textContent = 'Open service';
+                    document.body.append(link);
+                    """,
+                    destination,
+                )
+                driver.find_element(By.ID, "history-service-link").click()
+                WebDriverWait(driver, 60).until(
+                    ec.visibility_of_element_located((By.ID, "ready"))
+                )
+                assert driver.current_url == destination
+                driver.back()
+                WebDriverWait(driver, 30).until(ec.url_to_be(previous_url))
+                driver.forward()
+                WebDriverWait(driver, 60).until(
+                    ec.visibility_of_element_located((By.ID, "ready"))
+                )
+                assert driver.current_url == destination
+            finally:
+                driver.execute_cdp_cmd("Network.setBlockedURLs", {"urls": []})
+                driver.quit()
+
+
 def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
     valkey_container: DockerContainer,
     runtime_web_application: _RuntimeWebApplication,
@@ -2135,7 +2382,8 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
         maximum_application_buffer_bytes=16 * 1024 * 1024,
         maintenance=False,
         relay_path=True,
-    ) as stack:
+    ) as initial_stack:
+        stack = initial_stack
         runtime_web_api_client = azentspublicclient.ApiClient(
             configuration=azentspublicclient.Configuration(host=stack.public_api_url)
         )
@@ -2181,29 +2429,24 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
             _open_application_in_browser(driver, endpoint_url=service_url)
 
             evidence = _browser_transport_evidence(driver)
-            assert "error" not in evidence, evidence
-            assert evidence["echoBody"] == {
+            assert evidence.echo.model_dump(mode="json") == {
                 "body": "runtime-web-body",
                 "method": "POST",
             }
-            upload_evidence = evidence["uploadEvidence"]
-            assert isinstance(upload_evidence, dict)
-            assert upload_evidence["bytes"] == _BROWSER_TRANSFER_BYTES
-            assert upload_evidence["sha256"] == evidence["expectedUploadDigest"]
-            assert upload_evidence["content_length"] == _BROWSER_TRANSFER_BYTES
-            assert upload_evidence["transfer_encoding"] is None
-            assert evidence["eventsBody"] == (
+            assert evidence.upload.bytes == _BROWSER_TRANSFER_BYTES
+            assert evidence.upload.sha256 == evidence.expected_upload_digest
+            assert evidence.upload.content_length == _BROWSER_TRANSFER_BYTES
+            assert evidence.upload.transfer_encoding is None
+            assert evidence.events_body == (
                 "data: open\n\ndata: heartbeat\n\ndata: complete\n\n"
             )
-            assert evidence["redirectStatus"] == 200
-            assert evidence["redirectedUrl"] == service_url
-            redirected_body = evidence["redirectedBody"]
-            assert isinstance(redirected_body, str)
-            assert "Runtime Web E2E ready" in redirected_body
-            assert evidence["bytes"] == _BROWSER_TRANSFER_BYTES
-            assert evidence["assetCount"] == _BROWSER_ASSET_COUNT
-            assert evidence["assetsValid"] is True
-            assert evidence["websocket"] == {
+            assert evidence.redirect_status == 200
+            assert evidence.redirected_url == service_url
+            assert "Runtime Web E2E ready" in evidence.redirected_body
+            assert evidence.bytes == _BROWSER_TRANSFER_BYTES
+            assert evidence.asset_count == _BROWSER_ASSET_COUNT
+            assert evidence.assets_valid is True
+            assert evidence.websocket.model_dump(mode="json") == {
                 "text": "echo:runtime-web-socket",
                 "binary": [0, 1, 2, 255],
             }
@@ -2219,6 +2462,62 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
                 endpoint_url=service_url,
                 identity_secret=identity_secret,
             )
+            # Keep the Gateway and browser alive while the Runner joins a fresh
+            # Owner epoch; previous transfer totals must not enter the new hop.
+            runtime_api = AgentRuntimeV1Api(runtime_web_api_client)
+            previous_runtime = runtime_api.agent_runtime_v1_get_agent_runtime(
+                handle=workspace.handle,
+                agent_id=workspace.agent_id,
+                _headers=_headers(workspace.token),
+            )
+            assert previous_runtime.runtime is not None
+            previous_runner_generation = previous_runtime.runtime.runner_generation
+            assert previous_runner_generation is not None
+            runtime_web_stack_factory.owner_control.get_wrapped_container().restart(
+                timeout=5,
+            )
+            _wait_for_http(
+                runtime_web_stack_factory.owner_control,
+                port=8033,
+                path="/__azents/runtime-web/ready",
+                name="reconnected Runtime Web Owner",
+            )
+            stack = replace(
+                stack,
+                owner_control_operations_url=(
+                    f"http://{runtime_web_stack_factory.owner_control.get_container_host_ip()}:"
+                    f"{runtime_web_stack_factory.owner_control.get_exposed_port(8033)}"
+                ),
+            )
+            _assert_operations_ready(stack)
+            _wait_runtime(
+                runtime_api=runtime_api,
+                workspace=_TerminalWorkspace(
+                    token=workspace.token,
+                    handle=workspace.handle,
+                    agent_id=workspace.agent_id,
+                    session_id=workspace.session_id,
+                ),
+                predicate=lambda runtime: (
+                    runtime.runtime is not None
+                    and runtime.runtime.runner_generation is not None
+                    and runtime.runtime.runner_generation != previous_runner_generation
+                    and runtime.lifecycle is not None
+                    and runtime.lifecycle.availability == "ready"
+                    and runtime.lifecycle.runner.state == "ready"
+                    and runtime.actions.use_runner
+                ),
+                message="Runtime Web Runner did not become ready in a new generation",
+            )
+            _browser_neutral_transport_evidence(
+                stack=stack,
+                endpoint_url=service_url,
+                identity_secret=identity_secret,
+            )
+            recovered = _browser_transport_evidence(driver)
+            assert recovered.echo.body == "runtime-web-body"
+            assert recovered.upload.sha256 == recovered.expected_upload_digest
+            _wait_for_runtime_web_stream_release(stack)
             if auth_mode == "shared_cookie":
                 _assert_redis_capacity_fallback(
                     stack=stack,

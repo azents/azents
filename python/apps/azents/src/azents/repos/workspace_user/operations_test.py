@@ -13,12 +13,14 @@ from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.enums import WorkspaceUserRole
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.workspace import RDBWorkspace
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.owner_lifecycle import OwnerLifecycleRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import Workspace, WorkspaceCreate
+from azents.repos.workspace.data import Workspace
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import NotFound, WorkspaceUser
 from azents.testing.types import require_instance
@@ -71,13 +73,13 @@ def _repository(
     *,
     user_repository: AsyncMock | None = None,
     workspace_repository: AsyncMock | None = None,
-    session: AsyncMock | None = None,
+    session: WriteSession | None = None,
 ) -> WorkspaceUserOperationRepository:
     """Build an operation repository with one deterministic transaction."""
-    test_session = session or AsyncMock(spec=AsyncSession)
+    test_session = session or ReadWriteSession(AsyncMock(spec=AsyncSession))
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
         yield test_session
 
     return WorkspaceUserOperationRepository(
@@ -102,7 +104,7 @@ async def test_create_owner_rejects_existing_owner_under_workspace_lock() -> Non
     user_repository = AsyncMock(spec=WorkspaceUserRepository)
     workspace_repository = AsyncMock(spec=WorkspaceRepository)
     workspace_repository.resolve_id.return_value = "workspace-1"
-    workspace_repository.get_by_id_for_update.return_value = _workspace()
+    workspace_repository.acquire_ownership_mutation.return_value = _workspace()
     user_repository.get_owner_by_workspace.return_value = _workspace_user(
         role=WorkspaceUserRole.OWNER
     )
@@ -120,63 +122,44 @@ async def test_create_owner_rejects_existing_owner_under_workspace_lock() -> Non
 
     assert isinstance(result, Failure)
     assert isinstance(result.error, WorkspaceUserOwnerAlreadyExists)
-    workspace_repository.get_by_id_for_update.assert_awaited_once()
+    workspace_repository.acquire_ownership_mutation.assert_awaited_once()
     user_repository.create_with_conflict.assert_not_awaited()
 
 
-async def test_update_role_rechecks_owner_after_workspace_lock() -> None:
-    """A concurrent transfer cannot be overwritten by a role update."""
-    user_repository = AsyncMock(spec=WorkspaceUserRepository)
-    workspace_repository = AsyncMock(spec=WorkspaceRepository)
-    user_repository.get.side_effect = [
-        _workspace_user(role=WorkspaceUserRole.MEMBER),
-        _workspace_user(role=WorkspaceUserRole.OWNER),
-    ]
-    workspace_repository.get_by_id_for_update.return_value = _workspace()
-    repository = _repository(
-        user_repository=user_repository,
-        workspace_repository=workspace_repository,
+async def test_update_role_rejects_owner_from_conditional_mutation() -> None:
+    """A conditional update losing to transfer returns the existing OwnerLocked."""
+    users = AsyncMock(spec=WorkspaceUserRepository)
+    workspace = AsyncMock(spec=WorkspaceRepository)
+    users.update_non_owner_role.return_value = None
+    users.get.return_value = _workspace_user(role=WorkspaceUserRole.OWNER)
+    repo = _repository(user_repository=users, workspace_repository=workspace)
+    result = await repo.update_non_owner_role(
+        workspace_user_id="workspace-user-1", role=WorkspaceUserRole.MANAGER
     )
-
-    result = await repository.update_non_owner_role(
-        workspace_user_id="workspace-user-1",
-        role=WorkspaceUserRole.MANAGER,
-    )
-
     assert isinstance(result, Failure)
     assert isinstance(result.error, WorkspaceUserOwnerLocked)
-    user_repository.update_role.assert_not_awaited()
+    workspace.acquire_ownership_mutation.assert_not_awaited()
 
 
-async def test_delete_rechecks_owner_after_workspace_lock() -> None:
-    """A concurrent transfer cannot make deletion remove the new Owner."""
-    user_repository = AsyncMock(spec=WorkspaceUserRepository)
-    workspace_repository = AsyncMock(spec=WorkspaceRepository)
-    user_repository.get.side_effect = [
-        _workspace_user(role=WorkspaceUserRole.MEMBER),
-        _workspace_user(role=WorkspaceUserRole.OWNER),
-    ]
-    workspace_repository.get_by_id_for_update.return_value = _workspace()
-    repository = _repository(
-        user_repository=user_repository,
-        workspace_repository=workspace_repository,
-    )
-
-    result = await repository.delete_non_owner(workspace_user_id="workspace-user-1")
-
+async def test_delete_rejects_owner_from_conditional_mutation() -> None:
+    """A conditional delete cannot remove a newly transferred Owner."""
+    users = AsyncMock(spec=WorkspaceUserRepository)
+    workspace = AsyncMock(spec=WorkspaceRepository)
+    users.delete_non_owner.return_value = None
+    users.get.return_value = _workspace_user(role=WorkspaceUserRole.OWNER)
+    repo = _repository(user_repository=users, workspace_repository=workspace)
+    result = await repo.delete_non_owner(workspace_user_id="workspace-user-1")
     assert isinstance(result, Failure)
     assert isinstance(result.error, WorkspaceUserOwnerLocked)
-    user_repository.delete.assert_not_awaited()
+    workspace.acquire_ownership_mutation.assert_not_awaited()
 
 
 async def test_transfer_ownership_rejects_member_from_another_workspace() -> None:
     """Ownership transfer target must belong to the locked Workspace."""
     user_repository = AsyncMock(spec=WorkspaceUserRepository)
     workspace_repository = AsyncMock(spec=WorkspaceRepository)
-    workspace_repository.get_by_id_for_update.return_value = _workspace()
-    user_repository.get_for_update.return_value = _workspace_user(
-        workspace_id="workspace-2"
-    )
+    workspace_repository.acquire_ownership_mutation.return_value = _workspace()
+    user_repository.get.return_value = _workspace_user(workspace_id="workspace-2")
     repository = _repository(
         user_repository=user_repository,
         workspace_repository=workspace_repository,
@@ -189,7 +172,7 @@ async def test_transfer_ownership_rejects_member_from_another_workspace() -> Non
 
     assert isinstance(result, Failure)
     assert isinstance(result.error, WorkspaceUserOutsideWorkspace)
-    user_repository.get_owner_by_workspace_for_update.assert_not_awaited()
+    user_repository.get_owner_by_workspace.assert_not_awaited()
 
 
 async def test_transfer_ownership_to_current_owner_is_idempotent() -> None:
@@ -197,9 +180,9 @@ async def test_transfer_ownership_to_current_owner_is_idempotent() -> None:
     owner = _workspace_user(role=WorkspaceUserRole.OWNER)
     user_repository = AsyncMock(spec=WorkspaceUserRepository)
     workspace_repository = AsyncMock(spec=WorkspaceRepository)
-    workspace_repository.get_by_id_for_update.return_value = _workspace()
-    user_repository.get_for_update.return_value = owner
-    user_repository.get_owner_by_workspace_for_update.return_value = owner
+    workspace_repository.acquire_ownership_mutation.return_value = _workspace()
+    user_repository.get.return_value = owner
+    user_repository.get_owner_by_workspace.return_value = owner
     repository = _repository(
         user_repository=user_repository,
         workspace_repository=workspace_repository,
@@ -228,12 +211,13 @@ async def test_transfer_ownership_rolls_back_when_promotion_fails() -> None:
         user_id="user-new-owner",
         role=WorkspaceUserRole.MANAGER,
     )
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
     user_repository = AsyncMock(spec=WorkspaceUserRepository)
     workspace_repository = AsyncMock(spec=WorkspaceRepository)
-    workspace_repository.get_by_id_for_update.return_value = _workspace()
-    user_repository.get_for_update.return_value = new_owner
-    user_repository.get_owner_by_workspace_for_update.return_value = current_owner
+    workspace_repository.acquire_ownership_mutation.return_value = _workspace()
+    user_repository.get.return_value = new_owner
+    user_repository.get_owner_by_workspace.return_value = current_owner
     user_repository.update_role.side_effect = [
         Success(
             _workspace_user(
@@ -257,7 +241,7 @@ async def test_transfer_ownership_rolls_back_when_promotion_fails() -> None:
 
     assert isinstance(result, Failure)
     assert isinstance(result.error, NotFound)
-    session.rollback.assert_awaited_once()
+    _raw_session.rollback.assert_awaited_once()
 
 
 @pytest.mark.parametrize("attempt", range(3))
@@ -274,18 +258,22 @@ async def test_concurrent_owner_creation_keeps_single_owner(
     user_ids: list[str] = []
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as _raw_session:
+            session = ReadWriteSession(_raw_session)
             try:
                 yield session
             except Exception:
-                await session.rollback()
+                await session.write_session.rollback()
                 raise
             else:
-                await session.commit()
+                await session.write_session.commit()
 
     try:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup_session:
+        async with AsyncSession(
+            rdb_engine, expire_on_commit=False
+        ) as _raw_setup_session:
+            setup_session = ReadWriteSession(_raw_setup_session)
             workspace_result = await WorkspaceRepository().create(
                 setup_session,
                 WorkspaceCreate(name="Owner race", handle=workspace_handle),
@@ -301,7 +289,7 @@ async def test_concurrent_owner_creation_keeps_single_owner(
                     UserCreate(email=f"owner-race-{suffix}-{index}@example.com"),
                 )
                 user_ids.append(user.id)
-            await setup_session.commit()
+            await setup_session.write_session.commit()
 
         repository = WorkspaceUserOperationRepository(
             user_repository=WorkspaceUserRepository(),
@@ -327,11 +315,14 @@ async def test_concurrent_owner_creation_keeps_single_owner(
         assert len(failures) == 1
         assert isinstance(failures[0].error, WorkspaceUserOwnerAlreadyExists)
     finally:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as cleanup_session:
+        async with AsyncSession(
+            rdb_engine, expire_on_commit=False
+        ) as _raw_cleanup_session:
+            cleanup_session = ReadWriteSession(_raw_cleanup_session)
             if workspace_id is not None:
-                await cleanup_session.execute(
+                await cleanup_session.write_session.execute(
                     sa.delete(RDBWorkspace).where(RDBWorkspace.id == workspace_id)
                 )
             for user_id in user_ids:
                 await UserRepository().delete(cleanup_session, user_id)
-            await cleanup_session.commit()
+            await cleanup_session.write_session.commit()

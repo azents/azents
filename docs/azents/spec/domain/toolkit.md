@@ -6,6 +6,27 @@ spec_type: domain
 domain: toolkit
 owner: "@Hardtack"
 code_paths:
+  - python/apps/azents/src/azents/core/agent_errors.py
+  - python/apps/azents/src/azents/core/chat_data.py
+  - python/apps/azents/src/azents/core/exchange_file_errors.py
+  - python/apps/azents/src/azents/core/github_auth.py
+  - python/apps/azents/src/azents/core/github_installation.py
+  - python/apps/azents/src/azents/core/historical_memory_settings.py
+  - python/apps/azents/src/azents/core/historical_memory_context.py
+  - python/apps/azents/src/azents/core/mailbox_errors.py
+  - python/apps/azents/src/azents/core/memory_scope.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/core/toolkit_errors.py
+  - python/apps/azents/src/azents/repos/engine_event_repositories.py
+  - python/apps/azents/src/azents/repos/engine_resolve.py
+  - python/apps/azents/src/azents/repos/engine_tool_repositories.py
+  - python/apps/azents/src/azents/repos/engine_runtime_tool_read.py
+  - python/apps/azents/src/azents/repos/memory_context_snapshot.py
+  - python/apps/azents/src/azents/repos/historical_memory/source_events.py
+  - python/apps/azents/src/azents/repos/skill_state_store.py
+  - python/apps/azents/src/azents/repos/vfs_projection_operations.py
+  - python/apps/azents/src/azents/repos/vfs_read_authority.py
+  - python/apps/azents/src/azents/repos/worker_toolkit_repositories.py
   - python/apps/azents/src/azents/core/tools.py
   - python/apps/azents/src/azents/core/runtime_profile.py
   - python/apps/azents/src/azents/core/runtime_capabilities.py
@@ -16,13 +37,22 @@ code_paths:
   - python/apps/azents/src/azents/core/engine_tool_state.py
   - python/apps/azents/src/azents/repos/toolkit/**
   - python/apps/azents/src/azents/repos/toolkit_operations/**
+  - python/apps/azents/src/azents/repos/toolkit_oauth_operations.py
+  - python/apps/azents/src/azents/repos/toolkit_oauth_data.py
   - python/apps/azents/src/azents/repos/github_user_installation/**
   - python/apps/azents/src/azents/services/toolkit/**
+  - python/apps/azents/src/azents/services/toolkit_oauth/**
   - python/apps/azents/src/azents/services/vfs.py
+  - python/apps/azents/src/azents/services/vfs_read.py
+  - python/apps/azents/src/azents/services/vfs_mutation.py
+  - python/apps/azents/src/azents/services/memory_vfs.py
+  - python/apps/azents/src/azents/services/historical_memory/**
+  - python/apps/azents/src/azents/repos/memory_vfs/**
   - python/apps/azents/src/azents/services/github_platform_system_setting/runtime.py
-  - python/apps/azents/src/azents/services/github_platform_system_setting/binding.py
+  - python/apps/azents/src/azents/repos/github_platform_system_setting/binding.py
   - python/apps/azents/src/azents/api/public/toolkit/v1/**
   - python/apps/azents/src/azents/rdb/models/toolkit.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/cda14157c46c_allow_duplicate_toolkit_slugs.py
   - python/apps/azents/src/azents/rdb/models/github_user_installation.py
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/runtime_web/**
@@ -34,7 +64,11 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/contracts.py
   - python/apps/azents/src/azents/engine/run/input.py
   - python/apps/azents/src/azents/engine/tools/**
-  - python/apps/azents/src/azents/services/agent_mailbox.py
+  - python/apps/azents/src/azents/repos/agent_mailbox.py
+  - python/apps/azents/src/azents/repos/terminal_finalization.py
+  - python/apps/azents/src/azents/repos/terminal_finalization_data.py
+  - python/apps/azents/src/azents/repos/subagent_terminal_result.py
+  - python/apps/azents/src/azents/core/terminal_result.py
   - python/apps/azents/src/azents/services/turn_action.py
   - python/apps/azents/src/azents/services/subagent_terminal_result.py
   - python/apps/azents/src/azents/services/subagent_coordination.py
@@ -67,15 +101,17 @@ code_paths:
   - typescript/apps/azents-web/src/app/(app)/oauth/mcp/callback/**
   - typescript/apps/azents-web/src/features/agents/agentToolkitManagementState.ts
   - typescript/apps/azents-web/src/features/agents/components/AgentToolkitSection.tsx
+  - typescript/apps/azents-web/src/features/agents/components/ManagedAgentToolkitSection.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentToolkitManagementContainer.ts
   - typescript/apps/azents-web/src/features/toolkits/**
   - typescript/apps/azents-web/src/features/toolkit-setup/**
   - typescript/apps/azents-web/src/shared/lib/redacted-credentials.ts
+  - typescript/apps/azents-web/src/shared/lib/toolkit-identifiers.ts
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-10-01
-spec_version: 125
+last_verified_at: 2026-10-08
+spec_version: 139
 ---
 
 # Toolkit
@@ -89,7 +125,9 @@ This domain covers four feature groups.
 1. **Toolkit bundle** — external service integration tools such as MCP / GitHub / GCP / AWS / Notion / Sentry / GoogleAnalytics / Kubernetes. Implemented by `ToolkitConfig`, Workspace-sharing `ToolkitScope`, and shared attachment `AgentToolkit`.
 2. **MCP OAuth2 connection** — toolkit-level OAuth2 client/token state for remote MCP servers. Implemented by `MCPOAuthConnection`.
 3. **Auto-bound platform capabilities** — Runtime, Runtime Web, Memory, Goal, Todo, Skill, Subagent, Scheduled Task, and other platform-owned Toolkits resolved from the current Agent, Session, Run, and Runtime capability snapshot without a persisted ToolkitConfig.
-4. **Managed Skill VFS** — immutable run-scoped `azents://` resources for release-bundled global and Toolkit Provider Skills. Managed files remain outside the Runtime filesystem until `import_file` materializes one selected entry.
+4. **Registered read-only VFS** — immutable run-scoped Skills and live authorized
+   Memory resources behind generic read tools. Skills remain outside Runtime until
+   `import_file` materializes one selected entry; Memory has no transfer capability.
 
 All credentials are stored in DB with Fernet (`AZ_CREDENTIAL_ENCRYPTION_KEY`) symmetric encryption and are never exposed in agent prompt. (`CredentialCipher`, [`python/apps/azents/src/azents/core/crypto.py`](../../../../python/apps/azents/src/azents/core/crypto.py))
 
@@ -109,20 +147,31 @@ upstream authorization/quota failures produce safe failures without revealing ke
 
 ### Team Session execution boundary
 
+Ordinary Toolkit/Agent management authorization uses scoped reads without
+parent/admin read locks. Durable namespace claim is separate: shared slug change
+and attachment coordinate only their actual Toolkit allocation, and missing or
+changed reservations allocate under the exact Agent/sequence identity claim.
+Reuse of an already-valid reservation is an ordinary read and does not acquire
+that Agent allocation fence. Concurrent different Toolkits with the same base
+slug retain distinct durable executable namespaces.
+
 Resolved Session Toolkits bind a narrow PostgreSQL execution owner
 (`session_id`, `owner_generation`) before Toolkit lifecycle entry. This covers
-lifecycle/background snapshot writes as well as direct Tool state mutations.
+execution identity and actual effect admission, not every private state scope.
 Request-local full resource authority may change between Runs under the same owner,
 while the durable owner token remains fixed; reusing a Toolkit under another
 generation is rejected. Idle-continuation Toolkit preparation uses the same narrow
 binding before entry.
 
-Todo, Goal, Memory, Skill, Subagent, Scheduled Task, GitHub selection,
-MCP/AWS/GCP snapshots, Runtime instruction dedupe, and Claude Rules state commit
-through owner-bound database scopes. External discovery, Runtime/file reads,
-provider calls, and broker publication occur after those scopes close. A stale
-owner rejection terminates hook/tool processing instead of becoming an allowed
-hook result, failed Tool payload, or background refresh retry.
+Todo/Goal payloads, Skill adoption, GitHub selection, MCP/AWS/GCP snapshots and
+instruction appendix dedupe use ordinary completed operations without generic
+root-tree ownership manager binding. Existing state CAS and source/schema
+identity remain. Memory content mutation, durable Goal events, Run VFS publication,
+Memory boundary publication and Scheduled terminal publication explicitly fence
+only their critical exact Session mutation groups. External discovery, Runtime/
+file reads, provider calls and broker publication occur outside database scopes.
+Observed stale admission and critical-owner rejection retain their existing
+failure handling; no row lock is held across external I/O.
 
 Tool Search working-set, AGENTS.md/Claude Rules appendix dedupe, and Todo payload
 models are pure core state. Their ordinary reads and mutations are completed
@@ -133,8 +182,28 @@ Raw MCP, AWS, GCP, and GitHub MCP tool snapshots plus the GitHub selected
 installation are also pure core state loaded and replaced through completed
 repository operations. External tool discovery, credential exchange, and tool
 execution remain outside those operations. Successful snapshot replacement keeps
-the existing optimistic retry and owner-generation fence; runtime still validates
+the existing optimistic retry without a Session root fence; runtime still validates
 the stored server/project identity before rebuilding tools.
+
+Saved snapshot and GitHub selection descriptions load through independent,
+database-enforced read-only scopes. Their private metadata replacements use
+ordinary write scopes with existing state version predicates. Neither path
+acquires a generic Session ownership fence or requires a globally latest view. Missing
+state remains an absent description; retained source identity and schema/executor
+pairing remain mandatory.
+
+Runtime Toolkit availability uses the captured capability projection rather than
+current-operation admission. Retained Runtime/configuration, ready Runner,
+Runner-reported workspace and existing BOUND Session-folder evidence describe
+availability without Runtime reconciliation, start, pending-folder binding or
+Agent/context row locks. Dynamic Worktree preparation shares one retained
+eligibility projection for create and remove; removal additionally requires a
+ready managed allocation. Actual tool invocation still revalidates current
+capability, expected configuration/target, binding and ownership before external
+effects. Model preparation uses a nonlocking current-owner observation rather
+than a generic root/Agent/ancestor gate. Critical persisted outputs separately
+exclude handover through the exact Session mutation commit; no short owner check
+promises exclusion throughout external execution.
 
 All currently implemented AgentSessions execute as Team Sessions. Generic Toolkit, resolve, run, and
 turn contexts contain canonical Workspace, Agent, Session, Run, and resource authority, but no User
@@ -168,13 +237,18 @@ erDiagram
     TOOLKIT_CONFIG ||--o{ AGENT_TOOLKIT : attached_to
     TOOLKIT_CONFIG ||--o| MCP_OAUTH_CONNECTION : oauth_connection
     AGENT ||--o{ AGENT_TOOLKIT : mounts
+    AGENT ||--o{ TOOLKIT_NAMESPACE_RESERVATION : reserves
+    AGENT ||--o{ TOOLKIT_NAMESPACE_SEQUENCE : allocates
+    TOOLKIT_CONFIG o|--o| TOOLKIT_NAMESPACE_RESERVATION : active_mapping
 ```
 
 ### Entities
 
-- **ToolkitConfig** — a Workspace-resident tool + setting bundle with a nullable canonical `owner_agent_id`. A null owner is `Workspace shared`; it can be mounted by multiple Agents through `AgentToolkit` and has a WORKSPACE scope. A non-null owner is `This Agent only`; it has no `AgentToolkit` or `ToolkitScope` projection and is reachable only through its exact owning Agent. Its local slug indexes are `(workspace_id, slug)` for shared rows and `(owner_agent_id, slug)` for Agent-owned rows. `revision` starts at `1` and increments whenever persisted ToolkitConfig state changes. ([`rdb/models/toolkit.py`](../../../../python/apps/azents/src/azents/rdb/models/toolkit.py))
+- **ToolkitConfig** — a Workspace-resident tool + setting bundle with a nullable canonical `owner_agent_id`. A null owner is `Workspace shared`; it can be mounted by multiple Agents through `AgentToolkit` and has a WORKSPACE scope. A non-null owner is `This Agent only`; it has no `AgentToolkit` or `ToolkitScope` projection and is reachable only through its exact owning Agent. `slug` is a non-empty, non-unique stored base alias; duplicate Slugs are allowed within both ownership kinds and among Toolkits effective for one Agent. `revision` starts at `1` and increments whenever persisted ToolkitConfig state changes. ([`rdb/models/toolkit.py`](../../../../python/apps/azents/src/azents/rdb/models/toolkit.py))
 - **ToolkitScope** — Workspace visibility scope for a Workspace-shared ToolkitConfig only. `scope_type` is `WORKSPACE`; `scope_id` is the Workspace ID. The common Workspace create path automatically adds this scope. ([`services/toolkit/__init__.py`](../../../../python/apps/azents/src/azents/services/toolkit/__init__.py))
 - **AgentToolkit** — shared Workspace ToolkitConfig ↔ Agent attachment. `(agent_id, toolkit_id)` is UNIQUE. It is not created for Agent-owned ToolkitConfigs.
+- **ToolkitNamespaceReservation** — durable namespace authority for one Agent and ToolkitConfig. Active rows have a non-null `toolkit_id`; retired rows keep `toolkit_id = NULL` so a prior executable namespace is never reassigned within the Agent. The row stores the base Slug, monotonic ordinal, and final namespace. `(agent_id, namespace)`, active `(agent_id, toolkit_id)`, and `(agent_id, base_slug, ordinal)` are unique.
+- **ToolkitNamespaceSequence** — one durable monotonic counter per `(agent_id, base_slug)`. It survives Toolkit deletion and reservation retirement until the Agent is deleted.
 - **MCPOAuthConnection** — Toolkit-level MCP OAuth client registration and token state. `toolkit_id` is UNIQUE; client IDs, client secrets, access tokens, and refresh tokens are encrypted. Status is `connected` or `reconnect_required`.
 
 ### Enum / Type
@@ -206,6 +280,20 @@ erDiagram
 
 ## Behavior
 
+### Name and Slug Materialization
+
+Toolkit create requests may omit or send blank `name` and `slug` values. The Toolkit service is the persistence authority:
+
+- generic `mcp` requires a non-blank trimmed Name;
+- every other registered Provider defaults a blank or omitted Name to its canonical Provider Name;
+- a blank or omitted Slug is derived from the effective Name through Unicode NFKD, ASCII projection, lowercase conversion, separator collapse, edge trimming, and a 100-character bound;
+- when the effective Name produces no ASCII identifier, Slug derivation falls back to the canonical Provider Name; and
+- an explicit Slug trims surrounding whitespace, lowercases ASCII, converts whitespace and hyphen runs to underscores, collapses underscores, and then validates the lowercase ASCII identifier format.
+
+Patch omission preserves the stored value. An included blank Name requests the Provider default and remains invalid for generic MCP. An included blank Slug requests recomputation from the patch's effective Name, using the current stored Name when Name is omitted. Persisted and response Names and Slugs remain non-null.
+
+The Web create form keeps Name and Slug inputs empty and previews the same policy through placeholders in Toolkit Type → Name → Slug order. Untouched empty values are omitted from create mutations; edit forms load persisted values and submit deliberate blank clears. Python and TypeScript policy tests consume the same versioned language-neutral conformance corpus.
+
 ### Toolkit Type & Scope
 
 Every ToolkitConfig belongs to one Workspace and has one explicit ownership kind:
@@ -218,30 +306,37 @@ Every ToolkitConfig belongs to one Workspace and has one explicit ownership kind
 To mount a Workspace-shared Toolkit on an Agent:
 
 1. Call `attach_to_agent(agent_id, toolkit_id)`.
-2. Service checks Agent → Workspace ownership, Toolkit → Workspace ownership, and whether toolkit is in user's available list.
+2. The attachment repository operation checks Agent → Workspace ownership, Toolkit → Workspace ownership, and whether toolkit is in user's available list before returning to the service.
 3. INSERT `AgentToolkit` row. UNIQUE violation on `(agent_id, toolkit_id)` returns `DuplicateAgentToolkit`.
 
-`effective_agent_toolkit_relation(enabled_only=True)` is the canonical runtime and VFS relation. It unions enabled shared `AgentToolkit` attachments with enabled Agent-owned ToolkitConfigs whose `owner_agent_id` equals the Agent, carries a stable source discriminator, and rejects duplicate effective slugs before any partial catalog or VFS projection is published. Disabling or deleting an Agent-only Toolkit removes it from later effective reads; already-prepared calls and immutable AgentRun VFS projections retain their normal snapshot semantics.
+`effective_agent_toolkit_relation(enabled_only=True)` is the canonical runtime and VFS relation. It unions enabled shared `AgentToolkit` attachments with enabled Agent-owned ToolkitConfigs whose `owner_agent_id` equals the Agent, carries a stable source discriminator, and joins exactly one active namespace reservation for every relation row. Missing, duplicate, or base-Slug-mismatched active reservations are invariant failures; runtime reads never allocate or guess a fallback. Disabling or detaching a Toolkit keeps its reservation for later reuse. Deleting a Toolkit retires the active mapping while retaining the reserved namespace and sequence history. Disabling or deleting an Agent-only Toolkit removes it from later effective reads; already-prepared calls and immutable AgentRun VFS projections retain their normal snapshot semantics.
 
 ### Tool Name Prefixing
 
-ToolkitConfig `slug` is the DB-registered toolkit's model-visible namespace. It is locally unique within the shared Workspace or owning Agent, and it must also be unique among every enabled effective Toolkit for one Agent. It is used as the outer tool-name prefix for DB-registered toolkits.
+ToolkitConfig `slug` is the administrator-visible, non-unique base alias. One Agent+Toolkit namespace reservation owns the effective outer tool-name prefix. The first allocation for a base Slug uses the base unchanged; later allocations use `_2`, `_3`, and increasing monotonic ordinals. Candidate collisions with already reserved namespaces consume the next ordinal instead of reassigning an old name.
 
-`resolve_agent_tools()` resolves the canonical effective relation into `ToolkitBinding` records with `slug=ToolkitConfig.slug` and `use_prefix=True`. During `build_tool_catalog()`, every `FunctionTool` returned by an enabled binding is renamed with `tool.with_prefix(f"{slug}__")` when `use_prefix=True`. The final model-visible name is therefore:
+`resolve_agent_tools()` resolves the canonical effective relation into `ToolkitBinding` records that carry both stored `slug` and `effective_namespace`, with `use_prefix=True`. During `build_tool_catalog()`, every `FunctionTool` returned by an enabled binding is renamed with `tool.with_prefix(f"{effective_namespace}__")` when `use_prefix=True`. The final model-visible name is therefore:
 
 ```text
-{toolkit_slug}__{tool_name}
+{effective_namespace}__{tool_name}
 ```
 
-Auto-bound single-instance toolkits use `use_prefix=False`; their tool names are exposed as-is. This applies to Memory Read, Memory Write, Runtime file/process tools, Subagent collaboration tools, and the session-bound Goal/Todo tools. For example, `list_memories`, `save_memory`, `exec_command`, `write_stdin`, `read`, `run_tool_to_file`, `spawn_agent`, `wait_agent`, `get_goal`, and `update_todo` are not prefixed.
+Catalog construction rejects duplicate final names before publication and reports both source ToolkitConfig IDs; dictionary overwrite is never collision handling. The catalog source retains ToolkitConfig ID, Type, persisted Name, base Slug, effective namespace, revision, and a bounded allowlisted non-secret connection identity. Tool Search, executor routing, runtime hooks, durable source snapshots, and activity projections consume that exact selected source rather than parsing the final name.
 
-Some toolkits may add their own internal segment before the outer ToolkitConfig slug is applied. GitHub multi-installation routing does this by prefixing each installation's MCP tools with a safe account-login segment. With ToolkitConfig slug `github`, installation `azents`, and MCP tool `get_file_contents`, the final model-visible name becomes:
+Auto-bound single-instance toolkits use `use_prefix=False`; names are exposed as-is.
+This includes Saved Memory writes, generic readable-storage tools, Runtime mutation/
+process tools, Subagent collaboration, and Session Goal/Todo tools. For example,
+`save_memory`, `delete_memory`, `read`, `grep`, `glob`, `exec_command`,
+`write_stdin`, `run_tool_to_file`, `spawn_agent`, `wait_agent`, `get_goal`, and
+`update_todo` are not prefixed. Memory context is a prompt-only binding.
+
+Some toolkits may add their own internal segment before the outer effective namespace is applied. GitHub multi-installation routing does this by prefixing each installation's MCP tools with a safe account-login segment. With effective namespace `github`, installation `azents`, and MCP tool `get_file_contents`, the final model-visible name becomes:
 
 ```text
 github__azents__get_file_contents
 ```
 
-The slug prefix is only a tool-call namespace. Toolkit State uses its own `toolkit_namespace` field and is not derived automatically from the model-visible tool name.
+The effective prefix is only a tool-call namespace. Toolkit State uses its own `toolkit_namespace` field and is not derived automatically from the model-visible tool name.
 
 Toolkit State identity and payload models are pure core types. Database handles
 and optimistic compare-and-set storage live in the repository layer. Goal and
@@ -294,6 +389,60 @@ and save it through authorized Runtime transfer. Target failure cannot be reclas
 output. Stored parts are suppressed from the outer result; only failed parts and a final
 already-executed notice remain model-visible after partial Runtime storage failure.
 
+Dynamic prompt preparation may return visible text plus server-only native replay
+compatibility metadata in one result. Ordinary toolkit strings are unchanged.
+Memory supplies only already admitted exact Historical unit/revision identity;
+catalog projections preserve that binding without injecting it into visible
+prompt fragments or treating it as access authority.
+
+### Registered VFS and Generic Storage Ownership
+
+The DI-owned VFS backend registry maps canonical mounts to native read backends;
+duplicate registration is fatal. There is no static supported-mount allowlist
+or whole-backend materialization fallback. Exact-file, file/directory search,
+and glob-pattern URI validation are separate; traversal, encoded aliases,
+backslashes, user info, ports, queries, and fragments are rejected.
+
+One auto-bound `readable_storage` Toolkit owns exactly one `read`, `grep`, and
+`glob` for both root and subagent execution, even without Runtime. Absolute
+Runtime paths lazily resolve the existing filesystem adapter under the current
+Runtime capability/version gate. Canonical `azents://` paths route to their
+registered backend under a server-created Run/concrete/root Session/Agent/
+Workspace/User/owner context. Relative or ambiguous locations are invalid.
+Unsupported backend operations fail explicitly.
+
+The same routed storage surface owns exactly one generic `write`, `edit`,
+`delete` and `apply_patch`. Absolute Runtime paths delegate to the existing
+Runtime filesystem implementations/capability checks. Canonical VFS mutations
+use separately registered optional mutation and atomic-patch capabilities;
+read-only backends need no mutation members or throwing placeholder methods.
+Patch admission rejects mixed backends and commits all-or-none within a backend.
+Unsupported VFS operations fail without Runtime fallback. Foreground Skills and
+Memory remain read-only; only the internal consolidation principal registers the
+private writable `memory-draft` mount with draft/epoch/receipt fences.
+
+Skills reads use the immutable current AgentRun projection. Memory reads use live
+PostgreSQL queries and independently recheck Memory enablement and current root/
+source authority. The Memory tree includes a README, Saved Agent/User entries,
+Historical Team/User summaries, and source Session/event/exact result files using
+database IDs. Broad regex search excludes tool-result bodies; exact result reads
+contain persisted text only, not inputs, artifacts, references, or bytes.
+Denied source use is non-enumerating and archive/access loss applies to the next
+operation. See [`memory.md`](memory.md) for namespace and lifecycle detail.
+
+Read results use common bounded character ranges, grep file/line results, and
+sorted canonical glob URIs. Backend limits are no greater than common tool caps,
+and truncation plus exact stop reason survives through generic output, including
+empty truncated results. Skills/Memory regex work runs in a killable subprocess;
+deadline or cancellation kills and reaps the child. Memory operations have a
+two-second bound, at most 1,000 glob candidates/results, and row/byte admission
+bounds. Content-free logs retain backend/operation/duration/count/stop metadata.
+
+RuntimeToolkit owns process, image, transfer and Runtime filesystem adapter
+implementations, not duplicate generic storage tool names. Optional
+transfer-read is a backend capability: Skills retains its immutable import path,
+while Memory explicitly does not support transfer or import.
+
 ### Managed Skill VFS
 
 Azents-managed Skill packages use a read-only virtual filesystem distinct from the Agent Runtime filesystem. The first registered mount is `skills`, and every managed Skill entrypoint has the canonical form:
@@ -304,7 +453,15 @@ azents://skills/{namespace}/{skill}/SKILL.md
 
 The `azents` namespace is reserved for approved global release-bundled packages. A Toolkit Provider may declare one approved release resource root under the namespace equal to its stable Provider slug, such as `github`. A Provider package is eligible only when the Agent has an enabled attachment to an enabled ToolkitConfig of that Provider type. Credential state, provider connection health, and the Workspace-local ToolkitConfig slug do not change content eligibility or rewrite the URI. The initial projection records source identity but not a concrete ToolkitConfig tool prefix, so managed package instructions cannot assume one Workspace-local prefix.
 
-Every AgentRun stores one self-contained immutable VFS projection in `agent_runs.vfs_projection`. The projection records schema and revision identity, deterministic source records, canonical entries, content hashes, media types, decoded sizes, and Base64 bodies. Release sources are scanned from local Python package resources. A process-local catalog may retain the last successful source slice, but recovery authority is the projection persisted on the AgentRun. Once set, retries, worker takeover, and resume never replace it with current package bytes.
+Every AgentRun stores one self-contained immutable Skills VFS projection in
+`agent_runs.vfs_projection`; this does not store the live Memory tree. The
+projection records schema/revision identity, deterministic source records,
+canonical entries, hashes, media types, decoded sizes, and Base64 bodies.
+Release sources are scanned from local package resources. A process-local catalog
+may retain the last successful source slice, but recovery authority is the
+persisted projection. Retries, takeover, and resume never replace it with current
+package bytes. Existing hashes/source revisions and the at-most-eight-MiB
+projection bound remain unchanged.
 
 The Skill Toolkit combines managed entrypoints with the existing filesystem Skill snapshot. Filesystem Skills keep absolute `SKILL.md` paths and the session-scoped `latest`/`active` adoption lifecycle. Managed Skills use their exact `azents://` URI as `skill_path`; equal slugs remain separate when their locators differ. `load_skill` dispatches absolute paths only to the active filesystem projection and canonical managed URIs only to the current run VFS projection, with no cross-source fallback.
 
@@ -329,7 +486,14 @@ revalidates the exact active projection item before emitting the durable
 Eligibility drift between an idle preview and run creation therefore produces the
 normal unavailable-Skill error rather than reading stale preview content.
 
-`import_file` registers an `azents` resolver alongside `exchange` and `artifact`. The resolver validates the canonical URI, current run ownership, exact projection membership, Base64 content, decoded size, and SHA-256 hash before passing bytes to the existing Runtime materialization path. Ordinary Runtime `read`, `glob`, `grep`, `write`, and `edit` tools remain path-only and never resolve `azents://` directly. Only the materialized Runtime copy follows Runtime path retention rules; the source entry remains part of the retained immutable AgentRun projection.
+`import_file` registers an `azents` resolver alongside `exchange` and `artifact`.
+For importable Skills it validates the canonical URI, current run ownership,
+exact projection membership, Base64 content, decoded size, and SHA-256 hash
+before passing bytes to Runtime materialization. Generic `read`, `glob`, and
+`grep` resolve managed URIs through readable storage without import. Runtime
+mutation adapters remain filesystem-only, and foreground Memory has no import/transfer
+capability. Only the materialized Runtime copy follows Runtime path retention
+rules; the Skill source remains in the retained immutable AgentRun projection.
 
 Root and subagent executions use the same admission contract. Each AgentRun independently ensures a projection for its resolved Agent, Session, and Workspace context rather than inheriting another run's projection.
 
@@ -346,12 +510,16 @@ azents-web provides Workspace-shared Toolkit management screens and an authority
 
 The AWS Toolkit form describes the current AWS Managed MCP authorization model for its Access Key + SigV4 connection. It directs managers to grant only the downstream AWS service API permissions the Agent needs. It does not require the deprecated `aws-mcp:InvokeMcp`, `aws-mcp:CallReadOnlyTool`, or `aws-mcp:CallReadWriteTool` actions, which have no effect. MCP-specific restrictions use the `aws:ViaAWSMCPService` or `aws:CalledViaAWSMCP` IAM condition context keys.
 
-For a saved Agent, the Agent response's requester-relative `toolkit_management_available` flag is true only for a Workspace Owner or explicit AgentAdmin. The enhanced Toolkit section reads the Agent management projection and starts `Add Toolkit` with a persisted Toolkit type choice. After selection it shows only eligible Workspace-shared candidates for that type alongside the option to configure an Agent-only Toolkit. Saved cards label each item `Workspace shared` or `This Agent only`, show text readiness (`ready`, `authorization_required`, or `disabled`), and keep ownership-correct actions separate:
+For a saved Agent, the Agent response's requester-relative `toolkit_management_available` flag is true only for a Workspace Owner or explicit AgentAdmin. `Add Toolkit` opens a two-tab catalog. `New Toolkit` is the default and shows Provider-type tiles that open the existing Agent-only configuration form directly. `Workspace Toolkit` shows eligible saved shared instances of every type, excluding current attachments, with a final link to Workspace Toolkit creation. Selecting a shared tile attaches its exact ID immediately. Completing the Agent-only form persists that Toolkit immediately. Neither action submits or requires another save of the parent Agent form.
 
-- A Workspace-shared item can be detached. When an OAuth Toolkit requires authorization, a Workspace Owner/Manager can connect or reconnect directly from its Agent card; other Workspace object edits, disablement, and deletion remain in the Workspace Toolkit screens. Other authorization warnings link authorized managers to the Workspace Toolkit editor.
+Connected cards show service icon, Name, Type, short description, ownership and text readiness (`ready`, `authorization_required`, or `disabled`). Details separate technical identifiers, allowlisted Provider configuration and OAuth scope/expiration from the compact list. Configured features are not claimed to be external granted permissions. Raw config, credentials and absent account identities are never invented or dumped. Server resource URLs display only HTTP(S) origin, excluding credential-bearing paths as well as userinfo/query/fragment material. Deletion failures remain visible in the active confirmation dialog with retry/cancel actions. Toolkit icons use a common frontend type-keyed component, existing Tabler marks and bundled local SVGs; icons do not define Provider availability or require third-party runtime requests. Ownership-correct actions remain separate:
+
+- A Workspace-shared item can be detached from details. When an OAuth Toolkit requires authorization, a Workspace Owner/Manager can connect or reconnect directly from its Agent card or details; other Workspace object edits, disablement, and deletion remain in the Workspace Toolkit screens. Authorized managers receive a Workspace-management link; Agent administrators without Workspace write authority do not receive shared-object mutation actions.
 - An Agent-only item can be created, edited, connection-tested, enabled or disabled, OAuth-connected or disconnected, and deleted through nested Agent routes. When OAuth authorization is required, the card starts connect or reconnect directly; other authorization warnings open its editor. Deletion is confirmed as removal from that Agent with stored credentials deleted.
 - The reusable Toolkit form is embedded only under a saved Agent. Unsaved validation and connection-test errors remain in that form; closing it creates no ToolkitConfig.
 - Requesters without the flag retain the legacy shared attachment section. They receive no Agent-only item, ownership/readiness detail, or Agent-only management action. Chat has no Toolkit management surface.
+
+The catalog, form and details share a responsive dialog while the parent Agent form remains mounted. Agent-only edit/toggle/delete actions are available from details. An acknowledged write remains committed even when a subsequent management-query refresh fails; a read failure does not reclassify the form as unsaved. Saved OAuth-incomplete items retain authorization-required readiness. This readiness is based on persisted state, not live provider health.
 
 The Agent-only form uses the existing provider-specific config, credential, test, GitHub, and MCP OAuth controls. The callback return target is the owning Agent's capabilities Toolkit section. The callback's opener notification contains only its fixed event type and success boolean; credentials, tokens, codes, and state plaintext are never rendered or posted.
 The Agent card reserves an OAuth popup before requesting an authorization URL, verifies callback origin and popup source, and invalidates the Agent management projection on callback success. Failure leaves readiness unchanged and displays an error. The existing ownership-specific OAuth endpoints and backend permission checks remain authoritative.
@@ -375,7 +543,48 @@ Platform App installation rows and `github_app_platform` Toolkit credentials are
 
 Public install URL generation, OAuth start/callback, installation synchronization, and Worker token issuance resolve one coherent Platform GitHub App snapshot from System Settings at the operation boundary. OAuth state carries the internal effective generation, and callback processing rejects generation drift before code exchange. Token issuance verifies the Toolkit's bound App ID and the User installation's App ID against the current effective App before any external token request. Same-App key or OAuth-secret rotation preserves the binding; an App-ID mismatch fails closed.
 
+Workspace installation synchronization runs through a session-free service:
+exchange and list HTTP precede one completed, ordered User/App upsert/prune
+transaction. That final operation repeats the existing active User/exact Auth
+Session, immutable admitted Workspace, current membership, and `TOOLKITS_WRITE`
+conditions. The captured App identity remains the synchronization scope; no
+second Platform generation fence is added. Temporary-token revocation occurs
+only after successful Workspace synchronization, while Agent setup retains its
+existing `finally` revocation. Persistence keeps duplicate-row order and defaults
+a missing or non-string avatar to an empty string; the Public list separately
+requires a string avatar.
+
+GitHub App identity, App/user installation listing, installation-token issuance,
+OAuth authorization-code exchange and temporary-token revocation use public
+asynchronous GitHubKit operations. SDK transport retains the current endpoints,
+authentication, `2022-11-28` header, five-second timeout and first-page
+100-installation limit; retries and response caching are disabled. App JWT
+issuance retains RS256, normalized PEM newlines, a 60-second backdate and a
+nine-minute expiry.
+
+Installation/account JSON is decoded at provider ingress into immutable
+`GitHubInstallationSnapshot` records. Domain, persistence and Public projections
+consume declared fields while preserving ordered duplicates, boolean-ID
+compatibility, malformed-record skipping, and the distinction between unknown
+avatars and explicit empty strings. Persistence retains its empty-string
+fallback; Public projections omit unknown avatars. Provider extensions remain
+compatible, and no Public wire field is added or renamed.
+
+Expected HTTP errors retain the caller contract. Revocation handles expected
+HTTP cleanup failures once; unexpected defects and cancellation propagate.
+Validation diagnostics do not expose token-bearing provider payloads.
+
 Toolkit list/detail responses expose an optional redacted `authorization_state` with `status=reconnect_required` and the stable reason `app_identity_changed` when a persisted Toolkit belongs to a different Platform App. Main Web uses this Public API projection to block misleading connect/test actions and guide a manager to reconnect; it does not call the Admin API or depend on the Admin client. Persisted Toolkit configuration and Agent attachments are retained across App identity changes.
+
+### Shared Connection Test Boundaries
+
+Saved connection tests use a completed exact shared Toolkit/Workspace read and
+retain strict not-found behavior. Unsaved tests read an eligible saved snapshot
+only when a Toolkit ID is supplied; a missing, foreign, or Agent-owned item uses
+form-only credentials, and a null ID opens no database scope. Provider validation,
+redacted/Kubernetes credential merging, Platform App binding, and provider network
+tests run outside repository transactions. Submitted credential discriminators,
+blank-value retention, and configured Kubernetes-cluster pruning are unchanged.
 
 ### MCP OAuth Connection Flow
 
@@ -509,9 +718,33 @@ Strong invariant: **raw credential is never exposed in agent prompt**.
 
 ### Runtime Tool Execution and Network Authority
 
-Runtime file/process tools (`exec_command` / `write_stdin` / `import_file` / `present_file` /
-`read` / `write` / `grep` / `glob` / ...) are auto-bound only when the captured Agent capability
-snapshot grants the declared Runtime capability. The current Workspace Runtime Profile and its
+AWS role credentials use the public STS AssumeRole SDK operation, retaining
+region/endpoint, role/external ID, session name, duration and early-refresh cache.
+Direct access keys do not instantiate STS. Google service-account signing and
+token parsing use the public credential SDK with only the adopted email/private
+key and scopes. The fixed token URI, RS256 and absence of a `kid` header remain
+unchanged; opaque token URI/universe/key-ID fields cannot gain endpoint or signing
+authority. UTC expiry is normalized explicitly. The existing 30-second timeout,
+disabled redirects and one physical authentication dispatch are enforced through
+the public Request boundary, including SDK-eligible retries. Failed refreshes
+do not publish credentials; synchronous SDK work runs off the event loop and
+owns resource closure.
+
+Kubernetes CRUD remains on lightkube. Discovery and WebSocket execution reuse the
+owned Kubernetes SDK client through public typed Core/Groups APIs and the public
+generic operation for installed preferred group versions. Private lightkube HTTP
+internals and handwritten discovery requests are not used. Preferred versions,
+subresource skips, per-group HTTP-failure skips and resource ordering/cache reuse
+remain unchanged. Partial initialization closes both clients before propagating
+unexpected failures or cancellation. GKE discovery uses the public Container SDK
+with current endpoint identity and no additional operation retries.
+
+Runtime mutation/process/transfer tools (`exec_command`, `write_stdin`,
+`write`, `delete`, `edit`, `apply_patch`, `import_file`, `present_file`, and
+`read_image`) are auto-bound only when the captured Agent capability
+snapshot grants the declared Runtime capability. Generic `read`/`grep`/`glob`
+remain independently bound; only their absolute Runtime branch requires that
+capability. The current Workspace Runtime Profile and its
 resolved Provider configuration own outbound network authority. ToolkitConfig owns persisted
 external-service integration configuration.
 
@@ -521,7 +754,15 @@ the capability before Runtime ensure, Profile resolution, Runner dispatch, or cr
 Every admitted operation rechecks the captured capability version and current state before external
 side effects; a concurrent removal fails closed instead of retargeting another Runtime incarnation.
 
-Memory Read and Memory Write are resolved as separate auto-bound capabilities. Memory Read exposes `list_memories`, `get_memory`, and `search_memories`. Memory Write exposes `save_memory` and `delete_memory`. Root execution mode binds both when Agent memory is enabled. Subagent execution mode keeps Memory Read eligible and excludes Memory Write from auto-binding.
+Memory Context and Memory Write are separate auto-bound capabilities. Enabled
+root/subagent `memory_context` contributes the root's persisted initial or
+post-compaction boundary snapshot and live VFS lookup guidance, with no domain
+read tools. Ordinary turns filter unavailable entries without reselection.
+Root-only `memory_write` exposes Saved `save_memory` and `delete_memory`; subagents
+do not receive those mutation tools. The six dedicated Memory/history read
+factories are removed without aliases. Disabled Memory contributes no automatic
+context/mutation tools and denies the live Memory mount while generic tools can
+still read other authorized backends.
 
 - `ShellToolkitConfig` is the internal shared configuration model for auto-bound Builtin, Memory,
   and Runtime Toolkit instances. It carries `allowed_domains`, `denied_domains`, `agent_data_root`,
@@ -531,7 +772,7 @@ Memory Read and Memory Write are resolved as separate auto-bound capabilities. M
   configuration envelope. Kubernetes Profile and Workspace policy may select direct,
   proxy-required, or no-network authority; Docker remains direct-only under its supported Profile
   contract. ([`core/runtime_profile.py`](../../../../python/apps/azents/src/azents/core/runtime_profile.py), [`services/agent_runtime`](../../../../python/apps/azents/src/azents/services/agent_runtime))
-- Runtime file tools guide the LLM-facing path surface for durable working files under the current Runner-reported Agent Workspace and temporary files under `/tmp/**`. Static tool schemas name the Agent Workspace generically, while the dynamic Runtime prompt renders the exact current root. User upload is copied to Runtime by `import_file` using `exchange://{object_key}` file-location URI, and internal artifact is copied with `artifact://{storage_key}` file-location URI. `/tmp/**` destination import warns that result can disappear after Runtime restart and returns original URI for reimport. `present_file` exports only files under the current durable Agent Workspace as user-visible `exchange://{object_key}` attachment.
+- Runtime file tools guide the LLM-facing path surface for durable working files under the current Runner-reported Agent Workspace and temporary files under `/tmp/**`. Static tool schemas name the Agent Workspace generically, while the dynamic Runtime prompt renders the exact current root. User upload is copied to Runtime by `import_file` using `exchange://{object_key}` file-location URI, and internal artifact is copied with `artifact://{storage_key}` file-location URI. `/tmp/**` destination import warns that result can disappear after Runtime restart and returns original URI for reimport. `present_file` exports files from any absolute Runtime path, including `/tmp/**` and paths outside the Agent Workspace, as user-visible `exchange://{object_key}` attachments, subject to filesystem permissions and transfer verification.
 - Runtime transfer, publication, and provider-delivery services are required parts of the Runtime Toolkit rather than optional capabilities. Toolkit context construction never waits for Runner readiness. The Runtime static prompt selects the applied configuration when a ready current-generation Runner is already serving it; otherwise it selects the desired configuration used for a permitted start/wait path. A blocked or malformed future desired slot does not replace the authority of an already-ready applied Runtime. When neither path supplies a usable configuration document, the prompt leaves Runtime operations unavailable.
 - General Runtime file movement uses shared 128 MiB eligibility: `import_file`,
   `run_tool_to_file` parts, and `download_external_file` receive exact-attempt direct
@@ -563,8 +804,9 @@ Shell and managed process execution runs directly through the Runner process ser
 edit, patch, search, Git, import, image, publication, provider-delivery, and transfer operations
 also execute directly in the Runner without a helper subprocess. Relative paths resolve from the
 Agent Workspace; absolute paths are governed by the Runtime operating-system user's ordinary
-filesystem permissions. Product-level boundaries such as `present_file` exporting only an Agent
-Workspace subfile remain enforced by their owning service. None of these behaviors is represented
+filesystem permissions. `present_file` requires absolute Runtime paths, while Session authority,
+regular-file verification, source stability, size, and checksum checks remain enforced by the
+publication and transfer services. None of these behaviors is represented
 as Azents-owned process or infrastructure isolation.
 
 Structured logs separate visible file-tool duration and Runtime operation count from appendix processing. They include tool status, Session identity, phase duration, candidate/discovery/cache/dedupe counts, and internal list/stat/read counts as applicable. Raw file content, rendered appendix content, and model-visible output are not logged.
@@ -694,6 +936,13 @@ woken in its existing Session subject to the ordinary active-capacity check.
 Terminal-result delivery, parent observation cursors, and the public Subagent Tree
 remain independent and complete.
 
+Historical terminal-result repair loads candidates and direct children through
+completed repository reads and commits each eligible parent delivery through a
+separate database-only repair operation. Repair logging and outcome counting run
+after those operations. Normal terminal finalization and repair share canonical
+AgentMailbox database admission and safe result text but retain their distinct
+parent-ineligibility and User Stop behavior.
+
 `spawn_agent` currently supports only `agent_type = default`; unsupported values fail as tool errors.
 Its `fork_turns` parameter defaults to `all`, so the child starts with the parent's current
 model-visible context unless the caller explicitly selects no context or a bounded number of turns.
@@ -777,7 +1026,8 @@ Goal and Todo auto-bound toolkits expose fixed tool definitions independent of c
 
 | Toolkit | Activation condition | Credential source |
 |---|---|---|
-| `memory_read` | auto-bound when Agent memory is enabled; eligible for root and subagent execution modes | — |
+| `memory_context` | prompt-only boundary snapshot and VFS guidance when Memory is enabled; root and subagent | — |
+| `readable_storage` | generic `read`/`grep`/`glob` for root and subagent, independently of Runtime; backend/absolute-path authority applies at execution | — |
 | `subagent` | auto-bound collaboration toolkit; eligible for root and subagent execution modes | `spawn_agent`, `send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, `list_agents` |
 | `memory_write` | auto-bound when Agent memory is enabled and execution mode is root | — |
 | `runtime` | auto-bound only when the Agent is `managed`; every declared Runtime capability is granted at the captured/current capability version. Network authority comes from the current Workspace Runtime Profile configuration. | — |
@@ -791,8 +1041,9 @@ Goal and Todo auto-bound toolkits expose fixed tool definitions independent of c
 
 ### Runtime-Only Toolkit Boundary
 
-Memory Read/Write, Goal, Todo, managed VFS Skills, subagent collaboration, schedule, and compatible
-remote Toolkit operations do not require a managed Runtime. Runtime file/process tools,
+Memory Context/Write, generic VFS reads, Goal, Todo, managed VFS Skills, subagent
+collaboration, schedule, and compatible remote Toolkit operations do not require
+a managed Runtime. Absolute-path read branches, Runtime mutation/process tools,
 filesystem Skill discovery/materialization, AGENTS.md/Claude Rules filesystem projection, Runtime
 transfer, Workspace/Project/Git operations, and Runtime credential exposure declare stable Runtime
 capabilities and are projected exactly when the captured and current Agent capability is `managed`
@@ -802,15 +1053,15 @@ independent browser `terminal_enabled` policy is never read by Toolkit resolutio
 Toolkit resolution receives an execution mode. Root sessions use root mode. Child sessions whose
 `AgentSession.session_kind` is `subagent` use subagent mode. This filter keeps root/user-facing
 capabilities such as Memory Write and Goal Toolkit out of subagent auto-binding without changing
-DB-registered ToolkitConfig resolution. Runtime-free mode retains compatible server and remote
-capabilities while omitting every Runtime-dependent tool, prompt, hook, filesystem projection, and
-credential injection path.
+DB-registered ToolkitConfig resolution. Runtime-free mode retains generic VFS
+reads and compatible server/remote capabilities while omitting Runtime-dependent
+tool branches, prompts, hooks, filesystem projection, and credential injection.
 
 
 ## Business Rules
 
-- `[effective-toolkit-relation]` The canonical effective relation is the ordered union of Workspace-shared `AgentToolkit` attachments and direct Agent-owned ToolkitConfigs. Runtime, VFS, impact, and effective-slug checks consume this relation rather than constructing their own ownership lookup.
-- `[toolkit-slug-local-and-effective-unique]` Shared `(workspace_id, slug)` and Agent-owned `(owner_agent_id, slug)` values use separate partial unique indexes. Slug allows lowercase letters, numbers, and underscores only (`^[a-z0-9_]+$`); dashes are rejected because the slug becomes the outer model-visible tool namespace before the `__` tool separator. A create, attach, update, or enable operation also rejects a duplicate enabled slug in the Agent's effective relation. If omitted, a slug defaults to `toolkit_type`.
+- `[effective-toolkit-relation]` The canonical effective relation is the ordered union of Workspace-shared `AgentToolkit` attachments and direct Agent-owned ToolkitConfigs. Runtime, VFS, impact, and namespace reads consume this relation rather than constructing their own ownership lookup. Every persisted relation row must join exactly one active Agent+Toolkit namespace reservation with the current stored base Slug.
+- `[toolkit-slug-base-alias]` Stored Slug is a non-unique base alias. Create requests may omit or blank Name and Slug for backend materialization, except that generic MCP requires a Name. Explicit Slugs normalize surrounding language-neutral whitespace, ASCII case, whitespace/hyphen separators, and repeated underscores before `^[a-z0-9_]+$` and 100-character validation. Blank Slug patches derive from the Name in the locked current mutation snapshot. Duplicate create, update, attach, and enable operations are allowed; executable uniqueness comes only from the durable effective namespace.
 - `[workspace-scope-access]` Only a Workspace-shared Toolkit has a WORKSPACE scope and can be attached by workspace members. Agent-only Toolkit visibility is the direct owning-Agent relation and has no scope or attachment row.
 - `[agent-toolkit-management-authority]` Agent-only management requires the Workspace Owner or an explicit AgentAdmin of the exact active Agent. Workspace Manager and Member roles alone grant neither item disclosure nor Agent-only action authority. Unauthorized Agent-owned item access uses the common not-found boundary.
 - `[shell-is-not-toolkit-config]` Request creating ToolkitConfig with `toolkit_type="shell"` returns 400. Runtime tool availability is managed through Agent Runtime settings and Runtime Profile authority, not a persisted ToolkitConfig. ([`api/public/toolkit/v1/__init__.py` L82-87](../../../../python/apps/azents/src/azents/api/public/toolkit/v1/__init__.py))
@@ -822,7 +1073,7 @@ credential injection path.
 - `[credentials-not-in-response]` ToolkitConfigResponse does not include plaintext credentials and exposes only `has_credentials: bool`.
 - `[runtime-network-authority]` Outbound network authority comes from the exact current Workspace
   Runtime Profile and Provider-owned infrastructure Profile.
-- `[agent-workspace-file-tool-boundary]` Shell file tools guide current Runner-reported Agent Workspace subpaths and `/tmp/**` paths. External Exchange files and internal Artifacts enter Runtime through `import_file`; `/tmp/**` import result includes transient warning and original file-location URI. User-downloadable file is exported by `present_file` only from an Agent Workspace subfile as `exchange://{object_key}` attachment. Runner-native operations otherwise rely on the Runtime operating-system user's ordinary filesystem permissions.
+- `[agent-workspace-file-tool-boundary]` Shell file tools guide current Runner-reported Agent Workspace subpaths and `/tmp/**` paths. External Exchange files and internal Artifacts enter Runtime through `import_file`; `/tmp/**` import result includes transient warning and original file-location URI. User-downloadable files are exported by `present_file` from any absolute Runtime file path as `exchange://{object_key}` attachments, with publication authority and transfer verification retained. Runner-native operations rely on the Runtime operating-system user's ordinary filesystem permissions.
 - `[agents-md-project-boundary]` Project-scoped `AGENTS.md` auto-load works only inside registered Project. Agent Workspace root instruction is separate root scope, and Agent Workspace root itself is not treated as Project.
 - `[toolkit-hook-effects]` Toolkit tool-call hook may perform `on_before_tool_call` deny and `on_after_tool_call` text output replacement within [hook-260518/ADR](../../adr/hook-260518-hook.md) scope. Arbitrary input mutation, retry/continuation wrapper, credential trace storage are not allowed.
 - `[toolkit-session-lifecycle]` Executable Toolkit instance is managed by session-scoped lifecycle registry tied to `_SessionRunner` active lifetime. Each actionable wake-up resolves a fresh desired toolkit snapshot. A binding with the same stable identity and source revision retains its entered instance; a changed revision enters a replacement before the previous instance is closed. New or replacement toolkit `__aenter__()` must complete before engine `update_context()` call. Removed and replaced toolkits are `__aexit__()` only after successful reconciliation.
@@ -1015,14 +1266,16 @@ supports at most 49 tasks, and its complete desired progress snapshot must fit t
 64 KiB aggregate canonical bound. `continue` preserves unfinished Channel Work and
 projects the complete latest Tracker; every continue invalidates older awaiting
 settlement, while message-only continuation leaves progress and Tracker position
-unchanged. For Discord, an explicitly supplied complete ordered task snapshot is
-compared with the canonical pre-transition tasks. A changed snapshot accompanied by a
-message removes or detaches the current Tracker, creates the complete latest Tracker
-as a notification-suppressed standalone message, and then attempts the reply parts.
+unchanged. For Discord, the ordered titles of explicitly supplied tasks are compared
+with the canonical pre-transition task titles. A renamed, added, removed, or reordered
+title removes or detaches the current Tracker and creates the complete latest Tracker
+as a notification-suppressed standalone message, regardless of message presence.
+Any requested reply parts are attempted after relocation.
 Replacement creation depends on confirmed current-host removal but not on reply
-delivery. A changed snapshot without a message updates the current standalone or reply
-host in place, or creates a missing standalone host. Identical task replacements and
-title-only changes also update the current host in place. Later progress changes
+delivery. Completion, reopening, IDs, details, output, and sources are excluded from
+this comparison. An unchanged task-title list or work-title-only change updates the
+current standalone or reply host in place, or creates a missing standalone host.
+Later progress changes
 repair failed or ambiguous best-effort projection without durable retry work.
 `request_input` requires a
 participant-visible message, preserves active Work, and establishes binding-scoped
@@ -1076,6 +1329,36 @@ notification execute only after the operation returns.
 
 ## Changelog
 
+- **2026-10-07** (spec_version 138) — Compare ordered task titles for Discord Tracker
+  relocation regardless of reply presence; status and metadata changes edit the host.
+
+- **2026-10-05** (spec_version 137) — Reconciled code-path discovery with current
+  defining modules; system behavior is unchanged.
+
+- **2026-10-05** (spec_version 136) — Separated harmless private state and descriptive scopes from exact critical Session mutation fences; retained immutable Toolkit owner identity, precise effect admission, VFS/Memory-boundary publication and credential finalization.
+
+- **2026-10-04** (spec_version 131) — Promoted single generic mutation routing
+  with optional native VFS mutation/atomic-patch protocols and scoped internal
+  drafts, preserving read-only foreground Memory/Skills and Runtime adapters.
+
+- **2026-10-03** (spec_version 130) — Allowed `present_file` to publish files from
+  absolute Runtime paths outside the Agent Workspace while preserving filesystem
+  permissions, publication authority, and transfer verification.
+- **2026-10-02** (spec_version 129) — Completed Workspace OAuth installation
+  synchronization and saved/unsaved connection-test persistence boundaries,
+  preserving ordered User/App synchronization, existing callback cleanup, and
+  strict saved versus optional form-only credential behavior.
+- **2026-10-02** (spec_version 128) — Canonicalized AgentMailbox and terminal
+  database composition and completed historical result-repair operations while
+  preserving parent validation, idempotency, and queue-only scheduling.
+- **2026-10-02** (spec_version 127) — Promoted prompt-only Memory boundary
+  context, mutation-only domain tools, and one generic Runtime-independent
+  read/grep/glob binding for immutable Skills and live read-only Memory mounts.
+- **2026-10-01** (spec_version 126) — Made Toolkit Name and Slug create inputs
+  backend-defaulted, added shared Python/TypeScript conformance vectors and
+  placeholder-only Web previews, made stored Slugs non-unique, and promoted
+  durable Agent+Toolkit effective namespaces as the sole registered-tool prefix
+  and routing authority.
 - **2026-10-01** (spec_version 125) — Moved Scheduled and Subagent Toolkit
   reads and atomic mutations behind repository-owned completed operations while
   preserving lock order, fork/capacity authority, and post-commit channel,

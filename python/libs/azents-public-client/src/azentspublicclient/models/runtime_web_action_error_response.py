@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict
-from typing import Any, ClassVar, Dict, List
+from typing import Any, ClassVar, Dict
 from azentspublicclient.models.runtime_web_action_error_detail import RuntimeWebActionErrorDetail
 from typing import Optional, Set
 from typing_extensions import Self
@@ -28,7 +28,6 @@ class RuntimeWebActionErrorResponse(BaseModel):
     FastAPI envelope for a bounded Runtime Web control error.
     """ # noqa: E501
     detail: RuntimeWebActionErrorDetail
-    additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["detail"]
 
     model_config = ConfigDict(
@@ -61,10 +60,8 @@ class RuntimeWebActionErrorResponse(BaseModel):
         * `None` is only added to the output dict for nullable fields that
           were set at model initialization. Other fields with value `None`
           are ignored.
-        * Fields in `self.additional_properties` are added to the output dict.
         """
         excluded_fields: Set[str] = set([
-            "additional_properties",
         ])
 
         _dict = self.model_dump(
@@ -75,11 +72,6 @@ class RuntimeWebActionErrorResponse(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of detail
         if self.detail:
             _dict['detail'] = self.detail.to_dict()
-        # puts key-value pairs in additional_properties in the top level
-        if self.additional_properties is not None:
-            for _key, _value in self.additional_properties.items():
-                _dict[_key] = _value
-
         return _dict
 
     @classmethod
@@ -91,14 +83,12 @@ class RuntimeWebActionErrorResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "detail": RuntimeWebActionErrorDetail.from_dict(obj["detail"]) if obj.get("detail") is not None else None
+            }.items() if _key in obj
         })
-        # store additional fields in additional_properties
-        for _key in obj.keys():
-            if _key not in cls.__properties:
-                _obj.additional_properties[_key] = obj.get(_key)
-
         return _obj
 
 

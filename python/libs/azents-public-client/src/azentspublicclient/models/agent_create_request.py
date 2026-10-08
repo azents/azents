@@ -46,7 +46,6 @@ class AgentCreateRequest(BaseModel):
     max_turns: Optional[StrictInt] = None
     auto_archive_ttl_days: Optional[StrictInt] = Field(default=30, description="Inactivity period before automatic Session archive")
     subagent_settings: Optional[SubagentSettings] = Field(default=None, description="Subagent execution settings")
-    additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["name", "selectable_model_options", "main_model_label", "lightweight_model_label", "description", "model_parameters", "system_prompt", "enabled", "type", "runtime_profile_id", "terminal_enabled", "memory_enabled", "tool_search_enabled", "max_turns", "auto_archive_ttl_days", "subagent_settings"]
 
     model_config = ConfigDict(
@@ -79,10 +78,8 @@ class AgentCreateRequest(BaseModel):
         * `None` is only added to the output dict for nullable fields that
           were set at model initialization. Other fields with value `None`
           are ignored.
-        * Fields in `self.additional_properties` are added to the output dict.
         """
         excluded_fields: Set[str] = set([
-            "additional_properties",
         ])
 
         _dict = self.model_dump(
@@ -103,11 +100,6 @@ class AgentCreateRequest(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of subagent_settings
         if self.subagent_settings:
             _dict['subagent_settings'] = self.subagent_settings.to_dict()
-        # puts key-value pairs in additional_properties in the top level
-        if self.additional_properties is not None:
-            for _key, _value in self.additional_properties.items():
-                _dict[_key] = _value
-
         # set to None if selectable_model_options (nullable) is None
         # and model_fields_set contains the field
         if self.selectable_model_options is None and "selectable_model_options" in self.model_fields_set:
@@ -159,7 +151,9 @@ class AgentCreateRequest(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "name": obj.get("name"),
             "selectable_model_options": [SelectableModelOptionInput.from_dict(_item) for _item in obj["selectable_model_options"]] if obj.get("selectable_model_options") is not None else None,
             "main_model_label": obj.get("main_model_label"),
@@ -176,12 +170,8 @@ class AgentCreateRequest(BaseModel):
             "max_turns": obj.get("max_turns"),
             "auto_archive_ttl_days": obj.get("auto_archive_ttl_days") if obj.get("auto_archive_ttl_days") is not None else 30,
             "subagent_settings": SubagentSettings.from_dict(obj["subagent_settings"]) if obj.get("subagent_settings") is not None else None
+            }.items() if _key in obj
         })
-        # store additional fields in additional_properties
-        for _key in obj.keys():
-            if _key not in cls.__properties:
-                _obj.additional_properties[_key] = obj.get(_key)
-
         return _obj
 
 

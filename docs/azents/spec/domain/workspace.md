@@ -1,16 +1,38 @@
 ---
 title: "Workspace & Membership"
+created: 2026-04-20
+tags: [workspace, backend, frontend, security, runtime]
 spec_type: domain
 domain: workspace
 owner: "@Hardtack"
 code_paths:
+  - python/apps/azents/src/azents/repos/agent_workspace_access.py
+  - python/apps/azents/src/azents/core/agent_automatic_project.py
+  - python/apps/azents/src/azents/core/agent_errors.py
+  - python/apps/azents/src/azents/core/agent_session_input_data.py
+  - python/apps/azents/src/azents/core/chat_data.py
+  - python/apps/azents/src/azents/core/exchange_file_errors.py
+  - python/apps/azents/src/azents/core/external_channel_access.py
+  - python/apps/azents/src/azents/core/external_channel_conversation_data.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/core/session_workspace_items.py
+  - python/apps/azents/src/azents/core/session_workspace_paths.py
+  - python/apps/azents/src/azents/repos/skill_state_store.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/services/workspace/**
+  - python/apps/azents/src/azents/core/workspace.py
+  - python/apps/azents/src/azents/core/account_access.py
+  - python/apps/azents/src/azents/core/auth/deps.py
+  - python/apps/azents/src/azents/repos/workspace/**
+  - python/apps/azents/src/azents/repos/account_access.py
+  - python/apps/azents/src/azents/services/account_access.py
   - python/apps/azents/src/azents/services/workspace_user/**
   - python/apps/azents/src/azents/repos/workspace_user/**
   - python/apps/azents/src/azents/api/admin/workspace_user/**
   - python/apps/azents/src/azents/services/workspace_invitation/**
+  - python/apps/azents/src/azents/repos/workspace_invitation/**
   - python/apps/azents/src/azents/services/workspace_join_request/**
+  - python/apps/azents/src/azents/repos/workspace_join_request/**
   - python/apps/azents/src/azents/services/external_channel/management.py
   - python/apps/azents/src/azents/api/public/external_channel/v1/management_route.py
   - python/apps/azents/src/azents/core/auth/permissions.py
@@ -19,8 +41,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_workspace_access.py
   - python/apps/azents/src/azents/services/chat/workspace_upload.py
   - python/apps/azents/src/azents/repos/workspace_upload_authority/**
-  - python/apps/azents/src/azents/services/file_download_stream.py
-  - python/apps/azents/src/azents/api/public/file_download.py
+  - python/apps/azents/src/azents/services/browser_file_download.py
   - python/apps/azents/src/azents/runtime/transfer/**
   - python/apps/azents/src/azents/services/session_workspace_project/**
   - python/apps/azents/src/azents/repos/session_workspace_project/**
@@ -29,7 +50,11 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_project_preset/**
   - python/apps/azents/src/azents/repos/agent_project_default/**
   - python/apps/azents/src/azents/repos/agent_project_catalog/**
+  - python/apps/azents/src/azents/repos/agent_project_catalog/operations.py
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
+  - python/apps/azents/src/azents/repos/agent_automatic_project_operations.py
+  - python/apps/azents/src/azents/repos/project_browser_manifest_read.py
+  - python/apps/azents/src/azents/repos/subscription_usage_read.py
   - python/apps/azents/src/azents/rdb/models/agent_automatic_project_item.py
   - python/apps/azents/src/azents/rdb/models/agent_automatic_project_setting.py
   - python/apps/azents/src/azents/rdb/models/session_agent_context.py
@@ -44,9 +69,13 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/git_worktree_cleanup_claim.py
   - python/apps/azents/src/azents/services/agent_project_catalog/**
   - python/apps/azents/src/azents/services/agent_automatic_project/**
-  - python/apps/azents/src/azents/services/root_agent_session_creation/**
+  - python/apps/azents/src/azents/repos/root_agent_session_creation.py
   - python/apps/azents/src/azents/services/runtime_directory_validation.py
   - python/apps/azents/src/azents/services/session_git_worktree/**
+  - python/apps/azents/src/azents/core/session_git_worktree_results.py
+  - python/apps/azents/src/azents/repos/session_git_worktree/**
+  - python/apps/azents/src/azents/repos/session_working_folder_binding/**
+  - python/apps/azents/src/azents/services/session_working_folder_binding*
   - python/apps/azents/src/azents/services/turn_action.py
   - python/apps/azents/src/azents/services/archived_session_purge.py
   - python/apps/azents/src/azents/services/runtime_profile_workspace/**
@@ -131,8 +160,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-10-01
-spec_version: 90
+last_verified_at: 2026-10-05
+spec_version: 97
 ---
 
 # Workspace & Membership
@@ -253,7 +282,70 @@ erDiagram
 
 ## Behavior
 
+### Workspace Administration and Membership Admission
+
+Ordinary Workspace/member/Agent/Toolkit authorization descriptions use scoped
+reads without parent, membership or administrative-row read locks. Existing
+tenant and permission checks remain. Non-owner member update/delete carries the
+non-OWNER condition in the actual SQL mutation, so an obsolete ordinary request
+cannot demote or delete a newly transferred OWNER. Initial OWNER creation and
+ownership transfer retain only their coherent security-mutation exclusion;
+ordinary member creation and inspection do not inherit it.
+
+Already-BOUND Project access uses retained read-only context and exact
+Agent/Session/Workspace/path identity without Agent/context locks. Actual PENDING
+binding and registry insertion versus overlapping destructive worktree cleanup
+keep separate exact-target/path claim mutation protection. Registry deletion
+still removes only the selected record and does not delete filesystem folders.
+
+Workspace create, handle lookup, update, global list, owner creation, and
+User-scoped list execute as completed database-only repository operations.
+Authenticated public creation commits the Workspace and its initial OWNER
+membership together; membership insertion failure rolls back the Workspace.
+Admin Workspace creation remains Workspace-only. Handle uniqueness, omitted
+patch fields, membership ordering, and omission of missing referenced Workspace
+projections retain their existing behavior.
+
+HTTP Workspace admission reads the handle and exact User membership in one
+completed repository operation. Missing Workspace retains `404`; an existing
+Workspace without that membership retains `403`. Detached membership data supplies
+the existing HTTP context and local role/permission projection after the database
+operation finishes. System-administrator assignment still grants no implicit
+Workspace access.
+
+### Session Worktree Database Ownership
+
+Session Git worktree admission, allocation, Project linking, path claims,
+action progress/result writes, cleanup settlement, and terminal handoff execute
+as completed database-only repository operations. Their existing atomic groups
+remain separate: a repository does not retain a transaction across Runner,
+Runtime resolution, Git, filesystem, Skill invalidation, or projection callbacks.
+Independent Session, allocation, and action observations use read-only scopes.
+
+Critical dependent mutations fence the exact Session owner generation in the
+same transaction as their writes. Binding validation composes with allocation,
+Project linking, and catalog mutations within that operation; it is not an
+independently committed service bridge. Runtime/path coordination and exact path
+claim locks retain their order inside the mutation group. A stale execution
+owner or binding cannot commit dependent state.
+
+Terminal handoff atomically appends the durable action snapshot, creates the
+idempotent bridge continuation and input wakeup when applicable, and deletes the
+live action row. Failure or cancellation rolls the group back; replay returns
+the existing durable event and requires retained continuation authority.
+External callbacks run only after the operation finishes. Archive cleanup
+likewise finishes its database claim/preparation or settlement before external
+checkout removal and Skill effects.
+
 ### Agent Workspace Runtime State
+
+`AgentWorkspaceFileService` receives the completed
+`AgentWorkspaceAccessRepository` as an injected collaborator. The repository
+loads the Agent and exact requester membership in a native PostgreSQL read-only
+scope and returns detached authority after that scope closes. File orchestration
+does not construct access owners from database managers or narrower repositories;
+Runtime operation targets, Runner-reported paths, and file outcomes remain
+independently authoritative.
 
 Agent Workspace API exposes Agent Runtime capability and lifecycle state. Read APIs do not ensure or
 start a Runtime. Server reads PostgreSQL capability, optional logical Runtime, Provider/Runner state,
@@ -436,6 +528,14 @@ Agent Workspace Project is a boundary registry explicitly registered by user for
   current Agent Runtime before the final locked revision check and atomic replace.
   An empty clear requires no Runtime. Validation or revision failure leaves the
   previous ordered policy unchanged.
+- Automatic Project policy management uses a completed, native read-only
+  repository admission/policy snapshot before Runtime directory validation.
+  Non-empty path validation and Runtime target discovery run with that read scope
+  closed. The final repository write rechecks the exact Agent Workspace and
+  explicit AgentAdmin relationship, locks that authority and the current policy,
+  then atomically replaces the ordered policy and catalog availability projection.
+  Revoked management authority, stale revisions, SQL failures and cancellation do
+  not leave a partial policy/catalog change. Empty clears still require no Runtime.
 - Automatic root creation reads the policy inside its caller-owned database
   transaction and writes those paths directly to the new
   `SessionAgentContext`. It performs no Runtime I/O at Session creation time.
@@ -461,6 +561,14 @@ Agent Workspace Project is a boundary registry explicitly registered by user for
 - `GET /chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/project-browser-manifest` returns a backend-owned Project browser manifest for the selected session. It derives Project root entries from `session_agent_context_projects`, joins catalog status projection by Agent/path, and returns backend-provided capabilities. Project root entries allow registry removal when tied to a session Project and disallow filesystem delete, move, and rename. Entries linked to `session_agent_context_git_worktrees` expose `repository_type: "git"` so clients can render Git-specific Project root metadata without probing the filesystem. A non-cleaned Azents-owned worktree Project also exposes `delete_worktree: true`; ordinary Project registry rows and preview entries do not.
 - `POST /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview` accepts explicit `project_paths` before a session exists and returns the same Project browser entry model. Preview entries do not expose session registry removal because no session Project row exists yet, and they do not expose repository metadata.
 - Project browser manifest reads do not call runtime runner file stat/list operations before responding. Missing or unchecked catalog projection is represented as stored/unchecked status and may be refreshed by separate boundary-triggered sync work.
+- Manifest access checks and Project/worktree/catalog preparation are completed
+  read-only repository operations. Session working-folder binding and Runtime
+  workspace evidence resolution run between closed reads. The final Session or
+  preview read repeats its existing membership/Agent authority after Runtime
+  preparation and returns detached ordered rows. Stored unchecked status,
+  Git/worktree metadata, capability policy and non-blocking refresh hints are
+  presented by the service; no filesystem/Runtime callbacks or live database
+  handles cross the repository boundary.
 - `DELETE /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}` removes only the selected Session's shared context registry row. Filesystem folder deletion is destructive and not included. Azents-owned worktree cleanup is a separate explicit cleanup or archive-time best-effort lifecycle based on `session_agent_context_git_worktrees` ownership metadata, not on the Project registry row alone. Retention purge deletes only the allocation row and never accesses Runtime or Git state.
 - `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup` requests destructive cleanup for Azents-owned worktree allocations. When `project_id` is supplied, cleanup is scoped to the allocation linked to that session Project; otherwise cleanup covers all non-cleaned allocations for the session. Cleanup validates session ownership, containment under `<current-agent-workspace>/.azents/worktrees`, branch name presence, and Azents-created branch ownership before calling Runner Git cleanup. Successful cleanup removes the Git worktree without force, deletes the Azents-created branch, removes the catalog entry, deletes the linked session Project row, and best-effort removes the empty session-scoped worktree parent directory. Failure or cancellation of that final empty-parent removal does not revert otherwise confirmed Git cleanup.
 - `cleanup_orphan_git_worktrees` is a parameterless, explicit chat TurnAction rather than a direct
@@ -653,6 +761,15 @@ to direct demotion or deletion.
 
 `WorkspaceInvitationService.create()` handles duplicate invitations naturally through `create_or_reinvite` repository method.
 
+Invitation reads and mutations run through completed database-only repository
+operations. Invitation creation keeps pending-request autoapproval, membership
+creation, request deletion, and invitation insertion/re-invitation in one atomic
+transaction. Acceptance keeps membership creation and the status transition
+atomic; an absent final invitation row rolls back membership creation.
+Signup-token preparation and invitation email delivery occur only after these
+repository scopes finish. Delivery failures propagate without undoing the
+committed invitation or membership.
+
 1. Normalize input email with `lower().strip()`.
 2. Check whether User with same email is already workspace member → fail with `AlreadyMember` if exists.
 3. If pending JoinRequest from same User exists, **automatically approve while creating invitation**: create `WorkspaceUser` immediately and delete JoinRequest.
@@ -677,6 +794,13 @@ Behavior of `WorkspaceJoinRequestService.request_join()`:
 5. If new request, create and send notification based on `NOTIFICATION_COOLDOWN = 24h`. Send and update `last_notified_at` only if `last_notified_at` is absent or cooldown elapsed.
 
 Approval (`approve`) creates WorkspaceUser (role=MEMBER) and deletes request. Rejection (`reject`) simply deletes request. `mute()` transitions only status to MUTED and stops future notifications.
+
+Join-request reads and mutations run through completed database-only repository
+operations. New-request creation and notification timestamp update commit
+together; membership creation and request deletion on approval are atomic.
+Notification and approval emails run after the relevant repository scopes
+finish. A delivery failure leaves the committed request, notification timestamp,
+or approved membership intact. Muted re-requests still suppress notifications.
 
 ### Ownership Transfer
 
@@ -716,6 +840,21 @@ checkout content. After Runner confirms removal or absence, the service removes 
 and catalog entry, refreshes Skill projection, and marks the allocation cleaned while retaining its
 source and preserved branch metadata. It never calls branch deletion. Archive skips that cleaned
 allocation, so it cannot later delete the branch preserved by the Agent-facing removal.
+
+### Agent Project Catalog operation boundaries
+
+Agent Project Catalog candidate upserts, entry lists, exact-path status snapshots,
+and status application finish inside repository-owned operations. Independent
+lists and snapshots use PostgreSQL read-only scopes and return detached domain
+entries; candidate batches and status batches retain one atomic write group and
+the exact Agent/path identity. Runtime target resolution, Agent Workspace path
+normalization, and Runner filesystem probes occur outside every open catalog
+transaction, before their resulting status evidence is applied.
+
+Catalog filesystem status is descriptive Agent-scoped evidence and does not
+inherit a Session owner-generation gate. Canonical Session and action ownership
+remain fenced at their actual registry/action mutation boundaries; descriptive
+status refresh does not grant Project registration or action admission authority.
 
 ### Workspace External Channel Multi Apps
 
@@ -936,6 +1075,35 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-10-05 (spec_version=97)** — Integrated injected completed Agent Workspace
+  access and native read-only Agent/membership inspection with the common
+  membership, Catalog/model and Session worktree operation boundaries.
+
+- **2026-10-05 (spec_version=96)** — Added completed Session worktree atomic
+  operations and final working-folder validation to the common Catalog, model
+  policy and membership boundaries. Preserved exact-owner mutation fences,
+  read-only observations, coordination order, terminal continuation atomicity
+  and external effects after commit.
+
+- **2026-10-05 (spec_version=95)** — Integrated completed Catalog and model-policy
+  operations with membership boundaries. Preserved descriptive catalog status,
+  read-only policy/manifest snapshots, detached Runtime evidence and atomic final
+  policy/catalog mutation authority on the common scoped-fence implementation.
+
+- **2026-10-05** (spec_version 94) — Reconciled code-path discovery with current
+  defining modules; system behavior is unchanged.
+
+- **2026-10-05 (spec_version=93)** — Moved invitation and join-request reads and
+  atomic membership mutations into completed repository operations, keeping
+  signup-token preparation and email delivery after commit with unchanged
+  ownership validation, statuses, notification cooldown, and delivery failure
+  propagation.
+
+
+- **2026-10-02 (spec_version=91)** — Moved Workspace administration and HTTP
+  membership admission into completed repository operations, retaining atomic
+  Workspace/OWNER creation and existing lookup, conflict, and authorization
+  contracts.
 - **2026-09-30** (spec_version 90) — Documented authorized Workspace browser GET
   handoff after verified Runner direct PUT, shared 128 MiB eligibility, and distinct preview bounds.
 

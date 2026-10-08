@@ -25,6 +25,11 @@ from azents.core.runtime_capabilities import (
     RuntimeCapabilityDeniedError,
     RuntimeCapabilityResolver,
 )
+from azents.core.session_resource_authority import (
+    SessionExecutionOwner,
+    accepts_execution_owner,
+)
+from azents.core.session_workspace_project import SessionWorkspaceProject
 from azents.core.tools import (
     ResolveContext,
     Toolkit,
@@ -47,16 +52,8 @@ from azents.engine.tools.runtime_instruction_context import (
     RuntimeInstructionContext,
     RuntimeInstructionContextStore,
 )
-from azents.repos.session_workspace_project.data import SessionWorkspaceProject
-from azents.repos.toolkit_state.engine import (
-    ToolkitClaudeRulesAppendixDedupeStateStore,
-)
 from azents.services.file_storage import FileStorage
 from azents.services.runtime_storage_error import RuntimeStorageError
-from azents.services.session_resource_authority import (
-    SessionExecutionOwner,
-    accepts_execution_owner,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -194,8 +191,6 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
             session_id=self._session_id,
         ):
             return
-        if isinstance(self.store, ToolkitClaudeRulesAppendixDedupeStateStore):
-            self.store = self.store.for_execution(owner)
         self._execution_owner = owner
 
     def set_agent_id(self, agent_id: str) -> None:

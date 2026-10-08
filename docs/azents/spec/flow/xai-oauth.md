@@ -6,6 +6,13 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, workspace, model-catalog]
 code_paths:
+  - python/apps/azents/src/azents/core/route_capability_constraints.py
+  - python/apps/azents/src/azents/core/active_model_capabilities.py
+  - python/apps/azents/src/azents/core/model_provider_declarations.py
+  - python/apps/azents/src/azents/engine/events/effective_model_request.py
+  - python/apps/azents/src/azents/repos/engine_event_repositories.py
+  - python/apps/azents/src/azents/repos/engine_resolve.py
+  - python/apps/azents/src/azents/repos/llm_catalog_operations.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/841e7188d527_bind_oauth_reauthentication_targets.py
   - python/apps/azents/src/azents/core/xai.py
@@ -19,6 +26,7 @@ code_paths:
   - python/apps/azents/src/azents/services/llm_catalog/**
   - python/apps/azents/src/azents/services/model_listing/providers.py
   - python/apps/azents/src/azents/services/subscription_usage/**
+  - python/apps/azents/src/azents/repos/subscription_usage_read.py
   - python/apps/azents/src/azents/repos/xai_oauth_session/**
   - python/apps/azents/src/azents/repos/xai_oauth_runtime/**
   - python/apps/azents/src/azents/repos/oauth_persistence_errors.py
@@ -30,8 +38,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-10-01
-spec_version: 10
+last_verified_at: 2026-10-05
+spec_version: 13
 ---
 
 # xAI OAuth Flow
@@ -207,6 +215,14 @@ child endpoint. The read is integration-scoped and read-through: Azents does not
 snapshots, collect history, poll in the background, aggregate workspaces, or use usage to change Agent
 execution entitlement.
 
+The integration and decrypted typed secrets are loaded by one completed native
+PostgreSQL read-only repository operation. Missing integration is classified
+before foreign-Workspace access, preserving the existing error and privacy
+contract. Provider OAuth freshness/refresh, one-retry handling and usage-client
+calls run only after that read closes; existing OAuth persistence operations own
+their separate writes. Usage persistence, financial-field authorization and
+provider/secrets redaction retain their existing contracts.
+
 The endpoint requires `LLM_INTEGRATIONS_READ`. It returns operational limit and reset metadata to
 readers. Prepaid balance, pay-as-you-go values, and auto top-up configuration are included only when the
 caller also has `LLM_INTEGRATIONS_WRITE`. A disabled integration returns the typed `disabled`
@@ -261,13 +277,34 @@ Unexpected presentation failures remain inside a card-local error boundary.
 
 ## Model Catalog
 
+The final schema-3 contract compiles exact OAuth-account declarations, applicable
+local source facts and reviewed route bounds into boolean/list membership.
+Provider/source omissions and completeness remain diagnostic inputs rather than
+an unknown capability authority. Active reads and NEW operations use the central
+same-identity local capture; existing operations retain their captured candidates
+and replay metadata. API-key records are not OAuth capability evidence.
+
+The exact `grok-4.7` identity has the reviewed hosted web-search supplement on
+this OAuth inference route as well. Own-provider null with matching-source false
+denies web search while retaining the null evidence; own false remains a denial
+and own true retains support over matching generic false. This is an exact-model
+web rule, not borrowing from an API-key twin or predicting other model features.
+
+Actual request admission follows the encoded tool/scalar/output envelope.
+Unspecified client strictness is resolved before SDK customization, while explicit
+strict and structured-response requests remain independent. Raw `ultra` is retained
+as provider evidence and excluded from the existing seven canonical effort levels.
+
 Each `xai_oauth` integration owns a stored account-specific catalog. Before synchronization, Azents reuses the runtime token-freshness service and persists any rotated token set. It then calls the Grok CLI proxy `/models` endpoint with the bearer token, account id, token-auth marker, pinned model-list client version, Grok shell identifier, and interactive client mode.
 
 The returned account-visible models are authoritative and may differ from API-key integrations.
 Provider context-window, reasoning-effort, backend-search, and API-backend fields override optional
-retained-source enrichment. An exact or expanded-alias `xai/<model>` entry may fill missing metadata,
-but a miss does not hide a model. Picker reads use the stored snapshot. Runtime uses exact raw
-provider IDs; `xai/` remains only in source lookup keys.
+current exact source-model enrichment within the OAuth-specific source namespace.
+An exact match may fill missing metadata, but a miss does not hide a model. Picker reads
+use current stored entries and latest sync state, without catalog snapshot history.
+Runtime uses exact raw provider IDs. Selection saves its own normalized available or
+unavailable pricing definition; dispatch does not borrow a native API-key twin or
+read a newer source to estimate usage.
 
 ## Frontend UX Rules
 
@@ -290,6 +327,7 @@ provider IDs; `xai/` remains only in source lookup keys.
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
+| 2026-10-03 | 11 | Adopted current catalog/latest sync and saved exact-scope prices | Preserve OAuth host identity independently of API-key source twins |
 | 2026-09-30 | 10 | Documented public Pydantic AI/SDK HTTP inference and raw model identity | Preserve OAuth-specific credentials, endpoints and account semantics during executable package removal |
 | 2026-09-23 | 9 | Documented integration-targeted device reauthentication, shared management UI, and the target migration | Match the implemented in-place subscription credential replacement |
 | 2026-09-04 | 8 | Mapped the shared subscription-usage state and container modules | Keep provider usage eligibility, retained-success refresh state, summary, and threshold presentation linked after the frontend boundary relocation |

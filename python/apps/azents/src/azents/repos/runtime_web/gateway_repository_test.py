@@ -3,9 +3,9 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.models.runtime_web import RuntimeWebActorKind, RuntimeWebAuthMode
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_web.data import RuntimeWebOperationIdentity
 from azents.repos.runtime_web.gateway_data import RuntimeWebDesiredConfiguration
 from azents.repos.runtime_web.gateway_repository import RuntimeWebGatewayRepository
@@ -28,7 +28,7 @@ def _operation(agent_id: str) -> RuntimeWebOperationIdentity:
 
 
 async def test_separate_domain_ticket_is_service_bound_and_single_use(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     now = datetime.now(UTC)
     fixture = await _authority_fixture(
@@ -138,7 +138,7 @@ async def test_separate_domain_ticket_is_service_bound_and_single_use(
 
 
 async def test_configuration_change_invalidates_existing_identity(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     repository = RuntimeWebGatewayRepository()
     await repository.synchronize_configuration(

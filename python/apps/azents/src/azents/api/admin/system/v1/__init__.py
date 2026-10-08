@@ -6,18 +6,18 @@ from typing import Annotated, assert_never
 from azcommon.result import Failure, Success
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from azents.core.archived_session_retention_data import (
+    RetentionApplicationInProgress,
+    RetentionRevisionConflict,
+)
 from azents.core.auth.deps import SystemAdmin, get_system_admin
 from azents.core.enums import SystemUserRole
-from azents.repos.system_user_role.data import (
+from azents.core.system_user_role import (
     LastSystemAdmin,
     SystemRoleAssignmentNotFound,
     SystemUserNotFound,
 )
-from azents.services.archived_session_retention import (
-    ArchivedSessionRetentionService,
-    RetentionApplicationInProgress,
-    RetentionRevisionConflict,
-)
+from azents.services.archived_session_retention import ArchivedSessionRetentionService
 from azents.services.system_user_role.service import SystemUserRoleService
 from azents.utils.fastapi.route import RouteMounter
 

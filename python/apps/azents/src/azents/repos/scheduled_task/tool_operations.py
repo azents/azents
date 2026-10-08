@@ -5,7 +5,6 @@ import datetime
 from typing import Literal
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentLifecycleStatus,
@@ -15,6 +14,8 @@ from azents.core.enums import (
     ExternalChannelRouteCatalogStatus,
     MailboxItemKind,
 )
+from azents.core.scheduled_task import MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
@@ -24,19 +25,20 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelResource,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.mailbox import MailboxRepository
-from azents.repos.scheduled_task.data import (
-    MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH,
-    ScheduledTask,
-    ScheduledTaskCreate,
-)
+from azents.repos.scheduled_task.data import ScheduledTask, ScheduledTaskCreate
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task.schedule import validate_schedule
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.scheduled_task_cycle.data import (
     ScheduledTaskCycleRecord,
     ScheduledTaskCycleState,
+)
+from azents.repos.session_execution.ownership import (
+    fence_owned_session_mutation,
+    validate_session_execution_owner,
 )
 
 ScheduledTaskExecutionState = Literal[
@@ -68,11 +70,31 @@ class _ScheduledTaskMutationTarget:
 class ScheduledTaskToolOperationRepository:
     """Own complete Scheduled Toolkit database transactions."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     task_repository: ScheduledTaskRepository
     cycle_repository: ScheduledTaskCycleRepository
     mailbox_repository: MailboxRepository
     run_repository: AgentRunRepository
+    owner: SessionExecutionOwner | None
+
+    async def _validate_owner(self, session: ReadSession) -> None:
+        if self.owner is not None:
+            await validate_session_execution_owner(session, self.owner)
+
+    async def _fence_mutation(self, session: WriteSession, *, session_id: str) -> None:
+        if self.owner is not None:
+            if self.owner.session_id != session_id:
+                raise ValueError("Session execution owner mismatch")
+            await fence_owned_session_mutation(session, self.owner)
+        else:
+            current_id = await session.write_session.scalar(
+                sa.update(RDBAgentSession)
+                .where(RDBAgentSession.id == session_id)
+                .values(updated_at=RDBAgentSession.updated_at)
+                .returning(RDBAgentSession.id)
+            )
+            if current_id is None:
+                raise ValueError("AgentSession not found")
 
     async def active_cycle(
         self,
@@ -84,6 +106,7 @@ class ScheduledTaskToolOperationRepository:
     ) -> ScheduledTaskCycleRecord | None:
         """Resolve the current Run's exact started cycle in one transaction."""
         async with self.session_manager() as session:
+            await self._validate_owner(session)
             run = await self.run_repository.get_by_id(session, run_id)
             if (
                 run is None
@@ -113,6 +136,7 @@ class ScheduledTaskToolOperationRepository:
     ) -> list[ScheduledTaskCycleState]:
         """Return current started cycle states after the transaction closes."""
         async with self.session_manager() as session:
+            await self._validate_owner(session)
             records = await self.cycle_repository.list_started(
                 session,
                 agent_id=agent_id,
@@ -142,6 +166,7 @@ class ScheduledTaskToolOperationRepository:
             now=now,
         )
         async with self.session_manager() as session:
+            await self._fence_mutation(session, session_id=session_id)
             await self._validate_target(
                 session,
                 workspace_id=workspace_id,
@@ -178,6 +203,7 @@ class ScheduledTaskToolOperationRepository:
     ) -> list[ScheduledTaskToolProjection]:
         """List Session Tasks and derive execution state in one transaction."""
         async with self.session_manager() as session:
+            await self._validate_owner(session)
             tasks = await self.task_repository.list_by_session_id(session, session_id)
             return [
                 await self._task_projection(
@@ -197,6 +223,7 @@ class ScheduledTaskToolOperationRepository:
     ) -> ScheduledTask | None:
         """Delete one Session-owned Task and return its committed snapshot."""
         async with self.session_manager() as session:
+            await self._fence_mutation(session, session_id=session_id)
             target = await self._lock_mutation_target(
                 session,
                 session_id=session_id,
@@ -239,7 +266,7 @@ class ScheduledTaskToolOperationRepository:
 
     async def _task_projection(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         session_id: str,
@@ -268,7 +295,7 @@ class ScheduledTaskToolOperationRepository:
 
     async def _lock_mutation_target(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         task_id: str,
@@ -336,14 +363,14 @@ class ScheduledTaskToolOperationRepository:
 
     @staticmethod
     async def _validate_target(
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         agent_id: str,
         session_id: str,
         binding_id: str | None,
     ) -> None:
-        target = await session.scalar(
+        target = await session.read_session.scalar(
             sa.select(RDBAgentSession).where(
                 RDBAgentSession.id == session_id,
                 RDBAgentSession.workspace_id == workspace_id,
@@ -357,7 +384,7 @@ class ScheduledTaskToolOperationRepository:
             )
         if binding_id is None:
             return
-        binding = await session.scalar(
+        binding = await session.read_session.scalar(
             sa.select(RDBExternalChannelBinding)
             .join(
                 RDBExternalChannelResource,

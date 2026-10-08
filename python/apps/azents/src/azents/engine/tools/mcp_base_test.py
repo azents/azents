@@ -4,7 +4,9 @@ import asyncio
 from typing import AsyncContextManager, NamedTuple
 from unittest.mock import AsyncMock, patch
 
+import httpx2 as httpx
 import pytest
+from mcp.types import CallToolResult, TextContent
 from mcp.types import Tool as McpBaseTool
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,13 +14,19 @@ from azents.core.engine_tool_state import (
     McpToolSnapshotItem,
     McpToolSnapshotState,
 )
+from azents.core.mcp_transport import McpToolListResult
 from azents.core.toolkit_state import ToolkitStateIdentity
 from azents.core.tools import McpToolkitConfig, TurnContext
+from azents.engine.run.types import FunctionToolError
 from azents.engine.tools.mcp import McpToolkit
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
+from azents.repos.engine_tool_repositories import EngineMcpSnapshotFactory
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
 from azents.testing.types import is_object_factory
+
+from . import mcp_base as mcp_base_module
 
 
 class _ToolkitStateKey(NamedTuple):
@@ -102,8 +110,8 @@ def _tool(name: str) -> McpBaseTool:
 class _FakeSessionContext:
     """Minimal async session context manager for tests."""
 
-    async def __aenter__(self) -> AsyncSession:
-        return AsyncSession()
+    async def __aenter__(self) -> WriteSession:
+        return ReadWriteSession(AsyncSession())
 
     async def __aexit__(self, *exc: object) -> None:
         pass
@@ -112,7 +120,7 @@ class _FakeSessionContext:
 class _FakeSessionManager:
     """Minimal async context manager factory for tests."""
 
-    def __call__(self) -> AsyncContextManager[AsyncSession]:
+    def __call__(self) -> AsyncContextManager[WriteSession]:
         return _FakeSessionContext()
 
 
@@ -141,26 +149,22 @@ async def _wait_refresh(toolkit: McpToolkit) -> None:
         await task
 
 
-class _McpListToolsResult(NamedTuple):
-    """Structured result returned by `slow_list_tools`."""
-
-    tools: list[object]
-    cacheable: bool
-
-
 async def test_update_context_returns_immediately_without_snapshot() -> None:
     """Slow MCP list_tools does not block request preparation."""
     started = asyncio.Event()
     continue_list = asyncio.Event()
 
-    async def slow_list_tools(*_args: object, **_kwargs: object) -> _McpListToolsResult:
+    async def slow_list_tools(*_args: object, **_kwargs: object) -> McpToolListResult:
         started.set()
         await continue_list.wait()
-        return _McpListToolsResult(tools=[_tool("alpha")], cacheable=False)
+        return McpToolListResult(tools=[_tool("alpha")], use_streamable_http=False)
 
     toolkit = McpToolkit(
         config=McpToolkitConfig(server_url="https://example.com/mcp", auth_type="none"),
-        session_manager=_session_manager,
+        snapshot_factory=EngineMcpSnapshotFactory(
+            session_manager=_session_manager,
+            read_session_manager=_session_manager,
+        ),
         agent_id="agent-1",
         session_id="session-1",
         state_name="tool_snapshot:test",
@@ -184,14 +188,19 @@ async def test_background_refresh_success_exposes_sorted_tools_next_turn() -> No
     """Successful background refresh exposes deterministic tool order."""
     toolkit = McpToolkit(
         config=McpToolkitConfig(server_url="https://example.com/mcp", auth_type="none"),
-        session_manager=_session_manager,
+        snapshot_factory=EngineMcpSnapshotFactory(
+            session_manager=_session_manager,
+            read_session_manager=_session_manager,
+        ),
         agent_id="agent-1",
         session_id="session-1",
         state_name="tool_snapshot:test",
     )
     with patch(
         "azents.engine.tools.mcp_base.mcp_list_tools",
-        return_value=([_tool("zeta"), _tool("alpha")], False),
+        return_value=McpToolListResult(
+            tools=[_tool("zeta"), _tool("alpha")], use_streamable_http=False
+        ),
     ):
         async with toolkit:
             await _wait_refresh(toolkit)
@@ -208,7 +217,10 @@ async def test_background_refresh_stops_after_owner_rejection() -> None:
     """A detached snapshot writer does not restart after ownership loss."""
     toolkit = McpToolkit(
         config=McpToolkitConfig(server_url="https://example.com/mcp", auth_type="none"),
-        session_manager=_session_manager,
+        snapshot_factory=EngineMcpSnapshotFactory(
+            session_manager=_session_manager,
+            read_session_manager=_session_manager,
+        ),
         agent_id="agent-1",
         session_id="session-1",
         state_name="tool_snapshot:test",
@@ -222,7 +234,9 @@ async def test_background_refresh_stops_after_owner_rejection() -> None:
         patch.object(toolkit, "_save_tool_snapshot", save),
         patch(
             "azents.engine.tools.mcp_base.mcp_list_tools",
-            return_value=([_tool("alpha")], False),
+            return_value=McpToolListResult(
+                tools=[_tool("alpha")], use_streamable_http=False
+            ),
         ) as list_tools,
     ):
         async with toolkit:
@@ -265,7 +279,10 @@ async def test_stored_snapshot_restores_model_tool_name() -> None:
     )
     toolkit = McpToolkit(
         config=McpToolkitConfig(server_url="https://example.com/mcp", auth_type="none"),
-        session_manager=_session_manager,
+        snapshot_factory=EngineMcpSnapshotFactory(
+            session_manager=_session_manager,
+            read_session_manager=_session_manager,
+        ),
         agent_id="agent-1",
         session_id="session-1",
         state_name=state_name,
@@ -283,20 +300,25 @@ async def test_refresh_failure_preserves_previous_successful_snapshot() -> None:
     """Failed refresh keeps the previous successful tool snapshot."""
     toolkit = McpToolkit(
         config=McpToolkitConfig(server_url="https://example.com/mcp", auth_type="none"),
-        session_manager=_session_manager,
+        snapshot_factory=EngineMcpSnapshotFactory(
+            session_manager=_session_manager,
+            read_session_manager=_session_manager,
+        ),
         agent_id="agent-1",
         session_id="session-1",
         state_name="tool_snapshot:test",
     )
     with patch(
         "azents.engine.tools.mcp_base.mcp_list_tools",
-        return_value=([_tool("alpha")], False),
+        return_value=McpToolListResult(
+            tools=[_tool("alpha")], use_streamable_http=False
+        ),
     ):
         async with toolkit:
             await _wait_refresh(toolkit)
     with patch(
         "azents.engine.tools.mcp_base.mcp_list_tools",
-        side_effect=RuntimeError("boom"),
+        side_effect=ConnectionError("Connection refused"),
     ):
         async with toolkit:
             await _wait_refresh(toolkit)
@@ -313,14 +335,17 @@ async def test_failed_refresh_without_snapshot_exposes_no_retry_tool_or_prompt()
     """Initial MCP failure exposes no loading/retry/status pseudo-tool."""
     toolkit = McpToolkit(
         config=McpToolkitConfig(server_url="https://example.com/mcp", auth_type="none"),
-        session_manager=_session_manager,
+        snapshot_factory=EngineMcpSnapshotFactory(
+            session_manager=_session_manager,
+            read_session_manager=_session_manager,
+        ),
         agent_id="agent-1",
         session_id="session-1",
         state_name="tool_snapshot:test",
     )
     with patch(
         "azents.engine.tools.mcp_base.mcp_list_tools",
-        side_effect=RuntimeError("boom"),
+        side_effect=ConnectionError("Connection refused"),
     ):
         async with toolkit:
             await _wait_refresh(toolkit)
@@ -329,3 +354,232 @@ async def test_failed_refresh_without_snapshot_exposes_no_retry_tool_or_prompt()
 
     assert state.tools == []
     assert (await toolkit.get_static_prompt(_context())) == ""
+
+
+def _http_error(status: int) -> httpx.HTTPStatusError:
+    request = httpx.Request("POST", "https://mcp.example.test")
+    response = httpx.Response(status, request=request)
+    return httpx.HTTPStatusError(
+        "Owned transport failure", request=request, response=response
+    )
+
+
+@pytest.mark.parametrize(("agent_id", "session_id"), [("", None), (None, "")])
+def test_no_db_mcp_identity_still_distinguishes_empty_from_absent(
+    agent_id: str | None, session_id: str | None
+) -> None:
+    """Optional persistence does not make explicit empty identities an absence."""
+    with pytest.raises(ValueError, match="nonempty or absent"):
+        McpToolkit(
+            snapshot_factory=None,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+
+
+async def test_mixed_tool_exception_group_preserves_unrelated_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An auth leaf cannot cause an unrelated programming failure to be retried."""
+    failure = ExceptionGroup("Owned group", [_http_error(401), ValueError("Owned bug")])
+    call = AsyncMock(side_effect=failure)
+    refresh = AsyncMock(return_value="new-token")
+    monkeypatch.setattr(mcp_base_module, "mcp_call_tool", call)
+    tool = mcp_base_module.wrap_mcp_tool(
+        _tool("alpha"), "https://mcp.example.test", {}, 30.0, on_auth_failure=refresh
+    )
+    with pytest.raises(ExceptionGroup) as caught:
+        await tool.handler("{}")
+    assert caught.value is failure
+    assert isinstance(caught.value.exceptions[1], ValueError)
+    assert call.await_count == 1
+    refresh.assert_not_awaited()
+
+
+async def test_known_auth_group_refreshes_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A group containing only 401 leaves retains the existing single refresh."""
+    failure = ExceptionGroup("Owned auth group", [_http_error(401), _http_error(401)])
+    call = AsyncMock(
+        side_effect=[
+            failure,
+            CallToolResult(content=[TextContent(type="text", text="ok")]),
+        ]
+    )
+    refresh = AsyncMock(return_value="new-token")
+    monkeypatch.setattr(mcp_base_module, "mcp_call_tool", call)
+    tool = mcp_base_module.wrap_mcp_tool(
+        _tool("alpha"), "https://mcp.example.test", {}, 30.0, on_auth_failure=refresh
+    )
+    assert await tool.handler("{}") == "ok"
+    assert call.await_count == 2
+    assert call.await_args_list[1].args[1] == {"Authorization": "Bearer new-token"}
+    refresh.assert_awaited_once()
+
+
+async def test_mixed_retry_group_is_not_replaced_by_a_tool_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unhandled retry siblings remain visible after the authorized refresh."""
+    failure = ExceptionGroup(
+        "Owned retry group", [_http_error(403), ValueError("Owned bug")]
+    )
+    call = AsyncMock(side_effect=[_http_error(401), failure])
+    refresh = AsyncMock(return_value="new-token")
+    monkeypatch.setattr(mcp_base_module, "mcp_call_tool", call)
+    tool = mcp_base_module.wrap_mcp_tool(
+        _tool("alpha"), "https://mcp.example.test", {}, 30.0, on_auth_failure=refresh
+    )
+    with pytest.raises(ExceptionGroup) as caught:
+        await tool.handler("{}")
+    assert caught.value is failure
+    assert call.await_count == 2
+    refresh.assert_awaited_once()
+
+
+async def test_non_auth_http_sibling_does_not_trigger_auth_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only a uniformly unauthorized exception group can request new credentials."""
+    failure = ExceptionGroup("Owned HTTP group", [_http_error(401), _http_error(403)])
+    call = AsyncMock(side_effect=failure)
+    refresh = AsyncMock(return_value="new-token")
+    monkeypatch.setattr(mcp_base_module, "mcp_call_tool", call)
+    tool = mcp_base_module.wrap_mcp_tool(
+        _tool("alpha"), "https://mcp.example.test", {}, 30.0, on_auth_failure=refresh
+    )
+    with pytest.raises(FunctionToolError, match="HTTP 401"):
+        await tool.handler("{}")
+    refresh.assert_not_awaited()
+    assert call.await_count == 1
+
+
+async def test_unexpected_background_failure_is_observed_once(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Unexpected bugs propagate from the task and have a sanitized trace boundary."""
+    toolkit = McpToolkit(
+        config=McpToolkitConfig(
+            server_url="https://user:secret@mcp.example.test/path?token=secret",
+            auth_type="none",
+        ),
+        snapshot_factory=EngineMcpSnapshotFactory(
+            session_manager=_session_manager,
+            read_session_manager=_session_manager,
+        ),
+        agent_id="agent-1",
+        session_id="session-1",
+    )
+    failure = ValueError("credential=untrusted-secret")
+    monkeypatch.setattr(
+        mcp_base_module, "mcp_list_tools", AsyncMock(side_effect=failure)
+    )
+    observed = asyncio.Event()
+    observe = toolkit._observe_refresh_failure
+
+    def record_observation(task: asyncio.Task[None]) -> None:
+        observe(task)
+        observed.set()
+
+    monkeypatch.setattr(toolkit, "_observe_refresh_failure", record_observation)
+    async with toolkit:
+        task = toolkit._bg_task
+        assert task is not None
+        with pytest.raises(ValueError) as caught:
+            await task
+        assert caught.value is failure
+        await asyncio.wait_for(observed.wait(), timeout=1)
+        assert toolkit._bg_error is None
+    records = [
+        record
+        for record in caplog.records
+        if record.message == "Unexpected MCP discovery failure"
+    ]
+    assert len(records) == 1
+    assert records[0].exc_info is not None
+    assert records[0].exc_info[2] is not None
+    assert "untrusted-secret" not in caplog.text
+    state = await toolkit.update_context(_context())
+    assert state.tools == []
+
+
+async def test_mixed_background_group_keeps_the_unhandled_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An expected discovery leaf cannot swallow an unrelated invariant failure."""
+    toolkit = McpToolkit(
+        config=McpToolkitConfig(
+            server_url="https://mcp.example.test", auth_type="none"
+        ),
+        snapshot_factory=EngineMcpSnapshotFactory(
+            session_manager=_session_manager,
+            read_session_manager=_session_manager,
+        ),
+        agent_id="agent-1",
+        session_id="session-1",
+    )
+    failure = ExceptionGroup(
+        "Owned discovery group", [ConnectionError("Offline"), ValueError("Owned bug")]
+    )
+    monkeypatch.setattr(
+        mcp_base_module, "mcp_list_tools", AsyncMock(side_effect=failure)
+    )
+    with pytest.raises(ExceptionGroup) as caught:
+        await toolkit._connect_and_list_tools()
+    assert caught.value is failure
+    assert toolkit._bg_error is None
+
+
+async def test_expected_background_group_remains_nonfatal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Groups containing only declared transport failures keep the empty snapshot."""
+    toolkit = McpToolkit(
+        config=McpToolkitConfig(
+            server_url="https://mcp.example.test", auth_type="none"
+        ),
+        snapshot_factory=EngineMcpSnapshotFactory(
+            session_manager=_session_manager,
+            read_session_manager=_session_manager,
+        ),
+        agent_id="agent-1",
+        session_id="session-1",
+    )
+    failure = ExceptionGroup(
+        "Owned transport group", [ConnectionError("Offline"), _http_error(500)]
+    )
+    monkeypatch.setattr(
+        mcp_base_module, "mcp_list_tools", AsyncMock(side_effect=failure)
+    )
+    await toolkit._connect_and_list_tools()
+    assert toolkit._bg_error is not None
+    assert (await toolkit.update_context(_context())).tools == []
+
+
+async def test_background_cancellation_stays_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    toolkit = McpToolkit(
+        config=McpToolkitConfig(
+            server_url="https://mcp.example.test", auth_type="none"
+        ),
+        snapshot_factory=EngineMcpSnapshotFactory(
+            session_manager=_session_manager,
+            read_session_manager=_session_manager,
+        ),
+        agent_id="agent-1",
+        session_id="session-1",
+    )
+    monkeypatch.setattr(
+        mcp_base_module, "mcp_list_tools", AsyncMock(side_effect=asyncio.CancelledError)
+    )
+    async with toolkit:
+        task = toolkit._bg_task
+        assert task is not None
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert toolkit._bg_error is None
+    assert "Unexpected MCP discovery failure" not in caplog.text

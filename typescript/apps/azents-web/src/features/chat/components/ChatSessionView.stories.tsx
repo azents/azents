@@ -40,6 +40,7 @@ const subscriptionModel: AgentModelSelection = {
     compatibility: {},
   },
   model_snapshot: {},
+  pricing: null,
   source_metadata: null,
   last_refreshed_at: "2026-08-20T10:00:00Z",
 };

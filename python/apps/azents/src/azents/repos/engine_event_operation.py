@@ -3,14 +3,8 @@
 import dataclasses
 from collections.abc import Sequence
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.enums import AgentRunStatus, EventKind
-from azents.engine.events.protocols import (
-    AgentRunCreateRepository,
-    SessionHeadRepository,
-    TranscriptRepository,
-)
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.events.types import (
     AgentRunState,
     Event,
@@ -18,8 +12,15 @@ from azents.engine.events.types import (
 )
 from azents.engine.io.user_input import RunUserMessage
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.engine_event_contracts import (
+    AgentRunCreateRepository,
+    SessionHeadRepository,
+    TranscriptRepository,
+)
+from azents.repos.session_execution.ownership import fence_owned_session_mutation
 
 
 @dataclasses.dataclass(frozen=True)
@@ -34,11 +35,12 @@ class EngineRunPreparation:
 class EngineEventOperationRepository:
     """Own completed Event Engine transcript and Run operations."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     run_repository: AgentRunCreateRepository
     agent_session_repository: AgentSessionRepository
     session_head_repository: SessionHeadRepository
     transcript_repository: TranscriptRepository
+    owner: SessionExecutionOwner | None
 
     async def append_system_error(
         self,
@@ -48,6 +50,8 @@ class EngineEventOperationRepository:
     ) -> Event:
         """Append a recoverable system error in one completed transaction."""
         async with self.session_manager() as session:
+            if self.owner is not None:
+                await fence_owned_session_mutation(session, self.owner)
             return await self.transcript_repository.append(
                 session,
                 EventCreate(
@@ -92,6 +96,8 @@ class EngineEventOperationRepository:
     ) -> EngineRunPreparation:
         """Append initial inputs and validate the active Run atomically."""
         async with self.session_manager() as session:
+            if self.owner is not None:
+                await fence_owned_session_mutation(session, self.owner)
             await self._ensure_agent_session(session, session_id)
             user_message_events = await self._append_user_messages(
                 session,
@@ -116,6 +122,8 @@ class EngineEventOperationRepository:
     ) -> list[Event]:
         """Append polled input messages in one completed transaction."""
         async with self.session_manager() as session:
+            if self.owner is not None:
+                await fence_owned_session_mutation(session, self.owner)
             return await self._append_user_messages(
                 session,
                 session_id,
@@ -124,7 +132,7 @@ class EngineEventOperationRepository:
 
     async def _ensure_agent_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
     ) -> None:
         """Ensure the AgentSession exists before event processing."""
@@ -137,7 +145,7 @@ class EngineEventOperationRepository:
 
     async def _append_user_messages(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
         user_messages: Sequence[RunUserMessage],
     ) -> list[Event]:

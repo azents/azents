@@ -4,24 +4,23 @@ import asyncio
 import dataclasses
 import datetime
 import logging
-from typing import Annotated
+from typing import Annotated, NamedTuple
 from uuid import uuid4
 
 from cryptography.fernet import InvalidToken
 from fastapi import Depends
 from pydantic import ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config, ExternalChannelGatewayLeaseConfig
 from azents.core.deps import get_config
 from azents.core.external_channel_provider import SlackConnectionCredentials
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
     SlackWorkPresenceTarget,
 )
-from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.slack_presence_operations import (
+    SlackPresenceOperationRepository,
+)
 from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
 )
@@ -31,6 +30,7 @@ from azents.services.external_channel.slack_presence import (
     SlackWorkPresenceClient,
 )
 from azents.services.external_channel.slack_sdk_client import create_slack_web_client
+from azents.utils.logging import sanitized_exception_info
 
 logger = logging.getLogger(__name__)
 _POLL_INTERVAL = datetime.timedelta(seconds=5)
@@ -39,7 +39,13 @@ _RENEW_INTERVAL = datetime.timedelta(seconds=15)
 _RECONCILE_INTERVAL = datetime.timedelta(seconds=5)
 _CHANNEL_REFRESH_INTERVAL = datetime.timedelta(seconds=90)
 
-type SlackPresenceKey = tuple[str, str, str]
+
+class SlackPresenceKey(NamedTuple):
+    """Immutable identity of one Slack presence projection."""
+
+    kind: str
+    channel_id: str
+    thread_ts: str
 
 
 class SlackPresenceLeaseLost(RuntimeError):
@@ -67,14 +73,10 @@ def get_slack_work_presence_client() -> SlackWorkPresenceClient:
 class SlackWorkPresenceManagerService:
     """Reconcile canonical Channel Work onto Slack-native presence."""
 
-    session_manager: Annotated[
-        SessionManager[AsyncSession],
-        Depends(get_session_manager),
+    operations: Annotated[
+        SlackPresenceOperationRepository, Depends(SlackPresenceOperationRepository)
     ]
-    repository: Annotated[
-        ExternalChannelRepository,
-        Depends(ExternalChannelRepository.create),
-    ]
+
     credentials_codec: Annotated[
         ExternalChannelCredentialsCodec,
         Depends(get_external_channel_credentials_codec),
@@ -129,8 +131,7 @@ class SlackWorkPresenceManagerService:
                 await asyncio.gather(*tasks.values(), return_exceptions=True)
 
     async def _list_connection_ids(self) -> list[str]:
-        async with self.session_manager() as session:
-            return await self.repository.list_slack_presence_connection_ids(session)
+        return await self.operations.list_connection_ids()
 
     async def _run_owned_connection(
         self,
@@ -166,9 +167,12 @@ class SlackWorkPresenceManagerService:
                 raise
             except SlackPresenceLeaseLost:
                 return
-        except SlackPresenceCredentialError:
+        except SlackPresenceCredentialError as error:
             logger.warning(
                 "Slack Work presence credentials are unavailable",
+                exc_info=sanitized_exception_info(
+                    error, message="Slack Work presence credential details redacted."
+                ),
                 extra={
                     "provider": "slack",
                     "connection_id": connection_id,
@@ -386,16 +390,12 @@ class SlackWorkPresenceManagerService:
         connection_id: str,
     ) -> ExternalChannelConnectionConfiguration | None:
         now = _utc_now()
-        async with self.session_manager() as session:
-            configuration = await self.repository.claim_slack_presence_connection(
-                session,
-                connection_id=connection_id,
-                lease_owner=self.manager_id,
-                now=now,
-                lease_until=now + self._lease_duration(),
-            )
-            await session.commit()
-            return configuration
+        return await self.operations.claim(
+            connection_id=connection_id,
+            lease_owner=self.manager_id,
+            now=now,
+            lease_until=now + self._lease_duration(),
+        )
 
     async def _renew(
         self,
@@ -404,28 +404,18 @@ class SlackWorkPresenceManagerService:
         configuration_generation: int,
     ) -> bool:
         now = _utc_now()
-        async with self.session_manager() as session:
-            renewed = await self.repository.renew_slack_presence_lease(
-                session,
-                connection_id=connection_id,
-                lease_owner=self.manager_id,
-                required_configuration_generation=configuration_generation,
-                now=now,
-                lease_until=now + self._lease_duration(),
-            )
-            await session.commit()
-            return renewed
+        return await self.operations.renew(
+            connection_id=connection_id,
+            lease_owner=self.manager_id,
+            configuration_generation=configuration_generation,
+            now=now,
+            lease_until=now + self._lease_duration(),
+        )
 
     async def _release(self, connection_id: str) -> bool:
-        async with self.session_manager() as session:
-            released = await self.repository.release_slack_presence_lease(
-                session,
-                connection_id=connection_id,
-                lease_owner=self.manager_id,
-                now=_utc_now(),
-            )
-            await session.commit()
-            return released
+        return await self.operations.release(
+            connection_id=connection_id, lease_owner=self.manager_id, now=_utc_now()
+        )
 
     async def _load_targets(
         self,
@@ -433,14 +423,12 @@ class SlackWorkPresenceManagerService:
         connection_id: str,
         configuration_generation: int,
     ) -> tuple[SlackWorkPresenceTarget, ...] | None:
-        async with self.session_manager() as session:
-            return await self.repository.list_owned_slack_work_presence_targets(
-                session,
-                connection_id=connection_id,
-                lease_owner=self.manager_id,
-                required_configuration_generation=configuration_generation,
-                now=_utc_now(),
-            )
+        return await self.operations.load_targets(
+            connection_id=connection_id,
+            lease_owner=self.manager_id,
+            configuration_generation=configuration_generation,
+            now=_utc_now(),
+        )
 
     def _credentials(
         self,
@@ -484,7 +472,11 @@ class SlackWorkPresenceManagerService:
 
 
 def _presence_key(target: SlackWorkPresenceTarget) -> SlackPresenceKey:
-    return target.kind, target.channel_id, target.thread_ts
+    return SlackPresenceKey(
+        kind=target.kind,
+        channel_id=target.channel_id,
+        thread_ts=target.thread_ts,
+    )
 
 
 def _idle_target(target: SlackWorkPresenceTarget) -> SlackWorkPresenceTarget:

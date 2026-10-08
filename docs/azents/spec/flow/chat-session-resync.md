@@ -6,6 +6,23 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [conversation, agent, external-channel]
 code_paths:
+  - python/apps/azents/src/azents/services/chat/team_session_test.py
+  - python/apps/azents/src/azents/services/active_model_capabilities.py
+  - typescript/apps/azents-web/src/shared/lib/model-capability-support.ts
+  - typescript/apps/azents-web/src/shared/lib/reasoning-effort.ts
+  - python/apps/azents/src/azents/core/agent_session_input_data.py
+  - python/apps/azents/src/azents/core/chat_data.py
+  - python/apps/azents/src/azents/core/chat_operation_data.py
+  - python/apps/azents/src/azents/core/chat_projection.py
+  - python/apps/azents/src/azents/core/exchange_file_errors.py
+  - python/apps/azents/src/azents/core/mailbox_errors.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/core/session_workspace_paths.py
+  - python/apps/azents/src/azents/repos/chat_operations.py
+  - python/apps/azents/src/azents/repos/engine_tool_repositories.py
+  - python/apps/azents/src/azents/repos/mailbox_runtime_operations.py
+  - python/apps/azents/src/azents/repos/skill_state_store.py
+  - python/apps/azents/src/azents/repos/worker_toolkit_repositories.py
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - python/apps/azents/src/azents/services/chat/**
   - python/apps/azents/src/azents/services/mailbox.py
@@ -13,6 +30,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_session/**
   - python/apps/azents/src/azents/repos/message/**
   - python/apps/azents/src/azents/broker/broadcast.py
+  - python/apps/azents/src/azents/broker/websocket_deps.py
+  - python/apps/azents/src/azents/core/config.py
   - python/apps/azents/src/azents/transport/chat.py
   - python/apps/azents/src/azents/engine/tools/skill.py
   - python/apps/azents/src/azents/worker/deps.py
@@ -23,8 +42,8 @@ code_paths:
   - typescript/apps/azents-web/src/shared/agent-session/**
   - typescript/apps/azents-web/src/shared/subagent-tree/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-09-15
-spec_version: 52
+last_verified_at: 2026-10-05
+spec_version: 57
 ---
 
 # Chat Session Resync
@@ -44,8 +63,30 @@ Chat screen has two timeline states.
 | --- | --- |
 | Auth | WebSocket ticket or REST JWT must be valid. |
 | Session access | Requester must be session workspace member. |
-| Backend live source | `/live` must be able to read Redis live projections, `mailbox_items`, running `agent_runs`, and active `action_executions`. |
+| Backend live source | `/live` must be able to read the selected ephemeral live projection store, `mailbox_items`, running `agent_runs`, and active `action_executions`. |
 | Frontend state | Session component is remounted by session key and does not share cross-session state. |
+
+### Broadcast backend selection
+
+`Settings`/`Config.broadcast_backend` selects `redis` by default or explicit
+`memory`. Redis retains its existing pubsub and owner-fenced Lua behavior.
+Memory mode composes one broadcast and in-memory live store per `AppContext`;
+API and Worker wrappers share that instance only when they use the same context.
+Separate contexts, processes or replicas cannot fan out through this adapter.
+Cross-process deployments therefore require the Redis adapter.
+
+Selecting `AZ_SESSION_BROKER_BACKEND=memory` for the supported non-reload
+all-in-one process also selects memory broadcast/live storage, regardless of the
+separate broadcast option. This avoids a Redis dependency in co-located memory
+operation while leaving the ordinary Redis Session backend and independent
+broadcast option unchanged.
+
+The in-memory store is seeded only after the existing PostgreSQL owner-generation
+validation. Publication and owner-scoped clearing reject stale generations;
+clearing retains the generation fence. This is an ephemeral transport, not durable
+history or execution authority. Redis errors do not trigger implicit memory
+fallback. Focused memory fixtures verify local behavior and do not certify a live
+multi-process or deployment topology.
 
 ## 3. Initial Entry Sequence
 
@@ -93,7 +134,7 @@ sequenceDiagram
 | `action_execution_removed` | server → client | `session_id`, `action_execution_id` | The operation left live state after its terminal durable snapshot was committed. |
 | `subagent_tree_changed` | server → client | `root_session_agent_id`, `changed_session_agent_id` | Subagent Tree projection invalidation signal; client refetches the dedicated tree API. |
 
-The server sends `subscribed` only after the Redis session subscription is confirmed for the current
+The server sends `subscribed` only after the selected backend session subscription is confirmed for the current
 send-loop generation. A `subscription_health_check_ack` is emitted only while that same generation
 still owns the confirmed subscription, including a second check under the WebSocket send lock. Client
 does not query the history/live REST baseline before `subscribed`. If health check ack timeout or
@@ -224,6 +265,14 @@ before `action_execution_removed`. Durable observation suppresses a matching liv
 a delayed live update or removal arrives out of order. Terminal operations have no retry/discard
 mutation response.
 
+The frontend decodes durable `action_execution_result` payloads and live
+`action_execution_updated` frames before admitting their projections. Validation covers all
+required execution fields, the supported action discriminator and its payload, and each progress
+event's required and optional fields. Nullable fields remain distinct from omitted fields; an
+execution's `action_type` must match its action payload. Additive response fields are stripped by
+the decoder. Malformed history results and live updates are ignored rather than entering timeline
+state, and live frames must match the subscribed Session ID.
+
 Raw live partials remain separate from raw durable history until render selection. Assistant,
 reasoning, provider-tool, client-tool, and internal-agent rows use semantic projection identity so a
 durable history append replaces its live counterpart without duplicate frames or temporary
@@ -276,6 +325,35 @@ it does not use the direct human user-message bubble treatment. Subagent navigat
 internal-message surfaces use a robot icon as their representative symbol.
 
 ## 5.3 Composer Profile State
+
+Model controls consume the Agent response's active same-identity metadata
+projection. Final boolean/list fields are the support authority; configuration
+shows all supported potential rather than testing incomplete runtime predicates.
+Canonical effort controls remain `none`, `minimal`, `low`, `medium`, `high`,
+`xhigh`, and `max`. Concrete model changes use the existing ordered adaptation,
+while valid explicit intent and nullable omission are preserved. Provider `ultra`
+remains original evidence and is excluded from the controls.
+
+The active metadata read does not rewrite saved model identities/settings,
+Session intent or historical applied profiles. NEW operations capture compiled
+metadata; durable turn-marker provenance and replay continue to use the actual
+captured operation.
+
+Authorized Session detail, list, unread, directory, sidebar and Workspace
+baseline reads also remain descriptions. When a saved applied label has been
+removed from the Agent options, the response compiles the current Agent fallback
+and safe effort/options without persisting a replacement. The baseline retains
+the actual stored `applied_profile_generation`; it does not synthesize a new
+generation or initialize durable intent while resyncing. Actual accepted input
+or profile mutation owns persistence and generation advancement. Ordinary
+baseline and Subagent coordination reads therefore do not wait on held Agent,
+root hierarchy or execution-owner row gates.
+
+Composer profile edits and both settings-only apply and ordinary input submission
+drop execution options unsupported by the currently selected target's primary
+candidate. Supported options and the explicitly selected effort remain intact.
+A settings-only apply failure renders a localized model-settings error rather
+than a message-send error; retry still uses settings-only apply and creates no message.
 
 The Composer presents separate desktop Model and effort controls and a combined mobile control. Model choices come only from the Agent's selectable target labels. Effort options come from the selected target's normalized reasoning capabilities, but stored, decoded, and rendered effort values are opaque nullable strings. The frontend does not normalize or reject an unknown read-side string; backend submission and preparation remain authoritative for supported values. Switching to a target that does not support the current explicit effort visibly resets effort to Default.
 
@@ -386,7 +464,7 @@ finite transaction periodically.
 
 - Given: existing session id and valid ticket.
 - When: connect to WebSocket.
-- Then: server registers Redis subscription and sends `subscribed`.
+- Then: server confirms the selected backend subscription and sends `subscribed`.
 
 **TC-2: Initial finite baseline after barriers**
 
@@ -476,7 +554,7 @@ finite transaction periodically.
 
 ## 10. Invariants
 
-- WebSocket open is not subscribe completion; `subscribed` and health-check ack require the current Redis-confirmed send-loop generation.
+- WebSocket open is not subscribe completion; `subscribed` and health-check ack require the current backend-confirmed send-loop generation.
 - Public WebSocket delivery uses canonical action envelopes plus the listed control frames; the server does not emit raw top-level durable Events or internal runtime telemetry.
 - Every resync is a finite epoch/generation-guarded transaction with a fresh REST query and eventual release of its owned observation buffer.
 - REST baseline is applied as latest source only after session subscription ack and a successful health check for that transaction.
@@ -527,6 +605,15 @@ Session Channels management state is queried separately from timeline resync.
 
 ## 12. Changelog
 
+- **2026-10-05** — v56. Reconciled code-path discovery with current defining
+  modules; system behavior is unchanged.
+
+- **2026-10-05** — v56. Decode durable and live action execution projections
+  against the complete wire shape, preserving omitted/nullable fields and
+  skipping malformed projections before timeline admission.
+- **2026-10-05** — v55. Kept stale applied-label fallback in detached REST
+  projections without hidden profile writes or fabricated generations, and
+  removed inherited ownership/tree gates from baseline descriptions.
 - **2026-09-15** — v52. Replaced Runtime Web approval cards and Session-keyed
   projections with known-tool summaries plus managed-Runtime-gated Agent service
   management.

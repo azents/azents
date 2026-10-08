@@ -157,6 +157,8 @@ export interface ToolkitSourceSnapshot {
   toolkit_type: string;
   toolkit_name: string;
   toolkit_slug: string;
+  toolkit_namespace?: string | null;
+  source_identity?: Record<string, string>;
 }
 
 export interface InvalidToolkitSource {

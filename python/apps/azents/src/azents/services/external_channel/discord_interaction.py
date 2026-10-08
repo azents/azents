@@ -17,12 +17,13 @@ from azents.core.enums import (
     ExternalChannelTransport,
 )
 from azents.core.external_channel_projection import is_external_channel_projection
+from azents.core.scheduled_task import MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH
+from azents.core.scheduled_task_control import ScheduledTaskEditInput
 from azents.repos.external_channel.data import (
     ExternalChannelInteractionCreate,
     ExternalChannelPrincipalCreate,
     ExternalChannelTrigger,
 )
-from azents.repos.scheduled_task.data import MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH
 from azents.services.external_channel.discord_api import (
     DiscordGuildCommandRole,
     DiscordGuildCommandSetCapability,
@@ -32,7 +33,6 @@ from azents.services.external_channel.discord_api import (
 from azents.services.external_channel.discord_events import (
     project_discord_message_command_source_event,
 )
-from azents.services.scheduled_task.control import ScheduledTaskEditInput
 
 MAX_DISCORD_INTERACTION_BODY_BYTES = 256 * 1024
 DISCORD_INTERACTION_TTL = datetime.timedelta(minutes=15)

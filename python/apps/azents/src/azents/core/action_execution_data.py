@@ -1,0 +1,86 @@
+"""Action execution repository data models."""
+
+import datetime
+
+from pydantic import BaseModel, Field
+
+from azents.core.enums import ActionExecutionEventKind, ActionExecutionStatus
+from azents.core.json_value import JSONValue
+
+
+class ActionExecution(BaseModel):
+    """Live execution state for one operation TurnAction event."""
+
+    id: str = Field(description="Action execution ID")
+    session_id: str = Field(description="AgentSession ID")
+    mailbox_item_id: str = Field(description="Durable source input buffer ID")
+    sender_user_id: str | None = Field(
+        description="Human sender User ID, or null when unavailable",
+    )
+    action_type: str = Field(description="Action discriminator")
+    action: dict[str, JSONValue] = Field(description="Durable action payload")
+    result: dict[str, JSONValue] | None = Field(
+        default=None,
+        description="Action-specific durable result projection",
+    )
+    status: ActionExecutionStatus = Field(description="Execution status")
+    owner_generation: int = Field(description="Admitting Session owner generation")
+    failure_summary: str | None = Field(description="User-safe failure summary")
+    cancellation_summary: str | None = Field(
+        description="User-safe cancellation summary"
+    )
+    started_at: datetime.datetime | None = Field(description="Start time")
+    completed_at: datetime.datetime | None = Field(description="Completion time")
+    failed_at: datetime.datetime | None = Field(description="Failure time")
+    cancelled_at: datetime.datetime | None = Field(description="Cancellation time")
+    created_at: datetime.datetime = Field(description="Created time")
+    updated_at: datetime.datetime = Field(description="Updated time")
+
+
+class ActionExecutionCreate(BaseModel):
+    """Action execution create schema."""
+
+    id: str | None = Field(description="Optional action execution ID")
+    session_id: str = Field(description="AgentSession ID")
+    mailbox_item_id: str = Field(description="Durable source input buffer ID")
+    sender_user_id: str | None = Field(
+        description="Human sender User ID, or null when unavailable",
+    )
+    action_type: str = Field(description="Action discriminator")
+    action: dict[str, JSONValue] = Field(description="Durable action payload")
+    status: ActionExecutionStatus = Field(description="Initial execution status")
+    owner_generation: int = Field(description="Admitting Session owner generation")
+
+
+class ActionExecutionEvent(BaseModel):
+    """Append-only action execution progress event."""
+
+    id: str = Field(description="Action execution event ID")
+    action_execution_id: str = Field(description="Action execution ID")
+    session_id: str = Field(description="AgentSession ID")
+    sequence: int = Field(description="Monotonic sequence within execution")
+    kind: ActionExecutionEventKind = Field(description="Progress event kind")
+    step_key: str | None = Field(description="Action-local step key")
+    command_argv: list[str] | None = Field(description="Command argv snapshot")
+    content: str | None = Field(description="Progress content")
+    exit_code: int | None = Field(description="Command exit code")
+    created_at: datetime.datetime = Field(description="Created time")
+
+
+class ActionExecutionEventCreate(BaseModel):
+    """Action execution event create schema."""
+
+    action_execution_id: str = Field(description="Action execution ID")
+    session_id: str = Field(description="AgentSession ID")
+    kind: ActionExecutionEventKind = Field(description="Progress event kind")
+    step_key: str | None = Field(description="Action-local step key")
+    command_argv: list[str] | None = Field(description="Command argv snapshot")
+    content: str | None = Field(description="Progress content")
+    exit_code: int | None = Field(description="Command exit code")
+
+
+class ActionExecutionProjection(BaseModel):
+    """Action execution with ordered live progress events."""
+
+    execution: ActionExecution = Field(description="Action execution state")
+    events: list[ActionExecutionEvent] = Field(description="Ordered progress events")

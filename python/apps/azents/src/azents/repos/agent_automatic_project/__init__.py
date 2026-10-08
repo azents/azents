@@ -2,19 +2,17 @@
 
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_automatic_project import AgentAutomaticProjectPolicy
 from azents.rdb.models.agent_automatic_project_item import (
     RDBAgentAutomaticProjectItem,
 )
 from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
 )
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
-from .data import (
-    AgentAutomaticProjectPolicy,
-    AgentAutomaticProjectPolicyRevisionConflict,
-)
+from .data import AgentAutomaticProjectPolicyRevisionConflict
 
 
 class AgentAutomaticProjectRepository:
@@ -22,12 +20,12 @@ class AgentAutomaticProjectRepository:
 
     async def get_policy(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
     ) -> AgentAutomaticProjectPolicy | None:
         """Fetch one policy from a single statement-level database snapshot."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(
                 RDBAgentAutomaticProjectSetting,
                 RDBAgentAutomaticProjectItem.path,
@@ -56,12 +54,12 @@ class AgentAutomaticProjectRepository:
 
     async def lock_policy(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
     ) -> AgentAutomaticProjectPolicy | None:
         """Lock and fetch one Agent automatic Project policy."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBAgentAutomaticProjectSetting)
             .where(RDBAgentAutomaticProjectSetting.agent_id == agent_id)
             .with_for_update()
@@ -73,7 +71,7 @@ class AgentAutomaticProjectRepository:
 
     async def replace_policy(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         expected_revision: int,
@@ -84,7 +82,7 @@ class AgentAutomaticProjectRepository:
         AgentAutomaticProjectPolicyRevisionConflict,
     ]:
         """Atomically replace a policy when its revision precondition matches."""
-        setting_result = await session.execute(
+        setting_result = await session.write_session.execute(
             sa.update(RDBAgentAutomaticProjectSetting)
             .where(
                 RDBAgentAutomaticProjectSetting.agent_id == agent_id,
@@ -106,12 +104,12 @@ class AgentAutomaticProjectRepository:
                 )
             )
 
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBAgentAutomaticProjectItem).where(
                 RDBAgentAutomaticProjectItem.agent_id == agent_id,
             )
         )
-        session.add_all(
+        session.write_session.add_all(
             [
                 RDBAgentAutomaticProjectItem(
                     agent_id=agent_id,
@@ -121,7 +119,7 @@ class AgentAutomaticProjectRepository:
                 for position, path in enumerate(paths)
             ]
         )
-        await session.flush()
+        await session.write_session.flush()
         return Success(
             AgentAutomaticProjectPolicy(
                 agent_id=setting.agent_id,
@@ -135,11 +133,11 @@ class AgentAutomaticProjectRepository:
 
     async def _build_policy(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         setting: RDBAgentAutomaticProjectSetting,
     ) -> AgentAutomaticProjectPolicy:
         """Build one policy snapshot from a settings row and ordered items."""
-        item_result = await session.execute(
+        item_result = await session.read_session.execute(
             sa.select(RDBAgentAutomaticProjectItem.path)
             .where(RDBAgentAutomaticProjectItem.agent_id == setting.agent_id)
             .order_by(RDBAgentAutomaticProjectItem.position.asc())

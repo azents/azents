@@ -7,7 +7,8 @@ from typing import Annotated
 from pydantic import BaseModel, Field
 from typing_extensions import Self, TypedDict
 
-from azents.repos.memory.data import Memory, MemoryScope
+from azents.core.memory_scope import MemoryScope
+from azents.repos.memory.data import Memory
 
 
 class MemoryOutput(BaseModel):
@@ -45,6 +46,14 @@ class MemoryListOutput(BaseModel):
     """Memory list output."""
 
     items: list[MemoryOutput] = Field(description="Memory list")
+    next_cursor: str | None = Field(description="Next page cursor, if available")
+
+
+@dataclasses.dataclass(frozen=True)
+class MemoryCursorInvalid:
+    """The list cursor is malformed or belongs to another query."""
+
+    message: str
 
 
 class MemoryCreateInput(BaseModel):

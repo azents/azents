@@ -2,13 +2,11 @@
 
 import datetime
 
-import httpx
 from azcommon.result import Failure, Result, Success
 
 from azents.core.chatgpt_oauth import (
     ChatGPTOAuthConnectionMethod,
     ChatGPTOAuthConnectionStatus,
-    resolve_chatgpt_oauth_token_url,
 )
 from azents.core.credentials import ChatGPTOAuthConfig, ChatGPTOAuthSecrets
 from azents.core.enums import LLMProvider
@@ -16,8 +14,8 @@ from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
 )
+from azents.services.oauth_runtime_clients import ChatGPTOAuthClientFactory
 
-from .client import ChatGPTOAuthClient
 from .data import ProviderRejected, ProviderUnavailable, TokenSet
 
 _REFRESH_WINDOW = datetime.timedelta(minutes=5)
@@ -27,6 +25,7 @@ async def ensure_runtime_tokens(
     *,
     integration: LLMProviderIntegrationWithSecrets,
     persistence_repository: ChatGPTOAuthRuntimeRepository,
+    client_factory: ChatGPTOAuthClientFactory,
 ) -> Result[LLMProviderIntegrationWithSecrets, ProviderRejected | ProviderUnavailable]:
     """Ensure ChatGPT OAuth token freshness before Runtime execution."""
     if integration.provider != LLMProvider.CHATGPT_OAUTH:
@@ -47,6 +46,7 @@ async def ensure_runtime_tokens(
     return await refresh_runtime_tokens(
         integration=integration,
         persistence_repository=persistence_repository,
+        client_factory=client_factory,
     )
 
 
@@ -54,6 +54,7 @@ async def refresh_runtime_tokens(
     *,
     integration: LLMProviderIntegrationWithSecrets,
     persistence_repository: ChatGPTOAuthRuntimeRepository,
+    client_factory: ChatGPTOAuthClientFactory,
 ) -> Result[LLMProviderIntegrationWithSecrets, ProviderRejected | ProviderUnavailable]:
     """Force one ChatGPT OAuth refresh for a rejected runtime credential."""
     if integration.provider != LLMProvider.CHATGPT_OAUTH:
@@ -62,11 +63,8 @@ async def refresh_runtime_tokens(
         integration.config, ChatGPTOAuthConfig
     ):
         return Failure(ProviderRejected(reason="ChatGPT OAuth integration is invalid"))
-    async with httpx.AsyncClient(timeout=20.0) as http_client:
-        refresh_result = await ChatGPTOAuthClient(
-            http_client,
-            token_url=resolve_chatgpt_oauth_token_url(),
-        ).refresh_tokens(
+    async with client_factory() as client:
+        refresh_result = await client.refresh_tokens(
             refresh_token=integration.secrets.refresh_token,
             connection_method=ChatGPTOAuthConnectionMethod(
                 integration.config.connection_method
@@ -105,7 +103,7 @@ async def _persist_refresh_success(
     config = integration.config
     assert isinstance(config, ChatGPTOAuthConfig)
     refreshed = await persistence_repository.update_and_reload(
-        integration_id=integration.id,
+        original_integration=integration,
         secrets=ChatGPTOAuthSecrets(
             access_token=tokens.access_token,
             refresh_token=tokens.refresh_token,
@@ -146,9 +144,7 @@ async def _persist_refresh_failure(
         else ChatGPTOAuthConnectionStatus.TEMPORARILY_UNAVAILABLE
     )
     return await persistence_repository.persist_refresh_failure(
-        integration_id=integration.id,
-        original_secrets=original_secrets,
-        original_config=config,
+        original_integration=integration,
         config=ChatGPTOAuthConfig(
             account_id=config.account_id,
             email=config.email,

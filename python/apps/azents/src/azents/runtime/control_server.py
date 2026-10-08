@@ -45,7 +45,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from sqlalchemy import event
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from azents.core.config import PostgreSQLConfig
 from azents.core.file_transfer import GENERAL_FILE_MAXIMUM_BYTES
@@ -56,20 +56,38 @@ from azents.core.runtime_transfer_coordinator_credential import (
     RuntimeTransferCoordinatorCredentialVerifier,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import (
+    WriteSession,
+    create_read_only_session_manager,
+    create_read_write_session_manager,
+)
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.runtime_connection_generation.repository import (
     CURRENT_ALLOCATOR_VERSION,
     RuntimeConnectionGenerationRepository,
 )
+from azents.repos.runtime_connection_registration_operations import (
+    RuntimeProviderConnectionRegistrationOperationRepository,
+    RuntimeRunnerConnectionRegistrationOperationRepository,
+)
 from azents.repos.runtime_control_read import RuntimeControlReadRepository
 from azents.repos.runtime_lifecycle_dispatch.repository import (
     RuntimeLifecycleDispatchRepository,
 )
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
+from azents.repos.runtime_profile_reconciliation_operations import (
+    RuntimeProfileReconciliationOperationRepository,
+)
+from azents.repos.runtime_profile_resolution_operations import (
+    RuntimeProfileResolutionOperationRepository,
+)
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_binding.repository import (
     RuntimeProviderAuthBindingRepository,
+)
+from azents.repos.runtime_provider_contract_operations import (
+    RuntimeProviderContractOperationsRepository,
 )
 from azents.repos.runtime_provider_control.repository import (
     RuntimeProviderControlRepository,
@@ -77,6 +95,15 @@ from azents.repos.runtime_provider_control.repository import (
 from azents.repos.runtime_provider_policy.repository import (
     RuntimeProviderPolicyRepository,
 )
+from azents.repos.runtime_reconciliation import RuntimeReconciliationOperationRepository
+from azents.repos.runtime_recreation_operations import (
+    RuntimeRecreationReconcileOperationRepository,
+)
+from azents.repos.runtime_report_operations import RuntimeReportOperationRepository
+from azents.repos.runtime_runner_auth_operations import (
+    RuntimeRunnerAuthenticationOperationRepository,
+)
+from azents.repos.runtime_stream_route import RuntimeStreamRouteOperationRepository
 from azents.repos.runtime_web.session_route_repository import (
     RuntimeWebSessionRouteConflict,
     RuntimeWebSessionRouteRepository,
@@ -128,9 +155,11 @@ from azents.runtime.control_protocol.reconciler import (
 from azents.runtime.control_protocol.service import (
     RuntimeControlProtocolService,
 )
+from azents.runtime.coordination.local import LocalRuntimeStores
 from azents.runtime.coordination.redis import (
     RedisRuntimeCoordinationStore,
 )
+from azents.runtime.coordination.store import RuntimeCoordinationStore
 from azents.runtime.stream_session_owner import (
     RuntimeStreamOwnedSession,
     RuntimeStreamOwnerSessionRegistry,
@@ -202,17 +231,14 @@ from azents.services.runtime_connection_registration.service import (
 from azents.services.runtime_profile_reconciliation.service import (
     RuntimeProfileReconciliationService,
 )
-from azents.services.runtime_profile_resolution.service import (
-    RuntimeProfileResolutionService,
-)
 from azents.services.runtime_provider_contract.service import (
     RuntimeProviderContractService,
 )
+from azents.services.runtime_provider_control.deps import (
+    create_runtime_provider_enrollment_service,
+)
 from azents.services.runtime_provider_control.provider_auth import (
     KubernetesApiTokenReviewer,
-)
-from azents.services.runtime_provider_control.service import (
-    RuntimeProviderEnrollmentService,
 )
 from azents.services.runtime_recreation.service import RuntimeRecreationReconciler
 from azents.services.runtime_runner_auth.service import (
@@ -556,6 +582,7 @@ class RuntimeControlSettings(BaseSettings):
     runtime_env: RuntimeEnvironment = RuntimeEnvironment.LOCAL
     sentry_dsn: str | None = None
     redis_url: str = "redis://localhost:6379"
+    session_broker_backend: Literal["memory", "redis"] = "redis"
     runtime_control_port: int = _DEFAULT_PORT
     runtime_control_web_transport_enabled: bool = False
     runtime_control_trusted_port: int = 8032
@@ -732,13 +759,34 @@ class _RuntimeWebCapacityRedisAdapter:
 @asynccontextmanager
 async def runtime_control_server_lifespan(
     settings: RuntimeControlSettings,
+    *,
+    local_stores: LocalRuntimeStores | None,
 ) -> AsyncGenerator[grpc.aio.Server]:
     """Manage runtime-control gRPC server resources."""
     validate_runtime_control_transfer_settings(settings)
     validate_runtime_control_workspace_upload_settings(settings)
     validate_runtime_control_web_settings(settings)
-    redis = create_redis_client(settings.redis_url)
-    coordination_store = RedisRuntimeCoordinationStore(redis)
+    if (settings.session_broker_backend == "memory") != (local_stores is not None):
+        raise ValueError("Memory Runtime Control requires co-located shared stores")
+    redis: Redis | None
+    coordination_store: RuntimeCoordinationStore
+    terminal_coordination: RuntimeTerminalCoordinationStore
+    if local_stores is not None:
+        if (
+            settings.runtime_control_transfer_backend != "memory"
+            or settings.runtime_control_workspace_upload_backend != "memory"
+            or settings.runtime_control_web_capacity_backend != "memory"
+        ):
+            raise ValueError(
+                "Co-located Runtime Control requires memory state backends"
+            )
+        redis = None
+        coordination_store = local_stores.coordination
+        terminal_coordination = local_stores.terminal
+    else:
+        redis = create_redis_client(settings.redis_url)
+        coordination_store = RedisRuntimeCoordinationStore(redis)
+        terminal_coordination = RedisRuntimeTerminalCoordinationStore(redis)
     clock = _utc_now
     transfer_state = create_runtime_control_transfer_state_store(
         settings=settings,
@@ -762,21 +810,21 @@ async def runtime_control_server_lifespan(
         clock=clock,
     )
     workspace_upload_config = _workspace_upload_config(settings)
-    if not isinstance(redis, _RedisClient):
-        raise TypeError("Redis client does not support Workspace upload commands")
-    workspace_upload_store = (
-        RedisWorkspaceUploadStore(
+    workspace_upload_store: RedisWorkspaceUploadStore | InMemoryWorkspaceUploadStore
+    if settings.runtime_control_workspace_upload_backend == "redis":
+        if not isinstance(redis, _RedisClient):
+            raise TypeError("Redis client does not support Workspace upload commands")
+        workspace_upload_store = RedisWorkspaceUploadStore(
             redis=redis,
             config=workspace_upload_config,
             clock=clock,
             namespace=settings.runtime_control_workspace_upload_redis_namespace,
         )
-        if settings.runtime_control_workspace_upload_backend == "redis"
-        else InMemoryWorkspaceUploadStore(
+    else:
+        workspace_upload_store = InMemoryWorkspaceUploadStore(
             config=workspace_upload_config,
             clock=clock,
         )
-    )
     workspace_upload_object_store = WorkspaceUploadObjectStore(
         s3_service=transfer_s3,
         bucket=settings.runtime_control_workspace_s3_bucket,
@@ -821,7 +869,6 @@ async def runtime_control_server_lifespan(
         object_store=workspace_upload_object_store,
         live_object_handles=workspace_upload_store.list_object_handles,
     )
-    terminal_coordination = RedisRuntimeTerminalCoordinationStore(redis)
     runner_generation_observer = CompositeRuntimeRunnerGenerationObserver(
         transfer_coordinator,
         RuntimeTerminalRunnerGenerationObserver(
@@ -871,7 +918,7 @@ async def runtime_control_server_lifespan(
     profile_repository = RuntimeProfileRepository()
     provider_repository = RuntimeProviderRepository()
     provider_control_repository = RuntimeProviderControlRepository()
-    profile_resolution = RuntimeProfileResolutionService(
+    resolution_operations = RuntimeProfileResolutionOperationRepository(
         session_manager=session_manager,
         agent_repository=agent_repository,
         runtime_repository=runtime_repository,
@@ -880,9 +927,11 @@ async def runtime_control_server_lifespan(
         provider_policy_repository=policy_repository,
     )
     profile_reconciliation = RuntimeProfileReconciliationService(
-        session_manager=session_manager,
-        profile_repository=profile_repository,
-        resolution_service=profile_resolution,
+        operations=RuntimeProfileReconciliationOperationRepository(
+            session_manager=session_manager,
+            profile_repository=profile_repository,
+            resolution_operations=resolution_operations,
+        ),
     )
     kubernetes_api_client: ApiClient | None = None
     kubernetes_token_reviewer = None
@@ -892,7 +941,7 @@ async def runtime_control_server_lifespan(
         kubernetes_token_reviewer = KubernetesApiTokenReviewer(
             AuthenticationV1Api(kubernetes_api_client)
         )
-    enrollment_service = RuntimeProviderEnrollmentService(
+    enrollment_service = create_runtime_provider_enrollment_service(
         session_manager=session_manager,
         repository=provider_control_repository,
         provider_repository=provider_repository,
@@ -902,22 +951,23 @@ async def runtime_control_server_lifespan(
         auth_registry=None,
     )
     contract_service = RuntimeProviderContractService(
-        session_manager=session_manager,
-        provider_repository=provider_repository,
-        policy_repository=policy_repository,
-        profile_repository=profile_repository,
+        operations=RuntimeProviderContractOperationsRepository(
+            session_manager=session_manager,
+            provider_repository=provider_repository,
+            policy_repository=policy_repository,
+            profile_repository=profile_repository,
+        )
     )
-    provider_sink = RuntimeProviderReportRepositorySink(
+    report_operations = RuntimeReportOperationRepository(
         runtime_repository=runtime_repository,
         profile_repository=profile_repository,
         session_manager=session_manager,
     )
+    provider_sink = RuntimeProviderReportRepositorySink(repository=report_operations)
     web_runner_generation_gate = _RuntimeWebRunnerGenerationGate()
     runner_sink = _RuntimeWebRunnerStateSink(
         delegate=RuntimeRunnerStateRepositorySink(
-            runtime_repository=runtime_repository,
-            profile_repository=profile_repository,
-            session_manager=session_manager,
+            repository=report_operations,
         ),
         generation_gate=web_runner_generation_gate,
     )
@@ -925,28 +975,32 @@ async def runtime_control_server_lifespan(
         settings.credential_encryption_key
     )
     runner_authenticator = RuntimeRunnerAuthenticationService(
-        session_manager=session_manager,
-        runtime_repository=runtime_repository,
         verifier=runner_credential_verifier,
+        operations=RuntimeRunnerAuthenticationOperationRepository(
+            session_manager=create_read_only_session_manager(engine),
+            runtime_repository=runtime_repository,
+        ),
     )
     provider_connection_registrar = RuntimeProviderConnectionRegistrationService(
-        session_manager=session_manager,
-        generation_repository=generation_repository,
         coordination_store=coordination_store,
-        provider_control=enrollment_service,
         clock=clock,
-        heartbeat_interval_seconds=(
-            settings.testenv_runtime_control_heartbeat_interval_seconds
+        heartbeat_interval_seconds=settings.testenv_runtime_control_heartbeat_interval_seconds,
+        operations=RuntimeProviderConnectionRegistrationOperationRepository(
+            session_manager=session_manager,
+            read_session_manager=create_read_only_session_manager(engine),
+            generation_repository=generation_repository,
+            provider_control=enrollment_service.operations,
         ),
     )
     runner_connection_registrar = RuntimeRunnerConnectionRegistrationService(
-        session_manager=session_manager,
-        generation_repository=generation_repository,
         coordination_store=coordination_store,
-        runner_authentication=runner_authenticator,
         generation_observer=runner_generation_observer,
-        heartbeat_interval_seconds=(
-            settings.testenv_runtime_control_heartbeat_interval_seconds
+        heartbeat_interval_seconds=settings.testenv_runtime_control_heartbeat_interval_seconds,
+        operations=RuntimeRunnerConnectionRegistrationOperationRepository(
+            session_manager=session_manager,
+            read_session_manager=create_read_only_session_manager(engine),
+            generation_repository=generation_repository,
+            runner_authentication=runner_authenticator.operations,
         ),
     )
     stream_session_offer_provider: RuntimeStreamSessionOfferProvider = (
@@ -959,9 +1013,12 @@ async def runtime_control_server_lifespan(
     if settings.runtime_control_web_transport_enabled:
         trusted_transport = runtime_web_trusted_transport(settings)
         control_boot_id = uuid.uuid4().hex
-        route_repository = RuntimeWebSessionRouteRepository()
-        owner_manager = RuntimeStreamSessionOwnerManager(
+        route_repository = RuntimeStreamRouteOperationRepository(
             session_manager=session_manager,
+            read_session_manager=create_read_only_session_manager(engine),
+            route_repository=RuntimeWebSessionRouteRepository(),
+        )
+        owner_manager = RuntimeStreamSessionOwnerManager(
             repository=route_repository,
             owner_replica_id=settings.runtime_control_instance_id,
             owner_boot_id=control_boot_id,
@@ -976,13 +1033,14 @@ async def runtime_control_server_lifespan(
         )
         stream_session_offer_provider = owner_offer_provider
         owner_registry = RuntimeStreamOwnerSessionRegistry(
-            session_manager=session_manager,
             repository=route_repository,
             clock=clock,
         )
         capacity_registry = RuntimeWebCapacityRegistry(
             config=_runtime_web_capacity_config(settings),
-            redis=_RuntimeWebCapacityRedisAdapter(redis),
+            redis=(
+                _RuntimeWebCapacityRedisAdapter(redis) if redis is not None else None
+            ),
             monotonic_clock_milliseconds=lambda: int(time.monotonic() * 1000),
             recoverable_errors=(RedisError, OSError, TimeoutError),
         )
@@ -1033,7 +1091,6 @@ async def runtime_control_server_lifespan(
             platform=sys.platform,
         )
         web_data_plane = RuntimeStreamControlDataPlane(
-            session_manager=session_manager,
             route_repository=route_repository,
             owner_replica_id=settings.runtime_control_instance_id,
             control_boot_id=control_boot_id,
@@ -1049,10 +1106,11 @@ async def runtime_control_server_lifespan(
             resident_memory_bytes=resident_memory_sampler.current_bytes,
         )
     reconciler = RuntimeLifecycleReconciler(
-        agent_repository=agent_repository,
-        runtime_repository=runtime_repository,
-        profile_repository=profile_repository,
-        session_manager=session_manager,
+        repository=RuntimeReconciliationOperationRepository(
+            runtime_repository=runtime_repository,
+            profile_repository=profile_repository,
+            session_manager=session_manager,
+        ),
         dispatch_repository=RuntimeLifecycleDispatchRepository(
             agent_repository=agent_repository,
             runtime_repository=runtime_repository,
@@ -1077,16 +1135,14 @@ async def runtime_control_server_lifespan(
         ),
     )
     recreation_reconciler = RuntimeRecreationReconciler(
-        session_manager=session_manager,
-        profile_repository=profile_repository,
-        runtime_repository=runtime_repository,
-        agent_repository=agent_repository,
-        terminal_invalidation_publisher=(
-            CoordinatedRuntimeTerminalInvalidationPublisher(
-                store=terminal_coordination,
-                dispatcher=terminal_dispatcher,
-                clock=clock,
-            )
+        terminal_invalidation_publisher=CoordinatedRuntimeTerminalInvalidationPublisher(
+            store=terminal_coordination, dispatcher=terminal_dispatcher, clock=clock
+        ),
+        operations=RuntimeRecreationReconcileOperationRepository(
+            session_manager=session_manager,
+            profile_repository=profile_repository,
+            runtime_repository=runtime_repository,
+            agent_repository=agent_repository,
         ),
     )
     stop_reconciler = asyncio.Event()
@@ -1357,7 +1413,8 @@ async def runtime_control_server_lifespan(
         if kubernetes_api_client is not None:
             await kubernetes_api_client.close()
         await resources.aclose()
-        await redis.aclose()
+        if redis is not None:
+            await redis.aclose()
         await engine.dispose()
 
 
@@ -2199,19 +2256,8 @@ def _create_engine(settings: RuntimeControlSettings) -> AsyncEngine:
     )
 
 
-def _session_manager(engine: AsyncEngine) -> SessionManager[AsyncSession]:
-    @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        async with AsyncSession(engine, expire_on_commit=False) as session:
-            try:
-                yield session
-            except Exception:
-                await session.rollback()
-                raise
-            else:
-                await session.commit()
-
-    return session_manager
+def _session_manager(engine: AsyncEngine) -> SessionManager[WriteSession]:
+    return create_read_write_session_manager(engine)
 
 
 async def run_runtime_control_server() -> None:
@@ -2234,5 +2280,5 @@ async def run_runtime_control_server() -> None:
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(signum, stop.set)
-    async with runtime_control_server_lifespan(settings):
+    async with runtime_control_server_lifespan(settings, local_stores=None):
         await stop.wait()

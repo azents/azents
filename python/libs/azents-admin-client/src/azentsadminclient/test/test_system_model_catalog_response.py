@@ -37,11 +37,10 @@ class TestSystemModelCatalogResponse(unittest.TestCase):
             return SystemModelCatalogResponse(
                 provider = 'openai',
                 catalog_id = '',
-                snapshot_id = '',
+                last_success_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 visible_count = 56,
                 hidden_count = 56,
-                latest_attempt = azentsadminclient.models.system_model_catalog_sync_attempt_response.SystemModelCatalogSyncAttemptResponse(
-                    id = '', 
+                latest_sync = azentsadminclient.models.system_model_catalog_sync_status_response.SystemModelCatalogSyncStatusResponse(
                     status = '', 
                     started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                     finished_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
@@ -57,11 +56,10 @@ class TestSystemModelCatalogResponse(unittest.TestCase):
             return SystemModelCatalogResponse(
                 provider = 'openai',
                 catalog_id = '',
-                snapshot_id = '',
+                last_success_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 visible_count = 56,
                 hidden_count = 56,
-                latest_attempt = azentsadminclient.models.system_model_catalog_sync_attempt_response.SystemModelCatalogSyncAttemptResponse(
-                    id = '', 
+                latest_sync = azentsadminclient.models.system_model_catalog_sync_status_response.SystemModelCatalogSyncStatusResponse(
                     status = '', 
                     started_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                     finished_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 

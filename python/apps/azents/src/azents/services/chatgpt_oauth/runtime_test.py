@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock
 import pytest
 from azcommon.result import Failure, Result, Success
 from cryptography.fernet import Fernet
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.chatgpt_oauth import (
     ChatGPTOAuthConnectionMethod,
@@ -17,6 +16,8 @@ from azents.core.chatgpt_oauth import (
 from azents.core.credentials import ChatGPTOAuthConfig, ChatGPTOAuthSecrets
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import LLMProvider
+from azents.core.workspace import WorkspaceCreate
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import (
@@ -24,7 +25,7 @@ from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
 )
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
+from azents.services.oauth_runtime_clients import create_runtime_oauth_client_factories
 
 from .client import ChatGPTOAuthClient
 from .data import ProviderRejected, ProviderUnavailable, TokenSet
@@ -43,20 +44,20 @@ class _CreatedIntegration(NamedTuple):
 class _SessionManager:
     """Expose single test DB session as context manager."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: WriteSession) -> None:
         self._session = session
 
     def __call__(self) -> "_SessionManager":
         return self
 
-    async def __aenter__(self) -> AsyncSession:
+    async def __aenter__(self) -> WriteSession:
         return self._session
 
     async def __aexit__(self, *_args: object) -> None:
         return None
 
 
-async def _create_workspace(session: AsyncSession) -> str:
+async def _create_workspace(session: WriteSession) -> str:
     """Create workspace for tests."""
     suffix = uuid.uuid4().hex[:12]
     handle = f"cgpt-runtime-{suffix}"
@@ -71,7 +72,7 @@ async def _create_workspace(session: AsyncSession) -> str:
 
 
 async def _create_integration(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     expires_at: datetime.datetime,
 ) -> _CreatedIntegration:
@@ -102,7 +103,7 @@ async def _create_integration(
 
 def _persistence_repository(
     integration_repository: LLMProviderIntegrationRepository,
-    session: AsyncSession,
+    session: WriteSession,
 ) -> ChatGPTOAuthRuntimeRepository:
     """Create the runtime persistence boundary for tests."""
     return ChatGPTOAuthRuntimeRepository(
@@ -175,10 +176,12 @@ class TestEnsureRuntimeTokens:
         ensured = await ensure_runtime_tokens(
             integration=integration,
             persistence_repository=repository,
+            client_factory=create_runtime_oauth_client_factories().chatgpt,
         )
         refreshed = await refresh_runtime_tokens(
             integration=integration,
             persistence_repository=repository,
+            client_factory=create_runtime_oauth_client_factories().chatgpt,
         )
 
         if ensure_succeeds:
@@ -191,7 +194,7 @@ class TestEnsureRuntimeTokens:
         assert isinstance(refreshed.error, ProviderRejected)
 
     async def test_fresh_token_returns_existing_integration(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Sufficiently fresh token is not refreshed."""
         expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1)
@@ -205,13 +208,14 @@ class TestEnsureRuntimeTokens:
         result = await ensure_runtime_tokens(
             integration=integration,
             persistence_repository=_persistence_repository(repo, rdb_session),
+            client_factory=create_runtime_oauth_client_factories().chatgpt,
         )
 
         assert isinstance(result, Success)
         assert result.value.id == integration_id
 
     async def test_forced_refresh_rotates_a_fresh_token(
-        self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+        self, rdb_session: WriteSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Forced refresh does not apply the normal five-minute freshness shortcut."""
         expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1)
@@ -244,6 +248,7 @@ class TestEnsureRuntimeTokens:
         result = await refresh_runtime_tokens(
             integration=integration,
             persistence_repository=_persistence_repository(repo, rdb_session),
+            client_factory=create_runtime_oauth_client_factories().chatgpt,
         )
 
         assert isinstance(result, Success)
@@ -251,7 +256,7 @@ class TestEnsureRuntimeTokens:
         assert result.value.secrets.access_token == "forced-access-token"
 
     async def test_near_expiry_refresh_persists_rotated_tokens(
-        self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+        self, rdb_session: WriteSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Nearly expired token refreshes and updates encrypted secrets."""
         expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=1)
@@ -284,6 +289,7 @@ class TestEnsureRuntimeTokens:
         result = await ensure_runtime_tokens(
             integration=integration,
             persistence_repository=_persistence_repository(repo, rdb_session),
+            client_factory=create_runtime_oauth_client_factories().chatgpt,
         )
 
         assert isinstance(result, Success)
@@ -292,7 +298,7 @@ class TestEnsureRuntimeTokens:
         assert result.value.secrets.refresh_token == "new-refresh-token"
 
     async def test_refresh_rejected_marks_refresh_required(
-        self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+        self, rdb_session: WriteSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Permanent refresh failure is stored as reconnect-required state."""
         expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=1)
@@ -316,6 +322,7 @@ class TestEnsureRuntimeTokens:
         result = await ensure_runtime_tokens(
             integration=integration,
             persistence_repository=_persistence_repository(repo, rdb_session),
+            client_factory=create_runtime_oauth_client_factories().chatgpt,
         )
         updated = await repo.get_by_id(rdb_session, integration_id)
 
@@ -327,7 +334,7 @@ class TestEnsureRuntimeTokens:
         )
 
     async def test_temporary_failure_remains_retryable(
-        self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+        self, rdb_session: WriteSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Transient failure state retries refresh on next runtime preflight."""
         expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=1)
@@ -350,6 +357,7 @@ class TestEnsureRuntimeTokens:
         first = await ensure_runtime_tokens(
             integration=integration,
             persistence_repository=_persistence_repository(repo, rdb_session),
+            client_factory=create_runtime_oauth_client_factories().chatgpt,
         )
         after_failure = await repo.get_by_id_with_secrets(rdb_session, integration_id)
         assert isinstance(first, Failure)
@@ -380,6 +388,7 @@ class TestEnsureRuntimeTokens:
         second = await ensure_runtime_tokens(
             integration=after_failure,
             persistence_repository=_persistence_repository(repo, rdb_session),
+            client_factory=create_runtime_oauth_client_factories().chatgpt,
         )
 
         assert isinstance(second, Success)
@@ -387,7 +396,7 @@ class TestEnsureRuntimeTokens:
         assert second.value.secrets.access_token == "recovered-access-token"
 
     async def test_concurrent_success_prevents_rejected_failure_state(
-        self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+        self, rdb_session: WriteSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Old token failure after concurrent refresh success preserves state."""
         expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=1)
@@ -435,6 +444,7 @@ class TestEnsureRuntimeTokens:
         result = await ensure_runtime_tokens(
             integration=stale_integration,
             persistence_repository=_persistence_repository(repo, rdb_session),
+            client_factory=create_runtime_oauth_client_factories().chatgpt,
         )
 
         assert isinstance(result, Success)

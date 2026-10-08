@@ -26,6 +26,9 @@ def test_model_capabilities_serializes_required_top_level_keys() -> None:
         "built_in_tools",
         "parameters",
         "compatibility",
+        "capability_schema_version",
+        "structured_response",
+        "request_constraints",
     }
     assert data["context_window"] == {
         "default_input_tokens": None,
@@ -35,13 +38,13 @@ def test_model_capabilities_serializes_required_top_level_keys() -> None:
     assert data["modalities"] == {"input": [], "output": []}
     assert data["tool_calling"] == {
         "supported": False,
-        "parallel_tool_calls": None,
-        "strict_json_schema": None,
+        "parallel_tool_calls": False,
+        "strict_json_schema": False,
     }
     assert data["reasoning"] == {
         "supported": False,
         "effort_levels": [],
-        "summaries": None,
+        "summaries": False,
     }
     assert data["built_in_tools"] == {"supported": []}
     assert data["parameters"] == {
@@ -55,6 +58,12 @@ def test_model_capabilities_serializes_required_top_level_keys() -> None:
         "provider_family": None,
         "responses_api": None,
         "unsupported_media_policy": None,
+    }
+    assert data["capability_schema_version"] == 3
+    assert data["structured_response"] is False
+    assert data["request_constraints"] == {
+        "known_default": None,
+        "feature_conditions": [],
     }
 
 
@@ -160,7 +169,7 @@ def test_model_capabilities_ignores_unknown_future_fields() -> None:
     assert data["reasoning"] == {
         "supported": True,
         "effort_levels": ["low"],
-        "summaries": None,
+        "summaries": False,
     }
     assert "pricing" not in data
 

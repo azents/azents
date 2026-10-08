@@ -4,6 +4,7 @@ import dataclasses
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import NamedTuple
 from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
@@ -23,6 +24,8 @@ from azents.core.runtime_profile import (
     RuntimeRecreationOperationStatus,
     RuntimeRecreationTargetKind,
 )
+from azents.core.runtime_recreation import RuntimeRecreationUnavailable
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime import AgentRuntimeRepository
@@ -36,15 +39,15 @@ from azents.repos.runtime_profile.data import (
 )
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.repos.runtime_recreation_operations import (
+    RuntimeRecreationOperationRepository,
+    RuntimeRecreationReconcileOperationRepository,
+)
 from azents.services.runtime_terminal.invalidation import (
     NoopRuntimeTerminalInvalidationPublisher,
 )
 
-from .service import (
-    RuntimeRecreationReconciler,
-    RuntimeRecreationService,
-    RuntimeRecreationUnavailable,
-)
+from .service import RuntimeRecreationReconciler, RuntimeRecreationService
 
 
 class _SessionManager:
@@ -54,7 +57,7 @@ class _SessionManager:
         self.session = AsyncMock(spec=AsyncSession)
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         yield self.session
 
 
@@ -232,43 +235,58 @@ def _ready_state(
     )
 
 
-def _reconciler() -> tuple[
-    RuntimeRecreationReconciler,
-    AsyncMock,
-    AsyncMock,
-    AsyncMock,
-]:
+class _ReconcilerFixture(NamedTuple):
+    reconciler: RuntimeRecreationReconciler
+    profiles: AsyncMock
+    runtimes: AsyncMock
+    agents: AsyncMock
+
+
+class _AuthorityFixture(NamedTuple):
+    service: RuntimeRecreationService
+    profiles: AsyncMock
+    providers: AsyncMock
+
+
+def _reconciler() -> _ReconcilerFixture:
     profile_repository = AsyncMock(spec=RuntimeProfileRepository)
-    profile_repository.get_recreation_target_version.return_value = "2"
+    profile_repository.lock_recreation_target_for_dispatch.return_value = "2"
     runtime_repository = AsyncMock(spec=AgentRuntimeRepository)
     agent_repository = AsyncMock(spec=AgentRepository)
     agent_repository.lock_by_id.return_value = _agent()
     reconciler = RuntimeRecreationReconciler(
-        session_manager=_SessionManager(),
-        profile_repository=profile_repository,
-        runtime_repository=runtime_repository,
-        agent_repository=agent_repository,
-        terminal_invalidation_publisher=(NoopRuntimeTerminalInvalidationPublisher()),
+        terminal_invalidation_publisher=NoopRuntimeTerminalInvalidationPublisher(),
         operation_limit=1,
         item_limit=1,
-        maximum_attempts=3,
+        operations=RuntimeRecreationReconcileOperationRepository(
+            session_manager=_SessionManager(),
+            profile_repository=profile_repository,
+            runtime_repository=runtime_repository,
+            agent_repository=agent_repository,
+            maximum_attempts=3,
+        ),
     )
-    return reconciler, profile_repository, runtime_repository, agent_repository
+    return _ReconcilerFixture(
+        reconciler=reconciler,
+        profiles=profile_repository,
+        runtimes=runtime_repository,
+        agents=agent_repository,
+    )
 
 
-def _authority_service() -> tuple[
-    RuntimeRecreationService,
-    AsyncMock,
-    AsyncMock,
-]:
+def _authority_service() -> _AuthorityFixture:
     profile_repository = AsyncMock(spec=RuntimeProfileRepository)
     provider_repository = AsyncMock(spec=RuntimeProviderRepository)
     service = RuntimeRecreationService(
-        session_manager=_SessionManager(),
-        profile_repository=profile_repository,
-        provider_repository=provider_repository,
+        operations=RuntimeRecreationOperationRepository(
+            session_manager=_SessionManager(),
+            profile_repository=profile_repository,
+            provider_repository=provider_repository,
+        )
     )
-    return service, profile_repository, provider_repository
+    return _AuthorityFixture(
+        service=service, profiles=profile_repository, providers=provider_repository
+    )
 
 
 async def test_workspace_operation_hides_foreign_profile_target() -> None:
@@ -290,7 +308,6 @@ async def test_workspace_operation_hides_foreign_profile_target() -> None:
         ANY,
         workspace_id="foreign-workspace",
         profile_id="profile-1",
-        for_update=False,
     )
     profiles.list_recreation_items.assert_not_awaited()
 
@@ -351,14 +368,14 @@ async def test_workspace_recreation_create_rejects_stale_target_version() -> Non
     profiles.create_recreation_operation.assert_not_awaited()
 
 
-async def test_workspace_recreation_create_persists_locked_target_version() -> None:
+async def test_workspace_recreation_create_persists_captured_target_version() -> None:
     """Operation creation stores the repository's exact target snapshot."""
     service, profiles, _providers = _authority_service()
     profile = MagicMock()
     profile.id = "profile-1"
     profile.version = 2
     profiles.get_workspace_runtime_profile.return_value = profile
-    profiles.get_recreation_target_version.return_value = "2"
+    profiles.lock_recreation_target_for_dispatch.return_value = "2"
     profiles.create_recreation_operation.return_value = _operation()
     profiles.list_recreation_target_items.return_value = []
     profiles.complete_empty_recreation_operation.return_value = True
@@ -379,12 +396,8 @@ async def test_workspace_recreation_create_persists_locked_target_version() -> N
     )
 
     assert operation.status is RuntimeRecreationOperationStatus.COMPLETED
-    profiles.get_recreation_target_version.assert_awaited_once_with(
-        ANY,
-        target_kind=RuntimeRecreationTargetKind.WORKSPACE_RUNTIME_PROFILE,
-        target_id="profile-1",
-        for_share=False,
-    )
+    profiles.lock_recreation_target_for_dispatch.assert_not_awaited()
+    profiles.lock_recreation_target_for_dispatch.assert_not_awaited()
     create = profiles.create_recreation_operation.await_args.kwargs
     assert create["target_version"] == "2"
     profiles.complete_empty_recreation_operation.assert_awaited_once()
@@ -549,7 +562,7 @@ async def test_recreation_skips_changed_authority_target_before_dispatch() -> No
     profiles.claim_recreation_items.return_value = [item]
     profiles.lock_recreation_item.return_value = item
     profiles.get_recreation_operation.return_value = _operation()
-    profiles.get_recreation_target_version.return_value = "3"
+    profiles.lock_recreation_target_for_dispatch.return_value = "3"
     profiles.get_configuration_state.return_value = _ready_state()
     profiles.finish_recreation_item.return_value = True
     runtimes.get_by_id.return_value = _runtime(configuration_sequence=1)
@@ -557,11 +570,10 @@ async def test_recreation_skips_changed_authority_target_before_dispatch() -> No
     result = await reconciler.reconcile_once()
 
     assert result.completed_items == 1
-    profiles.get_recreation_target_version.assert_awaited_once_with(
+    profiles.lock_recreation_target_for_dispatch.assert_awaited_once_with(
         ANY,
         target_kind=RuntimeRecreationTargetKind.WORKSPACE_RUNTIME_PROFILE,
         target_id="profile-1",
-        for_share=True,
     )
     runtimes.set_desired_state_if_configuration_current.assert_not_awaited()
     profiles.get_configuration_state.assert_awaited_once()
@@ -619,11 +631,10 @@ async def test_recreation_ignores_item_locked_by_peer_worker() -> None:
     assert result.processed_items == 1
     assert result.dispatched_items == 0
     assert result.completed_items == 0
-    profiles.get_recreation_target_version.assert_awaited_once_with(
+    profiles.lock_recreation_target_for_dispatch.assert_awaited_once_with(
         ANY,
         target_kind=RuntimeRecreationTargetKind.WORKSPACE_RUNTIME_PROFILE,
         target_id="profile-1",
-        for_share=True,
     )
     runtimes.get_by_id.assert_not_awaited()
 
@@ -636,7 +647,7 @@ async def test_recreation_does_not_dispatch_after_target_deletion() -> None:
     profiles.list_recreation_items.return_value = [item]
     profiles.claim_recreation_items.return_value = []
     profiles.get_recreation_operation.return_value = _operation()
-    profiles.get_recreation_target_version.return_value = None
+    profiles.lock_recreation_target_for_dispatch.return_value = None
     profiles.lock_recreation_item.return_value = None
 
     result = await reconciler.reconcile_once()
@@ -644,7 +655,7 @@ async def test_recreation_does_not_dispatch_after_target_deletion() -> None:
     assert result.processed_items == 1
     assert result.dispatched_items == 0
     assert result.completed_items == 0
-    profiles.get_recreation_target_version.assert_awaited_once()
+    profiles.lock_recreation_target_for_dispatch.assert_awaited_once()
     profiles.lock_recreation_item.assert_awaited_once_with(
         ANY,
         item_id="item-1",
@@ -688,3 +699,41 @@ async def test_recreation_failure_becomes_terminal_at_maximum_attempts() -> None
         failure_message="Provider restart failed.",
     )
     runtimes.set_desired_state_if_configuration_current.assert_not_awaited()
+
+
+async def test_recreation_invalidation_follows_database_operation_completion() -> None:
+    """A successful dispatch publishes only after its transaction owner exits."""
+    reconciler, profiles, runtimes, _agents = _reconciler()
+    item = _item()
+    active: list[bool] = []
+    published: list[str] = []
+
+    @asynccontextmanager
+    async def sessions() -> AsyncIterator[WriteSession]:
+        active.append(True)
+        try:
+            yield AsyncMock(spec=AsyncSession)
+        finally:
+            active.pop()
+
+    class _Publisher(NoopRuntimeTerminalInvalidationPublisher):
+        async def publish_runtime_terminal_invalidation(self, runtime_id: str) -> None:
+            assert not active
+            published.append(runtime_id)
+
+    reconciler.operations.session_manager = sessions
+    reconciler.terminal_invalidation_publisher = _Publisher()
+    profiles.lock_recreation_item.return_value = item
+    profiles.get_recreation_operation.return_value = _operation()
+    profiles.get_configuration_state.return_value = _ready_state()
+    profiles.update_recreation_item_dispatch.return_value = True
+    runtimes.get_by_id.return_value = _runtime()
+    command = MagicMock()
+    command.desired_generation = 1
+    runtimes.set_desired_state_if_configuration_current.return_value = command
+
+    result = await reconciler._process_item(item)
+
+    assert result.dispatched
+    assert published == ["runtime-1"]
+    assert not active

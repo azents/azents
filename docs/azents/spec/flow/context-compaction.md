@@ -4,9 +4,19 @@ created: 2026-05-10
 tags: [backend, engine]
 spec_type: flow
 owner: "@Hardtack"
-touches_domains: [agent, conversation, external-channel]
+touches_domains: [agent, conversation, external-channel, memory]
 code_paths:
+  - python/apps/azents/src/azents/core/active_model_capabilities.py
+  - python/apps/azents/src/azents/repos/active_model_capabilities.py
+  - python/apps/azents/src/azents/engine/events/effective_model_request.py
+  - python/apps/azents/src/azents/engine/events/model_support_contract.py
+  - python/apps/azents/src/azents/core/historical_memory_settings.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/repos/engine_event_repositories.py
+  - python/apps/azents/src/azents/repos/engine_resolve.py
+  - python/apps/azents/src/azents/repos/model_metadata_operations.py
   - python/apps/azents/src/azents/engine/context/compaction.py
+  - python/apps/azents/src/azents/engine/provider_model_operation.py
   - python/apps/azents/src/azents/engine/context/window.py
   - python/apps/azents/src/azents/services/model_metadata.py
   - python/apps/azents/src/azents/engine/responses.py
@@ -17,9 +27,20 @@ code_paths:
   - python/apps/azents/src/azents/core/goal.py
   - python/apps/azents/src/azents/core/toolkit_state.py
   - python/apps/azents/src/azents/core/engine_tool_state.py
+  - python/apps/azents/src/azents/core/historical_memory_snapshot.py
+  - python/apps/azents/src/azents/core/historical_memory_context.py
+  - python/apps/azents/src/azents/services/historical_memory/context_snapshot.py
+  - python/apps/azents/src/azents/services/historical_memory/execution_context.py
+  - python/apps/azents/src/azents/repos/memory_execution_events.py
+  - python/apps/azents/src/azents/worker/run/memory_execution.py
+  - python/apps/azents/src/azents/repos/memory_context_snapshot.py
+  - python/apps/azents/src/azents/repos/historical_memory_consolidation/foreground.py
+  - python/apps/azents/src/azents/repos/historical_memory/**
   - python/apps/azents/src/azents/repos/goal/**
   - python/apps/azents/src/azents/repos/toolkit_state/**
   - python/apps/azents/src/azents/repos/compaction_operation.py
+  - python/apps/azents/src/azents/repos/session_execution_record.py
+  - python/apps/azents/src/azents/core/session_execution_data.py
   - python/apps/azents/src/azents/repos/model_operation_completion.py
   - python/apps/azents/src/azents/engine/tools/scheduled.py
   - python/apps/azents/src/azents/repos/scheduled_task_cycle/**
@@ -31,11 +52,16 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-10-01
-spec_version: 44
+last_verified_at: 2026-10-07
+spec_version: 55
 ---
 
 # Context Compaction
+
+Planning, owner fencing and model-input-head mutation use the common execution
+record. They require neither a public Conversation profile nor a participant
+tree, and never manufacture public fields for an internal Session. The existing
+Event/Run identities and adjacent append/head commit boundaries remain unchanged.
 
 Context compaction keeps long session history within model input limits without deleting audit/UI
 history. The event runtime uses append-only compaction.
@@ -43,9 +69,17 @@ history. The event runtime uses append-only compaction.
 Automatic compaction effective context window is computed by
 `engine/context/window.py`. Each option first resolves a default input window and
 maximum input window from its normalized capability, using the maximum as the
-default when the distinct default is absent. Locally captured validated-source metadata and the 128,000-token
-fallback fill missing limits. An unset option cap uses that resolved default; an
+default when the distinct default is absent. Only missing saved maxima request indexed exact
+current source-model reads; paired foreground/lightweight calculations share one coherent
+exact-key view without restoring the full source. Saved maxima take precedence, known defaults
+remain a floor, and the 128,000-token fallback applies only when all limits are absent.
+An unset option cap uses that resolved default; an
 explicit option cap is clamped to the resolved maximum.
+
+Each physical compaction candidate carries its saved normalized pricing definition.
+Call-local capture adds aware dispatch time without price DB/source lookup and keeps
+candidate-specific estimates stable across catalog refresh. Historical missing prices
+remain unavailable, with no per-read enrichment or change to text-only title behavior.
 
 For each prepared inference-bearing input, runtime then takes the prompt-selected
 foreground candidate's resolved effective window and the Agent lightweight Primary's
@@ -73,34 +107,101 @@ When compaction is required:
 5. Dispatch the compaction summary enrichment hook pipeline with the generated summary and rendered continuity history.
 6. Append the continuity history after the enriched summary.
 7. A completed repository-owned finalization operation opens one short database
-   transaction, locks the Session, and revalidates both captured boundaries. A
+   transaction, fences the exact captured execution-owner generation when
+   execution-bound, locks the Session, and revalidates both captured boundaries. A
    changed head or latest non-reverted event ID makes the plan stale and writes
    no compaction event.
 8. For a current plan, append adjacent `compaction_marker(status=started)` and `compaction_summary` events with the same `compaction_id` and reason at the physical transcript tail. The summary payload contains the enriched checkpoint followed by bounded `Recent User Messages` and `Recent Transcript` sections.
 9. Move `agent_sessions.model_input_head_event_id` to the summary event, replace the Session's `tool_search/working_set.tool_names` with an empty list, and commit the same transaction. The Tool Search reset applies even when the Agent currently has Tool Search disabled; other Toolkit State identities are unchanged.
 10. Remove the live operation after success, Stop, cancellation, or terminal failure. A skipped, failed, cancelled, or stale attempt appends no compaction marker or summary, does not move the model-input head, and does not reset the Tool Search working set.
 
+Run-owned compaction settlement is enabled by typed model-operation completion
+authority on the execution context, not a live-session Worker callback. The
+existing compaction repository directly composes the COMPACTION success mutation
+with summary/head and Tool Search writes; foreground terminal settlement remains
+in its separate output-completion operation.
+
 Old events remain queryable. The head pointer changes which ascending event-ID range is used for
 future model input. Input appended while summary generation is running invalidates the fixed plan;
 the completed summary is discarded without a marker or head change, and a later attempt rebuilds
 from current durable history.
 
+## Memory Context Boundary
+
+Conversation Memory selection is independent of transcript summary generation.
+Root Run-start preparation selects a Saved index and whole current Team/personal
+scope results. `on_session_compact` marks pending refresh, and reconstruction
+refreshes only after a committed summary head; failed/stale compaction admits no
+new selection. The compaction transaction does not write the Memory snapshot.
+Unchanged content reuses its text and creation time. Child executions inherit
+the root selection rather than independently selecting new results.
+
+Each integrated result is a whole independently framed 10,000-byte document.
+User context may compose Team and personal documents for up to 20,000 bytes;
+there is no ranking, packing or source-summary fallback. Other turns reauthorize
+current scope permission while preserving frozen selected bytes. Original source
+versions, archive state and full manifests are not aggregate-access authority.
+An independently permitted peer remains available when one scope is denied.
+
+Prompt filtering uses read-only common root/Agent/Workspace/User scope authority.
+Snapshot mutation retains owner-generation/head/CAS fences. Native opaque replay
+compatibility follows the actual permitted semantic prefix; it has no aggregate
+revision or inherited source-dependency identity. Explicit Memory VFS reads can
+observe a newer current result without changing frozen context. A failed
+compaction cannot create a new selection boundary because the head is unchanged.
+
+### Internal Memory execution compaction
+
+The summary-only Memory purpose host reconstructs dialogue and tool results from
+its common Session Event transcript and committed model-input head. It measures
+the actual lowered model/tool request against the selected resolved input window
+and uses the common EventCompactor when the normal context threshold is exceeded.
+The shared checkpoint task receives the current canonical transcript projection;
+marker/summary/head writes are fenced by the same Session owner and Run commit
+identity as conversation execution.
+
+Compaction preserves the current execution files, pending correction, provided
+summaries and useful checkpoint state in the same Session/Run. It does not
+republish an aggregate, create a fresh Memory execution or reset its deadline or
+consumed turn count. An oversized post-compaction request remains a compaction
+failure rather than receiving an invented input/output budget. Common
+physical-send admission rejects lost owner or cancellation before each SDK wire
+request and does not map admission denial into provider quota failure.
+See [`memory.md`](../domain/memory.md) for explicit submission and scope access.
+
 ## Summary Model
 
-Summary generation is routed by provider from `engine/context/compaction.py`. OpenAI API-key and
-ChatGPT OAuth use an operation-scoped official OpenAI SDK client; the other eight provider identities
-use the public Pydantic AI model/official SDK boundary through `engine/responses.py`.
-The compaction model is resolved from the current candidate in the frozen
-Agent lightweight chain. Its model-scoped context cap participates in the effective input window, while its
-model-scoped `max_output_tokens` and built-in tools do not replace internal compaction request policy.
+Summary generation uses the shared provider operation from
+`engine/provider_model_operation.py`. OpenAI API-key and ChatGPT OAuth use the
+foreground Responses lowerer, adapter and normalizer; other provider identities
+use the foreground Pydantic AI lowerer, adapter and official SDK boundary.
+For Conversation execution, a new compaction operation compiles exact authorized LOCAL metadata for the
+configured Lightweight chain before normalizing controls and freezing candidates.
+An existing compaction operation resolves its current captured candidate without
+mutable metadata lookup; retries and quota progression retain that capture.
+The Run request carries a deep copy of the complete selected candidate and its
+model settings through fresh resolution, recovery and quota handoff. Its context
+cap participates in the effective input window. Its explicit output setting
+receives the same saved-model maximum clamp as foreground, while an unspecified
+output cap stays unspecified. Internal Memory compaction instead uses the exact
+already captured current Lightweight host candidate, credentials and resolved
+window. Its physical compaction usage joins the common Run observations.
+Summary calls declare no client or hosted tools.
 
 Compaction summary generation is not user-facing streaming output, although the transport uses a
 stream so the common watchdog can enforce parsed-event idle and absolute attempt deadlines. The
-standard OpenAI-compatible helper sends ordinary user input plus top-level instructions and omits
-`max_output_tokens`; it does not use sampling continuation. ChatGPT OAuth also uses complete input,
-`store=false`, encrypted reasoning inclusion, and no `previous_response_id`.
-Pydantic AI routes receive the dynamic summary token budget through provider-specific model settings
-and validate their protocol-native completion before admitting a summary. Both adapter families
+shared effective-request normalizer validates final feature membership and
+conditions after provider-specific encoding. Genuine effort omission can use a
+known captured default for condition evaluation; cleared, budget-only, disabled
+and adaptive thinking keep their encoded kinds. Native structured output and
+synthetic function output are admitted independently. The standard
+provider operation sends ordinary user input plus top-level instructions through
+the foreground request contracts. Compaction shares the enclosing Run's keyed
+transport policy and HTTP-only fallback state; the operation-scoped SDK closes
+on every exit. ChatGPT OAuth uses complete input, `store=false`, encrypted
+reasoning inclusion, and no `previous_response_id`. Both provider families
+use the selected output setting and validate protocol-native completion before
+admitting a summary. Both adapter families
 preserve only a bounded redacted provider message and typed safe
 diagnostics for classified provider failures. A normalized compaction `quota_or_billing` failure
 records the candidate outcome, shares its Workspace cooldown, and advances immediately to the next
@@ -111,14 +212,18 @@ unclassified provider outcome bypasses compaction provider retry state and follo
 internal-error path. Manual compaction uses its command Run's same failed-run controller and fresh
 operation chain. Provider retry hints are diagnostic and do not replace the standard backoff schedule.
 
-The summary budget is based on the model context window:
+The stored checkpoint representation budget is based on the model context window:
 
 - target summary chars: 3% of context window tokens, converted with 1 token ≈ 4 chars;
 - limit summary chars: 8% of context window tokens, converted with 1 token ≈ 4 chars;
 - target chars are nearest-rounded to 1000 chars and clamped to 12k–24k chars;
 - limit chars are nearest-rounded to 1000 chars and clamped to 16k–50k chars;
-- `max_output_tokens = limit_chars // 4`;
 - unknown context windows use a 128k token fallback.
+
+This character budget controls the retained checkpoint representation, not
+provider output generation. Input fitting reserves an explicit selected output
+cap when present, plus the existing prompt overhead, within the resolved
+effective window.
 
 The runtime char guard allows a 10% tolerance over `limit_chars`. It computes
 `truncate_chars = ceil_to_1000(limit_chars * 1.1)`. If a model returns more than `truncate_chars`, the
@@ -248,6 +353,10 @@ the immediate shape of the recent interaction.
 - Compaction is append-only: success atomically appends one adjacent marker/summary pair; failure or cancellation appends no compaction lifecycle event.
 - Successful compaction resets only the Session's `tool_search/working_set` in the marker/summary/head transaction. A skipped or unsuccessful attempt preserves that working set, and all other Toolkit State remains unchanged.
 - External summary generation and enrichment run before the successful commit transaction opens and do not hold a Session row lock.
+- Planning is an ordinary read, independent of execution-tree locks. The final
+  marker/summary/head/Tool Search reset group retains exact owner exclusion
+  through commit, including execution-bound finalization without a model-operation
+  commit context. Unowned dependency factories pass that absence explicitly.
 - Events appended during external summary work make the plan stale; the attempt writes no marker or summary and leaves the model-input head unchanged.
 - Summary failure or cancellation leaves the model-input head unchanged.
 - Successful compaction writes the trigger reason to both `compaction_marker.payload.reason` and `compaction_summary.payload.reason` so context/debug views can explain why the checkpoint was created.
@@ -276,9 +385,9 @@ the immediate shape of the recent interaction.
 - Manual compaction uses the command run context when dispatching session compaction and summary enrichment hooks.
 - Automatic and manual compaction expose one Run-scoped `preparing_context` live operation whose identity remains stable across retry and is removed at every terminal boundary.
 - Every classified provider-attributed compaction failure uses the common bounded failure contract and the owning Run's full retry budget; unclassified provider outcomes are internal errors and do not enter provider retry state.
-- Summary model calls use watched streaming transport without publishing user-facing deltas. OpenAI
-  API-key and ChatGPT OAuth omit API-level `max_output_tokens`; the Pydantic AI model routes receive
-  the dynamic summary budget through their supported provider SDK settings.
+- Summary model calls use watched streaming transport without publishing user-facing deltas.
+  All routes use the captured candidate settings and foreground output-cap clamp;
+  checkpoint character retention does not create a provider output ceiling.
 - Summary content is bounded by the runtime char guard after the model returns.
 - UI/audit history continues to include pre-compaction events. ModelFile GC may later delete unpinned ModelFile blobs whose single FilePart event is behind the head cursor, but it does not delete events or history metadata.
 - Legacy SDK compaction packages are not part of production compaction.
@@ -313,6 +422,31 @@ terminalizes.
 
 ## Changelog
 
+- **2026-10-07** (spec_version 55) — Describe common internal Memory Session
+  compaction, persistent files/correction continuity and scope-only aggregate
+  snapshot authority.
+
+- **2026-10-07** (spec_version 54) — Moved planning, owner fences and head
+  mutation to common execution records without public Conversation prerequisites.
+
+- **2026-10-05** (spec_version 52) — Separated plain compaction planning from
+  explicit execution-owned critical finalization and retained owner exclusion
+  for the complete summary/head/reset commit.
+
+- **2026-10-04** (spec_version 49) — Replaced source ranking/packing with whole
+  independently authorized 10k Team/personal documents and up to 20k foreground
+  assembly while retaining Run/compaction refresh boundaries and revision denial.
+
+- **2026-10-03** (spec_version 48) — Replaced complete-source context capture
+  with grouped exact current maxima and retained saved candidate pricing for compaction.
+- **2026-10-02** (spec_version 47) — Replaced the execution context's
+  live-session completion callback with typed authority while retaining direct
+  repository-composed compaction settlement and its existing atomic group.
+- **2026-10-02** (spec_version 46) — Added root Run-start Memory preparation and
+  existing-hook invalidation followed by same-Run committed-compaction refresh,
+  preserving unchanged selected content and failed-compaction isolation.
+- **2026-10-02** (spec_version 45) — Documented initial/new-summary Memory
+  snapshot selection and ordinary-turn authorization filtering without reselection.
 - **2026-10-01** (spec_version 44) — Moved compaction plan capture and atomic
   marker/summary/head, model-operation success, and Tool Search reset
   finalization into completed repository-owned operations. Summary generation

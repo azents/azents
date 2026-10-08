@@ -5,10 +5,11 @@ import contextlib
 import json
 import time
 from collections.abc import AsyncIterator, Awaitable
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
+from typing import Protocol
 
-from azents.core.external_channel_projection import is_external_channel_projection
-from azents.services.external_channel.conversation import (
+from azents.core.external_channel_conversation_data import (
     ExternalChannelHistoryCredentialsInvalid,
     ExternalChannelHistoryDeadlineExceeded,
     ExternalChannelHistoryMalformed,
@@ -22,6 +23,7 @@ from azents.services.external_channel.conversation import (
     ExternalChannelHistoryTriggerMissing,
     ExternalChannelOperationDeadline,
 )
+from azents.core.external_channel_projection import is_external_channel_projection
 from azents.services.external_channel.discord_events import (
     DiscordEventExcluded,
     DiscordNormalizedMessage,
@@ -29,14 +31,12 @@ from azents.services.external_channel.discord_events import (
     project_discord_message,
 )
 from azents.services.external_channel.discord_sdk import (
-    DiscordSDKClientFactory,
     DiscordSDKCredentialsInvalid,
     DiscordSDKError,
     DiscordSDKPermissionDenied,
     DiscordSDKRateLimited,
     DiscordSDKRequestRejected,
     DiscordSDKResourceUnavailable,
-    DiscordSDKSession,
     DiscordSDKUnavailable,
 )
 
@@ -102,10 +102,41 @@ class DiscordConversationHistoryTrigger:
     connected_bot_user_id: str | None
 
 
+class DiscordHistorySDKSession(Protocol):
+    """Public SDK reads required for bounded conversation-history hydration."""
+
+    async def fetch_message_projection(
+        self,
+        *,
+        guild_id: str,
+        source_channel_id: str,
+        channel_id: str,
+        message_id: str,
+    ) -> dict[str, object]: ...
+
+    async def fetch_history_projections(
+        self,
+        *,
+        guild_id: str,
+        source_channel_id: str,
+        channel_id: str,
+        before_message_id: str,
+        limit: int,
+    ) -> tuple[dict[str, object], ...]: ...
+
+
+class DiscordHistorySDKFactory(Protocol):
+    """Open the public SDK session needed by this read-only adapter."""
+
+    def open(
+        self, *, bot_token: str
+    ) -> AbstractAsyncContextManager[DiscordHistorySDKSession]: ...
+
+
 class DiscordConversationHistoryClient:
     """Fetch canonical Discord source/thread history without retaining raw pages."""
 
-    def __init__(self, sdk_factory: DiscordSDKClientFactory) -> None:
+    def __init__(self, sdk_factory: DiscordHistorySDKFactory) -> None:
         self.sdk_factory = sdk_factory
 
     async def fetch_thread_page(
@@ -492,7 +523,7 @@ class DiscordConversationHistoryClient:
         *,
         bot_token: str,
         deadline: ExternalChannelOperationDeadline,
-    ) -> AsyncIterator[DiscordSDKSession]:
+    ) -> AsyncIterator[DiscordHistorySDKSession]:
         remaining = deadline.remaining_seconds()
         if remaining <= 0:
             raise TimeoutError

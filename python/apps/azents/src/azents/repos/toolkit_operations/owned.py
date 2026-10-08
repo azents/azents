@@ -1,15 +1,19 @@
 """Completed database-only Agent Toolkit authority and OAuth operations."""
 
 import dataclasses
+from collections.abc import Sequence
 from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentLifecycleStatus, WorkspaceUserRole
+from azents.core.github_installation import GitHubInstallationSnapshot
+from azents.core.toolkit_errors import NotFound
+from azents.core.toolkit_identifiers import resolve_default_toolkit_slug
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_admin import AgentAdminRepository
@@ -17,12 +21,11 @@ from azents.repos.github_user_installation import GithubUserInstallationReposito
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
 from azents.repos.toolkit import ToolkitRepository
 from azents.repos.toolkit.data import (
-    DuplicateSlug,
-    NotFound,
     ToolkitConfig,
     ToolkitCreate,
     ToolkitUpdate,
 )
+from azents.repos.toolkit_namespace import ToolkitNamespaceRepository
 from azents.repos.toolkit_operations import (
     ToolkitOperationsRepository,
     get_encrypted_toolkit_repository,
@@ -30,7 +33,6 @@ from azents.repos.toolkit_operations import (
 )
 from azents.repos.toolkit_operations.data import (
     AgentWorkspaceMismatch,
-    EffectiveSlugConflict,
     PlatformAuthorityRejected,
     PlatformToolkitAuthority,
 )
@@ -53,12 +55,13 @@ class AgentToolkitOperationsRepository:
         MCPOAuthConnectionRepository, Depends(get_mcp_oauth_connection_repository)
     ]
     agent_repo: Annotated[AgentRepository, Depends()]
+    namespace_repo: Annotated[ToolkitNamespaceRepository, Depends()]
     agent_admin_repo: Annotated[AgentAdminRepository, Depends()]
     github_user_installation_repo: Annotated[
         GithubUserInstallationRepository, Depends()
     ]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     shared_operations: Annotated[ToolkitOperationsRepository, Depends()]
 
@@ -81,7 +84,6 @@ class AgentToolkitOperationsRepository:
                 workspace_id=workspace_id,
                 workspace_user_id=workspace_user_id,
                 role=role,
-                for_update=False,
             )
             if isinstance(access, Failure):
                 return Failure(access.error)
@@ -137,7 +139,6 @@ class AgentToolkitOperationsRepository:
                 workspace_id=workspace_id,
                 workspace_user_id=workspace_user_id,
                 role=role,
-                for_update=False,
             )
             if isinstance(access, Failure):
                 return Failure(access.error)
@@ -161,11 +162,7 @@ class AgentToolkitOperationsRepository:
         platform_authority: PlatformToolkitAuthority | None,
     ) -> Result[
         ToolkitConfig,
-        AgentWorkspaceMismatch
-        | AgentManagementDenied
-        | DuplicateSlug
-        | EffectiveSlugConflict
-        | PlatformAuthorityRejected,
+        AgentWorkspaceMismatch | AgentManagementDenied | PlatformAuthorityRejected,
     ]:
         """Revalidate owner and namespace; create without a Scope or attachment."""
         if create.owner_agent_id != agent_id or create.workspace_id != workspace_id:
@@ -177,7 +174,6 @@ class AgentToolkitOperationsRepository:
                 workspace_id=workspace_id,
                 workspace_user_id=workspace_user_id,
                 role=role,
-                for_update=True,
             )
             if isinstance(access, Failure):
                 return Failure(access.error)
@@ -188,19 +184,14 @@ class AgentToolkitOperationsRepository:
                 )
                 if error is not None:
                     return Failure(error)
-            if await self.toolkit_repo.has_effective_slug_conflict(
+            toolkit = await self.toolkit_repo.create(session, create)
+            await self.namespace_repo.ensure_active(
                 session,
                 agent_id=agent_id,
-                workspace_id=workspace_id,
-                toolkit_id="",
-                slug=create.slug,
-                enabled=create.enabled,
-            ):
-                return Failure(EffectiveSlugConflict(slug=create.slug))
-            result = await self.toolkit_repo.create(session, create)
-            if isinstance(result, Failure):
-                return Failure(result.error)
-            return Success(result.value)
+                toolkit_id=toolkit.id,
+                base_slug=create.slug,
+            )
+            return Success(toolkit)
 
     async def update_agent_owned(
         self,
@@ -211,19 +202,18 @@ class AgentToolkitOperationsRepository:
         workspace_id: str,
         workspace_user_id: str,
         role: WorkspaceUserRole,
+        slug_reset_canonical_name: str | None,
         platform_authority: PlatformToolkitAuthority | None,
     ) -> Result[
         ToolkitConfig,
         AgentWorkspaceMismatch
         | AgentManagementDenied
         | NotFound
-        | DuplicateSlug
-        | EffectiveSlugConflict
         | PlatformAuthorityRejected,
     ]:
-        """Preserve Toolkit-before-Agent locking and final effective slug validation."""
+        """Preserve Toolkit-before-Agent locking and final namespace mutation."""
         async with self.session_manager() as session:
-            toolkit = await self.toolkit_repo.get_by_id_for_update(session, toolkit_id)
+            toolkit = await self.toolkit_repo.get_by_id(session, toolkit_id)
             if (
                 toolkit is None
                 or toolkit.owner_agent_id != agent_id
@@ -236,7 +226,6 @@ class AgentToolkitOperationsRepository:
                 workspace_id=workspace_id,
                 workspace_user_id=workspace_user_id,
                 role=role,
-                for_update=True,
             )
             if isinstance(access, Failure):
                 return Failure(access.error)
@@ -247,20 +236,27 @@ class AgentToolkitOperationsRepository:
                 )
                 if error is not None:
                     return Failure(error)
-            slug = update.get("slug", toolkit.slug)
-            enabled = update.get("enabled", toolkit.enabled)
-            if await self.toolkit_repo.has_effective_slug_conflict(
+            transaction_update = ToolkitUpdate(**update)
+            if slug_reset_canonical_name is not None:
+                transaction_update["slug"] = resolve_default_toolkit_slug(
+                    transaction_update.get("name", toolkit.name),
+                    slug_reset_canonical_name,
+                )
+            slug = transaction_update.get("slug", toolkit.slug)
+            result = await self.toolkit_repo.update_by_id(
                 session,
-                agent_id=agent_id,
-                workspace_id=workspace_id,
-                toolkit_id=toolkit_id,
-                slug=slug,
-                enabled=enabled,
-            ):
-                return Failure(EffectiveSlugConflict(slug=slug))
-            result = await self.toolkit_repo.update_by_id(session, toolkit_id, update)
+                toolkit_id,
+                transaction_update,
+            )
             if isinstance(result, Failure):
                 return Failure(result.error)
+            if slug != toolkit.slug:
+                await self.namespace_repo.ensure_active(
+                    session,
+                    agent_id=agent_id,
+                    toolkit_id=toolkit_id,
+                    base_slug=slug,
+                )
             return Success(result.value)
 
     async def authorize_agent_management(
@@ -279,7 +275,6 @@ class AgentToolkitOperationsRepository:
                 workspace_id=workspace_id,
                 workspace_user_id=workspace_user_id,
                 role=role,
-                for_update=False,
             )
         match access:
             case Success():
@@ -298,7 +293,7 @@ class AgentToolkitOperationsRepository:
         user_id: str,
         role: WorkspaceUserRole,
         platform_app_id: str,
-        installations: list[dict[str, object]],
+        installations: Sequence[GitHubInstallationSnapshot],
     ) -> Result[None, AgentWorkspaceMismatch | AgentManagementDenied]:
         """Synchronize GitHub installations after current Agent authorization."""
         async with self.session_manager() as session:
@@ -308,7 +303,6 @@ class AgentToolkitOperationsRepository:
                 workspace_id=workspace_id,
                 workspace_user_id=workspace_user_id,
                 role=role,
-                for_update=False,
             )
             match access:
                 case Failure(error):
@@ -345,7 +339,6 @@ class AgentToolkitOperationsRepository:
                 workspace_id=workspace_id,
                 workspace_user_id=workspace_user_id,
                 role=role,
-                for_update=False,
             )
             match access:
                 case Failure(error):
@@ -388,7 +381,7 @@ class AgentToolkitOperationsRepository:
     ]:
         """Persist OAuth state only while Agent ownership and authority remain valid."""
         async with self.session_manager() as session:
-            toolkit = await self.toolkit_repo.get_by_id_for_update(
+            toolkit = await self.toolkit_repo.get_by_id(
                 session,
                 toolkit_id,
             )
@@ -404,7 +397,6 @@ class AgentToolkitOperationsRepository:
                 workspace_id=workspace_id,
                 workspace_user_id=workspace_user_id,
                 role=role,
-                for_update=True,
             )
             match access:
                 case Failure(error):
@@ -451,7 +443,7 @@ class AgentToolkitOperationsRepository:
     ]:
         """Delete OAuth state only for the currently authorized Agent-owned Toolkit."""
         async with self.session_manager() as session:
-            toolkit = await self.toolkit_repo.get_by_id_for_update(
+            toolkit = await self.toolkit_repo.get_by_id(
                 session,
                 toolkit_id,
             )
@@ -467,7 +459,6 @@ class AgentToolkitOperationsRepository:
                 workspace_id=workspace_id,
                 workspace_user_id=workspace_user_id,
                 role=role,
-                for_update=True,
             )
             match access:
                 case Failure(error):
@@ -496,7 +487,7 @@ class AgentToolkitOperationsRepository:
     ]:
         """Delete one ToolkitConfig owned by the exact managed Agent."""
         async with self.session_manager() as session:
-            toolkit = await self.toolkit_repo.get_by_id_for_update(
+            toolkit = await self.toolkit_repo.get_by_id(
                 session,
                 toolkit_id,
             )
@@ -512,7 +503,6 @@ class AgentToolkitOperationsRepository:
                 workspace_id=workspace_id,
                 workspace_user_id=workspace_user_id,
                 role=role,
-                for_update=True,
             )
             match access:
                 case Failure(error):
@@ -526,20 +516,15 @@ class AgentToolkitOperationsRepository:
 
     async def _get_managed_agent(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_id: str,
         *,
         workspace_id: str,
         workspace_user_id: str,
         role: WorkspaceUserRole,
-        for_update: bool,
     ) -> Result[Agent, AgentWorkspaceMismatch | AgentManagementDenied]:
         """Load an active Agent and verify Owner or explicit AgentAdmin authority."""
-        agent = (
-            await self.agent_repo.lock_by_id(session, agent_id)
-            if for_update
-            else await self.agent_repo.get_by_id(session, agent_id)
-        )
+        agent = await self.agent_repo.get_by_id(session, agent_id)
         if (
             agent is None
             or agent.workspace_id != workspace_id

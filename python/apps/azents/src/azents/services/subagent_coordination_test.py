@@ -1,10 +1,8 @@
 """Subagent coordination projection service tests."""
 
 import datetime
-from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentRunStatus,
@@ -15,8 +13,8 @@ from azents.repos.subagent_coordination.data import (
     SubagentCoordinationSnapshot,
     SubagentCoordinationSnapshotRow,
 )
-from azents.repos.subagent_coordination.repository import (
-    SubagentCoordinationRepository,
+from azents.repos.subagent_coordination.operations import (
+    SubagentCoordinationReadRepository,
 )
 
 from .subagent_coordination import SubagentCoordinationService
@@ -48,8 +46,8 @@ def _row(
     )
 
 
-class _Repository(SubagentCoordinationRepository):
-    """SubagentCoordinationRepository fake."""
+class _Repository(SubagentCoordinationReadRepository):
+    """Completed Subagent observation fake."""
 
     def __init__(self, snapshot: SubagentCoordinationSnapshot | None) -> None:
         """Initialize the configured snapshot."""
@@ -58,20 +56,13 @@ class _Repository(SubagentCoordinationRepository):
 
     async def project_root_tree(
         self,
-        session: AsyncSession,
         *,
         current_session_id: str,
         configured_capacity: int,
     ) -> SubagentCoordinationSnapshot | None:
         """Return the configured snapshot."""
-        del session
         self.calls.append((current_session_id, configured_capacity))
         return self.snapshot
-
-
-def _session() -> AsyncSession:
-    """Build one unused typed session double."""
-    return AsyncMock(spec=AsyncSession)
 
 
 @pytest.mark.parametrize(
@@ -112,7 +103,6 @@ async def test_list_agents_projects_bounded_statuses(
     service = SubagentCoordinationService(repository=repository)
 
     projection = await service.list_agents(
-        _session(),
         current_session_id="child-session",
         configured_capacity=2,
     )
@@ -152,7 +142,6 @@ async def test_list_agents_preserves_root_first_canonical_rows() -> None:
     service = SubagentCoordinationService(repository=_Repository(snapshot))
 
     projection = await service.list_agents(
-        _session(),
         current_session_id="root-session",
         configured_capacity=1,
     )
@@ -169,7 +158,6 @@ async def test_list_agents_returns_none_for_missing_current_tree() -> None:
     service = SubagentCoordinationService(repository=_Repository(None))
 
     projection = await service.list_agents(
-        _session(),
         current_session_id="missing-session",
         configured_capacity=3,
     )

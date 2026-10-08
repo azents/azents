@@ -7,6 +7,10 @@ import pytest
 import pytest_asyncio
 from redis.asyncio import Redis
 
+from azents.core.chat_data import (
+    PendingMailboxAgentMessagePresentation,
+    PendingMailboxExternalChannelPresentation,
+)
 from azents.core.enums import (
     ActionExecutionStatus,
     AgentRunStatus,
@@ -18,6 +22,14 @@ from azents.core.enums import (
     MailboxSchedulingMode,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.mailbox_data import (
+    AgentCreateGitWorktreeContinuationResult,
+    AgentMessageMailboxPayload,
+    ExternalChannelMessageMailboxPayload,
+    MailboxItem,
+    MailboxPresentationItem,
+    TurnActionContinuationMailboxPayload,
+)
 from azents.engine.events.action_messages import ActionMessagePayload, SkillAction
 from azents.engine.events.types import (
     ActiveToolCall,
@@ -29,18 +41,6 @@ from azents.engine.events.types import (
     ReasoningPayload,
     ToolkitSourceSnapshot,
     UserMessagePayload,
-)
-from azents.repos.mailbox.data import (
-    AgentCreateGitWorktreeContinuationResult,
-    AgentMessageMailboxPayload,
-    ExternalChannelMessageMailboxPayload,
-    MailboxItem,
-    MailboxPresentationItem,
-    TurnActionContinuationMailboxPayload,
-)
-from azents.services.chat.data import (
-    PendingMailboxAgentMessagePresentation,
-    PendingMailboxExternalChannelPresentation,
 )
 
 from .live_events import (

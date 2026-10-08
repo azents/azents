@@ -21,17 +21,15 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     ExternalChannelTransport,
 )
-from azents.core.external_channel_provider import (
-    DiscordConnectionConfiguration,
-    DiscordConnectionCredentials,
-    ExternalChannelConnectionStatusSnapshot,
-    SlackConnectionCredentials,
+from azents.core.external_channel_access import (
+    ExternalChannelAccessDecisionError,
+    ExternalChannelAccessRequestNotFound,
 )
-from azents.repos.external_channel.data import (
+from azents.core.external_channel_impact import (
     ExternalChannelMultiConnectionImpact,
     ExternalChannelMultiRouteImpact,
 )
-from azents.repos.external_channel.management_data import (
+from azents.core.external_channel_management import (
     ManagedApprovalRequest,
     ManagedBinding,
     ManagedBlock,
@@ -44,13 +42,15 @@ from azents.repos.external_channel.management_data import (
     ManagedMultiRoute,
     ManagedSlackManagementHandoff,
 )
-from azents.repos.external_channel.management_operation_data import (
+from azents.core.external_channel_management_errors import (
     ExternalChannelManagementGenerationChanged,
     ExternalChannelManagementNotFound,
 )
-from azents.services.external_channel.access import (
-    ExternalChannelAccessDecisionError,
-    ExternalChannelAccessRequestNotFound,
+from azents.core.external_channel_provider import (
+    DiscordConnectionConfiguration,
+    DiscordConnectionCredentials,
+    ExternalChannelConnectionStatusSnapshot,
+    SlackConnectionCredentials,
 )
 from azents.services.external_channel.connection import (
     ExternalChannelConnectionStateChanged,
@@ -1085,7 +1085,9 @@ async def get_manifest_guidance(
         raise _not_found() from error
     callback_url = config.external_channel_slack_callback_url
     if not callback_url:
-        callback_url = f"{config.api_url.rstrip('/')}/external-channel/v1/slack/events"
+        callback_url = "/external-channel/v1/slack/events"
+        if config.api_url is not None:
+            callback_url = f"{config.api_url.rstrip('/')}{callback_url}"
     return slack_manifest_guidance(
         transport,
         callback_url=callback_url,
@@ -1639,10 +1641,7 @@ def _require_workspace_permission(
 def _require_multi_app_enabled(config: Config) -> None:
     """Reject new Multi data until operators complete mode-aware rollout."""
     if not config.external_channel_multi_app_enabled:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=("Multi App creation is not enabled for this deployment."),
-        )
+        raise RuntimeError("Multi App creation is not enabled for this deployment.")
 
 
 def _discord_activation_error(

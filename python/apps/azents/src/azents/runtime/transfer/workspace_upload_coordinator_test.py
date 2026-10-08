@@ -2,15 +2,27 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from azcommon.infra.s3.service import S3ObjectIdentity
+from azcommon.infra.s3.service import (
+    S3ObjectIdentity,
+    S3ObjectMetadata,
+    S3TransferCleanupRequired,
+)
+from botocore.exceptions import (
+    ClientError,
+    EndpointConnectionError,
+    ParamValidationError,
+    ReadTimeoutError,
+)
 
 from azents.runtime.transfer.workspace_upload import (
     WorkspaceUploadAdmission,
+    WorkspaceUploadCleanupArtifact,
     WorkspaceUploadCleanupStatus,
     WorkspaceUploadConfig,
     WorkspaceUploadFailure,
@@ -88,12 +100,20 @@ def _admission() -> WorkspaceUploadAdmission:
     )
 
 
+@dataclass(frozen=True)
+class _CoordinatorSetup:
+    """Named facade and object-storage fixtures for one coordinated upload."""
+
+    coordinator: WorkspaceUploadCoordinator
+    object_store: WorkspaceUploadObjectStore
+
+
 def _coordinator(
     store: InMemoryWorkspaceUploadStore,
     clock: _Clock,
     s3: _S3,
     reconciler: _Reconciler,
-) -> tuple[WorkspaceUploadCoordinator, WorkspaceUploadObjectStore]:
+) -> _CoordinatorSetup:
     """Build one fully injected direct-object coordinator facade."""
     object_store = WorkspaceUploadObjectStore(
         s3_service=s3,
@@ -105,8 +125,8 @@ def _coordinator(
         multipart_part_size=3,
         clock=clock,
     )
-    return (
-        WorkspaceUploadCoordinator(
+    return _CoordinatorSetup(
+        coordinator=WorkspaceUploadCoordinator(
             store=store,
             object_store=object_store,
             reconciliation_handler=reconciler,
@@ -116,7 +136,7 @@ def _coordinator(
             clock=clock,
             terminal_ttl=timedelta(minutes=1),
         ),
-        object_store,
+        object_store=object_store,
     )
 
 
@@ -144,7 +164,9 @@ async def test_cancelled_ingress_is_cleaned_after_operation_expiry() -> None:
     store = InMemoryWorkspaceUploadStore(config=_config(), clock=clock)
     s3 = _S3(now=clock.now)
     reconciler = _Reconciler()
-    coordinator, object_store = _coordinator(store, clock, s3, reconciler)
+    setup = _coordinator(store, clock, s3, reconciler)
+    coordinator = setup.coordinator
+    object_store = setup.object_store
     created = await coordinator.create(_admission())
     assert created is not None
     assert created.ingress_handle is not None
@@ -190,7 +212,7 @@ async def test_retry_without_source_is_rejected() -> None:
     store = InMemoryWorkspaceUploadStore(config=_config(), clock=clock)
     s3 = _S3(now=clock.now)
     reconciler = _Reconciler()
-    coordinator, _object_store = _coordinator(store, clock, s3, reconciler)
+    coordinator = _coordinator(store, clock, s3, reconciler).coordinator
     created = await coordinator.create(_admission())
     assert created is not None
     retryable = await store.compare_and_set(
@@ -223,7 +245,9 @@ async def test_finalize_claims_direct_ingress_and_reconcile_starts_delivery() ->
     store = InMemoryWorkspaceUploadStore(config=_config(), clock=clock)
     s3 = _S3(now=clock.now)
     reconciler = _Reconciler()
-    coordinator, object_store = _coordinator(store, clock, s3, reconciler)
+    setup = _coordinator(store, clock, s3, reconciler)
+    coordinator = setup.coordinator
+    object_store = setup.object_store
     created = await _create_and_seed(coordinator, object_store, s3)
 
     finalized = await coordinator.finalize(
@@ -246,3 +270,312 @@ async def test_finalize_claims_direct_ingress_and_reconcile_starts_delivery() ->
 
     assert result.reconciled == 1
     assert reconciler.records == ["upload"]
+
+
+class _FailingHeadS3(_S3):
+    """Raise one explicit finalization failure without contacting storage."""
+
+    def __init__(self, error: Exception) -> None:
+        super().__init__(now=_NOW)
+        self.error = error
+
+    async def head_with_checksum(
+        self, identity: S3ObjectIdentity
+    ) -> S3ObjectMetadata | None:
+        """Expose the selected SDK or programming failure."""
+        raise self.error
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ClientError({"Error": {"Code": "AccessDenied"}}, "HeadObject"),
+        EndpointConnectionError(endpoint_url="https://objects.test"),
+        ReadTimeoutError(endpoint_url="https://objects.test"),
+    ],
+)
+async def test_finalize_storage_outage_preserves_ingress_cleanup(
+    error: Exception,
+) -> None:
+    """Expected storage failures remain fail-closed and retain both handles."""
+    clock = _Clock()
+    store = InMemoryWorkspaceUploadStore(config=_config(), clock=clock)
+    s3 = _FailingHeadS3(error)
+    setup = _coordinator(store, clock, s3, _Reconciler())
+    created = await _create_and_seed(setup.coordinator, setup.object_store, s3)
+
+    finalized = await setup.coordinator.finalize(
+        "upload",
+        requester_user_id="requester",
+        workspace_id="workspace",
+        agent_id="agent",
+        expected_revision=created.revision,
+    )
+
+    assert finalized is None
+    current = await store.get(
+        "upload",
+        requester_user_id="requester",
+        workspace_id="workspace",
+        agent_id="agent",
+    )
+    assert current is not None
+    assert current.failure is WorkspaceUploadFailure.INGRESS
+    assert current.cleanup_status is WorkspaceUploadCleanupStatus.PENDING
+    assert current.ingress_handle == created.ingress_handle
+    assert current.pending_source_handle == "d" * 32
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        TypeError("programming failure"),
+        RuntimeError("programming failure"),
+        ParamValidationError(report="invalid SDK arguments"),
+        S3TransferCleanupRequired(
+            "cleanup pending",
+            multipart_cleanup_required=True,
+            completed_object_cleanup_required=False,
+        ),
+    ],
+)
+async def test_finalize_unexpected_failure_propagates_with_pending_source(
+    error: Exception,
+) -> None:
+    """Unexpected failures stay visible without losing durable cleanup evidence."""
+    clock = _Clock()
+    store = InMemoryWorkspaceUploadStore(config=_config(), clock=clock)
+    s3 = _FailingHeadS3(error)
+    setup = _coordinator(store, clock, s3, _Reconciler())
+    created = await _create_and_seed(setup.coordinator, setup.object_store, s3)
+
+    with pytest.raises(type(error)) as raised:
+        await setup.coordinator.finalize(
+            "upload",
+            requester_user_id="requester",
+            workspace_id="workspace",
+            agent_id="agent",
+            expected_revision=created.revision,
+        )
+
+    assert raised.value is error
+    current = await store.get(
+        "upload",
+        requester_user_id="requester",
+        workspace_id="workspace",
+        agent_id="agent",
+    )
+    assert current is not None
+    assert current.failure is None
+    assert current.pending_source_handle == "d" * 32
+    assert current.source_handle is None
+
+
+class _FailingDeleteS3(_S3):
+    """Raise one explicit storage or programming failure during source cleanup."""
+
+    def __init__(self, error: BaseException) -> None:
+        super().__init__(now=_NOW)
+        self.error = error
+
+    async def delete(self, bucket: str, key: str) -> None:
+        """Preserve the original failure without deleting the owned object."""
+        raise self.error
+
+
+async def _cancel_for_cleanup(
+    coordinator: WorkspaceUploadCoordinator,
+) -> WorkspaceUploadRecord:
+    """Create one owned ingress handle and make its cleanup eligible."""
+    created = await coordinator.create(_admission())
+    assert created is not None
+    cancelled = await coordinator.cancel(
+        "upload",
+        requester_user_id="requester",
+        workspace_id="workspace",
+        agent_id="agent",
+        expected_revision=created.revision,
+    )
+    assert cancelled is not None
+    return cancelled
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ClientError({"Error": {"Code": "AccessDenied"}}, "DeleteObject"),
+        EndpointConnectionError(endpoint_url="https://objects.test"),
+        ReadTimeoutError(endpoint_url="https://objects.test"),
+    ],
+)
+async def test_cleanup_storage_failure_retains_retryable_artifact(
+    error: Exception,
+) -> None:
+    """Recognized storage failures retain exact source-cleanup retry evidence."""
+    clock = _Clock()
+    store = InMemoryWorkspaceUploadStore(config=_config(), clock=clock)
+    s3 = _FailingDeleteS3(error)
+    coordinator = _coordinator(store, clock, s3, _Reconciler()).coordinator
+    cancelled = await _cancel_for_cleanup(coordinator)
+
+    result = await coordinator.reconcile(
+        reconciliation_cursor=None,
+        cleanup_cursor=None,
+        limit=2,
+    )
+
+    assert result.cleaned == 0
+    assert result.cleanup_failures == 1
+    current = await coordinator.get(
+        "upload",
+        requester_user_id="requester",
+        workspace_id="workspace",
+        agent_id="agent",
+    )
+    assert current is not None
+    assert current.phase is WorkspaceUploadPhase.CANCELLED
+    assert current.ingress_handle == cancelled.ingress_handle
+    assert current.cleanup_status is WorkspaceUploadCleanupStatus.RETRYABLE_FAILURE
+    assert current.cleanup_claim_id is None
+    assert current.cleanup_lease_expires_at is None
+    assert current.cleanup_failure is not None
+    assert (
+        current.cleanup_failure.artifact
+        is WorkspaceUploadCleanupArtifact.INGRESS_OBJECT_DELETE
+    )
+    assert current.cleanup_failure.attempts == 1
+    assert not s3.deleted
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ValueError("invalid internal cleanup evidence"),
+        TypeError("programming failure"),
+        AssertionError("programming failure"),
+        ParamValidationError(report="invalid SDK arguments"),
+        asyncio.CancelledError(),
+    ],
+)
+async def test_cleanup_unexpected_failure_propagates_without_retry_projection(
+    error: BaseException,
+) -> None:
+    """Defects and cancellation stay visible without a manufactured storage retry."""
+    clock = _Clock()
+    store = InMemoryWorkspaceUploadStore(config=_config(), clock=clock)
+    s3 = _FailingDeleteS3(error)
+    coordinator = _coordinator(store, clock, s3, _Reconciler()).coordinator
+    cancelled = await _cancel_for_cleanup(coordinator)
+
+    with pytest.raises(type(error)) as raised:
+        await coordinator.reconcile(
+            reconciliation_cursor=None,
+            cleanup_cursor=None,
+            limit=2,
+        )
+
+    assert raised.value is error
+    current = await coordinator.get(
+        "upload",
+        requester_user_id="requester",
+        workspace_id="workspace",
+        agent_id="agent",
+    )
+    assert current is not None
+    assert current.ingress_handle == cancelled.ingress_handle
+    assert current.cleanup_status is WorkspaceUploadCleanupStatus.IN_PROGRESS
+    assert current.cleanup_claim_id == "claim"
+    assert current.cleanup_failure is None
+    assert not s3.deleted
+
+
+async def test_cleanup_invalid_internal_handle_propagates_before_s3_delete() -> None:
+    """Real object-handle validation cannot become a transient storage retry."""
+    clock = _Clock()
+    store = InMemoryWorkspaceUploadStore(config=_config(), clock=clock)
+    s3 = _S3(now=_NOW)
+    coordinator = _coordinator(store, clock, s3, _Reconciler()).coordinator
+    cancelled = await _cancel_for_cleanup(coordinator)
+    invalid = await store.compare_and_set(
+        replace(cancelled, ingress_handle="invalid-handle"),
+        expected_revision=cancelled.revision,
+    )
+    assert invalid is not None
+
+    with pytest.raises(ValueError, match="Workspace upload object handle is invalid"):
+        await coordinator.reconcile(
+            reconciliation_cursor=None,
+            cleanup_cursor=None,
+            limit=2,
+        )
+
+    current = await coordinator.get(
+        "upload",
+        requester_user_id="requester",
+        workspace_id="workspace",
+        agent_id="agent",
+    )
+    assert current is not None
+    assert current.cleanup_status is WorkspaceUploadCleanupStatus.IN_PROGRESS
+    assert current.cleanup_failure is None
+    assert not s3.deleted
+
+
+class _SupersededDeleteS3(_FailingDeleteS3):
+    """Advance the cleanup claim before returning the old owner's storage error."""
+
+    def __init__(
+        self,
+        error: Exception,
+        store: InMemoryWorkspaceUploadStore,
+    ) -> None:
+        super().__init__(error)
+        self.store = store
+
+    async def delete(self, bucket: str, key: str) -> None:
+        """Use authoritative CAS state rather than timing to supersede the claim."""
+        current = await self.store.get(
+            "upload",
+            requester_user_id="requester",
+            workspace_id="workspace",
+            agent_id="agent",
+        )
+        assert current is not None
+        replaced = await self.store.compare_and_set(
+            replace(current, cleanup_claim_id="replacement"),
+            expected_revision=current.revision,
+        )
+        assert replaced is not None
+        await super().delete(bucket, key)
+
+
+async def test_cleanup_storage_failure_cannot_overwrite_superseding_claim() -> None:
+    """A late expected storage failure stays stale under the existing claim fence."""
+    clock = _Clock()
+    store = InMemoryWorkspaceUploadStore(config=_config(), clock=clock)
+    s3 = _SupersededDeleteS3(
+        ClientError({"Error": {"Code": "AccessDenied"}}, "DeleteObject"),
+        store,
+    )
+    coordinator = _coordinator(store, clock, s3, _Reconciler()).coordinator
+    cancelled = await _cancel_for_cleanup(coordinator)
+
+    result = await coordinator.reconcile(
+        reconciliation_cursor=None,
+        cleanup_cursor=None,
+        limit=2,
+    )
+
+    assert result.cleaned == 0
+    assert result.cleanup_failures == 0
+    current = await coordinator.get(
+        "upload",
+        requester_user_id="requester",
+        workspace_id="workspace",
+        agent_id="agent",
+    )
+    assert current is not None
+    assert current.ingress_handle == cancelled.ingress_handle
+    assert current.cleanup_status is WorkspaceUploadCleanupStatus.IN_PROGRESS
+    assert current.cleanup_claim_id == "replacement"
+    assert current.cleanup_failure is None

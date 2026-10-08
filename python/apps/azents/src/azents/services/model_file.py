@@ -14,14 +14,15 @@ from azcommon.types import JSONValue
 from azcommon.uuid import uuid7
 from fastapi import Depends
 from PIL import Image, ImageOps, UnidentifiedImageError
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.config import Config
+from azents.core.config import Config, require_workspace_s3_bucket
 from azents.core.deps import get_config
 from azents.core.enums import ModelFileStatus
 from azents.core.s3.deps import get_s3_service
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.file_metadata_authority import FileResourceAuthority
 from azents.repos.model_file import ModelFileRepository, model_file_storage_key
@@ -30,7 +31,6 @@ from azents.repos.model_file.operations import (
     ModelFileMetadataFailure,
     ModelFileOperationRepository,
 )
-from azents.services.session_resource_authority import SessionResourceAuthority
 
 _IMAGE_MEDIA_PREFIX = "image/"
 _TEXT_MEDIA_PREFIX = "text/"
@@ -141,7 +141,7 @@ class ModelFileService:
     model_file_repository: Annotated[ModelFileRepository, Depends(ModelFileRepository)]
     agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     s3_service: Annotated[S3Service, Depends(get_s3_service)]
     config: Annotated[Config, Depends(get_config)]
@@ -174,7 +174,7 @@ class ModelFileService:
         succeeded = False
         try:
             await self.s3_service.upload(
-                bucket=self.config.workspace_s3.bucket,
+                bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                 key=uploaded_object_key,
                 body=normalized_body.body,
                 content_type=normalized_body.media_type,
@@ -285,26 +285,12 @@ class ModelFileService:
         if model_file.status != ModelFileStatus.AVAILABLE:
             return Failure(ModelFileUnavailable())
         body = await self.s3_service.download_bytes(
-            bucket=self.config.workspace_s3.bucket,
+            bucket=require_workspace_s3_bucket(self.config.workspace_s3),
             key=model_file.storage_key,
         )
         if body is None:
             return Failure(ModelFileUnavailable())
         return Success(ModelFileDownload(model_file=model_file, body=body))
-
-    async def validate_resource_authority_in_session(
-        self,
-        session: AsyncSession,
-        authority: SessionResourceAuthority,
-        *,
-        lock: bool,
-    ) -> bool:
-        """Validate resource authority inside a caller-owned transaction."""
-        return await self.operation_repository.validate_authority_in_session(
-            session,
-            _repository_authority(authority),
-            lock=lock,
-        )
 
     async def validate_resource_authority(
         self,
@@ -320,7 +306,7 @@ class ModelFileService:
         if object_key is None:
             return
         await self.s3_service.delete(
-            bucket=self.config.workspace_s3.bucket,
+            bucket=require_workspace_s3_bucket(self.config.workspace_s3),
             key=object_key,
         )
 

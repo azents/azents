@@ -165,7 +165,9 @@ class InvalidCredentials:
 class LoginMethodsInput(BaseModel):
     """Login method lookup input."""
 
-    email: str = Field(description="Email address")
+    email: str | None = Field(
+        description="Email address, or None for instance availability"
+    )
 
 
 class LoginMethodsOutput(BaseModel):

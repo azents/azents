@@ -110,6 +110,10 @@ class Settings(BaseSettings):
 
     # Redis
     redis_url: str = "redis://localhost:6379"
+    # Memory mode is restricted to the shared all-in-one process.
+    session_broker_backend: Literal["redis", "memory"] = "redis"
+    # Explicit process-local standalone broadcast; Redis remains the default.
+    broadcast_backend: Literal["redis", "memory"] = "redis"
 
     # Trusted Runtime Transfer Coordinator client. The endpoint remains unset until
     # the coordinated Runtime transfer deployment is enabled.
@@ -127,7 +131,7 @@ class Settings(BaseSettings):
     model_stream_close_grace_seconds: float = 5.0
 
     # OAuth2 for per-user MCP authentication
-    oauth_secret_key: str = ""
+    oauth_secret_key: str | None = None
 
     # MCP egress proxy; forward proxy for SSRF blocking
     mcp_proxy_url: str | None = None
@@ -155,7 +159,7 @@ class Settings(BaseSettings):
     )
 
     # Session data S3 storage; unified file storage
-    workspace_s3_bucket: str = ""
+    workspace_s3_bucket: str | None = None
     workspace_s3_prefix: str = "v1"
     workspace_s3_endpoint_url: str | None = None
     # Optional browser-visible override; presigned URLs reuse endpoint_url when unset.
@@ -530,11 +534,19 @@ class WorkspaceS3Config(BaseModel):
     such as IAM role is used.
     """
 
-    bucket: str
+    bucket: str | None
     prefix: str = "v1"
     endpoint_url: str | None = None
     public_endpoint_url: str | None = None
     credentials: WorkspaceS3Credentials | None = None
+
+
+def require_workspace_s3_bucket(config: WorkspaceS3Config) -> str:
+    """Validate existing bucket fields only at an active storage boundary."""
+    bucket = config.bucket
+    if not bucket:
+        raise ValueError("Workspace S3 bucket is not configured")
+    return bucket
 
 
 class Config(BaseModel):
@@ -542,7 +554,9 @@ class Config(BaseModel):
 
     runtime_env: RuntimeEnvironment
     job_runtime_backend: JobRuntimeBackend = JobRuntimeBackend.LOCAL
+    broadcast_backend: Literal["redis", "memory"] = "redis"
     sentry_dsn: str | None
+    session_broker_backend: Literal["redis", "memory"] = "redis"
     rdb: PostgreSQLConfig
     auth: AuthConfig
     system_bootstrap: SystemBootstrapConfig
@@ -553,10 +567,10 @@ class Config(BaseModel):
     runtime_transfer_coordinator: RuntimeTransferCoordinatorConfig
     model_stream_timeout: ModelStreamTimeoutConfig
     openai_responses_websocket_enabled: bool
-    web_url: str = ""
-    api_url: str = ""
-    external_channel_slack_callback_url: str = ""
-    external_channel_discord_callback_url: str = ""
+    web_url: str | None = None
+    api_url: str | None = None
+    external_channel_slack_callback_url: str | None = None
+    external_channel_discord_callback_url: str | None = None
     external_channel_multi_app_enabled: bool = False
     external_channel_conversation: ExternalChannelConversationConfig = Field(
         default_factory=lambda: ExternalChannelConversationConfig(
@@ -572,7 +586,7 @@ class Config(BaseModel):
             ),
         )
     )
-    oauth_secret_key: str = ""
+    oauth_secret_key: str | None = None
     mcp_proxy_url: str | None = None
     workspace_s3: WorkspaceS3Config
     file_lifecycle: FileLifecycleConfig = FileLifecycleConfig()
@@ -604,6 +618,8 @@ class Config(BaseModel):
         return cls(
             runtime_env=settings.runtime_env,
             job_runtime_backend=settings.job_runtime_backend,
+            broadcast_backend=settings.broadcast_backend,
+            session_broker_backend=settings.session_broker_backend,
             sentry_dsn=settings.sentry_dsn,
             rdb=PostgreSQLConfig(
                 host=settings.rdb_host,
@@ -682,13 +698,13 @@ class Config(BaseModel):
             openai_responses_websocket_enabled=(
                 settings.openai_responses_websocket_enabled
             ),
-            web_url=settings.web_url or "",
-            api_url=settings.api_url or "",
+            web_url=settings.web_url,
+            api_url=settings.api_url,
             external_channel_slack_callback_url=(
-                settings.external_channel_slack_callback_url or ""
+                settings.external_channel_slack_callback_url
             ),
             external_channel_discord_callback_url=(
-                settings.external_channel_discord_callback_url or ""
+                settings.external_channel_discord_callback_url
             ),
             external_channel_multi_app_enabled=(
                 settings.external_channel_multi_app_enabled

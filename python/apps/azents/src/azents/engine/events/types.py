@@ -510,6 +510,8 @@ class ToolkitSourceSnapshot(BaseModel):
     toolkit_type: str = Field(min_length=1)
     toolkit_name: str = Field(min_length=1)
     toolkit_slug: str = Field(min_length=1)
+    toolkit_namespace: str | None = Field(default=None)
+    source_identity: dict[str, str] = Field(default_factory=dict)
 
 
 class ClientToolCallPayload(BaseModel):
@@ -590,29 +592,40 @@ class ClientToolResultPayload(BaseModel):
 
 
 class ModelCostProvenance(BaseModel):
-    """Distinguish native reported charges from snapshot-backed estimates."""
+    """Distinguish native charges from selected prices and retain old evidence."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="allow")
 
     method: Literal["provider_reported", "estimated"]
     provider: str
     model_identifier: str
     service_tier: str | None
-    source_snapshot_id: str | None
-    source_hash: str | None
+    source_key: str | None
     source_model_key: str | None
+    collected_at: datetime.datetime | None
     estimator_version: str | None
+
+    @model_validator(mode="before")
+    @classmethod
+    def decode_historical_provenance(cls, value: object) -> object:
+        """Read immutable old evidence without making it current price authority."""
+        if isinstance(value, dict):
+            return {
+                "source_key": None,
+                "collected_at": None,
+                **value,
+            }
+        return value
 
 
 class TokenUsagePayload(BaseModel):
-    """Model token usage with adapter raw payload preserved."""
+    """Durable normalized token usage and finalized cost evidence."""
 
     model_config = ConfigDict(frozen=True)
 
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
-    raw: RawDict = Field(description="Adapter-native usage payload")
     cached_tokens: int | None = Field(default=None)
     cache_creation_tokens: int | None = Field(default=None)
     reasoning_tokens: int | None = Field(default=None)
@@ -621,7 +634,6 @@ class TokenUsagePayload(BaseModel):
         default=None,
         description="Known charge or estimate authority; absent on historical usage",
     )
-    raw_hidden_params: RawDict | None = Field(default=None)
 
 
 class TurnMarkerPayload(BaseModel):
@@ -883,6 +895,25 @@ NATIVE_ARTIFACT_REQUIRED_KINDS = frozenset(
 NATIVE_ARTIFACT_ABSENT_KINDS = frozenset(EventKind) - NATIVE_ARTIFACT_REQUIRED_KINDS
 
 
+def validate_message_payload(kind: EventKind, payload: EventPayload) -> None:
+    """Apply the same canonical payload/native invariant to any execution host."""
+    payload_type = PAYLOAD_BY_KIND[kind]
+    if not isinstance(payload, payload_type):
+        raise ValueError("event payload does not match event kind")
+    has_artifact = isinstance(
+        payload,
+        AssistantMessagePayload
+        | ReasoningPayload
+        | ClientToolCallPayload
+        | ProviderToolCallPayload
+        | UnknownAdapterOutputPayload,
+    )
+    if kind in NATIVE_ARTIFACT_REQUIRED_KINDS and not has_artifact:
+        raise ValueError("event payload requires native_artifact")
+    if kind in NATIVE_ARTIFACT_ABSENT_KINDS and has_artifact:
+        raise ValueError("event payload must not include native_artifact")
+
+
 class Event(BaseModel):
     """Event transcript event."""
 
@@ -903,22 +934,7 @@ class Event(BaseModel):
     @model_validator(mode="after")
     def validate_payload_shape(self) -> "Event":
         """Validate kind, payload type, and native artifact invariant."""
-        payload_type = PAYLOAD_BY_KIND[self.kind]
-        if not isinstance(self.payload, payload_type):
-            raise ValueError("event payload does not match event kind")
-
-        has_artifact = isinstance(
-            self.payload,
-            AssistantMessagePayload
-            | ReasoningPayload
-            | ClientToolCallPayload
-            | ProviderToolCallPayload
-            | UnknownAdapterOutputPayload,
-        )
-        if self.kind in NATIVE_ARTIFACT_REQUIRED_KINDS and not has_artifact:
-            raise ValueError("event payload requires native_artifact")
-        if self.kind in NATIVE_ARTIFACT_ABSENT_KINDS and has_artifact:
-            raise ValueError("event payload must not include native_artifact")
+        validate_message_payload(self.kind, self.payload)
         return self
 
 

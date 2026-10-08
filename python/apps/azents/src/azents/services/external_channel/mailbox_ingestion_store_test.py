@@ -17,6 +17,7 @@ from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
     ExternalChannelConversationScopeKind,
+    ExternalChannelIngressAuthorityKind,
     ExternalChannelIngressProfile,
     ExternalChannelMessageLifecycle,
     ExternalChannelMessageRevisionKind,
@@ -31,11 +32,35 @@ from azents.core.enums import (
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
 )
+from azents.core.external_channel_conversation_data import (
+    ExternalChannelConversationScope,
+    ExternalChannelHistoryRange,
+    ExternalChannelOperationDeadline,
+)
+from azents.core.external_channel_ingestion import (
+    ExternalChannelCanonicalHistoryMessage,
+    ExternalChannelIngestionAcceptance,
+    ExternalChannelIngestionOperation,
+    ExternalChannelIngestionPreparation,
+    ExternalChannelIngestionReason,
+    ExternalChannelIngestionRequest,
+    ExternalChannelIngressAuthority,
+    ExternalChannelTriggerLocator,
+)
+from azents.core.external_channel_participation_state import (
+    ExternalChannelSetupSourceProjection,
+    projection_with_setup_source,
+    setup_source_from_projection,
+)
 from azents.core.external_channel_session_presence import (
     build_external_channel_session_url,
 )
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
+from azents.repos.external_channel.conversation_provisioning import (
+    ExternalChannelConversationProvisioningRepository,
+)
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRoute,
     ExternalChannelBinding,
@@ -44,41 +69,18 @@ from azents.repos.external_channel.data import (
     ExternalChannelResource,
     ExternalChannelSetupClaim,
 )
-from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.repos.external_channel.work import ExternalChannelWorkRepository
-from azents.repos.external_channel.work_state import ChannelWorkState
-from azents.services.external_channel.conversation import (
-    ExternalChannelConversationScope,
-    ExternalChannelHistoryRange,
-    ExternalChannelOperationDeadline,
-)
-from azents.services.external_channel.conversation_provisioning import (
-    ExternalChannelConversationProvisioningService,
-)
-from azents.services.external_channel.ingestion import (
-    ExternalChannelCanonicalHistoryMessage,
-    ExternalChannelIngestionAcceptance,
-    ExternalChannelIngestionOperation,
-    ExternalChannelIngestionPreparation,
-    ExternalChannelIngestionReason,
-    ExternalChannelIngestionRequest,
-    ExternalChannelIngressAuthority,
-    ExternalChannelIngressAuthorityKind,
-    ExternalChannelTriggerLocator,
-)
-from azents.services.external_channel.mailbox_ingestion_store import (
-    ExternalChannelMailboxIngestionStore,
+from azents.repos.external_channel.mailbox_ingestion import (
+    ExternalChannelMailboxIngestionRepository,
     _Conversation,
     _response_mode_ignored_reason,
 )
-from azents.services.external_channel.participation_state import (
-    ExternalChannelSetupSourceProjection,
-    projection_with_setup_source,
-    setup_source_from_projection,
-)
-from azents.services.mailbox import MailboxService
-from azents.services.root_agent_session_creation import (
-    RootAgentSessionCreationService,
+from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.work import ExternalChannelWorkRepository
+from azents.repos.external_channel.work_state import ChannelWorkState
+from azents.repos.mailbox import MailboxRepository
+from azents.repos.mailbox.admission import MailboxAdmissionRepository
+from azents.repos.root_agent_session_creation import (
+    RootAgentSessionCreationRepository,
 )
 from azents.testing.external_channel import make_provider_effect_plan
 
@@ -245,12 +247,12 @@ def _session(
     *,
     commit: AsyncMock | None = None,
     rollback: AsyncMock | None = None,
-) -> AsyncSession:
+) -> WriteSession:
     """Build one runtime-specced AsyncSession fake."""
     session = MagicMock(spec=AsyncSession)
     session.commit = commit or AsyncMock()
     session.rollback = rollback or AsyncMock()
-    return session
+    return ReadWriteSession(session)
 
 
 def _store(
@@ -258,23 +260,26 @@ def _store(
     repository: ExternalChannelRepository,
     work_repository: ExternalChannelWorkRepository | None = None,
     agent_repository: AgentRepository | None = None,
-    root_creation_service: RootAgentSessionCreationService | None = None,
-) -> ExternalChannelMailboxIngestionStore:
-    return ExternalChannelMailboxIngestionStore(
+    root_creation_service: RootAgentSessionCreationRepository | None = None,
+) -> ExternalChannelMailboxIngestionRepository:
+    return ExternalChannelMailboxIngestionRepository(
         session_manager=MagicMock(),
         repository=repository,
         work_repository=work_repository
         or create_autospec(ExternalChannelWorkRepository, instance=True),
         conversation_provisioning=create_autospec(
-            ExternalChannelConversationProvisioningService,
+            ExternalChannelConversationProvisioningRepository,
             instance=True,
         ),
         agent_repository=agent_repository
         or create_autospec(AgentRepository, instance=True),
         agent_session_repository=MagicMock(),
-        root_agent_session_creation_service=root_creation_service
-        or create_autospec(RootAgentSessionCreationService, instance=True),
-        mailbox_service=create_autospec(MailboxService, instance=True),
+        root_agent_session_creation_repository=root_creation_service
+        or create_autospec(RootAgentSessionCreationRepository, instance=True),
+        mailbox_admission_repository=create_autospec(
+            MailboxAdmissionRepository, instance=True
+        ),
+        mailbox_repository=create_autospec(MailboxRepository, instance=True),
         config=Config.model_construct(
             web_url="https://azents.example/base",
         ),
@@ -404,13 +409,13 @@ async def _accepted_control_plan_case(
     session = _session()
 
     @asynccontextmanager
-    async def session_context() -> AsyncIterator[AsyncSession]:
+    async def session_context() -> AsyncIterator[WriteSession]:
         yield session
 
     repository = MagicMock()
     work_repository = MagicMock()
-    mailbox_service = MagicMock()
-    mailbox_service.enqueue_many = AsyncMock(
+    mailbox_admission_repository = MagicMock()
+    mailbox_admission_repository.enqueue_many_in_session = AsyncMock(
         side_effect=lambda _session, inputs: [
             SimpleNamespace(
                 created=mailbox_created,
@@ -424,7 +429,7 @@ async def _accepted_control_plan_case(
     )
     store = _store(repository=repository, work_repository=work_repository)
     store.session_manager = MagicMock(return_value=session_context())
-    store.mailbox_service = mailbox_service
+    store.mailbox_admission_repository = mailbox_admission_repository
     target_session = SimpleNamespace(
         status=AgentSessionStatus.ACTIVE,
         stop_requested_at=(
@@ -679,8 +684,8 @@ async def test_admission_cas_failure_rolls_back_prepared_input() -> None:
         case.acceptance.reason
         is ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE
     )
-    case.session.rollback.assert_awaited_once()
-    case.session.commit.assert_not_awaited()
+    case.session.write_session.rollback.assert_awaited_once()
+    case.session.write_session.commit.assert_not_awaited()
     case.agent_session_repository.lock_by_id.assert_not_awaited()
     case.agent_session_repository.admit_input_wakeup.assert_awaited_once()
 
@@ -858,8 +863,8 @@ async def test_setup_required_commits_claim_without_conversation_side_effects() 
     work_repository.prepare_direct_control = AsyncMock(return_value=plan)
     root_creation_service = MagicMock()
     root_creation_service.create_root_session = AsyncMock()
-    mailbox_service = MagicMock()
-    mailbox_service.enqueue_many = AsyncMock()
+    mailbox_admission_repository = MagicMock()
+    mailbox_admission_repository.enqueue_many_in_session = AsyncMock()
     agent_session_repository = MagicMock()
     agent_session_repository.mark_running_for_input_wakeup = AsyncMock()
     store = _store(
@@ -867,7 +872,7 @@ async def test_setup_required_commits_claim_without_conversation_side_effects() 
         work_repository=work_repository,
         root_creation_service=root_creation_service,
     )
-    store.mailbox_service = mailbox_service
+    store.mailbox_admission_repository = mailbox_admission_repository
     store.agent_session_repository = agent_session_repository
     route = ExternalChannelAgentRoute.model_construct(
         id="route-1",
@@ -941,7 +946,7 @@ async def test_setup_required_commits_claim_without_conversation_side_effects() 
     repository.create_binding_idempotent.assert_not_awaited()
     work_repository.ensure_active_work.assert_not_awaited()
     root_creation_service.create_root_session.assert_not_awaited()
-    mailbox_service.enqueue_many.assert_not_awaited()
+    mailbox_admission_repository.enqueue_many_in_session.assert_not_awaited()
     agent_session_repository.mark_running_for_input_wakeup.assert_not_awaited()
 
 

@@ -59,37 +59,31 @@ class RDBAgentMemory(RDBModel):
         onupdate=sa.func.now(),
     )
 
-    # Index and constraint condition.
-    __table_args__ = (
-        # Partial unique: agent scope — (agent_id, name) WHERE user_id IS NULL
-        sa.Index(
-            "uq_agent_memories_agent_scope",
-            "agent_id",
-            "name",
-            unique=True,
-            postgresql_where=sa.text("user_id IS NULL"),
-        ),
-        # Partial unique: user scope — (agent_id, user_id, name)
-        # WHERE user_id IS NOT NULL
-        sa.Index(
-            "uq_agent_memories_user_scope",
-            "agent_id",
-            "user_id",
-            "name",
-            unique=True,
-            postgresql_where=sa.text("user_id IS NOT NULL"),
-        ),
-        # Regular: agent scope lookup
-        sa.Index(
-            "ix_agent_memories_agent_id",
-            "agent_id",
-            postgresql_where=sa.text("user_id IS NULL"),
-        ),
-        # Regular: user scope lookup
-        sa.Index(
-            "ix_agent_memories_agent_user",
-            "agent_id",
-            "user_id",
-            postgresql_where=sa.text("user_id IS NOT NULL"),
-        ),
+    UQ_AGENT_SCOPE = sa.Index(
+        "ix_agent_memories_agent_id_name",
+        "agent_id",
+        "name",
+        unique=True,
+        postgresql_where=sa.text("user_id IS NULL"),
     )
+    UQ_USER_SCOPE = sa.Index(
+        "ix_agent_memories_agent_id_user_id_name",
+        "agent_id",
+        "user_id",
+        "name",
+        unique=True,
+        postgresql_where=sa.text("user_id IS NOT NULL"),
+    )
+    IX_AGENT_ID = sa.Index(
+        "ix_agent_memories_agent_id",
+        "agent_id",
+        postgresql_where=sa.text("user_id IS NULL"),
+    )
+    IX_AGENT_USER = sa.Index(
+        "ix_agent_memories_agent_id_user_id",
+        "agent_id",
+        "user_id",
+        postgresql_where=sa.text("user_id IS NOT NULL"),
+    )
+
+    __table_args__ = (UQ_AGENT_SCOPE, UQ_USER_SCOPE, IX_AGENT_ID, IX_AGENT_USER)

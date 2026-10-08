@@ -2,9 +2,6 @@
 
 import dataclasses
 from collections.abc import Callable, Sequence
-from typing import Protocol
-
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.engine_tool_state import (
     AGENTS_APPENDIX_DEDUPE_TOOLKIT_STATE_NAME,
@@ -26,35 +23,21 @@ from azents.core.engine_tool_state import (
 )
 from azents.core.toolkit_state import ToolkitStateIdentity
 from azents.rdb.session import SessionManager
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.toolkit_state.store import ToolkitStateHandle, ToolkitStateStore
-
-
-class SessionExecutionOwnerLike(Protocol):
-    """Durable Session execution owner fields used for transaction fencing."""
-
-    @property
-    def session_id(self) -> str:
-        """Return the durable Session identity."""
-        ...
-
-    @property
-    def owner_generation(self) -> int:
-        """Return the durable owner generation."""
-        ...
 
 
 @dataclasses.dataclass
 class ToolWorkingSetStore:
     """Own completed deferred-tool working-set operations."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     repository: ToolkitStateRepository | None = None
 
     def with_session_manager(
         self,
-        session_manager: SessionManager[AsyncSession],
+        session_manager: SessionManager[WriteSession],
     ) -> "ToolWorkingSetStore":
         """Bind operations to a different database authority."""
         return ToolWorkingSetStore(
@@ -69,7 +52,7 @@ class ToolWorkingSetStore:
 
     async def load_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
         session_id: str,
     ) -> ToolWorkingSetState:
@@ -120,7 +103,7 @@ class ToolWorkingSetStore:
 
     async def clear_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_id: str,
         session_id: str,
     ) -> ToolWorkingSetState:
@@ -149,7 +132,7 @@ class ToolWorkingSetStore:
 
     async def _update_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_id: str,
         session_id: str,
         mutator: Callable[[ToolWorkingSetState], ToolWorkingSetState],
@@ -170,12 +153,12 @@ class ToolWorkingSetStore:
             raise RuntimeError("Tool working-set update did not run")
         return updated
 
-    def _handle(
+    def _handle[S: ReadSession](
         self,
-        session: AsyncSession,
+        session: S,
         agent_id: str,
         session_id: str,
-    ) -> ToolkitStateHandle[ToolWorkingSetState]:
+    ) -> ToolkitStateHandle[ToolWorkingSetState, S]:
         """Create the typed handle for one Agent Session."""
         return ToolkitStateStore(
             session=session,
@@ -195,20 +178,7 @@ class ToolWorkingSetStore:
 class ToolkitAgentsAppendixDedupeStateStore:
     """Own completed AGENTS.md appendix dedupe operations."""
 
-    session_manager: SessionManager[AsyncSession]
-
-    def for_execution(
-        self,
-        owner: SessionExecutionOwnerLike,
-    ) -> "ToolkitAgentsAppendixDedupeStateStore":
-        """Bind dedupe operations to one durable Session owner."""
-        return ToolkitAgentsAppendixDedupeStateStore(
-            session_manager=OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            )
-        )
+    session_manager: SessionManager[WriteSession]
 
     async def load_appendix_dedupe(
         self,
@@ -240,11 +210,11 @@ class ToolkitAgentsAppendixDedupeStateStore:
             )
 
     @staticmethod
-    def _handle(
-        session: AsyncSession,
+    def _handle[S: ReadSession](
+        session: S,
         agent_id: str,
         session_id: str,
-    ) -> ToolkitStateHandle[AgentsAppendixDedupeState]:
+    ) -> ToolkitStateHandle[AgentsAppendixDedupeState, S]:
         """Create the typed AGENTS.md dedupe handle."""
         return ToolkitStateStore(session=session).handle(
             ToolkitStateIdentity(
@@ -261,20 +231,7 @@ class ToolkitAgentsAppendixDedupeStateStore:
 class ToolkitClaudeRulesAppendixDedupeStateStore:
     """Own completed Claude rules appendix dedupe operations."""
 
-    session_manager: SessionManager[AsyncSession]
-
-    def for_execution(
-        self,
-        owner: SessionExecutionOwnerLike,
-    ) -> "ToolkitClaudeRulesAppendixDedupeStateStore":
-        """Bind dedupe operations to one durable Session owner."""
-        return ToolkitClaudeRulesAppendixDedupeStateStore(
-            session_manager=OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            )
-        )
+    session_manager: SessionManager[WriteSession]
 
     async def load_appendix_dedupe(
         self,
@@ -325,11 +282,11 @@ class ToolkitClaudeRulesAppendixDedupeStateStore:
             )
 
     @staticmethod
-    def _handle(
-        session: AsyncSession,
+    def _handle[S: ReadSession](
+        session: S,
         agent_id: str,
         session_id: str,
-    ) -> ToolkitStateHandle[ClaudeRulesAppendixDedupeState]:
+    ) -> ToolkitStateHandle[ClaudeRulesAppendixDedupeState, S]:
         """Create the typed Claude rules dedupe handle."""
         return ToolkitStateStore(session=session).handle(
             ToolkitStateIdentity(
@@ -346,20 +303,7 @@ class ToolkitClaudeRulesAppendixDedupeStateStore:
 class TodoStateStore:
     """Own completed Todo state operations."""
 
-    session_manager: SessionManager[AsyncSession]
-
-    def for_execution(
-        self,
-        owner: SessionExecutionOwnerLike,
-    ) -> "TodoStateStore":
-        """Bind Todo operations to one durable Session owner."""
-        return TodoStateStore(
-            session_manager=OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            )
-        )
+    session_manager: SessionManager[WriteSession]
 
     async def load(self, agent_id: str, session_id: str) -> TodoState:
         """Fetch Todo state in a completed transaction."""
@@ -368,7 +312,7 @@ class TodoStateStore:
 
     async def load_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
         session_id: str,
     ) -> TodoState:
@@ -396,11 +340,11 @@ class TodoStateStore:
             return state
 
     @staticmethod
-    def _handle(
-        session: AsyncSession,
+    def _handle[S: ReadSession](
+        session: S,
         agent_id: str,
         session_id: str,
-    ) -> ToolkitStateHandle[TodoState]:
+    ) -> ToolkitStateHandle[TodoState, S]:
         """Create the typed Todo state handle."""
         return ToolkitStateStore(session=session).handle(
             ToolkitStateIdentity(
@@ -417,32 +361,19 @@ class TodoStateStore:
 class McpToolSnapshotStore:
     """Own completed MCP tool snapshot operations."""
 
-    session_manager: SessionManager[AsyncSession] | None
+    session_manager: SessionManager[WriteSession] | None
+    read_session_manager: SessionManager[ReadSession] | None
     agent_id: str
     session_id: str
     toolkit_namespace: str
     state_name: str
 
-    def for_execution(
-        self,
-        owner: SessionExecutionOwnerLike,
-    ) -> "McpToolSnapshotStore":
-        """Bind snapshot operations to one durable Session owner."""
-        manager = self.session_manager
-        if manager is not None:
-            manager = OwnerBoundSessionManager(
-                session_manager=manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            )
-        return dataclasses.replace(self, session_manager=manager)
-
     async def load(self) -> McpToolSnapshotState | None:
         """Load one snapshot in a completed transaction."""
         if not self._available():
             return None
-        assert self.session_manager is not None  # noqa: S101
-        async with self.session_manager() as session:
+        assert self.read_session_manager is not None  # noqa: S101
+        async with self.read_session_manager() as session:
             return await self._handle(session).load(
                 default_factory=McpToolSnapshotState
             )
@@ -472,14 +403,15 @@ class McpToolSnapshotStore:
         """Return whether persistence and state identity are available."""
         return (
             self.session_manager is not None
+            and self.read_session_manager is not None
             and bool(self.agent_id)
             and bool(self.session_id)
         )
 
-    def _handle(
+    def _handle[S: ReadSession](
         self,
-        session: AsyncSession,
-    ) -> ToolkitStateHandle[McpToolSnapshotState]:
+        session: S,
+    ) -> ToolkitStateHandle[McpToolSnapshotState, S]:
         """Create the typed MCP snapshot handle."""
         return ToolkitStateStore(session=session).handle(
             ToolkitStateIdentity(
@@ -496,30 +428,16 @@ class McpToolSnapshotStore:
 class GitHubSelectedInstallationStore:
     """Own completed GitHub selected-installation operations."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
+    read_session_manager: SessionManager[ReadSession]
     agent_id: str
     session_id: str
-
-    def for_execution(
-        self,
-        owner: SessionExecutionOwnerLike,
-    ) -> "GitHubSelectedInstallationStore":
-        """Bind selection operations to one durable Session owner."""
-        return GitHubSelectedInstallationStore(
-            session_manager=OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            ),
-            agent_id=self.agent_id,
-            session_id=self.session_id,
-        )
 
     async def load(self) -> str | None:
         """Load the selected installation in a completed transaction."""
         if not self.agent_id or not self.session_id:
             return None
-        async with self.session_manager() as session:
+        async with self.read_session_manager() as session:
             state = await self._handle(session).load(
                 default_factory=lambda: GitHubSelectedInstallationState(
                     installation_id="__unset__"
@@ -538,10 +456,10 @@ class GitHubSelectedInstallationStore:
                 GitHubSelectedInstallationState(installation_id=installation_id)
             )
 
-    def _handle(
+    def _handle[S: ReadSession](
         self,
-        session: AsyncSession,
-    ) -> ToolkitStateHandle[GitHubSelectedInstallationState]:
+        session: S,
+    ) -> ToolkitStateHandle[GitHubSelectedInstallationState, S]:
         """Create the typed selected-installation handle."""
         return ToolkitStateStore(session=session).handle(
             ToolkitStateIdentity(

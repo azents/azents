@@ -4,7 +4,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentRunStatus,
@@ -19,6 +18,10 @@ from azents.core.external_channel_provider_effect import (
     ProviderOperationKey,
     ProviderTarget,
 )
+from azents.core.mailbox_data import (
+    ScheduledTaskContinuationMailboxPayload,
+    ScheduledTaskTriggerMailboxPayload,
+)
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -32,10 +35,7 @@ from azents.rdb.models.mailbox_item import RDBMailboxItem
 from azents.rdb.models.scheduled_task import RDBScheduledTask
 from azents.rdb.models.toolkit_state import RDBToolkitState
 from azents.rdb.models.workspace import RDBWorkspace
-from azents.repos.mailbox.data import (
-    ScheduledTaskContinuationMailboxPayload,
-    ScheduledTaskTriggerMailboxPayload,
-)
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleState
 
 _NAMESPACE = "scheduled"
@@ -85,14 +85,14 @@ class ScheduledTaskLifecycleRepository:
 
     async def terminate_session_tree(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_ids: Sequence[str],
     ) -> ScheduledTaskLifecycleCleanup:
         """Delete Session-owned Tasks and admitted work in stable lock order."""
         tasks = list(
             (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBScheduledTask)
                     .where(RDBScheduledTask.session_id.in_(session_ids))
                     .order_by(RDBScheduledTask.id)
@@ -127,14 +127,14 @@ class ScheduledTaskLifecycleRepository:
 
     async def terminate_binding(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         binding_id: str,
     ) -> ScheduledTaskLifecycleCleanup:
         """Delete Tasks targeted at one Binding before it is disconnected."""
         tasks = list(
             (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBScheduledTask)
                     .where(RDBScheduledTask.binding_id == binding_id)
                     .order_by(RDBScheduledTask.id)
@@ -169,7 +169,7 @@ class ScheduledTaskLifecycleRepository:
 
     async def archive_allows_active_runs(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_ids: Sequence[str],
         running_session_ids: Sequence[str],
@@ -177,7 +177,7 @@ class ScheduledTaskLifecycleRepository:
         """Return whether every active execution is one valid started cycle."""
         runs = list(
             (
-                await session.scalars(
+                await session.read_session.scalars(
                     sa.select(RDBAgentRun)
                     .where(
                         RDBAgentRun.session_id.in_(session_ids),
@@ -196,7 +196,7 @@ class ScheduledTaskLifecycleRepository:
             cycle_id = run.scheduled_task_cycle_id
             if cycle_id is None:
                 return False
-            agent_id = await session.scalar(
+            agent_id = await session.read_session.scalar(
                 sa.select(RDBAgentSession.agent_id).where(
                     RDBAgentSession.id == run.session_id
                 )
@@ -219,7 +219,7 @@ class ScheduledTaskLifecycleRepository:
         scheduled_mailbox_session_ids: set[str] = set()
         mailbox_items = list(
             (
-                await session.scalars(
+                await session.read_session.scalars(
                     sa.select(RDBMailboxItem)
                     .where(RDBMailboxItem.session_id.in_(session_ids))
                     .order_by(
@@ -245,7 +245,7 @@ class ScheduledTaskLifecycleRepository:
             payload = ScheduledTaskContinuationMailboxPayload.model_validate(
                 item.payload
             )
-            agent_id = await session.scalar(
+            agent_id = await session.read_session.scalar(
                 sa.select(RDBAgentSession.agent_id).where(
                     RDBAgentSession.id == item.session_id
                 )
@@ -266,7 +266,7 @@ class ScheduledTaskLifecycleRepository:
 
     async def validate_restore_session_tree(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_ids: Sequence[str],
     ) -> ScheduledTaskLifecycleVerification:
@@ -285,7 +285,7 @@ class ScheduledTaskLifecycleRepository:
 
     async def require_purge_ready(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_ids: Sequence[str],
     ) -> ScheduledTaskLifecycleVerification:
@@ -302,7 +302,7 @@ class ScheduledTaskLifecycleRepository:
 
     async def purge_session_tree(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_ids: Sequence[str],
     ) -> ScheduledTaskLifecycleCleanup:
@@ -315,13 +315,13 @@ class ScheduledTaskLifecycleRepository:
 
     async def verify_session_tree(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_ids: Sequence[str],
     ) -> ScheduledTaskLifecycleVerification:
         """Count Task rows and namespaced cycle states for one Session tree."""
         task_count = int(
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(sa.func.count())
                 .select_from(RDBScheduledTask)
                 .where(RDBScheduledTask.session_id.in_(session_ids))
@@ -329,7 +329,7 @@ class ScheduledTaskLifecycleRepository:
             or 0
         )
         trigger_count = int(
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(sa.func.count())
                 .select_from(RDBMailboxItem)
                 .where(
@@ -341,7 +341,7 @@ class ScheduledTaskLifecycleRepository:
         )
         states = list(
             (
-                await session.scalars(
+                await session.read_session.scalars(
                     sa.select(RDBToolkitState).where(
                         RDBToolkitState.session_id.in_(session_ids),
                         RDBToolkitState.toolkit_namespace == _NAMESPACE,
@@ -365,7 +365,7 @@ class ScheduledTaskLifecycleRepository:
 
     async def _terminate_tasks(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         tasks: Sequence[RDBScheduledTask],
         expected_binding_id: str | None,
@@ -391,7 +391,7 @@ class ScheduledTaskLifecycleRepository:
                 )
                 if cycle_row is not None:
                     cycle = ScheduledTaskCycleState.model_validate(cycle_row.state_json)
-            task = await session.scalar(
+            task = await session.write_session.scalar(
                 sa.select(RDBScheduledTask)
                 .where(RDBScheduledTask.id == candidate.id)
                 .with_for_update()
@@ -408,15 +408,15 @@ class ScheduledTaskLifecycleRepository:
             ):
                 continue
             if trigger is not None:
-                await session.delete(trigger)
+                await session.write_session.delete(trigger)
                 deleted_trigger_count += 1
             if cycle is not None and cycle.phase == "admitted":
                 assert cycle_row is not None
-                await session.delete(cycle_row)
+                await session.write_session.delete(cycle_row)
                 deleted_admitted_cycle_count += 1
-            await session.delete(task)
+            await session.write_session.delete(task)
             deleted_task_count += 1
-        await session.flush()
+        await session.write_session.flush()
         return ScheduledTaskLifecycleCleanup(
             deleted_task_count=deleted_task_count,
             deleted_admitted_cycle_count=deleted_admitted_cycle_count,
@@ -427,7 +427,7 @@ class ScheduledTaskLifecycleRepository:
 
     async def _cleanup_remaining_lifecycle_work(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_ids: Sequence[str] | None,
         expected_binding_id: str | None,
@@ -447,7 +447,9 @@ class ScheduledTaskLifecycleRepository:
                 == expected_binding_id
             )
         candidates = list(
-            (await session.scalars(query.order_by(RDBToolkitState.id))).all()
+            (
+                await session.write_session.scalars(query.order_by(RDBToolkitState.id))
+            ).all()
         )
         deleted_cycle_count = 0
         deleted_trigger_count = 0
@@ -470,7 +472,7 @@ class ScheduledTaskLifecycleRepository:
             )
             if row is None:
                 if trigger is not None:
-                    await session.delete(trigger)
+                    await session.write_session.delete(trigger)
                     deleted_trigger_count += 1
                 continue
             cycle = ScheduledTaskCycleState.model_validate(row.state_json)
@@ -480,10 +482,10 @@ class ScheduledTaskLifecycleRepository:
             ):
                 continue
             if trigger is not None:
-                await session.delete(trigger)
+                await session.write_session.delete(trigger)
                 deleted_trigger_count += 1
             if cycle.phase == "admitted":
-                await session.delete(row)
+                await session.write_session.delete(row)
                 deleted_cycle_count += 1
                 continue
             preserved_started_cycle_count += 1
@@ -497,11 +499,11 @@ class ScheduledTaskLifecycleRepository:
                     cleanup_plans.extend(
                         self._tracker_cleanup_plans(cycle=cycle, target=target)
                     )
-        await session.flush()
+        await session.write_session.flush()
         if session_ids is not None:
             residual_triggers = list(
                 (
-                    await session.scalars(
+                    await session.write_session.scalars(
                         sa.select(RDBMailboxItem)
                         .where(
                             RDBMailboxItem.session_id.in_(session_ids),
@@ -519,9 +521,9 @@ class ScheduledTaskLifecycleRepository:
                 ).all()
             )
             for trigger in residual_triggers:
-                await session.delete(trigger)
+                await session.write_session.delete(trigger)
                 deleted_trigger_count += 1
-            await session.flush()
+            await session.write_session.flush()
         return ScheduledTaskLifecycleCleanup(
             deleted_task_count=0,
             deleted_admitted_cycle_count=deleted_cycle_count,
@@ -532,7 +534,7 @@ class ScheduledTaskLifecycleRepository:
 
     async def _binding_targets(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         binding_ids: Sequence[str],
     ) -> dict[str, _BindingTarget]:
@@ -540,7 +542,7 @@ class ScheduledTaskLifecycleRepository:
         if not unique_ids:
             return {}
         rows = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(
                     RDBExternalChannelBinding,
                     RDBExternalChannelResource,
@@ -640,12 +642,12 @@ class ScheduledTaskLifecycleRepository:
 
     async def _lock_trigger(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         cycle_id: str,
     ) -> RDBMailboxItem | None:
-        return await session.scalar(
+        return await session.write_session.scalar(
             sa.select(RDBMailboxItem)
             .where(
                 RDBMailboxItem.session_id == session_id,
@@ -657,13 +659,13 @@ class ScheduledTaskLifecycleRepository:
 
     async def _lock_cycle_row(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
         cycle_id: str,
     ) -> RDBToolkitState | None:
-        return await session.scalar(
+        return await session.write_session.scalar(
             sa.select(RDBToolkitState)
             .where(
                 RDBToolkitState.agent_id == agent_id,
@@ -676,13 +678,13 @@ class ScheduledTaskLifecycleRepository:
 
     async def _cycle(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         session_id: str,
         cycle_id: str,
     ) -> ScheduledTaskCycleState | None:
-        row = await session.scalar(
+        row = await session.read_session.scalar(
             sa.select(RDBToolkitState).where(
                 RDBToolkitState.agent_id == agent_id,
                 RDBToolkitState.session_id == session_id,

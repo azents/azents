@@ -27,10 +27,17 @@ from azents.core.external_account_link import (
     ExternalAccountLinkView,
     ExternalAccountNativeLinkState,
 )
+from azents.core.external_channel_participation import (
+    ExternalChannelParticipationError,
+    ExternalChannelParticipationSessionNavigation,
+    ExternalChannelParticipationSettings,
+    ExternalChannelParticipationSettingsMutation,
+)
 from azents.core.external_model_settings import (
     ExternalModelRejected,
     ExternalModelSettingsRejectionCode,
 )
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelBinding,
     ExternalChannelInteraction,
@@ -59,11 +66,7 @@ from azents.services.external_channel.discord_settings_scope import (
 )
 from azents.services.external_channel.model_settings import ExternalModelSettingsService
 from azents.services.external_channel.participation import (
-    ExternalChannelParticipationError,
     ExternalChannelParticipationService,
-    ExternalChannelParticipationSessionNavigation,
-    ExternalChannelParticipationSettings,
-    ExternalChannelParticipationSettingsMutation,
 )
 from azents.testing.external_channel import make_provider_effect_plan
 
@@ -108,7 +111,7 @@ _CONTEXT = DiscordSettingsContext(
 
 
 @asynccontextmanager
-async def _session_manager() -> AsyncGenerator[AsyncSession, None]:
+async def _session_manager() -> AsyncGenerator[WriteSession, None]:
     yield MagicMock(spec=AsyncSession)
 
 
@@ -218,7 +221,7 @@ def _service(
     participation: object,
 ) -> _DiscordSettingsServiceFixture:
     repository = AsyncMock(spec=ExternalChannelRepository)
-    repository.lock_interaction.return_value = origin
+    repository.get_interaction.return_value = origin
     config = MagicMock(spec=Config)
     config.auth = SimpleNamespace(jwt=SimpleNamespace(secret_key="settings-secret"))
     config.web_url = "https://azents.example"
@@ -931,7 +934,7 @@ async def test_binding_open_rebinds_follow_up_controls_to_component_interaction(
         {"label": "Every message", "value": "all_messages", "default": True},
     ]
     assert _object_dict_list(saved_rows[2]["components"])[0] == navigation_button
-    assert repository.lock_interaction.await_args.kwargs["interaction_id"] == (
+    assert repository.get_interaction.await_args.kwargs["interaction_id"] == (
         "component-interaction-1"
     )
     participation.mutate_parent_settings.assert_awaited_once()

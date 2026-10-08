@@ -3,7 +3,6 @@
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
 from pydantic import TypeAdapter
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import (
     DEFAULT_MAIN_MODEL_OPTION_LABEL,
@@ -13,6 +12,7 @@ from azents.core.agent import (
     default_selectable_model_settings,
 )
 from azents.rdb.models.workspace_model_settings import RDBWorkspaceModelSettings
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.model_candidate_chain_cutover import (
     mark_model_candidate_chain_write,
 )
@@ -34,51 +34,67 @@ class WorkspaceModelSettingsRepository:
 
     async def get(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         workspace_id: str,
     ) -> WorkspaceModelSettings | None:
         """Fetch Workspace settings."""
-        row = await session.get(RDBWorkspaceModelSettings, workspace_id)
+        row = await session.read_session.get(RDBWorkspaceModelSettings, workspace_id)
         if row is None:
             return None
         return self._build(row)
 
     async def get_or_create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         workspace_id: str,
     ) -> WorkspaceModelSettings:
         """Fetch Workspace settings or create empty row."""
-        row = await session.get(RDBWorkspaceModelSettings, workspace_id)
+        row = await session.write_session.get(RDBWorkspaceModelSettings, workspace_id)
         if row is None:
             row = RDBWorkspaceModelSettings(workspace_id=workspace_id)
-            session.add(row)
-            await session.flush()
-            await session.refresh(row)
+            session.write_session.add(row)
+            await session.write_session.flush()
+            await session.write_session.refresh(row)
         return self._build(row)
 
     async def update(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         workspace_id: str,
         update: WorkspaceModelSettingsUpdate,
     ) -> Result[WorkspaceModelSettings, DefaultModelCannotBeCleared]:
         """Partially update Workspace settings."""
-        row = await session.get(RDBWorkspaceModelSettings, workspace_id)
+        row = await session.write_session.get(RDBWorkspaceModelSettings, workspace_id)
         if row is None:
             row = RDBWorkspaceModelSettings(workspace_id=workspace_id)
-            session.add(row)
-            await session.flush()
-            await session.refresh(row)
+            session.write_session.add(row)
+            await session.write_session.flush()
+            await session.write_session.refresh(row)
 
         if (
-            "default_model_selection" in update
-            and update["default_model_selection"] is None
-            and row.default_model_selection is not None
-        ) or (
-            "default_selectable_model_options" in update
-            and update["default_selectable_model_options"] is None
-            and row.default_selectable_model_options is not None
+            (
+                "default_model_selection" in update
+                and update["default_model_selection"] is None
+                and row.default_model_selection is not None
+            )
+            or (
+                "default_selectable_model_options" in update
+                and update["default_selectable_model_options"] is None
+                and row.default_selectable_model_options is not None
+            )
+            or (
+                row.default_selectable_model_options is not None
+                and (
+                    (
+                        "default_main_model_label" in update
+                        and update["default_main_model_label"] is None
+                    )
+                    or (
+                        "default_lightweight_model_label" in update
+                        and update["default_lightweight_model_label"] is None
+                    )
+                )
+            )
         ):
             return Failure(DefaultModelCannotBeCleared(workspace_id=workspace_id))
 
@@ -109,23 +125,23 @@ class WorkspaceModelSettingsRepository:
         if values:
             if "default_selectable_model_options" in values:
                 await mark_model_candidate_chain_write(session)
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBWorkspaceModelSettings)
                 .where(RDBWorkspaceModelSettings.workspace_id == workspace_id)
                 .values(**values)
             )
-            await session.refresh(row)
+            await session.write_session.refresh(row)
         assert row is not None
         return Success(self._build(row))
 
     async def set_default_model_if_empty(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         workspace_id: str,
         selection: AgentModelSelection,
     ) -> WorkspaceModelSettings:
         """Set only when default model is empty."""
-        row = await session.get(RDBWorkspaceModelSettings, workspace_id)
+        row = await session.write_session.get(RDBWorkspaceModelSettings, workspace_id)
         if row is None:
             row = RDBWorkspaceModelSettings(
                 workspace_id=workspace_id,
@@ -147,10 +163,10 @@ class WorkspaceModelSettingsRepository:
                 default_main_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
                 default_lightweight_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
             )
-            session.add(row)
+            session.write_session.add(row)
             await mark_model_candidate_chain_write(session)
-            await session.flush()
-            await session.refresh(row)
+            await session.write_session.flush()
+            await session.write_session.refresh(row)
             return self._build(row)
         if row.default_model_selection is None:
             selection_dict = selection.model_dump(mode="json")
@@ -172,8 +188,8 @@ class WorkspaceModelSettingsRepository:
             row.default_main_model_label = DEFAULT_MAIN_MODEL_OPTION_LABEL
             row.default_lightweight_model_label = DEFAULT_MAIN_MODEL_OPTION_LABEL
             await mark_model_candidate_chain_write(session)
-            await session.flush()
-            await session.refresh(row)
+            await session.write_session.flush()
+            await session.write_session.refresh(row)
         return self._build(row)
 
     def _build(self, row: RDBWorkspaceModelSettings) -> WorkspaceModelSettings:

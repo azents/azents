@@ -13,8 +13,7 @@ from typing import Any, NamedTuple, Protocol, assert_never
 import frontmatter
 import yaml
 from azcommon.uuid import uuid7
-from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel, ConfigDict, Field
 
 from azents.broker.broadcast import WebSocketBroadcastPublishError
 from azents.core.enums import AgentSessionRunState
@@ -23,6 +22,13 @@ from azents.core.runtime_capabilities import (
     RuntimeCapabilityDeniedError,
     RuntimeCapabilityResolver,
 )
+from azents.core.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
+    accepts_execution_authority,
+    accepts_execution_owner,
+)
+from azents.core.session_workspace_project import SessionWorkspaceProject
 from azents.core.skill_projection import (
     SkillProjectionItem,
     SkillProjectionSnapshot,
@@ -63,18 +69,8 @@ from azents.engine.tools.runtime_io import (
     RuntimeRunnerOperationGenerationError,
     RuntimeRunnerOperationUnavailable,
 )
-from azents.rdb.session import SessionManager
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
-from azents.repos.session_workspace_project.data import SessionWorkspaceProject
-from azents.repos.skill_state import SkillStateRepository
 from azents.services.agent_runtime.lifecycle_data import RuntimeOperationTargetResolver
 from azents.services.runtime_storage_error import RuntimeStorageError
-from azents.services.session_resource_authority import (
-    SessionExecutionOwner,
-    SessionResourceAuthority,
-    accepts_execution_authority,
-    accepts_execution_owner,
-)
 from azents.services.session_working_folder_binding import (
     SessionWorkingFolderBindingError,
     SessionWorkingFolderBindingService,
@@ -100,6 +96,8 @@ If a skill's description says 'proactively', use it without waiting for the user
 
 class LoadSkillInput(BaseModel):
     """load_skill tool input."""
+
+    model_config = ConfigDict(extra="forbid")
 
     skill_path: str = Field(
         min_length=1,
@@ -173,13 +171,6 @@ class SkillExecutionStateStore(
     Protocol,
 ):
     """Skill state operations that can bind to one execution authority."""
-
-    def for_execution(
-        self,
-        owner: SessionExecutionOwner,
-    ) -> "SkillExecutionStateStore":
-        """Return an execution-local owner-fenced store."""
-        ...
 
 
 class SkillRuntimeFileReader(Protocol):
@@ -284,76 +275,6 @@ class SkillBroadcast(Protocol):
     ) -> None:
         """Publish one input-action update."""
         ...
-
-
-class SkillStateStore:
-    """Engine-facing façade for repository-owned Skill state operations."""
-
-    def __init__(
-        self,
-        *,
-        session_manager: SessionManager[AsyncSession],
-    ) -> None:
-        """Create Skill state store."""
-        self.session_manager = session_manager
-        self.repository = SkillStateRepository(session_manager=session_manager)
-
-    def for_execution(
-        self,
-        owner: SessionExecutionOwner,
-    ) -> "SkillStateStore":
-        """Bind state reads and writes to one durable Session owner."""
-        return SkillStateStore(
-            session_manager=OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            )
-        )
-
-    async def load(self, agent_id: str, session_id: str) -> SkillProjectionState:
-        """Fetch Skill projection state."""
-        return await self.repository.load(agent_id=agent_id, session_id=session_id)
-
-    async def replace_latest(
-        self,
-        agent_id: str,
-        session_id: str,
-        snapshot: SkillProjectionSnapshot,
-    ) -> SkillProjectionState:
-        """Replace latest projection snapshot."""
-        return await self.repository.replace_latest(
-            agent_id=agent_id,
-            session_id=session_id,
-            snapshot=snapshot,
-        )
-
-    async def adopt_latest(
-        self, agent_id: str, session_id: str
-    ) -> SkillProjectionState:
-        """Copy latest projection into active projection."""
-        return await self.repository.adopt_latest(
-            agent_id=agent_id,
-            session_id=session_id,
-        )
-
-    async def invalidate_project(
-        self,
-        agent_id: str,
-        session_id: str,
-        *,
-        project_id: str,
-        project_path: str,
-        session_run_state: AgentSessionRunState,
-    ) -> SkillProjectionState:
-        """Remove deleted Project items without reading runtime files."""
-        return await self.repository.invalidate_project(
-            agent_id=agent_id,
-            session_id=session_id,
-            project_id=project_id,
-            project_path=project_path,
-            session_run_state=session_run_state,
-        )
 
 
 class SkillProjectionService:
@@ -639,10 +560,6 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
             session_id=self._session_id,
         ):
             return
-        bound_store = self.store.for_execution(owner)
-        self.store = bound_store
-        if self.projection_service is not None:
-            self.projection_service = self.projection_service.with_store(bound_store)
         self._execution_owner = owner
 
     def bind_execution_authority(

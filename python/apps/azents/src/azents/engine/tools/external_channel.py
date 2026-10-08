@@ -16,6 +16,9 @@ from azents.core.external_channel_file import (
     MAX_EXTERNAL_CHANNEL_FILES,
     ExternalChannelFileLocator,
 )
+from azents.core.external_channel_limits import (
+    SLACK_MARKDOWN_TEXT_MAX_LENGTH,
+)
 from azents.core.external_channel_progress import (
     MAX_EXTERNAL_CHANNEL_TASK_SOURCES,
     MAX_EXTERNAL_CHANNEL_TASK_TEXT_LENGTH,
@@ -24,6 +27,12 @@ from azents.core.external_channel_progress import (
 )
 from azents.core.external_channel_progress import (
     ExternalChannelWorkSource as ChannelWorkSource,
+)
+from azents.core.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
+    accepts_execution_authority,
+    accepts_execution_owner,
 )
 from azents.core.tools import (
     ResolveContext,
@@ -63,17 +72,8 @@ from azents.services.external_channel.file_transfer import (
     ExternalChannelFileTransferExecutionError,
     ExternalChannelFileTransferService,
 )
-from azents.services.external_channel.slack_events import (
-    SLACK_MARKDOWN_TEXT_MAX_LENGTH,
-)
 from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.scheduled_task.channel import ScheduledTaskChannelService
-from azents.services.session_resource_authority import (
-    SessionExecutionOwner,
-    SessionResourceAuthority,
-    accepts_execution_authority,
-    accepts_execution_owner,
-)
 
 EXTERNAL_CHANNEL_TOOLKIT_SLUG = "external_channel"
 _LOGGER = logging.getLogger(__name__)
@@ -109,7 +109,7 @@ _DOWNLOAD_EXTERNAL_FILE_DESCRIPTION = (
 class ChannelActionSourceInput(BaseModel):
     """One labeled URL source supplied by the Agent."""
 
-    model_config = ConfigDict(str_strip_whitespace=True)
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     url: str = Field(min_length=1, max_length=2_048)
     label: str = Field(min_length=1, max_length=500)
@@ -118,7 +118,7 @@ class ChannelActionSourceInput(BaseModel):
 class ChannelActionTaskInput(BaseModel):
     """One ordered task supplied by the Agent."""
 
-    model_config = ConfigDict(str_strip_whitespace=True)
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     id: str = Field(min_length=1, max_length=80)
     title: str = Field(min_length=1, max_length=500)
@@ -142,7 +142,7 @@ class ChannelActionTaskInput(BaseModel):
 class ChannelActionInput(BaseModel):
     """Act on one active External Channel binding."""
 
-    model_config = ConfigDict(str_strip_whitespace=True)
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     mode: Literal["finish", "continue", "request_input", "ignore"] = Field(
         description=(
@@ -250,7 +250,7 @@ class ChannelActionInput(BaseModel):
 class DownloadExternalFileInput(BaseModel):
     """Materialize one selected External Channel file in the Runtime."""
 
-    model_config = ConfigDict(str_strip_whitespace=True)
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     file: str = Field(
         min_length=1,

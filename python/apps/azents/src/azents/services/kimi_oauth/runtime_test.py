@@ -3,13 +3,16 @@
 import asyncio
 import datetime
 import uuid
-from typing import cast
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import NamedTuple
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from azcommon.result import Failure, Result, Success
 from cryptography.fernet import Fernet
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from azents.core.credentials import KimiOAuthConfig, KimiOAuthSecrets
 from azents.core.crypto import CredentialCipher
@@ -18,11 +21,13 @@ from azents.core.kimi_oauth import (
     KimiOAuthConnectionMethod,
     KimiOAuthConnectionStatus,
 )
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
+from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 
 from .client import KimiOAuthClient
 from .data import ProviderRejected, ProviderUnavailable, TokenSet
@@ -31,23 +36,21 @@ from .runtime import ensure_runtime_tokens, refresh_runtime_tokens
 _TEST_KEY = Fernet.generate_key().decode()
 
 
-class _SessionManager:
-    """Expose single test DB session as context manager."""
-
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
-
-    def __call__(self) -> "_SessionManager":
-        return self
-
-    async def __aenter__(self) -> AsyncSession:
-        return self._session
-
-    async def __aexit__(self, *_args: object) -> None:
-        return None
+def _unexpected_http(_request: httpx.Request) -> httpx.Response:
+    """Reject transport requests when the configured refresh hook is not used."""
+    raise AssertionError("Kimi runtime tests must use their controlled refresh hook")
 
 
-async def _create_workspace(session: AsyncSession) -> str:
+@asynccontextmanager
+async def _client_factory() -> AsyncIterator[KimiOAuthClient]:
+    """Preserve concrete-client hooks behind a network-denying transport."""
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(_unexpected_http), timeout=20.0
+    ) as client:
+        yield KimiOAuthClient(client)
+
+
+async def _create_workspace(session: WriteSession) -> str:
     """Create workspace for tests."""
     suffix = uuid.uuid4().hex[:12]
     handle = f"kimi-runtime-{suffix}"
@@ -61,11 +64,18 @@ async def _create_workspace(session: AsyncSession) -> str:
     return workspace_id
 
 
+class _CreatedIntegration(NamedTuple):
+    """Created identity and query collaborator for committed fixture operations."""
+
+    repository: LLMProviderIntegrationRepository
+    integration_id: str
+
+
 async def _create_integration(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     expires_at: datetime.datetime,
-) -> tuple[LLMProviderIntegrationRepository, str]:
+) -> _CreatedIntegration:
     """Create Kimi OAuth integration for tests."""
     repo = LLMProviderIntegrationRepository(CredentialCipher(_TEST_KEY))
     workspace_id = await _create_workspace(session)
@@ -91,11 +101,11 @@ async def _create_integration(
             ),
         ),
     )
-    return repo, integration.id
+    return _CreatedIntegration(repo, integration.id)
 
 
 async def _reconnect_integration(
-    session: AsyncSession,
+    session: WriteSession,
     repo: LLMProviderIntegrationRepository,
     integration_id: str,
 ) -> None:
@@ -125,7 +135,7 @@ async def _reconnect_integration(
 
 
 async def _rotate_integration(
-    session: AsyncSession,
+    session: WriteSession,
     repo: LLMProviderIntegrationRepository,
     integration_id: str,
 ) -> None:
@@ -159,7 +169,7 @@ async def _rotate_integration(
 
 
 async def _mark_refresh_failure(
-    session: AsyncSession,
+    session: WriteSession,
     repo: LLMProviderIntegrationRepository,
     integration_id: str,
     *,
@@ -191,40 +201,47 @@ class TestEnsureRuntimeTokens:
     """ensure_runtime_tokens tests."""
 
     async def test_fresh_token_returns_existing_integration(
-        self, rdb_session: AsyncSession
+        self, rdb_session_manager: SessionManager[WriteSession]
     ) -> None:
         """Sufficiently fresh token is not refreshed."""
         expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=2)
-        repo, integration_id = await _create_integration(
-            rdb_session,
-            expires_at=expires_at,
-        )
-        integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
+        async with rdb_session_manager() as rdb_session:
+            repo, integration_id = await _create_integration(
+                rdb_session,
+                expires_at=expires_at,
+            )
+        async with rdb_session_manager() as rdb_session:
+            integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
         assert integration is not None
 
         result = await ensure_runtime_tokens(
             integration=integration,
-            integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
+            persistence_repository=KimiOAuthRuntimeRepository(
+                session_manager=rdb_session_manager,
+                integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
 
         assert isinstance(result, Success)
         assert result.value.id == integration_id
 
     async def test_more_than_five_minutes_remaining_skips_refresh(
-        self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+        self,
+        rdb_session_manager: SessionManager[WriteSession],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A token outside the five-minute window remains unchanged."""
         expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(
             minutes=10
         )
-        repo, integration_id = await _create_integration(
-            rdb_session,
-            expires_at=expires_at,
-        )
-        integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
+        async with rdb_session_manager() as rdb_session:
+            repo, integration_id = await _create_integration(
+                rdb_session,
+                expires_at=expires_at,
+            )
+        async with rdb_session_manager() as rdb_session:
+            integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
         assert integration is not None
         refresh = AsyncMock()
         monkeypatch.setattr(
@@ -233,10 +250,11 @@ class TestEnsureRuntimeTokens:
 
         result = await ensure_runtime_tokens(
             integration=integration,
-            integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
+            persistence_repository=KimiOAuthRuntimeRepository(
+                session_manager=rdb_session_manager,
+                integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
 
         assert isinstance(result, Success)
@@ -244,15 +262,19 @@ class TestEnsureRuntimeTokens:
         refresh.assert_not_awaited()
 
     async def test_within_five_minutes_uses_shared_refresh_path(
-        self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+        self,
+        rdb_session_manager: SessionManager[WriteSession],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A token inside the five-minute window delegates to forced refresh."""
         expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=4)
-        repo, integration_id = await _create_integration(
-            rdb_session,
-            expires_at=expires_at,
-        )
-        integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
+        async with rdb_session_manager() as rdb_session:
+            repo, integration_id = await _create_integration(
+                rdb_session,
+                expires_at=expires_at,
+            )
+        async with rdb_session_manager() as rdb_session:
+            integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
         assert integration is not None
         refresh = AsyncMock(return_value=Success(integration))
         monkeypatch.setattr(
@@ -261,25 +283,30 @@ class TestEnsureRuntimeTokens:
 
         result = await ensure_runtime_tokens(
             integration=integration,
-            integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
+            persistence_repository=KimiOAuthRuntimeRepository(
+                session_manager=rdb_session_manager,
+                integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
 
         assert isinstance(result, Success)
         refresh.assert_awaited_once()
 
     async def test_forced_refresh_rotates_a_fresh_rejected_token(
-        self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+        self,
+        rdb_session_manager: SessionManager[WriteSession],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Refresh a still-fresh token after Imagine rejects it with 401."""
         expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=2)
-        repo, integration_id = await _create_integration(
-            rdb_session,
-            expires_at=expires_at,
-        )
-        integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
+        async with rdb_session_manager() as rdb_session:
+            repo, integration_id = await _create_integration(
+                rdb_session,
+                expires_at=expires_at,
+            )
+        async with rdb_session_manager() as rdb_session:
+            integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
         assert integration is not None
 
         async def fake_refresh(
@@ -307,10 +334,11 @@ class TestEnsureRuntimeTokens:
 
         result = await refresh_runtime_tokens(
             integration=integration,
-            integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
+            persistence_repository=KimiOAuthRuntimeRepository(
+                session_manager=rdb_session_manager,
+                integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
 
         assert isinstance(result, Success)
@@ -321,15 +349,19 @@ class TestEnsureRuntimeTokens:
         )
 
     async def test_refresh_success_preserves_concurrent_reconnect(
-        self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+        self,
+        rdb_session_manager: SessionManager[WriteSession],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A stale refresh success does not replace newer reconnect credentials."""
         expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=1)
-        repo, integration_id = await _create_integration(
-            rdb_session,
-            expires_at=expires_at,
-        )
-        integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
+        async with rdb_session_manager() as rdb_session:
+            repo, integration_id = await _create_integration(
+                rdb_session,
+                expires_at=expires_at,
+            )
+        async with rdb_session_manager() as rdb_session:
+            integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
         assert integration is not None
 
         async def refresh_after_reconnect(
@@ -340,7 +372,8 @@ class TestEnsureRuntimeTokens:
             connection_method: KimiOAuthConnectionMethod,
         ) -> Result[TokenSet, ProviderRejected | ProviderUnavailable]:
             assert refresh_token == "old-refresh-token"
-            await _reconnect_integration(rdb_session, repo, integration_id)
+            async with rdb_session_manager() as rdb_session:
+                await _reconnect_integration(rdb_session, repo, integration_id)
             return Success(
                 TokenSet(
                     access_token="stale-access-token",
@@ -355,10 +388,11 @@ class TestEnsureRuntimeTokens:
 
         result = await ensure_runtime_tokens(
             integration=integration,
-            integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
+            persistence_repository=KimiOAuthRuntimeRepository(
+                session_manager=rdb_session_manager,
+                integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
 
         assert isinstance(result, Success)
@@ -368,15 +402,19 @@ class TestEnsureRuntimeTokens:
         assert result.value.secrets.device_id == "reconnected-device-id"
 
     async def test_refresh_failure_preserves_concurrent_reconnect(
-        self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+        self,
+        rdb_session_manager: SessionManager[WriteSession],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A stale failure does not mark newer reconnect credentials unusable."""
         expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=1)
-        repo, integration_id = await _create_integration(
-            rdb_session,
-            expires_at=expires_at,
-        )
-        integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
+        async with rdb_session_manager() as rdb_session:
+            repo, integration_id = await _create_integration(
+                rdb_session,
+                expires_at=expires_at,
+            )
+        async with rdb_session_manager() as rdb_session:
+            integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
         assert integration is not None
 
         async def fail_after_reconnect(
@@ -386,17 +424,19 @@ class TestEnsureRuntimeTokens:
             device_id: str,
             connection_method: KimiOAuthConnectionMethod,
         ) -> Result[TokenSet, ProviderRejected | ProviderUnavailable]:
-            await _reconnect_integration(rdb_session, repo, integration_id)
+            async with rdb_session_manager() as rdb_session:
+                await _reconnect_integration(rdb_session, repo, integration_id)
             return Failure(ProviderRejected(reason="stale credentials rejected"))
 
         monkeypatch.setattr(KimiOAuthClient, "refresh_tokens", fail_after_reconnect)
 
         result = await ensure_runtime_tokens(
             integration=integration,
-            integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
+            persistence_repository=KimiOAuthRuntimeRepository(
+                session_manager=rdb_session_manager,
+                integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
 
         assert isinstance(result, Success)
@@ -407,15 +447,19 @@ class TestEnsureRuntimeTokens:
         assert result.value.secrets.access_token == "reconnected-access-token"
 
     async def test_success_replaces_concurrent_config_only_failure(
-        self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+        self,
+        rdb_session_manager: SessionManager[WriteSession],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A valid refresh success recovers a config-only concurrent failure."""
         expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=1)
-        repo, integration_id = await _create_integration(
-            rdb_session,
-            expires_at=expires_at,
-        )
-        integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
+        async with rdb_session_manager() as rdb_session:
+            repo, integration_id = await _create_integration(
+                rdb_session,
+                expires_at=expires_at,
+            )
+        async with rdb_session_manager() as rdb_session:
+            integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
         assert integration is not None
 
         async def succeed_after_failure(
@@ -425,13 +469,14 @@ class TestEnsureRuntimeTokens:
             device_id: str,
             connection_method: KimiOAuthConnectionMethod,
         ) -> Result[TokenSet, ProviderRejected | ProviderUnavailable]:
-            await _mark_refresh_failure(
-                rdb_session,
-                repo,
-                integration_id,
-                status=KimiOAuthConnectionStatus.TEMPORARILY_UNAVAILABLE,
-                reason="first refresh failed",
-            )
+            async with rdb_session_manager() as rdb_session:
+                await _mark_refresh_failure(
+                    rdb_session,
+                    repo,
+                    integration_id,
+                    status=KimiOAuthConnectionStatus.TEMPORARILY_UNAVAILABLE,
+                    reason="first refresh failed",
+                )
             return Success(
                 TokenSet(
                     access_token="recovered-access-token",
@@ -446,10 +491,11 @@ class TestEnsureRuntimeTokens:
 
         result = await ensure_runtime_tokens(
             integration=integration,
-            integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
+            persistence_repository=KimiOAuthRuntimeRepository(
+                session_manager=rdb_session_manager,
+                integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
 
         assert isinstance(result, Success)
@@ -460,15 +506,19 @@ class TestEnsureRuntimeTokens:
         assert result.value.secrets.access_token == "recovered-access-token"
 
     async def test_failure_preserves_concurrent_refresh_success(
-        self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+        self,
+        rdb_session_manager: SessionManager[WriteSession],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A stale failure preserves credentials rotated by another refresh."""
         expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=1)
-        repo, integration_id = await _create_integration(
-            rdb_session,
-            expires_at=expires_at,
-        )
-        integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
+        async with rdb_session_manager() as rdb_session:
+            repo, integration_id = await _create_integration(
+                rdb_session,
+                expires_at=expires_at,
+            )
+        async with rdb_session_manager() as rdb_session:
+            integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
         assert integration is not None
 
         async def fail_after_success(
@@ -478,17 +528,19 @@ class TestEnsureRuntimeTokens:
             device_id: str,
             connection_method: KimiOAuthConnectionMethod,
         ) -> Result[TokenSet, ProviderRejected | ProviderUnavailable]:
-            await _rotate_integration(rdb_session, repo, integration_id)
+            async with rdb_session_manager() as rdb_session:
+                await _rotate_integration(rdb_session, repo, integration_id)
             return Failure(ProviderUnavailable(reason="stale refresh timed out"))
 
         monkeypatch.setattr(KimiOAuthClient, "refresh_tokens", fail_after_success)
 
         result = await ensure_runtime_tokens(
             integration=integration,
-            integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
+            persistence_repository=KimiOAuthRuntimeRepository(
+                session_manager=rdb_session_manager,
+                integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
 
         assert isinstance(result, Success)
@@ -499,15 +551,19 @@ class TestEnsureRuntimeTokens:
         assert result.value.secrets.access_token == "winning-access-token"
 
     async def test_second_concurrent_failure_remains_failure(
-        self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+        self,
+        rdb_session_manager: SessionManager[WriteSession],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Config-only changes never convert another refresh failure to success."""
         expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=1)
-        repo, integration_id = await _create_integration(
-            rdb_session,
-            expires_at=expires_at,
-        )
-        integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
+        async with rdb_session_manager() as rdb_session:
+            repo, integration_id = await _create_integration(
+                rdb_session,
+                expires_at=expires_at,
+            )
+        async with rdb_session_manager() as rdb_session:
+            integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
         assert integration is not None
 
         async def fail_after_failure(
@@ -517,25 +573,28 @@ class TestEnsureRuntimeTokens:
             device_id: str,
             connection_method: KimiOAuthConnectionMethod,
         ) -> Result[TokenSet, ProviderRejected | ProviderUnavailable]:
-            await _mark_refresh_failure(
-                rdb_session,
-                repo,
-                integration_id,
-                status=KimiOAuthConnectionStatus.TEMPORARILY_UNAVAILABLE,
-                reason="first refresh failed",
-            )
+            async with rdb_session_manager() as rdb_session:
+                await _mark_refresh_failure(
+                    rdb_session,
+                    repo,
+                    integration_id,
+                    status=KimiOAuthConnectionStatus.TEMPORARILY_UNAVAILABLE,
+                    reason="first refresh failed",
+                )
             return Failure(ProviderUnavailable(reason="second refresh failed"))
 
         monkeypatch.setattr(KimiOAuthClient, "refresh_tokens", fail_after_failure)
 
         result = await ensure_runtime_tokens(
             integration=integration,
-            integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
+            persistence_repository=KimiOAuthRuntimeRepository(
+                session_manager=rdb_session_manager,
+                integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
-        updated = await repo.get_by_id_with_secrets(rdb_session, integration_id)
+        async with rdb_session_manager() as rdb_session:
+            updated = await repo.get_by_id_with_secrets(rdb_session, integration_id)
 
         assert isinstance(result, Failure)
         assert result.error.reason == "second refresh failed"
@@ -548,15 +607,19 @@ class TestEnsureRuntimeTokens:
         assert updated.config.last_failure_reason == "second refresh failed"
 
     async def test_second_concurrent_success_preserves_first_rotation(
-        self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+        self,
+        rdb_session_manager: SessionManager[WriteSession],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A stale success does not overwrite the first committed rotation."""
         expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=1)
-        repo, integration_id = await _create_integration(
-            rdb_session,
-            expires_at=expires_at,
-        )
-        integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
+        async with rdb_session_manager() as rdb_session:
+            repo, integration_id = await _create_integration(
+                rdb_session,
+                expires_at=expires_at,
+            )
+        async with rdb_session_manager() as rdb_session:
+            integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
         assert integration is not None
 
         async def succeed_after_success(
@@ -566,7 +629,8 @@ class TestEnsureRuntimeTokens:
             device_id: str,
             connection_method: KimiOAuthConnectionMethod,
         ) -> Result[TokenSet, ProviderRejected | ProviderUnavailable]:
-            await _rotate_integration(rdb_session, repo, integration_id)
+            async with rdb_session_manager() as rdb_session:
+                await _rotate_integration(rdb_session, repo, integration_id)
             return Success(
                 TokenSet(
                     access_token="stale-access-token",
@@ -581,10 +645,11 @@ class TestEnsureRuntimeTokens:
 
         result = await ensure_runtime_tokens(
             integration=integration,
-            integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
+            persistence_repository=KimiOAuthRuntimeRepository(
+                session_manager=rdb_session_manager,
+                integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
 
         assert isinstance(result, Success)
@@ -599,19 +664,22 @@ class TestEnsureRuntimeTokens:
     ) -> None:
         """Credential persistence serializes through the integration row lock."""
         session_factory = async_sessionmaker(rdb_engine, expire_on_commit=False)
-        async with session_factory() as setup_session:
+        async with session_factory() as raw_setup_session:
+            setup_session = ReadWriteSession(raw_setup_session)
             repo, integration_id = await _create_integration(
                 setup_session,
                 expires_at=datetime.datetime.now(datetime.UTC)
                 + datetime.timedelta(minutes=1),
             )
-            await setup_session.commit()
+            await setup_session.write_session.commit()
 
         async with (
-            session_factory() as lock_session,
-            session_factory() as waiting_session,
+            session_factory() as raw_lock_session,
+            session_factory() as raw_waiting_session,
         ):
-            lock_transaction = await lock_session.begin()
+            lock_session = ReadWriteSession(raw_lock_session)
+            waiting_session = ReadWriteSession(raw_waiting_session)
+            lock_transaction = await lock_session.write_session.begin()
             locked = await repo.get_by_id_with_secrets_for_update(
                 lock_session, integration_id
             )
@@ -628,7 +696,7 @@ class TestEnsureRuntimeTokens:
 
                 await lock_transaction.commit()
                 observed = await asyncio.wait_for(waiting_task, timeout=2)
-                await waiting_session.commit()
+                await waiting_session.write_session.commit()
 
                 assert observed is not None
                 assert observed.id == integration_id
@@ -641,15 +709,19 @@ class TestEnsureRuntimeTokens:
                         await waiting_task
 
     async def test_near_expiry_refresh_persists_rotated_tokens(
-        self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+        self,
+        rdb_session_manager: SessionManager[WriteSession],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Nearly expired token refreshes and updates encrypted secrets."""
         expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=1)
-        repo, integration_id = await _create_integration(
-            rdb_session,
-            expires_at=expires_at,
-        )
-        integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
+        async with rdb_session_manager() as rdb_session:
+            repo, integration_id = await _create_integration(
+                rdb_session,
+                expires_at=expires_at,
+            )
+        async with rdb_session_manager() as rdb_session:
+            integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
         assert integration is not None
 
         async def fake_refresh(
@@ -677,10 +749,11 @@ class TestEnsureRuntimeTokens:
 
         result = await ensure_runtime_tokens(
             integration=integration,
-            integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
+            persistence_repository=KimiOAuthRuntimeRepository(
+                session_manager=rdb_session_manager,
+                integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
 
         assert isinstance(result, Success)
@@ -689,15 +762,19 @@ class TestEnsureRuntimeTokens:
         assert result.value.secrets.refresh_token == "new-refresh-token"
 
     async def test_permanent_rejection_marks_refresh_required(
-        self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+        self,
+        rdb_session_manager: SessionManager[WriteSession],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A permanent refresh rejection requires reconnecting the integration."""
         expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=1)
-        repo, integration_id = await _create_integration(
-            rdb_session,
-            expires_at=expires_at,
-        )
-        integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
+        async with rdb_session_manager() as rdb_session:
+            repo, integration_id = await _create_integration(
+                rdb_session,
+                expires_at=expires_at,
+            )
+        async with rdb_session_manager() as rdb_session:
+            integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
         assert integration is not None
 
         async def fake_refresh(
@@ -714,12 +791,14 @@ class TestEnsureRuntimeTokens:
 
         result = await ensure_runtime_tokens(
             integration=integration,
-            integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
+            persistence_repository=KimiOAuthRuntimeRepository(
+                session_manager=rdb_session_manager,
+                integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
-        updated = await repo.get_by_id(rdb_session, integration_id)
+        async with rdb_session_manager() as rdb_session:
+            updated = await repo.get_by_id(rdb_session, integration_id)
 
         assert isinstance(result, Failure)
         assert updated is not None
@@ -728,15 +807,19 @@ class TestEnsureRuntimeTokens:
         assert updated.config.last_failure_reason == "credentials rejected"
 
     async def test_temporary_failure_remains_retryable(
-        self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+        self,
+        rdb_session_manager: SessionManager[WriteSession],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Transient failure state retries refresh on next runtime preflight."""
         expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=1)
-        repo, integration_id = await _create_integration(
-            rdb_session,
-            expires_at=expires_at,
-        )
-        integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
+        async with rdb_session_manager() as rdb_session:
+            repo, integration_id = await _create_integration(
+                rdb_session,
+                expires_at=expires_at,
+            )
+        async with rdb_session_manager() as rdb_session:
+            integration = await repo.get_by_id_with_secrets(rdb_session, integration_id)
         assert integration is not None
 
         async def fail_refresh(
@@ -754,12 +837,16 @@ class TestEnsureRuntimeTokens:
         monkeypatch.setattr(KimiOAuthClient, "refresh_tokens", fail_refresh)
         first = await ensure_runtime_tokens(
             integration=integration,
-            integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
+            persistence_repository=KimiOAuthRuntimeRepository(
+                session_manager=rdb_session_manager,
+                integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
-        after_failure = await repo.get_by_id_with_secrets(rdb_session, integration_id)
+        async with rdb_session_manager() as rdb_session:
+            after_failure = await repo.get_by_id_with_secrets(
+                rdb_session, integration_id
+            )
         assert isinstance(first, Failure)
         assert after_failure is not None
         assert isinstance(after_failure.config, KimiOAuthConfig)
@@ -791,10 +878,11 @@ class TestEnsureRuntimeTokens:
         monkeypatch.setattr(KimiOAuthClient, "refresh_tokens", success_refresh)
         second = await ensure_runtime_tokens(
             integration=after_failure,
-            integration_repository=repo,
-            session_manager=cast(
-                SessionManager[AsyncSession], _SessionManager(rdb_session)
+            persistence_repository=KimiOAuthRuntimeRepository(
+                session_manager=rdb_session_manager,
+                integration_repository=repo,
             ),
+            client_factory=_client_factory,
         )
 
         assert isinstance(second, Success)

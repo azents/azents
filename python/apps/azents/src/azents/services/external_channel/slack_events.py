@@ -9,7 +9,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, NamedTuple
 
 import aiohttp
 import httpx
@@ -23,15 +23,7 @@ from azents.core.enums import (
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
 )
-from azents.core.external_channel_file import (
-    MAX_EXTERNAL_CHANNEL_FILE_TEXT_LENGTH,
-    MAX_EXTERNAL_CHANNEL_FILES,
-    ExternalChannelFileMetadata,
-    ExternalChannelFileUnsupportedReason,
-)
-from azents.core.external_channel_projection import is_external_channel_projection
-from azents.runtime.transfer.provider_source import ProviderByteStreamResponse
-from azents.services.external_channel.conversation import (
+from azents.core.external_channel_conversation_data import (
     ExternalChannelHistoryCredentialsInvalid,
     ExternalChannelHistoryDeadlineExceeded,
     ExternalChannelHistoryMalformed,
@@ -45,6 +37,15 @@ from azents.services.external_channel.conversation import (
     ExternalChannelHistoryTriggerMissing,
     ExternalChannelOperationDeadline,
 )
+from azents.core.external_channel_file import (
+    MAX_EXTERNAL_CHANNEL_FILE_TEXT_LENGTH,
+    MAX_EXTERNAL_CHANNEL_FILES,
+    ExternalChannelFileMetadata,
+    ExternalChannelFileUnsupportedReason,
+)
+from azents.core.external_channel_limits import SLACK_MARKDOWN_TEXT_MAX_LENGTH
+from azents.core.external_channel_projection import is_external_channel_projection
+from azents.runtime.transfer.provider_source import ProviderByteStreamResponse
 from azents.services.external_channel.slack_blocks import (
     projected_slack_blocks_text,
     slack_blocks_text,
@@ -53,7 +54,6 @@ from azents.services.external_channel.slack_endpoint import slack_file_url_allow
 
 _MAX_NORMALIZED_TEXT_BYTES = 64 * 1024
 _MAX_ATTACHMENT_TYPES = 32
-SLACK_MARKDOWN_TEXT_MAX_LENGTH = 12_000
 SLACK_INTERACTION_VIEW_TITLE_MAX_LENGTH = 24
 SLACK_INTERACTION_VIEW_PRIVATE_METADATA_MAX_LENGTH = 3_000
 SLACK_INTERACTION_VIEW_MAX_BLOCKS = 100
@@ -547,7 +547,7 @@ def _normalize_slack_event(
         provider_updated_at = None
 
     root_thread_ts = _optional_string(message, "thread_ts") or message_ts
-    author_type, provider_user_id = _author(message)
+    author = _author(message)
     normalized_body = _normalized_message_body(
         message,
         trusted_block_projection=trusted_block_projection,
@@ -564,8 +564,8 @@ def _normalize_slack_event(
     invocation = _slack_message_invocation(
         event_type=event_type,
         subtype=subtype,
-        author_type=author_type,
-        provider_user_id=provider_user_id,
+        author_type=author.author_type,
+        provider_user_id=author.provider_user_id,
         normalized_body=normalized_body,
         tenant_id=tenant_id,
         envelope=envelope,
@@ -583,8 +583,8 @@ def _normalize_slack_event(
         revision_key=revision_key,
         revision_kind=revision_kind,
         lifecycle=lifecycle,
-        author_type=author_type,
-        provider_user_id=provider_user_id,
+        author_type=author.author_type,
+        provider_user_id=author.provider_user_id,
         normalized_body=normalized_body,
         attachment_metadata=attachment_metadata,
         normalized_size=normalized_size,
@@ -2172,25 +2172,51 @@ def _eligible_channel(channel_id: str, channel_type: object) -> bool:
     return channel_id.startswith(("C", "G"))
 
 
+class SlackMessageAuthor(NamedTuple):
+    """Provider author classification and optional stable principal identity."""
+
+    author_type: ExternalChannelPrincipalAuthorType
+    provider_user_id: str | None
+
+
+class SlackMessageReferenceIDs(NamedTuple):
+    """Bounded user and channel references extracted from Slack message text."""
+
+    user_ids: set[str]
+    channel_ids: set[str]
+
+
 def _author(
     message: dict[str, object],
-) -> tuple[ExternalChannelPrincipalAuthorType, str | None]:
+) -> SlackMessageAuthor:
     user_id = _optional_string(message, "user")
     bot_id = _optional_string(message, "bot_id")
     app_id = _optional_string(message, "app_id")
     if bot_id is not None:
-        return ExternalChannelPrincipalAuthorType.BOT, f"bot:{bot_id}"
+        return SlackMessageAuthor(
+            author_type=ExternalChannelPrincipalAuthorType.BOT,
+            provider_user_id=f"bot:{bot_id}",
+        )
     if app_id is not None and user_id is None:
-        return ExternalChannelPrincipalAuthorType.APP, f"app:{app_id}"
+        return SlackMessageAuthor(
+            author_type=ExternalChannelPrincipalAuthorType.APP,
+            provider_user_id=f"app:{app_id}",
+        )
     if user_id is not None:
-        return ExternalChannelPrincipalAuthorType.HUMAN, user_id
-    return ExternalChannelPrincipalAuthorType.SYSTEM, None
+        return SlackMessageAuthor(
+            author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+            provider_user_id=user_id,
+        )
+    return SlackMessageAuthor(
+        author_type=ExternalChannelPrincipalAuthorType.SYSTEM,
+        provider_user_id=None,
+    )
 
 
-def slack_message_reference_ids(body: str | None) -> tuple[set[str], set[str]]:
+def slack_message_reference_ids(body: str | None) -> SlackMessageReferenceIDs:
     """Extract bounded Slack user and channel IDs from message text."""
     if body is None:
-        return set(), set()
+        return SlackMessageReferenceIDs(user_ids=set(), channel_ids=set())
     user_ids = {
         match.group(1) or match.group(2)
         for match in _SLACK_USER_REFERENCE.finditer(body)
@@ -2201,9 +2227,9 @@ def slack_message_reference_ids(body: str | None) -> tuple[set[str], set[str]]:
         for match in _SLACK_CHANNEL_REFERENCE.finditer(body)
         if match.group(1) or match.group(2)
     }
-    return (
-        set(sorted(user_ids)[:_MAX_REFERENCE_IDS]),
-        set(sorted(channel_ids)[:_MAX_REFERENCE_IDS]),
+    return SlackMessageReferenceIDs(
+        user_ids=set(sorted(user_ids)[:_MAX_REFERENCE_IDS]),
+        channel_ids=set(sorted(channel_ids)[:_MAX_REFERENCE_IDS]),
     )
 
 

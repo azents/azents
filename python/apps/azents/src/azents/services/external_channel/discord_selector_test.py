@@ -1,22 +1,33 @@
 """Discord-native selector response tests."""
 
 import datetime
-from types import SimpleNamespace
-from typing import cast
+from typing import Annotated, Literal
 
 import pytest
+from pydantic import BaseModel, ConfigDict, Field
 
-from azents.core.config import Config
+from azents.core.config import Config, Settings
+from azents.core.enums import (
+    ExternalChannelInteractionStatus,
+    ExternalChannelInteractionType,
+    ExternalChannelTransport,
+)
+from azents.core.external_channel_ingestion import (
+    ExternalChannelIngestionOutcome,
+    ExternalChannelIngestionOutcomeKind,
+    ExternalChannelIngestionReason,
+)
+from azents.core.external_channel_provider_effect import ProviderEffectPlan
+from azents.core.external_channel_selection import (
+    ExternalChannelSelectorCandidate,
+    ExternalChannelSelectorCatalog,
+    ExternalChannelSelectorSelection,
+)
 from azents.repos.external_channel.data import ExternalChannelInteraction
 from azents.services.external_channel.discord_selector import (
     DiscordSelectorResponseService,
     build_discord_selector_custom_id,
     parse_discord_selector_custom_id,
-)
-from azents.services.external_channel.ingestion import (
-    ExternalChannelIngestionOutcome,
-    ExternalChannelIngestionOutcomeKind,
-    ExternalChannelIngestionReason,
 )
 from azents.services.external_channel.ingestion_replay import (
     ExternalChannelIngestionReplayService,
@@ -24,19 +35,84 @@ from azents.services.external_channel.ingestion_replay import (
 from azents.services.external_channel.provider_control import (
     ExternalChannelProviderControlService,
 )
-from azents.services.external_channel.selector import (
-    ExternalChannelSelectorCandidate,
-    ExternalChannelSelectorCatalog,
-    ExternalChannelSelectorSelection,
-    ExternalChannelSelectorService,
-)
+from azents.services.external_channel.selector import ExternalChannelSelectorService
 from azents.testing.external_channel import make_provider_effect_plan
 
 _NOW = datetime.datetime(2026, 7, 28, tzinfo=datetime.UTC)
 _SECRET = "selector-test-secret"
 
 
-class _SelectorDouble:
+def _interaction() -> ExternalChannelInteraction:
+    """Create the complete admitted selector record used by the typed fake."""
+    return ExternalChannelInteraction(
+        id="admission-1",
+        connection_id="connection-1",
+        transport=ExternalChannelTransport.HTTP,
+        provider_interaction_key="discord:interaction-1",
+        interaction_type=ExternalChannelInteractionType.BLOCK_ACTION,
+        callback_id=None,
+        action_id=None,
+        principal_id="principal-1",
+        setup_claim_id=None,
+        resource_correlation_key=None,
+        projection={},
+        status=ExternalChannelInteractionStatus.PROCESSING,
+        expires_at=_NOW + datetime.timedelta(minutes=20),
+        error_kind=None,
+        error_summary=None,
+        created_at=_NOW,
+        updated_at=_NOW,
+    )
+
+
+class _SelectorOption(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    label: str
+    description: str
+    value: str
+
+
+class _SelectorMenu(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    type: Literal[3]
+    custom_id: str
+    placeholder: str
+    min_values: int
+    max_values: int
+    options: list[_SelectorOption]
+
+
+class _SelectorButton(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    type: Literal[2]
+    custom_id: str
+    label: str
+    style: int
+
+
+class _SelectorRow(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    type: Literal[1]
+    components: list[
+        Annotated[_SelectorMenu | _SelectorButton, Field(discriminator="type")]
+    ]
+
+
+class _InitialSelectorData(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    flags: int
+    content: str
+    embeds: list[dict[str, object]]
+    components: list[_SelectorRow]
+
+
+class _InitialSelectorResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    type: Literal[4]
+    data: _InitialSelectorData
+
+
+class _SelectorDouble(ExternalChannelSelectorService):
     """Record trusted catalog and selection calls only."""
 
     def __init__(self) -> None:
@@ -54,9 +130,7 @@ class _SelectorDouble:
         )
         self.selection = ExternalChannelSelectorSelection(
             status="selected",
-            selector_interaction=ExternalChannelInteraction.model_construct(
-                id="admission-1"
-            ),
+            selector_interaction=_interaction(),
             binding=None,
         )
 
@@ -105,15 +179,15 @@ class _SelectorDouble:
         return self.selection
 
 
-class _ProviderControlDouble:
+class _ProviderControlDouble(ExternalChannelProviderControlService):
     def __init__(self) -> None:
-        self.calls: list[str] = []
+        self.calls: list[ProviderEffectPlan] = []
 
-    async def attempt_delivery(self, delivery_attempt_id: str) -> None:
-        self.calls.append(delivery_attempt_id)
+    async def attempt(self, plan: ProviderEffectPlan) -> None:
+        self.calls.append(plan)
 
 
-class _ReplayDouble:
+class _ReplayDouble(ExternalChannelIngestionReplayService):
     def __init__(
         self,
         outcome: ExternalChannelIngestionOutcome | None = None,
@@ -145,22 +219,21 @@ def _service(
     provider_control: _ProviderControlDouble | None = None,
 ) -> DiscordSelectorResponseService:
     """Build the response service with only redacted local selector state."""
-    config = SimpleNamespace(
-        auth=SimpleNamespace(
-            jwt=SimpleNamespace(secret_key=_SECRET),
+    config = Config.from_settings(
+        Settings(
+            _env_file=None,
+            rdb_host="unused",
+            rdb_user="unused",
+            rdb_db_name="unused",
+            auth_jwt_secret_key=_SECRET,
+            credential_encryption_key="unused",
         )
     )
     return DiscordSelectorResponseService(
-        selector_service=cast(ExternalChannelSelectorService, selector),
-        config=cast(Config, config),
-        provider_control=cast(
-            ExternalChannelProviderControlService,
-            provider_control or _ProviderControlDouble(),
-        ),
-        ingestion_replay_service=cast(
-            ExternalChannelIngestionReplayService,
-            replay or _ReplayDouble(),
-        ),
+        selector_service=selector,
+        config=config,
+        provider_control=provider_control or _ProviderControlDouble(),
+        ingestion_replay_service=replay or _ReplayDouble(),
     )
 
 
@@ -199,19 +272,21 @@ async def test_initial_response_renders_bounded_selector_and_next_scope() -> Non
 
     assert selector.catalog_calls == [("admission-1", "principal-1", None, 0)]
     assert response["type"] == 4
-    data = cast(dict[str, object], response["data"])
-    assert data["flags"] == 64
-    rows = cast(list[dict[str, object]], data["components"])
-    select = cast(dict[str, object], cast(list[object], rows[0]["components"])[0])
-    option = cast(dict[str, object], cast(list[object], select["options"])[0])
-    assert option == {
+    data = _InitialSelectorResponse.model_validate(response).data
+    assert data.flags == 64
+    rows = data.components
+    select = rows[0].components[0]
+    assert isinstance(select, _SelectorMenu)
+    option = select.options[0]
+    assert option.model_dump() == {
         "label": "Agent One",
         "description": "Available immediately",
         "value": "route-1",
     }
-    next_button = cast(dict[str, object], cast(list[object], rows[1]["components"])[0])
+    next_button = rows[1].components[0]
+    assert isinstance(next_button, _SelectorButton)
     next_scope = parse_discord_selector_custom_id(
-        custom_id=cast(str, next_button["custom_id"]),
+        custom_id=next_button.custom_id,
         secret=_SECRET,
     )
     assert next_scope.action == "next"
@@ -252,13 +327,7 @@ async def test_typed_component_selection_replays_shared_ingestion() -> None:
     selector = _SelectorDouble()
     selector.selection = ExternalChannelSelectorSelection(
         status="selected",
-        selector_interaction=ExternalChannelInteraction.model_construct(
-            id="admission-1",
-            connection_id="connection-1",
-            conversation_position_id="position-1",
-            range_start_position="0001",
-            trigger_position="0002",
-        ),
+        selector_interaction=_interaction(),
         binding=None,
     )
     replay = _ReplayDouble(

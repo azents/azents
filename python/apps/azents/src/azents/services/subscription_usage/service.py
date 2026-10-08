@@ -10,7 +10,6 @@ from typing import Annotated, assert_never
 import httpx
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.chatgpt_oauth import (
     CHATGPT_USAGE_BASE_URL,
@@ -37,14 +36,10 @@ from azents.core.xai_oauth import (
     XaiOAuthConnectionStatus,
     resolve_xai_usage_base_url,
 )
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
-from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
+from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
-from azents.repos.llm_provider_integration.deps import (
-    get_llm_provider_integration_repository,
-)
+from azents.repos.subscription_usage_read import SubscriptionUsageReadRepository
 from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
 from azents.services.chatgpt_oauth.data import ProviderRejected, ProviderUnavailable
 from azents.services.chatgpt_oauth.runtime import (
@@ -60,6 +55,10 @@ from azents.services.kimi_oauth.runtime import (
 )
 from azents.services.kimi_oauth.runtime import (
     refresh_runtime_tokens as refresh_kimi_runtime_tokens,
+)
+from azents.services.oauth_runtime_clients import (
+    RuntimeOAuthClientFactories,
+    create_runtime_oauth_client_factories,
 )
 from azents.services.xai_oauth.data import (
     ProviderEntitlementDenied as XaiProviderEntitlementDenied,
@@ -146,9 +145,12 @@ def get_kimi_usage_base_url() -> str:
 class SubscriptionUsageService:
     """Load, authorize, refresh, and normalize one subscription usage read."""
 
-    repository: Annotated[
-        LLMProviderIntegrationRepository,
-        Depends(get_llm_provider_integration_repository),
+    read_repository: Annotated[
+        SubscriptionUsageReadRepository,
+        Depends(SubscriptionUsageReadRepository),
+    ]
+    kimi_oauth_runtime_repository: Annotated[
+        KimiOAuthRuntimeRepository, Depends(KimiOAuthRuntimeRepository)
     ]
     chatgpt_oauth_runtime_repository: Annotated[
         ChatGPTOAuthRuntimeRepository, Depends(ChatGPTOAuthRuntimeRepository)
@@ -156,8 +158,8 @@ class SubscriptionUsageService:
     xai_oauth_runtime_repository: Annotated[
         XaiOAuthRuntimeRepository, Depends(XaiOAuthRuntimeRepository)
     ]
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+    runtime_oauth_clients: Annotated[
+        RuntimeOAuthClientFactories, Depends(create_runtime_oauth_client_factories)
     ]
     http_client: Annotated[httpx.AsyncClient, Depends(_get_http_client)]
     chatgpt_usage_base_url: Annotated[str, Depends(get_chatgpt_usage_base_url)]
@@ -174,10 +176,7 @@ class SubscriptionUsageService:
     ) -> Result[SubscriptionUsageOutcome, SubscriptionUsageServiceFailure]:
         """Read subscription usage for one workspace integration."""
         started_at = time.perf_counter()
-        async with self.session_manager() as session:
-            integration = await self.repository.get_by_id_with_secrets(
-                session, integration_id
-            )
+        integration = await self.read_repository.load(integration_id)
         if integration is None:
             failure = SubscriptionUsageNotFound(integration_id=integration_id)
             self._log_service_failure(
@@ -278,6 +277,7 @@ class SubscriptionUsageService:
         fresh_result = await ensure_runtime_tokens(
             integration=integration,
             persistence_repository=self.chatgpt_oauth_runtime_repository,
+            client_factory=self.runtime_oauth_clients.chatgpt,
         )
         match fresh_result:
             case Success(fresh_integration):
@@ -344,6 +344,7 @@ class SubscriptionUsageService:
         refresh_result = await refresh_runtime_tokens(
             integration=integration,
             persistence_repository=self.chatgpt_oauth_runtime_repository,
+            client_factory=self.runtime_oauth_clients.chatgpt,
         )
         match refresh_result:
             case Failure(error):
@@ -438,6 +439,7 @@ class SubscriptionUsageService:
         fresh_result = await ensure_xai_runtime_tokens(
             integration=integration,
             persistence_repository=self.xai_oauth_runtime_repository,
+            client_factory=self.runtime_oauth_clients.xai,
         )
         match fresh_result:
             case Success(fresh_integration):
@@ -506,6 +508,7 @@ class SubscriptionUsageService:
         refresh_result = await refresh_xai_runtime_tokens(
             integration=integration,
             persistence_repository=self.xai_oauth_runtime_repository,
+            client_factory=self.runtime_oauth_clients.xai,
         )
         match refresh_result:
             case Failure(error):
@@ -639,8 +642,8 @@ class SubscriptionUsageService:
             )
         fresh_result = await ensure_kimi_runtime_tokens(
             integration=integration,
-            integration_repository=self.repository,
-            session_manager=self.session_manager,
+            persistence_repository=self.kimi_oauth_runtime_repository,
+            client_factory=self.runtime_oauth_clients.kimi,
         )
         match fresh_result:
             case Success(fresh_integration):
@@ -697,8 +700,8 @@ class SubscriptionUsageService:
         """Force one Kimi token refresh and retry one usage request."""
         refresh_result = await refresh_kimi_runtime_tokens(
             integration=integration,
-            integration_repository=self.repository,
-            session_manager=self.session_manager,
+            persistence_repository=self.kimi_oauth_runtime_repository,
+            client_factory=self.runtime_oauth_clients.kimi,
         )
         match refresh_result:
             case Failure(error):

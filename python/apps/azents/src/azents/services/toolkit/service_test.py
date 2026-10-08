@@ -13,9 +13,11 @@ from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.enums import AgentLifecycleStatus, WorkspaceUserRole
+from azents.core.toolkit_errors import NotFound
 from azents.engine.tools.mcp import McpToolkitProvider
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.github_user_installation import GithubUserInstallationRepository
@@ -26,9 +28,11 @@ from azents.repos.toolkit import (
     ToolkitRepository,
     ToolkitScopeRepository,
 )
-from azents.repos.toolkit.data import NotFound, ToolkitConfig
+from azents.repos.toolkit.data import AgentToolkit, ToolkitConfig
+from azents.repos.toolkit_namespace import ToolkitNamespaceRepository
 from azents.repos.toolkit_operations import ToolkitOperationsRepository
 from azents.repos.toolkit_operations.owned import AgentToolkitOperationsRepository
+from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.agent.data import NotAdmin
 from azents.services.github_platform_system_setting.runtime import (
@@ -38,7 +42,6 @@ from azents.services.toolkit import ToolkitService, merge_envvar_credentials
 from azents.services.toolkit.data import (
     AgentNotBelongToWorkspace,
     AgentToolkitOAuthConnectionInput,
-    EffectiveSlugConflict,
     ToolkitCreateInput,
     ToolkitUpdateInput,
 )
@@ -111,7 +114,7 @@ class TestMergeEnvVarCredentials:
         )
         toolkit_repo = MagicMock()
         toolkit_repo.get_shared_by_id = AsyncMock(return_value=existing)
-        toolkit_repo.get_shared_by_id_for_update = AsyncMock(return_value=existing)
+        toolkit_repo.get_shared_by_id = AsyncMock(return_value=existing)
         toolkit_repo.update_by_id = AsyncMock(return_value=Success(existing))
         session_manager = MagicMock()
         session_manager.return_value = AsyncMock()
@@ -336,7 +339,7 @@ async def test_agent_owned_create_sets_owner_without_scope_or_attachment() -> No
     agent = _active_agent()
     agent_repo = MagicMock()
     agent_repo.get_by_id = AsyncMock(return_value=agent)
-    agent_repo.lock_by_id = AsyncMock(return_value=agent)
+    agent_repo.get_by_id = AsyncMock(return_value=agent)
     agent_admin_repo = MagicMock()
     agent_admin_repo.is_admin = AsyncMock()
     agent_toolkit_repo = MagicMock()
@@ -348,8 +351,7 @@ async def test_agent_owned_create_sets_owner_without_scope_or_attachment() -> No
         update={"id": "toolkit-owned", "owner_agent_id": "agent-1"}
     )
     toolkit_repo = MagicMock()
-    toolkit_repo.has_effective_slug_conflict = AsyncMock(return_value=False)
-    toolkit_repo.create = AsyncMock(return_value=Success(created))
+    toolkit_repo.create = AsyncMock(return_value=created)
     provider = McpToolkitProvider()
     service = _agent_management_service(
         toolkit_repo=toolkit_repo,
@@ -359,6 +361,8 @@ async def test_agent_owned_create_sets_owner_without_scope_or_attachment() -> No
         toolkit_registry={"mcp": provider},
     )
     service.operations_repository.scope_repository = scope_repo
+    namespace_repo = AsyncMock(spec=ToolkitNamespaceRepository)
+    service.owned_operations.namespace_repo = namespace_repo
 
     result = await service.create_agent_owned(
         "agent-1",
@@ -387,6 +391,15 @@ async def test_agent_owned_create_sets_owner_without_scope_or_attachment() -> No
     assert create.owner_agent_id == "agent-1"
     scope_repo.create.assert_not_awaited()
     agent_toolkit_repo.create.assert_not_awaited()
+    namespace_repo.ensure_active.assert_awaited_once()
+    namespace_call = namespace_repo.ensure_active.await_args
+    assert namespace_call is not None
+    assert len(namespace_call.args) == 1
+    assert namespace_call.kwargs == {
+        "agent_id": "agent-1",
+        "toolkit_id": "toolkit-owned",
+        "base_slug": "private",
+    }
 
 
 async def test_agent_owned_item_lookup_hides_another_agents_toolkit() -> None:
@@ -454,9 +467,9 @@ async def test_agent_oauth_store_locks_owner_and_marks_incomplete_flow() -> None
         update={"owner_agent_id": "agent-1"}
     )
     toolkit_repo = MagicMock()
-    toolkit_repo.get_by_id_for_update = AsyncMock(return_value=toolkit)
+    toolkit_repo.get_by_id = AsyncMock(return_value=toolkit)
     agent_repo = MagicMock()
-    agent_repo.lock_by_id = AsyncMock(return_value=_active_agent())
+    agent_repo.get_by_id = AsyncMock(return_value=_active_agent())
     oauth_repo = MagicMock()
     oauth_repo.upsert_connected = AsyncMock()
     oauth_repo.mark_reconnect_required = AsyncMock()
@@ -494,8 +507,8 @@ async def test_agent_oauth_store_locks_owner_and_marks_incomplete_flow() -> None
     )
 
     assert isinstance(result, Success)
-    toolkit_repo.get_by_id_for_update.assert_awaited_once()
-    agent_repo.lock_by_id.assert_awaited_once()
+    toolkit_repo.get_by_id.assert_awaited_once()
+    agent_repo.get_by_id.assert_awaited_once()
     oauth_repo.upsert_connected.assert_awaited_once()
     oauth_repo.mark_reconnect_required.assert_awaited_once()
 
@@ -506,7 +519,7 @@ async def test_agent_oauth_delete_rejects_another_agents_toolkit() -> None:
         update={"owner_agent_id": "agent-other"}
     )
     toolkit_repo = MagicMock()
-    toolkit_repo.get_by_id_for_update = AsyncMock(return_value=toolkit)
+    toolkit_repo.get_by_id = AsyncMock(return_value=toolkit)
     oauth_repo = MagicMock()
     oauth_repo.delete_by_toolkit_id = AsyncMock()
     service = _agent_management_service(
@@ -531,79 +544,94 @@ async def test_agent_oauth_delete_rejects_another_agents_toolkit() -> None:
     oauth_repo.delete_by_toolkit_id.assert_not_awaited()
 
 
-async def test_attach_rejects_effective_slug_conflict_before_projection_create() -> (
-    None
-):
-    """Serialize the Agent namespace and reject a conflicting shared attachment."""
+async def test_attach_allocates_namespace_after_projection_create() -> None:
+    """Persist the Agent attachment and its reusable namespace in one transaction."""
     toolkit = _toolkit_config(slug="github")
     toolkit_repo = MagicMock()
-    toolkit_repo.get_shared_by_id_for_update = AsyncMock(return_value=toolkit)
+    toolkit_repo.get_shared_by_id = AsyncMock(return_value=toolkit)
+    toolkit_repo.claim_shared_namespace_mutation = AsyncMock(return_value=toolkit)
     toolkit_repo.list_available_for_workspace_user = AsyncMock(return_value=[toolkit])
-    toolkit_repo.has_effective_slug_conflict = AsyncMock(return_value=True)
     agent_repo = MagicMock()
-    agent_repo.lock_by_id = AsyncMock(
+    agent_repo.get_by_id = AsyncMock(
         return_value=SimpleNamespace(workspace_id="workspace-1")
     )
+    attachment = AgentToolkit(
+        id="attachment-1",
+        agent_id="agent-1",
+        toolkit_id=toolkit.id,
+        toolkit_type=toolkit.toolkit_type,
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
     agent_toolkit_repo = MagicMock()
-    agent_toolkit_repo.create = AsyncMock()
-
-    result = await _service(
+    agent_toolkit_repo.create = AsyncMock(return_value=Success(attachment))
+    service = _service(
         toolkit_repo=toolkit_repo,
         agent_toolkit_repo=agent_toolkit_repo,
         agent_repo=agent_repo,
-    ).attach_to_agent(
+    )
+    namespace_repo = AsyncMock(spec=ToolkitNamespaceRepository)
+    service.operations_repository.namespace_repository = namespace_repo
+
+    result = await service.attach_to_agent(
         "agent-1",
         toolkit.id,
         workspace_id="workspace-1",
         user_id="user-1",
     )
 
-    assert isinstance(result, Failure)
-    assert result.error == EffectiveSlugConflict(slug="github")
-    agent_repo.lock_by_id.assert_awaited_once()
-    agent_toolkit_repo.create.assert_not_awaited()
+    assert isinstance(result, Success)
+    namespace_repo.ensure_active.assert_awaited_once()
+    call = namespace_repo.ensure_active.await_args
+    assert call is not None
+    assert call.kwargs == {
+        "agent_id": "agent-1",
+        "toolkit_id": toolkit.id,
+        "base_slug": "github",
+    }
 
 
-async def test_shared_slug_update_locks_attached_agents_before_conflict_check() -> None:
-    """Lock every attached Agent in repository order before validating a new slug."""
+async def test_shared_slug_update_reallocates_without_agent_read_lock() -> None:
+    """Allow a duplicate Slug while reallocating attached Agent namespaces."""
     toolkit = _toolkit_config(slug="github")
+    updated = toolkit.model_copy(update={"slug": "github_new"})
     toolkit_repo = MagicMock()
     toolkit_repo.get_shared_by_id = AsyncMock(return_value=toolkit)
-    toolkit_repo.get_shared_by_id_for_update = AsyncMock(return_value=toolkit)
-    toolkit_repo.has_effective_slug_conflict = AsyncMock(
-        side_effect=[False, True],
-    )
-    toolkit_repo.update_by_id = AsyncMock(return_value=Success(toolkit))
+    toolkit_repo.claim_shared_namespace_mutation = AsyncMock(return_value=toolkit)
+    toolkit_repo.get_shared_by_id = AsyncMock(return_value=toolkit)
+    toolkit_repo.claim_shared_namespace_mutation = AsyncMock(return_value=toolkit)
+    toolkit_repo.update_by_id = AsyncMock(return_value=Success(updated))
     agent_toolkit_repo = MagicMock()
     agent_toolkit_repo.list_agent_ids_by_toolkit = AsyncMock(
         return_value=["agent-a", "agent-b"],
     )
     agent_repo = MagicMock()
-    agent_repo.lock_by_id = AsyncMock(
+    agent_repo.get_by_id = AsyncMock(
         side_effect=[
             SimpleNamespace(workspace_id="workspace-1"),
             SimpleNamespace(workspace_id="workspace-1"),
         ],
     )
-
-    result = await _service(
+    service = _service(
         toolkit_repo=toolkit_repo,
         agent_toolkit_repo=agent_toolkit_repo,
         agent_repo=agent_repo,
-    ).update_by_id(
+    )
+    namespace_repo = AsyncMock(spec=ToolkitNamespaceRepository)
+    service.operations_repository.namespace_repository = namespace_repo
+
+    result = await service.update_by_id(
         toolkit.id,
         {"slug": "github_new"},
         workspace_id="workspace-1",
         user_id="user-1",
     )
 
-    assert isinstance(result, Failure)
-    assert result.error == EffectiveSlugConflict(slug="github_new")
-    assert [call.args[1] for call in agent_repo.lock_by_id.await_args_list] == [
-        "agent-a",
-        "agent-b",
-    ]
-    toolkit_repo.update_by_id.assert_not_awaited()
+    assert isinstance(result, Success)
+    agent_repo.get_by_id.assert_not_awaited()
+    toolkit_repo.update_by_id.assert_awaited_once()
+    assert [
+        call.kwargs["agent_id"] for call in namespace_repo.ensure_active.await_args_list
+    ] == ["agent-a", "agent-b"]
 
 
 class _RaceToolkitRepository(ToolkitRepository):
@@ -611,7 +639,7 @@ class _RaceToolkitRepository(ToolkitRepository):
 
     async def list_available_for_workspace_user(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         workspace_id: str,
         user_id: str,
     ) -> list[ToolkitConfig]:
@@ -625,29 +653,30 @@ class _RaceToolkitRepository(ToolkitRepository):
 
 def _engine_session_manager(
     engine: AsyncEngine,
-) -> SessionManager[AsyncSession]:
+) -> SessionManager[WriteSession]:
     """Create independent committing sessions for a concurrency test."""
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        async with AsyncSession(engine, expire_on_commit=False) as session:
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
+        async with AsyncSession(engine, expire_on_commit=False) as raw_session:
+            session = ReadWriteSession(raw_session)
             try:
                 yield session
             except Exception:
-                await session.rollback()
+                await session.write_session.rollback()
                 raise
             else:
-                await session.commit()
+                await session.write_session.commit()
 
     return session_manager
 
 
 async def _seed_slug_race(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
 ) -> None:
     """Seed one Agent, one shared Toolkit, and one conflicting owned Toolkit."""
     async with session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.text(
                 """
                 INSERT INTO workspaces (id, name, handle)
@@ -655,7 +684,7 @@ async def _seed_slug_race(
                 """
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.text(
                 """
                 INSERT INTO agents (
@@ -692,7 +721,7 @@ async def _seed_slug_race(
                 """
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.text(
                 """
                 INSERT INTO toolkit_configs (
@@ -723,13 +752,45 @@ async def _seed_slug_race(
                 """
             )
         )
+        await session.write_session.execute(
+            sa.text(
+                """
+                INSERT INTO agent_toolkit_namespace_reservations (
+                    id, agent_id, toolkit_id, base_slug, ordinal, namespace
+                )
+                VALUES (
+                    'namespace-race-owned',
+                    'agent-race',
+                    'toolkit-race-owned',
+                    'conflict',
+                    1,
+                    'conflict'
+                )
+                """
+            )
+        )
+        await session.write_session.execute(
+            sa.text(
+                """
+                INSERT INTO agent_toolkit_namespace_sequences (
+                    id, agent_id, base_slug, last_ordinal
+                )
+                VALUES (
+                    'sequence-race-owned',
+                    'agent-race',
+                    'conflict',
+                    1
+                )
+                """
+            )
+        )
 
 
 async def test_concurrent_shared_attach_and_slug_update_preserve_unique_namespace(
     rdb_engine: AsyncEngine,
     latest_db_schema: None,
 ) -> None:
-    """Serialize a shared attach race so exactly one conflicting mutation commits."""
+    """Serialize attach and Slug update while allowing both duplicate writes."""
     del latest_db_schema
     session_manager = _engine_session_manager(rdb_engine)
     await _seed_slug_race(session_manager)
@@ -737,10 +798,10 @@ async def test_concurrent_shared_attach_and_slug_update_preserve_unique_namespac
     agent_repo = MagicMock(spec=AgentRepository)
 
     async def lock_agent(
-        session: AsyncSession,
+        session: WriteSession,
         agent_id: str,
     ) -> SimpleNamespace | None:
-        workspace_id = await session.scalar(
+        workspace_id = await session.read_session.scalar(
             sa.select(RDBAgent.workspace_id)
             .where(RDBAgent.id == agent_id)
             .with_for_update(key_share=True)
@@ -749,7 +810,7 @@ async def test_concurrent_shared_attach_and_slug_update_preserve_unique_namespac
             return None
         return SimpleNamespace(workspace_id=workspace_id)
 
-    agent_repo.lock_by_id = AsyncMock(side_effect=lock_agent)
+    agent_repo.get_by_id = AsyncMock(side_effect=lock_agent)
     service = _build_service(
         toolkit_repo=toolkit_repo,
         mcp_oauth_connection_repo=MagicMock(),
@@ -762,6 +823,7 @@ async def test_concurrent_shared_attach_and_slug_update_preserve_unique_namespac
         toolkit_registry={},
         github_runtime=MagicMock(),
     )
+    service.operations_repository.namespace_repository = ToolkitNamespaceRepository()
     start = asyncio.Event()
 
     async def attach() -> object:
@@ -787,15 +849,7 @@ async def test_concurrent_shared_attach_and_slug_update_preserve_unique_namespac
         start.set()
         results = await asyncio.wait_for(asyncio.gather(*tasks), timeout=5)
 
-        successes = [result for result in results if isinstance(result, Success)]
-        conflicts = [
-            result
-            for result in results
-            if isinstance(result, Failure)
-            and isinstance(result.error, EffectiveSlugConflict)
-        ]
-        assert len(successes) == 1
-        assert len(conflicts) == 1
+        assert all(isinstance(result, Success) for result in results)
 
         async with session_manager() as session:
             effective = await toolkit_repo.list_effective_for_agent(
@@ -803,14 +857,17 @@ async def test_concurrent_shared_attach_and_slug_update_preserve_unique_namespac
                 "agent-race",
                 workspace_id="workspace-race",
             )
-        assert len({item.toolkit.slug for item in effective}) == len(effective)
+        assert [item.toolkit.slug for item in effective] == ["conflict", "conflict"]
+        assert len({item.namespace for item in effective}) == 2
     finally:
         for task in tasks:
             if not task.done():
                 task.cancel()
         async with session_manager() as session:
-            await session.execute(sa.text("DELETE FROM agents WHERE id = 'agent-race'"))
-            await session.execute(
+            await session.write_session.execute(
+                sa.text("DELETE FROM agents WHERE id = 'agent-race'")
+            )
+            await session.write_session.execute(
                 sa.text("DELETE FROM workspaces WHERE id = 'workspace-race'")
             )
 
@@ -824,16 +881,20 @@ def _build_service(
     agent_repo: AgentRepository,
     agent_admin_repo: AgentAdminRepository,
     github_user_installation_repo: GithubUserInstallationRepository,
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     toolkit_registry: dict[str, Any],
     github_runtime: PlatformGitHubAppRuntimeService,
 ) -> ToolkitService:
     """Compose test-owned repositories while preserving narrow collaborator probes."""
+    workspace_repository = AsyncMock(spec=WorkspaceRepository)
+    workspace_repository.get_by_id.return_value = SimpleNamespace()
     operations = ToolkitOperationsRepository(
         toolkit_repository=toolkit_repo,
         scope_repository=scope_repo,
         agent_toolkit_repository=agent_toolkit_repo,
         agent_repository=agent_repo,
+        namespace_repository=AsyncMock(spec=ToolkitNamespaceRepository),
+        workspace_repository=workspace_repository,
         workspace_user_repository=AsyncMock(spec=WorkspaceUserRepository),
         github_installation_repository=github_user_installation_repo,
         oauth_connection_repository=mcp_oauth_connection_repo,
@@ -844,6 +905,7 @@ def _build_service(
         toolkit_repo=toolkit_repo,
         mcp_oauth_connection_repo=mcp_oauth_connection_repo,
         agent_repo=agent_repo,
+        namespace_repo=AsyncMock(spec=ToolkitNamespaceRepository),
         agent_admin_repo=agent_admin_repo,
         github_user_installation_repo=github_user_installation_repo,
         session_manager=session_manager,

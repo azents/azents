@@ -155,6 +155,54 @@ class ModelStreamCallContext:
     check_stop: Callable[[], Awaitable[bool]] | None
 
 
+@dataclasses.dataclass(frozen=True)
+class InternalModelCallIdentity:
+    """Safe internal operation attribution, without a foreground identity."""
+
+    agent_id: str
+    workspace_id: str
+    unit_id: str
+    attempt_id: str
+
+    def log_fields(self) -> dict[str, object]:
+        return {
+            "internal_agent_id": self.agent_id,
+            "internal_workspace_id": self.workspace_id,
+            "internal_unit_id": self.unit_id,
+            "internal_attempt_id": self.attempt_id,
+        }
+
+
+@dataclasses.dataclass(frozen=True)
+class InternalModelStreamCallContext(ModelStreamCallContext):
+    """Independent job identity and one admission before each physical request."""
+
+    identity: InternalModelCallIdentity
+    admit_dispatch: Callable[[], Awaitable[None]]
+
+    def __post_init__(self) -> None:
+        if self.session_id is not None or self.run_id is not None:
+            raise ValueError(
+                "Internal model calls must not bind a foreground identity."
+            )
+
+
+class ModelDispatchAdmissionError(RuntimeError):
+    """A safe internal admission rejection, not a provider/quota failure."""
+
+    def __init__(self, reason: Literal["budget", "ownership", "policy"]) -> None:
+        self.reason = reason
+        super().__init__("Internal model dispatch admission was rejected.")
+
+
+async def admit_model_dispatch(context: ModelStreamCallContext) -> None:
+    """Revalidate current admission before every physical provider request."""
+    if context.check_stop is not None and await context.check_stop():
+        raise asyncio.CancelledError(USER_STOP_CANCEL_MESSAGE)
+    if isinstance(context, InternalModelStreamCallContext):
+        await context.admit_dispatch()
+
+
 class ModelStreamClock(Protocol):
     """Monotonic clock used by deterministic watchdog tests."""
 
@@ -911,7 +959,7 @@ def connect_only_http_timeout(connect_timeout_seconds: float) -> httpx.Timeout:
 
 
 def _context_log_fields(context: ModelStreamCallContext) -> dict[str, object]:
-    return {
+    fields: dict[str, object] = {
         "session_id": context.session_id,
         "run_id": context.run_id,
         "model_stream_call_kind": context.call_kind,
@@ -920,6 +968,9 @@ def _context_log_fields(context: ModelStreamCallContext) -> dict[str, object]:
         "model": context.model,
         "model_stream_attempt_number": context.attempt_number,
     }
+    if isinstance(context, InternalModelStreamCallContext):
+        fields.update(context.identity.log_fields())
+    return fields
 
 
 def _is_user_stop_cancellation(exc: asyncio.CancelledError) -> bool:

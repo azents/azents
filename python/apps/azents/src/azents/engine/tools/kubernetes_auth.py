@@ -6,10 +6,8 @@ Creates async ApiClient based on kubernetes_asyncio.
 
 import asyncio
 import base64
-import json
 import logging
 import tempfile
-import urllib.request
 from collections.abc import Mapping
 from typing import Annotated, Any, Literal, NamedTuple
 
@@ -17,6 +15,8 @@ import boto3
 import google.auth.transport.requests
 import yaml
 from botocore.signers import RequestSigner
+from google.api_core.client_options import ClientOptions
+from google.cloud import container_v1
 from google.oauth2 import service_account
 from kubernetes_asyncio.client import ApiClient, Configuration
 from kubernetes_asyncio.config import new_client_from_config_dict
@@ -24,7 +24,7 @@ from lightkube import AsyncClient
 from lightkube.config.kubeconfig import KubeConfig
 from lightkube.config.models import Cluster as LightkubeCluster
 from lightkube.config.models import User as LightkubeUser
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from azents.core.tools import ClusterConfig
 
@@ -46,12 +46,16 @@ class GkeClusterInfo(NamedTuple):
 class KubeconfigCredential(BaseModel):
     """kubeconfig YAML based authentication."""
 
+    model_config = ConfigDict(extra="forbid")
+
     type: Literal["kubeconfig"] = "kubeconfig"
     kubeconfig_yaml: str = Field(description="raw kubeconfig YAML string")
 
 
 class TokenCredential(BaseModel):
     """Service Account token based authentication."""
+
+    model_config = ConfigDict(extra="forbid")
 
     type: Literal["token"] = "token"
     token: str = Field(description="Service Account token")
@@ -64,6 +68,8 @@ class TokenCredential(BaseModel):
 class EksCredential(BaseModel):
     """AWS EKS IAM based authentication."""
 
+    model_config = ConfigDict(extra="forbid")
+
     type: Literal["eks"] = "eks"
     aws_access_key_id: str = Field(description="AWS Access Key ID")
     aws_secret_access_key: str = Field(description="AWS Secret Access Key")
@@ -75,6 +81,8 @@ class EksCredential(BaseModel):
 
 class GkeCredential(BaseModel):
     """Google GKE Service Account based authentication."""
+
+    model_config = ConfigDict(extra="forbid")
 
     type: Literal["gke"] = "gke"
     service_account_key: dict[str, object] = Field(
@@ -91,6 +99,8 @@ ClusterCredential = Annotated[
 
 class KubernetesCredentials(BaseModel):
     """Container for all cluster credentials."""
+
+    model_config = ConfigDict(extra="forbid")
 
     clusters: dict[
         str,
@@ -363,24 +373,24 @@ def _get_gke_cluster_info(
     :return: (endpoint, ca_cert_base64) tuple
     :raises ValueError: On API call failure
     """
-    request = google.auth.transport.requests.Request()
-    credentials.refresh(request)
-
-    url = (
-        f"https://container.googleapis.com/v1/projects/{project_id}"
-        f"/locations/{location}/clusters/{cluster_name}"
+    with container_v1.ClusterManagerClient(
+        credentials=credentials,
+        transport="rest",
+        client_options=ClientOptions(api_endpoint="container.googleapis.com"),
+    ) as client:
+        cluster = client.get_cluster(
+            name=(
+                f"projects/{project_id}/locations/{location}/clusters/{cluster_name}"
+            ),
+            retry=None,
+            timeout=None,
+        )
+    if not cluster.endpoint or not cluster.master_auth.cluster_ca_certificate:
+        raise ValueError("GKE cluster endpoint or CA certificate is missing.")
+    return GkeClusterInfo(
+        endpoint=f"https://{cluster.endpoint}",
+        ca_cert_b64=cluster.master_auth.cluster_ca_certificate,
     )
-
-    req = urllib.request.Request(url)
-    req.add_header("Authorization", f"Bearer {credentials.token}")
-    req.add_header("Content-Type", "application/json")
-
-    with urllib.request.urlopen(req) as resp:  # noqa: S310
-        data = json.loads(resp.read().decode())
-
-    endpoint: str = f"https://{data['endpoint']}"
-    ca_cert_b64: str = data["masterAuth"]["clusterCaCertificate"]
-    return GkeClusterInfo(endpoint=endpoint, ca_cert_b64=ca_cert_b64)
 
 
 async def _create_gke_client(
@@ -789,32 +799,27 @@ def _scan_gke_clusters_sync(
         scopes=scopes,
     )
 
-    request = google.auth.transport.requests.Request()
-    credentials.refresh(request)
-
-    # Fetch all clusters with GKE API
-    url = (
-        f"https://container.googleapis.com/v1/projects/{project_id}"
-        "/locations/-/clusters"
-    )
-
-    req = urllib.request.Request(url)
-    req.add_header("Authorization", f"Bearer {credentials.token}")
-    req.add_header("Content-Type", "application/json")
-
-    with urllib.request.urlopen(req) as resp:  # noqa: S310
-        data = json.loads(resp.read().decode())
-
-    result: list[dict[str, str]] = []
-    for cluster_data in data.get("clusters", []):
-        result.append(
-            {
-                "name": cluster_data["name"],
-                "region": cluster_data.get("location", ""),
-                "status": cluster_data.get("status", "UNKNOWN"),
-                "endpoint": cluster_data.get("endpoint", ""),
-                "version": cluster_data.get("currentMasterVersion", ""),
-            }
+    with container_v1.ClusterManagerClient(
+        credentials=credentials,
+        transport="rest",
+        client_options=ClientOptions(api_endpoint="container.googleapis.com"),
+    ) as client:
+        response = client.list_clusters(
+            parent=f"projects/{project_id}/locations/-",
+            retry=None,
+            timeout=None,
         )
-
-    return result
+    return [
+        {
+            "name": cluster.name,
+            "region": cluster.location,
+            "status": (
+                container_v1.Cluster.Status(cluster.status).name
+                if cluster.status != container_v1.Cluster.Status.STATUS_UNSPECIFIED
+                else "UNKNOWN"
+            ),
+            "endpoint": cluster.endpoint,
+            "version": cluster.current_master_version,
+        }
+        for cluster in response.clusters
+    ]

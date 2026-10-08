@@ -55,7 +55,9 @@ async def system_catalog_projection_handler(context: TaskContext) -> TaskResult:
                 {
                     "provider": summary.provider.value,
                     "catalog_id": summary.catalog_id,
-                    "snapshot_id": summary.snapshot_id,
+                    "last_success_at": summary.last_success_at.isoformat()
+                    if summary.last_success_at is not None
+                    else None,
                     "visible_count": summary.visible_count,
                     "hidden_count": summary.hidden_count,
                 }
@@ -212,6 +214,32 @@ async def external_account_oauth_cleanup_handler(
     )
 
 
+async def historical_memory_discovery_handler(
+    context: TaskContext,
+) -> TaskResult:
+    """Admit sources, sweep private payloads and dispatch independent Memory work."""
+    from azents.services.historical_memory import discovery  # noqa: PLC0415
+    from azents.services.historical_memory.consolidation_discovery import (  # noqa: PLC0415
+        HistoricalMemoryConsolidationDiscoveryService,
+    )
+
+    service = await context.container.solve(discovery.HistoricalMemoryDiscoveryService)
+    summary = await service.discover_once()
+    consolidation = await context.container.solve(
+        HistoricalMemoryConsolidationDiscoveryService
+    )
+    consolidation_summary = await consolidation.discover_once()
+    return TaskResult(
+        summary={
+            "task_key": context.task_key,
+            "attempt_started_at": context.attempt_started_at.isoformat(),
+            "manual_triggered": context.manual_triggered,
+            **dataclasses.asdict(summary),
+            **dataclasses.asdict(consolidation_summary),
+        }
+    )
+
+
 HEARTBEAT_TASK = ScheduledTaskDefinition(
     key="scheduler_heartbeat",
     description="No-op scheduler heartbeat used to verify periodic execution wiring.",
@@ -350,6 +378,20 @@ EXTERNAL_ACCOUNT_OAUTH_CLEANUP_TASK = ScheduledTaskDefinition(
     enabled_by_default=True,
 )
 
+HISTORICAL_MEMORY_DISCOVERY_TASK = ScheduledTaskDefinition(
+    key="historical_memory_discovery",
+    description="Admit inactive Sessions and dispatch Historical Memory preparation.",
+    interval=datetime.timedelta(minutes=5),
+    timeout=datetime.timedelta(minutes=2),
+    retry_policy=RetryPolicy(
+        kind="bounded_backoff",
+        min_delay=datetime.timedelta(minutes=1),
+        max_delay=datetime.timedelta(minutes=30),
+    ),
+    handler=historical_memory_discovery_handler,
+    enabled_by_default=True,
+)
+
 
 USER_SCHEDULED_TASK_DISPATCH_TASK = ScheduledTaskDefinition(
     key="user_scheduled_task_dispatch",
@@ -376,6 +418,7 @@ SCHEDULED_TASK_DEFINITIONS: tuple[ScheduledTaskDefinition, ...] = (
     OWNER_LIFECYCLE_TASK,
     FILE_LIFECYCLE_CLEANUP_TASK,
     EXTERNAL_ACCOUNT_OAUTH_CLEANUP_TASK,
+    HISTORICAL_MEMORY_DISCOVERY_TASK,
     USER_SCHEDULED_TASK_DISPATCH_TASK,
 )
 

@@ -116,17 +116,17 @@ def _wait_for_catalog_attempt_completion(
         f"llm-provider-integrations/{integration_id}/catalog-entries"
     )
 
-    def attempt_completed() -> bool:
+    def sync_completed() -> bool:
         response = requests.get(entries_url, headers=_headers(token), timeout=10)
         if response.status_code == 404:
             return False
-        latest_attempt = _response_object(response).get("latest_attempt")
-        if not isinstance(latest_attempt, dict):
+        latest_sync = _response_object(response).get("latest_sync")
+        if not isinstance(latest_sync, dict):
             return False
-        return latest_attempt.get("status") in {"failed", "succeeded"}
+        return latest_sync.get("status") in {"failed", "succeeded"}
 
     wait_until(
-        attempt_completed,
+        sync_completed,
         timeout=10,
         interval=0.2,
         message="Initial xAI OAuth catalog sync did not complete",

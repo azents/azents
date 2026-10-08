@@ -4,14 +4,20 @@ import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import Any, NamedTuple, cast
-from unittest.mock import AsyncMock
+from typing import NamedTuple
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from azcommon.infra.s3.service import S3ObjectIdentity, S3ProductPublicationMetadata
+from azcommon.infra.s3.service import (
+    S3ObjectIdentity,
+    S3ProductPublicationMetadata,
+    S3Service,
+)
 from azcommon.result import Failure, Result, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSession
+from azents.core.config import Config, WorkspaceS3Config
 from azents.core.enums import (
     AgentRunStatus,
     AgentSessionKind,
@@ -21,14 +27,18 @@ from azents.core.enums import (
     ArtifactStatus,
     WorkspaceUserRole,
 )
-from azents.repos.agent_session.data import AgentSession
+from azents.core.session_resource_authority import SessionResourceAuthority
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
+from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.artifact import ArtifactRepository
 from azents.repos.artifact.data import Artifact, ArtifactCreate
 from azents.repos.artifact.operations import (
     ArtifactMetadataFailure,
     ArtifactOperationRepository,
 )
+from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUser
-from azents.services.session_resource_authority import SessionResourceAuthority
+from azents.testing.types import require_instance
 
 from .artifact import (
     ArtifactAccessDenied,
@@ -49,7 +59,7 @@ class _FakeArtifactRepository:
 
     async def create(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         create: ArtifactCreate,
     ) -> Artifact:
         """Store create input as domain model as-is."""
@@ -86,7 +96,7 @@ class _FakeArtifactRepository:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         artifact_id: str,
     ) -> Artifact | None:
         """Fetch Artifact by ID."""
@@ -95,7 +105,7 @@ class _FakeArtifactRepository:
 
     async def get_by_storage_key(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         storage_key: str,
     ) -> Artifact | None:
         """Fetch Artifact by storage key."""
@@ -107,7 +117,7 @@ class _FakeArtifactRepository:
 
     async def expire_due(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         now: datetime.datetime,
         limit: int,
@@ -129,7 +139,7 @@ class _FakeArtifactRepository:
 
     async def mark_blob_deleted(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         artifact_id: str,
         blob_deleted_at: datetime.datetime,
@@ -149,7 +159,7 @@ class _FakeAgentSessionRepository:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> AgentSession | None:
         """Fetch AgentSession by ID."""
@@ -160,7 +170,7 @@ class _FakeAgentSessionRepository:
 
     async def get_root_session_agent_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> object | None:
         """Return the root SessionAgent identity."""
@@ -178,7 +188,7 @@ class _FakeWorkspaceUserRepository:
 
     async def get_by_workspace_and_user(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         user_id: str,
@@ -266,23 +276,9 @@ class _FakeS3Service:
         self.objects.pop(identity.key, None)
 
 
-class _WorkspaceS3Config:
-    """workspace S3 config for tests."""
-
-    bucket = "test-bucket"
-
-
-class _FileLifecycleConfig:
-    """File lifecycle config for tests."""
-
-    artifact_ttl = datetime.timedelta(days=7)
-
-
-class _Config:
-    """Config for tests."""
-
-    workspace_s3 = _WorkspaceS3Config()
-    file_lifecycle = _FileLifecycleConfig()
+def _config() -> Config:
+    """Use declared storage fields and the default seven-day artifact retention."""
+    return Config.model_construct(workspace_s3=WorkspaceS3Config(bucket="test-bucket"))
 
 
 class _SessionBoundary:
@@ -292,11 +288,11 @@ class _SessionBoundary:
         self.active = 0
 
     @asynccontextmanager
-    async def session_manager(self) -> AsyncGenerator[AsyncSession, None]:
+    async def session_manager(self) -> AsyncGenerator[WriteSession, None]:
         """Yield a test DB session while tracking its lifetime."""
         self.active += 1
         try:
-            yield cast(AsyncSession, object())
+            yield ReadWriteSession(AsyncMock(spec=AsyncSession))
         finally:
             self.active -= 1
 
@@ -308,7 +304,7 @@ class _AuthorityArtifactService(ArtifactService):
 
     async def _has_valid_resource_authority(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         authority: SessionResourceAuthority,
         *,
         lock: bool = False,
@@ -379,14 +375,25 @@ def _make_service() -> _ArtifactServiceFixture:
     workspace_user_repository = _FakeWorkspaceUserRepository(_make_workspace_user())
     service = ArtifactService(
         operation_repository=ArtifactOperationRepository(
-            artifact_repository=cast(Any, artifact_repo),
-            agent_session_repository=cast(Any, agent_session_repository),
+            artifact_repository=require_instance(
+                MagicMock(spec=ArtifactRepository, wraps=artifact_repo),
+                ArtifactRepository,
+            ),
+            agent_session_repository=require_instance(
+                MagicMock(spec=AgentSessionRepository, wraps=agent_session_repository),
+                AgentSessionRepository,
+            ),
             agent_run_repository=agent_run_repository,
-            workspace_user_repository=cast(Any, workspace_user_repository),
+            workspace_user_repository=require_instance(
+                MagicMock(
+                    spec=WorkspaceUserRepository, wraps=workspace_user_repository
+                ),
+                WorkspaceUserRepository,
+            ),
             session_manager=session_boundary.session_manager,
         ),
-        s3_service=cast(Any, s3),
-        config=cast(Any, _Config()),
+        s3_service=require_instance(MagicMock(spec=S3Service, wraps=s3), S3Service),
+        config=_config(),
     )
     return _ArtifactServiceFixture(
         service=service, repository=artifact_repo, s3_service=s3
@@ -432,14 +439,18 @@ def _make_authority_service(
         existing = artifact_repo.artifacts.get(create.id)
         if existing is not None:
             return Success(existing)
-        return Success(await artifact_repo.create(cast(AsyncSession, object()), create))
+        return Success(
+            await artifact_repo.create(
+                ReadWriteSession(AsyncMock(spec=AsyncSession)), create
+            )
+        )
 
     operations.load_verified_publication.side_effect = load_verified_publication
     operations.finalize_verified_publication.side_effect = finalize_verified_publication
     service = _AuthorityArtifactService(
         operation_repository=operations,
-        s3_service=cast(Any, s3),
-        config=cast(Any, _Config()),
+        s3_service=require_instance(MagicMock(spec=S3Service, wraps=s3), S3Service),
+        config=_config(),
     )
     service.authority_results = authority_results
     return _AuthorityArtifactServiceFixture(
@@ -525,7 +536,7 @@ async def test_authority_resolves_artifact_created_by_previous_session_run() -> 
     run_repository = AsyncMock()
 
     async def get_run(
-        session: AsyncSession,
+        session: WriteSession,
         run_id: str,
     ) -> object | None:
         del session

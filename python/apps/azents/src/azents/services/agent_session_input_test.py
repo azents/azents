@@ -4,7 +4,7 @@ import asyncio
 import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, create_autospec
 from uuid import uuid4
 
 import pytest
@@ -16,6 +16,19 @@ from azents.core.agent import (
     DEFAULT_MAIN_MODEL_OPTION_LABEL,
     SelectableModelCandidate,
     SelectableModelOption,
+)
+from azents.core.agent_session_data import (
+    AgentSession,
+    AgentSessionCreate,
+    SessionWorkingFolderContext,
+)
+from azents.core.agent_session_input_data import (
+    AgentSessionInputError,
+    AgentSessionInputIdempotencyConflict,
+    AgentSessionInputInactiveSession,
+    AgentSessionInputInvalidInferenceProfile,
+    AgentSessionInputSubagentReadOnly,
+    CreatedAgentSessionInputResult,
 )
 from azents.core.enums import (
     AgentLifecycleStatus,
@@ -34,12 +47,20 @@ from azents.core.enums import (
     SessionWorkingFolderCleanupStatus,
     WorkspaceUserRole,
 )
+from azents.core.exchange_file_errors import (
+    ExchangeFileInputClaimError,
+    FileRetentionOwnerConflict,
+)
 from azents.core.inference_profile import (
     RequestedInferenceProfile,
     SessionAppliedInferenceProfile,
+    validate_requested_profile_against_options,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.mailbox_data import MailboxItem
 from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.core.session_workspace_project import SessionWorkspaceProjectCreate
+from azents.core.workspace import WorkspaceCreate
 from azents.engine.run.input import InputMessage
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_automatic_project_setting import (
@@ -55,45 +76,42 @@ from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.rdb.models.user import RDBUser
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.action_execution import ActionExecutionRepository
+from azents.repos.active_profile_admission import (
+    ActiveProfileAdmissionRepository,
+    CapturedProfileAdmission,
+)
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
-from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
+from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import (
-    AgentSession,
-    AgentSessionCreate,
-    SessionWorkingFolderContext,
+from azents.repos.agent_session_input_operations import (
+    AgentSessionInputOperationsRepository,
 )
 from azents.repos.chat_write_request import ChatWriteRequestRepository
-from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.input_attachment_claim import InputAttachmentClaimRepository
 from azents.repos.mailbox import MailboxRepository
-from azents.repos.mailbox.data import MailboxItem
-from azents.repos.scheduled_task.repository import ScheduledTaskRepository
-from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
+from azents.repos.mailbox.admission import MailboxAdmissionRepository
+from azents.repos.mailbox.admission_data import MailboxAdmissionResult, MailboxEnqueue
+from azents.repos.mailbox_database import MailboxDatabaseRepository
+from azents.repos.root_agent_session_creation import (
+    RootAgentSessionCreationRepository,
+)
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
-from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
-from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUser, WorkspaceUserCreate
-from azents.services.exchange_file import (
-    ExchangeFileInputClaimError,
-    ExchangeFileService,
-    FileRetentionOwnerConflict,
-)
-from azents.services.model_file import ModelFileService
-from azents.services.root_agent_session_creation import (
-    RootAgentSessionCreationService,
+from azents.services.agent_session_input import (
+    AgentSessionInputService,
 )
 from azents.testing.model_selection import (
     make_test_model_selection,
@@ -101,26 +119,7 @@ from azents.testing.model_selection import (
     make_test_model_settings,
     make_test_selectable_model_option_dicts,
 )
-from azents.testing.turn_action import (
-    make_test_mailbox_promotion_repository,
-    make_test_turn_action_capabilities,
-)
 from azents.testing.types import require_instance
-
-from .agent_session_input import (
-    AgentSessionInputError,
-    AgentSessionInputIdempotencyConflict,
-    AgentSessionInputInactiveSession,
-    AgentSessionInputInvalidInferenceProfile,
-    AgentSessionInputService,
-    AgentSessionInputSubagentReadOnly,
-    CreatedAgentSessionInputResult,
-)
-from .mailbox import (
-    MailboxAdmissionResult,
-    MailboxEnqueue,
-    MailboxService,
-)
 
 _TEST_INFERENCE_PROFILE = RequestedInferenceProfile(
     model_target_label="default",
@@ -130,9 +129,9 @@ _TEST_INFERENCE_PROFILE = RequestedInferenceProfile(
 
 
 @asynccontextmanager
-async def _session_manager_double() -> AsyncGenerator[AsyncSession, None]:
+async def _session_manager_double() -> AsyncGenerator[WriteSession, None]:
     """Yield a placeholder DB session for service-double tests."""
-    yield require_instance(MagicMock(spec=AsyncSession), AsyncSession)
+    yield ReadWriteSession(require_instance(MagicMock(spec=AsyncSession), AsyncSession))
 
 
 class _RuntimeRepositoryDouble(AgentRuntimeRepository):
@@ -143,7 +142,7 @@ class _RuntimeRepositoryDouble(AgentRuntimeRepository):
 
     async def ensure_for_agent(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
         *,
         default_runtime_provider_id: str | None = None,
@@ -167,7 +166,7 @@ class _ActiveAgentRepositoryDouble(AgentRepository):
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
     ) -> Agent | None:
         """Return a minimal active Agent projection."""
@@ -201,10 +200,9 @@ class _ActiveAgentRepositoryDouble(AgentRepository):
 class _WorkspaceUserRepositoryDouble(WorkspaceUserRepository):
     """Workspace membership repository for admission unit tests."""
 
-    async def lock_by_workspace_and_user(
+    async def get_by_workspace_and_user(
         self,
-        session: AsyncSession,
-        *,
+        session: ReadSession,
         workspace_id: str,
         user_id: str,
     ) -> WorkspaceUser:
@@ -229,7 +227,7 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> AgentSession:
         """Lock and fetch session."""
@@ -268,7 +266,7 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
 
     async def set_applied_inference_profile(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         model_target_label: str,
@@ -287,7 +285,7 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
 
     async def mark_running_for_input_wakeup(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> None:
         """Record wake transition."""
@@ -296,7 +294,7 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
 
     async def get_working_folder_context_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
     ) -> SessionWorkingFolderContext:
@@ -314,17 +312,17 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
         )
 
 
-class _MailboxServiceDouble(MailboxService):
-    """MailboxService double for tests."""
+class _MailboxAdmissionRepositoryDouble(MailboxAdmissionRepository):
+    """Record admission independently of the mixed-I/O Mailbox service."""
 
     def __init__(self, calls: list[str]) -> None:
         self.calls = calls
         self.enqueued: MailboxEnqueue | None = None
         self.moved: tuple[str, str] | None = None
 
-    async def enqueue(
+    async def enqueue_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         input: MailboxEnqueue,
     ) -> MailboxAdmissionResult:
         """Record MailboxItem creation."""
@@ -351,22 +349,16 @@ class _MailboxServiceDouble(MailboxService):
         )
         return MailboxAdmissionResult(mailbox_item=mailbox_item, created=True)
 
-    async def move_by_session_id(
-        self,
-        session: AsyncSession,
-        *,
-        from_session_id: str,
-        to_session_id: str,
-    ) -> int:
-        """Record MailboxItem move request."""
-        del session
-        self.calls.append("move_mailbox_item")
-        self.moved = (from_session_id, to_session_id)
-        return 1
+
+class _MailboxServiceDouble(MailboxDatabaseRepository):
+    """Provide only non-admission Mailbox service queries."""
+
+    def __init__(self, calls: list[str]) -> None:
+        self.calls = calls
 
     async def has_seen_action_type(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         action_type: str,
@@ -376,7 +368,7 @@ class _MailboxServiceDouble(MailboxService):
         return True
 
 
-class _ExchangeFileService(ExchangeFileService):
+class _ExchangeFileService(InputAttachmentClaimRepository):
     """ExchangeFileService for tests."""
 
     def __init__(self) -> None:
@@ -384,7 +376,7 @@ class _ExchangeFileService(ExchangeFileService):
 
     async def claim_input_attachments(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         session_id: str,
@@ -401,7 +393,7 @@ class _RejectingExchangeFileService(_ExchangeFileService):
 
     async def claim_input_attachments(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         session_id: str,
@@ -413,9 +405,9 @@ class _RejectingExchangeFileService(_ExchangeFileService):
         return Failure(FileRetentionOwnerConflict())
 
 
-def _root_agent_session_creation_service() -> RootAgentSessionCreationService:
+def _root_agent_session_creation_service() -> RootAgentSessionCreationRepository:
     """Build root Session creation service for tests."""
-    return RootAgentSessionCreationService(
+    return RootAgentSessionCreationRepository(
         agent_session_repository=AgentSessionRepository(),
         agent_repository=AgentRepository(),
         automatic_project_repository=AgentAutomaticProjectRepository(),
@@ -423,37 +415,26 @@ def _root_agent_session_creation_service() -> RootAgentSessionCreationService:
     )
 
 
-def _mailbox_item_service(
-    rdb_session_manager: SessionManager[AsyncSession],
-) -> MailboxService:
-    """Create MailboxService for integration tests."""
-    return MailboxService(
-        session_manager=rdb_session_manager,
+def _mailbox_admission_repository(
+    session_manager: SessionManager[WriteSession],
+) -> MailboxAdmissionRepository:
+    """Create database-only admission for integration tests."""
+    return MailboxAdmissionRepository(
+        session_manager=session_manager,
         mailbox_item_repository=MailboxRepository(),
-        exchange_file_service=_ExchangeFileService(),
-        model_file_service=require_instance(
-            MagicMock(spec=ModelFileService),
-            ModelFileService,
-        ),
         agent_session_repository=AgentSessionRepository(),
-        event_transcript_repository=EventTranscriptRepository(),
-        agent_run_repository=AgentRunRepository(),
-        scheduled_task_repository=ScheduledTaskRepository(),
-        scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
-            toolkit_state_repository=ToolkitStateRepository(),
-        ),
-        action_execution_repository=ActionExecutionRepository(),
-        turn_action_capabilities=make_test_turn_action_capabilities(
-            rdb_session_manager
-        ),
-        promotion_repository=make_test_mailbox_promotion_repository(
-            rdb_session_manager
-        ),
-        external_channel_repository=ExternalChannelRepository(),
     )
 
 
-async def _create_workspace(session: AsyncSession, handle: str) -> str:
+def _mailbox_item_service(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> MailboxRepository:
+    """Provide the canonical mailbox primitive for atomic input composition."""
+    del rdb_session_manager
+    return MailboxRepository()
+
+
+async def _create_workspace(session: WriteSession, handle: str) -> str:
     """Create Workspace for tests."""
     repo = WorkspaceRepository()
     result = await repo.create(
@@ -466,7 +447,7 @@ async def _create_workspace(session: AsyncSession, handle: str) -> str:
 
 
 async def _create_agent(
-    session: AsyncSession,
+    session: WriteSession,
     workspace_id: str,
     slug: str,
     *,
@@ -482,8 +463,8 @@ async def _create_agent(
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
 
     agent = RDBAgent(
         workspace_id=workspace_id,
@@ -518,10 +499,10 @@ async def _create_agent(
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
-    session.add(RDBAgentAutomaticProjectSetting(agent_id=agent.id))
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
+    session.write_session.add(RDBAgentAutomaticProjectSetting(agent_id=agent.id))
+    await session.write_session.flush()
     if runtime_capability is AgentRuntimeCapability.MANAGED:
         runtime_repository = AgentRuntimeRepository()
         runtime = await runtime_repository.ensure_for_agent(session, agent.id)
@@ -538,7 +519,7 @@ async def _create_agent(
 
 
 async def _cleanup_committed_agent_fixture(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     workspace_id: str | None,
     user_id: str | None,
@@ -546,12 +527,12 @@ async def _cleanup_committed_agent_fixture(
 ) -> None:
     """Remove the committed fixture used by the cross-transaction fence test."""
     if agent_id is not None:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBSessionAgentContext)
             .where(RDBSessionAgentContext.agent_id == agent_id)
             .values(root_session_agent_id=None)
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBSessionAgent).where(
                 RDBSessionAgent.agent_session_id.in_(
                     sa.select(RDBAgentSession.id).where(
@@ -560,39 +541,43 @@ async def _cleanup_committed_agent_fixture(
                 )
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBSessionAgentContext).where(
                 RDBSessionAgentContext.agent_id == agent_id
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBAgentSession).where(RDBAgentSession.agent_id == agent_id)
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBAgentRuntime).where(RDBAgentRuntime.agent_id == agent_id)
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBAgentDecommissionJob).where(
                 RDBAgentDecommissionJob.agent_id == agent_id
             )
         )
-        await session.execute(sa.delete(RDBAgent).where(RDBAgent.id == agent_id))
+        await session.write_session.execute(
+            sa.delete(RDBAgent).where(RDBAgent.id == agent_id)
+        )
     if workspace_id is not None:
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBWorkspace).where(RDBWorkspace.id == workspace_id)
         )
     if user_id is not None:
-        await session.execute(sa.delete(RDBUser).where(RDBUser.id == user_id))
+        await session.write_session.execute(
+            sa.delete(RDBUser).where(RDBUser.id == user_id)
+        )
 
 
-async def _create_user(session: AsyncSession, email: str) -> str:
+async def _create_user(session: WriteSession, email: str) -> str:
     """Create User for tests."""
     user = await UserRepository().create(session, UserCreate(email=email))
     return user.id
 
 
 async def _add_workspace_user(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     workspace_id: str,
     user_id: str,
@@ -615,27 +600,35 @@ class TestAgentSessionInputService:
 
     async def test_create_buffered_agent_input_delegates_wake_to_mailbox_service(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Delegate the durable REST input wake transition to MailboxService."""
         calls: list[str] = []
         runtime_repository = _RuntimeRepositoryDouble(calls)
         session_repository = _AgentSessionRepositoryDouble(calls)
         mailbox_item_service = _MailboxServiceDouble(calls)
+        mailbox_admission_repository = _MailboxAdmissionRepositoryDouble(calls)
         service = AgentSessionInputService(
-            agent_repository=_ActiveAgentRepositoryDouble(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=runtime_repository,
-            agent_session_repository=session_repository,
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=_WorkspaceUserRepositoryDouble(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=mailbox_item_service,
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=_ActiveAgentRepositoryDouble(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=runtime_repository,
+                agent_session_repository=session_repository,
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=_WorkspaceUserRepositoryDouble(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=MailboxRepository(),
+                mailbox_admission_repository=mailbox_admission_repository,
+                active_profile_repository=_active_profile_repository(
+                    rdb_session_manager
+                ),
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=mailbox_item_service,
+            )
         )
 
         result = await service.create_buffered_agent_input(
@@ -663,17 +656,17 @@ class TestAgentSessionInputService:
             "ensure_for_agent",
             "enqueue_mailbox_item",
         ]
-        assert mailbox_item_service.enqueued is not None
-        assert mailbox_item_service.enqueued.session_id == "session-1"
+        assert mailbox_admission_repository.enqueued is not None
+        assert mailbox_admission_repository.enqueued.session_id == "session-1"
         assert (
-            mailbox_item_service.enqueued.scheduling_mode
+            mailbox_admission_repository.enqueued.scheduling_mode
             == MailboxSchedulingMode.WAKE_SESSION
         )
-        assert mailbox_item_service.enqueued.content == "restore me"
+        assert mailbox_admission_repository.enqueued.content == "restore me"
 
     async def test_invalid_profile_rejects_before_mailbox_and_applied_state(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Invalid Human profile admission leaves Session and mailbox unchanged."""
         async with rdb_session_manager() as session:
@@ -707,7 +700,7 @@ class TestAgentSessionInputService:
                 agent_session.id,
             )
             initial_runtime_ids = list(
-                await session.scalars(
+                await session.read_session.scalars(
                     sa.select(RDBAgentRuntime.id).where(
                         RDBAgentRuntime.agent_id == agent_id
                     )
@@ -723,19 +716,32 @@ class TestAgentSessionInputService:
         assert initial_context.binding_state is SessionWorkingFolderBindingState.PENDING
 
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=AgentRuntimeRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=_mailbox_item_service(rdb_session_manager),
+                mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                active_profile_repository=_active_profile_repository(
+                    rdb_session_manager
+                ),
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=MailboxDatabaseRepository(
+                    mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
+                    event_transcript_repository=EventTranscriptRepository(),
+                    action_execution_repository=ActionExecutionRepository(),
+                ),
+            )
         )
 
         result = await service.create_buffered_agent_input(
@@ -771,7 +777,7 @@ class TestAgentSessionInputService:
                 agent_session.id,
             )
             runtime_ids = list(
-                await session.scalars(
+                await session.read_session.scalars(
                     sa.select(RDBAgentRuntime.id).where(
                         RDBAgentRuntime.agent_id == agent_id
                     )
@@ -802,24 +808,30 @@ class TestAgentSessionInputService:
         db_session = AsyncMock(spec=AsyncSession)
 
         @asynccontextmanager
-        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-            yield db_session
+        async def session_manager() -> AsyncGenerator[WriteSession, None]:
+            yield ReadWriteSession(db_session)
 
         mailbox_item_service = _MailboxServiceDouble(calls)
+        mailbox_admission_repository = _MailboxAdmissionRepositoryDouble(calls)
         service = AgentSessionInputService(
-            agent_repository=_ActiveAgentRepositoryDouble(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=_RuntimeRepositoryDouble(calls),
-            agent_session_repository=_AgentSessionRepositoryDouble(calls),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=_WorkspaceUserRepositoryDouble(),
-            exchange_file_service=_RejectingExchangeFileService(),
-            mailbox_item_service=mailbox_item_service,
-            session_manager=session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=_ActiveAgentRepositoryDouble(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=_RuntimeRepositoryDouble(calls),
+                agent_session_repository=_AgentSessionRepositoryDouble(calls),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=_WorkspaceUserRepositoryDouble(),
+                attachment_claim_repository=_RejectingExchangeFileService(),
+                mailbox_repository=MailboxRepository(),
+                mailbox_admission_repository=mailbox_admission_repository,
+                active_profile_repository=_active_profile_repository(session_manager),
+                session_manager=session_manager,
+                mailbox_database_repository=mailbox_item_service,
+            )
         )
 
         result = await service.create_buffered_agent_input(
@@ -844,7 +856,7 @@ class TestAgentSessionInputService:
             "ensure_for_agent",
             "enqueue_mailbox_item",
         ]
-        assert mailbox_item_service.enqueued is not None
+        assert mailbox_admission_repository.enqueued is not None
 
     async def test_create_buffered_agent_input_rejects_subagent_before_wake(
         self,
@@ -857,20 +869,28 @@ class TestAgentSessionInputService:
             session_kind=AgentSessionKind.SUBAGENT,
         )
         mailbox_item_service = _MailboxServiceDouble(calls)
+        mailbox_admission_repository = _MailboxAdmissionRepositoryDouble(calls)
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=runtime_repository,
-            agent_session_repository=session_repository,
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=_WorkspaceUserRepositoryDouble(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=mailbox_item_service,
-            session_manager=_session_manager_double,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=_ActiveAgentRepositoryDouble(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=runtime_repository,
+                agent_session_repository=session_repository,
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=_WorkspaceUserRepositoryDouble(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=MailboxRepository(),
+                mailbox_admission_repository=mailbox_admission_repository,
+                active_profile_repository=_active_profile_repository(
+                    _session_manager_double
+                ),
+                session_manager=_session_manager_double,
+                mailbox_database_repository=mailbox_item_service,
+            )
         )
 
         result = await service.create_buffered_agent_input(
@@ -890,11 +910,11 @@ class TestAgentSessionInputService:
         assert isinstance(result, Failure)
         assert isinstance(result.error, AgentSessionInputSubagentReadOnly)
         assert calls == ["get_by_id"]
-        assert mailbox_item_service.enqueued is None
+        assert mailbox_admission_repository.enqueued is None
 
     async def test_create_team_session_with_buffered_input_bootstraps_session(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """First draft input creates a session with explicit Projects."""
         async with rdb_session_manager() as session:
@@ -922,19 +942,32 @@ class TestAgentSessionInputService:
             )
 
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=AgentRuntimeRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=_mailbox_item_service(rdb_session_manager),
+                mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                active_profile_repository=_active_profile_repository(
+                    rdb_session_manager
+                ),
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=MailboxDatabaseRepository(
+                    mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
+                    event_transcript_repository=EventTranscriptRepository(),
+                    action_execution_repository=ActionExecutionRepository(),
+                ),
+            )
         )
 
         result = await service.create_team_session_with_buffered_input(
@@ -1002,7 +1035,7 @@ class TestAgentSessionInputService:
 
     async def test_create_two_user_sessions_with_buffered_input(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Owner can admit multiple User Sessions on one Agent."""
         async with rdb_session_manager() as session:
@@ -1021,19 +1054,32 @@ class TestAgentSessionInputService:
             )
 
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=AgentRuntimeRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=_mailbox_item_service(rdb_session_manager),
+                mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                active_profile_repository=_active_profile_repository(
+                    rdb_session_manager
+                ),
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=MailboxDatabaseRepository(
+                    mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
+                    event_transcript_repository=EventTranscriptRepository(),
+                    action_execution_repository=ActionExecutionRepository(),
+                ),
+            )
         )
 
         first = await service.create_user_session_with_buffered_input(
@@ -1096,7 +1142,7 @@ class TestAgentSessionInputService:
 
     async def test_runtime_free_session_queues_only_user_input(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Runtime-free Session creation omits Runtime working-folder actions."""
         async with rdb_session_manager() as session:
@@ -1115,19 +1161,32 @@ class TestAgentSessionInputService:
             )
 
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=AgentRuntimeRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=_mailbox_item_service(rdb_session_manager),
+                mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                active_profile_repository=_active_profile_repository(
+                    rdb_session_manager
+                ),
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=MailboxDatabaseRepository(
+                    mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
+                    event_transcript_repository=EventTranscriptRepository(),
+                    action_execution_repository=ActionExecutionRepository(),
+                ),
+            )
         )
 
         result = await service.create_user_session_with_buffered_input(
@@ -1159,7 +1218,7 @@ class TestAgentSessionInputService:
 
     async def test_new_session_retry_reuses_admitted_session_and_input(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """One Agent-scoped client request creates exactly one Session and input."""
         async with rdb_session_manager() as session:
@@ -1183,19 +1242,32 @@ class TestAgentSessionInputService:
             )
 
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=AgentRuntimeRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=_mailbox_item_service(rdb_session_manager),
+                mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                active_profile_repository=_active_profile_repository(
+                    rdb_session_manager
+                ),
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=MailboxDatabaseRepository(
+                    mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
+                    event_transcript_repository=EventTranscriptRepository(),
+                    action_execution_repository=ActionExecutionRepository(),
+                ),
+            )
         )
         message = InputMessage(
             text="one durable first message",
@@ -1267,15 +1339,16 @@ class TestAgentSessionInputService:
         del latest_db_schema
 
         @asynccontextmanager
-        async def independent_session_manager() -> AsyncGenerator[AsyncSession]:
-            async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+        async def independent_session_manager() -> AsyncGenerator[WriteSession]:
+            async with AsyncSession(rdb_engine, expire_on_commit=False) as raw_session:
+                session = ReadWriteSession(raw_session)
                 try:
                     yield session
                 except Exception:
-                    await session.rollback()
+                    await session.write_session.rollback()
                     raise
                 else:
-                    await session.commit()
+                    await session.write_session.commit()
 
         agent_id: str | None = None
         user_id: str | None = None
@@ -1307,25 +1380,36 @@ class TestAgentSessionInputService:
 
             def _service() -> AgentSessionInputService:
                 return AgentSessionInputService(
-                    agent_repository=AgentRepository(),
-                    agent_project_preset_repository=AgentProjectPresetRepository(),
-                    agent_project_catalog_repository=AgentProjectCatalogRepository(),
-                    agent_project_default_repository=AgentProjectDefaultRepository(),
-                    agent_runtime_repository=AgentRuntimeRepository(),
-                    agent_session_repository=AgentSessionRepository(),
-                    root_agent_session_creation_service=(
-                        _root_agent_session_creation_service()
-                    ),
-                    chat_write_request_repository=ChatWriteRequestRepository(),
-                    session_workspace_project_repository=(
-                        SessionWorkspaceProjectRepository()
-                    ),
-                    workspace_user_repository=WorkspaceUserRepository(),
-                    exchange_file_service=_ExchangeFileService(),
-                    mailbox_item_service=_mailbox_item_service(
-                        independent_session_manager
-                    ),
-                    session_manager=independent_session_manager,
+                    operations=AgentSessionInputOperationsRepository(
+                        agent_repository=AgentRepository(),
+                        agent_project_preset_repository=AgentProjectPresetRepository(),
+                        agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                        agent_project_default_repository=AgentProjectDefaultRepository(),
+                        agent_runtime_repository=AgentRuntimeRepository(),
+                        agent_session_repository=AgentSessionRepository(),
+                        root_session_repository=_root_agent_session_creation_service(),
+                        chat_write_request_repository=ChatWriteRequestRepository(),
+                        session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                        workspace_user_repository=WorkspaceUserRepository(),
+                        attachment_claim_repository=_ExchangeFileService(),
+                        mailbox_repository=_mailbox_item_service(
+                            independent_session_manager
+                        ),
+                        mailbox_admission_repository=_mailbox_admission_repository(
+                            independent_session_manager
+                        ),
+                        active_profile_repository=_active_profile_repository(
+                            independent_session_manager
+                        ),
+                        session_manager=independent_session_manager,
+                        mailbox_database_repository=MailboxDatabaseRepository(
+                            mailbox_item_repository=_mailbox_item_service(
+                                independent_session_manager
+                            ),
+                            event_transcript_repository=EventTranscriptRepository(),
+                            action_execution_repository=ActionExecutionRepository(),
+                        ),
+                    )
                 )
 
             message = InputMessage(
@@ -1380,7 +1464,7 @@ class TestAgentSessionInputService:
         finally:
             async with independent_session_manager() as session:
                 if agent_id is not None:
-                    await session.execute(
+                    await session.write_session.execute(
                         sa.text(
                             "DELETE FROM chat_write_requests "
                             "WHERE creation_agent_id = :agent_id "
@@ -1389,7 +1473,7 @@ class TestAgentSessionInputService:
                         ),
                         {"agent_id": agent_id},
                     )
-                    await session.execute(
+                    await session.write_session.execute(
                         sa.text(
                             "DELETE FROM mailbox_items WHERE session_id IN "
                             "(SELECT id FROM agent_sessions WHERE agent_id = :agent_id)"
@@ -1405,7 +1489,7 @@ class TestAgentSessionInputService:
 
     async def test_new_session_retry_rejects_changed_payload(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """An Agent-scoped client key cannot create a second changed Session."""
         async with rdb_session_manager() as session:
@@ -1429,19 +1513,32 @@ class TestAgentSessionInputService:
             )
 
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=AgentRuntimeRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=_mailbox_item_service(rdb_session_manager),
+                mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                active_profile_repository=_active_profile_repository(
+                    rdb_session_manager
+                ),
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=MailboxDatabaseRepository(
+                    mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
+                    event_transcript_repository=EventTranscriptRepository(),
+                    action_execution_repository=ActionExecutionRepository(),
+                ),
+            )
         )
         message = InputMessage(
             text="original",
@@ -1482,7 +1579,7 @@ class TestAgentSessionInputService:
 
     async def test_new_session_attachment_conflict_rolls_back_session_and_input(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """First-message claim failure removes the new Session and MailboxItem."""
         async with rdb_session_manager() as session:
@@ -1513,19 +1610,32 @@ class TestAgentSessionInputService:
             ).session
 
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
-            exchange_file_service=_RejectingExchangeFileService(),
-            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=AgentRuntimeRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+                attachment_claim_repository=_RejectingExchangeFileService(),
+                mailbox_repository=_mailbox_item_service(rdb_session_manager),
+                mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                active_profile_repository=_active_profile_repository(
+                    rdb_session_manager
+                ),
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=MailboxDatabaseRepository(
+                    mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
+                    event_transcript_repository=EventTranscriptRepository(),
+                    action_execution_repository=ActionExecutionRepository(),
+                ),
+            )
         )
 
         result = await service.create_team_session_with_buffered_input(
@@ -1560,7 +1670,7 @@ class TestAgentSessionInputService:
 
     async def test_buffered_agent_input_rejects_archived_session_after_rollover(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """User input with stale session id is rejected instead of redirected."""
         async with rdb_session_manager() as session:
@@ -1586,19 +1696,32 @@ class TestAgentSessionInputService:
             )
 
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=AgentRuntimeRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=_mailbox_item_service(rdb_session_manager),
+                mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                active_profile_repository=_active_profile_repository(
+                    rdb_session_manager
+                ),
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=MailboxDatabaseRepository(
+                    mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
+                    event_transcript_repository=EventTranscriptRepository(),
+                    action_execution_repository=ActionExecutionRepository(),
+                ),
+            )
         )
 
         result = await service.create_buffered_agent_input(
@@ -1626,7 +1749,7 @@ class TestAgentSessionInputService:
 
     async def test_buffered_agent_input_rejects_subagent_session(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Direct human input cannot be enqueued into a child subagent session."""
         async with rdb_session_manager() as session:
@@ -1655,19 +1778,32 @@ class TestAgentSessionInputService:
             )
 
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=AgentRuntimeRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=_mailbox_item_service(rdb_session_manager),
+                mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                active_profile_repository=_active_profile_repository(
+                    rdb_session_manager
+                ),
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=MailboxDatabaseRepository(
+                    mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
+                    event_transcript_repository=EventTranscriptRepository(),
+                    action_execution_repository=ActionExecutionRepository(),
+                ),
+            )
         )
 
         result = await service.create_buffered_agent_input(
@@ -1695,7 +1831,7 @@ class TestAgentSessionInputService:
 
     async def test_create_buffered_agent_input_marks_session_running(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """REST input storage marks Session running to cover broker loss."""
         async with rdb_session_manager() as session:
@@ -1719,19 +1855,32 @@ class TestAgentSessionInputService:
             ).session
 
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=AgentRuntimeRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=_mailbox_item_service(rdb_session_manager),
+                mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                active_profile_repository=_active_profile_repository(
+                    rdb_session_manager
+                ),
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=MailboxDatabaseRepository(
+                    mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
+                    event_transcript_repository=EventTranscriptRepository(),
+                    action_execution_repository=ActionExecutionRepository(),
+                ),
+            )
         )
 
         result = await service.create_buffered_agent_input(
@@ -1761,7 +1910,7 @@ class TestAgentSessionInputService:
 
     async def test_existing_session_input_adopts_working_folder_setup_once(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Legacy-style active Session input queues one setup action before wake."""
         async with rdb_session_manager() as session:
@@ -1785,19 +1934,32 @@ class TestAgentSessionInputService:
             )
 
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=AgentRuntimeRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=_mailbox_item_service(rdb_session_manager),
+                mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                active_profile_repository=_active_profile_repository(
+                    rdb_session_manager
+                ),
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=MailboxDatabaseRepository(
+                    mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
+                    event_transcript_repository=EventTranscriptRepository(),
+                    action_execution_repository=ActionExecutionRepository(),
+                ),
+            )
         )
 
         first = await service.create_buffered_agent_input(
@@ -1866,21 +2028,23 @@ class TestAgentSessionInputService:
         agent_id: str | None = None
 
         @asynccontextmanager
-        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-            async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+        async def session_manager() -> AsyncGenerator[WriteSession, None]:
+            async with AsyncSession(rdb_engine, expire_on_commit=False) as raw_session:
+                session = ReadWriteSession(raw_session)
                 try:
                     yield session
                 except Exception:
-                    await session.rollback()
+                    await session.write_session.rollback()
                     raise
                 else:
-                    await session.commit()
+                    await session.write_session.commit()
 
         try:
             async with AsyncSession(
                 rdb_engine,
                 expire_on_commit=False,
-            ) as setup_session:
+            ) as raw_setup_session:
+                setup_session = ReadWriteSession(raw_setup_session)
                 workspace_id = await _create_workspace(
                     setup_session,
                     f"input-agent-fence-{suffix}",
@@ -1906,28 +2070,42 @@ class TestAgentSessionInputService:
                         agent_id=agent_id,
                     )
                 ).session
-                await setup_session.commit()
+                await setup_session.write_session.commit()
 
             service = AgentSessionInputService(
-                agent_repository=AgentRepository(),
-                agent_project_preset_repository=AgentProjectPresetRepository(),
-                agent_project_catalog_repository=AgentProjectCatalogRepository(),
-                agent_project_default_repository=AgentProjectDefaultRepository(),
-                agent_runtime_repository=AgentRuntimeRepository(),
-                agent_session_repository=AgentSessionRepository(),
-                root_agent_session_creation_service=_root_agent_session_creation_service(),
-                chat_write_request_repository=ChatWriteRequestRepository(),
-                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-                workspace_user_repository=WorkspaceUserRepository(),
-                exchange_file_service=_ExchangeFileService(),
-                mailbox_item_service=_mailbox_item_service(session_manager),
-                session_manager=session_manager,
+                operations=AgentSessionInputOperationsRepository(
+                    agent_repository=AgentRepository(),
+                    agent_project_preset_repository=AgentProjectPresetRepository(),
+                    agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                    agent_project_default_repository=AgentProjectDefaultRepository(),
+                    agent_runtime_repository=AgentRuntimeRepository(),
+                    agent_session_repository=AgentSessionRepository(),
+                    root_session_repository=_root_agent_session_creation_service(),
+                    chat_write_request_repository=ChatWriteRequestRepository(),
+                    session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                    workspace_user_repository=WorkspaceUserRepository(),
+                    attachment_claim_repository=_ExchangeFileService(),
+                    mailbox_repository=_mailbox_item_service(session_manager),
+                    mailbox_admission_repository=_mailbox_admission_repository(
+                        session_manager
+                    ),
+                    active_profile_repository=_active_profile_repository(
+                        session_manager
+                    ),
+                    session_manager=session_manager,
+                    mailbox_database_repository=MailboxDatabaseRepository(
+                        mailbox_item_repository=_mailbox_item_service(session_manager),
+                        event_transcript_repository=EventTranscriptRepository(),
+                        action_execution_repository=ActionExecutionRepository(),
+                    ),
+                )
             )
 
             async with AsyncSession(
                 rdb_engine,
                 expire_on_commit=False,
-            ) as decommission_session:
+            ) as raw_decommission_session:
+                decommission_session = ReadWriteSession(raw_decommission_session)
                 decommissioned = await AgentRepository().mark_decommissioning(
                     decommission_session,
                     agent_id,
@@ -1960,7 +2138,7 @@ class TestAgentSessionInputService:
                             asyncio.shield(admission_task),
                             timeout=0.1,
                         )
-                    await decommission_session.commit()
+                    await decommission_session.write_session.commit()
                     result = await asyncio.wait_for(admission_task, timeout=5)
                 finally:
                     if not admission_task.done():
@@ -1980,18 +2158,19 @@ class TestAgentSessionInputService:
             async with AsyncSession(
                 rdb_engine,
                 expire_on_commit=False,
-            ) as session:
+            ) as raw_session:
+                session = ReadWriteSession(raw_session)
                 await _cleanup_committed_agent_fixture(
                     session,
                     workspace_id=workspace_id,
                     user_id=user_id,
                     agent_id=agent_id,
                 )
-                await session.commit()
+                await session.write_session.commit()
 
     async def test_create_buffered_agent_input_dedupes_client_request_id(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Same client_request_id returns same MailboxItem."""
         async with rdb_session_manager() as session:
@@ -2015,19 +2194,32 @@ class TestAgentSessionInputService:
             ).session
 
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=AgentRuntimeRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=_mailbox_item_service(rdb_session_manager),
+                mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                active_profile_repository=_active_profile_repository(
+                    rdb_session_manager
+                ),
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=MailboxDatabaseRepository(
+                    mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
+                    event_transcript_repository=EventTranscriptRepository(),
+                    action_execution_repository=ActionExecutionRepository(),
+                ),
+            )
         )
 
         request_payload: dict[str, object] = {
@@ -2052,7 +2244,7 @@ class TestAgentSessionInputService:
         async with rdb_session_manager() as session:
             historical_profile = _TEST_INFERENCE_PROFILE.model_dump(mode="json")
             historical_profile.pop("enabled_execution_options")
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBChatWriteRequest)
                 .where(
                     RDBChatWriteRequest.client_request_id == "client-request-1",
@@ -2113,7 +2305,7 @@ class TestAgentSessionInputService:
 
     async def test_buffered_input_idempotency_is_scoped_to_requester(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Different requesters sharing a client key retain independent inputs."""
         async with rdb_session_manager() as session:
@@ -2153,19 +2345,32 @@ class TestAgentSessionInputService:
             ).session
 
         service = AgentSessionInputService(
-            agent_repository=AgentRepository(),
-            agent_project_preset_repository=AgentProjectPresetRepository(),
-            agent_project_catalog_repository=AgentProjectCatalogRepository(),
-            agent_project_default_repository=AgentProjectDefaultRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
-            agent_session_repository=AgentSessionRepository(),
-            root_agent_session_creation_service=_root_agent_session_creation_service(),
-            chat_write_request_repository=ChatWriteRequestRepository(),
-            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            workspace_user_repository=WorkspaceUserRepository(),
-            exchange_file_service=_ExchangeFileService(),
-            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
-            session_manager=rdb_session_manager,
+            operations=AgentSessionInputOperationsRepository(
+                agent_repository=AgentRepository(),
+                agent_project_preset_repository=AgentProjectPresetRepository(),
+                agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                agent_project_default_repository=AgentProjectDefaultRepository(),
+                agent_runtime_repository=AgentRuntimeRepository(),
+                agent_session_repository=AgentSessionRepository(),
+                root_session_repository=_root_agent_session_creation_service(),
+                chat_write_request_repository=ChatWriteRequestRepository(),
+                session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+                workspace_user_repository=WorkspaceUserRepository(),
+                attachment_claim_repository=_ExchangeFileService(),
+                mailbox_repository=_mailbox_item_service(rdb_session_manager),
+                mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                active_profile_repository=_active_profile_repository(
+                    rdb_session_manager
+                ),
+                session_manager=rdb_session_manager,
+                mailbox_database_repository=MailboxDatabaseRepository(
+                    mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
+                    event_transcript_repository=EventTranscriptRepository(),
+                    action_execution_repository=ActionExecutionRepository(),
+                ),
+            )
         )
 
         shared_client_request_id = "shared-client-request"
@@ -2286,3 +2491,26 @@ class TestAgentSessionInputService:
             first_post_promotion_retry.value.accepted_mailbox_item_id
             == first.value.accepted_mailbox_item_id
         )
+
+
+def _active_profile_repository(
+    manager: SessionManager[WriteSession],
+) -> ActiveProfileAdmissionRepository:
+    """Keep these lifecycle-only fixtures scoped to their declared option contract."""
+    del manager
+    repository = create_autospec(ActiveProfileAdmissionRepository, instance=True)
+
+    async def validate(
+        session: WriteSession,
+        *,
+        agent: Agent,
+        profile: RequestedInferenceProfile,
+        captured: CapturedProfileAdmission | None,
+    ) -> None:
+        del session, captured
+        validate_requested_profile_against_options(
+            agent.selectable_model_options, profile
+        )
+
+    repository.validate_in_session.side_effect = validate
+    return repository

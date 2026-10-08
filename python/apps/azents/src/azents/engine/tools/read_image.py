@@ -5,9 +5,11 @@ Return image file in session data storage as ModelFile-backed FilePart.
 
 import logging
 from collections.abc import Awaitable, Callable
+from typing import Protocol
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.events.model_file_parts import file_output_part_from_model_file
 from azents.engine.run.types import (
     FunctionTool,
@@ -16,19 +18,27 @@ from azents.engine.run.types import (
 )
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.path_policy import RUNTIME_ACCESSIBLE_PATHS_MSG
+from azents.repos.model_file.data import ModelFile
 from azents.runtime.transfer.runtime_image_read import (
     RuntimeImageReadError,
     RuntimeImageReadModelFileOversized,
     RuntimeImageReadRequest,
-    RuntimeImageReadService,
 )
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.services.file_storage import FileStorage
-from azents.services.model_file import ModelFileService, model_file_size_limit_message
+from azents.services.model_file import model_file_size_limit_message
 from azents.services.runtime_storage_error import RuntimeStorageError
-from azents.services.session_resource_authority import SessionResourceAuthority
 
 logger = logging.getLogger(__name__)
+
+
+class RuntimeImageReader(Protocol):
+    """Narrow completed image materialization boundary used by this tool."""
+
+    async def read(self, request: RuntimeImageReadRequest) -> ModelFile:
+        """Return the materialized image or raise its typed transfer error."""
+        ...
+
 
 # Maximum image size (20MB)
 _MAX_IMAGE_SIZE = 20 * 1024 * 1024
@@ -46,6 +56,8 @@ _EXTENSION_TO_MEDIA_TYPE: dict[str, str] = {
 class ReadImageInput(BaseModel):
     """read_image tool input."""
 
+    model_config = ConfigDict(extra="forbid")
+
     path: str = Field(
         description=("Absolute runtime image path to read"),
     )
@@ -54,16 +66,14 @@ class ReadImageInput(BaseModel):
 def make_read_image_tool(
     *,
     session_storage: FileStorage,
-    model_file_service: ModelFileService,
     authority: SessionResourceAuthority,
-    runtime_image_read_service: RuntimeImageReadService | None = None,
+    runtime_image_read_service: RuntimeImageReader | None = None,
     resolve_runtime_target: Callable[[], Awaitable[ServerToRuntimeTarget]]
     | None = None,
 ) -> FunctionTool:
     """Create read_image tool.
 
     :param session_storage: runtime runner file storage
-    :param model_file_service: ModelFile creation service
     :param authority: Validated Session/Run resource authority
     :return: read_image Tool instance
     """

@@ -9,9 +9,16 @@ from enum import StrEnum
 from typing import Annotated
 
 import sentry_sdk
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
+from azents.core.auth.deps import SystemAdmin, get_system_admin
+from azents.core.session_diagnostics import (
+    SessionDiagnosticEventPage,
+    SessionDiagnosticFile,
+    SessionDiagnosticMetadata,
+)
+from azents.services.session_diagnostics import SessionDiagnosticService
 from azents.utils.fastapi.route import RouteMounter
 
 logger = logging.getLogger(__name__)
@@ -109,6 +116,64 @@ def fire_exception(
     FastAPI returns 500 and sends an event with stacktrace to Sentry.
     """
     raise RuntimeError(message)
+
+
+@router.get("/sessions/{session_id}")
+async def get_session_diagnostics(
+    session_id: str,
+    workspace_id: Annotated[str, Query(min_length=32, max_length=32)],
+    admin: Annotated[SystemAdmin, Depends(get_system_admin)],
+    service: Annotated[SessionDiagnosticService, Depends()],
+) -> SessionDiagnosticMetadata:
+    """Inspect retained common metadata under authenticated operational authority."""
+    del admin
+    result = await service.metadata(session_id=session_id, workspace_id=workspace_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Session is unavailable.")
+    return result
+
+
+@router.get("/sessions/{session_id}/events")
+async def get_session_diagnostic_events(
+    session_id: str,
+    workspace_id: Annotated[str, Query(min_length=32, max_length=32)],
+    admin: Annotated[SystemAdmin, Depends(get_system_admin)],
+    service: Annotated[SessionDiagnosticService, Depends()],
+    after: Annotated[str | None, Query(min_length=32, max_length=32)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> SessionDiagnosticEventPage:
+    """Page safe canonical audit records without exposing native model artifacts."""
+    del admin
+    result = await service.events(
+        session_id=session_id, workspace_id=workspace_id, after=after, limit=limit
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Session is unavailable.")
+    return result
+
+
+@router.get("/sessions/{session_id}/file")
+async def get_session_diagnostic_file(
+    session_id: str,
+    workspace_id: Annotated[str, Query(min_length=32, max_length=32)],
+    path: Annotated[str, Query(min_length=1, max_length=512)],
+    admin: Annotated[SystemAdmin, Depends(get_system_admin)],
+    service: Annotated[SessionDiagnosticService, Depends()],
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=65_536)] = 10_000,
+) -> SessionDiagnosticFile:
+    """Read retained current file content without file versions or restoration."""
+    del admin
+    result = await service.file(
+        session_id=session_id,
+        workspace_id=workspace_id,
+        path=path,
+        offset=offset,
+        limit=limit,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Session file is unavailable.")
+    return result
 
 
 def mount(mounter: RouteMounter) -> None:

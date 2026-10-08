@@ -11,7 +11,8 @@ import {
   useState,
 } from "react";
 import {
-  normalizeReasoningEffort,
+  knownReasoningEffort,
+  normalizeReasoningEffortForCapabilities,
   reasoningEffortLevels,
 } from "@/shared/lib/reasoning-effort";
 import { isRecord, isString } from "@/shared/lib/unknown-value";
@@ -24,6 +25,10 @@ import {
   supportedExecutionOptionIds,
 } from "../executionOptions";
 import { resolveAppliedInferenceProfile } from "../inferenceProfileBaseline";
+import type {
+  ChatExecutionOptionDefinition,
+  ChatExecutionOptionGroup,
+} from "../executionOptions";
 import type {
   ChatAction,
   ChatLiveRunState,
@@ -203,11 +208,122 @@ interface RankedInputAction {
   ranges: number[];
 }
 
+type ComposerWriteError = { type: "input" } | { type: "profile" };
+
 type DesktopProfileSection = "model" | "effort" | `execution:${string}`;
 
 interface DesktopProfileFocusTarget {
   section: DesktopProfileSection;
   optionIndex: number | null;
+}
+
+export interface ChatInputContainer extends Pick<
+  ChatInputProps,
+  | "agentId"
+  | "sessionId"
+  | "isMobile"
+  | "selectableModelOptions"
+  | "defaultInferenceProfile"
+  | "isUploading"
+  | "pendingFiles"
+  | "goal"
+  | "todo"
+  | "removeFile"
+  | "wasCommandBlocked"
+  | "isStopAvailable"
+  | "isStopPending"
+  | "onStopRequest"
+> {
+  onApplyInferenceProfile: ChatInputProps["onApplyInferenceProfile"];
+  onClearGoal: ChatInputProps["onClearGoal"];
+  onUpdateGoal: ChatInputProps["onUpdateGoal"];
+  onPauseGoal: ChatInputProps["onPauseGoal"];
+  onResumeGoal: ChatInputProps["onResumeGoal"];
+  t: ReturnType<typeof useTranslations<"chat">>;
+  inferenceProfileSelectionEnabled: boolean;
+  contextUsageEnabled: boolean;
+  contextUsage: TokenUsageSummary | null;
+  contextUsageActiveRun: ChatLiveRunState | null;
+  selectableExecutionOptions: ChatExecutionOptionDefinition[];
+  selectableExecutionOptionGroups: ChatExecutionOptionGroup[];
+  editingMessageId: string | null;
+  editSendDisabled: boolean;
+  inputDisabled: boolean;
+  disabledPlaceholder: string | null;
+  inputValue: string;
+  inferenceProfile: RequestedInferenceProfile;
+  profilePickerOpened: boolean;
+  setProfilePickerOpened: React.Dispatch<React.SetStateAction<boolean>>;
+  scrollToContextUsageOnOpen: boolean;
+  setScrollToContextUsageOnOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  contextUsageDetailsRef: React.RefObject<HTMLDivElement | null>;
+  desktopProfileSection: DesktopProfileSection | null;
+  setDesktopProfileSection: React.Dispatch<
+    React.SetStateAction<DesktopProfileSection | null>
+  >;
+  writeError: ComposerWriteError | null;
+  selectedAction: InputActionDefinition | null;
+  setSelectedAction: React.Dispatch<
+    React.SetStateAction<InputActionDefinition | null>
+  >;
+  inputActionListboxId: string;
+  inputActionOptionRefs: React.RefObject<Map<number, HTMLButtonElement>>;
+  desktopProfileDialogId: string;
+  desktopProfileModelPanelId: string;
+  desktopProfileEffortPanelId: string;
+  desktopProfileExecutionPanelId: string;
+  profileTriggerRef: React.RefObject<HTMLButtonElement | null>;
+  desktopProfileSectionRefs: React.RefObject<
+    Map<DesktopProfileSection, HTMLButtonElement>
+  >;
+  desktopModelOptionRefs: React.RefObject<Map<number, HTMLButtonElement>>;
+  desktopEffortOptionRefs: React.RefObject<Map<number, HTMLButtonElement>>;
+  executionOptionRefs: React.RefObject<
+    Map<string, Map<number, HTMLButtonElement>>
+  >;
+  selectableEfforts: ModelReasoningEffort[];
+  selectedModelLabel: string;
+  selectedEffortLabel: string;
+  supportedExecutionOptions: ModelExecutionOptionId[];
+  hasPendingInferenceProfileChange: boolean;
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  inputActionQuery: string | null;
+  visibleInputActions: RankedInputAction[];
+  todoPreviewVisible: boolean;
+  activeInputActionIndex: number;
+  setActiveInputActionIndex: React.Dispatch<React.SetStateAction<number>>;
+  activeInputAction: RankedInputAction | null;
+  activeInputActionOptionId: string;
+  updateInputValue: (value: string) => void;
+  persistDraft: (message: string, action: ChatAction | null) => void;
+  handleCancelEdit: () => void;
+  handleSend: () => void;
+  handleSelectInputAction: (definition: InputActionDefinition) => void;
+  handleInputFocus: () => void;
+  handleInputBlur: () => void;
+  handleKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  handleFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  handleModelChange: (label: string | null) => void;
+  handleEffortChange: (effort: string | null) => void;
+  handleExecutionOptionToggle: (option: ModelExecutionOptionId) => void;
+  handleExecutionOptionGroupChange: (group: string, selected: string) => void;
+  handleOpenContextUsage: () => void;
+  handleProfilePickerEnterTransitionEnd: () => void;
+  desktopProfileSections: DesktopProfileSection[];
+  closeDesktopProfilePicker: () => void;
+  handleDesktopProfileSectionKeyDown: (
+    section: DesktopProfileSection,
+    event: React.KeyboardEvent<HTMLButtonElement>,
+  ) => void;
+  handleDesktopProfileOptionKeyDown: (
+    section: DesktopProfileSection,
+    index: number,
+    event: React.KeyboardEvent<HTMLButtonElement>,
+  ) => void;
+  handleProfileTriggerKeyDown: (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+  ) => void;
 }
 
 function normalizeStoredAction(value: unknown): ChatAction | null {
@@ -227,23 +343,6 @@ function normalizeStoredAction(value: unknown): ChatAction | null {
     return { type: "cleanup_orphan_git_worktrees" };
   }
   return null;
-}
-
-function knownReasoningEffort(
-  value: string | null,
-): ModelReasoningEffort | null {
-  switch (value) {
-    case "none":
-    case "minimal":
-    case "low":
-    case "medium":
-    case "high":
-    case "xhigh":
-    case "max":
-      return value;
-    default:
-      return null;
-  }
 }
 
 function parseComposerDraft(raw: string): ComposerDraft {
@@ -491,7 +590,7 @@ function useChatInputContainerImplementation({
   editSendDisabled = false,
   inputDisabled = false,
   disabledPlaceholder = null,
-}: ChatInputProps) {
+}: ChatInputProps): ChatInputContainer {
   const t = useTranslations("chat");
   const draftStorageKey = useMemo(
     () => getScopedStorageKey(DRAFT_STORAGE_KEY_PREFIX, agentId, sessionId),
@@ -539,7 +638,7 @@ function useChatInputContainerImplementation({
     useState<DesktopProfileSection | null>(null);
   const [desktopProfileFocusTarget, setDesktopProfileFocusTarget] =
     useState<DesktopProfileFocusTarget | null>(null);
-  const [sendErrorVisible, setSendErrorVisible] = useState(false);
+  const [writeError, setWriteError] = useState<ComposerWriteError | null>(null);
   const [selectedAction, setSelectedAction] =
     useState<InputActionDefinition | null>(() =>
       resolveActionDefinition(parsedDraft.action, inputActions),
@@ -737,7 +836,7 @@ function useChatInputContainerImplementation({
 
   const updateInputValue = useCallback(
     (nextValue: string): void => {
-      setSendErrorVisible(false);
+      setWriteError(null);
       setInputActionSuggestionsDismissed(false);
       setInputValue(nextValue);
       persistDraft(
@@ -788,7 +887,7 @@ function useChatInputContainerImplementation({
   }, [onCancelEdit, restorePersistedDraft]);
 
   const clearInputAfterSend = useCallback((): void => {
-    setSendErrorVisible(false);
+    setWriteError(null);
     if (editingMessageId !== null) {
       restorePersistedDraft();
     } else {
@@ -815,6 +914,17 @@ function useChatInputContainerImplementation({
         return;
       }
 
+      const profileForWrite = normalizeComposerProfile(
+        inferenceProfile,
+        supportedExecutionOptions,
+      );
+      if (
+        profileForWrite.enabled_execution_options.join(",") !==
+        inferenceProfile.enabled_execution_options.join(",")
+      ) {
+        profileDirtyRef.current = true;
+      }
+      setInferenceProfile(profileForWrite);
       const hasAttachedFiles = pendingFiles.length > 0;
       if (
         editingMessageId === null &&
@@ -824,10 +934,8 @@ function useChatInputContainerImplementation({
         selectedAction === null &&
         onApplyInferenceProfile != null
       ) {
-        const applied = await onApplyInferenceProfile(inferenceProfile);
-        if (!applied) {
-          setSendErrorVisible(true);
-        }
+        const applied = await onApplyInferenceProfile(profileForWrite);
+        setWriteError(applied ? null : { type: "profile" });
         return;
       }
       const messagePolicy = selectedAction?.message.policy ?? "required";
@@ -836,11 +944,11 @@ function useChatInputContainerImplementation({
         return;
       }
       if (hasAttachedFiles && attachmentPolicy === "unsupported") {
-        setSendErrorVisible(true);
+        setWriteError({ type: "input" });
         return;
       }
       if (!hasAttachedFiles && attachmentPolicy === "required") {
-        setSendErrorVisible(true);
+        setWriteError({ type: "input" });
         return;
       }
 
@@ -853,7 +961,7 @@ function useChatInputContainerImplementation({
           const uploaded = await uploadAll(agentId);
           if (uploaded.length === 0) {
             if (!trimmed || attachmentPolicy === "required") {
-              setSendErrorVisible(true);
+              setWriteError({ type: "input" });
               resetDoneFiles();
               return;
             }
@@ -861,29 +969,29 @@ function useChatInputContainerImplementation({
             const sentWithoutAttachments = await onSendInput(
               trimmed,
               normalizedAction,
-              inferenceProfile,
+              profileForWrite,
             );
             if (sentWithoutAttachments) {
               clearInputAfterSend();
             } else {
-              setSendErrorVisible(true);
+              setWriteError({ type: "input" });
             }
             return;
           }
           const sent = await onSendInput(
             trimmed,
             normalizedAction,
-            inferenceProfile,
+            profileForWrite,
             uploaded,
           );
           if (sent) {
             clearInputAfterSend();
           } else {
-            setSendErrorVisible(true);
+            setWriteError({ type: "input" });
             resetDoneFiles();
           }
         } catch {
-          setSendErrorVisible(true);
+          setWriteError({ type: "input" });
           resetDoneFiles();
         }
         return;
@@ -892,12 +1000,12 @@ function useChatInputContainerImplementation({
       const sent = await onSendInput(
         trimmed,
         normalizedAction,
-        inferenceProfile,
+        profileForWrite,
       );
       if (sent) {
         clearInputAfterSend();
       } else {
-        setSendErrorVisible(true);
+        setWriteError({ type: "input" });
       }
     };
     void send();
@@ -905,6 +1013,7 @@ function useChatInputContainerImplementation({
     inputValue,
     selectedAction,
     inferenceProfile,
+    supportedExecutionOptions,
     isUploading,
     editingMessageId,
     editSendDisabled,
@@ -947,7 +1056,7 @@ function useChatInputContainerImplementation({
   }, []);
 
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
       if (
         !e.nativeEvent.isComposing &&
         visibleInputActions.length > 0 &&
@@ -1000,7 +1109,7 @@ function useChatInputContainerImplementation({
 
   /** Handle files selected through the hidden input. */
   const handleFileChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
+    (e: React.ChangeEvent<HTMLInputElement>): void => {
       if (e.target.files && e.target.files.length > 0) {
         addFiles(e.target.files);
       }
@@ -1013,9 +1122,19 @@ function useChatInputContainerImplementation({
   const updateInferenceProfile = useCallback(
     (nextProfile: RequestedInferenceProfile): void => {
       profileDirtyRef.current = true;
-      setInferenceProfile(nextProfile);
+      const option = modelOptionForTarget(
+        selectableModelOptions,
+        nextProfile.model_target_label,
+      );
+      setInferenceProfile(
+        normalizeComposerProfile(
+          nextProfile,
+          supportedExecutionOptionIds(option),
+        ),
+      );
+      setWriteError(null);
     },
-    [],
+    [selectableModelOptions],
   );
 
   const handleModelChange = useCallback(
@@ -1023,19 +1142,16 @@ function useChatInputContainerImplementation({
       if (modelTargetLabel === null) {
         return;
       }
-      const nextEfforts = effortLevelsForTarget(
-        selectableModelOptions,
-        modelTargetLabel,
-      );
       const nextModelOption = modelOptionForTarget(
         selectableModelOptions,
         modelTargetLabel,
       );
       updateInferenceProfile({
         model_target_label: modelTargetLabel,
-        reasoning_effort: normalizeReasoningEffort(
+        reasoning_effort: normalizeReasoningEffortForCapabilities(
           knownReasoningEffort(inferenceProfile.reasoning_effort),
-          nextEfforts,
+          nextModelOption?.candidates[0]?.model_selection
+            .normalized_capabilities,
         ),
         enabled_execution_options: normalizeEnabledExecutionOptions(
           inferenceProfile,
@@ -1472,7 +1588,7 @@ function useChatInputContainerImplementation({
     contextUsageDetailsRef,
     desktopProfileSection,
     setDesktopProfileSection,
-    sendErrorVisible,
+    writeError,
     selectedAction,
     setSelectedAction,
     inputActionListboxId,
@@ -1522,10 +1638,6 @@ function useChatInputContainerImplementation({
     handleProfileTriggerKeyDown,
   };
 }
-
-export type ChatInputContainer = ReturnType<
-  typeof useChatInputContainerImplementation
->;
 
 export function useChatInputContainer(
   props: ChatInputProps,

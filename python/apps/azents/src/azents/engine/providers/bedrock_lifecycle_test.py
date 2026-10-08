@@ -28,6 +28,7 @@ from pydantic_ai.providers.bedrock import BedrockProvider
 from pydantic_ai.settings import ModelSettings
 
 from azents.core.enums import LLMProvider
+from azents.core.llm_catalog import ModelCapabilities, ModelToolCallingCapabilities
 from azents.engine.events.pydantic_ai_adapter import PydanticAIModelAdapter
 from azents.engine.events.pydantic_ai_adapter_test import context_for_test
 from azents.engine.events.pydantic_ai_output import PydanticAIOutputNormalizer
@@ -37,6 +38,7 @@ from azents.engine.events.pydantic_ai_types import (
 )
 from azents.engine.model_assembly import ModelAssemblyMetadata
 from azents.engine.model_stream import (
+    ModelDispatchAdmissionError,
     ModelStreamTimeoutPolicy,
     ModelStreamTimeoutPolicyResolver,
     ModelStreamWatchdog,
@@ -168,6 +170,7 @@ class BedrockCall:
             event
             async for event in self.adapter.stream(
                 PydanticAIRequest(
+                    native_replay_context=None,
                     provider="aws_bedrock",
                     model=self.model,
                     assembly_metadata=assembly_metadata,
@@ -257,6 +260,69 @@ async def test_sdk_reports_non_converse_family_without_dispatch() -> None:
     finally:
         for close in reversed(state.close_callbacks):
             await close()
+
+
+@pytest.mark.parametrize("outcome", ["ownership", "stop", "allowed"])
+async def test_foreground_boto_dispatch_checks_common_owner_on_event_loop(
+    outcome: str,
+) -> None:
+    """A synchronous official SDK must await the common foreground fence."""
+    model = "anthropic.claude-3-haiku-20240307-v1:0"
+    call = bedrock_call(model=model, chunks=[nominal_body(model)])
+    loop = asyncio.get_running_loop()
+    checks: list[str] = []
+
+    async def check_stop() -> bool:
+        assert asyncio.get_running_loop() is loop
+        checks.append("checked")
+        if outcome == "ownership":
+            raise ModelDispatchAdmissionError("ownership")
+        return outcome == "stop"
+
+    async def collect() -> list[PydanticAIStreamEvent]:
+        return [
+            event
+            async for event in call.adapter.stream(
+                PydanticAIRequest(
+                    native_replay_context=None,
+                    provider="aws_bedrock",
+                    model=model,
+                    assembly_metadata=None,
+                    messages=[
+                        ModelRequest(parts=[UserPromptPart(content="Scoped input")])
+                    ],
+                    settings={},
+                    parameters=ModelRequestParameters(),
+                ),
+                watchdog=call.watchdog,
+                timeout_policy=call.policy,
+                call_context=dataclasses.replace(
+                    context_for_test(),
+                    provider="aws_bedrock",
+                    model=model,
+                    check_stop=check_stop,
+                ),
+            )
+        ]
+
+    try:
+        if outcome == "ownership":
+            with pytest.raises(ModelDispatchAdmissionError) as failure:
+                await collect()
+            assert failure.value.reason == "ownership"
+            assert call.boundary.paths == []
+        elif outcome == "stop":
+            with pytest.raises(asyncio.CancelledError):
+                await collect()
+            assert call.boundary.paths == []
+        else:
+            events = await collect()
+            assert any(event.response is not None for event in events)
+            assert len(call.boundary.paths) == 1
+        assert checks
+    finally:
+        call.boundary.release_all()
+        await call.adapter.close()
 
 
 @pytest.mark.parametrize(
@@ -366,7 +432,14 @@ async def test_installed_converse_schema_and_json_output_tool_extraction(
                     "required": ["title"],
                 },
             ),
-        )
+        ),
+        assembly_metadata=ModelAssemblyMetadata(
+            model_developer=None,
+            model_family=None,
+            capabilities=ModelCapabilities(
+                tool_calling=ModelToolCallingCapabilities(supported=True)
+            ),
+        ),
     )
     assert call.boundary.paths == [f"/model/{model}/converse-stream"]
     payload = call.boundary.bodies[0]

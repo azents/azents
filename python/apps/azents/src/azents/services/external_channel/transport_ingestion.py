@@ -5,25 +5,33 @@ import datetime
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelConversationScopeKind,
+    ExternalChannelIngressAuthorityKind,
     ExternalChannelMessageRevisionKind,
     ExternalChannelProvider,
-    ExternalChannelResourceType,
+)
+from azents.core.external_channel_conversation_data import (
+    ExternalChannelConversationScope,
+    ExternalChannelOperationDeadline,
 )
 from azents.core.external_channel_file import external_channel_file_metadata_items
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
+from azents.core.external_channel_ingestion import (
+    ExternalChannelIngestionOperation,
+    ExternalChannelIngestionOutcome,
+    ExternalChannelIngestionOutcomeKind,
+    ExternalChannelIngestionReason,
+    ExternalChannelIngestionRequest,
+    ExternalChannelIngressAuthority,
+    ExternalChannelTriggerLocator,
+)
 from azents.repos.external_channel.data import (
     ExternalChannelResource,
     ExternalChannelTrigger,
 )
-from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.services.external_channel.conversation import (
-    ExternalChannelConversationScope,
-    ExternalChannelOperationDeadline,
+from azents.repos.external_channel.transport_ingestion_read import (
+    ExternalChannelTransportReadRepository,
 )
 from azents.services.external_channel.discord_events import (
     DiscordEventExcluded,
@@ -33,14 +41,6 @@ from azents.services.external_channel.discord_events import (
 )
 from azents.services.external_channel.ingestion import (
     ExternalChannelConversationIngestionService,
-    ExternalChannelIngestionOperation,
-    ExternalChannelIngestionOutcome,
-    ExternalChannelIngestionOutcomeKind,
-    ExternalChannelIngestionReason,
-    ExternalChannelIngestionRequest,
-    ExternalChannelIngressAuthority,
-    ExternalChannelIngressAuthorityKind,
-    ExternalChannelTriggerLocator,
 )
 from azents.services.external_channel.ingestion_deps import (
     get_external_channel_conversation_ingestion_service,
@@ -67,13 +67,9 @@ type SlackTransportIngestionResult = (
 class ExternalChannelTransportIngestionService:
     """Project authenticated callbacks into the shared ingestion boundary."""
 
-    session_manager: Annotated[
-        SessionManager[AsyncSession],
-        Depends(get_session_manager),
-    ]
-    repository: Annotated[
-        ExternalChannelRepository,
-        Depends(ExternalChannelRepository.create),
+    read_operations: Annotated[
+        ExternalChannelTransportReadRepository,
+        Depends(ExternalChannelTransportReadRepository),
     ]
     ingestion_service: Annotated[
         ExternalChannelConversationIngestionService,
@@ -173,16 +169,12 @@ class ExternalChannelTransportIngestionService:
             or authority.lease_generation is None
         ):
             return _retryable_failure()
-        async with self.session_manager() as session:
-            configuration = (
-                await self.repository.get_owned_discord_gateway_configuration(
-                    session,
-                    connection_id=event.connection_id,
-                    lease_owner=authority.lease_owner,
-                    lease_generation=authority.lease_generation,
-                    now=datetime.datetime.now(datetime.UTC),
-                )
-            )
+        configuration = await self.read_operations.get_owned_discord_configuration(
+            connection_id=event.connection_id,
+            lease_owner=authority.lease_owner,
+            lease_generation=authority.lease_generation,
+            now=datetime.datetime.now(datetime.UTC),
+        )
         if (
             configuration is None
             or configuration.configuration_generation
@@ -208,7 +200,7 @@ class ExternalChannelTransportIngestionService:
         except DiscordEventNormalizationError:
             return _terminal_rejection()
 
-        resource = await self._discord_resource(
+        resource = await self.read_operations.get_discord_resource(
             connection_id=event.connection_id,
             guild_id=normalized.tenant_id,
             thread_id=normalized.thread_id,
@@ -306,35 +298,6 @@ class ExternalChannelTransportIngestionService:
         if queue_outcome is not None:
             return queue_outcome
         return await self.ingestion_service.ingest(request)
-
-    async def _discord_resource(
-        self,
-        *,
-        connection_id: str,
-        guild_id: str,
-        thread_id: str | None,
-        message_id: str,
-    ) -> ExternalChannelResource | None:
-        """Resolve an existing Discord resource by canonical or delivery identity."""
-        conversation_id = thread_id or message_id
-        async with self.session_manager() as session:
-            resource = await self.repository.get_resource_by_provider_key(
-                session,
-                connection_id=connection_id,
-                resource_type=ExternalChannelResourceType.THREAD,
-                provider_resource_key=_discord_resource_key(
-                    guild_id=guild_id,
-                    conversation_id=conversation_id,
-                ),
-            )
-            if resource is not None or thread_id is None:
-                return resource
-            return await self.repository.get_discord_resource_by_delivery_channel(
-                session,
-                connection_id=connection_id,
-                guild_id=guild_id,
-                delivery_channel_id=thread_id,
-            )
 
 
 def transport_outcome_acknowledgeable(

@@ -38,7 +38,11 @@ class TestDockerContainerProfileSpecV1(unittest.TestCase):
                 profile_kind = 'docker_container',
                 contract_family = 'docker.container-profile',
                 schema_version = 1,
-                runner_resources = { },
+                runner_resources = azentspublicclient.models.docker_container_resources.DockerContainerResources(
+                    cpu_reservation_millicores = 1.0, 
+                    cpu_limit_millicores = 1.0, 
+                    memory_reservation_bytes = 1.0, 
+                    memory_limit_bytes = 1.0, ),
                 network_name = ''
             )
         else:
@@ -46,7 +50,11 @@ class TestDockerContainerProfileSpecV1(unittest.TestCase):
                 profile_kind = 'docker_container',
                 contract_family = 'docker.container-profile',
                 schema_version = 1,
-                runner_resources = { },
+                runner_resources = azentspublicclient.models.docker_container_resources.DockerContainerResources(
+                    cpu_reservation_millicores = 1.0, 
+                    cpu_limit_millicores = 1.0, 
+                    memory_reservation_bytes = 1.0, 
+                    memory_limit_bytes = 1.0, ),
                 network_name = '',
         )
         """

@@ -12,6 +12,10 @@ from azents.scheduler.deps import get_scheduler_service
 from azents.scheduler.user_scheduled_task_dispatch import (
     get_user_scheduled_task_dispatcher,
 )
+from azents.services.historical_memory.sampling import (
+    HistoricalMemorySamplingReport,
+    HistoricalMemorySamplingService,
+)
 from azents.services.scheduled_task.service import ScheduledTaskDispatchSummary
 from azents.utils.fastapi.route import as_route_mounter
 
@@ -108,3 +112,81 @@ def test_dispatch_scheduled_tasks_rejects_naive_instant() -> None:
 
     assert response.status_code == 422
     dispatcher.dispatch_once.assert_not_awaited()
+
+
+def test_historical_sample_shares_aware_instant_and_preserves_real_deadline() -> None:
+    """The route passes a normalized instant and explicit consolidation choice."""
+    sampled_at = datetime.datetime(2099, 1, 1, tzinfo=datetime.UTC)
+    service = AsyncMock(spec=HistoricalMemorySamplingService)
+    service.sample_agent.return_value = HistoricalMemorySamplingReport(
+        sampled_at, 1, 1, 1, 1, 0, 0, 0, 2
+    )
+    app = _app(SimpleNamespace())
+    app.dependency_overrides[HistoricalMemorySamplingService] = lambda: service
+    response = TestClient(app).post(
+        "/scheduler/v1/historical-memory/sample",
+        json={
+            "agent_id": "a" * 32,
+            "now": "2099-01-01T09:00:00+09:00",
+            "consolidate": True,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "now": "2099-01-01T00:00:00Z",
+        "admitted": 1,
+        "due_agents": 1,
+        "attempted": 1,
+        "prepared": 1,
+        "empty": 0,
+        "failed": 0,
+        "quota_advanced": 0,
+        "consolidation_dispatched": 2,
+    }
+    service.sample_agent.assert_awaited_once_with(
+        now=sampled_at,
+        agent_id="a" * 32,
+        consolidate=True,
+    )
+
+
+def test_historical_sample_rejects_naive_time_and_never_prepares_non_due_agent() -> (
+    None
+):
+    """Ingress rejects naive time and requires an explicit sampling choice."""
+    service = AsyncMock(spec=HistoricalMemorySamplingService)
+    service.sample_agent.return_value = HistoricalMemorySamplingReport(
+        datetime.datetime(2099, 1, 1, tzinfo=datetime.UTC),
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+    )
+    app = _app(SimpleNamespace())
+    app.dependency_overrides[HistoricalMemorySamplingService] = lambda: service
+    client = TestClient(app)
+    invalid = client.post(
+        "/scheduler/v1/historical-memory/sample",
+        json={
+            "agent_id": "a" * 32,
+            "now": "2099-01-01T00:00:00",
+            "consolidate": False,
+        },
+    )
+    assert invalid.status_code == 422
+    service.sample_agent.assert_not_awaited()
+    response = client.post(
+        "/scheduler/v1/historical-memory/sample",
+        json={
+            "agent_id": "a" * 32,
+            "now": "2099-01-01T00:00:00Z",
+            "consolidate": False,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["attempted"] == 0
+    service.sample_agent.assert_awaited_once()

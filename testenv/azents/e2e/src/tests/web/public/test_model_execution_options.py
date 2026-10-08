@@ -120,8 +120,10 @@ def _login_main_web(
     driver.delete_all_cookies()
     driver.get(f"{base_url}/login")
     email_input = _wait(driver).until(ec.element_to_be_clickable((By.NAME, "email")))
-    email_input.send_keys(email, Keys.ENTER)
-    _wait(driver).until(ec.url_contains("/login/password"))
+    email_input.send_keys(email)
+    if not driver.find_elements(By.NAME, "password"):
+        email_input.send_keys(Keys.ENTER)
+        _wait(driver).until(ec.url_contains("/login/password"))
     password_input = _wait(driver).until(
         ec.element_to_be_clickable((By.NAME, "password"))
     )
@@ -175,14 +177,16 @@ def _speed_radio(driver: WebDriver, option: str) -> WebElement:
     """Locate the real group-aware speed control by its canonical option ID."""
     selector = f"[role='radio'][data-execution-option-id='{option}']"
     if not driver.find_elements(By.CSS_SELECTOR, selector):
-        if not driver.find_elements(
-            By.CSS_SELECTOR, "[role='dialog'][aria-label='Model']"
-        ):
-            _wait(driver).until(
-                ec.element_to_be_clickable(
-                    (By.CSS_SELECTOR, "button[aria-label='Model']")
-                )
-            ).click()
+        trigger = _wait(driver).until(
+            ec.element_to_be_clickable((By.CSS_SELECTOR, "button[aria-label='Model']"))
+        )
+        if trigger.get_attribute("aria-expanded") != "true":
+            trigger.click()
+        _wait(driver).until(
+            ec.visibility_of_element_located(
+                (By.CSS_SELECTOR, "[role='dialog'][aria-label='Model']")
+            )
+        )
         _wait(driver).until(
             ec.element_to_be_clickable(
                 (

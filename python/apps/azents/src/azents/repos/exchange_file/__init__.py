@@ -2,15 +2,14 @@
 
 import datetime
 from collections.abc import Sequence
-from typing import Any, cast
 
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
-from sqlalchemy.engine import CursorResult
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ExchangeFileStatus
 from azents.rdb.models.exchange_file import RDBExchangeFile
+from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.repos.mutation_result import mutation_result
 
 from .data import (
     ExchangeFile,
@@ -34,7 +33,7 @@ class ExchangeFileRepository:
 
     async def create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: ExchangeFileCreate,
     ) -> ExchangeFile:
         """Create ExchangeFile metadata."""
@@ -70,28 +69,28 @@ class ExchangeFileRepository:
             workspace_id=create.workspace_id,
             file_id=create.id,
         )
-        session.add(rdb)
-        await session.flush()
+        session.write_session.add(rdb)
+        await session.write_session.flush()
         return self._build(rdb)
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         file_id: str,
     ) -> ExchangeFile | None:
         """Fetch ExchangeFile by ID."""
-        rdb = await session.get(RDBExchangeFile, file_id)
+        rdb = await session.read_session.get(RDBExchangeFile, file_id)
         if rdb is None:
             return None
         return await self._build_with_preview_uri(session, rdb)
 
     async def get_by_object_key(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         object_key: str,
     ) -> ExchangeFile | None:
         """Fetch ExchangeFile by object key."""
-        rdb = await session.scalar(
+        rdb = await session.read_session.scalar(
             sa.select(RDBExchangeFile).where(RDBExchangeFile.object_key == object_key)
         )
         if rdb is None:
@@ -100,13 +99,13 @@ class ExchangeFileRepository:
 
     async def get_by_object_key_for_agent(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         object_key: str,
         agent_id: str,
     ) -> ExchangeFile | None:
         """Fetch object key only inside current Agent namespace."""
-        rdb = await session.scalar(
+        rdb = await session.read_session.scalar(
             sa.select(RDBExchangeFile).where(
                 RDBExchangeFile.object_key == object_key,
                 RDBExchangeFile.agent_id == agent_id,
@@ -118,36 +117,35 @@ class ExchangeFileRepository:
 
     async def delete_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         file_id: str,
     ) -> None:
         """Delete ExchangeFile metadata."""
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBExchangeFile).where(RDBExchangeFile.id == file_id)
         )
-        await session.flush()
+        await session.write_session.flush()
 
     async def detach_source_user_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         source_user_id: str,
     ) -> int:
         """Detach a deleted User from retained ExchangeFile provenance."""
-        result = cast(
-            CursorResult[Any],
-            await session.execute(
+        result = mutation_result(
+            await session.write_session.execute(
                 sa.update(RDBExchangeFile)
                 .where(RDBExchangeFile.source_user_id == source_user_id)
                 .values(source_user_id=None)
-            ),
+            )
         )
-        await session.flush()
+        await session.write_session.flush()
         return result.rowcount or 0
 
     async def set_preview_thumbnail_file_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         file_id: str,
         preview_thumbnail_file_id: str,
@@ -157,7 +155,7 @@ class ExchangeFileRepository:
         preview_generated_at: datetime.datetime,
     ) -> ExchangeFile:
         """Link preview thumbnail file ID to source ExchangeFile."""
-        rdb = await session.get(RDBExchangeFile, file_id)
+        rdb = await session.write_session.get(RDBExchangeFile, file_id)
         if rdb is None:
             msg = "ExchangeFile not found while setting preview thumbnail"
             raise RuntimeError(msg)
@@ -166,8 +164,8 @@ class ExchangeFileRepository:
         rdb.preview_thumbnail_width = preview_thumbnail_width
         rdb.preview_thumbnail_height = preview_thumbnail_height
         rdb.preview_generated_at = preview_generated_at
-        await session.flush()
-        preview_thumbnail = await session.get(
+        await session.write_session.flush()
+        preview_thumbnail = await session.write_session.get(
             RDBExchangeFile,
             preview_thumbnail_file_id,
         )
@@ -180,13 +178,13 @@ class ExchangeFileRepository:
 
     async def _build_with_preview_uri(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         rdb: RDBExchangeFile,
     ) -> ExchangeFile:
         """Convert RDB model to domain model including preview thumbnail URI."""
         preview_thumbnail_uri: str | None = None
         if rdb.preview_thumbnail_file_id is not None:
-            preview_thumbnail = await session.get(
+            preview_thumbnail = await session.read_session.get(
                 RDBExchangeFile,
                 rdb.preview_thumbnail_file_id,
             )
@@ -196,7 +194,7 @@ class ExchangeFileRepository:
 
     async def claim_for_retention_root(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         object_keys: Sequence[str],
         workspace_id: str,
@@ -219,7 +217,7 @@ class ExchangeFileRepository:
         )
         rows = list(
             (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBExchangeFile)
                     .where(
                         sa.or_(
@@ -271,18 +269,18 @@ class ExchangeFileRepository:
                 row.retention_bound_at = bound_at
             elif row.retention_bound_at is None:
                 row.retention_bound_at = bound_at
-        await session.flush()
+        await session.write_session.flush()
         return Success(None)
 
     async def list_for_retention_root(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         retention_root_session_id: str,
     ) -> list[ExchangeFile]:
         """List ExchangeFiles owned by one retention root."""
         rows = (
-            await session.scalars(
+            await session.read_session.scalars(
                 sa.select(RDBExchangeFile)
                 .where(
                     RDBExchangeFile.retention_root_session_id
@@ -295,13 +293,13 @@ class ExchangeFileRepository:
 
     async def list_unbound_by_agent_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
     ) -> list[ExchangeFile]:
         """List ExchangeFiles still owned directly by an Agent."""
         rows = (
-            await session.scalars(
+            await session.read_session.scalars(
                 sa.select(RDBExchangeFile)
                 .where(
                     RDBExchangeFile.agent_id == agent_id,
@@ -314,14 +312,14 @@ class ExchangeFileRepository:
 
     async def expire_unbound_by_agent_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         expired_at: datetime.datetime,
     ) -> list[ExchangeFile]:
         """Expire direct Agent-owned ExchangeFiles before external cleanup."""
         rows = (
-            await session.scalars(
+            await session.write_session.scalars(
                 sa.select(RDBExchangeFile)
                 .where(
                     RDBExchangeFile.agent_id == agent_id,
@@ -334,18 +332,18 @@ class ExchangeFileRepository:
         for row in rows:
             row.status = ExchangeFileStatus.EXPIRED
             row.expired_at = expired_at
-        await session.flush()
+        await session.write_session.flush()
         return [self._build(row) for row in rows]
 
     async def delete_unbound_expired_by_agent_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
     ) -> int:
         """Delete externally-cleaned direct Agent-owned ExchangeFile metadata."""
         deleted_ids = (
-            await session.scalars(
+            await session.write_session.scalars(
                 sa.delete(RDBExchangeFile)
                 .where(
                     RDBExchangeFile.agent_id == agent_id,
@@ -360,14 +358,14 @@ class ExchangeFileRepository:
 
     async def expire_for_retention_root(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         retention_root_session_id: str,
         expired_at: datetime.datetime,
     ) -> list[ExchangeFile]:
         """Expire available ExchangeFiles owned by one retention root."""
         rows = (
-            await session.scalars(
+            await session.write_session.scalars(
                 sa.select(RDBExchangeFile)
                 .where(
                     RDBExchangeFile.retention_root_session_id
@@ -380,18 +378,18 @@ class ExchangeFileRepository:
         for row in rows:
             row.status = ExchangeFileStatus.EXPIRED
             row.expired_at = expired_at
-        await session.flush()
+        await session.write_session.flush()
         return [self._build(row) for row in rows]
 
     async def delete_purged_for_retention_root(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         retention_root_session_id: str,
     ) -> int:
         """Delete owned ExchangeFile metadata after blob cleanup."""
         deleted_ids = (
-            await session.scalars(
+            await session.write_session.scalars(
                 sa.delete(RDBExchangeFile)
                 .where(
                     RDBExchangeFile.retention_root_session_id
@@ -406,14 +404,14 @@ class ExchangeFileRepository:
 
     async def expire_due(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         now: datetime.datetime,
         limit: int,
     ) -> list[ExchangeFile]:
         """Mark ExchangeFiles past expiration time as expired."""
         rows = (
-            await session.scalars(
+            await session.write_session.scalars(
                 sa.select(RDBExchangeFile)
                 .where(
                     RDBExchangeFile.status == ExchangeFileStatus.AVAILABLE,
@@ -426,18 +424,18 @@ class ExchangeFileRepository:
         for row in rows:
             row.status = ExchangeFileStatus.EXPIRED
             row.expired_at = now
-        await session.flush()
+        await session.write_session.flush()
         return [self._build(row) for row in rows]
 
     async def list_expired_pending_blob_deletion(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         limit: int,
     ) -> list[ExchangeFile]:
         """List expired ExchangeFiles whose blob deletion has not been recorded."""
         rows = (
-            await session.scalars(
+            await session.read_session.scalars(
                 sa.select(RDBExchangeFile)
                 .where(
                     RDBExchangeFile.status == ExchangeFileStatus.EXPIRED,
@@ -451,35 +449,35 @@ class ExchangeFileRepository:
 
     async def mark_blob_deleted(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         file_id: str,
         blob_deleted_at: datetime.datetime,
     ) -> None:
         """Record ExchangeFile blob deletion success."""
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBExchangeFile)
             .where(RDBExchangeFile.id == file_id)
             .values(blob_deleted_at=blob_deleted_at)
         )
-        await session.flush()
+        await session.write_session.flush()
 
     async def expire_file_family(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         file_id: str,
         expired_at: datetime.datetime,
     ) -> list[ExchangeFile]:
         """Mark preview thumbnail linked to source file as expired."""
-        rdb = await session.get(RDBExchangeFile, file_id)
+        rdb = await session.write_session.get(RDBExchangeFile, file_id)
         if rdb is None:
             return []
         ids = [rdb.id]
         if rdb.preview_thumbnail_file_id is not None:
             ids.append(rdb.preview_thumbnail_file_id)
         rows = (
-            await session.scalars(
+            await session.write_session.scalars(
                 sa.select(RDBExchangeFile).where(
                     RDBExchangeFile.id.in_(ids),
                     RDBExchangeFile.status == ExchangeFileStatus.AVAILABLE,
@@ -489,12 +487,12 @@ class ExchangeFileRepository:
         for row in rows:
             row.status = ExchangeFileStatus.EXPIRED
             row.expired_at = expired_at
-        await session.flush()
+        await session.write_session.flush()
         return [self._build(row) for row in rows]
 
     async def list_statuses_by_object_key(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         object_keys: Sequence[str],
     ) -> dict[str, ExchangeFileStatus]:
@@ -502,7 +500,7 @@ class ExchangeFileRepository:
         if not object_keys:
             return {}
         rows = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(RDBExchangeFile.object_key, RDBExchangeFile.status).where(
                     RDBExchangeFile.object_key.in_(object_keys)
                 )

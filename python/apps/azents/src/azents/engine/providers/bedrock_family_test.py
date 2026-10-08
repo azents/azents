@@ -63,6 +63,7 @@ def saved_metadata(
         )
     return ModelAssemblyMetadata.from_selection(
         AgentModelSelection(
+            pricing=None,
             llm_provider_integration_id="synthetic-integration",
             provider=LLMProvider.AWS_BEDROCK,
             model_identifier=model,

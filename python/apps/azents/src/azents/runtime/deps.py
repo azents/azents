@@ -27,6 +27,7 @@ from azents.runtime.control_protocol.runner_operations import (
 from azents.runtime.control_protocol.service import (
     RuntimeControlProtocolService,
 )
+from azents.runtime.coordination.memory import InMemoryRuntimeCoordinationStore
 from azents.runtime.coordination.redis import (
     RedisRuntimeCoordinationStore,
 )
@@ -34,6 +35,9 @@ from azents.runtime.coordination.store import RuntimeCoordinationStore
 from azents.runtime.observability import (
     RuntimeReplyDeliveryMetrics,
     get_runtime_reply_delivery_metrics,
+)
+from azents.runtime.terminal_coordination.memory import (
+    InMemoryRuntimeTerminalCoordinationStore,
 )
 from azents.runtime.terminal_coordination.redis import (
     RedisRuntimeTerminalCoordinationStore,
@@ -67,6 +71,9 @@ async def get_runtime_coordination_store(
     """Return the process-wide Runtime Coordination Store."""
 
     async def create() -> AsyncIterator[RuntimeCoordinationStore]:
+        if config.session_broker_backend == "memory":
+            yield InMemoryRuntimeCoordinationStore()
+            return
         redis = create_redis_client(config.redis.url)
         try:
             yield RedisRuntimeCoordinationStore(redis)
@@ -86,6 +93,9 @@ async def get_runtime_terminal_coordination_store(
     """Return the process-wide volatile Runtime Terminal coordination store."""
 
     async def create() -> AsyncIterator[RuntimeTerminalCoordinationStore]:
+        if config.session_broker_backend == "memory":
+            yield InMemoryRuntimeTerminalCoordinationStore()
+            return
         redis = create_redis_client(config.redis.url)
         try:
             yield RedisRuntimeTerminalCoordinationStore(redis)

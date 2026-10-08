@@ -93,8 +93,8 @@ class McpToolSnapshotState(ToolkitStateModel):
 
     schema_version: int = MCP_TOOL_SNAPSHOT_SCHEMA_VERSION
     loaded_at: str | None = None
-    server_url: str = ""
-    tool_hash: str = ""
+    server_url: str | None = None
+    tool_hash: str | None = None
     tools: list[McpToolSnapshotItem] = Field(default_factory=list)
 
 

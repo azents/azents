@@ -9,20 +9,24 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionWakeUp
-from azents.repos.mailbox.data import MailboxItem
-from azents.services.external_channel.conversation import (
+from azents.core.external_channel_conversation_data import (
     ExternalChannelOperationDeadline,
 )
-from azents.services.external_channel.ingestion import (
+from azents.core.external_channel_ingestion import (
     ExternalChannelWakeDispatchUnavailable,
 )
+from azents.core.mailbox_data import MailboxItem
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
+from azents.repos.external_channel.mailbox_wake import (
+    ExternalChannelMailboxWakeRepository,
+)
+from azents.repos.mailbox import MailboxRepository
 from azents.services.external_channel.ingress_test_control import (
     ExternalChannelIngressTestControl,
 )
 from azents.services.external_channel.mailbox_wake import (
     ExternalChannelMailboxWakeDispatcher,
 )
-from azents.services.mailbox import MailboxService
 
 
 class _Session:
@@ -33,18 +37,17 @@ class _Session:
         self.calls.append("commit")
 
 
-class _MailboxService:
+class _MailboxRepository:
     def __init__(self, calls: list[str], item: MailboxItem | None) -> None:
         self.calls = calls
         self.item = item
 
     async def get_by_id(
         self,
-        session: AsyncSession,
-        *,
-        buffer_id: str,
+        session: ReadSession,
+        mailbox_item_id: str,
     ) -> MailboxItem | None:
-        del session, buffer_id
+        del session, mailbox_item_id
         self.calls.append("load_mailbox")
         return self.item
 
@@ -72,14 +75,16 @@ async def test_dispatch_sends_routing_only_wake_after_mailbox_commit() -> None:
     session = _Session(calls)
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
-        yield MagicMock(spec=AsyncSession, wraps=session)
+    async def session_manager() -> AsyncIterator[WriteSession]:
+        yield ReadWriteSession(MagicMock(spec=AsyncSession, wraps=session))
 
     broker = _Broker(calls)
     dispatcher = ExternalChannelMailboxWakeDispatcher(
-        session_manager=session_manager,
-        mailbox_service=MagicMock(
-            spec=MailboxService, wraps=_MailboxService(calls, _mailbox_item())
+        operations=ExternalChannelMailboxWakeRepository(
+            session_manager=session_manager,
+            mailbox_repository=MagicMock(
+                spec=MailboxRepository, wraps=_MailboxRepository(calls, _mailbox_item())
+            ),
         ),
         broker=MagicMock(spec=SessionBroker, wraps=broker),
         test_control=ExternalChannelIngressTestControl(),
@@ -105,14 +110,16 @@ async def test_missing_mailbox_item_does_not_send_duplicate_wake() -> None:
     session = _Session(calls)
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
-        yield MagicMock(spec=AsyncSession, wraps=session)
+    async def session_manager() -> AsyncIterator[WriteSession]:
+        yield ReadWriteSession(MagicMock(spec=AsyncSession, wraps=session))
 
     broker = _Broker(calls)
     dispatcher = ExternalChannelMailboxWakeDispatcher(
-        session_manager=session_manager,
-        mailbox_service=MagicMock(
-            spec=MailboxService, wraps=_MailboxService(calls, None)
+        operations=ExternalChannelMailboxWakeRepository(
+            session_manager=session_manager,
+            mailbox_repository=MagicMock(
+                spec=MailboxRepository, wraps=_MailboxRepository(calls, None)
+            ),
         ),
         broker=MagicMock(spec=SessionBroker, wraps=broker),
         test_control=ExternalChannelIngressTestControl(),
@@ -138,16 +145,18 @@ async def test_injected_wake_failure_is_one_shot_and_precedes_broker_io() -> Non
     session = _Session(calls)
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
-        yield MagicMock(spec=AsyncSession, wraps=session)
+    async def session_manager() -> AsyncIterator[WriteSession]:
+        yield ReadWriteSession(MagicMock(spec=AsyncSession, wraps=session))
 
     control = ExternalChannelIngressTestControl()
     control.fail_next_wake(session_id="session-1")
     broker = _Broker(calls)
     dispatcher = ExternalChannelMailboxWakeDispatcher(
-        session_manager=session_manager,
-        mailbox_service=MagicMock(
-            spec=MailboxService, wraps=_MailboxService(calls, _mailbox_item())
+        operations=ExternalChannelMailboxWakeRepository(
+            session_manager=session_manager,
+            mailbox_repository=MagicMock(
+                spec=MailboxRepository, wraps=_MailboxRepository(calls, _mailbox_item())
+            ),
         ),
         broker=MagicMock(spec=SessionBroker, wraps=broker),
         test_control=control,

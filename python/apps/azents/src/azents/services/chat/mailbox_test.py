@@ -4,12 +4,17 @@ import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any, NamedTuple
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import sqlalchemy as sa
 from azcommon.result import Failure, Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.chat_data import (
+    PendingMailboxUserMessagePresentation,
+    SessionAccessDenied,
+    SessionNotFound,
+    SubagentSessionReadOnly,
+)
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
@@ -23,6 +28,8 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.mailbox_data import MailboxItemCreate
+from azents.core.workspace import WorkspaceCreate
 from azents.engine.events.types import (
     ActiveToolCall,
     ClientToolCallPayload,
@@ -33,6 +40,7 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
@@ -44,33 +52,42 @@ from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
+from azents.repos.chat_operations import ChatOperationsRepository
+from azents.repos.external_channel.lifecycle import ExternalChannelLifecycleRepository
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.goal.store import GoalStateStore
+from azents.repos.lifecycle_target import LifecycleTargetRepository
 from azents.repos.mailbox import MailboxRepository
-from azents.repos.mailbox.data import MailboxItemCreate
+from azents.repos.mailbox.admission import MailboxAdmissionRepository
+from azents.repos.mailbox_runtime_operations import MailboxRuntimeOperations
 from azents.repos.message import MessageRepository
+from azents.repos.root_agent_session_creation import (
+    RootAgentSessionCreationRepository,
+)
 from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleRepository
-from azents.repos.scheduled_task.repository import ScheduledTaskRepository
-from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
+from azents.repos.scheduled_task_lifecycle_participant import (
+    ScheduledTaskLifecycleParticipantRepository,
+)
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
+from azents.repos.session_lifecycle_operations import (
+    SessionLifecycleOperationsRepository,
+)
+from azents.repos.session_lifecycle_purge_operations import (
+    SessionLifecyclePurgeOperations,
+)
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
-from azents.repos.toolkit_state import ToolkitStateRepository
+from azents.repos.toolkit_state.engine import TodoStateStore
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
-from azents.services.chat.data import PendingMailboxUserMessagePresentation
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.mailbox import MailboxService
 from azents.services.model_file import ModelFileService
-from azents.services.root_agent_session_creation import (
-    RootAgentSessionCreationService,
-)
 from azents.services.runtime_terminal.invalidation import (
     NoopRuntimeTerminalInvalidationPublisher,
 )
-from azents.services.scheduled_task.lifecycle import ScheduledTaskLifecycleService
 from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,
 )
@@ -84,9 +101,9 @@ from azents.testing.turn_action import (
     make_test_mailbox_promotion_repository,
     make_test_turn_action_capabilities,
 )
+from azents.testing.types import require_instance
 
 from . import ChatSessionService
-from .data import SessionAccessDenied, SessionNotFound, SubagentSessionReadOnly
 
 
 class _SessionBufferFixture(NamedTuple):
@@ -100,12 +117,12 @@ class _SessionBufferFixture(NamedTuple):
 class _TrackingSessionManager:
     """Reject nested DB sessions and expose the active session count."""
 
-    def __init__(self, delegate: SessionManager[AsyncSession]) -> None:
+    def __init__(self, delegate: SessionManager[WriteSession]) -> None:
         self.delegate = delegate
         self.active = 0
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncGenerator[AsyncSession]:
+    async def __call__(self) -> AsyncGenerator[WriteSession]:
         """Open exactly one delegated DB session at a time."""
         assert self.active == 0
         self.active += 1
@@ -129,7 +146,7 @@ class _BoundaryCheckingLiveEventStore:
         return []
 
 
-async def _create_workspace(session: AsyncSession, handle: str) -> str:
+async def _create_workspace(session: WriteSession, handle: str) -> str:
     """Create Workspace for tests."""
     repo = WorkspaceRepository()
     result = await repo.create(
@@ -141,14 +158,14 @@ async def _create_workspace(session: AsyncSession, handle: str) -> str:
     return workspace_id
 
 
-async def _create_user(session: AsyncSession, email: str) -> str:
+async def _create_user(session: WriteSession, email: str) -> str:
     """Create User for tests."""
     user = await UserRepository().create(session, UserCreate(email=email))
     return user.id
 
 
 async def _add_workspace_user(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     workspace_id: str,
     user_id: str,
@@ -166,7 +183,7 @@ async def _add_workspace_user(
     assert isinstance(result, Success)
 
 
-async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> str:
+async def _create_agent(session: WriteSession, workspace_id: str, slug: str) -> str:
     """Create Agent for tests."""
 
     integration = RDBLLMProviderIntegration(
@@ -176,8 +193,8 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
 
     agent = RDBAgent(
         workspace_id=workspace_id,
@@ -211,13 +228,13 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     return agent.id
 
 
 def _service(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> ChatSessionService:
     """Create ChatSessionService for tests."""
     mailbox_item_service = _make_mailbox_service(
@@ -229,13 +246,7 @@ def _service(
         exchange_file_service=_ExchangeFileService(),
         model_file_service=_ModelFileService(),
         agent_session_repository=AgentSessionRepository(),
-        event_transcript_repository=EventTranscriptRepository(),
         agent_run_repository=AgentRunRepository(),
-        scheduled_task_repository=ScheduledTaskRepository(),
-        scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
-            toolkit_state_repository=ToolkitStateRepository(),
-        ),
-        action_execution_repository=ActionExecutionRepository(),
         turn_action_capabilities=make_test_turn_action_capabilities(
             rdb_session_manager
         ),
@@ -253,7 +264,7 @@ def _service(
         event_transcript_repository=EventTranscriptRepository(),
         agent_session_repository=AgentSessionRepository(),
         agent_runtime_repository=AgentRuntimeRepository(),
-        root_agent_session_creation_service=RootAgentSessionCreationService(
+        root_agent_session_creation_service=RootAgentSessionCreationRepository(
             agent_session_repository=AgentSessionRepository(),
             agent_repository=AgentRepository(),
             automatic_project_repository=AgentAutomaticProjectRepository(),
@@ -263,10 +274,20 @@ def _service(
         workspace_user_repository=WorkspaceUserRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
         mailbox_item_service=mailbox_item_service,
+        mailbox_admission_repository=MailboxAdmissionRepository(
+            session_manager=rdb_session_manager,
+            mailbox_item_repository=MailboxRepository(),
+            agent_session_repository=AgentSessionRepository(),
+        ),
         session_git_worktree_service=object(),
-        lifecycle_orchestrator=get_session_lifecycle_orchestrator(),
+        lifecycle_orchestrator=get_session_lifecycle_orchestrator(
+            require_instance(
+                MagicMock(spec=SessionLifecyclePurgeOperations),
+                SessionLifecyclePurgeOperations,
+            )
+        ),
         external_channel_lifecycle_service=object(),
-        scheduled_task_lifecycle_service=ScheduledTaskLifecycleService(
+        scheduled_task_lifecycle_service=ScheduledTaskLifecycleParticipantRepository(
             ScheduledTaskLifecycleRepository()
         ),
         terminal_invalidation_publisher=NoopRuntimeTerminalInvalidationPublisher(),
@@ -291,17 +312,67 @@ class _ModelFileService(ModelFileService):
 
 
 def _make_mailbox_service(**kwargs: Any) -> MailboxService:  # noqa: ANN401
-    """Construct MailboxService with test-owned dependencies."""
-    return MailboxService(**kwargs)
+    """Compose database-only runtime operations and external mailbox effects."""
+    database_keys = (
+        "session_manager",
+        "mailbox_item_repository",
+        "agent_session_repository",
+        "agent_run_repository",
+    )
+    runtime_operations = MailboxRuntimeOperations(
+        **{key: kwargs.pop(key) for key in database_keys}
+    )
+    kwargs.pop("external_channel_repository", None)
+    return MailboxService(runtime_operations=runtime_operations, **kwargs)
 
 
 def _make_chat_service(**kwargs: Any) -> ChatSessionService:  # noqa: ANN401
-    """Construct ChatSessionService with test-owned dependencies."""
-    return ChatSessionService(**kwargs)
+    """Compose completed database operations and external test collaborators."""
+    manager = kwargs.pop("session_manager")
+    root = kwargs.pop("root_agent_session_creation_service")
+    kwargs.pop("mailbox_item_service")
+    registry = kwargs.pop("lifecycle_orchestrator").registry
+    scheduled = kwargs.pop("scheduled_task_lifecycle_service")
+    database_keys = (
+        "message_repository",
+        "agent_repository",
+        "agent_project_preset_repository",
+        "agent_project_catalog_repository",
+        "agent_project_default_repository",
+        "session_git_worktree_repository",
+        "agent_run_repository",
+        "action_execution_repository",
+        "event_transcript_repository",
+        "agent_session_repository",
+        "agent_runtime_repository",
+        "archived_session_retention_repository",
+        "workspace_user_repository",
+        "session_workspace_project_repository",
+        "mailbox_admission_repository",
+    )
+    database = {key: kwargs.pop(key) for key in database_keys}
+    lifecycle = SessionLifecycleOperationsRepository(
+        registry=registry,
+        agent_session_repository=database["agent_session_repository"],
+        lifecycle_target_repository=LifecycleTargetRepository(),
+        retention_repository=database["archived_session_retention_repository"],
+        external_channel_repository=ExternalChannelLifecycleRepository(),
+        scheduled_task_repository=scheduled.repository,
+    )
+    operations = ChatOperationsRepository(
+        **database,
+        root_session_repository=root,
+        mailbox_repository=MailboxRepository(),
+        lifecycle_operations=lifecycle,
+        goal_store=GoalStateStore(session_manager=manager, owner=None),
+        todo_store=TodoStateStore(session_manager=manager),
+        session_manager=manager,
+    )
+    return ChatSessionService(operations=operations, **kwargs)
 
 
 async def _create_session_with_buffer(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     handle: str,
     slug: str,
@@ -358,7 +429,7 @@ class TestChatSessionMailboxItem:
 
     async def test_list_live_events_includes_pending_buffers(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Live event list returns pending buffer projection."""
         async with rdb_session_manager() as session:
@@ -390,7 +461,7 @@ class TestChatSessionMailboxItem:
 
     async def test_list_live_events_closes_db_before_live_store_io(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Live output reads Redis only after its single DB snapshot closes."""
         async with rdb_session_manager() as session:
@@ -413,7 +484,7 @@ class TestChatSessionMailboxItem:
 
     async def test_list_live_events_running_run_overrides_idle_session_state(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """A running AgentRun is authoritative over stale Session idle state."""
         async with rdb_session_manager() as session:
@@ -537,7 +608,7 @@ class TestChatSessionMailboxItem:
 
     async def test_list_live_events_projects_compacting_as_one_live_operation(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """A compacting Run restores one stable context-preparation operation."""
         async with rdb_session_manager() as session:
@@ -594,7 +665,7 @@ class TestChatSessionMailboxItem:
 
     async def test_flushed_mailbox_item_remains_in_message_history(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Flushed buffer remains as user input in history event."""
         async with rdb_session_manager() as session:
@@ -613,13 +684,7 @@ class TestChatSessionMailboxItem:
             exchange_file_service=_ExchangeFileService(),
             model_file_service=_ModelFileService(),
             agent_session_repository=AgentSessionRepository(),
-            event_transcript_repository=EventTranscriptRepository(),
             agent_run_repository=AgentRunRepository(),
-            scheduled_task_repository=ScheduledTaskRepository(),
-            scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
-                toolkit_state_repository=ToolkitStateRepository(),
-            ),
-            action_execution_repository=ActionExecutionRepository(),
             turn_action_capabilities=make_test_turn_action_capabilities(
                 rdb_session_manager
             ),
@@ -653,7 +718,7 @@ class TestChatSessionMailboxItem:
 
     async def test_delete_mailbox_item_is_idempotent(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Pending buffer deletion succeeds even for missing row."""
         async with rdb_session_manager() as session:
@@ -678,7 +743,7 @@ class TestChatSessionMailboxItem:
 
     async def test_delete_mailbox_item_checks_session_access(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """User who is not session member cannot delete pending buffer."""
         async with rdb_session_manager() as session:
@@ -702,7 +767,7 @@ class TestChatSessionMailboxItem:
 
     async def test_prepare_session_working_folder_enqueues_pathless_retry_idempotently(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Explicit folder retries enqueue one server-authoritative action."""
         async with rdb_session_manager() as session:
@@ -775,7 +840,7 @@ class TestChatSessionMailboxItem:
 
     async def test_prepare_session_working_folder_rejects_invalid_sessions(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Only active root Sessions accept explicit folder preparation retries."""
         async with rdb_session_manager() as session:
@@ -786,7 +851,7 @@ class TestChatSessionMailboxItem:
             )
             inactive = await AgentSessionRepository().get_by_id(session, inactive_id)
             assert inactive is not None
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBAgentSession)
                 .where(RDBAgentSession.id == inactive_id)
                 .values(status=AgentSessionStatus.ARCHIVED)

@@ -3,9 +3,9 @@
 import hashlib
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_web.repository_test import _authority_fixture
 from azents.repos.runtime_web.session_route_repository import (
     RuntimeWebSessionRouteConflict,
@@ -13,14 +13,14 @@ from azents.repos.runtime_web.session_route_repository import (
 )
 
 
-async def _runtime(session: AsyncSession) -> RDBAgentRuntime:
+async def _runtime(session: WriteSession) -> RDBAgentRuntime:
     workspace_id, agent_id, _ = await _authority_fixture(session)
     runtime = RDBAgentRuntime(workspace_id=workspace_id, agent_id=agent_id)
-    session.add(runtime)
-    await session.flush()
+    session.write_session.add(runtime)
+    await session.write_session.flush()
     runtime.desired_generation = 3
     runtime.runner_generation = 4
-    await session.flush()
+    await session.write_session.flush()
     return runtime
 
 
@@ -29,7 +29,7 @@ def _digest(value: str) -> str:
 
 
 async def test_session_route_acquire_renew_drain_and_release(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     runtime = await _runtime(rdb_session)
     repository = RuntimeWebSessionRouteRepository()
@@ -76,7 +76,7 @@ async def test_session_route_acquire_renew_drain_and_release(
 
 
 async def test_session_route_rejects_live_second_owner(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     runtime = await _runtime(rdb_session)
     repository = RuntimeWebSessionRouteRepository()
@@ -109,7 +109,7 @@ async def test_session_route_rejects_live_second_owner(
 
 
 async def test_session_route_rejects_replaced_runner_generation(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     runtime = await _runtime(rdb_session)
     repository = RuntimeWebSessionRouteRepository()
@@ -126,7 +126,7 @@ async def test_session_route_rejects_replaced_runner_generation(
         lease_seconds=30,
     )
     runtime.runner_generation = 5
-    await rdb_session.flush()
+    await rdb_session.write_session.flush()
 
     assert (
         await repository.resolve(
@@ -151,7 +151,7 @@ async def test_session_route_rejects_replaced_runner_generation(
 
 
 async def test_session_route_resolve_rejects_draining_route(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     runtime = await _runtime(rdb_session)
     repository = RuntimeWebSessionRouteRepository()
@@ -196,7 +196,7 @@ async def test_session_route_resolve_rejects_draining_route(
 
 
 async def test_session_route_join_nonce_is_consumed_once(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     runtime = await _runtime(rdb_session)
     repository = RuntimeWebSessionRouteRepository()

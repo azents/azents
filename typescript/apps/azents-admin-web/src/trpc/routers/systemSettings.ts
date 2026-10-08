@@ -5,19 +5,23 @@ import {
   systemSettingsV1ConfirmPlatformGithubAppCandidate,
   systemSettingsV1GetExternalAccountOauthSetting,
   systemSettingsV1GetExternalChannelFilesSetting,
+  systemSettingsV1GetHistoricalMemoryExecutionSetting,
   systemSettingsV1GetPlatformGithubAppSetting,
   systemSettingsV1ListSystemSettingAuditEvents,
   systemSettingsV1PatchExternalAccountOauthSetting,
   systemSettingsV1PatchExternalChannelFilesSetting,
+  systemSettingsV1PatchHistoricalMemoryExecutionSetting,
   systemSettingsV1PatchPlatformGithubAppSetting,
   systemSettingsV1ValidatePlatformGithubAppCandidate,
 } from "@azents/admin-client";
 import { z } from "zod/v4";
 import { mapExpectedError } from "../api-error";
 import { protectedProcedure, router } from "../init";
+import { historicalMemoryExecutionInputSchema } from "./historical-memory-execution-input";
 import type {
   ExternalAccountOAuthPatchRequest,
   ExternalChannelFilesPatchRequest,
+  HistoricalMemoryExecutionPatchRequest,
   PlatformGitHubAppPatchRequest,
 } from "@azents/admin-client";
 
@@ -32,6 +36,38 @@ const externalAccountOAuthSecretActionSchema = z.discriminatedUnion("action", [
 ]);
 
 export const systemSettingsRouter = router({
+  getHistoricalMemoryExecution: protectedProcedure.query(async ({ ctx }) => {
+    const { data } = await systemSettingsV1GetHistoricalMemoryExecutionSetting({
+      client: ctx.adminApiClient,
+      throwOnError: true,
+    });
+    return data;
+  }),
+
+  patchHistoricalMemoryExecution: protectedProcedure
+    .input(historicalMemoryExecutionInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const body: HistoricalMemoryExecutionPatchRequest = {
+          expected_version: input.expectedVersion,
+          max_turns: input.maxTurns,
+          timeout_seconds: input.timeoutSeconds,
+        };
+        const { data } =
+          await systemSettingsV1PatchHistoricalMemoryExecutionSetting({
+            client: ctx.adminApiClient,
+            body,
+            throwOnError: true,
+          });
+        return data;
+      } catch (error) {
+        throw mapExpectedError(error, {
+          409: "CONFLICT",
+          422: "BAD_REQUEST",
+        });
+      }
+    }),
+
   getExternalChannelFiles: protectedProcedure.query(async ({ ctx }) => {
     const { data } = await systemSettingsV1GetExternalChannelFilesSetting({
       client: ctx.adminApiClient,

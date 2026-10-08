@@ -6,7 +6,6 @@ from typing import Annotated
 from azcommon.datetime import tznow
 from fastapi import Depends
 from pydantic import ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeProviderAvailabilityMode,
@@ -21,8 +20,9 @@ from azents.core.runtime_profile import (
     parse_workspace_runtime_profile_policy,
 )
 from azents.core.runtime_provider_contract import RuntimeProviderCapabilityContract
+from azents.core.runtime_provider_data import RuntimeProvider
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
-from azents.repos.runtime_provider.data import RuntimeProvider
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_control.repository import (
     RuntimeProviderControlRepository,
@@ -55,7 +55,7 @@ class RuntimeProfileAvailabilityRepository:
 
     async def get_agent_profile_unavailability_code(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         profile_id: str,
@@ -65,21 +65,18 @@ class RuntimeProfileAvailabilityRepository:
             session,
             workspace_id=workspace_id,
             profile_id=profile_id,
-            for_update=False,
         )
         if profile is None:
             return "profile_not_found"
         infrastructure = await self.profile_repository.get_infrastructure_profile(
             session,
             profile_id=profile.infrastructure_profile_id,
-            for_update=False,
         )
         if infrastructure is None:
             return "infrastructure_profile_not_found"
         provider = await self.provider_repository.get_by_id(
             session,
             provider_id=profile.provider_id,
-            for_update=False,
         )
         if provider is None:
             raise AssertionError("Workspace Runtime Profile Provider is missing.")
@@ -115,7 +112,7 @@ class RuntimeProfileAvailabilityRepository:
 
     async def _provider_ready_for_workspace(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         provider: RuntimeProvider,
         workspace_id: str,
@@ -146,7 +143,7 @@ class RuntimeProfileAvailabilityRepository:
 
     async def _workspace_compatibility_error(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         provider: RuntimeProvider,
         infrastructure_spec: dict[str, object],
@@ -159,7 +156,6 @@ class RuntimeProfileAvailabilityRepository:
         revision = await self.policy_repository.get_contract_by_id(
             session,
             contract_revision_id=revision_id,
-            for_update=False,
         )
         if revision is None or revision.provider_id != provider.id:
             return "provider_capability_unavailable"

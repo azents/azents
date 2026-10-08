@@ -1,0 +1,142 @@
+"""Provider preparation and Session creation for ingress conversation owners."""
+
+import dataclasses
+from typing import Annotated, Literal
+
+from fastapi import Depends
+
+from azents.core.enums import ExternalChannelProvider, ExternalChannelResourceStatus
+from azents.core.external_channel_conversation_preparation import (
+    ExternalChannelConversationPreparation,
+    ExternalChannelConversationProvisioningError,
+)
+from azents.rdb.session_capabilities import WriteSession
+from azents.repos.external_channel.conversation_provisioning import (
+    ExternalChannelConversationProvisioningRepository,
+)
+from azents.repos.external_channel.ingress_queue_data import ExternalChannelIngressOwner
+from azents.repos.external_channel.mailbox_ingestion import (
+    ExternalChannelConfiguredBindingResult,
+    ExternalChannelMailboxIngestionRepository,
+)
+from azents.repos.external_channel.repository import ExternalChannelRepository
+
+ExternalChannelIngressProvisioningError = ExternalChannelConversationProvisioningError
+ExternalChannelIngressProviderPreparation = ExternalChannelConversationPreparation
+
+
+@dataclasses.dataclass
+class ExternalChannelIngressProvisioningRepository:
+    """Prepare one provider conversation before creating its Binding and Session."""
+
+    repository: Annotated[
+        ExternalChannelRepository,
+        Depends(ExternalChannelRepository.create),
+    ]
+    conversation_provisioning: Annotated[
+        ExternalChannelConversationProvisioningRepository,
+        Depends(ExternalChannelConversationProvisioningRepository),
+    ]
+    mailbox_store: Annotated[
+        ExternalChannelMailboxIngestionRepository,
+        Depends(ExternalChannelMailboxIngestionRepository),
+    ]
+
+    async def complete_in_session(
+        self,
+        session: WriteSession,
+        *,
+        owner: ExternalChannelIngressOwner,
+        preparation: ExternalChannelIngressProviderPreparation,
+        initial_provider: ExternalChannelProvider,
+        initial_invocation: bool,
+    ) -> ExternalChannelConfiguredBindingResult:
+        """Atomically revalidate and create the configured Binding/Session state."""
+        connection = await self.repository.lock_connection_for_routing(
+            session,
+            connection_id=owner.connection_id,
+        )
+        resource = await self.repository.lock_resource(
+            session,
+            resource_id=owner.target_resource_id,
+        )
+        route = await self.repository.get_routable_route_by_id(
+            session,
+            route_id=owner.route_id,
+        )
+        if (
+            connection is None
+            or resource is None
+            or resource.connection_id != owner.connection_id
+            or resource.status is not ExternalChannelResourceStatus.ACTIVE
+            or route is None
+            or route.connection_id != owner.connection_id
+        ):
+            raise ExternalChannelIngressProvisioningError(
+                category="ownership_stale",
+                retryable=False,
+            )
+        if owner.participation_setting_id is not None:
+            parent_channel_id = _parent_channel_id(resource.labels or {})
+            setting = (
+                None
+                if parent_channel_id is None
+                else await self.repository.lock_active_participation_setting(
+                    session,
+                    connection_id=owner.connection_id,
+                    provider_parent_channel_id=parent_channel_id,
+                )
+            )
+            if (
+                setting is None
+                or setting.id != owner.participation_setting_id
+                or setting.settings_generation
+                != owner.participation_settings_generation
+                or setting.route_id != owner.route_id
+                or setting.response_mode is not owner.response_mode
+            ):
+                raise ExternalChannelIngressProvisioningError(
+                    category="ownership_stale",
+                    retryable=False,
+                )
+        await self.conversation_provisioning.apply_in_session(
+            session,
+            target_resource_id=resource.id,
+            preparation=preparation,
+        )
+        try:
+            return await self.mailbox_store.create_configured_binding(
+                session,
+                resource_id=owner.target_resource_id,
+                route_id=owner.route_id,
+                response_mode=owner.response_mode,
+                tracker_visibility=_tracker_visibility(
+                    provider=initial_provider,
+                    invocation=initial_invocation,
+                ),
+            )
+        except ValueError as error:
+            raise ExternalChannelIngressProvisioningError(
+                category="ownership_stale",
+                retryable=False,
+            ) from error
+
+
+def _parent_channel_id(labels: dict[str, object]) -> str | None:
+    return _label(labels, "parent_channel_id") or _label(labels, "channel_id")
+
+
+def _label(labels: dict[str, object], key: str) -> str | None:
+    value = labels.get(key)
+    return value if isinstance(value, str) and value else None
+
+
+def _tracker_visibility(
+    *,
+    provider: ExternalChannelProvider,
+    invocation: bool,
+) -> Literal["hidden", "visible"]:
+    """Keep Discord automatic activity on typing instead of a Tracker."""
+    if provider is ExternalChannelProvider.DISCORD:
+        return "hidden"
+    return "visible" if invocation else "hidden"

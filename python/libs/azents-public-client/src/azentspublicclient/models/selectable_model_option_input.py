@@ -32,7 +32,6 @@ class SelectableModelOptionInput(BaseModel):
     candidates: Annotated[List[SelectableModelCandidateInput], Field(min_length=1, max_length=5)] = Field(description="Ordered physical model candidates; first is Primary")
     subagent_enabled: Optional[StrictBool] = Field(default=True, description="Available as an explicit subagent model target")
     subagent_guidance: Optional[Annotated[str, Field(strict=True, max_length=500)]] = None
-    additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["label", "candidates", "subagent_enabled", "subagent_guidance"]
 
     model_config = ConfigDict(
@@ -65,10 +64,8 @@ class SelectableModelOptionInput(BaseModel):
         * `None` is only added to the output dict for nullable fields that
           were set at model initialization. Other fields with value `None`
           are ignored.
-        * Fields in `self.additional_properties` are added to the output dict.
         """
         excluded_fields: Set[str] = set([
-            "additional_properties",
         ])
 
         _dict = self.model_dump(
@@ -83,11 +80,6 @@ class SelectableModelOptionInput(BaseModel):
                 if _item_candidates:
                     _items.append(_item_candidates.to_dict())
             _dict['candidates'] = _items
-        # puts key-value pairs in additional_properties in the top level
-        if self.additional_properties is not None:
-            for _key, _value in self.additional_properties.items():
-                _dict[_key] = _value
-
         # set to None if subagent_guidance (nullable) is None
         # and model_fields_set contains the field
         if self.subagent_guidance is None and "subagent_guidance" in self.model_fields_set:
@@ -104,17 +96,15 @@ class SelectableModelOptionInput(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "label": obj.get("label"),
             "candidates": [SelectableModelCandidateInput.from_dict(_item) for _item in obj["candidates"]] if obj.get("candidates") is not None else None,
             "subagent_enabled": obj.get("subagent_enabled") if obj.get("subagent_enabled") is not None else True,
             "subagent_guidance": obj.get("subagent_guidance")
+            }.items() if _key in obj
         })
-        # store additional fields in additional_properties
-        for _key in obj.keys():
-            if _key not in cls.__properties:
-                _obj.additional_properties[_key] = obj.get(_key)
-
         return _obj
 
 

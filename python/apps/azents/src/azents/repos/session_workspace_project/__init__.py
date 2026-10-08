@@ -7,7 +7,6 @@ from typing import Literal
 
 import sqlalchemy as sa
 from sqlalchemy.engine import CursorResult
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ActionExecutionStatus,
@@ -17,8 +16,13 @@ from azents.core.enums import (
     GitWorktreePathClaimState,
     SessionGitWorktreeStatus,
 )
+from azents.core.session_workspace_project import (
+    SessionWorkspaceProject,
+    SessionWorkspaceProjectCreate,
+)
 from azents.rdb.models.action_execution import RDBActionExecution
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.git_worktree_cleanup_claim import (
     RDBGitWorktreePathClaim,
 )
@@ -28,11 +32,7 @@ from azents.rdb.models.session_agent_context import (
     RDBSessionAgentContextGitWorktree,
     RDBSessionAgentContextProject,
 )
-
-from .data import (
-    SessionWorkspaceProject,
-    SessionWorkspaceProjectCreate,
-)
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 
 class SessionWorkspaceProjectRepository:
@@ -40,7 +40,7 @@ class SessionWorkspaceProjectRepository:
 
     async def try_claim_agent_git_worktree(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         action_execution_id: str,
@@ -63,7 +63,7 @@ class SessionWorkspaceProjectRepository:
             runtime_id=runtime_id,
             worktree_path=worktree_path,
         )
-        existing = await session.execute(
+        existing = await session.write_session.execute(
             sa.select(RDBGitWorktreePathClaim).where(
                 RDBGitWorktreePathClaim.agent_runtime_id == runtime_id,
                 RDBGitWorktreePathClaim.worktree_path == worktree_path,
@@ -87,7 +87,7 @@ class SessionWorkspaceProjectRepository:
                 summary=None,
                 lease_until=now + timedelta(minutes=6),
             )
-            session.add(claim)
+            session.write_session.add(claim)
         else:
             claim.owner_kind = GitWorktreePathClaimOwnerKind.AGENT_ACTION
             claim.action_execution_id = action_execution_id
@@ -98,18 +98,18 @@ class SessionWorkspaceProjectRepository:
             claim.reason_code = None
             claim.summary = None
             claim.lease_until = now + timedelta(minutes=6)
-        await session.flush()
+        await session.write_session.flush()
         return True
 
     async def mark_agent_git_worktree_claim_removing(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         action_execution_id: str,
         worktree_path: str,
     ) -> None:
         """Transition one Agent removal claim into Runner mutation state."""
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBGitWorktreePathClaim)
             .where(
                 RDBGitWorktreePathClaim.owner_kind
@@ -123,18 +123,18 @@ class SessionWorkspaceProjectRepository:
                 lease_until=datetime.now(UTC) + timedelta(minutes=6),
             )
         )
-        await session.flush()
+        await session.write_session.flush()
 
     async def release_agent_git_worktree_claim(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         action_execution_id: str,
         worktree_path: str,
         state: GitWorktreePathClaimState,
     ) -> None:
         """Record one Agent removal claim as terminal and non-blocking."""
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBGitWorktreePathClaim)
             .where(
                 RDBGitWorktreePathClaim.owner_kind
@@ -147,16 +147,16 @@ class SessionWorkspaceProjectRepository:
                 lease_until=datetime.now(UTC),
             )
         )
-        await session.flush()
+        await session.write_session.flush()
 
     async def release_nonremoving_agent_git_worktree_claims(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         action_execution_id: str,
     ) -> None:
         """Release Agent claims that cannot own an in-flight Runner removal."""
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBGitWorktreePathClaim).where(
                 RDBGitWorktreePathClaim.owner_kind
                 == GitWorktreePathClaimOwnerKind.AGENT_ACTION,
@@ -164,11 +164,11 @@ class SessionWorkspaceProjectRepository:
                 RDBGitWorktreePathClaim.state != GitWorktreePathClaimState.REMOVING,
             )
         )
-        await session.flush()
+        await session.write_session.flush()
 
     async def try_claim_orphan_git_worktree(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         action_execution_id: str,
@@ -201,7 +201,7 @@ class SessionWorkspaceProjectRepository:
             runtime_id=runtime_id,
             worktree_path=worktree_path,
         )
-        existing = await session.execute(
+        existing = await session.write_session.execute(
             sa.select(RDBGitWorktreePathClaim).where(
                 RDBGitWorktreePathClaim.agent_runtime_id == runtime_id,
                 RDBGitWorktreePathClaim.worktree_path == worktree_path,
@@ -225,7 +225,7 @@ class SessionWorkspaceProjectRepository:
                 summary=None,
                 lease_until=now + timedelta(minutes=6),
             )
-            session.add(claim)
+            session.write_session.add(claim)
         else:
             claim.owner_kind = GitWorktreePathClaimOwnerKind.MANUAL_ACTION
             claim.action_execution_id = action_execution_id
@@ -236,18 +236,18 @@ class SessionWorkspaceProjectRepository:
             claim.reason_code = None
             claim.summary = None
             claim.lease_until = now + timedelta(minutes=6)
-        await session.flush()
+        await session.write_session.flush()
         return "claimed"
 
     async def mark_orphan_git_worktree_claim_removing(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         action_execution_id: str,
         worktree_path: str,
     ) -> None:
         """Transition one manual cleanup claim into its Runner I/O state."""
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBGitWorktreePathClaim)
             .where(
                 RDBGitWorktreePathClaim.action_execution_id == action_execution_id,
@@ -259,18 +259,18 @@ class SessionWorkspaceProjectRepository:
                 lease_until=datetime.now(UTC) + timedelta(minutes=6),
             )
         )
-        await session.flush()
+        await session.write_session.flush()
 
     async def release_orphan_git_worktree_claim(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         action_execution_id: str,
         worktree_path: str,
         state: GitWorktreePathClaimState,
     ) -> None:
         """Record one terminal worktree cleanup claim as non-blocking."""
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBGitWorktreePathClaim)
             .where(
                 RDBGitWorktreePathClaim.action_execution_id == action_execution_id,
@@ -281,40 +281,40 @@ class SessionWorkspaceProjectRepository:
                 lease_until=datetime.now(UTC),
             )
         )
-        await session.flush()
+        await session.write_session.flush()
 
     async def release_orphan_git_worktree_claims(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         action_execution_id: str,
     ) -> None:
         """Release all cleanup claims held by a terminal action execution."""
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBGitWorktreePathClaim).where(
                 RDBGitWorktreePathClaim.action_execution_id == action_execution_id,
             )
         )
-        await session.flush()
+        await session.write_session.flush()
 
     async def release_nonremoving_orphan_git_worktree_claims(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         action_execution_id: str,
     ) -> None:
         """Release claims that cannot still own an in-flight Runner removal."""
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBGitWorktreePathClaim).where(
                 RDBGitWorktreePathClaim.action_execution_id == action_execution_id,
                 RDBGitWorktreePathClaim.state != GitWorktreePathClaimState.REMOVING,
             )
         )
-        await session.flush()
+        await session.write_session.flush()
 
     async def try_claim_archive_git_worktree(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         root_session_id: str,
@@ -330,7 +330,7 @@ class SessionWorkspaceProjectRepository:
             runtime_id=runtime_id,
             worktree_path=worktree_path,
         )
-        existing = await session.execute(
+        existing = await session.write_session.execute(
             sa.select(RDBGitWorktreePathClaim).where(
                 RDBGitWorktreePathClaim.agent_runtime_id == runtime_id,
                 RDBGitWorktreePathClaim.worktree_path == worktree_path,
@@ -341,7 +341,7 @@ class SessionWorkspaceProjectRepository:
             return False
         now = datetime.now(UTC)
         if claim is None:
-            session.add(
+            session.write_session.add(
                 RDBGitWorktreePathClaim(
                     agent_runtime_id=runtime_id,
                     worktree_path=worktree_path,
@@ -366,19 +366,19 @@ class SessionWorkspaceProjectRepository:
             claim.reason_code = None
             claim.summary = None
             claim.lease_until = now + timedelta(minutes=6)
-        await session.flush()
+        await session.write_session.flush()
         return True
 
     async def release_archive_git_worktree_claim(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         root_session_id: str,
         worktree_path: str,
     ) -> None:
         """Release one archive cleanup claim after its attempt terminalizes."""
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBGitWorktreePathClaim).where(
                 RDBGitWorktreePathClaim.agent_runtime_id == runtime_id,
                 RDBGitWorktreePathClaim.root_session_id == root_session_id,
@@ -387,16 +387,16 @@ class SessionWorkspaceProjectRepository:
                 == GitWorktreePathClaimOwnerKind.ARCHIVE_CLEANUP,
             )
         )
-        await session.flush()
+        await session.write_session.flush()
 
     async def acquire_runtime_path_coordination_lock(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
     ) -> None:
         """Serialize Project attachment and cleanup claims for one Runtime."""
-        await session.execute(
+        await session.write_session.execute(
             sa.select(
                 sa.func.pg_advisory_xact_lock(
                     _runtime_path_coordination_lock_id(runtime_id)
@@ -406,13 +406,13 @@ class SessionWorkspaceProjectRepository:
 
     async def acquire_runtime_worktree_path_lock(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         worktree_path: str,
     ) -> None:
         """Serialize destructive ownership of one exact Runtime worktree path."""
-        await session.execute(
+        await session.write_session.execute(
             sa.select(
                 sa.func.pg_advisory_xact_lock(
                     _runtime_worktree_path_lock_id(runtime_id, worktree_path)
@@ -422,7 +422,7 @@ class SessionWorkspaceProjectRepository:
 
     async def has_blocking_git_worktree_claim(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         worktree_path: str,
@@ -438,12 +438,12 @@ class SessionWorkspaceProjectRepository:
 
     async def _list_blocking_cleanup_claim_paths(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
     ) -> list[str]:
         """List currently live cleanup claims for one Runtime under its lock."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBGitWorktreePathClaim).where(
                 RDBGitWorktreePathClaim.agent_runtime_id == runtime_id,
                 RDBGitWorktreePathClaim.state.in_(
@@ -463,7 +463,7 @@ class SessionWorkspaceProjectRepository:
 
     async def create_project(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: SessionWorkspaceProjectCreate,
     ) -> SessionWorkspaceProject:
         """Create Project row."""
@@ -492,18 +492,18 @@ class SessionWorkspaceProjectRepository:
             session_agent_context_id=context_id,
             path=create.path,
         )
-        session.add(rdb)
-        await session.flush()
-        await session.refresh(rdb)
+        session.write_session.add(rdb)
+        await session.write_session.flush()
+        await session.write_session.refresh(rdb)
         return self._build_project(rdb, session_id=create.session_id)
 
     async def get_project_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         project_id: str,
     ) -> SessionWorkspaceProject | None:
         """Fetch Project by ID."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(
                 RDBSessionAgentContextProject,
                 RDBSessionAgent.agent_session_id,
@@ -527,7 +527,7 @@ class SessionWorkspaceProjectRepository:
 
     async def get_project_by_path(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         path: str,
@@ -537,7 +537,7 @@ class SessionWorkspaceProjectRepository:
             session,
             session_id=session_id,
         )
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBSessionAgentContextProject).where(
                 RDBSessionAgentContextProject.session_agent_context_id == context_id,
                 RDBSessionAgentContextProject.path == path,
@@ -548,16 +548,36 @@ class SessionWorkspaceProjectRepository:
             return None
         return self._build_project(rdb, session_id=session_id)
 
+    async def get_project_in_context(
+        self,
+        session: ReadSession,
+        *,
+        project_id: str,
+        context_id: str,
+        session_id: str,
+    ) -> SessionWorkspaceProject | None:
+        """Read one exact Project within the selected Session context."""
+        result = await session.read_session.execute(
+            sa.select(RDBSessionAgentContextProject).where(
+                RDBSessionAgentContextProject.id == project_id,
+                RDBSessionAgentContextProject.session_agent_context_id == context_id,
+            )
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        return self._build_project(rdb, session_id=session_id)
+
     async def lock_project_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         project_id: str,
         context_id: str,
         session_id: str,
     ) -> SessionWorkspaceProject | None:
         """Lock one exact Project in the admission-pinned Session context."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBSessionAgentContextProject)
             .where(
                 RDBSessionAgentContextProject.id == project_id,
@@ -572,7 +592,7 @@ class SessionWorkspaceProjectRepository:
 
     async def get_runtime_id_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
     ) -> str | None:
@@ -588,7 +608,7 @@ class SessionWorkspaceProjectRepository:
 
     async def list_projects(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
     ) -> list[SessionWorkspaceProject]:
@@ -597,7 +617,7 @@ class SessionWorkspaceProjectRepository:
             session,
             session_id=session_id,
         )
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBSessionAgentContextProject)
             .where(RDBSessionAgentContextProject.session_agent_context_id == context_id)
             .order_by(RDBSessionAgentContextProject.path)
@@ -608,7 +628,7 @@ class SessionWorkspaceProjectRepository:
 
     async def list_active_connected_paths_by_runtime_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         runtime_id: str,
     ) -> list[str]:
@@ -623,9 +643,10 @@ class SessionWorkspaceProjectRepository:
                 RDBAgentSession,
                 RDBAgentSession.id == RDBSessionAgent.agent_session_id,
             )
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
             .where(
                 RDBSessionAgentContext.agent_runtime_id == runtime_id,
-                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBConversation.session_kind == AgentSessionKind.ROOT,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
             )
         )
@@ -641,12 +662,12 @@ class SessionWorkspaceProjectRepository:
             RDBSessionAgentContextGitWorktree.status
             != SessionGitWorktreeStatus.CLEANED,
         )
-        result = await session.execute(project_paths.union(worktree_paths))
+        result = await session.read_session.execute(project_paths.union(worktree_paths))
         return sorted(set(result.scalars()))
 
     async def delete_project(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         project_id: str,
         *,
         session_id: str,
@@ -656,7 +677,7 @@ class SessionWorkspaceProjectRepository:
             session,
             session_id=session_id,
         )
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.delete(RDBSessionAgentContextProject).where(
                 RDBSessionAgentContextProject.id == project_id,
                 RDBSessionAgentContextProject.session_agent_context_id == context_id,
@@ -664,17 +685,17 @@ class SessionWorkspaceProjectRepository:
         )
         if not isinstance(result, CursorResult):
             raise RuntimeError("SQLAlchemy deletion did not return CursorResult")
-        await session.flush()
+        await session.write_session.flush()
         return result.rowcount > 0
 
     async def _get_context_id_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
     ) -> str:
         """Fetch SessionAgentContext ID for an AgentSession."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBSessionAgent.context_id).where(
                 RDBSessionAgent.agent_session_id == session_id,
             )
@@ -686,12 +707,12 @@ class SessionWorkspaceProjectRepository:
 
     async def _get_runtime_id_by_context_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         context_id: str,
     ) -> str | None:
         """Resolve the Runtime bound to a SessionAgentContext."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBSessionAgentContext.agent_runtime_id).where(
                 RDBSessionAgentContext.id == context_id,
             )
@@ -700,7 +721,7 @@ class SessionWorkspaceProjectRepository:
 
     async def _claim_blocks_path(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         claim: RDBGitWorktreePathClaim,
     ) -> bool:
@@ -716,7 +737,7 @@ class SessionWorkspaceProjectRepository:
             return False
         if claim.action_execution_id is None or claim.owner_generation is None:
             return False
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(
                 RDBActionExecution.status,
                 RDBAgentSession.owner_generation,

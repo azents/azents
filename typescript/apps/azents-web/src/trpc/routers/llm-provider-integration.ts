@@ -193,11 +193,11 @@ export const llmProviderIntegrationRouter = router({
             model_identifier: entry.provider_model_identifier,
             model_display_name: entry.display_name,
             normalized_capabilities: entry.normalized_capabilities,
+            pricing: entry.pricing,
           })),
           summary: {
             source: "stored_catalog_projection",
-            fetched_at:
-              data.current_snapshot_created_at ?? new Date().toISOString(),
+            fetched_at: data.last_success_at ?? new Date().toISOString(),
             returned_count: data.entries.length,
             skipped_count: Math.max(data.total - data.entries.length, 0),
           },
@@ -205,9 +205,8 @@ export const llmProviderIntegrationRouter = router({
           catalog: {
             catalog_id: data.catalog_id,
             catalog_scope: data.catalog_scope,
-            current_snapshot_id: data.current_snapshot_id,
-            current_snapshot_created_at: data.current_snapshot_created_at,
-            latest_attempt: data.latest_attempt,
+            last_success_at: data.last_success_at,
+            latest_sync: data.latest_sync,
             stale: data.stale,
             sync_available_at: data.sync_available_at,
             automatic_retry_blocked: data.automatic_retry_blocked,

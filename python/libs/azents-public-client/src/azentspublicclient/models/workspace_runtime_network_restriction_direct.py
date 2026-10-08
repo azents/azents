@@ -29,7 +29,6 @@ class WorkspaceRuntimeNetworkRestrictionDirect(BaseModel):
     mode: StrictStr
     allowed_cidrs: List[StrictStr]
     denied_cidrs: List[StrictStr]
-    additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["mode", "allowed_cidrs", "denied_cidrs"]
 
     @field_validator('mode')
@@ -69,10 +68,8 @@ class WorkspaceRuntimeNetworkRestrictionDirect(BaseModel):
         * `None` is only added to the output dict for nullable fields that
           were set at model initialization. Other fields with value `None`
           are ignored.
-        * Fields in `self.additional_properties` are added to the output dict.
         """
         excluded_fields: Set[str] = set([
-            "additional_properties",
         ])
 
         _dict = self.model_dump(
@@ -80,11 +77,6 @@ class WorkspaceRuntimeNetworkRestrictionDirect(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # puts key-value pairs in additional_properties in the top level
-        if self.additional_properties is not None:
-            for _key, _value in self.additional_properties.items():
-                _dict[_key] = _value
-
         return _dict
 
     @classmethod
@@ -96,16 +88,14 @@ class WorkspaceRuntimeNetworkRestrictionDirect(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "mode": obj.get("mode"),
             "allowed_cidrs": obj.get("allowed_cidrs"),
             "denied_cidrs": obj.get("denied_cidrs")
+            }.items() if _key in obj
         })
-        # store additional fields in additional_properties
-        for _key in obj.keys():
-            if _key not in cls.__properties:
-                _obj.additional_properties[_key] = obj.get(_key)
-
         return _obj
 
 

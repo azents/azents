@@ -30,7 +30,6 @@ class WorkspaceModelSettingsUpdateRequest(BaseModel):
     default_selectable_model_options: Optional[List[SelectableModelOptionInput]] = None
     default_main_model_label: Optional[StrictStr] = None
     default_lightweight_model_label: Optional[StrictStr] = None
-    additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["default_selectable_model_options", "default_main_model_label", "default_lightweight_model_label"]
 
     model_config = ConfigDict(
@@ -63,10 +62,8 @@ class WorkspaceModelSettingsUpdateRequest(BaseModel):
         * `None` is only added to the output dict for nullable fields that
           were set at model initialization. Other fields with value `None`
           are ignored.
-        * Fields in `self.additional_properties` are added to the output dict.
         """
         excluded_fields: Set[str] = set([
-            "additional_properties",
         ])
 
         _dict = self.model_dump(
@@ -81,11 +78,6 @@ class WorkspaceModelSettingsUpdateRequest(BaseModel):
                 if _item_default_selectable_model_options:
                     _items.append(_item_default_selectable_model_options.to_dict())
             _dict['default_selectable_model_options'] = _items
-        # puts key-value pairs in additional_properties in the top level
-        if self.additional_properties is not None:
-            for _key, _value in self.additional_properties.items():
-                _dict[_key] = _value
-
         # set to None if default_selectable_model_options (nullable) is None
         # and model_fields_set contains the field
         if self.default_selectable_model_options is None and "default_selectable_model_options" in self.model_fields_set:
@@ -112,16 +104,14 @@ class WorkspaceModelSettingsUpdateRequest(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "default_selectable_model_options": [SelectableModelOptionInput.from_dict(_item) for _item in obj["default_selectable_model_options"]] if obj.get("default_selectable_model_options") is not None else None,
             "default_main_model_label": obj.get("default_main_model_label"),
             "default_lightweight_model_label": obj.get("default_lightweight_model_label")
+            }.items() if _key in obj
         })
-        # store additional fields in additional_properties
-        for _key in obj.keys():
-            if _key not in cls.__properties:
-                _obj.additional_properties[_key] = obj.get(_key)
-
         return _obj
 
 

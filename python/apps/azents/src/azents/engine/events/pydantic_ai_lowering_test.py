@@ -37,6 +37,7 @@ from azents.engine.events.file_parts import (
     ModelFileLoweringContent,
     RequestLocalModelFileResolver,
 )
+from azents.engine.events.native_replay import native_replay_schema_version
 from azents.engine.events.pydantic_ai_lowering import PydanticAILowerer
 from azents.engine.events.pydantic_ai_types import PydanticAIRequest
 from azents.engine.events.types import (
@@ -81,13 +82,17 @@ def _artifact(
             native_format=native_format,
             provider=provider,
             model=model,
-            schema_version="1",
+            schema_version=native_replay_schema_version(
+                "You are a helpful assistant.", native_replay_context=None
+            ),
         ),
         adapter=adapter,
         native_format=native_format,
         provider=provider,
         model=model,
-        schema_version="1",
+        schema_version=native_replay_schema_version(
+            "You are a helpful assistant.", native_replay_context=None
+        ),
         item=item,
     )
 
@@ -116,6 +121,7 @@ def _lowerer(
     reasoning_effort: str | None = None,
 ) -> PydanticAILowerer:
     return PydanticAILowerer(
+        top_k=None,
         provider=provider.value,
         provider_id=provider,
         model=model,
@@ -152,7 +158,12 @@ def test_old_native_artifact_uses_canonical_text_without_relabeling() -> None:
         EventKind.ASSISTANT_MESSAGE,
         AssistantMessagePayload(content="canonical answer", native_artifact=old),
     )
-    request = _lowerer().lower([event], model="claude-selected", system_prompt="policy")
+    request = _lowerer().lower(
+        [event],
+        native_replay_context=None,
+        model="claude-selected",
+        system_prompt="policy",
+    )
     assert isinstance(request.messages[0], ModelRequest)
     assert isinstance(request.messages[0].parts[0], SystemPromptPart)
     assert request.messages[0].parts[0].content == "policy"
@@ -180,7 +191,9 @@ def test_exact_native_thinking_replay_keeps_signature_opaque() -> None:
             text="visible summary", summary=None, native_artifact=artifact
         ),
     )
-    request = _lowerer().lower([event], model="claude-selected")
+    request = _lowerer().lower(
+        [event], native_replay_context=None, model="claude-selected"
+    )
     replayed = request.messages[1]
     assert isinstance(replayed, ModelResponse)
     assert isinstance(replayed.parts[0], ThinkingPart)
@@ -209,7 +222,9 @@ def test_cross_model_or_provider_reasoning_is_not_visible_fallback(
         EventKind.REASONING,
         ReasoningPayload(text="hidden-history", summary=None, native_artifact=artifact),
     )
-    request = _lowerer().lower([event], model="claude-selected")
+    request = _lowerer().lower(
+        [event], native_replay_context=None, model="claude-selected"
+    )
     assert len(request.messages) == 1
     assert (
         "hidden-history"
@@ -241,7 +256,9 @@ def test_call_and_result_pair_preserve_ids_and_do_not_create_execution() -> None
             output=[OutputTextPart(text="finished")],
         ),
     )
-    request = _lowerer().lower([call, result], model="claude-selected")
+    request = _lowerer().lower(
+        [call, result], native_replay_context=None, model="claude-selected"
+    )
     assert isinstance(request.messages[1], ModelResponse)
     assert isinstance(request.messages[1].parts[0], ToolCallPart)
     assert request.messages[1].parts[0].tool_call_id == "call-1"
@@ -261,7 +278,9 @@ def test_orphan_and_mismatched_results_are_not_dispatched() -> None:
             output=[OutputTextPart(text="orphan")],
         ),
     )
-    request = _lowerer().lower([orphan], model="claude-selected")
+    request = _lowerer().lower(
+        [orphan], native_replay_context=None, model="claude-selected"
+    )
     assert len(request.messages) == 1
 
 
@@ -290,7 +309,7 @@ def test_historical_custom_dialect_is_bounded_non_executable() -> None:
         ),
     )
     request = _lowerer(provider=LLMProvider.XAI, model="grok-selected").lower(
-        [call, result], model="grok-selected"
+        [call, result], native_replay_context=None, model="grok-selected"
     )
     assert (
         "secret-historical-command"
@@ -312,7 +331,7 @@ def test_replacement_route_cannot_enable_custom_from_library_metadata() -> None:
         tools=[{"type": "custom", "name": "apply_patch", "format": {"type": "text"}}],
     )
     with pytest.raises(ValueError, match="does not support plaintext custom"):
-        lowerer.lower([], model="grok-selected")
+        lowerer.lower([], native_replay_context=None, model="grok-selected")
 
 
 def test_native_tool_args_cannot_override_canonical_call() -> None:
@@ -335,7 +354,9 @@ def test_native_tool_args_cannot_override_canonical_call() -> None:
             native_artifact=artifact,
         ),
     )
-    request = _lowerer().lower([event], model="claude-selected")
+    request = _lowerer().lower(
+        [event], native_replay_context=None, model="claude-selected"
+    )
     assert isinstance(request.messages[1], ModelResponse)
     part = request.messages[1].parts[0]
     assert isinstance(part, ToolCallPart)
@@ -379,7 +400,7 @@ def test_historical_malformed_arguments_are_nonexecuting_on_object_only_sdk(
         ),
     )
     request = _lowerer(provider=provider, model="selected").lower(
-        [call, result], model="selected"
+        [call, result], native_replay_context=None, model="selected"
     )
     text = _text(request)
     assert "invalid JSON arguments; non-executable" in text
@@ -418,7 +439,9 @@ def test_provider_semantic_fallback_keeps_refs_and_excerpt() -> None:
             native_artifact=old,
         ),
     )
-    request = _lowerer().lower([event], model="claude-selected")
+    request = _lowerer().lower(
+        [event], native_replay_context=None, model="claude-selected"
+    )
     serialized = ModelMessagesTypeAdapter.dump_json(request.messages).decode()
     for expected in [
         "model-visible output",
@@ -444,7 +467,9 @@ def test_reminder_and_compaction_are_input_not_assistant(
         if kind == EventKind.COMPACTION_SUMMARY
         else SystemReminderPayload(text=text)
     )
-    request = _lowerer().lower([_event(kind, payload)], model="claude-selected")
+    request = _lowerer().lower(
+        [_event(kind, payload)], native_replay_context=None, model="claude-selected"
+    )
     assert isinstance(request.messages[1], ModelRequest)
     assert text in _text(request)
 
@@ -457,6 +482,7 @@ def test_stop_marker_has_ordinary_reminder() -> None:
                 InterruptedPayload(run_id="run-1", reason="user_requested"),
             )
         ],
+        native_replay_context=None,
         model="claude-selected",
     )
     assert "interrupt" in _text(request).lower()
@@ -469,7 +495,9 @@ def test_goal_continuation_uses_authoritative_reminder() -> None:
         metadata={"goal_objective": "Finish the task"},
     )
     request = _lowerer().lower(
-        [_event(EventKind.GOAL_CONTINUATION, payload)], model="claude-selected"
+        [_event(EventKind.GOAL_CONTINUATION, payload)],
+        native_replay_context=None,
+        model="claude-selected",
     )
     assert "Finish the task" in _text(request)
     assert "ignored-display-text" not in _text(request)
@@ -487,7 +515,9 @@ def test_goal_resume_preserves_fresh_blocked_audit_reminder() -> None:
         },
     )
     request = _lowerer().lower(
-        [_event(EventKind.GOAL_UPDATED, payload)], model="claude-selected"
+        [_event(EventKind.GOAL_UPDATED, payload)],
+        native_replay_context=None,
+        model="claude-selected",
     )
     text = _text(request)
     assert "fresh blocked audit" in text
@@ -509,7 +539,9 @@ def test_terminal_agent_result_keeps_message_kind_and_run_status() -> None:
         content="Terminal task result",
     )
     request = _lowerer().lower(
-        [_event(EventKind.AGENT_MESSAGE, payload)], model="claude-selected"
+        [_event(EventKind.AGENT_MESSAGE, payload)],
+        native_replay_context=None,
+        model="claude-selected",
     )
     text = _text(request)
     assert "Message Type: AGENT_RESULT" in text
@@ -532,7 +564,9 @@ def test_rich_file_uses_scoped_resolver_and_saved_capabilities() -> None:
         )
     )
     request = _lowerer(capabilities=caps, file_resolver=resolver).lower(
-        [_event(EventKind.USER_MESSAGE, payload)], model="claude-selected"
+        [_event(EventKind.USER_MESSAGE, payload)],
+        native_replay_context=None,
+        model="claude-selected",
     )
     assert isinstance(request.messages[1], ModelRequest)
     user = request.messages[1].parts[0]
@@ -542,7 +576,9 @@ def test_rich_file_uses_scoped_resolver_and_saved_capabilities() -> None:
         for part in user.content
     )
     conservative = _lowerer(file_resolver=resolver).lower(
-        [_event(EventKind.USER_MESSAGE, payload)], model="claude-selected"
+        [_event(EventKind.USER_MESSAGE, payload)],
+        native_replay_context=None,
+        model="claude-selected",
     )
     assert (
         "does not support"
@@ -576,11 +612,11 @@ def test_provider_declaration_budget_is_preserved(
         developer=LLMModelDeveloper.GOOGLE,
     )
     with pytest.raises(ValueError, match="declaration limit"):
-        lowerer.lower([], model="selected")
+        lowerer.lower([], native_replay_context=None, model="selected")
 
 
-def test_unknown_saved_strict_parallel_support_is_conservative() -> None:
-    request = _lowerer(
+def test_absent_strict_function_support_rejects_explicit_request() -> None:
+    lowerer = _lowerer(
         tools=[
             {
                 "type": "function",
@@ -589,15 +625,15 @@ def test_unknown_saved_strict_parallel_support_is_conservative() -> None:
                 "strict": True,
             }
         ]
-    ).lower([], model="claude-selected")
-    assert request.parameters.function_tools[0].strict is False
-    assert request.settings["parallel_tool_calls"] is False
+    )
+    with pytest.raises(ValueError, match="function"):
+        lowerer.lower([], native_replay_context=None, model="claude-selected")
 
 
 def test_library_tool_availability_does_not_authorize_hosted_search() -> None:
     lowerer = _lowerer(hosted_tools=[BuiltinToolSpec(name="web_search", config={})])
-    with pytest.raises(ValueError, match="not authorized"):
-        lowerer.lower([], model="claude-selected")
+    with pytest.raises(ValueError, match="builtin:web_search"):
+        lowerer.lower([], native_replay_context=None, model="claude-selected")
 
 
 def test_authorized_hosted_search_uses_public_native_tool() -> None:
@@ -607,7 +643,7 @@ def test_authorized_hosted_search_uses_public_native_tool() -> None:
     request = _lowerer(
         capabilities=caps,
         hosted_tools=[BuiltinToolSpec(name="web_search", config={"max_uses": 2})],
-    ).lower([], model="claude-selected")
+    ).lower([], native_replay_context=None, model="claude-selected")
     assert len(request.parameters.native_tools) == 1
     assert request.parameters.native_tools[0].kind == "web_search"
 
@@ -631,7 +667,7 @@ def test_saved_authorized_google_image_uses_public_native_tool(
                 name="image_generation", config={"size": "2K", "aspect_ratio": "16:9"}
             )
         ],
-    ).lower([], model="gemini-3.1-flash-image-preview")
+    ).lower([], native_replay_context=None, model="gemini-3.1-flash-image-preview")
     tool = request.parameters.native_tools[0]
     assert isinstance(tool, ImageGenerationTool)
     assert tool.size == "2K"
@@ -644,8 +680,10 @@ def test_library_image_support_does_not_authorize_selected_hosted_image() -> Non
         model="gemini-3.1-flash-image-preview",
         hosted_tools=[BuiltinToolSpec(name="image_generation", config={})],
     )
-    with pytest.raises(ValueError, match="not authorized"):
-        lowerer.lower([], model="gemini-3.1-flash-image-preview")
+    with pytest.raises(ValueError, match="builtin:image_generation"):
+        lowerer.lower(
+            [], native_replay_context=None, model="gemini-3.1-flash-image-preview"
+        )
 
 
 @pytest.mark.parametrize(
@@ -663,7 +701,7 @@ def test_anthropic_route_does_not_claim_library_hosted_image_support(
         hosted_tools=[BuiltinToolSpec(name="image_generation", config={})],
     )
     with pytest.raises(ValueError, match="does not support hosted image generation"):
-        lowerer.lower([], model="claude-selected")
+        lowerer.lower([], native_replay_context=None, model="claude-selected")
 
 
 @pytest.mark.parametrize(
@@ -683,8 +721,8 @@ def test_google_effort_without_legacy_mapping_fails_before_sdk_dispatch(
         ),
         reasoning_effort=effort,
     )
-    with pytest.raises(ValueError, match="no supported mapping"):
-        lowerer.lower([], model="gemini-3.1-pro-preview")
+    with pytest.raises(ValueError, match="no lossless mapping"):
+        lowerer.lower([], native_replay_context=None, model="gemini-3.1-pro-preview")
 
 
 def test_model_id_and_execution_intent_are_not_inferred_from_slashes() -> None:
@@ -693,20 +731,20 @@ def test_model_id_and_execution_intent_are_not_inferred_from_slashes() -> None:
         provider=LLMProvider.GOOGLE_VERTEX_AI,
         model=model,
         developer=LLMModelDeveloper.ANTHROPIC,
-    ).lower([], model=model)
+    ).lower([], native_replay_context=None, model=model)
     assert request.model == model
     assert request.provider == "google_vertex_ai"
     with pytest.raises(ValueError, match="differs"):
-        _lowerer(model=model).lower([], model="claude")
+        _lowerer(model=model).lower([], native_replay_context=None, model="claude")
 
 
 def test_fast_and_reasoning_require_saved_authorization() -> None:
     lowerer = _lowerer(enabled=[ModelExecutionOptionId.FAST])
     with pytest.raises(ValueError, match="not supported by the model"):
-        lowerer.lower([], model="claude-selected")
+        lowerer.lower([], native_replay_context=None, model="claude-selected")
     lowerer = _lowerer(reasoning_effort="high")
-    with pytest.raises(ValueError, match="Reasoning effort is not authorized"):
-        lowerer.lower([], model="claude-selected")
+    with pytest.raises(ValueError, match="support reasoning"):
+        lowerer.lower([], native_replay_context=None, model="claude-selected")
     caps = ModelCapabilities(
         reasoning=ModelReasoningCapabilities(
             supported=True, effort_levels=[ModelReasoningEffort.HIGH]
@@ -714,7 +752,7 @@ def test_fast_and_reasoning_require_saved_authorization() -> None:
         tool_calling=ModelToolCallingCapabilities(supported=True),
     )
     request = _lowerer(capabilities=caps, reasoning_effort="high").lower(
-        [], model="claude-selected"
+        [], native_replay_context=None, model="claude-selected"
     )
     assert request.settings.get("anthropic_effort") == "high"
 
@@ -731,7 +769,8 @@ def test_bedrock_settings_and_structured_helper_import_in_fresh_process(
             from azents.engine.model_text import call_provider_text
         from azents.core.enums import LLMModelDeveloper, LLMProvider
         from azents.core.llm_catalog import (
-            ModelCapabilities, ModelReasoningCapabilities, ModelReasoningEffort
+            ModelCapabilities, ModelReasoningCapabilities,
+            ModelReasoningEffort, ModelParameterCapabilities
         )
         from azents.engine.events.pydantic_ai_lowering import PydanticAILowerer
         from azents.engine.model_text import call_provider_text
@@ -743,11 +782,17 @@ def test_bedrock_settings_and_structured_helper_import_in_fresh_process(
         model = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
         profile = "arn:aws:bedrock:us-east-1:123456789012:inference-profile/fixture"
         lowerer = PydanticAILowerer(
+        top_k=None,
             provider="aws_bedrock",
             provider_id=LLMProvider.AWS_BEDROCK,
             model=model,
             tools=None,
-            model_capabilities=None,
+            model_capabilities=ModelCapabilities(
+                reasoning=ModelReasoningCapabilities(supported=True),
+                parameters=ModelParameterCapabilities(
+                    top_k=True, max_output_tokens=True
+                ),
+            ),
             supported_execution_options=[],
             enabled_execution_options=[],
             model_developer=LLMModelDeveloper.ANTHROPIC,
@@ -763,7 +808,7 @@ def test_bedrock_settings_and_structured_helper_import_in_fresh_process(
                 },
             },
         )
-        request = lowerer.lower([], model=model)
+        request = lowerer.lower([], native_replay_context=None, model=model)
         assert request.settings["max_tokens"] == 256
         assert request.settings["top_k"] == 42
         assert request.settings["thinking"] == "high"
@@ -778,17 +823,17 @@ def test_bedrock_settings_and_structured_helper_import_in_fresh_process(
         lowerer.model_capabilities = ModelCapabilities(
             reasoning=ModelReasoningCapabilities(
                 supported=True, effort_levels=[ModelReasoningEffort.HIGH]
-            )
+            ), parameters=ModelParameterCapabilities(top_k=True, max_output_tokens=True)
         )
         lowerer.reasoning_effort = "high"
-        effort_request = lowerer.lower([], model=model)
+        effort_request = lowerer.lower([], native_replay_context=None, model=model)
         assert effort_request.settings["bedrock_additional_model_requests_fields"] == {
             "thinking": {"type": "enabled", "budget_tokens": 1024},
-            "output_config": {"existing_option": "preserved", "effort": "high"},
+            "output_config": {"existing_option": "preserved"},
         }
         lowerer.reasoning_effort = None
         lowerer.model_developer = None
-        ordinary = lowerer.lower([], model=model)
+        ordinary = lowerer.lower([], native_replay_context=None, model=model)
         assert ordinary.settings["top_k"] == 42
         assert ordinary.settings["bedrock_inference_profile"] == profile
 
@@ -804,6 +849,7 @@ def test_bedrock_settings_and_structured_helper_import_in_fresh_process(
             }),
         )
         helper_request = PydanticAIRequest(
+            native_replay_context=None,
             provider=request.provider,
             model=request.model,
             messages=request.messages,

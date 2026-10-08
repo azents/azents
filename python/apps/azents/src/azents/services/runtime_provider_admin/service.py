@@ -1,115 +1,47 @@
-"""Admin operations for Runtime Provider product resources."""
+"""Runtime management sequencing through completed repository operations."""
 
 import dataclasses
 from typing import Annotated
 
-from azcommon.datetime import tznow
-from azents_runtime_control.provider import RuntimeProviderOperationalDiagnostics
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeProviderAvailabilityMode,
     RuntimeProviderLifecycleState,
 )
-from azents.core.runtime_profile import RuntimeReconcileSourceKind
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.runtime_profile.repository import RuntimeProfileRepository
-from azents.repos.runtime_provider.data import RuntimeProvider
-from azents.repos.runtime_provider.repository import RuntimeProviderRepository
-from azents.repos.runtime_provider_control.repository import (
-    RuntimeProviderControlRepository,
+from azents.core.runtime_provider_admin import (
+    RuntimeProviderOperationalDiagnosticsProjection,
 )
-
-
-@dataclasses.dataclass(frozen=True)
-class RuntimeProviderAdminUnavailable(Exception):
-    """The requested Runtime Provider Admin operation cannot be completed."""
-
-    code: str
-    message: str
-
-    def __post_init__(self) -> None:
-        Exception.__init__(self, self.message)
-
-
-@dataclasses.dataclass(frozen=True)
-class RuntimeProviderOperationalDiagnosticsProjection:
-    """Safe current Provider diagnostics for internal Admin projection."""
-
-    generation: int
-    protocol_version: str
-    diagnostics: RuntimeProviderOperationalDiagnostics
+from azents.core.runtime_provider_data import RuntimeProvider
+from azents.repos.runtime_provider_admin_operations import (
+    RuntimeProviderAdminOperationsRepository,
+)
 
 
 @dataclasses.dataclass
 class RuntimeProviderAdminService:
-    """Manage Provider inventory and mutable administrative policy."""
+    """Sequence completed management operations and postcommit effects."""
 
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ]
-    repository: Annotated[RuntimeProviderRepository, Depends(RuntimeProviderRepository)]
-    profile_repository: Annotated[
-        RuntimeProfileRepository, Depends(RuntimeProfileRepository)
-    ]
-    control_repository: Annotated[
-        RuntimeProviderControlRepository,
-        Depends(RuntimeProviderControlRepository),
+    operations: Annotated[
+        RuntimeProviderAdminOperationsRepository,
+        Depends(RuntimeProviderAdminOperationsRepository),
     ]
 
     async def list_providers(self) -> list[RuntimeProvider]:
         """Return all durable Providers, including disabled resources."""
-        async with self.session_manager() as session:
-            return await self.repository.list_available(
-                session,
-                workspace_id=None,
-                include_disabled=True,
-            )
+        return await self.operations.list_providers()
 
     async def get_provider(self, provider_id: str) -> RuntimeProvider:
         """Return one Provider by its stable logical ID."""
-        async with self.session_manager() as session:
-            provider = await self.repository.get_by_provider_id(
-                session,
-                provider_logical_id=provider_id,
-                for_update=False,
-            )
-        if provider is None:
-            raise RuntimeProviderAdminUnavailable(
-                code="provider_not_found",
-                message="Runtime Provider was not found.",
-            )
-        return provider
+        return await self.operations.get_provider(provider_id=provider_id)
 
     async def get_operational_diagnostics(
         self,
         provider_id: str,
     ) -> RuntimeProviderOperationalDiagnosticsProjection | None:
         """Return diagnostics only from the active authenticated generation."""
-        async with self.session_manager() as session:
-            provider = await self.repository.get_by_provider_id(
-                session,
-                provider_logical_id=provider_id,
-                for_update=False,
-            )
-            if provider is None:
-                raise RuntimeProviderAdminUnavailable(
-                    code="provider_not_found",
-                    message="Runtime Provider was not found.",
-                )
-            connection = await self.control_repository.get_current_connection(
-                session,
-                provider_id=provider.id,
-                now=tznow(),
-            )
-        if connection is None or connection.operational_diagnostics is None:
-            return None
-        return RuntimeProviderOperationalDiagnosticsProjection(
-            generation=connection.generation,
-            protocol_version=connection.reported_protocol_version,
-            diagnostics=connection.operational_diagnostics,
+        return await self.operations.get_operational_diagnostics(
+            provider_id=provider_id
         )
 
     async def update_policy(
@@ -121,38 +53,12 @@ class RuntimeProviderAdminService:
         availability_mode: RuntimeProviderAvailabilityMode,
     ) -> RuntimeProvider:
         """Replace mutable Provider policy without changing Runtime bindings."""
-        async with self.session_manager() as session:
-            provider = await self.repository.get_by_provider_id(
-                session,
-                provider_logical_id=provider_id,
-                for_update=False,
-            )
-            if provider is None:
-                raise RuntimeProviderAdminUnavailable(
-                    code="provider_not_found",
-                    message="Runtime Provider was not found.",
-                )
-            updated = await self.repository.update_administrative_policy(
-                session,
-                provider_id=provider.id,
-                enabled=enabled,
-                lifecycle_state=lifecycle_state,
-                availability_mode=availability_mode,
-            )
-            if updated is not None:
-                await self.profile_repository.enqueue_reconcile_task(
-                    session,
-                    source_type=RuntimeReconcileSourceKind.PROVIDER,
-                    source_id=updated.id,
-                    source_version=str(updated.admin_version),
-                    available_at=tznow(),
-                )
-        if updated is None:
-            raise RuntimeProviderAdminUnavailable(
-                code="provider_not_found",
-                message="Runtime Provider was not found.",
-            )
-        return updated
+        return await self.operations.update_policy(
+            provider_id=provider_id,
+            enabled=enabled,
+            lifecycle_state=lifecycle_state,
+            availability_mode=availability_mode,
+        )
 
     async def replace_workspace_availability(
         self,
@@ -161,33 +67,6 @@ class RuntimeProviderAdminService:
         workspace_ids: set[str],
     ) -> RuntimeProvider:
         """Replace the Workspace allow-list for one Provider."""
-        async with self.session_manager() as session:
-            provider = await self.repository.get_by_provider_id(
-                session,
-                provider_logical_id=provider_id,
-                for_update=False,
-            )
-            if provider is None:
-                raise RuntimeProviderAdminUnavailable(
-                    code="provider_not_found",
-                    message="Runtime Provider was not found.",
-                )
-            updated = await self.repository.replace_workspace_availability(
-                session,
-                provider_id=provider.id,
-                workspace_ids=workspace_ids,
-            )
-            if updated is not None:
-                await self.profile_repository.enqueue_reconcile_task(
-                    session,
-                    source_type=RuntimeReconcileSourceKind.PROVIDER,
-                    source_id=updated.id,
-                    source_version=str(updated.admin_version),
-                    available_at=tznow(),
-                )
-        if updated is None:
-            raise RuntimeProviderAdminUnavailable(
-                code="provider_not_found",
-                message="Runtime Provider was not found.",
-            )
-        return updated
+        return await self.operations.replace_workspace_availability(
+            provider_id=provider_id, workspace_ids=workspace_ids
+        )

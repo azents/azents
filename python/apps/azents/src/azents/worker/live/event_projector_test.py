@@ -2,13 +2,17 @@
 
 import asyncio
 import datetime
+from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.broadcast import (
+    BaseWebSocketBroadcast,
     WebSocketBroadcastPublishError,
+)
+from azents.core.chat_data import (
+    ChatLiveRunState,
 )
 from azents.core.enums import AgentRunPhase, AgentRunStatus
 from azents.core.inference_profile import AppliedInferenceProfile
@@ -26,8 +30,9 @@ from azents.engine.events.types import (
     ProviderToolCallPayload,
     ReasoningPayload,
 )
-from azents.services.chat.data import ChatLiveRunState
+from azents.repos.live_projection_authority import LiveProjectionAuthorityRepository
 from azents.services.chat.live_events import (
+    BaseLiveEventStore,
     InMemoryLiveEventStore,
     LiveOwnerAdvance,
 )
@@ -35,59 +40,32 @@ from azents.testing.types import is_string_object_dict
 from azents.worker.live.event_projector import LiveEventProjector
 
 
-class _SessionScope(AbstractAsyncContextManager[AsyncSession]):
-    """Return a minimal AsyncSession placeholder."""
+class _AuthorityRepository(LiveProjectionAuthorityRepository):
+    """Expose completed durable owner and terminal eligibility reads."""
 
-    async def __aenter__(self) -> AsyncSession:
-        """Enter the placeholder session scope."""
-        return object()  # ty: ignore[invalid-return-type] # Projector paths under test do not access the placeholder session.
-
-    async def __aexit__(self, *exc_info: object) -> None:
-        """Exit the placeholder session scope."""
-
-
-class _SessionManager:
-    """Create placeholder session scopes."""
-
-    def __call__(self) -> _SessionScope:
-        """Return one placeholder scope."""
-        return _SessionScope()
-
-
-class _AgentRunRepository:
-    """Expose the durable current Run used for terminal correlation."""
-
-    def __init__(self, current: AgentRunState | None = None) -> None:
-        self.current = current
-
-    async def get_running_by_session_id(
+    def __init__(
         self,
-        session: AsyncSession,
         *,
-        session_id: str,
-    ) -> AgentRunState | None:
-        """Return the configured durable current Run."""
-        del session, session_id
-        return self.current
-
-
-class _AgentSessionRepository:
-    """Expose the durable owner generation used for projection admission."""
-
-    def __init__(self, owner_generation: int = 1) -> None:
+        owner_generation: int | None = 1,
+        current_run: AgentRunState | None = None,
+    ) -> None:
         self.owner_generation = owner_generation
+        self.current_run = current_run
+        self.owner_reads: list[tuple[str, int]] = []
+        self.terminal_reads: list[tuple[str, str]] = []
 
-    async def get_by_id(
-        self,
-        session: AsyncSession,
-        session_id: str,
-    ) -> object:
-        del session, session_id
-        return type(
-            "_Session",
-            (),
-            {"owner_generation": self.owner_generation},
-        )()
+    async def owns_generation(self, *, session_id: str, owner_generation: int) -> bool:
+        self.owner_reads.append((session_id, owner_generation))
+        return (
+            self.owner_generation is not None
+            and self.owner_generation == owner_generation
+        )
+
+    async def terminal_matches_current_run(
+        self, *, session_id: str, run_id: str
+    ) -> bool:
+        self.terminal_reads.append((session_id, run_id))
+        return self.current_run is None or self.current_run.id == run_id
 
 
 class _LiveEventStore(InMemoryLiveEventStore):
@@ -135,30 +113,32 @@ class _FailingAdvanceStore(_LiveEventStore):
         raise RuntimeError("live store unavailable")
 
 
-class _Broadcast:
+class _Broadcast(BaseWebSocketBroadcast):
     """WebSocket broadcast test double."""
 
     def __init__(self, *, fail: bool = False) -> None:
         self.events: list[tuple[str, dict[str, object]]] = []
         self.fail = fail
 
-    async def publish(self, session_id: str, event: dict[str, object]) -> None:
+    async def publish(self, session_id: str, event_json: dict[str, object]) -> None:
         """Record a broadcast event or simulate Redis failure."""
         if self.fail:
             raise WebSocketBroadcastPublishError
-        self.events.append((session_id, event))
+        self.events.append((session_id, event_json))
 
     async def publish_live_projection(
-        self,
-        session_id: str,
-        event: dict[str, object],
-        *,
-        owner_generation: int,
+        self, session_id: str, event_json: dict[str, object], *, owner_generation: int
     ) -> bool:
         """Record a generation-gated projection event."""
         del owner_generation
-        await self.publish(session_id, event)
+        await self.publish(session_id, event_json)
         return True
+
+    def subscribe(
+        self, session_id: str
+    ) -> AbstractAsyncContextManager[AsyncIterator[dict[str, object]]]:
+        """Subscriptions are outside this focused broadcast fixture."""
+        raise AssertionError("Unexpected broadcast subscription")
 
 
 class _PausingGenerationBroadcast(_Broadcast):
@@ -171,21 +151,15 @@ class _PausingGenerationBroadcast(_Broadcast):
         self.release_paused_reset = asyncio.Event()
 
     async def publish_live_projection(
-        self,
-        session_id: str,
-        event: dict[str, object],
-        *,
-        owner_generation: int,
+        self, session_id: str, event_json: dict[str, object], *, owner_generation: int
     ) -> bool:
-        if event["type"] == "live_projection_reset" and owner_generation == 2:
+        if event_json["type"] == "live_projection_reset" and owner_generation == 2:
             self.paused_reset_reached.set()
             await self.release_paused_reset.wait()
         if self.owner_generation != owner_generation:
             return False
         return await super().publish_live_projection(
-            session_id,
-            event,
-            owner_generation=owner_generation,
+            session_id, event_json, owner_generation=owner_generation
         )
 
 
@@ -236,21 +210,22 @@ def _running_run(run_id: str) -> AgentRunState:
 
 
 def _projector(
-    store: object,
+    store: BaseLiveEventStore,
     broadcast: _Broadcast,
     *,
     current_run: AgentRunState | None = None,
     owner_generation: int = 1,
-    session_repository: _AgentSessionRepository | None = None,
+    authority_repository: _AuthorityRepository | None = None,
 ) -> LiveEventProjector:
     """Create a projector with durable correlation doubles."""
     return LiveEventProjector(
-        live_event_store=store,  # ty: ignore[invalid-argument-type] # Focused stores implement only exercised live-event operations.
-        broadcast=broadcast,  # ty: ignore[invalid-argument-type] # Focused broadcast double implements publish().
-        session_manager=_SessionManager(),
-        agent_run_repository=_AgentRunRepository(current_run),  # ty: ignore[invalid-argument-type] # Focused repository double implements current-run lookup.
-        agent_session_repository=session_repository
-        or _AgentSessionRepository(owner_generation),  # ty: ignore[invalid-argument-type] # Focused repository double implements owner lookup.
+        live_event_store=store,
+        broadcast=broadcast,
+        authority_repository=authority_repository
+        or _AuthorityRepository(
+            owner_generation=owner_generation,
+            current_run=current_run,
+        ),
     )
 
 
@@ -592,11 +567,11 @@ async def test_takeover_rejects_old_buffer_flush_and_clear() -> None:
     """A new durable generation makes buffered old live cleanup a no-op."""
     store = InMemoryLiveEventStore()
     broadcast = _Broadcast()
-    sessions = _AgentSessionRepository(owner_generation=1)
+    sessions = _AuthorityRepository(owner_generation=1)
     projector = _projector(
         store,
         broadcast,
-        session_repository=sessions,
+        authority_repository=sessions,
     )
 
     await projector.update(
@@ -649,11 +624,11 @@ async def test_control_event_reseeds_empty_store_and_rejects_stale_owner() -> No
     """Current controls seed an empty fence while stale controls stay private."""
     store = InMemoryLiveEventStore()
     broadcast = _Broadcast()
-    sessions = _AgentSessionRepository(owner_generation=2)
+    sessions = _AuthorityRepository(owner_generation=2)
     projector = _projector(
         store,
         broadcast,
-        session_repository=sessions,
+        authority_repository=sessions,
     )
     event: dict[str, object] = {
         "type": "todo_state_changed",
@@ -695,11 +670,11 @@ async def test_takeover_removes_old_event_before_new_live_update() -> None:
     """Connected clients remove generation N projections before N+1 updates."""
     store = InMemoryLiveEventStore()
     broadcast = _Broadcast()
-    sessions = _AgentSessionRepository(owner_generation=1)
+    sessions = _AuthorityRepository(owner_generation=1)
     projector = _projector(
         store,
         broadcast,
-        session_repository=sessions,
+        authority_repository=sessions,
     )
     await projector.update(
         "session-001",
@@ -745,11 +720,11 @@ async def test_supersession_and_clear_evict_generation_local_state() -> None:
     """Generation turnover cancels buffers and bounds projector-local maps."""
     store = InMemoryLiveEventStore()
     broadcast = _Broadcast()
-    sessions = _AgentSessionRepository(owner_generation=1)
+    sessions = _AuthorityRepository(owner_generation=1)
     projector = _projector(
         store,
         broadcast,
-        session_repository=sessions,
+        authority_repository=sessions,
     )
     await projector.update(
         "session-001",
@@ -827,11 +802,11 @@ async def test_newer_reset_recovers_when_prior_reset_loses_generation_race() -> 
     """N+2 reset clears clients when N+1 removal publication is superseded."""
     broadcast = _PausingGenerationBroadcast()
     store = _BroadcastCoordinatedStore(broadcast)
-    sessions = _AgentSessionRepository(owner_generation=1)
+    sessions = _AuthorityRepository(owner_generation=1)
     projector = _projector(
         store,
         broadcast,
-        session_repository=sessions,
+        authority_repository=sessions,
     )
     await projector.update(
         "session-001",
@@ -866,3 +841,89 @@ async def test_newer_reset_recovers_when_prior_reset_loses_generation_race() -> 
         "todo_state_changed",
     ]
     assert broadcast.events[-1][1]["generation"] == 3
+
+
+@pytest.mark.parametrize("durable_generation", [None, 2])
+async def test_missing_and_stale_owner_reads_suppress_all_volatile_effects(
+    durable_generation: int | None,
+) -> None:
+    """Missing/mismatched durable ownership returns None without new policy."""
+    store = _LiveEventStore()
+    broadcast = _Broadcast()
+    authority = _AuthorityRepository(owner_generation=durable_generation)
+    projector = _projector(store, broadcast, authority_repository=authority)
+
+    assert await projector._owned_store("session-001", 1) is None
+    assert authority.owner_reads == [("session-001", 1)]
+    assert broadcast.events == []
+    assert store.clear_count == 0
+    assert store._owner_generations == {}
+
+
+async def test_local_run_mismatch_short_circuits_completed_durable_read() -> None:
+    """A locally newer Run suppresses cleanup without even reading PostgreSQL."""
+    store = _LiveEventStore()
+    broadcast = _Broadcast()
+    authority = _AuthorityRepository(current_run=None)
+    projector = _projector(store, broadcast, authority_repository=authority)
+    projector._active_run_ids[("session-001", 1)] = "run-newer"
+
+    await projector.publish_live_run_cleared(
+        "session-001",
+        run_id="run-old",
+        owner_generation=1,
+    )
+
+    assert authority.terminal_reads == []
+    assert authority.owner_reads == []
+    assert projector._active_run_ids[("session-001", 1)] == "run-newer"
+    assert broadcast.events == []
+
+
+async def test_local_run_change_during_read_does_not_add_a_new_terminal_fence() -> None:
+    """Keep the original pre-read local check without a new post-read policy."""
+    read_entered = asyncio.Event()
+    release_read = asyncio.Event()
+
+    class PausingAuthority(_AuthorityRepository):
+        async def terminal_matches_current_run(
+            self,
+            *,
+            session_id: str,
+            run_id: str,
+        ) -> bool:
+            read_entered.set()
+            await release_read.wait()
+            return await super().terminal_matches_current_run(
+                session_id=session_id,
+                run_id=run_id,
+            )
+
+    store = _LiveEventStore()
+    broadcast = _Broadcast()
+    authority = PausingAuthority(current_run=None)
+    projector = _projector(store, broadcast, authority_repository=authority)
+    key = ("session-001", 1)
+    projector._active_run_ids[key] = "run-old"
+    terminal = asyncio.create_task(
+        projector.publish_live_run_cleared(
+            "session-001",
+            run_id="run-old",
+            owner_generation=1,
+        )
+    )
+    try:
+        await asyncio.wait_for(read_entered.wait(), timeout=2)
+        projector._active_run_ids[key] = "run-newer"
+        release_read.set()
+        await asyncio.wait_for(terminal, timeout=2)
+    finally:
+        release_read.set()
+        await terminal
+
+    assert authority.terminal_reads == [("session-001", "run-old")]
+    assert key not in projector._active_run_ids
+    assert [event[1]["type"] for event in broadcast.events] == [
+        "live_projection_reset",
+        "live_run_cleared",
+    ]

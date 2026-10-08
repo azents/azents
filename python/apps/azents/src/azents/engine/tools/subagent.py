@@ -9,14 +9,22 @@ import logging
 from textwrap import dedent
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from azents.broker.types import SessionBroker, SessionStopSignal, SessionWakeUp
 from azents.core.agent import SelectableModelOption, SubagentSettings
+from azents.core.agent_session_data import AgentSession, SessionAgent
 from azents.core.enums import AgentRunStatus, AgentSessionRunState, SessionAgentKind
-from azents.core.inference_profile import SessionInferenceState
+from azents.core.inference_profile import (
+    SessionInferenceState,
+    normalize_inherited_reasoning_effort,
+)
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_execution_options import validate_execution_options
+from azents.core.session_resource_authority import (
+    SessionExecutionOwner,
+    accepts_execution_owner,
+)
 from azents.core.tools import (
     PublishEventFn,
     ResolveContext,
@@ -42,17 +50,11 @@ from azents.engine.events.fork_context import (
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
 from azents.repos.agent.data import Agent
-from azents.repos.agent_session.data import AgentSession, SessionAgent
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.repos.subagent_tool_operations import (
     SubagentToolOperationError,
     SubagentToolOperationRepository,
 )
 from azents.services.model_metadata import ModelMetadataService
-from azents.services.session_resource_authority import (
-    SessionExecutionOwner,
-    accepts_execution_owner,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +115,8 @@ class SubagentToolkitConfig(BaseModel):
 class SpawnAgentInput(BaseModel):
     """spawn_agent tool input."""
 
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(description="Child agent name within the current agent")
     task: str = Field(description="Initial task for the child agent")
     agent_type: Literal["default"] = Field(
@@ -146,6 +150,8 @@ class SpawnAgentInput(BaseModel):
 class SendMessageInput(BaseModel):
     """send_message tool input."""
 
+    model_config = ConfigDict(extra="forbid")
+
     agent_name: str = Field(description="Target agent path or name")
     message: str = Field(description="Message to queue for the target agent")
 
@@ -153,12 +159,16 @@ class SendMessageInput(BaseModel):
 class FollowupTaskInput(BaseModel):
     """followup_task tool input."""
 
+    model_config = ConfigDict(extra="forbid")
+
     agent_name: str = Field(description="Target agent path or name")
     task: str = Field(description="Follow-up task to assign and wake")
 
 
 class InterruptAgentInput(BaseModel):
     """interrupt_agent tool input."""
+
+    model_config = ConfigDict(extra="forbid")
 
     agent_name: str = Field(description="Target agent path or name")
 
@@ -199,11 +209,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         ):
             self.operations = dataclasses.replace(
                 self.operations,
-                session_manager=OwnerBoundSessionManager(
-                    session_manager=self.operations.session_manager,
-                    session_id=owner.session_id,
-                    owner_generation=owner.owner_generation,
-                ),
+                owner=owner,
             )
             self._execution_owner = owner
 
@@ -273,7 +279,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         for option in self._subagent_override_options(self.agent):
             levels = option.candidates[
                 0
-            ].model_selection.normalized_capabilities.reasoning.effort_levels
+            ].model_selection.normalized_capabilities.configurable_reasoning_efforts()
             efforts = ", ".join(level.value for level in levels)
             effort_text = efforts if efforts else "none"
             target_line = f"- `{option.label}` Reasoning efforts: {effort_text}."
@@ -417,7 +423,9 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             selection = option.candidates[0].model_selection
             settings = option.candidates[0].settings
 
-        supported_efforts = selection.normalized_capabilities.reasoning.effort_levels
+        supported_efforts = (
+            selection.normalized_capabilities.configurable_reasoning_efforts()
+        )
         if reasoning_effort is not None:
             if reasoning_effort not in supported_efforts:
                 raise FunctionToolError(
@@ -466,14 +474,11 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             if lightweight_option is None:
                 raise FunctionToolError("Agent lightweight model target was not found")
             lightweight = lightweight_option.candidates[0].model_selection
-            capability_maximums = [
-                selection.normalized_capabilities.context_window.max_input_tokens,
-                lightweight.normalized_capabilities.context_window.max_input_tokens,
-            ]
+            requests = ModelMetadataService.context_requests([selection, lightweight])
             source_snapshot = (
                 None
-                if all(maximum is not None for maximum in capability_maximums)
-                else await self.operations.load_model_source_snapshot()
+                if not requests
+                else await self.operations.load_model_context(requests=requests)
             )
             compaction_input_tokens = resolve_model_input_tokens(
                 lightweight.normalized_capabilities.context_window.default_input_tokens,
@@ -712,17 +717,7 @@ def normalize_spawn_reasoning_effort(
     supported: list[ModelReasoningEffort],
 ) -> ModelReasoningEffort | None:
     """Normalize an inherited effort against a target's canonical levels."""
-    if not supported:
-        return None
-    effective_baseline = baseline or ModelReasoningEffort.MEDIUM
-    if effective_baseline in supported:
-        return effective_baseline
-    ordering = list(ModelReasoningEffort)
-    baseline_index = ordering.index(effective_baseline)
-    lower = [level for level in supported if ordering.index(level) < baseline_index]
-    if lower:
-        return max(lower, key=ordering.index)
-    return min(supported, key=ordering.index)
+    return normalize_inherited_reasoning_effort(baseline, supported)
 
 
 def _coordination_status(

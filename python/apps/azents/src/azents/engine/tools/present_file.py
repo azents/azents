@@ -4,12 +4,12 @@ Export runtime file as Exchange artifact and share with user.
 """
 
 import logging
-import posixpath
 import uuid
 from pathlib import PurePosixPath
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.io.attachments import RuntimeAttachment
 from azents.engine.run.types import (
     FunctionTool,
@@ -33,7 +33,6 @@ from azents.runtime.transfer.present_file_publication import (
 from azents.runtime.transfer.runtime_to_server import RuntimeToServerTransferError
 from azents.services.file_storage import FileStorage
 from azents.services.runtime_storage_error import RuntimeStorageError
-from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.services.session_storage import guess_media_type
 
 logger = logging.getLogger(__name__)
@@ -42,15 +41,6 @@ _PUBLICATION_ID_NAMESPACE = uuid.uuid5(
     uuid.NAMESPACE_URL,
     "https://azents.ai/runtime-transfer/present-file-publication",
 )
-
-
-def _is_presentable_path(path: str, workspace_root: str | None) -> bool:
-    """Check whether path is durable runtime path shareable with user."""
-    if workspace_root is None:
-        return False
-    normalized = PurePosixPath(posixpath.normpath(path))
-    root = PurePosixPath(posixpath.normpath(workspace_root))
-    return normalized.is_relative_to(root)
 
 
 def _publication_id(*, run_id: str, call_id: str, runtime_path: str) -> str:
@@ -64,6 +54,8 @@ def _publication_id(*, run_id: str, call_id: str, runtime_path: str) -> str:
 class PresentFileInput(BaseModel):
     """present_file tool input."""
 
+    model_config = ConfigDict(extra="forbid")
+
     paths: list[str] = Field(
         description="List of absolute paths to present to the user",
     )
@@ -75,7 +67,6 @@ def make_present_file_tool(
     publication_service: PresentFilePublicationExecutor,
     resolve_runtime_target: RuntimeTargetResolver,
     authority: SessionResourceAuthority,
-    workspace_root: str | None,
 ) -> FunctionTool:
     """Create present_file tool.
 
@@ -90,8 +81,6 @@ def make_present_file_tool(
         """Export runtime file as Exchange artifact."""
         if not input.paths:
             raise FunctionToolError("No paths provided.")
-        if workspace_root is None:
-            raise FunctionToolError("Runtime file transfer is unavailable.")
         execution = get_client_tool_execution_context()
 
         attachments: list[RuntimeAttachment] = []
@@ -99,9 +88,9 @@ def make_present_file_tool(
         runtime_target = None
 
         for abs_path in input.paths:
-            if not _is_presentable_path(abs_path, workspace_root):
+            if not PurePosixPath(abs_path).is_absolute():
                 errors.append(
-                    f"Only files under the Agent Workspace can be presented: {abs_path}"
+                    f"Only absolute Runtime file paths can be presented: {abs_path}"
                 )
                 continue
 
@@ -264,7 +253,9 @@ def make_present_file_tool(
         name="present_file",
         description=(
             "Present files to the user. "
-            "Provide a list of absolute paths under the Agent Workspace. "
+            "Provide a list of absolute Runtime file paths. "
+            "Files may be outside the Agent Workspace, including /tmp, "
+            "subject to Runtime filesystem permissions and transfer verification. "
             f"{RUNTIME_ACCESSIBLE_PATHS_MSG} "
             "The files will be exported as exchange:// file-location attachments that "
             "the user can preview and download."

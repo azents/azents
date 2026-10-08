@@ -2,10 +2,10 @@
 
 import json
 import time
-from typing import cast
 
 from pydantic import BaseModel, Field
 
+from azents.core.mailbox_activity import MailboxActivityObserverProtocol
 from azents.core.tools import (
     FunctionTool,
     Toolkit,
@@ -16,9 +16,8 @@ from azents.core.tools import (
 from azents.engine.run.types import FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
 from azents.services.agent_wait import (
-    AgentWaitService,
-    MailboxActivityObserverProtocol,
     WaitObservation,
+    WaitStateReader,
 )
 
 
@@ -29,18 +28,15 @@ class WaitToolkitConfig(BaseModel):
 class WaitToolkit(Toolkit[WaitToolkitConfig]):
     """Wait for descendant work or newly available input activity."""
 
-    def __init__(self, *, wait_service: AgentWaitService) -> None:
+    def __init__(self, *, wait_service: WaitStateReader) -> None:
         self.wait_service = wait_service
-        self.session_id = ""
+        self.session_id: str | None = None
         self.observer: MailboxActivityObserverProtocol | None = None
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Bind the current Session and Run-scoped observer."""
         self.session_id = context.session_id
-        self.observer = cast(
-            MailboxActivityObserverProtocol | None,
-            context.mailbox_activity_observer,
-        )
+        self.observer = context.mailbox_activity_observer
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
             tools=[self._wait_tool()],
@@ -75,6 +71,8 @@ class WaitToolkit(Toolkit[WaitToolkitConfig]):
         )
 
     async def _wait(self, timeout_seconds: int) -> str:
+        if self.session_id is None:
+            raise FunctionToolError("AgentSession is unavailable")
         deadline = time.monotonic() + timeout_seconds
         assert self.observer is not None
         revision = self.observer.current_revision()

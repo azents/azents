@@ -5,8 +5,7 @@ import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +17,8 @@ from azents.core.enums import (
     AgentSessionStatus,
     ScheduledTaskScheduleType,
 )
-from azents.rdb.session import SessionManager
+from azents.core.scheduled_task_management import ScheduledTaskManagementUnavailable
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.external_channel.management import (
@@ -27,6 +27,9 @@ from azents.repos.external_channel.management import (
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.scheduled_task.data import ScheduledTask
+from azents.repos.scheduled_task.management_operations import (
+    ScheduledTaskManagementRepository,
+)
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task.schedule import InvalidScheduledTaskSchedule
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
@@ -35,12 +38,9 @@ from azents.repos.scheduled_task_cycle.data import (
     ScheduledTaskCycleState,
 )
 from azents.services.scheduled_task.channel import ScheduledTaskChannelService
-from azents.services.scheduled_task.service import ScheduledTaskAuthorityValidator
+from azents.testing.types import require_instance
 
-from .management import (
-    ScheduledTaskManagementService,
-    ScheduledTaskManagementUnavailable,
-)
+from .management import ScheduledTaskManagementService
 
 _NOW = datetime.datetime(2026, 8, 16, tzinfo=datetime.UTC)
 _WORKSPACE_ID = "w" * 32
@@ -51,10 +51,11 @@ _CURRENT_BINDING_ID = "b" * 32
 _REQUESTED_BINDING_ID = "c" * 32
 
 
-class _Session:
+class _Session(AsyncSession):
     """Minimal AsyncSession substitute with commit observation."""
 
     def __init__(self) -> None:
+        super().__init__()
         self.committed = False
 
     async def commit(self) -> None:
@@ -66,10 +67,15 @@ class _SessionManager:
 
     def __init__(self) -> None:
         self.session = _Session()
+        self.active = False
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
-        yield cast(AsyncSession, self.session)
+    async def __call__(self) -> AsyncIterator[WriteSession]:
+        self.active = True
+        try:
+            yield ReadWriteSession(self.session)
+        finally:
+            self.active = False
 
 
 class _AgentRepository:
@@ -86,7 +92,7 @@ class _AgentRepository:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
     ) -> object | None:
         del session
@@ -101,7 +107,7 @@ class _AgentRepository:
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
     ) -> object | None:
         if self.events is not None:
@@ -125,7 +131,7 @@ class _AgentSessionRepository:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> object | None:
         del session
@@ -145,7 +151,7 @@ class _AgentSessionRepository:
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> object | None:
         if self.events is not None:
@@ -167,7 +173,7 @@ class _AuthorityValidator:
 
     async def validate(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         task: ScheduledTask,
     ) -> None:
         await self.validate_target(
@@ -180,7 +186,7 @@ class _AuthorityValidator:
 
     async def validate_target(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         agent_id: str,
@@ -204,7 +210,7 @@ class _ExternalChannelRepository:
 
     async def lock_binding(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         binding_id: str,
     ) -> None:
@@ -232,7 +238,7 @@ class _TaskRepository:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         task_id: str,
     ) -> ScheduledTask | None:
         del session
@@ -246,7 +252,7 @@ class _TaskRepository:
 
     async def get_by_session_and_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         task_id: str,
@@ -258,19 +264,19 @@ class _TaskRepository:
             return None
         return self.task
 
-    async def create(self, session: AsyncSession, create: object) -> ScheduledTask:
+    async def create(self, session: ReadSession, create: object) -> ScheduledTask:
         del session, create
         self.created = True
         raise AssertionError("Unexpected Task creation.")
 
-    async def replace(self, session: AsyncSession, **kwargs: object) -> ScheduledTask:
+    async def replace(self, session: ReadSession, **kwargs: object) -> ScheduledTask:
         del session, kwargs
         self.replaced = True
         raise AssertionError("Unexpected Task replacement.")
 
     async def delete_by_session_and_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         task_id: str,
@@ -295,12 +301,12 @@ class _CycleRepository:
         self.events = events
         self.record = record
 
-    async def get(self, session: AsyncSession, **kwargs: object) -> object | None:
+    async def get(self, session: ReadSession, **kwargs: object) -> object | None:
         del session, kwargs
         self.events.append("cycle-read")
         return self.record
 
-    async def lock(self, session: AsyncSession, **kwargs: object) -> object | None:
+    async def lock(self, session: ReadSession, **kwargs: object) -> object | None:
         del session, kwargs
         self.events.append("cycle-lock")
         return self.record
@@ -314,7 +320,7 @@ class _MailboxRepository:
 
     async def get_by_idempotency_key(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         **kwargs: object,
     ) -> None:
         del session, kwargs
@@ -389,34 +395,52 @@ def _service(
     cycle_repository: _CycleRepository | None = None,
 ) -> ScheduledTaskManagementService:
     return ScheduledTaskManagementService(
-        session_manager=cast(SessionManager[AsyncSession], _SessionManager()),
-        agent_repository=cast(
-            AgentRepository,
-            agent_repository or _AgentRepository(events),
-        ),
-        agent_session_repository=cast(
-            AgentSessionRepository,
-            agent_session_repository or _AgentSessionRepository(events),
-        ),
-        task_repository=cast(ScheduledTaskRepository, task_repository),
-        cycle_repository=cast(
-            ScheduledTaskCycleRepository,
-            cycle_repository or _CycleRepository(events),
-        ),
-        mailbox_repository=cast(MailboxRepository, _MailboxRepository(events)),
-        external_channel_repository=cast(
-            ExternalChannelRepository,
-            _ExternalChannelRepository(events),
-        ),
-        external_channel_management_repository=cast(
-            ExternalChannelManagementRepository,
-            AsyncMock(spec=ExternalChannelManagementRepository),
+        operations=ScheduledTaskManagementRepository(
+            session_manager=_SessionManager(),
+            agent_repository=require_instance(
+                MagicMock(
+                    spec=AgentRepository,
+                    wraps=agent_repository or _AgentRepository(events),
+                ),
+                AgentRepository,
+            ),
+            agent_session_repository=require_instance(
+                MagicMock(
+                    spec=AgentSessionRepository,
+                    wraps=agent_session_repository or _AgentSessionRepository(events),
+                ),
+                AgentSessionRepository,
+            ),
+            task_repository=require_instance(
+                MagicMock(spec=ScheduledTaskRepository, wraps=task_repository),
+                ScheduledTaskRepository,
+            ),
+            cycle_repository=require_instance(
+                MagicMock(
+                    spec=ScheduledTaskCycleRepository,
+                    wraps=cycle_repository or _CycleRepository(events),
+                ),
+                ScheduledTaskCycleRepository,
+            ),
+            mailbox_repository=require_instance(
+                MagicMock(spec=MailboxRepository, wraps=_MailboxRepository(events)),
+                MailboxRepository,
+            ),
+            external_channel_repository=require_instance(
+                MagicMock(
+                    spec=ExternalChannelRepository,
+                    wraps=_ExternalChannelRepository(events),
+                ),
+                ExternalChannelRepository,
+            ),
+            external_channel_management_repository=require_instance(
+                AsyncMock(spec=ExternalChannelManagementRepository),
+                ExternalChannelManagementRepository,
+            ),
+            authority_validator=authority_validator,
+            read_session_manager=_SessionManager(),
         ),
         channel_service=channel_service,
-        authority_validator=cast(
-            ScheduledTaskAuthorityValidator,
-            authority_validator,
-        ),
     )
 
 
@@ -679,6 +703,15 @@ async def test_delete_notifies_bound_channel_after_commit() -> None:
         channel_service=channel_service,
     )
 
+    manager = service.operations.session_manager
+    assert isinstance(manager, _SessionManager)
+
+    async def observe_deletion(deleted: ScheduledTask) -> None:
+        assert not manager.active
+        assert manager.session.committed
+        assert deleted is task
+
+    channel_service.execute_deletion.side_effect = observe_deletion
     await service.delete(
         workspace_id=_WORKSPACE_ID,
         agent_id=_AGENT_ID,
@@ -738,3 +771,38 @@ async def test_started_one_time_edit_is_conflict_after_canonical_lock_order() ->
         < task_lock_index
     )
     assert not repository.replaced
+
+
+async def test_replace_preserves_no_registration_effect() -> None:
+    """Editing future definition fields preserves the no-provider-effect path."""
+    events: list[str] = []
+    task = _task(binding_id=_CURRENT_BINDING_ID)
+    channel = AsyncMock(spec=ScheduledTaskChannelService)
+
+    class ReplacementRepository(_TaskRepository):
+        async def replace(
+            self, session: ReadSession, **kwargs: object
+        ) -> ScheduledTask:
+            del session, kwargs
+            return task
+
+    service = _service(
+        events=events,
+        task_repository=ReplacementRepository(events, task=task),
+        authority_validator=_AuthorityValidator(events),
+        channel_service=channel,
+    )
+    await service.replace(
+        workspace_id=_WORKSPACE_ID,
+        agent_id=_AGENT_ID,
+        user_id="user-1",
+        task_id=_TASK_ID,
+        title="Updated report",
+        objective="Preserve existing registration.",
+        at="2099-08-17T00:00:00Z",
+        cron=None,
+        timezone=None,
+        channel_id=_CURRENT_BINDING_ID,
+    )
+    channel.execute_registration.assert_not_awaited()
+    channel.execute_deletion.assert_not_awaited()

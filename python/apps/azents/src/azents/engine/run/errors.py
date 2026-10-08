@@ -8,7 +8,12 @@ ModelStreamTimeoutFailureCode = Literal[
     "model_stream_idle_timeout",
     "model_attempt_timeout",
 ]
-ModelStreamCallKind = Literal["sampling", "compaction", "session_title"]
+ModelStreamCallKind = Literal[
+    "sampling",
+    "compaction",
+    "session_title",
+    "historical_memory",
+]
 
 
 class UserVisibleRuntimeError(RuntimeError):

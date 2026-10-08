@@ -2,9 +2,10 @@
 
 import dataclasses
 import datetime
+from typing import NamedTuple
 
 from pydantic import BaseModel, Field
-from typing_extensions import Self, TypedDict
+from typing_extensions import Self
 
 
 class Workspace(BaseModel):
@@ -27,18 +28,11 @@ class Workspace(BaseModel):
         return cls.model_validate(data, from_attributes=True)
 
 
-class WorkspaceCreate(BaseModel):
-    """Workspace create schema."""
+class WorkspaceSnapshot(NamedTuple):
+    """Workspace identity and projection captured from one row."""
 
-    name: str = Field(description="Workspace name")
-    handle: str = Field(description="Workspace unique handle")
-
-
-class WorkspaceUpdate(TypedDict, total=False):
-    """Workspace update schema (partial update)."""
-
-    name: str
-    handle: str
+    workspace_id: str
+    workspace: Workspace
 
 
 class WorkspaceList(BaseModel):
@@ -53,17 +47,3 @@ class WorkspaceRuntimeProfileDefaultReplace:
 
     expected_version: int
     runtime_profile_id: str | None
-
-
-@dataclasses.dataclass(frozen=True)
-class HandleConflict:
-    """Duplicate handle error."""
-
-    handle: str
-
-
-@dataclasses.dataclass(frozen=True)
-class NotFound:
-    """Workspace not found."""
-
-    handle: str

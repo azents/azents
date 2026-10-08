@@ -5,12 +5,13 @@ import contextlib
 import dataclasses
 
 from azents.broker.types import BrokerMessage
+from azents.engine.run.task_supervision import SESSION_OWNER_HEARTBEAT_INTERVAL
 from azents.worker.session.inbox import SessionRunnerInbox
 
 _IDLE_TIMEOUT = (
     30 * 60.0
 )  # seconds — default idle window for session owner sticky lease
-_OWNER_HEARTBEAT_INTERVAL = 30.0  # seconds — idle owner heartbeat interval
+_OWNER_HEARTBEAT_INTERVAL = SESSION_OWNER_HEARTBEAT_INTERVAL
 
 
 @dataclasses.dataclass(frozen=True)

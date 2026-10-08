@@ -3,19 +3,49 @@
 import { useForm } from "@mantine/form";
 import { useEffect, useMemo, useState } from "react";
 import {
-  normalizeReasoningEffort,
+  normalizeReasoningEffortForCapabilities,
   reasoningEffortLevels,
 } from "@/shared/lib/reasoning-effort";
-import { AgentForm } from "../components/AgentForm";
+import { ModelCatalogPickerContainer } from "@/shared/model-options/containers/ModelCatalogPickerContainer";
+import { SelectableModelOptionsEditorContainer } from "@/shared/model-options/containers/SelectableModelOptionsEditorContainer";
+import { useImageGenerationCatalogs } from "@/shared/model-options/containers/useImageGenerationCatalogs";
 import {
   findSelectableModelOptionByLabel,
   selectableModelOptionFormValuesFromStoredOptions,
-} from "../model-selection";
+} from "@/shared/model-options/model-selection";
+import { AgentForm } from "../components/AgentForm";
 import { agentFormSchema } from "../schemas";
+import {
+  useImageCatalogTransport,
+  useModelCatalogQuery,
+} from "./model-catalog-transport";
 import { useAgentFormTranslations } from "./useAgentFormTranslations";
-import { useImageGenerationCatalogs } from "./useImageGenerationCatalogs";
 import type { AgentFormProps } from "../components/AgentForm";
 import type { AgentFormValues } from "../schemas";
+import type { SelectableModelOptionsEditorProps } from "@/shared/model-options/components/SelectableModelOptionsEditor";
+import type { ModelCatalogPickerContainerProps } from "@/shared/model-options/containers/ModelCatalogPickerContainer";
+
+function renderModelPicker(
+  props: ModelCatalogPickerContainerProps,
+): React.ReactNode {
+  return (
+    <ModelCatalogPickerContainer
+      {...props}
+      useCatalogQuery={useModelCatalogQuery}
+    />
+  );
+}
+
+function renderModelOptionsEditor(
+  props: SelectableModelOptionsEditorProps,
+): React.ReactNode {
+  return (
+    <SelectableModelOptionsEditorContainer
+      {...props}
+      renderModelPicker={renderModelPicker}
+    />
+  );
+}
 
 const initialValues: AgentFormValues = {
   name: "",
@@ -65,11 +95,9 @@ export function AgentFormContainer(props: AgentFormProps): React.ReactElement {
       const mainOption = agent.selectable_model_options.find(
         (option) => option.label === agent.main_model_label,
       );
-      const defaultReasoningEffort = normalizeReasoningEffort(
+      const defaultReasoningEffort = normalizeReasoningEffortForCapabilities(
         agent.model_parameters?.reasoning_effort ?? null,
-        reasoningEffortLevels(
-          mainOption?.candidates[0]?.model_selection.normalized_capabilities,
-        ),
+        mainOption?.candidates[0]?.model_selection.normalized_capabilities,
       );
       form.setValues({
         name: agent.name,
@@ -122,11 +150,9 @@ export function AgentFormContainer(props: AgentFormProps): React.ReactElement {
       main_model_label: mainModelLabel,
       lightweight_model_label:
         props.workspaceModelSettings.default_lightweight_model_label ?? null,
-      reasoning_effort: normalizeReasoningEffort(
+      reasoning_effort: normalizeReasoningEffortForCapabilities(
         null,
-        reasoningEffortLevels(
-          mainOption?.candidates[0]?.normalized_capabilities,
-        ),
+        mainOption?.candidates[0]?.normalized_capabilities,
       ),
     });
     form.resetDirty();
@@ -147,23 +173,25 @@ export function AgentFormContainer(props: AgentFormProps): React.ReactElement {
   );
 
   useEffect(() => {
-    const normalizedEffort = normalizeReasoningEffort(
+    const normalizedEffort = normalizeReasoningEffortForCapabilities(
       form.values.reasoning_effort ?? null,
-      selectedModelEffortLevels,
+      selectedMainModelOption?.candidates[0]?.normalized_capabilities,
     );
     if (form.values.reasoning_effort !== normalizedEffort) {
       form.setFieldValue("reasoning_effort", normalizedEffort);
     }
-  }, [form, form.values.reasoning_effort, selectedModelEffortLevels]);
+  }, [form, form.values.reasoning_effort, selectedMainModelOption?.candidates]);
 
   const imageCatalogs = useImageGenerationCatalogs(
     props.handle,
     form.values.selectable_model_options,
+    useImageCatalogTransport,
   );
 
   return (
     <AgentForm
       {...props}
+      renderModelOptionsEditor={renderModelOptionsEditor}
       t={t}
       form={form}
       hasSubmitAttempted={hasSubmitAttempted}

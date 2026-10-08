@@ -85,6 +85,9 @@ Class | Method | HTTP request | Description
 *AuthV1Api* | [**auth_v1_revoke_signup_token**](azentsadminclient/docs/AuthV1Api.md#auth_v1_revoke_signup_token) | **DELETE** /auth/v1/signup-tokens/{token_id} | Revoke Signup Token
 *DebugV1Api* | [**debug_v1_fire_exception**](azentsadminclient/docs/DebugV1Api.md#debug_v1_fire_exception) | **POST** /debug/v1/fire-exception | Fire Exception
 *DebugV1Api* | [**debug_v1_fire_log**](azentsadminclient/docs/DebugV1Api.md#debug_v1_fire_log) | **POST** /debug/v1/fire-log | Fire Log
+*DebugV1Api* | [**debug_v1_get_session_diagnostic_events**](azentsadminclient/docs/DebugV1Api.md#debug_v1_get_session_diagnostic_events) | **GET** /debug/v1/sessions/{session_id}/events | Get Session Diagnostic Events
+*DebugV1Api* | [**debug_v1_get_session_diagnostic_file**](azentsadminclient/docs/DebugV1Api.md#debug_v1_get_session_diagnostic_file) | **GET** /debug/v1/sessions/{session_id}/file | Get Session Diagnostic File
+*DebugV1Api* | [**debug_v1_get_session_diagnostics**](azentsadminclient/docs/DebugV1Api.md#debug_v1_get_session_diagnostics) | **GET** /debug/v1/sessions/{session_id} | Get Session Diagnostics
 *HealthV1Api* | [**health_v1_liveness**](azentsadminclient/docs/HealthV1Api.md#health_v1_liveness) | **GET** /health/v1/liveness | Liveness
 *HealthV1Api* | [**health_v1_readiness**](azentsadminclient/docs/HealthV1Api.md#health_v1_readiness) | **GET** /health/v1/readiness | Readiness
 *InvitationV1Api* | [**invitation_v1_delete_invitation**](azentsadminclient/docs/InvitationV1Api.md#invitation_v1_delete_invitation) | **DELETE** /invitation/v1/invitations/{invitation_id} | Delete Invitation
@@ -129,11 +132,13 @@ Class | Method | HTTP request | Description
 *SystemSettingsV1Api* | [**system_settings_v1_confirm_platform_github_app_candidate**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_confirm_platform_github_app_candidate) | **POST** /system-setting/v1/sections/platform-github-app/candidate/confirm | Confirm Platform Github App Candidate
 *SystemSettingsV1Api* | [**system_settings_v1_get_external_account_oauth_setting**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_get_external_account_oauth_setting) | **GET** /system-setting/v1/sections/external-account-oauth/{provider} | Get External Account Oauth Setting
 *SystemSettingsV1Api* | [**system_settings_v1_get_external_channel_files_setting**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_get_external_channel_files_setting) | **GET** /system-setting/v1/sections/external-channel-files | Get External Channel Files Setting
+*SystemSettingsV1Api* | [**system_settings_v1_get_historical_memory_execution_setting**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_get_historical_memory_execution_setting) | **GET** /system-setting/v1/sections/historical-memory-execution | Get Historical Memory Execution Setting
 *SystemSettingsV1Api* | [**system_settings_v1_get_platform_github_app_setting**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_get_platform_github_app_setting) | **GET** /system-setting/v1/sections/platform-github-app | Get Platform Github App Setting
 *SystemSettingsV1Api* | [**system_settings_v1_list_system_setting_audit_events**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_list_system_setting_audit_events) | **GET** /system-setting/v1/audit-events | List System Setting Audit Events
 *SystemSettingsV1Api* | [**system_settings_v1_list_system_setting_sections**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_list_system_setting_sections) | **GET** /system-setting/v1/sections | List System Setting Sections
 *SystemSettingsV1Api* | [**system_settings_v1_patch_external_account_oauth_setting**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_patch_external_account_oauth_setting) | **PATCH** /system-setting/v1/sections/external-account-oauth/{provider} | Patch External Account Oauth Setting
 *SystemSettingsV1Api* | [**system_settings_v1_patch_external_channel_files_setting**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_patch_external_channel_files_setting) | **PATCH** /system-setting/v1/sections/external-channel-files | Patch External Channel Files Setting
+*SystemSettingsV1Api* | [**system_settings_v1_patch_historical_memory_execution_setting**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_patch_historical_memory_execution_setting) | **PATCH** /system-setting/v1/sections/historical-memory-execution | Patch Historical Memory Execution Setting
 *SystemSettingsV1Api* | [**system_settings_v1_patch_platform_github_app_setting**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_patch_platform_github_app_setting) | **PATCH** /system-setting/v1/sections/platform-github-app | Patch Platform Github App Setting
 *SystemSettingsV1Api* | [**system_settings_v1_validate_platform_github_app_candidate**](azentsadminclient/docs/SystemSettingsV1Api.md#system_settings_v1_validate_platform_github_app_candidate) | **POST** /system-setting/v1/sections/platform-github-app/candidate/validate | Validate Platform Github App Candidate
 *SystemV1Api* | [**system_v1_get_archive_retention_application**](azentsadminclient/docs/SystemV1Api.md#system_v1_get_archive_retention_application) | **GET** /system/v1/settings/file-lifecycle/retention-applications/{application_id} | Get Archive Retention Application
@@ -167,6 +172,8 @@ Class | Method | HTTP request | Description
 ## Documentation For Models
 
  - [AdminWorkspaceRuntimeProfileDetailResponse](azentsadminclient/docs/AdminWorkspaceRuntimeProfileDetailResponse.md)
+ - [AgentSessionRunState](azentsadminclient/docs/AgentSessionRunState.md)
+ - [AgentSessionStatus](azentsadminclient/docs/AgentSessionStatus.md)
  - [ArchiveRetentionApplicationResponse](azentsadminclient/docs/ArchiveRetentionApplicationResponse.md)
  - [ArchiveRetentionPreviewRequest](azentsadminclient/docs/ArchiveRetentionPreviewRequest.md)
  - [ArchiveRetentionPreviewResponse](azentsadminclient/docs/ArchiveRetentionPreviewResponse.md)
@@ -183,6 +190,7 @@ Class | Method | HTTP request | Description
  - [EmailVerificationListResponse](azentsadminclient/docs/EmailVerificationListResponse.md)
  - [EmailVerificationResponse](azentsadminclient/docs/EmailVerificationResponse.md)
  - [ErrorLevel](azentsadminclient/docs/ErrorLevel.md)
+ - [EventKind](azentsadminclient/docs/EventKind.md)
  - [ExternalAccountOAuthDetailResponse](azentsadminclient/docs/ExternalAccountOAuthDetailResponse.md)
  - [ExternalAccountOAuthFieldResponse](azentsadminclient/docs/ExternalAccountOAuthFieldResponse.md)
  - [ExternalAccountOAuthHealthResponse](azentsadminclient/docs/ExternalAccountOAuthHealthResponse.md)
@@ -195,6 +203,8 @@ Class | Method | HTTP request | Description
  - [FileLifecycleSettingsUpdateResponse](azentsadminclient/docs/FileLifecycleSettingsUpdateResponse.md)
  - [HTTPValidationError](azentsadminclient/docs/HTTPValidationError.md)
  - [HealthStatus](azentsadminclient/docs/HealthStatus.md)
+ - [HistoricalMemoryExecutionDetailResponse](azentsadminclient/docs/HistoricalMemoryExecutionDetailResponse.md)
+ - [HistoricalMemoryExecutionPatchRequest](azentsadminclient/docs/HistoricalMemoryExecutionPatchRequest.md)
  - [InvitationListResponse](azentsadminclient/docs/InvitationListResponse.md)
  - [InvitationResponse](azentsadminclient/docs/InvitationResponse.md)
  - [InvitationStatus](azentsadminclient/docs/InvitationStatus.md)
@@ -266,6 +276,10 @@ Class | Method | HTTP request | Description
  - [RuntimeRecreationOperationStatus](azentsadminclient/docs/RuntimeRecreationOperationStatus.md)
  - [RuntimeRecreationTargetKind](azentsadminclient/docs/RuntimeRecreationTargetKind.md)
  - [SentryDiagnostics](azentsadminclient/docs/SentryDiagnostics.md)
+ - [SessionDiagnosticEvent](azentsadminclient/docs/SessionDiagnosticEvent.md)
+ - [SessionDiagnosticEventPage](azentsadminclient/docs/SessionDiagnosticEventPage.md)
+ - [SessionDiagnosticFile](azentsadminclient/docs/SessionDiagnosticFile.md)
+ - [SessionDiagnosticMetadata](azentsadminclient/docs/SessionDiagnosticMetadata.md)
  - [SignupTokenDeliveryMethod](azentsadminclient/docs/SignupTokenDeliveryMethod.md)
  - [SignupTokenListResponse](azentsadminclient/docs/SignupTokenListResponse.md)
  - [SignupTokenResponse](azentsadminclient/docs/SignupTokenResponse.md)
@@ -278,7 +292,7 @@ Class | Method | HTTP request | Description
  - [SystemModelCatalogRefreshListResponse](azentsadminclient/docs/SystemModelCatalogRefreshListResponse.md)
  - [SystemModelCatalogRefreshResponse](azentsadminclient/docs/SystemModelCatalogRefreshResponse.md)
  - [SystemModelCatalogResponse](azentsadminclient/docs/SystemModelCatalogResponse.md)
- - [SystemModelCatalogSyncAttemptResponse](azentsadminclient/docs/SystemModelCatalogSyncAttemptResponse.md)
+ - [SystemModelCatalogSyncStatusResponse](azentsadminclient/docs/SystemModelCatalogSyncStatusResponse.md)
  - [SystemSettingAuditEventListResponse](azentsadminclient/docs/SystemSettingAuditEventListResponse.md)
  - [SystemSettingAuditEventResponse](azentsadminclient/docs/SystemSettingAuditEventResponse.md)
  - [SystemSettingAuditEventType](azentsadminclient/docs/SystemSettingAuditEventType.md)

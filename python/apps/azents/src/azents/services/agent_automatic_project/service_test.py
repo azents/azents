@@ -6,7 +6,6 @@ from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
 from azcommon.result import Failure, Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentProjectCatalogStatus,
@@ -14,22 +13,29 @@ from azents.core.enums import (
     RuntimeRunnerState,
     WorkspaceUserRole,
 )
+from azents.core.session_workspace_paths import (
+    InvalidProjectPath,
+)
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.agent_admin.data import AgentAdminCreate
 from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
+from azents.repos.agent_automatic_project_operations import (
+    AgentAutomaticProjectOperationsRepository,
+)
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
 from azents.runtime.control_protocol.runner_operations import (
@@ -43,7 +49,6 @@ from azents.services.agent_runtime.lifecycle_data import (
     RuntimeOperationTarget,
     RuntimeOperationTargetResolver,
 )
-from azents.services.session_workspace_project import InvalidProjectPath
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
@@ -60,11 +65,11 @@ from .data import (
 class _TrackingSessionManager:
     """Wrap a session manager and expose whether a service session is open."""
 
-    wrapped: SessionManager[AsyncSession]
+    wrapped: SessionManager[WriteSession]
     active_contexts: int = 0
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncGenerator[AsyncSession]:
+    async def __call__(self) -> AsyncGenerator[WriteSession]:
         """Yield one database session while tracking its context lifetime."""
         self.active_contexts += 1
         try:
@@ -190,7 +195,7 @@ class _FakeRuntimeTargetResolver(RuntimeOperationTargetResolver):
 
 
 async def _create_workspace(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     handle: str,
 ) -> str:
@@ -206,7 +211,7 @@ async def _create_workspace(
 
 
 async def _create_workspace_user(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     workspace_id: str,
     email: str,
@@ -228,7 +233,7 @@ async def _create_workspace_user(
 
 
 async def _create_fixture(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     *,
     handle: str,
 ) -> _Fixture:
@@ -242,8 +247,8 @@ async def _create_fixture(
             encrypted_credentials="encrypted-test-value",
             config=None,
         )
-        session.add(integration)
-        await session.flush()
+        session.write_session.add(integration)
+        await session.write_session.flush()
         agent = RDBAgent(
             workspace_id=workspace_id,
             name="Automatic Project policy Agent",
@@ -276,9 +281,9 @@ async def _create_fixture(
             main_model_label="default",
             lightweight_model_label="lightweight",
         )
-        session.add(agent)
-        await session.flush()
-        session.add(RDBAgentAutomaticProjectSetting(agent_id=agent.id))
+        session.write_session.add(agent)
+        await session.write_session.flush()
+        session.write_session.add(RDBAgentAutomaticProjectSetting(agent_id=agent.id))
         admin_workspace_user_id = await _create_workspace_user(
             session,
             workspace_id=workspace_id,
@@ -323,11 +328,14 @@ def _service(
 ) -> AgentAutomaticProjectService:
     """Create the management service with real repositories."""
     return AgentAutomaticProjectService(
-        agent_repository=AgentRepository(),
-        agent_admin_repository=AgentAdminRepository(),
-        policy_repository=AgentAutomaticProjectRepository(),
-        catalog_repository=AgentProjectCatalogRepository(),
-        session_manager=session_manager,
+        repository=AgentAutomaticProjectOperationsRepository(
+            agent_repository=AgentRepository(),
+            admin_repository=AgentAdminRepository(),
+            policy_repository=AgentAutomaticProjectRepository(),
+            catalog_repository=AgentProjectCatalogRepository(),
+            read_session_manager=session_manager,
+            session_manager=session_manager,
+        ),
         runtime_target_resolver=_FakeRuntimeTargetResolver(),
         runner_operations=runner_operations,
     )
@@ -338,7 +346,7 @@ class TestAgentAutomaticProjectService:
 
     async def test_get_requires_explicit_agent_admin_without_runtime_io(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Workspace ownership alone does not grant policy read access."""
         fixture = await _create_fixture(
@@ -369,7 +377,7 @@ class TestAgentAutomaticProjectService:
 
     async def test_replace_normalizes_deduplicates_and_updates_catalog(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Valid replacement preserves normalized order and catalog status."""
         fixture = await _create_fixture(
@@ -422,7 +430,7 @@ class TestAgentAutomaticProjectService:
 
     async def test_replace_rejects_stale_revision_before_runtime_validation(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """An already stale write performs no Runtime operation."""
         fixture = await _create_fixture(
@@ -447,7 +455,7 @@ class TestAgentAutomaticProjectService:
 
     async def test_replace_detects_revision_change_during_runtime_validation(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """The lock-time revision check rejects a concurrent completed replacement."""
         fixture = await _create_fixture(
@@ -467,7 +475,7 @@ class TestAgentAutomaticProjectService:
                     updated_by_workspace_user_id=fixture.admin_workspace_user_id,
                 )
                 assert isinstance(replacement, Success)
-                await session.commit()
+                await session.write_session.commit()
 
         runner = _FakeRunnerOperations(
             session_manager=session_manager,
@@ -497,7 +505,7 @@ class TestAgentAutomaticProjectService:
 
     async def test_replace_empty_policy_clears_without_runtime(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Empty replacement clears stored paths even when no Runner is supplied."""
         fixture = await _create_fixture(
@@ -546,7 +554,7 @@ class TestAgentAutomaticProjectService:
 
     async def test_replace_reports_runtime_unavailable_for_nonempty_paths(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Non-empty replacement requires a ready Runtime Runner."""
         fixture = await _create_fixture(
@@ -569,7 +577,7 @@ class TestAgentAutomaticProjectService:
 
     async def test_replace_maps_runtime_timeout_to_retryable_unavailable(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Runner operation timeouts remain retryable Runtime conflicts."""
         fixture = await _create_fixture(
@@ -598,7 +606,7 @@ class TestAgentAutomaticProjectService:
 
     async def test_replace_rejects_workspace_root_and_outside_paths_before_runtime(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Workspace root and outside paths never reach Runtime validation."""
         fixture = await _create_fixture(
@@ -632,7 +640,7 @@ class TestAgentAutomaticProjectService:
 
     async def test_replace_rejects_missing_or_non_directory_paths(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Missing and file targets are user-safe invalid Project paths."""
         fixture = await _create_fixture(

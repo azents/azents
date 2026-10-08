@@ -16,6 +16,11 @@ from azents.runtime.control_server import (
     runtime_control_server_lifespan,
     validate_runtime_control_transfer_settings,
 )
+from azents.runtime.coordination.local import LocalRuntimeStores
+from azents.runtime.coordination.memory import InMemoryRuntimeCoordinationStore
+from azents.runtime.terminal_coordination.memory import (
+    InMemoryRuntimeTerminalCoordinationStore,
+)
 from azents.runtime.transfer.object_store import RuntimeTransferOrphanRepairResult
 
 
@@ -239,16 +244,17 @@ async def test_runtime_s3_clients_use_checksum_capable_sigv4_presigning(
         "http://s3.internal",
         "http://s3.public",
     ]
-    assert all(
-        isinstance(call["config"], control_server.BotoConfig)
-        and getattr(call["config"], "signature_version", None) == "s3v4"
-        for call in calls
-    )
+    for call in calls:
+        config = call["config"]
+        assert isinstance(config, control_server.BotoConfig)
+        assert config.signature_version == "s3v4"
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("memory_mode", [False, True])
 async def test_lifespan_composes_all_transfer_services_and_closes_resources(
     monkeypatch: pytest.MonkeyPatch,
+    memory_mode: bool,
 ) -> None:
     """One process owns state, S3, repair, and all Runtime Control services."""
     redis = _Redis()
@@ -256,7 +262,12 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
     s3 = _S3()
     registrations: list[tuple[str, dict[str, object]]] = []
 
-    monkeypatch.setattr(control_server, "create_redis_client", lambda _: redis)
+    def create_redis(_url: str) -> _Redis:
+        if memory_mode:
+            raise AssertionError("Memory Runtime Control constructed Redis")
+        return redis
+
+    monkeypatch.setattr(control_server, "create_redis_client", create_redis)
     monkeypatch.setattr(control_server, "_create_engine", lambda _: engine)
     monkeypatch.setattr(
         control_server,
@@ -304,6 +315,18 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
     async def session_manager() -> AsyncIterator[object]:
         yield object()
 
+    @asynccontextmanager
+    async def read_session_manager() -> AsyncIterator[object]:
+        raise AssertionError("composition must not execute route description queries")
+        yield object()
+
+    read_factory_engines: list[_Engine] = []
+
+    def read_session_factory(selected_engine: _Engine) -> object:
+        assert selected_engine is engine
+        read_factory_engines.append(selected_engine)
+        return read_session_manager
+
     class _Cutover:
         allocator_version = 1
 
@@ -313,6 +336,9 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
             return _Cutover()
 
     monkeypatch.setattr(control_server, "_session_manager", lambda _: session_manager)
+    monkeypatch.setattr(
+        control_server, "create_read_only_session_manager", read_session_factory
+    )
     monkeypatch.setattr(
         control_server,
         "RuntimeConnectionGenerationRepository",
@@ -326,7 +352,20 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
     monkeypatch.setattr(control_server.web, "AppRunner", _AppRunner)
     monkeypatch.setattr(control_server.web, "TCPSite", _TCPSite)
 
-    async with runtime_control_server_lifespan(_settings()):
+    settings = _settings()
+    local_stores = None
+    if memory_mode:
+        settings = settings.model_copy(
+            update={
+                "session_broker_backend": "memory",
+                "runtime_control_workspace_upload_backend": "memory",
+            }
+        )
+        local_stores = LocalRuntimeStores(
+            coordination=InMemoryRuntimeCoordinationStore(),
+            terminal=InMemoryRuntimeTerminalCoordinationStore(),
+        )
+    async with runtime_control_server_lifespan(settings, local_stores=local_stores):
         names = [name for name, _kwargs in registrations]
         assert names == [
             "runtime-web-sessions",
@@ -337,7 +376,10 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
             "workspace-upload",
         ]
         transfer = dict(registrations)["transfer"]
+        provider = dict(registrations)["provider"]
         runner = dict(registrations)["runner"]
+        if local_stores is not None:
+            assert runner["coordination_store"] is local_stores.coordination
         workspace = dict(registrations)["workspace-upload"]
         sessions = dict(registrations)["runtime-web-sessions"]
         assert transfer["object_store"] is s3
@@ -349,9 +391,42 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
         assert sessions["data_plane"] is not None
         assert sessions["owner_registry"] is not None
         assert sessions["offer_provider"] is not None
+        owner_registry = sessions["owner_registry"]
+        assert isinstance(
+            owner_registry, control_server.RuntimeStreamOwnerSessionRegistry
+        )
+        assert read_factory_engines == [engine, engine, engine, engine]
+        runner_authenticator = runner["runner_authenticator"]
+        assert isinstance(
+            runner_authenticator, control_server.RuntimeRunnerAuthenticationService
+        )
+        provider_registrar = provider["connection_registrar"]
+        assert isinstance(
+            provider_registrar,
+            control_server.RuntimeProviderConnectionRegistrationService,
+        )
+        runner_registrar = runner["connection_registrar"]
+        assert isinstance(
+            runner_registrar,
+            control_server.RuntimeRunnerConnectionRegistrationService,
+        )
+        assert runner_authenticator.operations.session_manager is read_session_manager
+        assert (
+            provider_registrar.operations.read_session_manager is read_session_manager
+        )
+        assert runner_registrar.operations.read_session_manager is read_session_manager
+        assert provider_registrar.operations.session_manager is session_manager
+        assert runner_registrar.operations.session_manager is session_manager
+        assert (
+            runner_registrar.operations.runner_authentication
+            is runner_authenticator.operations
+        )
+        assert owner_registry.repository.session_manager is session_manager
+        assert owner_registry.repository.read_session_manager is read_session_manager
+        assert read_session_manager is not session_manager
         assert "secret-key" not in repr(registrations)
 
-    assert redis.closed
+    assert redis.closed is not memory_mode
     assert engine.disposed
     assert s3.closed
 

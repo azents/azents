@@ -2,29 +2,28 @@
 
 import datetime
 
-import pytest
 from azcommon.result import Failure, Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
     AgentProjectCatalogStatus,
     AgentSessionProductMode,
     LLMProvider,
     RuntimeRunnerState,
 )
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
+from azents.repos.agent_project_catalog.operations import (
+    AgentProjectCatalogOperationsRepository,
+)
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
-from azents.repos.session_execution import (
-    CanonicalExecutionOwnerGenerationStaleError,
-)
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeFileStatResult,
     RuntimeRunnerOperationClient,
@@ -121,7 +120,7 @@ class _TakeoverRunnerOperations(_FakeRunnerOperations):
     def __init__(
         self,
         *,
-        session_manager: SessionManager[AsyncSession],
+        session_manager: SessionManager[WriteSession],
         session_id: str,
     ) -> None:
         super().__init__("directory")
@@ -153,7 +152,7 @@ class _TakeoverRunnerOperations(_FakeRunnerOperations):
         return result
 
 
-async def _create_workspace(session: AsyncSession, handle: str) -> str:
+async def _create_workspace(session: WriteSession, handle: str) -> str:
     """Create Workspace for tests."""
     repo = WorkspaceRepository()
     result = await repo.create(
@@ -166,7 +165,7 @@ async def _create_workspace(session: AsyncSession, handle: str) -> str:
     return workspace_id
 
 
-async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> str:
+async def _create_agent(session: WriteSession, workspace_id: str, slug: str) -> str:
     """Create Agent for tests."""
     integration = RDBLLMProviderIntegration(
         workspace_id=workspace_id,
@@ -175,8 +174,8 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
 
     agent = RDBAgent(
         workspace_id=workspace_id,
@@ -210,8 +209,8 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     runtime_repository = AgentRuntimeRepository()
     runtime = await runtime_repository.ensure_for_agent(session, agent.id)
     await runtime_repository.record_runner_state(
@@ -226,14 +225,17 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
 
 
 def _service(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     *,
     runner_operations: RuntimeRunnerOperationClient | None = None,
 ) -> AgentProjectCatalogService:
     """Create service for tests."""
     return AgentProjectCatalogService(
-        catalog_repository=AgentProjectCatalogRepository(),
-        session_manager=rdb_session_manager,
+        repository=AgentProjectCatalogOperationsRepository(
+            catalog_repository=AgentProjectCatalogRepository(),
+            session_manager=rdb_session_manager,
+            read_session_manager=rdb_session_manager,
+        ),
         runtime_target_resolver=_FakeRuntimeTargetResolver(),
         runner_operations=runner_operations,
     )
@@ -244,7 +246,7 @@ class TestAgentProjectCatalogService:
 
     async def test_upsert_project_candidate_does_not_require_session(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Catalog candidates can exist before an AgentSession is created."""
         async with rdb_session_manager() as session:
@@ -271,7 +273,7 @@ class TestAgentProjectCatalogService:
 
     async def test_upsert_project_candidate_rejects_invalid_path(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Project candidates must still satisfy Agent Workspace path rules."""
         result = await _service(rdb_session_manager).upsert_project_candidate(
@@ -283,7 +285,7 @@ class TestAgentProjectCatalogService:
 
     async def test_refresh_project_status_without_ready_runtime_is_unavailable(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Absent runtime stores UNAVAILABLE without runner calls."""
         async with rdb_session_manager() as session:
@@ -308,7 +310,7 @@ class TestAgentProjectCatalogService:
 
     async def test_refresh_project_status_maps_directory_to_available(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Runner directory stat stores AVAILABLE."""
         async with rdb_session_manager() as session:
@@ -319,7 +321,7 @@ class TestAgentProjectCatalogService:
                 "catalog-service-available",
             )
             runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent_id)
-            rdb_runtime = await session.get(RDBAgentRuntime, runtime.id)
+            rdb_runtime = await session.read_session.get(RDBAgentRuntime, runtime.id)
             assert rdb_runtime is not None
             rdb_runtime.runner_state = RuntimeRunnerState.READY
         runner_operations = _FakeRunnerOperations(kind="directory")
@@ -339,7 +341,7 @@ class TestAgentProjectCatalogService:
 
     async def test_refresh_project_status_maps_missing_to_missing(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Runner missing stat stores MISSING."""
         async with rdb_session_manager() as session:
@@ -350,7 +352,7 @@ class TestAgentProjectCatalogService:
                 "catalog-service-missing",
             )
             runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent_id)
-            rdb_runtime = await session.get(RDBAgentRuntime, runtime.id)
+            rdb_runtime = await session.read_session.get(RDBAgentRuntime, runtime.id)
             assert rdb_runtime is not None
             rdb_runtime.runner_state = RuntimeRunnerState.READY
         runner_operations = _FakeRunnerOperations(kind="missing")
@@ -367,11 +369,11 @@ class TestAgentProjectCatalogService:
         assert result.value.status == AgentProjectCatalogStatus.MISSING
         assert result.value.status_detail == "Path does not exist."
 
-    async def test_execution_refresh_rejects_takeover_after_runner_stat(
+    async def test_status_description_tolerates_takeover_after_runner_stat(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
-        """Runner evidence from an old owner cannot update catalog status."""
+        """Descriptive Runner evidence does not inherit a Session owner gate."""
         async with rdb_session_manager() as session:
             workspace_id = await _create_workspace(
                 session,
@@ -383,7 +385,7 @@ class TestAgentProjectCatalogService:
                 "catalog-service-owner-fence",
             )
             runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent_id)
-            rdb_runtime = await session.get(RDBAgentRuntime, runtime.id)
+            rdb_runtime = await session.read_session.get(RDBAgentRuntime, runtime.id)
             assert rdb_runtime is not None
             rdb_runtime.runner_state = RuntimeRunnerState.READY
             agent_session = await AgentSessionRepository().create(
@@ -396,7 +398,7 @@ class TestAgentProjectCatalogService:
                     title=None,
                 ),
             )
-            owner_generation = await AgentSessionRepository().claim_owner_generation(
+            await AgentSessionRepository().claim_owner_generation(
                 session,
                 agent_session.id,
             )
@@ -408,17 +410,17 @@ class TestAgentProjectCatalogService:
             ),
         )
 
-        with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
-            await service.refresh_project_status_for_execution(
-                agent_id=agent_id,
-                session_id=agent_session.id,
-                owner_generation=owner_generation,
-                path="/workspace/agent/app",
-            )
+        result = await service.refresh_project_status(
+            agent_id=agent_id,
+            path="/workspace/agent/app",
+        )
+        assert isinstance(result, Success)
+        assert result.value.status is AgentProjectCatalogStatus.AVAILABLE
 
         async with rdb_session_manager() as session:
             entries = await AgentProjectCatalogRepository().list_entries(
                 session,
                 agent_id=agent_id,
             )
-        assert entries == []
+        assert len(entries) == 1
+        assert entries[0].status is AgentProjectCatalogStatus.AVAILABLE

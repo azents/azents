@@ -31,10 +31,15 @@ from azents.app import (
 )
 from azents.core.config import Config
 from azents.core.deps import get_appctx
-from azents.process_lifecycle import run_with_container
+from azents.process_lifecycle import run_co_located_container, run_with_container
 from azents.runtime.control_server import (
     RuntimeControlSettings,
     runtime_control_server_lifespan,
+)
+from azents.runtime.coordination.local import LocalRuntimeStores
+from azents.runtime.deps import (
+    get_runtime_coordination_store,
+    get_runtime_terminal_coordination_store,
 )
 from azents.scheduler.service import SchedulerService
 from azents.utils.appctx import AppContext
@@ -79,6 +84,7 @@ def _create_api_targets(
     reload: bool,
 ) -> _ApiTargets:
     """Create reload factories or shared-context non-reload API apps."""
+    _enforce_memory_process_guard(config, reload=reload)
     if reload:
         return _ApiTargets(
             public_target="devserver:public_app",
@@ -126,11 +132,36 @@ async def _run_devserver_resources(
 ) -> AsyncIterator[di.Container]:
     """Run Runtime Control and the shared application container."""
     runtime_control_settings = RuntimeControlSettings()
+    if config.session_broker_backend == "memory":
+        runtime_control_settings = runtime_control_settings.model_copy(
+            update={
+                "session_broker_backend": "memory",
+                "runtime_control_transfer_backend": "memory",
+                "runtime_control_workspace_upload_backend": "memory",
+                "runtime_control_web_capacity_backend": "memory",
+            }
+        )
+        async with run_co_located_container(config) as container:
+            local_stores = LocalRuntimeStores(
+                coordination=await container.solve(get_runtime_coordination_store),
+                terminal=await container.solve(get_runtime_terminal_coordination_store),
+            )
+            async with runtime_control_server_lifespan(
+                runtime_control_settings, local_stores=local_stores
+            ):
+                yield container
+        return
     async with (
-        runtime_control_server_lifespan(runtime_control_settings),
+        runtime_control_server_lifespan(runtime_control_settings, local_stores=None),
         run_with_container(config) as container,
     ):
         yield container
+
+
+def _enforce_memory_process_guard(config: Config, *, reload: bool) -> None:
+    """Reject API roots that cannot share the memory Worker and Control owners."""
+    if config.session_broker_backend == "memory" and reload:
+        raise ValueError("Memory Session broker cannot run with reload child processes")
 
 
 async def main(*, reload: bool = False) -> None:
@@ -138,6 +169,7 @@ async def main(*, reload: bool = False) -> None:
     config = Config.from_env()
 
     _enforce_production_testenv_guard(config)
+    _enforce_memory_process_guard(config, reload=reload)
 
     configure_logging_for_runtime(
         runtime_env=config.runtime_env,

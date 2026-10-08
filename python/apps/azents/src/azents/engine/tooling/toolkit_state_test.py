@@ -5,15 +5,16 @@ from typing import NamedTuple
 import pytest
 from azcommon.result import Success
 from pydantic import Field, ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import LLMProvider, RuntimeRunnerState
 from azents.core.toolkit_state import (
     ToolkitStateIdentity,
     ToolkitStateModel,
 )
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.toolkit_state import (
@@ -25,7 +26,6 @@ from azents.repos.toolkit_state.store import (
     ToolkitStateStore,
 )
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
@@ -56,7 +56,7 @@ class _ConflictOnceRepository(ToolkitStateRepository):
 
     async def get(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         session_id: str,
@@ -74,7 +74,7 @@ class _ConflictOnceRepository(ToolkitStateRepository):
 
     async def save(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         state: ToolkitStateUpsert,
     ) -> ToolkitStateRecord:
         """Cause conflict as if another writer stored right before first CAS update."""
@@ -90,7 +90,7 @@ class _ConflictOnceRepository(ToolkitStateRepository):
         return await self._delegate.save(session, state)
 
 
-async def _create_workspace(session: AsyncSession, handle: str) -> str:
+async def _create_workspace(session: WriteSession, handle: str) -> str:
     """Create Workspace for tests."""
     repo = WorkspaceRepository()
     result = await repo.create(
@@ -102,7 +102,7 @@ async def _create_workspace(session: AsyncSession, handle: str) -> str:
     return workspace_id
 
 
-async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> str:
+async def _create_agent(session: WriteSession, workspace_id: str, slug: str) -> str:
     """Create Agent for tests."""
 
     integration = RDBLLMProviderIntegration(
@@ -112,8 +112,8 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
 
     agent = RDBAgent(
         workspace_id=workspace_id,
@@ -147,13 +147,13 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     return agent.id
 
 
 async def _create_agent_and_session(
-    session: AsyncSession, suffix: str
+    session: WriteSession, suffix: str
 ) -> _AgentSessionFixture:
     """Create AgentRuntime and AgentSession for tests."""
     workspace_id = await _create_workspace(session, f"toolkit-state-{suffix}")
@@ -237,7 +237,7 @@ class TestToolkitStateIdentity:
 class TestToolkitStateStore:
     """ToolkitStateStore tests."""
 
-    async def test_pydantic_round_trip(self, rdb_session: AsyncSession) -> None:
+    async def test_pydantic_round_trip(self, rdb_session: WriteSession) -> None:
         """Store Pydantic model state and load it again."""
         agent_id, session_id = await _create_agent_and_session(
             rdb_session, "round-trip"
@@ -258,7 +258,7 @@ class TestToolkitStateStore:
         assert loaded.value == 2
 
     async def test_invalid_stored_payload_raises_validation_error(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Return validation error when stored payload does not match model."""
         agent_id, session_id = await _create_agent_and_session(
@@ -285,7 +285,7 @@ class TestToolkitStateStore:
             await handle.load(default_factory=lambda: ExampleToolkitState(value=1))
 
     async def test_save_reloads_before_replacing_state(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """save reloads latest state before whole-state replacement."""
         agent_id, session_id = await _create_agent_and_session(
@@ -313,7 +313,7 @@ class TestToolkitStateStore:
         assert reloaded.value == 3
 
     async def test_update_reloads_and_retries_after_conflict(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """update reapplies mutator to latest state after conflict."""
         agent_id, session_id = await _create_agent_and_session(

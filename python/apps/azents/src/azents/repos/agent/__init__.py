@@ -3,7 +3,6 @@
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
 from pydantic import TypeAdapter
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import (
     AgentModelSelection,
@@ -11,29 +10,33 @@ from azents.core.agent import (
     SelectableModelOption,
     SubagentSettings,
 )
+from azents.core.agent_errors import NotFound
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentRuntimeCapability,
     AgentType,
     ExternalChannelResponseMode,
 )
+from azents.core.upload_images import StoredImage
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_admin import RDBAgentAdmin
 from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
 )
 from azents.rdb.models.agent_avatar_cleanup import RDBAgentAvatarCleanupJob
+from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.repos.historical_memory_consolidation.lifecycle import (
+    agent_memory_availability_in_session,
+)
 from azents.repos.model_candidate_chain_cutover import (
     mark_model_candidate_chain_write,
 )
-from azents.services.uploads.schema import StoredImage
 
 from .data import (
     Agent,
     AgentCreate,
     AgentList,
     AgentUpdate,
-    NotFound,
 )
 
 _params_adapter = TypeAdapter[ModelParameters](ModelParameters)
@@ -49,7 +52,7 @@ class AgentRepository:
 
     async def create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: AgentCreate,
     ) -> Agent:
         """Create Agent."""
@@ -89,15 +92,17 @@ class AgentRepository:
             subagent_settings=create.subagent_settings.model_dump(mode="json"),
         )
         await mark_model_candidate_chain_write(session)
-        session.add(rdb_agent)
-        await session.flush()
-        session.add(RDBAgentAutomaticProjectSetting(agent_id=rdb_agent.id))
-        await session.flush()
+        session.write_session.add(rdb_agent)
+        await session.write_session.flush()
+        session.write_session.add(
+            RDBAgentAutomaticProjectSetting(agent_id=rdb_agent.id)
+        )
+        await session.write_session.flush()
         return self._build_row(rdb_agent)
 
-    async def get_by_id(self, session: AsyncSession, agent_id: str) -> Agent | None:
+    async def get_by_id(self, session: ReadSession, agent_id: str) -> Agent | None:
         """Fetch Agent by ID."""
-        rdb_agent = await session.get(
+        rdb_agent = await session.read_session.get(
             RDBAgent,
             agent_id,
             populate_existing=True,
@@ -108,11 +113,11 @@ class AgentRepository:
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_id: str,
     ) -> Agent | None:
         """Lock one Agent for transactional lifecycle validation."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBAgent)
             .where(RDBAgent.id == agent_id)
             # Admission and write reauthorization only validate lifecycle and
@@ -125,28 +130,13 @@ class AgentRepository:
             return None
         return self._build_row(rdb_agent)
 
-    async def lock_by_id_nowait(
-        self,
-        session: AsyncSession,
-        agent_id: str,
-    ) -> Agent | None:
-        """Try to lock one Agent without waiting on a lifecycle writer."""
-        result = await session.execute(
-            sa.select(RDBAgent)
-            .where(RDBAgent.id == agent_id)
-            .with_for_update(key_share=True, nowait=True)
-            .execution_options(populate_existing=True)
-        )
-        rdb_agent = result.scalar_one_or_none()
-        return None if rdb_agent is None else self._build_row(rdb_agent)
-
     async def get_runtime_selection_input_for_update(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_id: str,
     ) -> Agent | None:
         """Fetch one Agent while serializing Runtime Profile selection."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBAgent)
             .where(RDBAgent.id == agent_id)
             # SQLAlchemy renders key_share=True as PostgreSQL
@@ -162,7 +152,7 @@ class AgentRepository:
 
     async def compare_and_set_runtime_capability(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         expected_capability: AgentRuntimeCapability,
@@ -172,7 +162,7 @@ class AgentRepository:
         runtime_profile_id: str | None,
     ) -> Agent | None:
         """Replace Runtime authority and Profile selection under both fences."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgent)
             .where(
                 RDBAgent.id == agent_id,
@@ -193,14 +183,14 @@ class AgentRepository:
             .returning(RDBAgent)
         )
         rdb_agent = result.scalar_one_or_none()
-        await session.flush()
+        await session.write_session.flush()
         return self._build_row(rdb_agent) if rdb_agent is not None else None
 
     async def list_by_workspace(
-        self, session: AsyncSession, workspace_id: str
+        self, session: ReadSession, workspace_id: str
     ) -> AgentList:
         """Fetch all Agents in workspace."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgent)
             .where(RDBAgent.workspace_id == workspace_id)
             .order_by(RDBAgent.created_at.desc())
@@ -210,7 +200,7 @@ class AgentRepository:
 
     async def list_visible_by_workspace(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         workspace_id: str,
         workspace_user_id: str,
     ) -> AgentList:
@@ -225,7 +215,7 @@ class AgentRepository:
             .correlate(RDBAgent)
             .exists()
         )
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgent)
             .where(
                 RDBAgent.workspace_id == workspace_id,
@@ -241,7 +231,7 @@ class AgentRepository:
 
     async def update_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_id: str,
         update: AgentUpdate,
     ) -> Result[Agent, NotFound]:
@@ -304,24 +294,39 @@ class AgentRepository:
 
         if "selectable_model_options" in db_values:
             await mark_model_candidate_chain_write(session)
-        await session.execute(
+        previous_memory_enabled: bool | None = None
+        if "memory_enabled" in update:
+            previous_memory_enabled = await session.write_session.scalar(
+                sa.select(RDBAgent.memory_enabled)
+                .where(RDBAgent.id == agent_id)
+                # Serialize settings writers while allowing enrollment FK locks.
+                .with_for_update(key_share=True)
+            )
+        await session.write_session.execute(
             sa.update(RDBAgent).where(RDBAgent.id == agent_id).values(**db_values)
         )
-        rdb_agent = await session.get(RDBAgent, agent_id)
+        rdb_agent = await session.write_session.get(RDBAgent, agent_id)
         if rdb_agent is None:
             return Failure(NotFound(agent_id=agent_id))
+        if (
+            previous_memory_enabled is not None
+            and previous_memory_enabled != rdb_agent.memory_enabled
+        ):
+            await agent_memory_availability_in_session(
+                session, agent_id=agent_id, denied=not rdb_agent.memory_enabled
+            )
         return Success(self._build_row(rdb_agent))
 
     async def replace_runtime_profile_selection(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         expected_version: int,
         runtime_profile_id: str | None,
     ) -> Agent | None:
         """Replace one Agent selection with optimistic version fencing."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgent)
             .where(
                 RDBAgent.id == agent_id,
@@ -337,34 +342,34 @@ class AgentRepository:
             .returning(RDBAgent)
         )
         rdb_agent = result.scalar_one_or_none()
-        await session.flush()
+        await session.write_session.flush()
         return self._build_row(rdb_agent) if rdb_agent is not None else None
 
     async def update_external_channel_default_response_mode(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         response_mode: ExternalChannelResponseMode,
     ) -> Agent | None:
         """Replace the default copied to subsequently created channel bindings."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgent)
             .where(RDBAgent.id == agent_id)
             .values(external_channel_default_response_mode=response_mode)
             .returning(RDBAgent)
         )
         rdb_agent = result.scalar_one_or_none()
-        await session.flush()
+        await session.write_session.flush()
         return self._build_row(rdb_agent) if rdb_agent is not None else None
 
     async def mark_decommissioning(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_id: str,
     ) -> Agent | None:
         """Fence an Agent from new work for durable decommission."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgent)
             .where(RDBAgent.id == agent_id)
             .values(lifecycle_status=AgentLifecycleStatus.DECOMMISSIONING)
@@ -373,7 +378,7 @@ class AgentRepository:
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
+        await session.write_session.flush()
         return self._build_row(rdb)
 
     def _build_row(self, rdb: RDBAgent) -> Agent:
@@ -434,13 +439,13 @@ class AgentRepository:
 
     async def update_avatar(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_id: str,
         avatar: StoredImage | None,
     ) -> Result[Agent, NotFound]:
         """Atomically replace one avatar and retain prior deletion responsibility."""
         avatar_dict = avatar.model_dump(mode="json") if avatar is not None else None
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBAgent).where(RDBAgent.id == agent_id).with_for_update()
         )
         rdb_agent = result.scalar_one_or_none()
@@ -453,12 +458,12 @@ class AgentRepository:
         )
         rdb_agent.avatar = avatar_dict
         if previous_avatar is not None and previous_avatar != avatar:
-            session.add(
+            session.write_session.add(
                 RDBAgentAvatarCleanupJob(
                     agent_id=rdb_agent.id,
                     avatar=previous_avatar.model_dump(mode="json"),
                 )
             )
-        await session.flush()
-        await session.refresh(rdb_agent)
+        await session.write_session.flush()
+        await session.write_session.refresh(rdb_agent)
         return Success(self._build_row(rdb_agent))

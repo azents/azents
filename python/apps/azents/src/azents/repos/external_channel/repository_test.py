@@ -1,23 +1,53 @@
 """ExternalChannelRepository tests."""
 
+import asyncio
 import dataclasses
 import datetime
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
-from types import SimpleNamespace
-from typing import Literal, Protocol, runtime_checkable
-from unittest.mock import AsyncMock, MagicMock, create_autospec
+from collections.abc import (
+    AsyncGenerator,
+)
+from contextlib import (
+    asynccontextmanager,
+)
+from types import (
+    SimpleNamespace,
+)
+from typing import (
+    Literal,
+    Protocol,
+    runtime_checkable,
+)
+from unittest.mock import (
+    AsyncMock,
+    MagicMock,
+    create_autospec,
+)
 
 import pytest
 import sqlalchemy as sa
-from azcommon.result import Success
-from sqlalchemy.dialects import postgresql
-from sqlalchemy.exc import DBAPIError, IntegrityError
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from azcommon.result import (
+    Success,
+)
+from sqlalchemy.dialects import (
+    postgresql,
+)
+from sqlalchemy.exc import (
+    DBAPIError,
+    IntegrityError,
+)
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+)
 
+from azents.core.agent_session_data import (
+    AgentSessionCreate,
+)
 from azents.core.enums import (
     AgentLifecycleStatus,
+    AgentRunStatus,
     AgentSessionProductMode,
+    AgentSessionRunState,
     AgentSessionStatus,
     ExternalChannelAccessGrantScope,
     ExternalChannelAppMode,
@@ -38,15 +68,33 @@ from azents.core.enums import (
 from azents.core.external_model_settings import (
     ExternalModelActorContext,
     ExternalModelApplied,
-    ExternalModelBusy,
     ExternalModelEditorReady,
     ExternalModelStale,
     ExternalModelTargetContext,
 )
-from azents.rdb.models.agent import RDBAgent
-from azents.rdb.models.agent_runtime import RDBAgentRuntime
-from azents.rdb.models.agent_session import RDBAgentSession
-from azents.rdb.models.external_account_link import RDBExternalAccountLink
+from azents.core.inference_profile import (
+    RequestedInferenceProfile,
+    validate_requested_profile_against_options,
+)
+from azents.core.workspace import (
+    WorkspaceCreate,
+)
+from azents.rdb.models.agent import (
+    RDBAgent,
+)
+from azents.rdb.models.agent_run import (
+    RDBAgentRun,
+)
+from azents.rdb.models.agent_runtime import (
+    RDBAgentRuntime,
+)
+from azents.rdb.models.agent_session import (
+    RDBAgentSession,
+)
+from azents.rdb.models.base import RDBModel
+from azents.rdb.models.external_account_link import (
+    RDBExternalAccountLink,
+)
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAccessGrant,
     RDBExternalChannelAgentRoute,
@@ -61,20 +109,53 @@ from azents.rdb.models.external_model_settings import (
     RDBExternalModelDraft,
     RDBExternalModelMutation,
 )
-from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
-from azents.rdb.models.toolkit_state import RDBToolkitState
-from azents.rdb.models.user import RDBUser
+from azents.rdb.models.llm_provider_integration import (
+    RDBLLMProviderIntegration,
+)
+from azents.rdb.models.toolkit_state import (
+    RDBToolkitState,
+)
+from azents.rdb.models.user import (
+    RDBUser,
+)
+from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
-from azents.repos.agent import AgentRepository
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
-from azents.repos.chat_write_request import ChatWriteRequestRepository
-from azents.repos.external_account_link import ExternalAccountLinkRepository
+from azents.rdb.session import (
+    SessionManager,
+)
+from azents.rdb.session_capabilities import (
+    ReadWriteSession,
+    WriteSession,
+)
+from azents.repos.active_model_capabilities import (
+    ActiveModelCapabilitiesRepository,
+)
+from azents.repos.active_profile_admission import (
+    ActiveProfileAdmissionRepository,
+    CapturedProfileAdmission,
+)
+from azents.repos.agent import (
+    AgentRepository,
+)
+from azents.repos.agent.data import (
+    Agent,
+)
+from azents.repos.agent_session import (
+    AgentSessionRepository,
+)
+from azents.repos.chat_write_request import (
+    ChatWriteRequestRepository,
+)
+from azents.repos.external_account_link import (
+    ExternalAccountLinkRepository,
+)
+from azents.repos.external_account_oauth.configuration_fence_test import (
+    _wait_for_blocked,
+)
 from azents.repos.external_channel.data import (
     ExternalChannelAccessGrantCreate,
     ExternalChannelAgentRouteCreate,
     ExternalChannelBindingCreate,
-    ExternalChannelBlockCreate,
     ExternalChannelConnectionCreate,
     ExternalChannelConversationPosition,
     ExternalChannelResourceCreate,
@@ -93,15 +174,31 @@ from azents.repos.external_channel.work_state import (
     ChannelWorkState,
     channel_work_state_name,
 )
+from azents.repos.llm_catalog import (
+    LLMCatalogRepository,
+)
+from azents.repos.model_metadata_source import (
+    ModelMetadataSourceRepository,
+)
 from azents.repos.session_model_profile.repository import (
     SessionModelProfileRepository,
 )
-from azents.repos.user import UserRepository
-from azents.repos.user.data import UserCreate
-from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
-from azents.repos.workspace_user import WorkspaceUserRepository
-from azents.repos.workspace_user.data import WorkspaceUserCreate
+from azents.repos.user import (
+    UserRepository,
+)
+from azents.repos.user.data import (
+    UserCreate,
+)
+from azents.repos.workspace import (
+    WorkspaceRepository,
+)
+from azents.repos.workspace_user import (
+    WorkspaceUserRepository,
+)
+from azents.repos.workspace_user.data import (
+    WorkspaceUserCreate,
+)
+from azents.testing.committed_fixture_cleanup import committed_fixture_graph
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
@@ -152,7 +249,7 @@ def _discord_command_set() -> dict[str, object]:
 
 
 async def _create_workspace(
-    session: AsyncSession,
+    session: WriteSession,
     handle: str = "external-channel-repository-test",
 ) -> str:
     """Create a Workspace required by an External Channel connection."""
@@ -212,7 +309,7 @@ class _DiscordGatewayTypingFixture:
 
 
 async def _create_discord_gateway_typing_fixture(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     suffix: str = "",
 ) -> _DiscordGatewayTypingFixture:
@@ -229,8 +326,8 @@ async def _create_discord_gateway_typing_fixture(
         encrypted_credentials="encrypted",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
     selection = make_test_model_selection_dict(
         integration_id=integration.id,
         provider=LLMProvider.ANTHROPIC,
@@ -248,12 +345,12 @@ async def _create_discord_gateway_typing_fixture(
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     runtime = RDBAgentRuntime(workspace_id=workspace_id, agent_id=agent.id)
     runtime.workspace_path = "/workspace/agent"
-    session.add(runtime)
-    await session.flush()
+    session.write_session.add(runtime)
+    await session.write_session.flush()
 
     repository = ExternalChannelRepository()
     connection = await repository.create_connection(
@@ -267,7 +364,7 @@ async def _create_discord_gateway_typing_fixture(
             }
         ),
     )
-    session.add(
+    session.write_session.add(
         RDBExternalChannelAppClaim(
             provider=ExternalChannelProvider.DISCORD,
             provider_app_id=f"discord-gateway-typing-app{identifier_suffix}",
@@ -275,7 +372,7 @@ async def _create_discord_gateway_typing_fixture(
             claim_generation=1,
         )
     )
-    await session.flush()
+    await session.write_session.flush()
     route = await repository.create_agent_route(
         session,
         ExternalChannelAgentRouteCreate(
@@ -299,6 +396,20 @@ async def _create_discord_gateway_typing_fixture(
             title=None,
         ),
     )
+    await AgentSessionRepository().mark_running(session, agent_session.id)
+    session.write_session.add(
+        RDBAgentRun(
+            session_id=agent_session.id,
+            scheduled_task_cycle_id=None,
+            run_index=1,
+            parent_agent_run_id=None,
+            requested_model_target_label=None,
+            requested_reasoning_effort=None,
+            requested_enabled_execution_options=[],
+            status=AgentRunStatus.RUNNING,
+        )
+    )
+    await session.write_session.flush()
     claim = await repository.claim_discord_gateway_lease(
         session,
         connection_id=connection.id,
@@ -319,7 +430,7 @@ async def _create_discord_gateway_typing_fixture(
 
 
 async def _create_discord_gateway_typing_binding(
-    session: AsyncSession,
+    session: WriteSession,
     fixture: _DiscordGatewayTypingFixture,
     *,
     key: str,
@@ -356,7 +467,7 @@ async def _create_discord_gateway_typing_binding(
         ),
         expected_access_request_id=None,
     )
-    session.add(
+    session.write_session.add(
         RDBToolkitState(
             agent_id=fixture.agent_id,
             session_id=fixture.agent_session_id,
@@ -384,7 +495,7 @@ async def _create_discord_gateway_typing_binding(
             schema_version=CHANNEL_WORK_STATE_SCHEMA_VERSION,
         )
     )
-    await session.flush()
+    await session.write_session.flush()
     return binding.id
 
 
@@ -392,18 +503,19 @@ async def _create_discord_gateway_typing_binding(
 async def test_detach_user_references_preserves_external_channel_invariants() -> None:
     """Detach retained audit references without violating configured-actor checks."""
     repository = ExternalChannelRepository()
-    session = MagicMock(spec=AsyncSession)
-    session.execute = AsyncMock(
+    raw_session = MagicMock(spec=AsyncSession)
+    raw_session.execute = AsyncMock(
         side_effect=[SimpleNamespace(rowcount=1) for _ in range(10)]
     )
-    session.flush = AsyncMock()
+    raw_session.flush = AsyncMock()
+    session = ReadWriteSession(raw_session)
 
     await repository.detach_user_references(session, user_id="user-1")
 
-    assert session.execute.await_count == 10
+    assert raw_session.execute.await_count == 10
     sql = "\n".join(
         str(call.args[0].compile(dialect=postgresql.dialect()))
-        for call in session.execute.await_args_list
+        for call in raw_session.execute.await_args_list
     )
     assert "external_channel_agent_routes" in sql
     assert "external_channel_channel_defaults" in sql
@@ -412,7 +524,7 @@ async def test_detach_user_references_preserves_external_channel_invariants() ->
     assert "external_channel_access_grants" in sql
     assert "external_channel_blocks" in sql
     assert "configured_by_principal_id" in sql
-    session.flush.assert_awaited_once()
+    raw_session.flush.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -422,14 +534,15 @@ async def test_conversation_position_lock_and_compare_and_set_are_fenced(
     """The durable position row is locked and advances only from its expected value."""
     repository = ExternalChannelRepository()
     position = SimpleNamespace(id="position-1", read_through_position=None)
-    session = MagicMock(spec=AsyncSession)
-    session.scalar = AsyncMock(return_value=position)
+    raw_session = MagicMock(spec=AsyncSession)
+    raw_session.scalar = AsyncMock(return_value=position)
     first_update = MagicMock()
     first_update.scalar_one_or_none.return_value = "position-1"
     stale_update = MagicMock()
     stale_update.scalar_one_or_none.return_value = None
-    session.execute = AsyncMock(side_effect=[first_update, stale_update])
-    session.flush = AsyncMock()
+    raw_session.execute = AsyncMock(side_effect=[first_update, stale_update])
+    raw_session.flush = AsyncMock()
+    session = ReadWriteSession(raw_session)
     monkeypatch.setattr(
         ExternalChannelConversationPosition,
         "model_validate",
@@ -456,14 +569,14 @@ async def test_conversation_position_lock_and_compare_and_set_are_fenced(
     assert locked is position
     assert advanced is True
     assert stale is False
-    lock_statement = session.scalar.await_args.args[0]
+    lock_statement = raw_session.scalar.await_args.args[0]
     assert "FOR UPDATE" in str(lock_statement.compile(dialect=postgresql.dialect()))
-    assert session.flush.await_count == 2
+    assert raw_session.flush.await_count == 2
 
 
 @pytest.mark.asyncio
 async def test_discord_gateway_typing_targets_fence_stale_lease_and_allow_empty(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """A valid lease returns an empty projection while stale authority returns None."""
     fixture = await _create_discord_gateway_typing_fixture(rdb_session)
@@ -489,7 +602,7 @@ async def test_discord_gateway_typing_targets_fence_stale_lease_and_allow_empty(
 
 @pytest.mark.asyncio
 async def test_discord_gateway_typing_targets_project_active_current_work(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Only active Work on current owners contributes its exact delivery target."""
     fixture = await _create_discord_gateway_typing_fixture(rdb_session)
@@ -597,24 +710,24 @@ async def test_discord_gateway_typing_targets_project_active_current_work(
         },
         work_cycle_id="work-malformed",
     )
-    disconnected_binding = await rdb_session.get(
+    disconnected_binding = await rdb_session.read_session.get(
         RDBExternalChannelBinding,
         disconnected_binding_id,
     )
-    unavailable_binding = await rdb_session.get(
+    unavailable_binding = await rdb_session.read_session.get(
         RDBExternalChannelBinding,
         unavailable_binding_id,
     )
     assert disconnected_binding is not None
     assert unavailable_binding is not None
     disconnected_binding.disconnected_at = _at(2)
-    unavailable_resource = await rdb_session.get(
+    unavailable_resource = await rdb_session.read_session.get(
         RDBExternalChannelResource,
         unavailable_binding.resource_id,
     )
     assert unavailable_resource is not None
     unavailable_resource.status = ExternalChannelResourceStatus.UNAVAILABLE
-    await rdb_session.flush()
+    await rdb_session.write_session.flush()
 
     targets = await fixture.repository.list_owned_discord_typing_targets(
         rdb_session,
@@ -641,9 +754,9 @@ async def test_discord_gateway_typing_targets_project_active_current_work(
 
 @pytest.mark.asyncio
 async def test_discord_gateway_typing_targets_exclude_stopping_session(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
-    """A stop request immediately removes otherwise active Work from projection."""
+    """Stop intent and subsequent idle cleanup both exclude retained active Work."""
     fixture = await _create_discord_gateway_typing_fixture(rdb_session)
     await _create_discord_gateway_typing_binding(
         rdb_session,
@@ -656,13 +769,13 @@ async def test_discord_gateway_typing_targets_exclude_stopping_session(
         },
         work_cycle_id="work-stopping-session",
     )
-    agent_session = await rdb_session.get(
+    agent_session = await rdb_session.read_session.get(
         RDBAgentSession,
         fixture.agent_session_id,
     )
     assert agent_session is not None
     agent_session.stop_requested_at = _at(2)
-    await rdb_session.flush()
+    await rdb_session.write_session.flush()
 
     targets = await fixture.repository.list_owned_discord_typing_targets(
         rdb_session,
@@ -674,6 +787,127 @@ async def test_discord_gateway_typing_targets_exclude_stopping_session(
 
     assert targets == ()
 
+    await AgentSessionRepository().mark_idle(rdb_session, fixture.agent_session_id)
+    assert agent_session.stop_requested_at is None
+    after_cleanup = await fixture.repository.list_owned_discord_typing_targets(
+        rdb_session,
+        connection_id=fixture.connection_id,
+        lease_owner=fixture.lease_owner,
+        lease_generation=fixture.lease_generation,
+        now=_at(4),
+    )
+    assert after_cleanup == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "run_status",
+    [
+        AgentRunStatus.PENDING,
+        AgentRunStatus.COMPLETED,
+        AgentRunStatus.STOPPED,
+        AgentRunStatus.FAILED,
+        AgentRunStatus.INTERRUPTED,
+        AgentRunStatus.CANCELLED,
+    ],
+)
+async def test_discord_gateway_typing_stops_when_run_is_not_running(
+    rdb_session: WriteSession,
+    run_status: AgentRunStatus,
+) -> None:
+    """Retained Work cannot renew typing after a Run ends or before activation."""
+    fixture = await _create_discord_gateway_typing_fixture(rdb_session)
+    await _create_discord_gateway_typing_binding(
+        rdb_session,
+        fixture,
+        key="typing-run-transition",
+        resource_type=ExternalChannelResourceType.PARENT_CHANNEL,
+        labels={"guild_id": "100", "parent_channel_id": "200"},
+        work_cycle_id="work-run-transition",
+    )
+    running = await fixture.repository.list_owned_discord_typing_targets(
+        rdb_session,
+        connection_id=fixture.connection_id,
+        lease_owner=fixture.lease_owner,
+        lease_generation=fixture.lease_generation,
+        now=_at(2),
+    )
+    assert running is not None
+    assert len(running) == 1
+    run = await rdb_session.read_session.scalar(
+        sa.select(RDBAgentRun).where(
+            RDBAgentRun.session_id == fixture.agent_session_id,
+        )
+    )
+    assert run is not None
+    run.status = run_status
+    await rdb_session.write_session.flush()
+
+    stopped = await fixture.repository.list_owned_discord_typing_targets(
+        rdb_session,
+        connection_id=fixture.connection_id,
+        lease_owner=fixture.lease_owner,
+        lease_generation=fixture.lease_generation,
+        now=_at(3),
+    )
+    assert stopped == ()
+
+    run.status = AgentRunStatus.RUNNING
+    await rdb_session.write_session.flush()
+    restored = await fixture.repository.list_owned_discord_typing_targets(
+        rdb_session,
+        connection_id=fixture.connection_id,
+        lease_owner=fixture.lease_owner,
+        lease_generation=fixture.lease_generation,
+        now=_at(4),
+    )
+    assert restored == running
+
+
+@pytest.mark.asyncio
+async def test_discord_gateway_typing_excludes_idle_session_and_absent_run(
+    rdb_session: WriteSession,
+) -> None:
+    """Work needs both running Session ownership and an actual running Run."""
+    fixture = await _create_discord_gateway_typing_fixture(rdb_session)
+    await _create_discord_gateway_typing_binding(
+        rdb_session,
+        fixture,
+        key="typing-idle-session",
+        resource_type=ExternalChannelResourceType.PARENT_CHANNEL,
+        labels={"guild_id": "100", "parent_channel_id": "200"},
+        work_cycle_id="work-idle-session",
+    )
+    agent_session = await rdb_session.read_session.get(
+        RDBAgentSession, fixture.agent_session_id
+    )
+    assert agent_session is not None
+    await AgentSessionRepository().mark_idle(rdb_session, fixture.agent_session_id)
+    idle = await fixture.repository.list_owned_discord_typing_targets(
+        rdb_session,
+        connection_id=fixture.connection_id,
+        lease_owner=fixture.lease_owner,
+        lease_generation=fixture.lease_generation,
+        now=_at(2),
+    )
+    assert idle == ()
+
+    agent_session.run_state = AgentSessionRunState.RUNNING
+    await rdb_session.write_session.execute(
+        sa.delete(RDBAgentRun).where(
+            RDBAgentRun.session_id == fixture.agent_session_id,
+        )
+    )
+    await rdb_session.write_session.flush()
+    absent = await fixture.repository.list_owned_discord_typing_targets(
+        rdb_session,
+        connection_id=fixture.connection_id,
+        lease_owner=fixture.lease_owner,
+        lease_generation=fixture.lease_generation,
+        now=_at(3),
+    )
+    assert absent == ()
+
 
 @pytest.mark.asyncio
 class TestExternalChannelRepository:
@@ -684,52 +918,75 @@ class TestExternalChannelRepository:
         rdb_engine: AsyncEngine,
         latest_db_schema: None,
     ) -> None:
-        """The fence conflicts even when there is no block row to lock."""
+        """The fence waits even when there is no block row to lock."""
         del latest_db_schema
         repository = ExternalChannelRepository()
         async with (
-            AsyncSession(rdb_engine) as first,
-            AsyncSession(rdb_engine) as second,
+            AsyncSession(rdb_engine) as _raw_first,
+            AsyncSession(rdb_engine) as _raw_second,
         ):
-            acquired = await repository.acquire_principal_agent_authorization_fence(
+            first = ReadWriteSession(_raw_first)
+            second = ReadWriteSession(_raw_second)
+            await repository.acquire_principal_agent_authorization_fence(
                 first,
                 agent_id="agent-without-row",
                 principal_id="principal-without-row",
-                nowait=False,
             )
-            conflicted = await repository.acquire_principal_agent_authorization_fence(
-                second,
-                agent_id="agent-without-row",
-                principal_id="principal-without-row",
-                nowait=True,
+            holder_pid = await first.write_session.scalar(
+                sa.select(sa.func.pg_backend_pid())
             )
-            assert acquired is True
-            assert conflicted is False
-
-            await first.commit()
-            acquired_after_release = (
-                await repository.acquire_principal_agent_authorization_fence(
+            assert isinstance(holder_pid, int)
+            pending = asyncio.create_task(
+                repository.acquire_principal_agent_authorization_fence(
                     second,
                     agent_id="agent-without-row",
                     principal_id="principal-without-row",
-                    nowait=True,
                 )
             )
-            assert acquired_after_release is True
+            try:
+                await _wait_for_blocked(rdb_engine, holder_pid)
+                await first.write_session.commit()
+                await asyncio.wait_for(pending, timeout=3)
+            finally:
+                if not pending.done():
+                    pending.cancel()
+                    await asyncio.gather(pending, return_exceptions=True)
 
-    async def test_native_model_authorization_fences_user_disable_both_orders(
+    async def test_native_model_authorization_uses_committed_disable_state(
         self,
         rdb_engine: AsyncEngine,
         latest_db_schema: None,
     ) -> None:
-        """User disable conflicts before and after native authorization."""
+        """Ordinary authorization observes committed rows without holding User locks."""
         del latest_db_schema
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup:
+        # Repeat the committed scenario to prove cleanup, without waiting for its
+        # leaked running Session to become eligible for the global recovery scan.
+        for _ in range(2):
+            async with committed_fixture_graph(rdb_engine, RDBModel.metadata):
+                fixture = await self._native_model_authorization_scenario(rdb_engine)
+                async with AsyncSession(rdb_engine) as observation:
+                    agent = await observation.get(RDBAgent, fixture.agent_id)
+                    assert agent is not None
+                    workspace_id = agent.workspace_id
+            async with AsyncSession(rdb_engine) as verification:
+                assert (
+                    await verification.get(RDBAgentSession, fixture.agent_session_id)
+                    is None
+                )
+                assert await verification.get(RDBAgent, fixture.agent_id) is None
+                assert await verification.get(RDBWorkspace, workspace_id) is None
+
+    async def _native_model_authorization_scenario(
+        self, rdb_engine: AsyncEngine
+    ) -> _DiscordGatewayTypingFixture:
+        """Run the complete authorization and purge assertions under owned cleanup."""
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as _raw_setup:
+            setup = ReadWriteSession(_raw_setup)
             fixture = await _create_discord_gateway_typing_fixture(
                 setup,
                 suffix="native-model-authorization",
             )
-            connection = await setup.get(
+            connection = await setup.read_session.get(
                 RDBExternalChannelConnection,
                 fixture.connection_id,
             )
@@ -757,8 +1014,8 @@ class TestExternalChannelRepository:
                 avatar_url=None,
                 profile=None,
             )
-            setup.add(principal)
-            await setup.flush()
+            setup.write_session.add(principal)
+            await setup.write_session.flush()
             grant = await fixture.repository.ensure_access_grant(
                 setup,
                 ExternalChannelAccessGrantCreate(
@@ -772,7 +1029,7 @@ class TestExternalChannelRepository:
                     revoked_at=None,
                 ),
             )
-            setup.add(
+            setup.write_session.add(
                 RDBExternalAccountLink(
                     workspace_id=connection.workspace_id,
                     user_id=user.id,
@@ -798,18 +1055,19 @@ class TestExternalChannelRepository:
                 },
                 work_cycle_id="native-model-work",
             )
-            await setup.commit()
+            await setup.write_session.commit()
 
         @asynccontextmanager
-        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-            async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+        async def session_manager() -> AsyncGenerator[WriteSession, None]:
+            async with AsyncSession(rdb_engine, expire_on_commit=False) as _raw_session:
+                session = ReadWriteSession(_raw_session)
                 try:
                     yield session
                 except Exception:
-                    await session.rollback()
+                    await session.write_session.rollback()
                     raise
                 else:
-                    await session.commit()
+                    await session.write_session.commit()
 
         agent_repository = AgentRepository()
         agent_session_repository = AgentSessionRepository()
@@ -826,10 +1084,16 @@ class TestExternalChannelRepository:
                 agent_session_repository=agent_session_repository,
                 workspace_user_repository=workspace_user_repository,
                 chat_write_request_repository=ChatWriteRequestRepository(),
+                active_profile_repository=_active_profile_repository(session_manager),
                 session_manager=session_manager,
             ),
             agent_repository=agent_repository,
             agent_session_repository=agent_session_repository,
+            active_model_capabilities_repository=ActiveModelCapabilitiesRepository(
+                session_manager=session_manager,
+                catalog_repository=LLMCatalogRepository(),
+                source_repository=ModelMetadataSourceRepository(),
+            ),
         )
         actor = ExternalModelActorContext(
             provider=ExternalChannelProvider.DISCORD,
@@ -846,8 +1110,9 @@ class TestExternalChannelRepository:
             agent_id=fixture.agent_id,
         )
 
-        async with AsyncSession(rdb_engine) as disabling:
-            await disabling.execute(
+        async with AsyncSession(rdb_engine) as _raw_disabling:
+            disabling = ReadWriteSession(_raw_disabling)
+            await disabling.write_session.execute(
                 sa.update(RDBUser)
                 .where(RDBUser.id == user.id)
                 .values(access_disabled_at=_at(1))
@@ -860,100 +1125,58 @@ class TestExternalChannelRepository:
                 offset=0,
                 limit=10,
             )
-            assert isinstance(busy, ExternalModelBusy)
-            await disabling.rollback()
+            assert isinstance(busy, ExternalModelEditorReady)
+            await disabling.write_session.rollback()
 
         async with (
-            AsyncSession(rdb_engine) as authorized_session,
-            AsyncSession(rdb_engine) as disabling,
+            AsyncSession(rdb_engine) as raw_authorized,
+            AsyncSession(rdb_engine) as raw_disabling,
         ):
             authorization = await repository._authorize(
-                authorized_session,
+                ReadWriteSession(raw_authorized),
                 actor=actor,
                 target=target,
             )
             assert authorization.target is not None
-            await disabling.execute(sa.text("SET LOCAL lock_timeout = '100ms'"))
-            with pytest.raises(DBAPIError) as raised:
-                await disabling.execute(
-                    sa.update(RDBUser)
-                    .where(RDBUser.id == user.id)
-                    .values(access_disabled_at=_at(2))
-                )
-            assert _dbapi_sqlstate(raised.value) == "55P03"
-            await disabling.rollback()
-            await disabling.execute(sa.text("SET LOCAL lock_timeout = '100ms'"))
-            with pytest.raises(DBAPIError) as block_conflict:
-                await external_repository.create_block_idempotent(
-                    disabling,
-                    ExternalChannelBlockCreate(
-                        agent_id=fixture.agent_id,
-                        principal_id=principal.id,
-                        blocked_by_user_id=user.id,
-                        reason=None,
-                        removed_by_user_id=None,
-                        removed_at=None,
-                    ),
-                )
-            assert _dbapi_sqlstate(block_conflict.value) == "55P03"
-            await disabling.rollback()
-            await disabling.execute(sa.text("SET LOCAL lock_timeout = '100ms'"))
-            with pytest.raises(DBAPIError) as grant_conflict:
-                await external_repository.delete_access_grant(
-                    disabling,
-                    grant_id=grant.id,
-                )
-            assert _dbapi_sqlstate(grant_conflict.value) == "55P03"
-            await disabling.rollback()
-            await disabling.execute(sa.text("SET LOCAL lock_timeout = '100ms'"))
-            with pytest.raises(DBAPIError) as member_conflict:
-                await disabling.execute(
-                    sa.delete(RDBWorkspaceUser).where(
-                        RDBWorkspaceUser.workspace_id == connection.workspace_id,
-                        RDBWorkspaceUser.user_id == user.id,
-                    )
-                )
-            assert _dbapi_sqlstate(member_conflict.value) == "55P03"
-            await disabling.rollback()
-            await disabling.execute(sa.text("SET LOCAL lock_timeout = '100ms'"))
-            with pytest.raises(DBAPIError) as link_conflict:
-                await disabling.execute(
-                    sa.update(RDBExternalAccountLink)
-                    .where(
-                        RDBExternalAccountLink.workspace_id == connection.workspace_id,
-                        RDBExternalAccountLink.user_id == user.id,
-                    )
-                    .values(revoked_at=_at(2))
-                )
-            assert _dbapi_sqlstate(link_conflict.value) == "55P03"
-            await disabling.rollback()
-            await disabling.execute(sa.text("SET LOCAL lock_timeout = '100ms'"))
-            with pytest.raises(DBAPIError) as archive_conflict:
-                await disabling.execute(
-                    sa.update(RDBAgentSession)
-                    .where(RDBAgentSession.id == fixture.agent_session_id)
-                    .values(status=AgentSessionStatus.ARCHIVED)
-                )
-            assert _dbapi_sqlstate(archive_conflict.value) == "55P03"
+            await raw_disabling.execute(sa.text("SET LOCAL lock_timeout = '500ms'"))
+            await raw_disabling.execute(
+                sa.update(RDBUser)
+                .where(RDBUser.id == user.id)
+                .values(access_disabled_at=_at(1))
+            )
+            await raw_disabling.commit()
+            denied = await repository._authorize(
+                ReadWriteSession(raw_authorized),
+                actor=actor,
+                target=target,
+            )
+            assert denied.rejection is not None
+
+        async with session_manager() as resetting:
+            await resetting.write_session.execute(
+                sa.update(RDBUser)
+                .where(RDBUser.id == user.id)
+                .values(access_disabled_at=None)
+            )
 
         opened = await repository.open_editor(
             actor=actor,
             target=target,
             owner_interaction_key="aba-draft",
-            now=_at(3),
+            now=datetime.datetime.now(datetime.UTC),
             offset=0,
             limit=10,
         )
         assert isinstance(opened, ExternalModelEditorReady)
         async with session_manager() as changing:
-            await agent_session_repository.set_applied_inference_profile(
+            await AgentSessionRepository().set_applied_inference_profile(
                 changing,
                 session_id=fixture.agent_session_id,
                 model_target_label="temporary",
                 reasoning_effort=None,
                 enabled_execution_options=[],
             )
-            await agent_session_repository.set_applied_inference_profile(
+            await AgentSessionRepository().set_applied_inference_profile(
                 changing,
                 session_id=fixture.agent_session_id,
                 model_target_label="default",
@@ -984,13 +1207,13 @@ class TestExternalChannelRepository:
             actor=actor,
             target=target,
             owner_interaction_key="displayed-selection-draft",
-            now=_at(6),
+            now=datetime.datetime.now(datetime.UTC),
             offset=0,
             limit=10,
         )
         assert isinstance(displayed, ExternalModelEditorReady)
         async with session_manager() as concurrent_update:
-            await concurrent_update.execute(
+            await concurrent_update.write_session.execute(
                 sa.update(RDBExternalModelDraft)
                 .where(RDBExternalModelDraft.id == displayed.editor.draft.id)
                 .values(selected_enabled_execution_options=["fast"])
@@ -1011,7 +1234,7 @@ class TestExternalChannelRepository:
             actor=actor,
             target=target,
             owner_interaction_key="mutation-before-purge",
-            now=_at(8),
+            now=datetime.datetime.now(datetime.UTC),
             offset=0,
             limit=10,
         )
@@ -1032,13 +1255,15 @@ class TestExternalChannelRepository:
             actor=actor,
             target=target,
             owner_interaction_key="removed-option-draft",
-            now=_at(8),
+            now=datetime.datetime.now(datetime.UTC),
             offset=0,
             limit=10,
         )
         assert isinstance(removed_option, ExternalModelEditorReady)
         async with session_manager() as catalog_change:
-            agent_row = await catalog_change.get(RDBAgent, fixture.agent_id)
+            agent_row = await catalog_change.read_session.get(
+                RDBAgent, fixture.agent_id
+            )
             assert agent_row is not None
             assert agent_row.selectable_model_options is not None
             replacement = dict(agent_row.selectable_model_options[0])
@@ -1070,7 +1295,7 @@ class TestExternalChannelRepository:
         assert isinstance(repeated_removed.result, ExternalModelStale)
         assert repeated_removed.notice_plan is None
         async with session_manager() as verify_unchanged:
-            unchanged = await agent_session_repository.get_by_id(
+            unchanged = await AgentSessionRepository().get_by_id(
                 verify_unchanged,
                 fixture.agent_session_id,
             )
@@ -1084,81 +1309,84 @@ class TestExternalChannelRepository:
                 purging,
                 session_ids=[fixture.agent_session_id],
             )
-            remaining_drafts = await purging.scalar(
+            remaining_drafts = await purging.read_session.scalar(
                 sa.select(sa.func.count())
                 .select_from(RDBExternalModelDraft)
                 .where(RDBExternalModelDraft.session_id == fixture.agent_session_id)
             )
-            remaining_mutations = await purging.scalar(
+            remaining_mutations = await purging.read_session.scalar(
                 sa.select(sa.func.count())
                 .select_from(RDBExternalModelMutation)
                 .where(RDBExternalModelMutation.session_id == fixture.agent_session_id)
             )
-            remaining_binding = await purging.get(
+            remaining_binding = await purging.read_session.get(
                 RDBExternalChannelBinding,
                 binding_id,
             )
             assert remaining_drafts == 0
             assert remaining_mutations == 1
             assert remaining_binding is None
-            await purging.execute(
+            await purging.write_session.execute(
                 sa.delete(RDBExternalModelMutation).where(
                     RDBExternalModelMutation.session_id == fixture.agent_session_id
                 )
             )
-            await purging.execute(
+            await purging.write_session.execute(
                 sa.delete(RDBExternalChannelAccessGrant).where(
                     RDBExternalChannelAccessGrant.id == grant.id
                 )
             )
-            await purging.execute(
+            await purging.write_session.execute(
                 sa.delete(RDBExternalAccountLink).where(
                     RDBExternalAccountLink.workspace_id == connection.workspace_id,
                     RDBExternalAccountLink.user_id == user.id,
                 )
             )
-            await purging.execute(
+            await purging.write_session.execute(
                 sa.delete(RDBExternalChannelPrincipal).where(
                     RDBExternalChannelPrincipal.id == principal.id
                 )
             )
-            await purging.execute(
+            await purging.write_session.execute(
                 sa.delete(RDBWorkspaceUser).where(
                     RDBWorkspaceUser.workspace_id == connection.workspace_id,
                     RDBWorkspaceUser.user_id == user.id,
                 )
             )
-            await purging.execute(sa.delete(RDBUser).where(RDBUser.id == user.id))
-            await purging.execute(
+            await purging.write_session.execute(
+                sa.delete(RDBUser).where(RDBUser.id == user.id)
+            )
+            await purging.write_session.execute(
                 sa.delete(RDBExternalChannelIngressLease).where(
                     RDBExternalChannelIngressLease.connection_id
                     == fixture.connection_id
                 )
             )
-            await purging.execute(
+            await purging.write_session.execute(
                 sa.delete(RDBExternalChannelAppClaim).where(
                     RDBExternalChannelAppClaim.connection_id == fixture.connection_id
                 )
             )
-            await purging.execute(
+            await purging.write_session.execute(
                 sa.delete(RDBExternalChannelAgentRoute).where(
                     RDBExternalChannelAgentRoute.connection_id == fixture.connection_id
                 )
             )
-            await purging.execute(
+            await purging.write_session.execute(
                 sa.delete(RDBExternalChannelResource).where(
                     RDBExternalChannelResource.connection_id == fixture.connection_id
                 )
             )
-            await purging.execute(
+            await purging.write_session.execute(
                 sa.delete(RDBExternalChannelConnection).where(
                     RDBExternalChannelConnection.id == fixture.connection_id
                 )
             )
+        return fixture
 
     async def test_connection_lookup_is_redacted_and_provider_scoped(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Connection lookup retains ciphertext in storage but not its DTO."""
         workspace_id = await _create_workspace(rdb_session)
@@ -1187,7 +1415,7 @@ class TestExternalChannelRepository:
 
     async def test_installation_identity_is_unique_across_workspaces(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """One active Slack App and Team installation has one callback owner."""
         first_workspace_id = await _create_workspace(
@@ -1208,7 +1436,7 @@ class TestExternalChannelRepository:
             IntegrityError,
             match="uq_external_channel_connections_installation_identity",
         ):
-            async with rdb_session.begin_nested():
+            async with rdb_session.write_session.begin_nested():
                 await repo.create_connection(
                     rdb_session,
                     _connection_create(second_workspace_id),
@@ -1216,7 +1444,7 @@ class TestExternalChannelRepository:
 
     async def test_released_disconnected_identity_can_be_added_again(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Clearing retained disconnected identity releases the installation."""
         first_workspace_id = await _create_workspace(
@@ -1263,7 +1491,7 @@ class TestExternalChannelRepository:
 
     async def test_provider_state_purge_can_follow_cleanup_target_capture(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Uninstall keeps credentials only until cleanup targets are captured."""
         workspace_id = await _create_workspace(
@@ -1312,7 +1540,7 @@ class TestExternalChannelRepository:
 
     async def test_provider_lifecycle_rejects_stale_configuration_generation(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A replaced configuration wins over an in-flight provider callback."""
         workspace_id = await _create_workspace(
@@ -1356,7 +1584,7 @@ class TestExternalChannelRepository:
 
     async def test_connection_health_update_returns_refreshed_projection(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Health updates return server-updated fields without lazy loading."""
         workspace_id = await _create_workspace(rdb_session)
@@ -1394,7 +1622,7 @@ class TestExternalChannelRepository:
 
     async def test_prepared_discord_callback_restores_ping_authority_on_retry(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A retry exposes only provisional PING authority before activation."""
         workspace_id = await _create_workspace(
@@ -1439,7 +1667,7 @@ class TestExternalChannelRepository:
 
     async def test_discord_activation_reclaims_a_disconnected_app_claim(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A disconnected App history cannot block a later activation."""
         workspace_id = await _create_workspace(
@@ -1462,7 +1690,7 @@ class TestExternalChannelRepository:
                 }
             ),
         )
-        rdb_session.add(
+        rdb_session.write_session.add(
             RDBExternalChannelAppClaim(
                 provider=ExternalChannelProvider.DISCORD,
                 provider_app_id="discord-app-reclaimed",
@@ -1484,7 +1712,7 @@ class TestExternalChannelRepository:
                 }
             ),
         )
-        await rdb_session.flush()
+        await rdb_session.write_session.flush()
 
         prepared = await repo.prepare_discord_callback(
             rdb_session,
@@ -1514,7 +1742,7 @@ class TestExternalChannelRepository:
         assert activated is not None
         assert activated.capabilities is not None
         assert activated.capabilities["discord_command_set"] == _discord_command_set()
-        claim = await rdb_session.scalar(
+        claim = await rdb_session.read_session.scalar(
             sa.select(RDBExternalChannelAppClaim).where(
                 RDBExternalChannelAppClaim.provider == ExternalChannelProvider.DISCORD,
                 RDBExternalChannelAppClaim.provider_app_id == "discord-app-reclaimed",
@@ -1526,7 +1754,7 @@ class TestExternalChannelRepository:
 
     async def test_discord_gateway_terminal_transition_fences_stale_lease(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Only the current Gateway lease can suppress future scheduler claims."""
         workspace_id = await _create_workspace(
@@ -1607,11 +1835,11 @@ class TestExternalChannelRepository:
             reason="gateway_credentials_invalid",
         )
 
-        rdb_connection = await rdb_session.get(
+        rdb_connection = await rdb_session.read_session.get(
             RDBExternalChannelConnection,
             connection.id,
         )
-        lease = await rdb_session.scalar(
+        lease = await rdb_session.read_session.scalar(
             sa.select(RDBExternalChannelIngressLease).where(
                 RDBExternalChannelIngressLease.connection_id == connection.id
             )
@@ -1632,7 +1860,7 @@ class TestExternalChannelRepository:
 
     async def test_discord_gateway_gap_and_active_transitions_are_fenced(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Project Gateway lifecycle health only from the current durable owner."""
         workspace_id = await _create_workspace(
@@ -1708,7 +1936,7 @@ class TestExternalChannelRepository:
             rdb_session,
             connection_id=connection.id,
         )
-        degraded_lease = await rdb_session.scalar(
+        degraded_lease = await rdb_session.read_session.scalar(
             sa.select(RDBExternalChannelIngressLease).where(
                 RDBExternalChannelIngressLease.connection_id == connection.id
             )
@@ -1745,13 +1973,13 @@ class TestExternalChannelRepository:
         assert marked_active is True
         assert recovered is not None
         assert recovered.status is ExternalChannelConnectionStatus.ACTIVE
-        await rdb_session.refresh(degraded_lease)
+        await rdb_session.write_session.refresh(degraded_lease)
         assert degraded_lease.gap_detected_at is None
         assert degraded_lease.gap_reason is None
 
     async def test_socket_lease_fences_owner_and_reclaims_after_expiry(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Only one manager owns a socket until its durable lease expires."""
         workspace_id = await _create_workspace(rdb_session)
@@ -1797,7 +2025,7 @@ class TestExternalChannelRepository:
 
     async def test_socket_gap_is_visible_until_reconnection(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Record transport gaps and clear them only after a leased reconnect."""
         workspace_id = await _create_workspace(rdb_session)
@@ -1854,7 +2082,7 @@ class TestExternalChannelRepository:
 
 
 async def test_slack_presence_lease_is_configuration_fenced(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Only the current generation owner can renew or project Slack presence."""
     workspace_id = await _create_workspace(
@@ -1982,7 +2210,7 @@ def test_slack_presence_projects_awaiting_work_as_idle() -> None:
 
 
 async def test_create_agent_route_enforces_mode_and_workspace_boundaries(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Route creation locks the connection and rejects mismatched boundaries."""
     first_workspace = await _create_workspace(rdb_session, "route-boundary-first")
@@ -1994,8 +2222,8 @@ async def test_create_agent_route_enforces_mode_and_workspace_boundaries(
         encrypted_credentials="encrypted",
         config=None,
     )
-    rdb_session.add(integration)
-    await rdb_session.flush()
+    rdb_session.write_session.add(integration)
+    await rdb_session.write_session.flush()
     selection = make_test_model_selection_dict(
         integration_id=integration.id,
         provider=LLMProvider.ANTHROPIC,
@@ -2037,8 +2265,8 @@ async def test_create_agent_route_enforces_mode_and_workspace_boundaries(
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    rdb_session.add_all((agent, second_agent, foreign_agent))
-    await rdb_session.flush()
+    rdb_session.write_session.add_all((agent, second_agent, foreign_agent))
+    await rdb_session.write_session.flush()
     repository = ExternalChannelRepository()
     connection = await repository.create_connection(
         rdb_session, _connection_create(first_workspace)
@@ -2060,7 +2288,7 @@ async def test_create_agent_route_enforces_mode_and_workspace_boundaries(
         IntegrityError,
         match="uq_external_channel_agent_routes_single_connection",
     ):
-        async with rdb_session.begin_nested():
+        async with rdb_session.write_session.begin_nested():
             await repository.create_agent_route(
                 rdb_session,
                 create.model_copy(
@@ -2111,3 +2339,26 @@ async def test_create_agent_route_enforces_mode_and_workspace_boundaries(
                 update={"catalog_removed_by_user_id": "not-a-route-owner"}
             ),
         )
+
+
+def _active_profile_repository(
+    manager: SessionManager[WriteSession],
+) -> ActiveProfileAdmissionRepository:
+    """Keep these lifecycle-only fixtures scoped to their declared option contract."""
+    del manager
+    repository = create_autospec(ActiveProfileAdmissionRepository, instance=True)
+
+    async def validate(
+        session: WriteSession,
+        *,
+        agent: Agent,
+        profile: RequestedInferenceProfile,
+        captured: CapturedProfileAdmission | None,
+    ) -> None:
+        del session, captured
+        validate_requested_profile_against_options(
+            agent.selectable_model_options, profile
+        )
+
+    repository.validate_in_session.side_effect = validate
+    return repository

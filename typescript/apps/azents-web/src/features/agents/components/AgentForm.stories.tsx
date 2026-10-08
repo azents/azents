@@ -2,21 +2,25 @@ import { rem } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { expect, userEvent, within } from "storybook/test";
 import { reasoningEffortLevels } from "@/shared/lib/reasoning-effort";
-import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
-import { useAgentFormTranslations } from "../containers/useAgentFormTranslations";
+import { renderStaticModelPicker } from "@/shared/model-options/components/model-option-editor-story-fixtures";
+import { SelectableModelOptionsEditorContainer } from "@/shared/model-options/containers/SelectableModelOptionsEditorContainer";
 import {
   findSelectableModelOptionByLabel,
   selectableModelOptionFormValuesFromStoredOptions,
-} from "../model-selection";
+} from "@/shared/model-options/model-selection";
+import { partialReasoningCapabilities } from "@/shared/storybook/model-capability-fixtures";
+import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
+import { useAgentFormTranslations } from "../containers/useAgentFormTranslations";
 import { AgentForm } from "./AgentForm";
+import type { AgentFormValues } from "../schemas";
+import type { AgentFormState } from "../types";
+import type { AgentFormProps } from "./AgentForm";
+import type { SelectableModelOptionsEditorProps } from "@/shared/model-options/components/SelectableModelOptionsEditor";
 import type {
   ImageGenerationCatalogState,
   ModelSelectionOption,
   ProviderIntegrationOption,
-} from "../model-selection";
-import type { AgentFormValues } from "../schemas";
-import type { AgentFormState } from "../types";
-import type { AgentFormProps } from "./AgentForm";
+} from "@/shared/model-options/model-selection";
 import type {
   AgentModelSelection,
   AgentResponse,
@@ -41,6 +45,7 @@ const mainSelection: AgentModelSelection = {
     compatibility: {},
   },
   model_snapshot: {},
+  pricing: null,
   source_metadata: null,
   last_refreshed_at: "2026-05-14T00:00:00Z",
 };
@@ -283,6 +288,7 @@ function AgentFormStory(props: AgentFormProps): React.ReactElement {
   return (
     <AgentForm
       {...props}
+      renderModelOptionsEditor={renderModelOptionsEditor}
       includeToolkitSection={false}
       t={t}
       form={form}
@@ -292,6 +298,17 @@ function AgentFormStory(props: AgentFormProps): React.ReactElement {
       imageGenerationCatalogStates={emptyImageGenerationCatalogStates}
       canSyncImageCatalog={false}
       onSyncImageCatalog={async () => {}}
+    />
+  );
+}
+
+function renderModelOptionsEditor(
+  props: SelectableModelOptionsEditorProps,
+): React.ReactNode {
+  return (
+    <SelectableModelOptionsEditorContainer
+      {...props}
+      renderModelPicker={renderStaticModelPicker}
     />
   );
 }
@@ -332,6 +349,56 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const DefaultPreselected = {} satisfies Story;
+
+export const Loading = {
+  args: { formState: { type: "LOADING" } },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).queryByRole("textbox", { name: "Name" }),
+    ).not.toBeInTheDocument();
+  },
+} satisfies Story;
+
+export const NotFound = {
+  args: { formState: { type: "NOT_FOUND" } },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByText("Agent not found"),
+    ).toBeVisible();
+  },
+} satisfies Story;
+
+export const MutationError = {
+  args: {
+    mutationState: {
+      type: "IDLE",
+      error: "Agent settings could not be saved.",
+    },
+  },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByText("Agent settings could not be saved."),
+    ).toBeVisible();
+  },
+} satisfies Story;
+
+export const Submitting = {
+  args: { mutationState: { type: "SUBMITTING" } },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByRole("button", { name: "Save" }),
+    ).toHaveAttribute("data-loading", "true");
+  },
+} satisfies Story;
+
+export const RuntimeProfilesLoading = {
+  args: { formState: { type: "CREATE" }, runtimeProfilesLoading: true },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByRole("combobox", { name: "Runtime profile" }),
+    ).toBeDisabled();
+  },
+} satisfies Story;
 
 export const CreateUsesWorkspaceDefault = {
   args: {
@@ -433,5 +500,43 @@ export const UnsupportedCapabilities = {
         model_parameters: null,
       },
     },
+  },
+} satisfies Story;
+
+export const VersionedPartialEffortsWithOmittedDefault = {
+  args: {
+    formState: {
+      type: "EDIT",
+      agent: {
+        ...baseAgent,
+        model_parameters: null,
+        selectable_model_options: baseAgent.selectable_model_options.map(
+          (option) => ({
+            ...option,
+            candidates: option.candidates.map((candidate) => ({
+              ...candidate,
+              model_selection: {
+                ...candidate.model_selection,
+                normalized_capabilities: partialReasoningCapabilities,
+              },
+            })),
+          }),
+        ),
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const select = canvas.getByRole("combobox", {
+      name: "Default reasoning effort",
+    });
+    await expect(select).toHaveValue("");
+    await userEvent.click(select);
+    const body = within(document.body);
+    await expect(body.getByRole("option", { name: "xhigh" })).toBeVisible();
+    await expect(body.getByRole("option", { name: "max" })).toBeVisible();
+    await expect(
+      body.queryByRole("option", { name: "medium" }),
+    ).not.toBeInTheDocument();
   },
 } satisfies Story;

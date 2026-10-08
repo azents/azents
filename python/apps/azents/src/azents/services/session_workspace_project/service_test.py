@@ -1,16 +1,20 @@
 """SessionWorkspaceProjectService tests."""
 
+import asyncio
 import dataclasses
 import datetime
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
 from azcommon.result import Failure, Success
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from azents.core.action_execution_data import ActionExecutionCreate
+from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     ActionExecutionStatus,
     AgentProjectCatalogStatus,
@@ -20,14 +24,19 @@ from azents.core.enums import (
     GitWorktreePathClaimState,
     LLMProvider,
     RuntimeRunnerState,
+    SessionWorkingFolderBindingState,
     WorkspaceUserRole,
+)
+from azents.core.session_workspace_paths import (
+    InvalidProjectPath,
+    normalize_session_workspace_path,
 )
 from azents.core.skill_projection import (
     SkillProjectionItem,
     SkillProjectionSnapshot,
     SkillProjectionState,
 )
-from azents.engine.tools.skill import SkillStateStore
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -35,9 +44,21 @@ from azents.rdb.models.git_worktree_cleanup_claim import (
     RDBGitWorktreePathClaim,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.session_agent import RDBSessionAgent
+from azents.rdb.models.session_agent_context import (
+    RDBSessionAgentContext,
+    RDBSessionAgentContextProject,
+)
+from azents.rdb.models.user import RDBUser
+from azents.rdb.models.workspace import RDBWorkspace
+from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import (
+    WriteSession,
+    create_read_only_session_manager,
+    create_read_write_session_manager,
+)
 from azents.repos.action_execution import ActionExecutionRepository
-from azents.repos.action_execution.data import ActionExecutionCreate
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
@@ -48,18 +69,16 @@ from azents.repos.agent_project_catalog.data import (
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.session_working_folder_binding import (
     SessionWorkingFolderBindingRepository,
 )
 from azents.repos.session_working_folder_binding.data import (
-    SessionWorkingFolderAuthority as RepositoryWorkingFolderAuthority,
-)
-from azents.repos.session_working_folder_binding.data import (
-    SessionWorkingFolderBindingError as RepositoryWorkingFolderBindingError,
-)
-from azents.repos.session_working_folder_binding.data import (
+    SessionWorkingFolderAuthority,
+    SessionWorkingFolderBindingError,
     SessionWorkingFolderTarget,
+)
+from azents.repos.session_working_folder_binding.data import (
+    SessionWorkingFolderAuthority as RepositoryWorkingFolderAuthority,
 )
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project_operations import (
@@ -70,10 +89,10 @@ from azents.repos.session_workspace_project_operations.data import (
     ProjectDatabaseContext,
 )
 from azents.repos.skill_state import SkillStateRepository
+from azents.repos.skill_state_store import SkillStateStore
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
 from azents.runtime.control_protocol.runner_operations import (
@@ -87,33 +106,28 @@ from azents.services.agent_runtime.lifecycle_data import (
     RuntimeOperationTargetResolver,
 )
 from azents.services.session_working_folder_binding import (
-    SessionWorkingFolderAuthority,
-    SessionWorkingFolderBindingError,
     SessionWorkingFolderBindingService,
+)
+from azents.services.session_workspace_project import (
+    ProjectAccessDenied,
+    ProjectPathCleanupInProgress,
+    ProjectPathConflict,
+    SessionWorkspaceProjectService,
 )
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
 )
 
-from . import (
-    InvalidProjectPath,
-    ProjectAccessDenied,
-    ProjectPathCleanupInProgress,
-    ProjectPathConflict,
-    SessionWorkspaceProjectService,
-    normalize_session_workspace_path,
-)
-
 
 class _SessionManager:
     """session manager for tests."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: WriteSession) -> None:
         self._session = session
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncGenerator[AsyncSession]:
+    async def __call__(self) -> AsyncGenerator[WriteSession]:
         """Return same session as context manager."""
         yield self._session
 
@@ -236,7 +250,7 @@ class _FailingCatalogRepository(AgentProjectCatalogRepository):
 
     async def update_status(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         path: str,
@@ -273,12 +287,12 @@ class _ForbiddenSkillStateStore(SkillStateStore):
 class _TrackingSessionManager:
     """Record repository sessions so external fakes can assert closed boundaries."""
 
-    def __init__(self, delegate: SessionManager[AsyncSession]) -> None:
+    def __init__(self, delegate: SessionManager[WriteSession]) -> None:
         self.delegate = delegate
-        self.sessions: list[AsyncSession] = []
+        self.sessions: list[WriteSession] = []
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncGenerator[AsyncSession]:
+    async def __call__(self) -> AsyncGenerator[WriteSession]:
         """Track each repository-owned session lifetime."""
         async with self.delegate() as session:
             self.sessions.append(session)
@@ -286,10 +300,12 @@ class _TrackingSessionManager:
 
     def assert_no_active_transaction(self) -> None:
         """Assert every repository call completed before external work."""
-        assert all(not session.in_transaction() for session in self.sessions)
+        assert all(
+            not session.write_session.in_transaction() for session in self.sessions
+        )
 
 
-async def _create_workspace(session: AsyncSession, handle: str) -> str:
+async def _create_workspace(session: WriteSession, handle: str) -> str:
     """Create Workspace for tests."""
     repo = WorkspaceRepository()
     await repo.create(session, WorkspaceCreate(name="Project service", handle=handle))
@@ -299,7 +315,7 @@ async def _create_workspace(session: AsyncSession, handle: str) -> str:
 
 
 async def _create_runtime_fixture(
-    session: AsyncSession, workspace_id: str, slug: str
+    session: WriteSession, workspace_id: str, slug: str
 ) -> _RuntimeFixture:
     """Create AgentRuntime and team primary AgentSession for tests."""
 
@@ -310,8 +326,8 @@ async def _create_runtime_fixture(
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
 
     agent = RDBAgent(
         workspace_id=workspace_id,
@@ -345,8 +361,8 @@ async def _create_runtime_fixture(
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
 
     runtime_repository = AgentRuntimeRepository()
     runtime = await runtime_repository.ensure_for_agent(session, agent.id)
@@ -372,14 +388,14 @@ async def _create_runtime_fixture(
     )
 
 
-async def _create_session(session: AsyncSession, workspace_id: str, slug: str) -> str:
+async def _create_session(session: WriteSession, workspace_id: str, slug: str) -> str:
     """Create AgentSession ID for tests."""
     fixture = await _create_runtime_fixture(session, workspace_id, slug)
     return fixture.session_id
 
 
 async def _create_workspace_user(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     workspace_id: str,
     email: str,
@@ -400,7 +416,7 @@ async def _create_workspace_user(
 
 
 def _service(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     runner_operations: RuntimeRunnerOperationClient | None = None,
     binding_error: SessionWorkingFolderBindingError | None = None,
@@ -428,29 +444,8 @@ def _service(
 
     binding_service.resolve_authority_for_target.side_effect = resolve_binding
 
-    async def resolve_binding_in_transaction(
-        transaction: AsyncSession,
-        *,
-        agent_id: str,
-        session_id: str,
-        runtime_target: RuntimeOperationTarget,
-    ) -> SessionWorkingFolderAuthority:
-        del transaction
-        return await resolve_binding(
-            agent_id=agent_id,
-            session_id=session_id,
-            runtime_target=runtime_target,
-        )
-
-    binding_service.resolve_authority_in_transaction.side_effect = (
-        resolve_binding_in_transaction
-    )
-    binding_service.resolve_bound_authority_in_transaction.side_effect = (
-        resolve_binding_in_transaction
-    )
-
     async def resolve_repository_binding(
-        transaction: AsyncSession,
+        transaction: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -471,7 +466,7 @@ def _service(
     )
 
     async def resolve_repository_binding_for_locked_agent(
-        transaction: AsyncSession,
+        transaction: WriteSession,
         *,
         agent: Agent,
         session_id: str,
@@ -493,10 +488,6 @@ def _service(
         binding_service.require_bindable_context.side_effect = binding_error
         binding_service.require_bound_context.side_effect = binding_error
         binding_service.resolve_authority_for_target.side_effect = binding_error
-        binding_service.resolve_authority_in_transaction.side_effect = binding_error
-        binding_service.resolve_bound_authority_in_transaction.side_effect = (
-            binding_error
-        )
         binding_repository.resolve_authority_in_session.side_effect = binding_error
         binding_repository.resolve_locked_authority_in_session.side_effect = (
             binding_error
@@ -516,6 +507,7 @@ def _service(
                 session_manager=session_manager
             ),
             session_manager=session_manager,
+            read_session_manager=session_manager,
         ),
         repository=project_repository,
         runtime_target_resolver=(
@@ -527,7 +519,7 @@ def _service(
 
 
 def _repository_owned_service(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     *,
     runtime_target: RuntimeOperationTarget,
     runner_operations: RuntimeRunnerOperationClient | None = None,
@@ -542,6 +534,7 @@ def _repository_owned_service(
         agent_repository=AgentRepository(),
         agent_session_repository=AgentSessionRepository(),
         session_manager=session_manager,
+        read_session_manager=session_manager,
     )
     return SessionWorkspaceProjectService(
         operations_repository=SessionWorkspaceProjectOperationsRepository(
@@ -557,6 +550,7 @@ def _repository_owned_service(
                 or SkillStateRepository(session_manager=session_manager)
             ),
             session_manager=session_manager,
+            read_session_manager=session_manager,
         ),
         repository=project_repository,
         runtime_target_resolver=_FakeRuntimeTargetResolver(
@@ -587,8 +581,8 @@ def _runtime_target(fixture: _RuntimeFixture) -> RuntimeOperationTarget:
 class TestSessionWorkspaceProjectService:
     """SessionWorkspaceProjectService tests."""
 
-    async def test_final_registration_uses_agent_first_lock_order(self) -> None:
-        """Final Project authorization locks Agent before Session and membership."""
+    async def test_final_registration_uses_plain_scoped_authorization(self) -> None:
+        """Final Project authorization reads scoped Agent, Session, and membership."""
         calls: list[str] = []
         transaction = AsyncMock(spec=AsyncSession)
         session_manager = _SessionManager(transaction)
@@ -598,7 +592,7 @@ class TestSessionWorkspaceProjectService:
         binding_repository = AsyncMock(spec=SessionWorkingFolderBindingRepository)
 
         async def lock_agent(
-            session: AsyncSession,
+            session: WriteSession,
             agent_id: str,
         ) -> Agent:
             del session
@@ -606,7 +600,7 @@ class TestSessionWorkspaceProjectService:
             return Agent.model_construct(id=agent_id)
 
         async def lock_session(
-            session: AsyncSession,
+            session: WriteSession,
             session_id: str,
         ) -> AgentSession:
             del session
@@ -619,7 +613,7 @@ class TestSessionWorkspaceProjectService:
             )
 
         async def lock_membership(
-            session: AsyncSession,
+            session: WriteSession,
             *,
             workspace_id: str,
             user_id: str,
@@ -628,24 +622,10 @@ class TestSessionWorkspaceProjectService:
             calls.append("membership")
             return object()
 
-        async def resolve_binding(
-            session: AsyncSession,
-            *,
-            agent: Agent,
-            session_id: str,
-            target: SessionWorkingFolderTarget,
-            bind_pending: bool,
-        ) -> RepositoryWorkingFolderAuthority:
-            del session, agent, session_id, target, bind_pending
-            calls.append("binding")
-            raise RepositoryWorkingFolderBindingError("test_stop")
-
-        agent_repository.lock_by_id.side_effect = lock_agent
-        session_repository.lock_by_id.side_effect = lock_session
-        membership_repository.lock_by_workspace_and_user.side_effect = lock_membership
-        binding_repository.resolve_locked_authority_in_session.side_effect = (
-            resolve_binding
-        )
+        agent_repository.get_by_id.side_effect = lock_agent
+        session_repository.get_by_id.side_effect = lock_session
+        membership_repository.get_by_workspace_and_user.side_effect = lock_membership
+        binding_repository.project_bound_authority_in_session.return_value = None
         repository = SessionWorkspaceProjectOperationsRepository(
             project_repository=AsyncMock(spec=SessionWorkspaceProjectRepository),
             agent_repository=agent_repository,
@@ -656,6 +636,7 @@ class TestSessionWorkspaceProjectService:
             binding_repository=binding_repository,
             skill_state_repository=AsyncMock(spec=SkillStateRepository),
             session_manager=session_manager,
+            read_session_manager=session_manager,
         )
 
         result = await repository.register_existing_project(
@@ -675,7 +656,7 @@ class TestSessionWorkspaceProjectService:
 
         assert isinstance(result, Failure)
         assert isinstance(result.error, ProjectBindingUnavailable)
-        assert calls == ["agent", "session", "membership", "binding"]
+        assert calls == ["agent", "session", "membership"]
 
     def test_normalize_rejects_workspace_root(self) -> None:
         """Session Workspace root itself cannot become Project."""
@@ -690,7 +671,7 @@ class TestSessionWorkspaceProjectService:
             raise AssertionError("root path was accepted")
 
     async def test_create_project_rejects_prefix_outside_path(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Reject path outside Session Workspace."""
         workspace_id = await _create_workspace(rdb_session, "swp-svc-prefix")
@@ -706,7 +687,7 @@ class TestSessionWorkspaceProjectService:
         assert isinstance(result.error, InvalidProjectPath)
 
     async def test_create_project_allows_nested_path(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Allow parent and nested child Project paths in the same session."""
         workspace_id = await _create_workspace(rdb_session, "swp-svc-nested")
@@ -727,7 +708,7 @@ class TestSessionWorkspaceProjectService:
         assert result.value.path == "/workspace/agent/app/frontend"
 
     async def test_create_project_rejects_duplicate_path(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Reject path same as existing Project."""
         workspace_id = await _create_workspace(rdb_session, "swp-svc-duplicate")
@@ -758,7 +739,7 @@ class TestSessionWorkspaceProjectService:
     )
     async def test_create_project_rejects_overlapping_cleanup_claim(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
         claim_suffix: str,
         project_suffix: str,
     ) -> None:
@@ -814,7 +795,7 @@ class TestSessionWorkspaceProjectService:
         assert isinstance(after_release, Success)
 
     async def test_expired_cleanup_claim_with_current_owner_still_blocks_reclaim(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Keep an expired claim while its owning action remains current."""
         workspace_id = await _create_workspace(rdb_session, "swp-svc-current-claim")
@@ -850,7 +831,7 @@ class TestSessionWorkspaceProjectService:
             )
             == "claimed"
         )
-        claim = await rdb_session.scalar(
+        claim = await rdb_session.read_session.scalar(
             sa.select(RDBGitWorktreePathClaim).where(
                 RDBGitWorktreePathClaim.action_execution_id == owner.id
             )
@@ -885,7 +866,7 @@ class TestSessionWorkspaceProjectService:
         assert result == "cleanup_in_progress"
 
     async def test_expired_cleanup_claim_with_stale_owner_is_reassigned(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Reclaim an expired manual claim when ownership generation advanced."""
         workspace_id = await _create_workspace(rdb_session, "swp-svc-stale-claim")
@@ -921,7 +902,7 @@ class TestSessionWorkspaceProjectService:
             )
             == "claimed"
         )
-        claim = await rdb_session.scalar(
+        claim = await rdb_session.read_session.scalar(
             sa.select(RDBGitWorktreePathClaim).where(
                 RDBGitWorktreePathClaim.action_execution_id == owner.id
             )
@@ -930,7 +911,9 @@ class TestSessionWorkspaceProjectService:
         claim.lease_until = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
             seconds=1
         )
-        agent_session = await rdb_session.get(RDBAgentSession, fixture.session_id)
+        agent_session = await rdb_session.read_session.get(
+            RDBAgentSession, fixture.session_id
+        )
         assert agent_session is not None
         agent_session.owner_generation = 1
         contender = await action_repository.create(
@@ -957,12 +940,12 @@ class TestSessionWorkspaceProjectService:
         )
 
         assert result == "claimed"
-        await rdb_session.refresh(claim)
+        await rdb_session.write_session.refresh(claim)
         assert claim.action_execution_id == contender.id
         assert claim.owner_generation == contender.owner_generation
 
     async def test_cancellation_retains_removing_claim_after_action_handover(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Keep a bounded claim while a cancelled Runner removal may still settle."""
         workspace_id = await _create_workspace(rdb_session, "swp-svc-removing-claim")
@@ -1012,7 +995,7 @@ class TestSessionWorkspaceProjectService:
             rdb_session,
             action_execution_id=execution.id,
         )
-        claim = await rdb_session.scalar(
+        claim = await rdb_session.read_session.scalar(
             sa.select(RDBGitWorktreePathClaim).where(
                 RDBGitWorktreePathClaim.worktree_path == path
             )
@@ -1025,7 +1008,7 @@ class TestSessionWorkspaceProjectService:
 
     async def test_agent_removal_claim_transitions_and_terminalizes(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Persist the Agent claim lifecycle around destructive Runner ownership."""
         workspace_id = await _create_workspace(rdb_session, "swp-agent-claim")
@@ -1069,7 +1052,7 @@ class TestSessionWorkspaceProjectService:
             worktree_path=path,
         )
         assert claimed is True
-        claim = await rdb_session.scalar(
+        claim = await rdb_session.read_session.scalar(
             sa.select(RDBGitWorktreePathClaim).where(
                 RDBGitWorktreePathClaim.action_execution_id == execution.id
             )
@@ -1083,7 +1066,7 @@ class TestSessionWorkspaceProjectService:
             action_execution_id=execution.id,
             worktree_path=path,
         )
-        await rdb_session.refresh(claim)
+        await rdb_session.write_session.refresh(claim)
         assert claim.state is GitWorktreePathClaimState.REMOVING
 
         await repository.release_agent_git_worktree_claim(
@@ -1092,13 +1075,13 @@ class TestSessionWorkspaceProjectService:
             worktree_path=path,
             state=GitWorktreePathClaimState.REMOVED,
         )
-        await rdb_session.refresh(claim)
+        await rdb_session.write_session.refresh(claim)
         assert claim.state is GitWorktreePathClaimState.REMOVED
         assert claim.lease_until <= datetime.datetime.now(datetime.UTC)
 
     async def test_agent_removal_cancellation_releases_only_nonremoving_claims(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Cancellation retains only a claim that may still own Runner mutation."""
         workspace_id = await _create_workspace(rdb_session, "swp-agent-cancel-claim")
@@ -1161,7 +1144,7 @@ class TestSessionWorkspaceProjectService:
 
         claims = list(
             (
-                await rdb_session.scalars(
+                await rdb_session.read_session.scalars(
                     sa.select(RDBGitWorktreePathClaim)
                     .where(
                         RDBGitWorktreePathClaim.owner_kind
@@ -1175,7 +1158,7 @@ class TestSessionWorkspaceProjectService:
         assert claims[0].state is GitWorktreePathClaimState.REMOVING
 
     async def test_register_existing_folder_rejects_invalid_path_before_runtime_check(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Reject invalid path without passing to Runner operation."""
         workspace_id = await _create_workspace(rdb_session, "swp-svc-register-bad")
@@ -1189,7 +1172,9 @@ class TestSessionWorkspaceProjectService:
             workspace_id=workspace_id,
             email="swp-svc-register-bad@example.com",
         )
-        runtime = await rdb_session.get(RDBAgentRuntime, fixture.runtime_id)
+        runtime = await rdb_session.read_session.get(
+            RDBAgentRuntime, fixture.runtime_id
+        )
         assert runtime is not None
         runtime.runner_state = RuntimeRunnerState.READY
         runner_operations = _FakeRunnerOperations()
@@ -1210,7 +1195,7 @@ class TestSessionWorkspaceProjectService:
         assert runner_operations.paths == []
 
     async def test_register_existing_folder_creates_project(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Register existing runtime directory as Project."""
         workspace_id = await _create_workspace(rdb_session, "swp-svc-register")
@@ -1224,7 +1209,9 @@ class TestSessionWorkspaceProjectService:
             workspace_id=workspace_id,
             email="swp-svc-register@example.com",
         )
-        runtime = await rdb_session.get(RDBAgentRuntime, fixture.runtime_id)
+        runtime = await rdb_session.read_session.get(
+            RDBAgentRuntime, fixture.runtime_id
+        )
         assert runtime is not None
         runtime.runner_state = RuntimeRunnerState.READY
         runner_operations = _FakeRunnerOperations()
@@ -1258,7 +1245,7 @@ class TestSessionWorkspaceProjectService:
         assert runner_operations.paths == ["/workspace/agent/app"]
 
     async def test_register_existing_folder_rejects_non_directory(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Session registration shares strict Runtime directory semantics."""
         workspace_id = await _create_workspace(rdb_session, "swp-svc-register-file")
@@ -1272,7 +1259,9 @@ class TestSessionWorkspaceProjectService:
             workspace_id=workspace_id,
             email="swp-svc-register-file@example.com",
         )
-        runtime = await rdb_session.get(RDBAgentRuntime, fixture.runtime_id)
+        runtime = await rdb_session.read_session.get(
+            RDBAgentRuntime, fixture.runtime_id
+        )
         assert runtime is not None
         runtime.runner_state = RuntimeRunnerState.READY
         service = _service(
@@ -1292,7 +1281,7 @@ class TestSessionWorkspaceProjectService:
         assert result.error.reason == "Project path must be a runtime directory."
 
     async def test_register_existing_folder_preserves_timeout_error_contract(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Session registration maps shared unavailability to its existing error."""
         workspace_id = await _create_workspace(rdb_session, "swp-svc-register-timeout")
@@ -1306,7 +1295,9 @@ class TestSessionWorkspaceProjectService:
             workspace_id=workspace_id,
             email="swp-svc-register-timeout@example.com",
         )
-        runtime = await rdb_session.get(RDBAgentRuntime, fixture.runtime_id)
+        runtime = await rdb_session.read_session.get(
+            RDBAgentRuntime, fixture.runtime_id
+        )
         assert runtime is not None
         runtime.runner_state = RuntimeRunnerState.READY
         service = _service(
@@ -1330,7 +1321,7 @@ class TestSessionWorkspaceProjectService:
         )
 
     async def test_list_projects_for_session_requires_matching_agent(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Reject Project list fetch when session is not owned by Agent."""
         workspace_id = await _create_workspace(rdb_session, "swp-svc-agent-mismatch")
@@ -1356,7 +1347,7 @@ class TestSessionWorkspaceProjectService:
         assert isinstance(result.error, ProjectAccessDenied)
 
     async def test_list_projects_for_session_requires_workspace_member(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Reject Project list fetch for user without Workspace membership."""
         workspace_id = await _create_workspace(rdb_session, "swp-svc-access-denied")
@@ -1377,7 +1368,7 @@ class TestSessionWorkspaceProjectService:
         assert isinstance(result.error, ProjectAccessDenied)
 
     async def test_list_projects_for_session_returns_registered_projects(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Workspace member fetches Project list registered in selected session."""
         workspace_id = await _create_workspace(rdb_session, "swp-svc-access-list")
@@ -1414,7 +1405,7 @@ class TestSessionWorkspaceProjectService:
 
     async def test_list_projects_for_session_requires_bound_context(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Persisted Project paths remain hidden without current bound authority."""
         workspace_id = await _create_workspace(rdb_session, "swp-svc-bound-list")
@@ -1452,7 +1443,7 @@ class TestSessionWorkspaceProjectService:
 
     async def test_delete_project_for_session_requires_bound_context(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Project registry mutation is denied after binding authority is lost."""
         workspace_id = await _create_workspace(rdb_session, "swp-svc-bound-delete")
@@ -1496,7 +1487,7 @@ class TestSessionWorkspaceProjectService:
 
     async def test_runtime_and_runner_calls_observe_no_active_repository_transaction(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Close database operations before Runtime resolution and Runner stat."""
         async with rdb_session_manager() as session:
@@ -1534,7 +1525,7 @@ class TestSessionWorkspaceProjectService:
 
     async def test_registration_revalidates_revoked_membership_after_runner_stat(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """A preflight member cannot finalize after membership is revoked."""
         async with rdb_session_manager() as session:
@@ -1595,7 +1586,7 @@ class TestSessionWorkspaceProjectService:
 
     async def test_registration_rolls_back_project_and_preset_when_catalog_fails(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Keep Project, preset, and catalog registration in one atomic mutation."""
         async with rdb_session_manager() as session:
@@ -1639,7 +1630,7 @@ class TestSessionWorkspaceProjectService:
 
     async def test_delete_composes_skill_invalidation_without_engine_store_call(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Delete Project and its Skill projection in one repository transaction."""
         async with rdb_session_manager() as session:
@@ -1716,3 +1707,150 @@ class TestSessionWorkspaceProjectService:
                 created.value.id,
             )
         assert stored is None
+
+
+@pytest.mark.asyncio
+async def test_bound_project_management_survives_held_ancestor_mutation_locks(
+    rdb_engine: AsyncEngine, latest_db_schema: None
+) -> None:
+    """PENDING creation binds; later BOUND registration and reads avoid locks."""
+    writes = create_read_write_session_manager(rdb_engine)
+    reads = create_read_only_session_manager(rdb_engine)
+    slug = f"project-lag-{uuid4().hex}"
+    async with writes() as session:
+        workspace_id = await _create_workspace(session, slug)
+        fixture = await _create_runtime_fixture(session, workspace_id, slug)
+        user_id = await _create_workspace_user(
+            session, workspace_id=workspace_id, email=f"{slug}@example.com"
+        )
+    target = SessionWorkingFolderTarget(
+        id=fixture.runtime_id,
+        capability_snapshot_version=1,
+        runtime_target_capability_version=1,
+        workspace_path="/workspace/agent",
+    )
+    service = _repository_owned_service(writes, runtime_target=_runtime_target(fixture))
+    operations = dataclasses.replace(
+        service.operations_repository, read_session_manager=reads
+    )
+    context = ProjectDatabaseContext(
+        agent_id=fixture.agent_id, session_id=fixture.session_id
+    )
+    held, release = asyncio.Event(), asyncio.Event()
+
+    async def holder() -> None:
+        async with writes() as session:
+            # NO KEY UPDATE models parent status/config mutation and still permits
+            # PostgreSQL FK KEY SHARE checks from actual child insertion.
+            for model, predicate in (
+                (RDBAgent, RDBAgent.id == fixture.agent_id),
+                (RDBAgentSession, RDBAgentSession.id == fixture.session_id),
+                (
+                    RDBSessionAgentContext,
+                    RDBSessionAgentContext.agent_id == fixture.agent_id,
+                ),
+                (
+                    RDBSessionAgent,
+                    RDBSessionAgent.agent_session_id == fixture.session_id,
+                ),
+                (
+                    RDBWorkspaceUser,
+                    sa.and_(
+                        RDBWorkspaceUser.workspace_id == workspace_id,
+                        RDBWorkspaceUser.user_id == user_id,
+                    ),
+                ),
+            ):
+                await session.write_session.execute(
+                    sa.select(model).where(predicate).with_for_update(key_share=True)
+                )
+            held.set()
+            await release.wait()
+
+    task: asyncio.Task[None] | None = None
+    try:
+        async with reads() as session:
+            pending = await (
+                AgentSessionRepository().get_working_folder_context_by_session_id(
+                    session, session_id=fixture.session_id
+                )
+            )
+            assert pending is not None
+            assert pending.binding_state is SessionWorkingFolderBindingState.PENDING
+        created = await operations.create_project(
+            context=context, path="/workspace/agent/initial", target=target
+        )
+        assert isinstance(created, Success)
+        async with reads() as session:
+            bound = await (
+                AgentSessionRepository().get_working_folder_context_by_session_id(
+                    session, session_id=fixture.session_id
+                )
+            )
+            assert bound is not None
+            assert bound.binding_state is SessionWorkingFolderBindingState.BOUND
+        task = asyncio.create_task(holder())
+        await asyncio.wait_for(held.wait(), timeout=5)
+        registered = await asyncio.wait_for(
+            operations.register_existing_project(
+                context=context,
+                user_id=user_id,
+                path="/workspace/agent/registered",
+                target=target,
+            ),
+            timeout=5,
+        )
+        assert isinstance(registered, Success)
+        listed = await asyncio.wait_for(
+            operations.list_accessible_projects(
+                context=context, user_id=user_id, target=target
+            ),
+            timeout=5,
+        )
+        assert isinstance(listed, Success)
+        assert {project.path for project in listed.value} == {
+            "/workspace/agent/initial",
+            "/workspace/agent/registered",
+        }
+        assert not release.is_set()
+    finally:
+        release.set()
+        if task is not None:
+            await task
+        async with writes() as session:
+            context_ids = sa.select(RDBSessionAgentContext.id).where(
+                RDBSessionAgentContext.agent_id == fixture.agent_id
+            )
+            await session.write_session.execute(
+                sa.delete(RDBSessionAgentContextProject).where(
+                    RDBSessionAgentContextProject.session_agent_context_id.in_(
+                        context_ids
+                    )
+                )
+            )
+            await session.write_session.execute(
+                sa.update(RDBSessionAgentContext)
+                .where(RDBSessionAgentContext.agent_id == fixture.agent_id)
+                .values(root_session_agent_id=None)
+            )
+            for model, predicate in (
+                (
+                    RDBSessionAgent,
+                    RDBSessionAgent.agent_session_id == fixture.session_id,
+                ),
+                (
+                    RDBSessionAgentContext,
+                    RDBSessionAgentContext.agent_id == fixture.agent_id,
+                ),
+                (RDBAgentSession, RDBAgentSession.id == fixture.session_id),
+                (RDBAgentRuntime, RDBAgentRuntime.id == fixture.runtime_id),
+                (RDBAgent, RDBAgent.id == fixture.agent_id),
+                (
+                    RDBLLMProviderIntegration,
+                    RDBLLMProviderIntegration.workspace_id == workspace_id,
+                ),
+                (RDBWorkspaceUser, RDBWorkspaceUser.workspace_id == workspace_id),
+                (RDBWorkspace, RDBWorkspace.id == workspace_id),
+                (RDBUser, RDBUser.id == user_id),
+            ):
+                await session.write_session.execute(sa.delete(model).where(predicate))

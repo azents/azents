@@ -3,7 +3,6 @@
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
 from pydantic import TypeAdapter
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.credentials import (
     ApiKeySecrets,
@@ -19,9 +18,8 @@ from azents.core.credentials import (
     XaiOAuthSecrets,
 )
 from azents.core.crypto import CredentialCipher
-from azents.rdb.models.llm_catalog import RDBLLMCatalog
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
-from azents.rdb.models.workspace import RDBWorkspace
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import (
     LLMProviderIntegration,
@@ -55,11 +53,11 @@ class LLMProviderIntegrationRepository:
         """
         :param cipher: Credential encryption/decryption object
         """
-        self._cipher = cipher
+        self.cipher = cipher
 
     async def create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: LLMProviderIntegrationCreate,
     ) -> LLMProviderIntegration:
         """Create LLM Provider Integration.
@@ -68,7 +66,7 @@ class LLMProviderIntegrationRepository:
         :param create: Create data
         :return: Created LLMProviderIntegration
         """
-        encrypted = self._cipher.encrypt(create.secrets.model_dump_json())
+        encrypted = self.cipher.encrypt(create.secrets.model_dump_json())
         config_dict = (
             create.config.model_dump(mode="json") if create.config is not None else None
         )
@@ -81,12 +79,12 @@ class LLMProviderIntegrationRepository:
             enabled=create.enabled,
             catalog_configuration_version=1,
         )
-        session.add(rdb_integration)
-        await session.flush()
+        session.write_session.add(rdb_integration)
+        await session.write_session.flush()
         return self._build(rdb_integration)
 
     async def get_by_id(
-        self, session: AsyncSession, integration_id: str
+        self, session: ReadSession, integration_id: str
     ) -> LLMProviderIntegration | None:
         """Fetch LLM Provider Integration by ID, excluding secrets.
 
@@ -94,13 +92,13 @@ class LLMProviderIntegrationRepository:
         :param integration_id: Integration ID
         :return: LLMProviderIntegration or None
         """
-        rdb = await session.get(RDBLLMProviderIntegration, integration_id)
+        rdb = await session.read_session.get(RDBLLMProviderIntegration, integration_id)
         if rdb is None:
             return None
         return self._build(rdb)
 
     async def get_by_id_with_secrets(
-        self, session: AsyncSession, integration_id: str
+        self, session: ReadSession, integration_id: str
     ) -> LLMProviderIntegrationWithSecrets | None:
         """Fetch LLM Provider Integration by ID, including secrets.
 
@@ -108,13 +106,13 @@ class LLMProviderIntegrationRepository:
         :param integration_id: Integration ID
         :return: LLMProviderIntegrationWithSecrets or None
         """
-        rdb = await session.get(RDBLLMProviderIntegration, integration_id)
+        rdb = await session.read_session.get(RDBLLMProviderIntegration, integration_id)
         if rdb is None:
             return None
         return self._build_with_secrets(rdb)
 
     async def get_by_id_with_secrets_for_update(
-        self, session: AsyncSession, integration_id: str
+        self, session: WriteSession, integration_id: str
     ) -> LLMProviderIntegrationWithSecrets | None:
         """Lock and fetch an integration by ID, including secrets.
 
@@ -122,7 +120,7 @@ class LLMProviderIntegrationRepository:
         :param integration_id: Integration ID
         :return: Locked LLMProviderIntegrationWithSecrets or None
         """
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBLLMProviderIntegration)
             .where(RDBLLMProviderIntegration.id == integration_id)
             .with_for_update()
@@ -134,7 +132,7 @@ class LLMProviderIntegrationRepository:
         return self._build_with_secrets(rdb)
 
     async def list_by_workspace(
-        self, session: AsyncSession, workspace_id: str
+        self, session: ReadSession, workspace_id: str
     ) -> LLMProviderIntegrationList:
         """Fetch all integrations in workspace.
 
@@ -142,7 +140,7 @@ class LLMProviderIntegrationRepository:
         :param workspace_id: Workspace ID
         :return: LLMProviderIntegration list
         """
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBLLMProviderIntegration)
             .where(RDBLLMProviderIntegration.workspace_id == workspace_id)
             .order_by(RDBLLMProviderIntegration.created_at.desc())
@@ -154,7 +152,7 @@ class LLMProviderIntegrationRepository:
 
     async def update_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         integration_id: str,
         update: LLMProviderIntegrationUpdate,
     ) -> Result[LLMProviderIntegration, NotFound]:
@@ -178,7 +176,7 @@ class LLMProviderIntegrationRepository:
         if "enabled" in update:
             db_values["enabled"] = update["enabled"]
         if "secrets" in update:
-            db_values["encrypted_credentials"] = self._cipher.encrypt(
+            db_values["encrypted_credentials"] = self.cipher.encrypt(
                 update["secrets"].model_dump_json()
             )
         if "config" in update:
@@ -199,7 +197,7 @@ class LLMProviderIntegrationRepository:
                 else_=RDBLLMProviderIntegration.catalog_configuration_version,
             )
 
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBLLMProviderIntegration)
             .where(RDBLLMProviderIntegration.id == integration_id)
             .values(**db_values)
@@ -212,7 +210,7 @@ class LLMProviderIntegrationRepository:
 
     async def update_runtime_state_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         integration_id: str,
         update: LLMProviderIntegrationUpdate,
     ) -> Result[LLMProviderIntegration, NotFound]:
@@ -224,7 +222,7 @@ class LLMProviderIntegrationRepository:
             )
         db_values: dict[str, object] = {}
         if "secrets" in update:
-            db_values["encrypted_credentials"] = self._cipher.encrypt(
+            db_values["encrypted_credentials"] = self.cipher.encrypt(
                 update["secrets"].model_dump_json()
             )
         if "config" in update:
@@ -237,7 +235,7 @@ class LLMProviderIntegrationRepository:
             if integration is None:
                 return Failure(NotFound(integration_id=integration_id))
             return Success(integration)
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBLLMProviderIntegration)
             .where(RDBLLMProviderIntegration.id == integration_id)
             .values(**db_values)
@@ -250,7 +248,7 @@ class LLMProviderIntegrationRepository:
 
     async def delete_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         integration_id: str,
         *,
         workspace_id: str,
@@ -261,32 +259,17 @@ class LLMProviderIntegrationRepository:
         :param integration_id: Integration ID
         :param workspace_id: Owning Workspace ID
         """
-        await session.execute(
-            sa.select(RDBWorkspace.id)
-            .where(RDBWorkspace.id == workspace_id)
-            .with_for_update()
-        )
-        catalog_result = await session.execute(
-            sa.select(RDBLLMCatalog.id)
-            .where(RDBLLMCatalog.provider_integration_id == integration_id)
-            .order_by(RDBLLMCatalog.id)
-            .with_for_update()
-        )
-        catalog_result.scalars().all()
-        await session.execute(
-            sa.select(RDBLLMProviderIntegration.id)
+        # DELETE owns only the exact target mutation; FK cascades retain catalog
+        # cleanup and PostgreSQL serializes competing target writes naturally.
+        result = await session.write_session.execute(
+            sa.delete(RDBLLMProviderIntegration)
             .where(
                 RDBLLMProviderIntegration.id == integration_id,
                 RDBLLMProviderIntegration.workspace_id == workspace_id,
             )
-            .with_for_update()
+            .returning(RDBLLMProviderIntegration.id)
         )
-        await session.execute(
-            sa.delete(RDBLLMProviderIntegration).where(
-                RDBLLMProviderIntegration.id == integration_id,
-                RDBLLMProviderIntegration.workspace_id == workspace_id,
-            )
-        )
+        result.scalar_one_or_none()
 
     def _build(self, rdb: RDBLLMProviderIntegration) -> LLMProviderIntegration:
         """Convert RDB model to domain model, excluding secrets."""
@@ -312,7 +295,7 @@ class LLMProviderIntegrationRepository:
     ) -> LLMProviderIntegrationWithSecrets:
         """Convert RDB model to domain model, including secrets."""
         secrets = _secrets_adapter.validate_json(
-            self._cipher.decrypt(rdb.encrypted_credentials)
+            self.cipher.decrypt(rdb.encrypted_credentials)
         )
         config = (
             _config_adapter.validate_python(rdb.config)

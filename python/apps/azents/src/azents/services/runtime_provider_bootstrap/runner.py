@@ -11,8 +11,8 @@ from fastapi import Depends
 from azents.core.config import RuntimeProviderBootstrapConfig
 from azents.core.deps import get_runtime_provider_bootstrap_config
 from azents.core.enums import RuntimeProviderBootstrapAdapterKind
+from azents.core.runtime_provider_bootstrap import RuntimeProviderBootstrapSourceError
 
-from .data import RuntimeProviderBootstrapSourceError
 from .helm_file import (
     HelmFileRuntimeProviderBootstrapAdapter,
     RuntimeProviderBootstrapSourceDocumentError,
@@ -79,6 +79,7 @@ class RuntimeProviderBootstrapRunner:
             )
             logger.warning(
                 "Runtime Provider bootstrap source rejected",
+                exc_info=True,
                 extra={
                     "source_key": error.source_key,
                     "error_code": error.code,

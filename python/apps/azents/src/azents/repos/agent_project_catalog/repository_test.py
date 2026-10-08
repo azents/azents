@@ -3,14 +3,14 @@
 import datetime
 
 from azcommon.result import Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentProjectCatalogStatus, LLMProvider
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_project_catalog.data import AgentProjectCatalogStatusPatch
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
@@ -19,7 +19,7 @@ from azents.testing.model_selection import (
 from . import AgentProjectCatalogRepository
 
 
-async def _create_workspace(session: AsyncSession, handle: str) -> str:
+async def _create_workspace(session: WriteSession, handle: str) -> str:
     """Create Workspace for tests."""
     repo = WorkspaceRepository()
     result = await repo.create(
@@ -32,7 +32,7 @@ async def _create_workspace(session: AsyncSession, handle: str) -> str:
     return workspace_id
 
 
-async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> str:
+async def _create_agent(session: WriteSession, workspace_id: str, slug: str) -> str:
     """Create Agent for tests."""
     integration = RDBLLMProviderIntegration(
         workspace_id=workspace_id,
@@ -41,8 +41,8 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
 
     agent = RDBAgent(
         workspace_id=workspace_id,
@@ -76,8 +76,8 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     return agent.id
 
 
@@ -86,7 +86,7 @@ class TestAgentProjectCatalogRepository:
 
     async def test_upsert_entry_is_idempotent(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Repeated upsert refreshes the same Agent/path row."""
         workspace_id = await _create_workspace(rdb_session, "catalog-upsert")
@@ -112,7 +112,7 @@ class TestAgentProjectCatalogRepository:
 
     async def test_list_entries_by_paths_filters_exact_paths(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Path lookup returns only exact Agent/path matches."""
         workspace_id = await _create_workspace(rdb_session, "catalog-list-paths")
@@ -139,7 +139,7 @@ class TestAgentProjectCatalogRepository:
 
     async def test_update_status_upserts_projection(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Status update records filesystem projection fields."""
         workspace_id = await _create_workspace(rdb_session, "catalog-status")

@@ -12,12 +12,10 @@ from azents.core.enums import (
     ExchangeFileProvenanceKind,
     ExchangeFileStatus,
 )
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.run.types import FunctionTool, FunctionToolError, FunctionToolResult
 from azents.engine.tooling.execution_context import client_tool_execution_context
-from azents.engine.tools.present_file import (
-    _is_presentable_path,  # Exercise root containment directly.
-    make_present_file_tool,
-)
+from azents.engine.tools.present_file import make_present_file_tool
 from azents.engine.tools.testing import FakeSharedStorage
 from azents.repos.exchange_file.data import ExchangeFile
 from azents.runtime.transfer.present_file_publication import (
@@ -27,15 +25,9 @@ from azents.runtime.transfer.present_file_publication import (
 from azents.runtime.transfer.runtime_to_server import RuntimeToServerTransferError
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.services.runtime_storage_error import RuntimeStorageError
-from azents.services.session_resource_authority import SessionResourceAuthority
 
 _NOW = datetime.datetime.now(datetime.timezone.utc)
 _TARGET = ServerToRuntimeTarget(runtime_id="runtime-1", desired_generation=3)
-
-
-def test_presentable_path_supports_filesystem_root_workspace() -> None:
-    """Filesystem root can be the Runner-reported Agent Workspace."""
-    assert _is_presentable_path("/result.png", "/")
 
 
 class _NoBodyReadStorage(FakeSharedStorage):
@@ -144,7 +136,6 @@ def _tool(
         publication_service=service,
         resolve_runtime_target=_resolve_runtime_target,
         authority=_authority(),
-        workspace_root="/runtime/home",
     )
 
 
@@ -319,20 +310,38 @@ async def test_present_file_logs_bounded_publication_failure_context(
 
 
 @pytest.mark.asyncio
-async def test_present_file_rejects_disallowed_path_without_publication() -> None:
-    """Retain workspace allowlist behavior before publication admission."""
+@pytest.mark.parametrize(
+    "path",
+    ["/tmp/output.txt", "/other/output.txt", "/runtime/home/output.txt", "/output.txt"],
+)
+async def test_present_file_publishes_absolute_runtime_paths(path: str) -> None:
+    """Publish Runtime files independently of their Workspace containment."""
+    storage = _NoBodyReadStorage({path: b"output"})
     service = _PublicationService()
-    tool = _tool(
-        _NoBodyReadStorage({"/tmp/output.txt": b"temporary"}),
-        service,
-    )
 
-    result = await _invoke(tool, paths=["/tmp/output.txt"])
+    result = await _invoke(_tool(storage, service), paths=[path])
 
-    assert isinstance(result, FunctionToolResult)
-    assert "Only files under the Agent Workspace can be presented" in _output_text(
-        result
-    )
+    assert "Presented 1 file(s)" in _output_text(result)
+    assert _output_item(result, 1)["name"] == "output.txt"
+    assert [request.runtime_path for request in service.requests] == [path]
+    assert storage.get_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path",
+    ["", "output.txt", "../output.txt", "exchange://object", "artifact://object"],
+)
+async def test_present_file_rejects_non_absolute_paths_without_runtime_access(
+    path: str,
+) -> None:
+    """Reject relative paths and file-location URIs before metadata or publication."""
+    service = _PublicationService()
+    tool = _tool(_UnavailableStatStorage(), service)
+
+    result = await _invoke(tool, paths=[path])
+
+    assert "Only absolute Runtime file paths can be presented" in _output_text(result)
     assert service.requests == []
 
 

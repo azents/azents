@@ -10,6 +10,7 @@ import threading
 from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from azents_runtime_control.grpc_runner_client import (
@@ -23,11 +24,14 @@ from azents_runtime_control.runner import (
     RuntimeRunnerEventType,
 )
 
+import azents_runtime_runner.operations as operations_module
 from azents_runtime_runner.execution import DirectExecutionBackend
+from azents_runtime_runner.main import StructuredLogFormatter
 from azents_runtime_runner.operations import (
     RunnerOperations,
     # Validate root-prefix parsing without traversing the host root.
     _extract_glob_dir_prefix,
+    _ManagedProcess,
 )
 from azents_runtime_runner.workspace import Workspace
 
@@ -2533,6 +2537,119 @@ async def test_git_create_worktree_semantic_failures(
 
     assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_ERROR
     assert client.events[-1].payload["error_code"] == error_code
+
+
+async def test_cleanup_timeout_logs_safe_origin_with_bound_process_count(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A synthetic cleanup error still terminates the owned local process."""
+
+    class TimeoutOperations(RunnerOperations):
+        async def _terminate_process(
+            self,
+            record: _ManagedProcess,
+            *,
+            status: Literal["terminated", "expired"],
+            reason: str,
+        ) -> None:
+            del record, status, reason
+            raise TimeoutError("CLEANUP_PRIVATE_VALUE") from RuntimeError(
+                "CLEANUP_PRIVATE_CAUSE"
+            )
+
+    operations = TimeoutOperations(
+        client=_FakeClient(),
+        workspace=Workspace(str(tmp_path)),
+        execution_backend=DirectExecutionBackend(),
+    )
+    await operations.handle(
+        _operation(
+            operation_type="process.start",
+            payload={
+                "command": "cat",
+                "owner_session_id": "session-1",
+                "yield_time_ms": 0,
+            },
+        )
+    )
+    assert len(operations._processes) == 1
+    process = next(iter(operations._processes.values())).process
+    await operations.close()
+    record = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "Runtime Runner process cleanup timed out"
+    )
+    rendered = StructuredLogFormatter().format(record)
+    assert process.returncode is not None
+    assert record.__dict__["process_count"] == 1
+    assert record.__dict__["error_type"] == "TimeoutError"
+    assert record.__dict__["error_frames"][-1]["function"] == "_terminate_process"
+    assert "runner_operation_cleanup_timed_out" in rendered
+    assert "CLEANUP_PRIVATE_VALUE" not in rendered
+    assert "CLEANUP_PRIVATE_CAUSE" not in rendered
+    assert "raise TimeoutError" not in rendered
+    assert record.exc_info is not None
+    assert record.exc_info[2] is None
+
+
+async def test_kill_timeout_warning_preserves_bound_operation_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A typed fake waiter exercises escalation logging without sending signals."""
+
+    class PendingProcess(asyncio.subprocess.Process):
+        def __init__(self) -> None:
+            self.pid = 42
+
+        async def wait(self) -> int:
+            await asyncio.Future[int]()
+            raise AssertionError("unreachable")
+
+    def signal_group(
+        *,
+        process_id: int,
+        process_group_id: int,
+        requested_signal: signal.Signals,
+        operation: RunnerOperationEnvelope,
+    ) -> bool:
+        del process_id, process_group_id, requested_signal, operation
+        return True
+
+    monkeypatch.setattr(operations_module, "_signal_process_group", signal_group)
+    monkeypatch.setattr(operations_module, "_PROCESS_TERMINATE_TIMEOUT_SECONDS", 0)
+    monkeypatch.setattr(operations_module, "_PROCESS_KILL_TIMEOUT_SECONDS", 0)
+    operations = RunnerOperations(
+        client=_FakeClient(),
+        workspace=Workspace(str(tmp_path)),
+        execution_backend=DirectExecutionBackend(),
+    )
+    try:
+        await operations._terminate_operation_process_group(
+            _operation(operation_type="bash", payload={}),
+            PendingProcess(),
+            reason="synthetic_cleanup",
+        )
+    finally:
+        await operations.close()
+    record = next(
+        record
+        for record in caplog.records
+        if record.getMessage()
+        == "Runtime Runner operation process did not exit after SIGKILL"
+    )
+    rendered = StructuredLogFormatter().format(record)
+    assert record.__dict__["request_id"] == "request-1"
+    assert record.__dict__["process_id"] == 42
+    assert record.__dict__["reason"] == "synthetic_cleanup"
+    assert record.__dict__["error_type"] == "TimeoutError"
+    assert record.__dict__["error_frames"]
+    assert "runner_operation_cleanup_timed_out" in rendered
+    assert "await asyncio.wait_for" not in rendered
+    assert record.exc_info is not None
+    assert record.exc_info[2] is None
 
 
 def _operation(

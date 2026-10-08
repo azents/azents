@@ -596,16 +596,20 @@ def test_persisted_active_tool_call_without_dialect_upgrades_to_json_function() 
     assert active.wire_dialect == "json_function"
 
 
-def test_event_token_usage_requires_raw_payload() -> None:
-    """Token usage cannot be stored without adapter raw payload."""
-    with pytest.raises(ValidationError):
-        TokenUsagePayload.model_validate(
-            {
-                "prompt_tokens": 10,
-                "completion_tokens": 5,
-                "total_tokens": 15,
-            }
-        )
+def test_event_token_usage_stores_normalized_counters_without_receipt() -> None:
+    """Durable accounting consists of normalized counters and cost evidence."""
+    usage = TokenUsagePayload.model_validate(
+        {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15,
+        }
+    )
+    assert usage.model_dump(mode="json", exclude_none=True) == {
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "total_tokens": 15,
+    }
 
 
 def test_historical_usage_does_not_acquire_cost_authority() -> None:
@@ -623,31 +627,75 @@ def test_historical_usage_does_not_acquire_cost_authority() -> None:
     assert usage.cost_provenance is None
 
 
-def test_snapshot_cost_provenance_roundtrips_without_raw_response_data() -> None:
+def test_selected_cost_provenance_roundtrips_without_raw_response_data() -> None:
     """Known estimated authority travels with usage, not output or secrets."""
     provenance = ModelCostProvenance(
         method="estimated",
         provider="openai",
         model_identifier="model",
         service_tier="priority",
-        source_snapshot_id="source-id",
-        source_hash="source-hash",
+        source_key="litellm_catalog",
         source_model_key="openai/model",
+        collected_at=datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC),
         estimator_version="1",
     )
     usage = TokenUsagePayload(
         prompt_tokens=10,
         completion_tokens=5,
         total_tokens=15,
-        raw={},
         cost_usd=0.25,
         cost_provenance=provenance,
     )
     restored = TokenUsagePayload.model_validate_json(usage.model_dump_json())
     assert restored.cost_provenance == provenance
     assert restored.cost_usd == 0.25
-    assert restored.raw == {}
-    assert restored.raw_hidden_params is None
+    assert "raw" not in restored.model_dump()
+    assert "raw_hidden_params" not in restored.model_dump()
+
+
+def test_historical_turn_marker_raw_is_not_reemitted() -> None:
+    """Read historical normalized counters without retaining provider receipts."""
+    marker = validate_persisted_event_payload(
+        EventKind.TURN_MARKER,
+        {
+            "run_id": "historical-run",
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "cached_tokens": 80,
+                "cache_creation_tokens": 5,
+                "reasoning_tokens": 10,
+                "cost_usd": 0.125,
+                "raw": {
+                    "attribution": {"items": {"private-item": {"input_tokens": 100}}}
+                },
+                "raw_hidden_params": {"response_cost": 0.125},
+            },
+        },
+    )
+    assert isinstance(marker, TurnMarkerPayload)
+    assert marker.usage.prompt_tokens == 100
+    assert marker.usage.completion_tokens == 20
+    assert marker.usage.cached_tokens == 80
+    assert marker.usage.cache_creation_tokens == 5
+    assert marker.usage.reasoning_tokens == 10
+    assert marker.usage.cost_usd == 0.125
+    serialized = marker.model_dump(mode="json")
+    assert serialized["usage"] == {
+        "prompt_tokens": 100,
+        "completion_tokens": 20,
+        "total_tokens": 120,
+        "cached_tokens": 80,
+        "cache_creation_tokens": 5,
+        "reasoning_tokens": 10,
+        "cost_usd": 0.125,
+        "cost_provenance": None,
+    }
+    assert "attribution" not in marker.model_dump_json()
+    usage_properties = TokenUsagePayload.model_json_schema()["properties"]
+    assert "raw" not in usage_properties
+    assert "raw_hidden_params" not in usage_properties
 
 
 def test_scheduled_task_payloads_are_closed_protocol_variants() -> None:

@@ -1,362 +1,103 @@
-"""UserStopFinalizer tests."""
+"""Real PostgreSQL Stop sequencing and completed-operation boundary tests."""
 
-from collections.abc import Sequence
-from contextlib import AbstractAsyncContextManager
-from datetime import UTC, datetime
-from typing import Any, NamedTuple
+import asyncio
+import dataclasses
+from datetime import datetime
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.broker.types import SessionBroker
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
 from azents.engine.events.engine_events import RunStopped
-from azents.engine.events.types import (
-    ActiveToolCall,
-    AgentRunState,
-    AssistantMessagePayload,
-    ClientToolCallPayload,
-    Event,
-    InterruptedPayload,
-    NativeArtifact,
-    RunMarkerPayload,
-)
+from azents.engine.events.types import ActiveToolCall, AgentRunState, Event
 from azents.engine.run.emit import PublishedEvent
-from azents.repos.agent_execution.data import EventCreate
-from azents.worker.session.execution_snapshot import (
-    CanonicalExecutionOwnerGenerationStaleError,
+from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
+from azents.repos.agent_execution import AgentRunRepository
+from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStaleError
+from azents.repos.user_stop import UserStopOperationRepository
+from azents.repos.user_stop_data import (
+    UserStopCancelledCallsInput,
+    UserStopDurableEvents,
+    UserStopMarkerInput,
+    UserStopOwnerInput,
+    UserStopPartialInput,
 )
+from azents.repos.user_stop_test import (
+    FaultTranscript,
+    StopFixture,
+    fault_stop,
+    history,
+    live_tool,
+    partial,
+    stop_fixture,
+)
+from azents.services.chat.live_events import RedisLiveEventStore
+from azents.worker.events.publisher import WorkerEventPublisher
+from azents.worker.live.event_projector import LiveEventProjector
+from azents.worker.session.lifecycle import SessionLifecycleService
 from azents.worker.session.user_stop_finalizer import UserStopFinalizer
 
 
-class _DBSession(AsyncSession):
-    """Minimal AsyncSession test double."""
+class _Broker(SessionBroker):
+    """Observe parent-result notification only after committed terminal state."""
 
-    def __init__(self) -> None:
-        """Avoid opening a real database session."""
+    def __init__(self, fixture: StopFixture, trace: list[str]) -> None:
+        self.fixture = fixture
+        self.trace = trace
+        self.notified: list[str] = []
 
-
-class _SessionScope(AbstractAsyncContextManager[AsyncSession]):
-    """DB session context for tests."""
-
-    def __init__(self) -> None:
-        self.session = _DBSession()
-
-    async def __aenter__(self) -> AsyncSession:
-        """Return test session."""
-        return self.session
-
-    async def __aexit__(self, *exc_info: object) -> None:
-        """No resources to clean up."""
+    async def notify_mailbox_activity(self, session_id: str) -> None:
+        self.fixture.manager.assert_closed()
+        async with self.fixture.manager.manager() as session:
+            run = await self.fixture.runs.get_by_id(session, self.fixture.run_id)
+            assert run is not None and run.status is AgentRunStatus.STOPPED
+            assert run.parent_result_mailbox_item_id is not None
+        self.notified.append(session_id)
+        self.trace.append("parent-activity")
 
 
-class _SessionManager:
-    """session manager for tests."""
-
-    def __call__(self) -> _SessionScope:
-        """Return new session scope."""
-        return _SessionScope()
-
-
-class _EventPublisher:
-    """worker event publisher for tests."""
-
-    def __init__(self) -> None:
-        self.dispatched: list[tuple[str, PublishedEvent]] = []
-
-    async def dispatch_event(
-        self,
-        session_id: str,
-        event: PublishedEvent,
-        *,
-        owner_generation: int,
-    ) -> None:
-        """Record publish request."""
-        del owner_generation
-        self.dispatched.append((session_id, event))
-
-
-class _AgentRunRepository:
-    """AgentRunRepository test double."""
-
-    def __init__(self, running_run: AgentRunState | None) -> None:
-        self.running_run = running_run
-        self.terminal_sessions: list[tuple[str, AgentRunStatus]] = []
-        self.terminal_runs: list[tuple[str, AgentRunStatus]] = []
-        self.fail_terminal = False
-
-    async def lock_by_id(
-        self,
-        session: AsyncSession,
-        run_id: str,
-    ) -> AgentRunState | None:
-        """Return the running Run as a locked projection."""
-        del session, run_id
-        return self.running_run
-
-    async def update_phase(
-        self,
-        session: AsyncSession,
-        run_id: str,
-        phase: AgentRunPhase,
-        *,
-        active_tool_calls: list[ActiveToolCall] | None = None,
-    ) -> object:
-        """Apply active-call cleanup to the test projection."""
-        del session, run_id, phase
-        if self.running_run is not None and active_tool_calls is not None:
-            self.running_run = self.running_run.model_copy(
-                update={"active_tool_calls": list(active_tool_calls)}
-            )
-        return object()
-
-    async def get_running_by_session_id(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-    ) -> AgentRunState | None:
-        """Return running AgentRun projection."""
-        del session, session_id
-        return self.running_run
-
-    async def get_by_id(
-        self,
-        session: AsyncSession,
-        run_id: str,
-    ) -> AgentRunState | None:
-        """Return the configured Run only when its ID matches."""
-        del session
-        if self.running_run is None or self.running_run.id != run_id:
-            return None
-        return self.running_run
-
-    async def mark_session_running_terminal(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-        status: AgentRunStatus,
-        ended_at: datetime,
-    ) -> object:
-        """Record session-level terminal transition request."""
-        del session, ended_at
-        self.terminal_sessions.append((session_id, status))
-        return object()
-
-    async def mark_terminal_if_running(
-        self,
-        session: AsyncSession,
-        run_id: str,
-        status: AgentRunStatus,
-        *,
-        ended_at: datetime,
-    ) -> object:
-        """Record run-level terminal transition request."""
-        del session, ended_at
-        if self.fail_terminal:
-            raise RuntimeError("terminal persistence unavailable")
-        self.terminal_runs.append((run_id, status))
-        return object()
-
-    async def mark_stopped_for_user_stop(
-        self,
-        session: AsyncSession,
-        run_id: str,
-        *,
-        ended_at: datetime,
-    ) -> object:
-        """Record User Stop terminal convergence."""
-        del session, ended_at
-        if self.fail_terminal:
-            raise RuntimeError("terminal persistence unavailable")
-        self.terminal_runs.append((run_id, AgentRunStatus.STOPPED))
-        return object()
-
-
-class _EventTranscriptRepository:
-    """EventTranscriptRepository test double."""
-
-    def __init__(self) -> None:
-        self.existing_external_ids: set[str] = set()
-        self.appended: list[EventCreate] = []
-
-    async def get_by_external_id(
-        self,
-        session: AsyncSession,
-        session_id: str,
-        external_id: str,
-    ) -> object | None:
-        """Return whether external_id exists."""
-        del session, session_id
-        if external_id in self.existing_external_ids:
-            return object()
-        return None
-
-    async def append(self, session: AsyncSession, create: EventCreate) -> object:
-        """Record append request."""
-        del session
-        self.appended.append(create)
-        if create.kind == EventKind.INTERRUPTED:
-            return Event(
-                id="cccccccccccccccccccccccccccccccc",
-                session_id=create.session_id,
-                kind=create.kind,
-                payload=InterruptedPayload.model_validate(create.payload),
-                external_id=create.external_id,
-                created_at=datetime.now(UTC),
-            )
-        if create.kind == EventKind.RUN_MARKER:
-            return Event(
-                id="dddddddddddddddddddddddddddddddd",
-                session_id=create.session_id,
-                kind=create.kind,
-                payload=RunMarkerPayload.model_validate(create.payload),
-                external_id=create.external_id,
-                created_at=datetime.now(UTC),
-            )
-        return object()
-
-
-class _AgentSessionRepository:
-    """AgentSessionRepository test double."""
-
-    def __init__(self) -> None:
-        self.cleared_stop_request_session_ids: list[str] = []
-
-    async def clear_stop_request(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-    ) -> object:
-        """Record stop request clear request."""
-        del session
-        self.cleared_stop_request_session_ids.append(session_id)
-        return object()
-
-
-class _SessionLifecycle:
-    """SessionLifecycleService test double."""
+class _LiveStore(RedisLiveEventStore):
+    """Read a live snapshot with no database session retained by the caller."""
 
     def __init__(
-        self,
-        run_repository: _AgentRunRepository,
-        *,
-        owner_generation: int = 1,
+        self, fixture: StopFixture, events: list[Event], trace: list[str]
     ) -> None:
-        self.run_repository = run_repository
-        self.owner_generation = owner_generation
-        self.parent_result_activity_run_ids: list[str] = []
+        self.fixture = fixture
+        self.events = events
+        self.trace = trace
 
-    def _assert_owner_generation(self, owner_generation: int) -> None:
-        """Reject a stale Worker generation."""
-        if owner_generation != self.owner_generation:
-            raise CanonicalExecutionOwnerGenerationStaleError(
-                "Session owner generation is stale"
-            )
-
-    async def get_running_agent_run(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
-    ) -> AgentRunState | None:
-        """Return the configured running Run under the owner fence."""
-        del session_id
-        self._assert_owner_generation(owner_generation)
-        return self.run_repository.running_run
-
-    async def assert_owner_generation(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-        owner_generation: int,
-    ) -> None:
-        """Validate the owner generation for a mutation transaction."""
-        del session, session_id
-        self._assert_owner_generation(owner_generation)
-
-    async def notify_parent_result_activity(self, run_id: str) -> None:
-        """Record one queue-only parent-result activity notification."""
-        self.parent_result_activity_run_ids.append(run_id)
-
-    async def mark_agent_run_terminal_if_running(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
-        run_id: str,
-        status: AgentRunStatus,
-    ) -> None:
-        """Delegate terminal persistence through the lifecycle boundary."""
-        self._assert_owner_generation(owner_generation)
-        run = await self.run_repository.get_by_id(
-            _DBSession(),
-            run_id,
-        )
-        if run is not None and run.session_id != session_id:
-            raise ValueError("AgentRun session mismatch")
-        await self.run_repository.mark_terminal_if_running(
-            _DBSession(),
-            run_id,
-            status,
-            ended_at=datetime.now(UTC),
-        )
-
-    async def mark_agent_run_stopped_for_user_stop(
-        self,
-        session_id: str,
-        *,
-        owner_generation: int,
-        run_id: str,
-    ) -> None:
-        """Delegate User Stop convergence through the lifecycle boundary."""
-        self._assert_owner_generation(owner_generation)
-        run = await self.run_repository.get_by_id(
-            _DBSession(),
-            run_id,
-        )
-        if run is not None and run.session_id != session_id:
-            raise ValueError("AgentRun session mismatch")
-        await self.run_repository.mark_stopped_for_user_stop(
-            _DBSession(),
-            run_id,
-            ended_at=datetime.now(UTC),
-        )
+    async def list_by_session_id(self, session_id: str) -> list[Event]:
+        assert session_id == self.fixture.owner.session_id
+        self.fixture.manager.assert_closed()
+        self.trace.append("live-read")
+        return list(self.events)
 
 
-class _LiveEventStore:
-    """RedisLiveEventStore test double."""
+class _Projector(LiveEventProjector):
+    """Observe live mutations after prior durable stages have completed."""
 
-    def __init__(self, events: Sequence[Event]) -> None:
-        self.events = list(events)
-
-    async def list_by_session_id(self, session_id: str) -> Sequence[Event]:
-        """Return live event list of session."""
-        del session_id
-        return self.events
-
-
-class _LiveEventProjector:
-    """LiveEventProjector test double."""
-
-    def __init__(self) -> None:
-        self.flushed_session_ids: list[str] = []
-        self.removed_events: list[tuple[str, str]] = []
-        self.removed_active_call_ids: list[set[str]] = []
+    def __init__(self, fixture: StopFixture, trace: list[str]) -> None:
+        self.fixture = fixture
+        self.trace = trace
+        self.removed_events: list[str] = []
+        self.removed_calls: list[set[str]] = []
 
     async def flush_session(self, session_id: str, *, owner_generation: int) -> None:
-        """Record flush request."""
-        del owner_generation
-        self.flushed_session_ids.append(session_id)
+        assert session_id == self.fixture.owner.session_id
+        assert owner_generation == self.fixture.owner.owner_generation
+        self.fixture.manager.assert_closed()
+        self.trace.append("flush")
 
     async def remove_event(
         self, session_id: str, event_id: str, *, owner_generation: int
     ) -> None:
-        """Record remove request."""
-        del owner_generation
-        self.removed_events.append((session_id, event_id))
+        assert session_id == self.fixture.owner.session_id
+        assert owner_generation == self.fixture.owner.owner_generation
+        self.fixture.manager.assert_closed()
+        assert "partial" in self.trace and "cancelled" in self.trace
+        self.removed_events.append(event_id)
+        self.trace.append("remove")
 
     async def replace_active_tool_calls(
         self,
@@ -366,361 +107,460 @@ class _LiveEventProjector:
         removed_call_ids: set[str],
         owner_generation: int,
     ) -> None:
-        """Record deterministic active-call removals."""
-        del session_id, owner_generation
+        assert session_id == self.fixture.owner.session_id
+        assert owner_generation == self.fixture.owner.owner_generation
         assert active_tool_calls == []
-        self.removed_active_call_ids.append(removed_call_ids)
+        self.fixture.manager.assert_closed()
+        async with self.fixture.manager.manager() as session:
+            run = await self.fixture.runs.get_by_id(session, self.fixture.run_id)
+            assert run is not None and run.active_tool_calls == []
+        self.removed_calls.append(removed_call_ids)
+        self.trace.append("replace")
 
 
-class _Broker:
-    """Session activity broker test double."""
+class _Publisher(WorkerEventPublisher):
+    """Observe committed history and uncleared Stop intent at each dispatch."""
 
-    def __init__(self) -> None:
-        self.cleared_session_ids: list[str] = []
+    def __init__(
+        self, fixture: StopFixture, trace: list[str], fail_at: int | None
+    ) -> None:
+        self.fixture = fixture
+        self.trace = trace
+        self.fail_at = fail_at
+        self.dispatched: list[PublishedEvent] = []
 
-    async def clear_session_activity(self, session_id: str) -> None:
-        """Record activity clear request."""
-        self.cleared_session_ids.append(session_id)
-
-
-def _native_artifact() -> NativeArtifact:
-    """Create native artifact for tests."""
-    return NativeArtifact(
-        compat_key="azents-live:live_projection:azents:live:1",
-        adapter="azents-live",
-        native_format="live_projection",
-        provider="azents",
-        model="live",
-        schema_version="1",
-        item={"live_projection": "test"},
-    )
-
-
-def _assistant_event(session_id: str) -> Event:
-    """Create assistant live event for tests."""
-    return Event(
-        id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        session_id=session_id,
-        kind=EventKind.ASSISTANT_MESSAGE,
-        payload=AssistantMessagePayload(
-            content="partial",
-            attachments=[],
-            native_artifact=_native_artifact(),
-        ),
-        created_at=datetime.now(UTC),
-    )
+    async def dispatch_event(
+        self,
+        session_id: str,
+        event: PublishedEvent,
+        *,
+        owner_generation: int,
+    ) -> None:
+        assert session_id == self.fixture.owner.session_id
+        assert owner_generation == self.fixture.owner.owner_generation
+        self.fixture.manager.assert_closed()
+        durable = await history(self.fixture)
+        assert [item.kind for item in durable][-2:] == [
+            EventKind.INTERRUPTED,
+            EventKind.RUN_MARKER,
+        ]
+        async with self.fixture.manager.manager() as session:
+            assert await self.fixture.sessions.has_stop_request(session, session_id)
+            run = await self.fixture.runs.get_by_id(session, self.fixture.run_id)
+            assert run is not None and run.status is AgentRunStatus.STOPPED
+        if self.fail_at == len(self.dispatched):
+            raise RuntimeError("dispatch unavailable")
+        self.dispatched.append(event)
+        self.trace.append("dispatch")
 
 
-def _tool_call_event(session_id: str) -> Event:
-    """Create client tool call live event for tests."""
-    return Event(
-        id="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        session_id=session_id,
-        kind=EventKind.CLIENT_TOOL_CALL,
-        payload=ClientToolCallPayload(
-            call_id="call-1",
-            name="bash",
-            arguments="{}",
-            native_artifact=_native_artifact(),
-            wire_dialect="json_function",
-        ),
-        created_at=datetime.now(UTC),
-    )
+@dataclasses.dataclass(frozen=True)
+class _StopOperations(UserStopOperationRepository):
+    """Record completed stages while executing the real PostgreSQL operations."""
+
+    fixture: StopFixture
+    trace: list[str]
+
+    async def append_partial_events(self, input: UserStopPartialInput) -> None:
+        await super().append_partial_events(input)
+        self.fixture.manager.assert_closed()
+        self.trace.append("partial")
+
+    async def append_cancelled_tool_results(
+        self, input: UserStopCancelledCallsInput
+    ) -> None:
+        await super().append_cancelled_tool_results(input)
+        self.fixture.manager.assert_closed()
+        self.trace.append("cancelled")
+
+    async def append_user_stop_events(
+        self, input: UserStopMarkerInput
+    ) -> UserStopDurableEvents:
+        events = await super().append_user_stop_events(input)
+        self.fixture.manager.assert_closed()
+        self.trace.append("markers")
+        return events
+
+    async def clear_stop_request(self, input: UserStopOwnerInput) -> None:
+        await super().clear_stop_request(input)
+        self.fixture.manager.assert_closed()
+        self.trace.append("clear")
 
 
-def _running_run(session_id: str) -> AgentRunState:
-    """Create running AgentRunState for tests."""
-    now = datetime.now(UTC)
-    return AgentRunState(
-        id="11111111111111111111111111111111",
-        session_id=session_id,
-        scheduled_task_cycle_id=None,
-        run_index=1,
-        phase=AgentRunPhase.STREAMING_MODEL,
-        status=AgentRunStatus.RUNNING,
-        parent_agent_run_id=None,
-        requested_model_target_label=None,
-        requested_reasoning_effort=None,
-        requested_enabled_execution_options=[],
-        active_tool_calls=[
-            ActiveToolCall(
-                call_id="call-1",
-                name="bash",
-                arguments="{}",
-                started_at=now,
-                owner_generation=1,
-                wire_dialect="json_function",
-            )
-        ],
-        last_completed_event_id=None,
-        parent_result_delivery_state=None,
-        parent_result_mailbox_item_id=None,
-        parent_result_enqueued_at=None,
-        stop_requested_at=None,
-        created_at=now,
-        started_at=now,
-        model_call_started_at=now,
-        ended_at=None,
-        updated_at=now,
-    )
+@dataclasses.dataclass(frozen=True)
+class _Lifecycle(SessionLifecycleService):
+    """Observe terminal completion without bypassing its repository operation."""
+
+    fixture: StopFixture
+    trace: list[str]
+
+    async def mark_session_agent_runs_terminal(
+        self, session_id: str, *, owner_generation: int, status: AgentRunStatus
+    ) -> list[str]:
+        transitioned = await super().mark_session_agent_runs_terminal(
+            session_id, owner_generation=owner_generation, status=status
+        )
+        self.fixture.manager.assert_closed()
+        self.trace.append("bulk-terminal")
+        return transitioned
+
+    async def mark_agent_run_stopped_for_user_stop(
+        self, session_id: str, *, owner_generation: int, run_id: str
+    ) -> None:
+        await super().mark_agent_run_stopped_for_user_stop(
+            session_id, owner_generation=owner_generation, run_id=run_id
+        )
+        self.fixture.manager.assert_closed()
+        self.trace.append("terminal")
 
 
-def _construct_finalizer(**kwargs: Any) -> UserStopFinalizer:  # noqa: ANN401
-    """Construct finalizer with test-owned dependency doubles."""
-    return UserStopFinalizer(**kwargs)
-
-
-class _FinalizerFixture(NamedTuple):
-    """Structured result returned by `_finalizer`."""
-
-    finalizer: Any
-    run_repository: _AgentRunRepository
-    session_repository: _AgentSessionRepository
-    transcript_repository: _EventTranscriptRepository
-    projector: _LiveEventProjector
+@dataclasses.dataclass(frozen=True)
+class _FinalizerFixture:
+    db: StopFixture
+    finalizer: UserStopFinalizer
+    trace: list[str]
+    projector: _Projector
+    publisher: _Publisher
     broker: _Broker
-    event_publisher: _EventPublisher
 
 
-def _finalizer(
+async def _finalizer(
+    manager: SessionManager[WriteSession],
+    name: str,
     *,
-    running_run: AgentRunState | None,
-    live_events: Sequence[Event],
+    child: bool,
+    fail_dispatch_at: int | None,
 ) -> _FinalizerFixture:
-    """Create subject under test and main dependency doubles."""
-    run_repository = _AgentRunRepository(running_run)
-    session_repository = _AgentSessionRepository()
-    transcript_repository = _EventTranscriptRepository()
-    projector = _LiveEventProjector()
-    broker = _Broker()
-    event_publisher = _EventPublisher()
-    finalizer = _construct_finalizer(
-        session_manager=_SessionManager(),
-        agent_run_repository=run_repository,
-        agent_session_repository=session_repository,
-        event_transcript_repository=transcript_repository,
-        live_event_store=_LiveEventStore(live_events),
-        live_event_projector=projector,
-        event_publisher=event_publisher,
-        session_lifecycle=_SessionLifecycle(run_repository),
+    db = await stop_fixture(manager, name, child=child)
+    trace: list[str] = []
+    projector = _Projector(db, trace)
+    broker = _Broker(db, trace)
+    publisher = _Publisher(db, trace, fail_dispatch_at)
+    stop = _StopOperations(
+        db.manager,
+        db.worker,
+        db.sessions,
+        db.transcripts,
+        db.stop.tool_result_repository,
+        db,
+        trace,
     )
-    return _FinalizerFixture(
-        finalizer=finalizer,
-        run_repository=run_repository,
-        session_repository=session_repository,
-        transcript_repository=transcript_repository,
-        projector=projector,
-        broker=broker,
-        event_publisher=event_publisher,
+    lifecycle = _Lifecycle(broker, db.worker, db, trace)
+    events = [partial(db.owner.session_id, "a" * 32), live_tool(db.owner.session_id)]
+    finalizer = UserStopFinalizer(
+        stop, _LiveStore(db, events, trace), projector, publisher, lifecycle
     )
+    return _FinalizerFixture(db, finalizer, trace, projector, publisher, broker)
 
 
-@pytest.mark.asyncio
-async def test_finalize_persists_live_events_and_marks_run_terminal() -> None:
-    """User stop full finalize cleans up live projection and run state."""
-    session_id = "session-001"
-    (
-        finalizer,
-        run_repository,
-        session_repository,
-        transcripts,
-        projector,
-        broker,
-        event_publisher,
-    ) = _finalizer(
-        running_run=_running_run(session_id),
-        live_events=[_assistant_event(session_id), _tool_call_event(session_id)],
-    )
-
-    await finalizer.finalize(
-        session_id,
-        owner_generation=1,
+async def _finalize(fixture: _FinalizerFixture) -> None:
+    await fixture.finalizer.finalize(
+        fixture.db.owner.session_id,
+        owner_generation=fixture.db.owner.owner_generation,
         run_id=None,
         active_tool_calls=[],
     )
 
-    appended_external_ids = [event.external_id for event in transcripts.appended]
-    assert appended_external_ids == [
-        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "tool-result:11111111111111111111111111111111:call-1",
-        "interrupted:11111111111111111111111111111111:user_requested",
-        "run-marker:11111111111111111111111111111111:interrupted",
-    ]
-    interrupted = transcripts.appended[2]
-    marker = transcripts.appended[3]
-    assert interrupted.kind == EventKind.INTERRUPTED
-    assert isinstance(
-        InterruptedPayload.model_validate(interrupted.payload),
-        InterruptedPayload,
+
+@pytest.mark.parametrize("child", [False, True])
+async def test_finalize_persists_live_events_and_preserves_completed_stage_order(
+    rdb_session_manager: SessionManager[WriteSession], child: bool
+) -> None:
+    fixture = await _finalizer(
+        rdb_session_manager,
+        "stop-finalizer-order",
+        child=child,
+        fail_dispatch_at=None,
     )
-    assert marker.kind == EventKind.RUN_MARKER
-    assert isinstance(RunMarkerPayload.model_validate(marker.payload), RunMarkerPayload)
-    assert projector.flushed_session_ids == [session_id]
-    assert projector.removed_events == [
-        (session_id, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-        (session_id, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+    await _finalize(fixture)
+    events = await history(fixture.db)
+    assert [event.external_id for event in events] == [
+        "a" * 32,
+        f"tool-result:{fixture.db.run_id}:call-1",
+        f"interrupted:{fixture.db.run_id}:user_requested",
+        f"run-marker:{fixture.db.run_id}:interrupted",
     ]
-    assert projector.removed_active_call_ids == [{"call-1"}]
-    assert run_repository.terminal_runs == [
-        ("11111111111111111111111111111111", AgentRunStatus.STOPPED)
+    assert fixture.trace == [
+        "flush",
+        "live-read",
+        "partial",
+        "cancelled",
+        "remove",
+        "remove",
+        "replace",
+        "terminal",
+        *(["parent-activity"] if child else []),
+        "markers",
+        "dispatch",
+        "dispatch",
+        "dispatch",
+        "clear",
     ]
-    assert run_repository.terminal_sessions == []
-    assert run_repository.running_run is not None
-    assert run_repository.running_run.active_tool_calls == []
-    assert session_repository.cleared_stop_request_session_ids == [session_id]
-    assert broker.cleared_session_ids == []
-    published_durable_events = [
-        event for _, event in event_publisher.dispatched[:2] if isinstance(event, Event)
+    assert fixture.projector.removed_events == ["a" * 32, "b" * 32]
+    assert fixture.projector.removed_calls == [{"call-1"}]
+    assert fixture.publisher.dispatched[:2] == events[-2:]
+    stopped = fixture.publisher.dispatched[2]
+    assert isinstance(stopped, RunStopped) and stopped.run_id == fixture.db.run_id
+    assert fixture.broker.notified == ([fixture.db.parent_session_id] if child else [])
+    async with rdb_session_manager() as session:
+        assert not await fixture.db.sessions.has_stop_request(
+            session, fixture.db.owner.session_id
+        )
+    fixture.db.manager.assert_closed()
+
+
+async def test_record_interrupted_run_publishes_history_after_terminal_before_clear(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    fixture = await _finalizer(
+        rdb_session_manager, "stop-record-order", child=True, fail_dispatch_at=None
+    )
+    await fixture.finalizer.record_interrupted_run(
+        fixture.db.owner.session_id,
+        owner_generation=fixture.db.owner.owner_generation,
+        run_id=fixture.db.run_id,
+    )
+    assert fixture.trace == [
+        "terminal",
+        "markers",
+        "dispatch",
+        "dispatch",
+        "dispatch",
+        "clear",
     ]
-    assert [event.kind for event in published_durable_events] == [
+    assert fixture.broker.notified == []
+    assert fixture.projector.removed_events == []
+    assert [event.kind for event in await history(fixture.db)] == [
         EventKind.INTERRUPTED,
         EventKind.RUN_MARKER,
     ]
-    published_session_ids = [
-        published_session_id for published_session_id, _ in event_publisher.dispatched
+    fixture.db.manager.assert_closed()
+
+
+async def test_finalize_ignores_redis_and_passed_calls_without_durable_ownership(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    fixture = await _finalizer(
+        rdb_session_manager,
+        "stop-ignore-stale-calls",
+        child=False,
+        fail_dispatch_at=None,
+    )
+    async with rdb_session_manager() as session:
+        await fixture.db.runs.update_phase(
+            session,
+            fixture.db.run_id,
+            AgentRunPhase.STREAMING_MODEL,
+            active_tool_calls=[],
+        )
+    await fixture.finalizer.finalize(
+        fixture.db.owner.session_id,
+        owner_generation=fixture.db.owner.owner_generation,
+        run_id=None,
+        active_tool_calls=fixture.db.calls,
+    )
+    assert EventKind.CLIENT_TOOL_RESULT not in [
+        event.kind for event in await history(fixture.db)
     ]
-    assert published_session_ids == [
-        session_id,
-        session_id,
-        session_id,
-    ]
-    stopped_event = event_publisher.dispatched[2][1]
-    assert isinstance(stopped_event, RunStopped)
-    assert stopped_event.run_id == "11111111111111111111111111111111"
+    assert fixture.projector.removed_calls == [set()]
+    fixture.db.manager.assert_closed()
 
 
-@pytest.mark.asyncio
-async def test_finalize_preserves_retry_state_when_terminal_persistence_fails() -> None:
-    """Stop intent and activity remain available for retry after DB failure."""
-    session_id = "session-001"
-    (
-        finalizer,
-        run_repository,
-        session_repository,
-        _,
-        _,
-        broker,
-        event_publisher,
-    ) = _finalizer(running_run=_running_run(session_id), live_events=[])
-    run_repository.fail_terminal = True
+@pytest.mark.parametrize("record_only", [False, True])
+async def test_stale_owner_rejected_before_live_durable_or_external_effects(
+    rdb_session_manager: SessionManager[WriteSession], record_only: bool
+) -> None:
+    fixture = await _finalizer(
+        rdb_session_manager,
+        "stop-stale-finalizer",
+        child=False,
+        fail_dispatch_at=None,
+    )
+    async with rdb_session_manager() as session:
+        await fixture.db.sessions.claim_owner_generation(
+            session, fixture.db.owner.session_id
+        )
+    with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
+        if record_only:
+            await fixture.finalizer.record_interrupted_run(
+                fixture.db.owner.session_id,
+                owner_generation=fixture.db.owner.owner_generation,
+                run_id=fixture.db.run_id,
+            )
+        else:
+            await _finalize(fixture)
+    assert fixture.trace == []
+    assert await history(fixture.db) == []
+    assert fixture.publisher.dispatched == []
+    async with rdb_session_manager() as session:
+        assert await fixture.db.sessions.has_stop_request(
+            session, fixture.db.owner.session_id
+        )
+    fixture.db.manager.assert_closed()
 
+
+class _FaultRunRepository(AgentRunRepository):
+    """Fail after the actual terminal write to test stage-local rollback."""
+
+    async def mark_stopped_for_user_stop(
+        self, session: WriteSession, run_id: str, *, ended_at: datetime
+    ) -> AgentRunState | None:
+        await super().mark_stopped_for_user_stop(session, run_id, ended_at=ended_at)
+        raise RuntimeError("terminal persistence unavailable")
+
+
+async def test_terminal_failure_keeps_prior_commits_and_stop_intent_for_retry(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    fixture = await _finalizer(
+        rdb_session_manager,
+        "stop-terminal-failure",
+        child=False,
+        fail_dispatch_at=None,
+    )
+    worker = dataclasses.replace(
+        fixture.db.worker, agent_run_repository=_FaultRunRepository()
+    )
+    finalizer = dataclasses.replace(
+        fixture.finalizer,
+        session_lifecycle=dataclasses.replace(
+            fixture.finalizer.session_lifecycle, repository=worker
+        ),
+    )
     with pytest.raises(RuntimeError, match="terminal persistence unavailable"):
         await finalizer.finalize(
-            session_id,
-            owner_generation=1,
+            fixture.db.owner.session_id,
+            owner_generation=fixture.db.owner.owner_generation,
             run_id=None,
             active_tool_calls=[],
         )
+    assert [event.kind for event in await history(fixture.db)] == [
+        EventKind.ASSISTANT_MESSAGE,
+        EventKind.CLIENT_TOOL_RESULT,
+    ]
+    assert fixture.publisher.dispatched == []
+    async with rdb_session_manager() as session:
+        run = await fixture.db.runs.get_by_id(session, fixture.db.run_id)
+        assert run is not None and run.status is AgentRunStatus.RUNNING
+        assert run.active_tool_calls == []
+        assert await fixture.db.sessions.has_stop_request(
+            session, fixture.db.owner.session_id
+        )
+    fixture.db.manager.assert_closed()
 
-    assert session_repository.cleared_stop_request_session_ids == []
-    assert broker.cleared_session_ids == []
-    assert event_publisher.dispatched == []
 
-
-@pytest.mark.asyncio
-async def test_record_interrupted_run_publishes_durable_history_before_stop() -> None:
-    """CancelledError path publishes durable User stop history before RunStopped."""
-    session_id = "session-001"
-    (
-        finalizer,
-        run_repository,
-        session_repository,
-        transcripts,
-        projector,
-        broker,
-        event_publisher,
-    ) = _finalizer(running_run=None, live_events=[])
-
-    await finalizer.record_interrupted_run(
-        session_id,
-        owner_generation=1,
-        run_id="22222222222222222222222222222222",
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_marker_failure_or_cancellation_preserves_completed_earlier_stages(
+    rdb_session_manager: SessionManager[WriteSession], cancel: bool
+) -> None:
+    fixture = await _finalizer(
+        rdb_session_manager,
+        "stop-marker-failure",
+        child=False,
+        fail_dispatch_at=None,
     )
-
-    assert finalizer.session_lifecycle.parent_result_activity_run_ids == []
-    assert [event.external_id for event in transcripts.appended] == [
-        "interrupted:22222222222222222222222222222222:user_requested",
-        "run-marker:22222222222222222222222222222222:interrupted",
-    ]
-    assert [event.kind for event in transcripts.appended] == [
-        EventKind.INTERRUPTED,
-        EventKind.RUN_MARKER,
-    ]
-    published_durable_events = [
-        event for _, event in event_publisher.dispatched[:2] if isinstance(event, Event)
-    ]
-    assert [event.kind for event in published_durable_events] == [
-        EventKind.INTERRUPTED,
-        EventKind.RUN_MARKER,
-    ]
-    stopped_event = event_publisher.dispatched[2][1]
-    assert isinstance(stopped_event, RunStopped)
-    assert stopped_event.run_id == "22222222222222222222222222222222"
-    assert session_repository.cleared_stop_request_session_ids == [session_id]
-    assert projector.flushed_session_ids == []
-    assert projector.removed_events == []
-    assert broker.cleared_session_ids == []
-    assert run_repository.terminal_runs == [
-        ("22222222222222222222222222222222", AgentRunStatus.STOPPED)
-    ]
-    assert run_repository.terminal_sessions == []
-
-
-@pytest.mark.asyncio
-async def test_finalize_ignores_redis_tool_call_without_durable_ownership() -> None:
-    """A Redis tool projection is not a user-stop cancellation candidate."""
-    session_id = "session-001"
-    stale_call = _running_run(session_id).active_tool_calls[0]
-    running_run = _running_run(session_id).model_copy(update={"active_tool_calls": []})
-    finalizer, _, _, transcripts, projector, _, _ = _finalizer(
-        running_run=running_run,
-        live_events=[_tool_call_event(session_id)],
+    error = asyncio.CancelledError() if cancel else RuntimeError("marker unavailable")
+    stop = fault_stop(fixture.db, FaultTranscript(EventKind.RUN_MARKER, 1, error))
+    finalizer = dataclasses.replace(
+        fixture.finalizer,
+        repository=dataclasses.replace(
+            fixture.finalizer.repository,
+            event_transcript_repository=stop.event_transcript_repository,
+            tool_result_repository=stop.tool_result_repository,
+        ),
     )
-
-    await finalizer.finalize(
-        session_id,
-        owner_generation=1,
-        run_id=None,
-        active_tool_calls=[stale_call],
-    )
-
-    assert [event.external_id for event in transcripts.appended] == [
-        "interrupted:11111111111111111111111111111111:user_requested",
-        "run-marker:11111111111111111111111111111111:interrupted",
-    ]
-    assert projector.removed_events == [
-        (session_id, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
-    ]
-
-
-@pytest.mark.asyncio
-async def test_finalize_rejects_stale_owner_before_live_or_durable_mutation() -> None:
-    """A stale Worker cannot finalize or clear another owner's stop state."""
-    session_id = "session-001"
-    (
-        finalizer,
-        run_repository,
-        session_repository,
-        transcripts,
-        projector,
-        broker,
-        event_publisher,
-    ) = _finalizer(
-        running_run=_running_run(session_id),
-        live_events=[_assistant_event(session_id)],
-    )
-
-    with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
+    with pytest.raises(type(error)):
         await finalizer.finalize(
-            session_id,
-            owner_generation=2,
+            fixture.db.owner.session_id,
+            owner_generation=fixture.db.owner.owner_generation,
             run_id=None,
             active_tool_calls=[],
         )
+    assert [event.kind for event in await history(fixture.db)] == [
+        EventKind.ASSISTANT_MESSAGE,
+        EventKind.CLIENT_TOOL_RESULT,
+    ]
+    assert fixture.publisher.dispatched == []
+    async with rdb_session_manager() as session:
+        run = await fixture.db.runs.get_by_id(session, fixture.db.run_id)
+        assert run is not None and run.status is AgentRunStatus.STOPPED
+        assert await fixture.db.sessions.has_stop_request(
+            session, fixture.db.owner.session_id
+        )
+    fixture.db.manager.assert_closed()
 
-    assert run_repository.terminal_runs == []
-    assert session_repository.cleared_stop_request_session_ids == []
-    assert transcripts.appended == []
-    assert projector.flushed_session_ids == []
-    assert broker.cleared_session_ids == []
-    assert event_publisher.dispatched == []
+
+@pytest.mark.parametrize("fail_at", [0, 1, 2])
+async def test_dispatch_failure_keeps_committed_history_and_stop_intent_until_retry(
+    rdb_session_manager: SessionManager[WriteSession], fail_at: int
+) -> None:
+    fixture = await _finalizer(
+        rdb_session_manager,
+        "stop-dispatch-failure",
+        child=False,
+        fail_dispatch_at=fail_at,
+    )
+    with pytest.raises(RuntimeError, match="dispatch unavailable"):
+        await _finalize(fixture)
+    assert len(fixture.publisher.dispatched) == fail_at
+    assert [event.kind for event in await history(fixture.db)] == [
+        EventKind.ASSISTANT_MESSAGE,
+        EventKind.CLIENT_TOOL_RESULT,
+        EventKind.INTERRUPTED,
+        EventKind.RUN_MARKER,
+    ]
+    assert "clear" not in fixture.trace
+    async with rdb_session_manager() as session:
+        assert await fixture.db.sessions.has_stop_request(
+            session, fixture.db.owner.session_id
+        )
+    fixture.publisher.fail_at = None
+    await fixture.finalizer.record_interrupted_run(
+        fixture.db.owner.session_id,
+        owner_generation=fixture.db.owner.owner_generation,
+        run_id=fixture.db.run_id,
+    )
+    assert len(await history(fixture.db)) == 4
+    async with rdb_session_manager() as session:
+        assert not await fixture.db.sessions.has_stop_request(
+            session, fixture.db.owner.session_id
+        )
+    fixture.db.manager.assert_closed()
+
+
+async def test_no_effective_run_clears_stop_without_fabricated_markers(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    fixture = await _finalizer(
+        rdb_session_manager,
+        "stop-no-effective-run",
+        child=False,
+        fail_dispatch_at=None,
+    )
+    await fixture.db.worker.mark_agent_run_stopped_for_user_stop(
+        fixture.db.owner.session_id,
+        owner_generation=fixture.db.owner.owner_generation,
+        run_id=fixture.db.run_id,
+    )
+    await _finalize(fixture)
+    assert [event.kind for event in await history(fixture.db)] == [
+        EventKind.ASSISTANT_MESSAGE
+    ]
+    assert fixture.publisher.dispatched == []
+    assert fixture.broker.notified == []
+    assert fixture.trace == [
+        "flush",
+        "live-read",
+        "partial",
+        "cancelled",
+        "remove",
+        "remove",
+        "replace",
+        "bulk-terminal",
+        "clear",
+    ]
+    async with rdb_session_manager() as session:
+        assert not await fixture.db.sessions.has_stop_request(
+            session, fixture.db.owner.session_id
+        )
+    fixture.db.manager.assert_closed()

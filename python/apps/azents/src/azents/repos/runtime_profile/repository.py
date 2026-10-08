@@ -1,13 +1,14 @@
 """Runtime Profile, reconciliation, and recreation persistence."""
 
 import datetime
+from collections.abc import Sequence
+from typing import NamedTuple
 
 import sqlalchemy as sa
 from azcommon.datetime import tznow
 from azcommon.uuid import uuid7
 from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from azents.core.enums import (
@@ -23,6 +24,7 @@ from azents.core.runtime_profile import (
     RuntimeRecreationOperationStatus,
     RuntimeRecreationTargetKind,
 )
+from azents.core.runtime_profile_deletion import WorkspaceRuntimeProfileDeletion
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.runtime_profile import (
@@ -35,6 +37,7 @@ from azents.rdb.models.runtime_profile import (
 )
 from azents.rdb.models.runtime_provider import RDBRuntimeProvider
 from azents.rdb.models.workspace import RDBWorkspace
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import (
     RuntimeConfigurationAppliedSlot,
@@ -55,10 +58,18 @@ from .data import (
     WorkspaceRuntimeProfile,
     WorkspaceRuntimeProfileCreate,
     WorkspaceRuntimeProfileDeleteOutcome,
-    WorkspaceRuntimeProfileDeletion,
     WorkspaceRuntimeProfileReplace,
     WorkspaceRuntimeProfileUsage,
 )
+
+
+class RuntimeRecreationTargetSnapshot(NamedTuple):
+    """Named Runtime identity and configuration fencing snapshot."""
+
+    runtime_id: str
+    configuration_sequence: int
+    configuration_digest: str
+    desired_generation: int
 
 
 class RuntimeProfileRepository:
@@ -66,7 +77,7 @@ class RuntimeProfileRepository:
 
     async def create_infrastructure_profile(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         create: RuntimeInfrastructureProfileCreate,
     ) -> RuntimeInfrastructureProfile:
@@ -87,30 +98,27 @@ class RuntimeProfileRepository:
             created_by_user_id=create.actor_user_id,
             updated_by_user_id=create.actor_user_id,
         )
-        session.add(rdb)
-        await session.flush()
+        session.write_session.add(rdb)
+        await session.write_session.flush()
         return self._build_infrastructure_profile(rdb)
 
     async def get_infrastructure_profile(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         profile_id: str,
-        for_update: bool,
     ) -> RuntimeInfrastructureProfile | None:
         """Fetch one infrastructure Profile by globally unique row ID."""
         statement = sa.select(RDBRuntimeInfrastructureProfile).where(
             RDBRuntimeInfrastructureProfile.id == profile_id
         )
-        if for_update:
-            statement = statement.with_for_update()
-        result = await session.execute(statement)
+        result = await session.read_session.execute(statement)
         rdb = result.scalar_one_or_none()
         return self._build_infrastructure_profile(rdb) if rdb is not None else None
 
     async def list_infrastructure_profiles(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         provider_id: str,
         include_disabled: bool,
@@ -129,14 +137,14 @@ class RuntimeProfileRepository:
                 RDBRuntimeInfrastructureProfile.lifecycle
                 == RuntimeProfileLifecycle.ACTIVE
             )
-        result = await session.execute(statement)
+        result = await session.read_session.execute(statement)
         return [
             self._build_infrastructure_profile(rdb) for rdb in result.scalars().all()
         ]
 
     async def replace_infrastructure_profile(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         provider_id: str,
         profile_id: str,
@@ -144,7 +152,7 @@ class RuntimeProfileRepository:
         replacement: RuntimeInfrastructureProfileReplace,
     ) -> RuntimeInfrastructureProfile | None:
         """Replace Profile content using Provider ownership and version fencing."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBRuntimeInfrastructureProfile)
             .where(
                 RDBRuntimeInfrastructureProfile.id == profile_id,
@@ -168,12 +176,12 @@ class RuntimeProfileRepository:
             .returning(RDBRuntimeInfrastructureProfile)
         )
         rdb = result.scalar_one_or_none()
-        await session.flush()
+        await session.write_session.flush()
         return self._build_infrastructure_profile(rdb) if rdb is not None else None
 
     async def get_infrastructure_profile_deletion_impact(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         profile_id: str,
         offset: int,
@@ -200,7 +208,7 @@ class RuntimeProfileRepository:
             .subquery()
         )
         blocking_reference_count = int(
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(sa.func.count())
                 .select_from(RDBWorkspaceRuntimeProfile)
                 .where(
@@ -210,7 +218,7 @@ class RuntimeProfileRepository:
             or 0
         )
         rows = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(
                     RDBWorkspace,
                     RDBWorkspaceRuntimeProfile,
@@ -241,7 +249,7 @@ class RuntimeProfileRepository:
 
         current_profile = aliased(RDBWorkspaceRuntimeProfile)
         applied_only_running_runtime_count = int(
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(sa.func.count(RDBAgentRuntime.id))
                 .select_from(RDBAgentRuntime)
                 .join(
@@ -299,13 +307,13 @@ class RuntimeProfileRepository:
 
     async def get_workspace_runtime_profile_usage(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         profile_id: str,
     ) -> WorkspaceRuntimeProfileUsage:
         """Return current Agent selection and running Runtime counts."""
         row = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(
                     sa.func.count(RDBAgent.id),
                     sa.func.count(RDBAgentRuntime.id).filter(
@@ -325,20 +333,18 @@ class RuntimeProfileRepository:
 
     async def delete_infrastructure_profile(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         provider_id: str,
         profile_id: str,
         expected_version: int,
     ) -> RuntimeInfrastructureProfileDeleteOutcome:
         """Delete one unreferenced Profile and terminalize target recreation."""
-        profile = await session.scalar(
-            sa.select(RDBRuntimeInfrastructureProfile)
-            .where(
+        profile = await session.write_session.scalar(
+            sa.select(RDBRuntimeInfrastructureProfile).where(
                 RDBRuntimeInfrastructureProfile.id == profile_id,
                 RDBRuntimeInfrastructureProfile.provider_id == provider_id,
             )
-            .with_for_update()
         )
         if profile is None:
             return RuntimeInfrastructureProfileDeleteOutcome(
@@ -355,7 +361,7 @@ class RuntimeProfileRepository:
             )
 
         blocking_reference_count = int(
-            await session.scalar(
+            await session.write_session.scalar(
                 sa.select(sa.func.count())
                 .select_from(RDBWorkspaceRuntimeProfile)
                 .where(
@@ -371,9 +377,26 @@ class RuntimeProfileRepository:
                 blocking_reference_count=blocking_reference_count,
             )
 
+        deleted = await session.write_session.scalar(
+            sa.delete(RDBRuntimeInfrastructureProfile)
+            .where(
+                RDBRuntimeInfrastructureProfile.id == profile_id,
+                RDBRuntimeInfrastructureProfile.provider_id == provider_id,
+                RDBRuntimeInfrastructureProfile.version == expected_version,
+            )
+            .returning(RDBRuntimeInfrastructureProfile.id)
+        )
+        if deleted is None:
+            latest = await self.get_infrastructure_profile(
+                session, profile_id=profile_id
+            )
+            return RuntimeInfrastructureProfileDeleteOutcome(
+                deletion=None, current_profile=latest, blocking_reference_count=0
+            )
+
         operations = list(
             (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBRuntimeRecreationOperation)
                     .where(
                         RDBRuntimeRecreationOperation.target_kind
@@ -396,7 +419,7 @@ class RuntimeProfileRepository:
         for operation in operations:
             items = list(
                 (
-                    await session.scalars(
+                    await session.write_session.scalars(
                         sa.select(RDBRuntimeRecreationOperationItem)
                         .where(
                             RDBRuntimeRecreationOperationItem.operation_id
@@ -425,8 +448,7 @@ class RuntimeProfileRepository:
             operation.status = RuntimeRecreationOperationStatus.COMPLETED
             operation.completed_at = now
 
-        await session.delete(profile)
-        await session.flush()
+        await session.write_session.flush()
         return RuntimeInfrastructureProfileDeleteOutcome(
             deletion=RuntimeInfrastructureProfileDeletion(
                 profile_id=profile_id,
@@ -439,12 +461,12 @@ class RuntimeProfileRepository:
 
     async def create_workspace_runtime_profile(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         create: WorkspaceRuntimeProfileCreate,
     ) -> WorkspaceRuntimeProfile:
         """Create one Workspace Profile bound to the exact Provider Profile."""
-        infrastructure_provider_id = await session.scalar(
+        infrastructure_provider_id = await session.write_session.scalar(
             sa.select(RDBRuntimeInfrastructureProfile.provider_id).where(
                 RDBRuntimeInfrastructureProfile.id == create.infrastructure_profile_id
             )
@@ -467,32 +489,29 @@ class RuntimeProfileRepository:
             created_by_workspace_user_id=create.actor_workspace_user_id,
             updated_by_workspace_user_id=create.actor_workspace_user_id,
         )
-        session.add(rdb)
-        await session.flush()
+        session.write_session.add(rdb)
+        await session.write_session.flush()
         return self._build_workspace_profile(rdb)
 
     async def get_workspace_runtime_profile(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         profile_id: str,
-        for_update: bool,
     ) -> WorkspaceRuntimeProfile | None:
         """Fetch one Workspace-owned Profile with its ownership boundary."""
         statement = sa.select(RDBWorkspaceRuntimeProfile).where(
             RDBWorkspaceRuntimeProfile.id == profile_id,
             RDBWorkspaceRuntimeProfile.workspace_id == workspace_id,
         )
-        if for_update:
-            statement = statement.with_for_update()
-        result = await session.execute(statement)
+        result = await session.read_session.execute(statement)
         rdb = result.scalar_one_or_none()
         return self._build_workspace_profile(rdb) if rdb is not None else None
 
     async def list_workspace_runtime_profiles(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         include_disabled: bool,
@@ -510,12 +529,12 @@ class RuntimeProfileRepository:
             statement = statement.where(
                 RDBWorkspaceRuntimeProfile.lifecycle == RuntimeProfileLifecycle.ACTIVE
             )
-        result = await session.execute(statement)
+        result = await session.read_session.execute(statement)
         return [self._build_workspace_profile(rdb) for rdb in result.scalars().all()]
 
     async def replace_workspace_runtime_profile(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         profile_id: str,
@@ -523,7 +542,7 @@ class RuntimeProfileRepository:
         replacement: WorkspaceRuntimeProfileReplace,
     ) -> WorkspaceRuntimeProfile | None:
         """Replace a Workspace Profile using ownership and version fencing."""
-        infrastructure_provider_id = await session.scalar(
+        infrastructure_provider_id = await session.write_session.scalar(
             sa.select(RDBRuntimeInfrastructureProfile.provider_id).where(
                 RDBRuntimeInfrastructureProfile.id
                 == replacement.infrastructure_profile_id
@@ -533,7 +552,7 @@ class RuntimeProfileRepository:
             raise ValueError(
                 "Infrastructure Profile does not belong to the selected Provider."
             )
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBWorkspaceRuntimeProfile)
             .where(
                 RDBWorkspaceRuntimeProfile.id == profile_id,
@@ -556,35 +575,31 @@ class RuntimeProfileRepository:
             .returning(RDBWorkspaceRuntimeProfile)
         )
         rdb = result.scalar_one_or_none()
-        await session.flush()
+        await session.write_session.flush()
         return self._build_workspace_profile(rdb) if rdb is not None else None
 
     async def delete_workspace_runtime_profile(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         profile_id: str,
         expected_version: int,
     ) -> WorkspaceRuntimeProfileDeleteOutcome:
         """Delete one exact Profile and atomically clear all live authority."""
-        workspace = await session.scalar(
-            sa.select(RDBWorkspace)
-            .where(RDBWorkspace.id == workspace_id)
-            .with_for_update()
+        workspace = await session.write_session.scalar(
+            sa.select(RDBWorkspace).where(RDBWorkspace.id == workspace_id)
         )
         if workspace is None:
             return WorkspaceRuntimeProfileDeleteOutcome(
                 deletion=None,
                 current_profile=None,
             )
-        profile = await session.scalar(
-            sa.select(RDBWorkspaceRuntimeProfile)
-            .where(
+        profile = await session.write_session.scalar(
+            sa.select(RDBWorkspaceRuntimeProfile).where(
                 RDBWorkspaceRuntimeProfile.id == profile_id,
                 RDBWorkspaceRuntimeProfile.workspace_id == workspace_id,
             )
-            .with_for_update()
         )
         if profile is None:
             return WorkspaceRuntimeProfileDeleteOutcome(
@@ -598,16 +613,56 @@ class RuntimeProfileRepository:
                 current_profile=current_profile,
             )
 
+        # Claim this exact expected-version deletion through its actual revision
+        # transition, before the dependent selection/generation mutations.
+        claimed = await session.write_session.scalar(
+            sa.update(RDBWorkspaceRuntimeProfile)
+            .where(
+                RDBWorkspaceRuntimeProfile.id == profile_id,
+                RDBWorkspaceRuntimeProfile.workspace_id == workspace_id,
+                RDBWorkspaceRuntimeProfile.version == expected_version,
+            )
+            .values(version=RDBWorkspaceRuntimeProfile.version + 1)
+            .returning(RDBWorkspaceRuntimeProfile.id)
+        )
+        if claimed is None:
+            latest = await session.read_session.scalar(
+                sa.select(RDBWorkspaceRuntimeProfile)
+                .where(
+                    RDBWorkspaceRuntimeProfile.id == profile_id,
+                    RDBWorkspaceRuntimeProfile.workspace_id == workspace_id,
+                )
+                .execution_options(populate_existing=True)
+            )
+            return WorkspaceRuntimeProfileDeleteOutcome(
+                deletion=None,
+                current_profile=(
+                    self._build_workspace_profile(latest)
+                    if latest is not None
+                    else None
+                ),
+            )
+
         now = tznow()
-        cleared_workspace_default = workspace.default_runtime_profile_id == profile_id
-        if cleared_workspace_default:
-            workspace.default_runtime_profile_id = None
-            workspace.default_runtime_profile_version += 1
-            workspace.updated_at = now
+        cleared_default = await session.write_session.scalar(
+            sa.update(RDBWorkspace)
+            .where(
+                RDBWorkspace.id == workspace_id,
+                RDBWorkspace.default_runtime_profile_id == profile_id,
+            )
+            .values(
+                default_runtime_profile_id=None,
+                default_runtime_profile_version=RDBWorkspace.default_runtime_profile_version
+                + 1,
+                updated_at=now,
+            )
+            .returning(RDBWorkspace.id)
+        )
+        cleared_workspace_default = cleared_default is not None
 
         agents = list(
             (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBAgent)
                     .where(
                         RDBAgent.workspace_id == workspace_id,
@@ -630,7 +685,7 @@ class RuntimeProfileRepository:
         if managed_agent_ids:
             runtimes = list(
                 (
-                    await session.scalars(
+                    await session.write_session.scalars(
                         sa.select(RDBAgentRuntime)
                         .where(RDBAgentRuntime.agent_id.in_(managed_agent_ids))
                         .order_by(RDBAgentRuntime.id)
@@ -642,7 +697,7 @@ class RuntimeProfileRepository:
         for runtime in runtimes:
             if runtime.provider_observed_state is RuntimeProviderObservedState.RUNNING:
                 affected_running_runtime_count += 1
-            state = await session.scalar(
+            state = await session.write_session.scalar(
                 sa.select(RDBRuntimeConfigurationState)
                 .where(RDBRuntimeConfigurationState.runtime_id == runtime.id)
                 .with_for_update()
@@ -651,7 +706,7 @@ class RuntimeProfileRepository:
             runtime.configuration_sequence = next_sequence
             runtime.updated_at = now
             if state is None:
-                session.add(
+                session.write_session.add(
                     RDBRuntimeConfigurationState(
                         runtime_id=runtime.id,
                         desired_sequence=next_sequence,
@@ -686,7 +741,7 @@ class RuntimeProfileRepository:
 
         operations = list(
             (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBRuntimeRecreationOperation)
                     .where(
                         RDBRuntimeRecreationOperation.target_kind
@@ -707,7 +762,7 @@ class RuntimeProfileRepository:
         for operation in operations:
             items = list(
                 (
-                    await session.scalars(
+                    await session.write_session.scalars(
                         sa.select(RDBRuntimeRecreationOperationItem)
                         .where(
                             RDBRuntimeRecreationOperationItem.operation_id
@@ -734,8 +789,8 @@ class RuntimeProfileRepository:
             operation.status = RuntimeRecreationOperationStatus.COMPLETED
             operation.completed_at = now
 
-        await session.delete(profile)
-        await session.flush()
+        await session.write_session.delete(profile)
+        await session.write_session.flush()
         return WorkspaceRuntimeProfileDeleteOutcome(
             deletion=WorkspaceRuntimeProfileDeletion(
                 profile_id=profile_id,
@@ -749,13 +804,13 @@ class RuntimeProfileRepository:
 
     async def clear_agent_runtime_profile_selection(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         expected_selection_version: int,
     ) -> bool:
         """Clear one selection and immediately replace managed Runtime authority."""
-        agent = await session.scalar(
+        agent = await session.write_session.scalar(
             sa.select(RDBAgent)
             .where(
                 RDBAgent.id == agent_id,
@@ -773,19 +828,19 @@ class RuntimeProfileRepository:
         agent.updated_at = now
 
         if agent.runtime_capability is not AgentRuntimeCapability.MANAGED:
-            await session.flush()
+            await session.write_session.flush()
             return True
 
-        runtime = await session.scalar(
+        runtime = await session.write_session.scalar(
             sa.select(RDBAgentRuntime)
             .where(RDBAgentRuntime.agent_id == agent.id)
             .with_for_update()
         )
         if runtime is None:
-            await session.flush()
+            await session.write_session.flush()
             return True
 
-        state = await session.scalar(
+        state = await session.write_session.scalar(
             sa.select(RDBRuntimeConfigurationState)
             .where(RDBRuntimeConfigurationState.runtime_id == runtime.id)
             .with_for_update()
@@ -794,7 +849,7 @@ class RuntimeProfileRepository:
         runtime.configuration_sequence = next_sequence
         runtime.updated_at = now
         if state is None:
-            session.add(
+            session.write_session.add(
                 RDBRuntimeConfigurationState(
                     runtime_id=runtime.id,
                     desired_sequence=next_sequence,
@@ -826,34 +881,31 @@ class RuntimeProfileRepository:
             state.provider_acknowledged_at = None
             state.runner_observed_at = None
             state.updated_at = now
-        await session.flush()
+        await session.write_session.flush()
         return True
 
     async def get_configuration_state(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         runtime_id: str,
-        for_update: bool = False,
     ) -> RuntimeConfigurationState | None:
         """Load one current desired/applied state and decode its documents."""
         statement = sa.select(RDBRuntimeConfigurationState).where(
             RDBRuntimeConfigurationState.runtime_id == runtime_id
         )
-        if for_update:
-            statement = statement.with_for_update()
-        row = (await session.execute(statement)).scalar_one_or_none()
+        row = (await session.read_session.execute(statement)).scalar_one_or_none()
         return self._build_configuration_state(row) if row is not None else None
 
     async def overwrite_desired_configuration_state(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         write: RuntimeConfigurationDesiredStateWrite,
         expected_sequence: int | None = None,
     ) -> RuntimeConfigurationState | None:
         """Atomically allocate a Runtime sequence and overwrite desired state."""
-        runtime = await session.scalar(
+        runtime = await session.write_session.scalar(
             sa.select(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == write.runtime_id)
             .with_for_update()
@@ -863,7 +915,7 @@ class RuntimeProfileRepository:
             and runtime.configuration_sequence != expected_sequence
         ):
             return None
-        current = await session.scalar(
+        current = await session.write_session.scalar(
             sa.select(RDBRuntimeConfigurationState)
             .where(RDBRuntimeConfigurationState.runtime_id == write.runtime_id)
             .with_for_update()
@@ -903,7 +955,7 @@ class RuntimeProfileRepository:
                 applied_document=None,
                 applied_at=None,
             )
-            session.add(current)
+            session.write_session.add(current)
         else:
             current.desired_sequence = next_sequence
             current.desired_status = write.status
@@ -916,19 +968,19 @@ class RuntimeProfileRepository:
             current.provider_acknowledged_at = None
             current.runner_observed_at = None
             current.updated_at = tznow()
-        await session.flush()
+        await session.write_session.flush()
         return self._build_configuration_state(current)
 
     async def configuration_evidence_matches_current(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         provider_id: str,
         evidence: RuntimeConfigurationEvidence,
     ) -> bool:
         """Check evidence against the exact current desired tuple."""
-        runtime = await session.scalar(
+        runtime = await session.write_session.scalar(
             sa.select(RDBAgentRuntime).where(
                 RDBAgentRuntime.id == runtime_id,
                 RDBAgentRuntime.runtime_provider_resource_id == provider_id,
@@ -948,14 +1000,14 @@ class RuntimeProfileRepository:
 
     async def configuration_evidence_matches_applied(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         provider_id: str,
         evidence: RuntimeConfigurationEvidence,
     ) -> bool:
         """Check evidence against the exact current applied tuple."""
-        runtime = await session.scalar(
+        runtime = await session.write_session.scalar(
             sa.select(RDBAgentRuntime).where(
                 RDBAgentRuntime.id == runtime_id,
                 RDBAgentRuntime.runtime_provider_resource_id == provider_id,
@@ -973,7 +1025,7 @@ class RuntimeProfileRepository:
 
     async def record_provider_configuration_evidence(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         provider_id: str,
@@ -986,7 +1038,7 @@ class RuntimeProfileRepository:
         )
         if state is None:
             return None
-        row = await session.scalar(
+        row = await session.write_session.scalar(
             sa.select(RDBRuntimeConfigurationState)
             .where(RDBRuntimeConfigurationState.runtime_id == runtime_id)
             .with_for_update()
@@ -996,12 +1048,12 @@ class RuntimeProfileRepository:
         row.provider_acknowledged_at = acknowledged_at
         self._promote_configuration_if_complete(row, evidence=evidence)
         row.updated_at = tznow()
-        await session.flush()
+        await session.write_session.flush()
         return self._build_configuration_state(row)
 
     async def record_runner_configuration_evidence(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         provider_id: str,
@@ -1014,7 +1066,7 @@ class RuntimeProfileRepository:
         )
         if state is None:
             return None
-        row = await session.scalar(
+        row = await session.write_session.scalar(
             sa.select(RDBRuntimeConfigurationState)
             .where(RDBRuntimeConfigurationState.runtime_id == runtime_id)
             .with_for_update()
@@ -1026,30 +1078,30 @@ class RuntimeProfileRepository:
             row, evidence=evidence, observed_at=observed_at
         )
         row.updated_at = tznow()
-        await session.flush()
+        await session.write_session.flush()
         return self._build_configuration_state(row)
 
     async def clear_configuration_state(
-        self, session: AsyncSession, *, runtime_id: str
+        self, session: WriteSession, *, runtime_id: str
     ) -> bool:
         """Delete current desired/applied documents without resetting sequence."""
-        deleted_runtime_id = await session.scalar(
+        deleted_runtime_id = await session.write_session.scalar(
             sa.delete(RDBRuntimeConfigurationState)
             .where(RDBRuntimeConfigurationState.runtime_id == runtime_id)
             .returning(RDBRuntimeConfigurationState.runtime_id)
         )
-        await session.flush()
+        await session.write_session.flush()
         return deleted_runtime_id is not None
 
     async def _lock_current_configuration_state(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         provider_id: str,
         evidence: RuntimeConfigurationEvidence,
     ) -> RuntimeConfigurationState | None:
-        runtime = await session.scalar(
+        runtime = await session.write_session.scalar(
             sa.select(RDBAgentRuntime)
             .where(
                 RDBAgentRuntime.id == runtime_id,
@@ -1060,9 +1112,7 @@ class RuntimeProfileRepository:
         )
         if runtime is None:
             return None
-        state = await self.get_configuration_state(
-            session, runtime_id=runtime_id, for_update=True
-        )
+        state = await self.get_configuration_state(session, runtime_id=runtime_id)
         if (
             state is None
             or state.desired.status is not RuntimeConfigurationStateStatus.READY
@@ -1096,7 +1146,7 @@ class RuntimeProfileRepository:
 
     async def enqueue_reconcile_task(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         source_type: RuntimeReconcileSourceKind,
         source_id: str,
@@ -1105,7 +1155,7 @@ class RuntimeProfileRepository:
     ) -> RuntimeConfigurationReconcileTask:
         """Idempotently enqueue one authoritative source version."""
         task_id = uuid7().hex
-        result = await session.execute(
+        result = await session.write_session.execute(
             insert(RDBRuntimeConfigurationReconcileTask)
             .values(
                 id=task_id,
@@ -1125,7 +1175,7 @@ class RuntimeProfileRepository:
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:
-            existing = await session.execute(
+            existing = await session.write_session.execute(
                 sa.select(RDBRuntimeConfigurationReconcileTask).where(
                     RDBRuntimeConfigurationReconcileTask.source_type == source_type,
                     RDBRuntimeConfigurationReconcileTask.source_id == source_id,
@@ -1134,12 +1184,12 @@ class RuntimeProfileRepository:
                 )
             )
             rdb = existing.scalar_one()
-        await session.flush()
+        await session.write_session.flush()
         return self._build_reconcile_task(rdb)
 
     async def claim_reconcile_tasks(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         available_before: datetime.datetime,
         reclaim_running_before: datetime.datetime,
@@ -1148,7 +1198,7 @@ class RuntimeProfileRepository:
         """Claim available or abandoned tasks with PostgreSQL ``SKIP LOCKED``."""
         if limit < 1:
             raise ValueError("Reconcile claim limit must be positive.")
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBRuntimeConfigurationReconcileTask)
             .where(
                 sa.or_(
@@ -1184,19 +1234,19 @@ class RuntimeProfileRepository:
             task.attempt += 1
             task.failure_code = None
             task.updated_at = claimed_at
-        await session.flush()
+        await session.write_session.flush()
         return [self._build_reconcile_task(task) for task in tasks]
 
     async def complete_reconcile_task(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         task_id: str,
         expected_attempt: int,
         cursor: str | None,
     ) -> bool:
         """Complete one currently owned reconcile-task attempt."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBRuntimeConfigurationReconcileTask)
             .where(
                 RDBRuntimeConfigurationReconcileTask.id == task_id,
@@ -1216,7 +1266,7 @@ class RuntimeProfileRepository:
 
     async def continue_reconcile_task(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         task_id: str,
         expected_attempt: int,
@@ -1224,7 +1274,7 @@ class RuntimeProfileRepository:
         available_at: datetime.datetime,
     ) -> bool:
         """Persist one page only while its reconcile-task attempt is owned."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBRuntimeConfigurationReconcileTask)
             .where(
                 RDBRuntimeConfigurationReconcileTask.id == task_id,
@@ -1245,7 +1295,7 @@ class RuntimeProfileRepository:
 
     async def retry_reconcile_task(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         task_id: str,
         expected_attempt: int,
@@ -1254,7 +1304,7 @@ class RuntimeProfileRepository:
         failure_code: str,
     ) -> bool:
         """Retry one task only while its claimed attempt is still owned."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBRuntimeConfigurationReconcileTask)
             .where(
                 RDBRuntimeConfigurationReconcileTask.id == task_id,
@@ -1275,42 +1325,42 @@ class RuntimeProfileRepository:
 
     async def get_reconcile_source_version(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         source_type: RuntimeReconcileSourceKind,
         source_id: str,
     ) -> str | None:
         """Return the current monotonic version for one reconcile source."""
         if source_type is RuntimeReconcileSourceKind.AGENT_SELECTION:
-            version = await session.scalar(
+            version = await session.read_session.scalar(
                 sa.select(RDBAgent.runtime_profile_selection_version).where(
                     RDBAgent.id == source_id
                 )
             )
             return str(version) if version is not None else None
         if source_type is RuntimeReconcileSourceKind.WORKSPACE_RUNTIME_PROFILE:
-            version = await session.scalar(
+            version = await session.read_session.scalar(
                 sa.select(RDBWorkspaceRuntimeProfile.version).where(
                     RDBWorkspaceRuntimeProfile.id == source_id
                 )
             )
             return str(version) if version is not None else None
         if source_type is RuntimeReconcileSourceKind.INFRASTRUCTURE_PROFILE:
-            version = await session.scalar(
+            version = await session.read_session.scalar(
                 sa.select(RDBRuntimeInfrastructureProfile.version).where(
                     RDBRuntimeInfrastructureProfile.id == source_id
                 )
             )
             return str(version) if version is not None else None
         if source_type is RuntimeReconcileSourceKind.PROVIDER:
-            version = await session.scalar(
+            version = await session.read_session.scalar(
                 sa.select(RDBRuntimeProvider.admin_version).where(
                     RDBRuntimeProvider.id == source_id
                 )
             )
             return str(version) if version is not None else None
         if source_type is RuntimeReconcileSourceKind.PROVIDER_CAPABILITY:
-            revision_id = await session.scalar(
+            revision_id = await session.read_session.scalar(
                 sa.select(RDBRuntimeProvider.current_contract_revision_id).where(
                     RDBRuntimeProvider.id == source_id
                 )
@@ -1320,7 +1370,7 @@ class RuntimeProfileRepository:
 
     async def list_affected_agent_ids(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         source_type: RuntimeReconcileSourceKind,
         source_id: str,
@@ -1357,12 +1407,12 @@ class RuntimeProfileRepository:
                 )
         if after_agent_id is not None:
             statement = statement.where(RDBAgent.id > after_agent_id)
-        result = await session.execute(statement)
+        result = await session.read_session.execute(statement)
         return list(result.scalars())
 
     async def create_recreation_operation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         target_kind: RuntimeRecreationTargetKind,
         target_id: str,
@@ -1393,19 +1443,18 @@ class RuntimeProfileRepository:
             started_at=None,
             completed_at=None,
         )
-        session.add(rdb)
-        await session.flush()
+        session.write_session.add(rdb)
+        await session.write_session.flush()
         return self._build_recreation_operation(rdb)
 
     async def get_recreation_target_version(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         target_kind: RuntimeRecreationTargetKind,
         target_id: str,
-        for_share: bool,
     ) -> str | None:
-        """Read one recreation target version, optionally blocking mutations."""
+        """Describe the retained version of one recreation target."""
         if target_kind is RuntimeRecreationTargetKind.PROVIDER:
             statement = sa.select(
                 RDBRuntimeProvider.admin_version,
@@ -1421,9 +1470,43 @@ class RuntimeProfileRepository:
             )
         else:
             raise AssertionError(f"Unsupported recreation target kind: {target_kind}")
-        if for_share:
-            statement = statement.with_for_update(read=True)
-        result = await session.execute(statement)
+        result = await session.read_session.execute(statement)
+        row = result.one_or_none()
+        if row is None:
+            return None
+        if target_kind is RuntimeRecreationTargetKind.PROVIDER:
+            admin_version, capability_revision_id = row
+            return _provider_recreation_target_version(
+                admin_version=admin_version,
+                capability_revision_id=capability_revision_id,
+            )
+        return str(row[0])
+
+    async def lock_recreation_target_for_dispatch(
+        self,
+        session: WriteSession,
+        *,
+        target_kind: RuntimeRecreationTargetKind,
+        target_id: str,
+    ) -> str | None:
+        """Exclude replacement of the exact target through dispatch mutation."""
+        if target_kind is RuntimeRecreationTargetKind.PROVIDER:
+            statement = sa.select(
+                RDBRuntimeProvider.admin_version,
+                RDBRuntimeProvider.current_contract_revision_id,
+            ).where(RDBRuntimeProvider.id == target_id)
+        elif target_kind is RuntimeRecreationTargetKind.INFRASTRUCTURE_PROFILE:
+            statement = sa.select(RDBRuntimeInfrastructureProfile.version).where(
+                RDBRuntimeInfrastructureProfile.id == target_id
+            )
+        elif target_kind is RuntimeRecreationTargetKind.WORKSPACE_RUNTIME_PROFILE:
+            statement = sa.select(RDBWorkspaceRuntimeProfile.version).where(
+                RDBWorkspaceRuntimeProfile.id == target_id
+            )
+        else:
+            raise AssertionError(f"Unsupported recreation target kind: {target_kind}")
+        statement = statement.with_for_update(read=True)
+        result = await session.write_session.execute(statement)
         row = result.one_or_none()
         if row is None:
             return None
@@ -1437,13 +1520,13 @@ class RuntimeProfileRepository:
 
     async def add_recreation_items(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         operation_id: str,
-        items: list[tuple[str, int, str, int]],
+        items: Sequence[tuple[str, int, str, int]],
     ) -> list[RuntimeRecreationOperationItem]:
         """Attach a stable Runtime and expected current-state tuple set."""
-        operation = await session.get(
+        operation = await session.write_session.get(
             RDBRuntimeRecreationOperation,
             operation_id,
             with_for_update=True,
@@ -1468,15 +1551,15 @@ class RuntimeProfileRepository:
             )
             for runtime_id, sequence, digest, desired_generation in items
         ]
-        session.add_all(created)
+        session.write_session.add_all(created)
         operation.total_count += len(created)
         operation.pending_count += len(created)
-        await session.flush()
+        await session.write_session.flush()
         return [self._build_recreation_item(item) for item in created]
 
     async def claim_recreation_items(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         operation_id: str,
         limit: int,
@@ -1484,7 +1567,7 @@ class RuntimeProfileRepository:
         """Claim pending recreation items without blocking peer workers."""
         if limit < 1:
             raise ValueError("Recreation claim limit must be positive.")
-        operation = await session.get(
+        operation = await session.write_session.get(
             RDBRuntimeRecreationOperation,
             operation_id,
             with_for_update=True,
@@ -1499,7 +1582,7 @@ class RuntimeProfileRepository:
         remaining_capacity = operation.concurrency_limit - operation.running_count
         if remaining_capacity <= 0:
             return []
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBRuntimeRecreationOperationItem)
             .where(
                 RDBRuntimeRecreationOperationItem.operation_id == operation_id,
@@ -1520,16 +1603,16 @@ class RuntimeProfileRepository:
             item.updated_at = claimed_at
         operation.pending_count -= len(items)
         operation.running_count += len(items)
-        await session.flush()
+        await session.write_session.flush()
         return [self._build_recreation_item(item) for item in items]
 
     async def list_recreation_target_items(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         target_kind: RuntimeRecreationTargetKind,
         target_id: str,
-    ) -> list[tuple[str, int, str, int]]:
+    ) -> list[RuntimeRecreationTargetSnapshot]:
         """Snapshot configured physical Runtimes and current fencing tuples."""
         statement = (
             sa.select(
@@ -1570,33 +1653,40 @@ class RuntimeProfileRepository:
             )
         else:
             raise AssertionError(f"Unsupported recreation target kind: {target_kind}")
-        result = await session.execute(statement)
+        result = await session.read_session.execute(statement)
         return [
-            (runtime_id, sequence, digest, generation)
+            RuntimeRecreationTargetSnapshot(
+                runtime_id=runtime_id,
+                configuration_sequence=sequence,
+                configuration_digest=digest,
+                desired_generation=generation,
+            )
             for runtime_id, sequence, digest, generation in result.tuples()
             if digest is not None
         ]
 
     async def get_recreation_operation(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         operation_id: str,
     ) -> RuntimeRecreationOperation | None:
         """Fetch one durable recreation operation."""
-        rdb = await session.get(RDBRuntimeRecreationOperation, operation_id)
+        rdb = await session.read_session.get(
+            RDBRuntimeRecreationOperation, operation_id
+        )
         return self._build_recreation_operation(rdb) if rdb is not None else None
 
     async def list_active_recreation_operation_ids(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         limit: int,
     ) -> list[str]:
         """List pending or running operations in stable creation order."""
         if limit < 1:
             raise ValueError("Recreation operation limit must be positive.")
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBRuntimeRecreationOperation.id)
             .where(
                 RDBRuntimeRecreationOperation.status.in_(
@@ -1616,7 +1706,7 @@ class RuntimeProfileRepository:
 
     async def list_recreation_items(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         operation_id: str,
         offset: int,
@@ -1637,17 +1727,17 @@ class RuntimeProfileRepository:
             statement = statement.where(
                 RDBRuntimeRecreationOperationItem.status.in_(statuses)
             )
-        result = await session.execute(statement)
+        result = await session.read_session.execute(statement)
         return [self._build_recreation_item(item) for item in result.scalars()]
 
     async def complete_empty_recreation_operation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         operation_id: str,
     ) -> bool:
         """Complete a sealed operation whose stable target set is empty."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBRuntimeRecreationOperation)
             .where(
                 RDBRuntimeRecreationOperation.id == operation_id,
@@ -1666,13 +1756,13 @@ class RuntimeProfileRepository:
 
     async def lock_recreation_item(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         item_id: str,
         expected_attempt: int,
     ) -> RuntimeRecreationOperationItem | None:
         """Lock one exact running attempt without waiting on a peer worker."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBRuntimeRecreationOperationItem)
             .where(
                 RDBRuntimeRecreationOperationItem.id == item_id,
@@ -1687,7 +1777,7 @@ class RuntimeProfileRepository:
 
     async def update_recreation_item_dispatch(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         item_id: str,
         expected_attempt: int,
@@ -1697,7 +1787,7 @@ class RuntimeProfileRepository:
         dispatched_generation: int,
     ) -> bool:
         """Record exact evidence for one generation-fenced restart dispatch."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBRuntimeRecreationOperationItem)
             .where(
                 RDBRuntimeRecreationOperationItem.id == item_id,
@@ -1720,7 +1810,7 @@ class RuntimeProfileRepository:
 
     async def finish_recreation_item(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         item_id: str,
         expected_attempt: int,
@@ -1735,7 +1825,7 @@ class RuntimeProfileRepository:
             RuntimeRecreationItemStatus.FAILED,
         }:
             raise ValueError("Recreation item terminal status is required.")
-        item = await session.scalar(
+        item = await session.write_session.scalar(
             sa.select(RDBRuntimeRecreationOperationItem)
             .where(
                 RDBRuntimeRecreationOperationItem.id == item_id,
@@ -1747,7 +1837,7 @@ class RuntimeProfileRepository:
         )
         if item is None:
             return False
-        operation = await session.get(
+        operation = await session.write_session.get(
             RDBRuntimeRecreationOperation,
             item.operation_id,
             with_for_update=True,
@@ -1766,12 +1856,12 @@ class RuntimeProfileRepository:
         else:
             operation.failed_count += 1
         self._complete_recreation_operation_if_finished(operation)
-        await session.flush()
+        await session.write_session.flush()
         return True
 
     async def retry_recreation_item(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         item_id: str,
         expected_attempt: int,
@@ -1782,7 +1872,7 @@ class RuntimeProfileRepository:
         """Requeue a running item or fail it after bounded attempts."""
         if maximum_attempts < 1:
             raise ValueError("Recreation maximum attempts must be positive.")
-        item = await session.scalar(
+        item = await session.write_session.scalar(
             sa.select(RDBRuntimeRecreationOperationItem)
             .where(
                 RDBRuntimeRecreationOperationItem.id == item_id,
@@ -1794,7 +1884,7 @@ class RuntimeProfileRepository:
         )
         if item is None:
             return False
-        operation = await session.get(
+        operation = await session.write_session.get(
             RDBRuntimeRecreationOperation,
             item.operation_id,
             with_for_update=True,
@@ -1813,7 +1903,7 @@ class RuntimeProfileRepository:
         else:
             item.status = RuntimeRecreationItemStatus.PENDING
             operation.pending_count += 1
-        await session.flush()
+        await session.write_session.flush()
         return True
 
     @staticmethod

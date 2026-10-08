@@ -56,6 +56,10 @@ from wsproto.events import (
 from wsproto.utilities import LocalProtocolError as WsprotoLocalProtocolError
 from wsproto.utilities import RemoteProtocolError as WsprotoRemoteProtocolError
 
+from azents_runtime_runner.diagnostics import (
+    RunnerDiagnosticReason,
+    runner_exception_diagnostic,
+)
 from azents_runtime_runner.stream_session import (
     RunnerStreamSessionManager,
     RunnerWebLoopbackProtocolError,
@@ -784,6 +788,10 @@ class RunnerWebSessionDispatcher:
             if envelope.stream_id in self.tombstone_set:
                 if payload in _IGNORED_TOMBSTONE_PAYLOADS:
                     return
+                if payload in {"data", "direction_end", "websocket"}:
+                    # Input already in flight when an app stream resets belongs
+                    # to that retired stream, not a new session-wide failure.
+                    return
                 raise ValueError("Runner Web tombstoned stream received new data")
             raise ValueError("Runner Web stream is unknown")
         if payload == "window_update":
@@ -987,13 +995,27 @@ class RunnerWebSessionDispatcher:
             )
             await self._reset(stream_id, stream.close_reason, stream=stream)
             raise
-        except TimeoutError:
+        except TimeoutError as exc:
             stream.close_reason = CloseReason.DEADLINE
-            _LOGGER.info("Runtime Web Runner stream deadline reached")
+            diagnostic = runner_exception_diagnostic(
+                exc, RunnerDiagnosticReason.WEB_DEADLINE
+            )
+            _LOGGER.info(
+                "Runtime Web Runner stream deadline reached",
+                exc_info=diagnostic.exc_info,
+                extra=diagnostic.log_fields(),
+            )
             await self._reset(stream_id, CloseReason.DEADLINE, stream=stream)
-        except OSError, httpcore.NetworkError, httpcore.ProtocolError:
+        except (OSError, httpcore.NetworkError, httpcore.ProtocolError) as exc:
             stream.close_reason = CloseReason.APPLICATION_UNAVAILABLE
-            _LOGGER.exception("Runtime Web Runner loopback stream failed")
+            diagnostic = runner_exception_diagnostic(
+                exc, RunnerDiagnosticReason.WEB_LOOPBACK_FAILED
+            )
+            _LOGGER.error(
+                "Runtime Web Runner loopback stream failed",
+                exc_info=diagnostic.exc_info,
+                extra=diagnostic.log_fields(),
+            )
             await self._reset(
                 stream_id,
                 CloseReason.APPLICATION_UNAVAILABLE,
@@ -1004,17 +1026,31 @@ class RunnerWebSessionDispatcher:
             h11.LocalProtocolError,
             WsprotoLocalProtocolError,
             WsprotoRemoteProtocolError,
-        ):
+        ) as exc:
             stream.close_reason = CloseReason.PROTOCOL_VIOLATION
-            _LOGGER.warning("Runtime Web Runner WebSocket protocol failed")
+            diagnostic = runner_exception_diagnostic(
+                exc, RunnerDiagnosticReason.WEB_PROTOCOL_FAILED
+            )
+            _LOGGER.warning(
+                "Runtime Web Runner WebSocket protocol failed",
+                exc_info=diagnostic.exc_info,
+                extra=diagnostic.log_fields(),
+            )
             await self._reset(
                 stream_id,
                 CloseReason.PROTOCOL_VIOLATION,
                 stream=stream,
             )
-        except RunnerStreamResourceExhausted:
+        except RunnerStreamResourceExhausted as exc:
             stream.close_reason = CloseReason.RESOURCE_EXHAUSTED
-            _LOGGER.warning("Runtime Web Runner hard process limit was exhausted")
+            diagnostic = runner_exception_diagnostic(
+                exc, RunnerDiagnosticReason.WEB_RESOURCE_EXHAUSTED
+            )
+            _LOGGER.warning(
+                "Runtime Web Runner hard process limit was exhausted",
+                exc_info=diagnostic.exc_info,
+                extra=diagnostic.log_fields(),
+            )
             await self._reset(
                 stream_id,
                 CloseReason.RESOURCE_EXHAUSTED,
@@ -1024,9 +1060,16 @@ class RunnerWebSessionDispatcher:
             RuntimeError,
             ValueError,
             UnicodeError,
-        ):
+        ) as exc:
             stream.close_reason = CloseReason.PROTOCOL_VIOLATION
-            _LOGGER.exception("Runtime Web Runner stream protocol failed")
+            diagnostic = runner_exception_diagnostic(
+                exc, RunnerDiagnosticReason.WEB_PROTOCOL_FAILED
+            )
+            _LOGGER.error(
+                "Runtime Web Runner stream protocol failed",
+                exc_info=diagnostic.exc_info,
+                extra=diagnostic.log_fields(),
+            )
             await self._reset(
                 stream_id,
                 CloseReason.PROTOCOL_VIOLATION,
@@ -1038,7 +1081,9 @@ class RunnerWebSessionDispatcher:
         finally:
             if self.streams.pop(stream_id, None) is stream:
                 self._retire(stream_id)
-            stream.response_credit.close()
+            async with stream.credit_changed:
+                stream.response_credit.close()
+                stream.credit_changed.notify_all()
             await stream.inbound.close()
             if stream.resources_reserved:
                 self.resources.end_tasks()

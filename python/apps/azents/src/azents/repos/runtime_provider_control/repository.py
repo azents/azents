@@ -8,7 +8,6 @@ from azents_runtime_control.provider import (
     RuntimeProviderOperationalWarning,
     RuntimeProviderOperationalWarningSeverity,
 )
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeProviderAuthMethod,
@@ -27,6 +26,7 @@ from azents.rdb.models.runtime_provider_control import (
     RDBRuntimeProviderCredential,
     RDBRuntimeProviderEnrollmentGrant,
 )
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import (
     RuntimeProviderConnection,
@@ -76,7 +76,7 @@ class RuntimeProviderControlRepository:
 
     async def create_enrollment_grant(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         create: RuntimeProviderEnrollmentGrantCreate,
     ) -> RuntimeProviderEnrollmentGrant:
@@ -90,18 +90,18 @@ class RuntimeProviderControlRepository:
             issued_by_user_id=create.issued_by_user_id,
             issued_by_source_id=create.issued_by_source_id,
         )
-        session.add(grant)
-        await session.flush()
+        session.write_session.add(grant)
+        await session.write_session.flush()
         return self._build_grant(grant)
 
     async def get_enrollment_grant_for_update(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         grant_id: str,
     ) -> RuntimeProviderEnrollmentGrant | None:
         """Lock one grant so a service can verify and consume it atomically."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBRuntimeProviderEnrollmentGrant)
             .where(RDBRuntimeProviderEnrollmentGrant.id == grant_id)
             .with_for_update()
@@ -111,14 +111,14 @@ class RuntimeProviderControlRepository:
 
     async def create_credential_and_consume_grant(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         grant_id: str,
         credential: RuntimeProviderCredentialCreate,
         consumed_at: datetime.datetime,
     ) -> RuntimeProviderCredential | None:
         """Consume a locked issued grant and create its Provider credential."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBRuntimeProviderEnrollmentGrant)
             .where(
                 RDBRuntimeProviderEnrollmentGrant.id == grant_id,
@@ -143,21 +143,21 @@ class RuntimeProviderControlRepository:
             expires_at=credential.expires_at,
             issued_grant_id=credential.issued_grant_id,
         )
-        session.add(rdb)
-        await session.flush()
+        session.write_session.add(rdb)
+        await session.write_session.flush()
         grant.consumed_credential_id = rdb.id
-        await session.flush()
+        await session.write_session.flush()
         return self._build_credential(rdb)
 
     async def get_active_credential_by_verifier(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         verifier: str,
         now: datetime.datetime,
     ) -> RuntimeProviderCredential | None:
         """Return one active unexpired credential matching a verifier."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBRuntimeProviderCredential).where(
                 RDBRuntimeProviderCredential.verifier == verifier,
                 RDBRuntimeProviderCredential.state
@@ -173,13 +173,13 @@ class RuntimeProviderControlRepository:
 
     async def mark_credential_used(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         credential_id: str,
         used_at: datetime.datetime,
     ) -> bool:
         """Mark one active credential as used, unless it was revoked concurrently."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBRuntimeProviderCredential)
             .where(
                 RDBRuntimeProviderCredential.id == credential_id,
@@ -197,7 +197,7 @@ class RuntimeProviderControlRepository:
 
     async def credential_active(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         credential_id: str,
         provider_id: str,
@@ -205,7 +205,7 @@ class RuntimeProviderControlRepository:
         now: datetime.datetime,
     ) -> bool:
         """Return whether one exact Provider credential remains usable."""
-        result = await session.scalar(
+        result = await session.read_session.scalar(
             sa.select(sa.literal(True)).where(
                 sa.exists(
                     sa.select(RDBRuntimeProviderCredential.id).where(
@@ -226,14 +226,14 @@ class RuntimeProviderControlRepository:
 
     async def revoke_older_bootstrap_credentials(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         provider_id: str,
         current_credential_id: str,
         revoked_at: datetime.datetime,
     ) -> tuple[RuntimeProviderCredential, ...]:
         """Revoke older credentials from the current credential's bootstrap source."""
-        current_result = await session.execute(
+        current_result = await session.write_session.execute(
             sa.select(
                 RDBRuntimeProviderCredential.created_at,
                 RDBRuntimeProviderEnrollmentGrant.issued_by_source_id,
@@ -255,7 +255,7 @@ class RuntimeProviderControlRepository:
             RDBRuntimeProviderEnrollmentGrant.issued_by_source_id
             == current.issued_by_source_id
         )
-        revoked_result = await session.execute(
+        revoked_result = await session.write_session.execute(
             sa.update(RDBRuntimeProviderCredential)
             .where(
                 RDBRuntimeProviderCredential.provider_id == provider_id,
@@ -280,7 +280,7 @@ class RuntimeProviderControlRepository:
         )
         revoked = tuple(revoked_result.scalars())
         if revoked:
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBRuntimeProviderConnection)
                 .where(
                     RDBRuntimeProviderConnection.credential_id.in_(
@@ -298,14 +298,14 @@ class RuntimeProviderControlRepository:
 
     async def revoke_credential(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         credential_id: str,
         revoked_at: datetime.datetime,
         revoked_by_user_id: str | None,
     ) -> RuntimeProviderCredential | None:
         """Revoke one active credential without invalidating audit history."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBRuntimeProviderCredential)
             .where(
                 RDBRuntimeProviderCredential.id == credential_id,
@@ -321,7 +321,7 @@ class RuntimeProviderControlRepository:
         )
         credential = result.scalar_one_or_none()
         if credential is not None:
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBRuntimeProviderConnection)
                 .where(
                     RDBRuntimeProviderConnection.credential_id == credential_id,
@@ -337,14 +337,14 @@ class RuntimeProviderControlRepository:
 
     async def revoke_binding_authority(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         binding_id: str,
         revoked_at: datetime.datetime,
         revoked_by_user_id: str | None,
     ) -> None:
         """Revoke every outstanding grant, credential, and connection for a binding."""
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBRuntimeProviderEnrollmentGrant)
             .where(
                 RDBRuntimeProviderEnrollmentGrant.binding_id == binding_id,
@@ -357,7 +357,7 @@ class RuntimeProviderControlRepository:
                 revoked_by_user_id=revoked_by_user_id,
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBRuntimeProviderCredential)
             .where(
                 RDBRuntimeProviderCredential.binding_id == binding_id,
@@ -370,7 +370,7 @@ class RuntimeProviderControlRepository:
                 revoked_by_user_id=revoked_by_user_id,
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBRuntimeProviderConnection)
             .where(
                 RDBRuntimeProviderConnection.binding_id == binding_id,
@@ -385,13 +385,13 @@ class RuntimeProviderControlRepository:
 
     async def has_connected_connection_for_binding(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         binding_id: str,
         now: datetime.datetime,
     ) -> bool:
         """Return whether one binding retains a connected Provider stream."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(
                 sa.exists().where(
                     RDBRuntimeProviderConnection.binding_id == binding_id,
@@ -410,12 +410,12 @@ class RuntimeProviderControlRepository:
 
     async def create_connection(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         create: RuntimeProviderConnectionCreate,
     ) -> RuntimeProviderConnection:
         """Record one authenticated Provider Control stream connection."""
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBRuntimeProviderConnection)
             .where(
                 RDBRuntimeProviderConnection.provider_id == create.provider_id,
@@ -450,13 +450,13 @@ class RuntimeProviderControlRepository:
             connected_at=create.connected_at,
             last_heartbeat_at=create.connected_at,
         )
-        session.add(rdb)
-        await session.flush()
+        session.write_session.add(rdb)
+        await session.write_session.flush()
         return self._build_connection(rdb)
 
     async def heartbeat_connection(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         provider_id: str,
         binding_id: str,
@@ -474,7 +474,7 @@ class RuntimeProviderControlRepository:
                 operational_diagnostics=_diagnostics_payload(operational_diagnostics),
                 diagnostics_checked_at=operational_diagnostics.checked_at,
             )
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBRuntimeProviderConnection)
             .where(
                 RDBRuntimeProviderConnection.provider_id == provider_id,
@@ -514,7 +514,7 @@ class RuntimeProviderControlRepository:
 
     async def disconnect_connection(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         provider_id: str,
         binding_id: str,
@@ -525,7 +525,7 @@ class RuntimeProviderControlRepository:
         auth_subject: str,
     ) -> bool:
         """Disconnect only the authenticated current connection generation."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBRuntimeProviderConnection)
             .where(
                 RDBRuntimeProviderConnection.provider_id == provider_id,
@@ -549,7 +549,7 @@ class RuntimeProviderControlRepository:
 
     async def connection_active(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         provider_id: str,
         binding_id: str,
@@ -560,7 +560,7 @@ class RuntimeProviderControlRepository:
         auth_subject: str,
     ) -> bool:
         """Return whether a connection and its credential remain active."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBRuntimeProviderConnection.id).where(
                 RDBRuntimeProviderConnection.provider_id == provider_id,
                 RDBRuntimeProviderConnection.binding_id == binding_id,
@@ -596,11 +596,10 @@ class RuntimeProviderControlRepository:
 
     async def has_connected_connection(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         provider_id: str,
         now: datetime.datetime,
-        for_update: bool = False,
     ) -> bool:
         """Return whether one Provider retains current connection authority."""
         statement = sa.select(RDBRuntimeProviderConnection.id).where(
@@ -629,20 +628,18 @@ class RuntimeProviderControlRepository:
                 ),
             ),
         )
-        if for_update:
-            statement = statement.with_for_update(read=True)
-        result = await session.execute(statement)
+        result = await session.read_session.execute(statement)
         return result.scalar_one_or_none() is not None
 
     async def get_current_connection(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         provider_id: str,
         now: datetime.datetime,
     ) -> RuntimeProviderConnection | None:
         """Return the active authenticated connection generation, if available."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBRuntimeProviderConnection).where(
                 RDBRuntimeProviderConnection.provider_id == provider_id,
                 RDBRuntimeProviderConnection.status

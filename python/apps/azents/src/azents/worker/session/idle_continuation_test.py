@@ -15,6 +15,10 @@ from azents.core.enums import (
     MailboxItemKind,
     MailboxSchedulingMode,
 )
+from azents.core.mailbox_data import (
+    MailboxItem,
+    ScheduledTaskContinuationMailboxPayload,
+)
 from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
 from azents.engine.events.types import Event
 from azents.engine.hooks.types import (
@@ -33,53 +37,43 @@ from azents.repos.idle_continuation import (
     IdleContinuationFinalization,
     IdleContinuationInput,
 )
-from azents.repos.mailbox.data import (
-    MailboxItem,
-    ScheduledTaskContinuationMailboxPayload,
-)
-from azents.services.mailbox import (
-    MailboxAdmissionResult,
-    MailboxEnqueue,
-)
-from azents.worker.session.execution_snapshot import (
+from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
-    CanonicalExecutionSnapshot,
 )
+from azents.repos.session_execution.data import CanonicalExecutionSnapshot
 from azents.worker.session.idle_continuation import IdleContinuationService
 
 
-class _MailboxService:
-    """MailboxService test double."""
+class _ContinuationRecorder:
+    """Record canonical inputs accepted by a completed idle operation."""
 
     def __init__(self) -> None:
-        self.enqueued_batches: list[list[MailboxEnqueue]] = []
+        self.enqueued_batches: list[list[IdleContinuationInput]] = []
 
-    async def enqueue_idle_continuations(
+    def record(
         self,
-        session: object,
-        inputs: list[MailboxEnqueue],
-    ) -> list[MailboxAdmissionResult]:
-        """Record the transaction-level enqueue request."""
-        del session
+        inputs: list[IdleContinuationInput],
+    ) -> list[IdleContinuationAdmission]:
+        """Record completed admission outcomes without a service DB interface."""
         self.enqueued_batches.append(inputs)
         return [
-            MailboxAdmissionResult(
+            IdleContinuationAdmission(
                 mailbox_item=MailboxItem(
                     id=f"{index + 1:032d}",
                     session_id=input.session_id,
                     kind=input.kind,
-                    scheduling_mode=input.scheduling_mode,
+                    scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                     requested_model_target_label=None,
                     requested_reasoning_effort=None,
                     requested_enabled_execution_options=[],
-                    sender_user_id=input.sender_user_id,
+                    sender_user_id=None,
                     order_group=f"{index + 1:032d}",
                     order_sequence=0,
                     content=input.content,
                     idempotency_key=input.idempotency_key,
                     metadata=input.metadata,
-                    attachments=input.attachments,
-                    file_parts=input.file_parts,
+                    attachments=[],
+                    file_parts=[],
                     payload=input.payload,
                     created_at=datetime.datetime.now(datetime.UTC),
                 ),
@@ -249,13 +243,13 @@ class _IdleContinuationRepository:
     def __init__(
         self,
         *,
-        mailbox_item_service: _MailboxService,
+        continuation_recorder: _ContinuationRecorder,
         agent_session_repository: _AgentSessionRepository,
         agent_run_repository: _AgentRunRepository,
         mailbox_item_repository: _MailboxRepository,
         scheduled_task_cycle_repository: _CycleRepository,
     ) -> None:
-        self.mailbox_item_service = mailbox_item_service
+        self.continuation_recorder = continuation_recorder
         self.agent_session_repository = agent_session_repository
         self.agent_run_repository = agent_run_repository
         self.mailbox_item_repository = mailbox_item_repository
@@ -301,31 +295,6 @@ class _IdleContinuationRepository:
                 for input in inputs
                 if input.scheduled_cycle_id == eligibility.archived_cycle_id
             ]
-        mailbox_inputs = [
-            MailboxEnqueue(
-                session_id=input.session_id,
-                kind=input.kind,
-                scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
-                requested_model_target_label=None,
-                requested_reasoning_effort=None,
-                requested_enabled_execution_options=[],
-                sender_user_id=None,
-                order_group=None,
-                order_sequence=0,
-                content=input.content,
-                idempotency_key=input.idempotency_key,
-                metadata=input.metadata,
-                action=None,
-                attachments=[],
-                file_parts=[],
-                payload=input.payload,
-            )
-            for input in accepted
-        ]
-        results = await self.mailbox_item_service.enqueue_idle_continuations(
-            session,
-            mailbox_inputs,
-        )
         consumed = (
             await self.agent_session_repository.consume_pending_idle_continuation(
                 session,
@@ -337,15 +306,12 @@ class _IdleContinuationRepository:
                 ),
             )
         )
+        if not consumed:
+            return IdleContinuationFinalization(False, [], 0)
+        results = self.continuation_recorder.record(accepted)
         return IdleContinuationFinalization(
             consumed=consumed,
-            admissions=[
-                IdleContinuationAdmission(
-                    mailbox_item=result.mailbox_item,
-                    created=result.created,
-                )
-                for result in results
-            ],
+            admissions=results,
             continuation_count=len(accepted),
         )
 
@@ -490,7 +456,7 @@ def _construct_service(**kwargs: Any) -> IdleContinuationService:  # noqa: ANN40
 
 def _service(
     *,
-    mailbox_item_service: Any,  # noqa: ANN401
+    continuation_recorder: Any,  # noqa: ANN401
     event_publisher: Any,  # noqa: ANN401
     broker: Any,  # noqa: ANN401
     agent_session_repository: Any | None = None,  # noqa: ANN401
@@ -501,7 +467,7 @@ def _service(
     mailbox_repository = mailbox_item_repository or _MailboxRepository(pending=False)
     return _construct_service(
         repository=_IdleContinuationRepository(
-            mailbox_item_service=mailbox_item_service,
+            continuation_recorder=continuation_recorder,
             agent_session_repository=agent_session,
             agent_run_repository=_AgentRunRepository(),
             mailbox_item_repository=mailbox_repository,
@@ -517,7 +483,7 @@ async def test_consume_admits_both_idle_transactions_through_execution_tree() ->
     """Initial eligibility and final outcome share the canonical admission gate."""
     repository = _AgentSessionRepository()
     result = await _service(
-        mailbox_item_service=_MailboxService(),
+        continuation_recorder=_ContinuationRecorder(),
         event_publisher=_EventPublisher(),
         broker=_Broker(),
         agent_session_repository=repository,
@@ -536,7 +502,7 @@ async def test_consume_admits_both_idle_transactions_through_execution_tree() ->
 async def test_consume_failure_publishes_no_event_or_wakeup() -> None:
     """A failed final boundary consume produces no external effects."""
     repository = _AgentSessionRepository(consume_result=False)
-    mailbox_item_service = _MailboxService()
+    continuation_recorder = _ContinuationRecorder()
     event_publisher = _EventPublisher()
     broker = _Broker()
     toolkit = _IdleToolkit(
@@ -544,13 +510,13 @@ async def test_consume_failure_publishes_no_event_or_wakeup() -> None:
     )
 
     result = await _service(
-        mailbox_item_service=mailbox_item_service,
+        continuation_recorder=continuation_recorder,
         event_publisher=event_publisher,
         broker=broker,
         agent_session_repository=repository,
     ).consume(
         _snapshot(),
-        toolkits=[ToolkitBinding(toolkit, "goal", False)],
+        toolkits=[ToolkitBinding(toolkit, "goal", "goal", False)],
         run_id="run-001",
     )
 
@@ -562,7 +528,7 @@ async def test_consume_failure_publishes_no_event_or_wakeup() -> None:
 @pytest.mark.asyncio
 async def test_consume_defers_when_new_pending_input_exists() -> None:
     """Known pending input prevents idle hook evaluation and its outcome."""
-    mailbox_item_service = _MailboxService()
+    continuation_recorder = _ContinuationRecorder()
     event_publisher = _EventPublisher()
     broker = _Broker()
     mailbox_item_repository = _MailboxRepository(pending=True)
@@ -571,19 +537,19 @@ async def test_consume_defers_when_new_pending_input_exists() -> None:
     )
 
     result = await _service(
-        mailbox_item_service=mailbox_item_service,
+        continuation_recorder=continuation_recorder,
         event_publisher=event_publisher,
         broker=broker,
         mailbox_item_repository=mailbox_item_repository,
     ).consume(
         _snapshot(),
-        toolkits=[ToolkitBinding(toolkit, "goal", False)],
+        toolkits=[ToolkitBinding(toolkit, "goal", "goal", False)],
         run_id="run-001",
     )
 
     assert result is False
     assert toolkit.contexts == []
-    assert mailbox_item_service.enqueued_batches == []
+    assert continuation_recorder.enqueued_batches == []
     assert event_publisher.dispatched == []
     assert broker.sent_messages == []
     assert mailbox_item_repository.checked_session_ids == ["session-001"]
@@ -592,7 +558,7 @@ async def test_consume_defers_when_new_pending_input_exists() -> None:
 @pytest.mark.asyncio
 async def test_consume_rejects_owner_generation_takeover() -> None:
     """A stale owner hands the idle continuation boundary to a fresh Worker."""
-    mailbox_item_service = _MailboxService()
+    continuation_recorder = _ContinuationRecorder()
     event_publisher = _EventPublisher()
     broker = _Broker()
     toolkit = _IdleToolkit(
@@ -601,18 +567,18 @@ async def test_consume_rejects_owner_generation_takeover() -> None:
 
     with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
         await _service(
-            mailbox_item_service=mailbox_item_service,
+            continuation_recorder=continuation_recorder,
             event_publisher=event_publisher,
             broker=broker,
             agent_session_repository=_AgentSessionRepository(owner_generation=2),
         ).consume(
             _snapshot(),
-            toolkits=[ToolkitBinding(toolkit, "goal", False)],
+            toolkits=[ToolkitBinding(toolkit, "goal", "goal", False)],
             run_id="run-001",
         )
 
     assert toolkit.contexts == []
-    assert mailbox_item_service.enqueued_batches == []
+    assert continuation_recorder.enqueued_batches == []
     assert event_publisher.dispatched == []
     assert broker.sent_messages == []
 
@@ -620,7 +586,7 @@ async def test_consume_rejects_owner_generation_takeover() -> None:
 @pytest.mark.asyncio
 async def test_consume_stores_continuation_and_sends_wake_up() -> None:
     """Idle continuation is buffered before sending the wake-up signal."""
-    mailbox_item_service = _MailboxService()
+    continuation_recorder = _ContinuationRecorder()
     event_publisher = _EventPublisher()
     broker = _Broker()
     repository = _AgentSessionRepository()
@@ -634,13 +600,13 @@ async def test_consume_stores_continuation_and_sends_wake_up() -> None:
     )
 
     result = await _service(
-        mailbox_item_service=mailbox_item_service,
+        continuation_recorder=continuation_recorder,
         event_publisher=event_publisher,
         broker=broker,
         agent_session_repository=repository,
     ).consume(
         snapshot := _snapshot(),
-        toolkits=[ToolkitBinding(toolkit, "goal", False)],
+        toolkits=[ToolkitBinding(toolkit, "goal", "goal", False)],
         run_id="run-001",
     )
 
@@ -653,11 +619,10 @@ async def test_consume_stores_continuation_and_sends_wake_up() -> None:
     assert context.run_id == "run-001"
     assert context.reason == "completed"
 
-    assert len(mailbox_item_service.enqueued_batches) == 1
-    [enqueue] = mailbox_item_service.enqueued_batches[0]
+    assert len(continuation_recorder.enqueued_batches) == 1
+    [enqueue] = continuation_recorder.enqueued_batches[0]
     assert enqueue.session_id == "session-001"
     assert enqueue.kind == MailboxItemKind.GOAL_CONTINUATION
-    assert enqueue.scheduling_mode == MailboxSchedulingMode.WAKE_SESSION
     assert enqueue.metadata == {
         "source": "goal",
         "goal_objective": "Ship",
@@ -665,7 +630,6 @@ async def test_consume_stores_continuation_and_sends_wake_up() -> None:
     }
     assert enqueue.content == "ignored"
     assert enqueue.idempotency_key == "idle_continuation:run-001:goal:0"
-    assert enqueue.attachments == []
     assert repository.consumed == [("session-001", "run-001", True)]
     assert len(event_publisher.dispatched) == 1
     assert event_publisher.dispatched[0][0] == "session-001"
@@ -676,7 +640,7 @@ async def test_consume_stores_continuation_and_sends_wake_up() -> None:
 @pytest.mark.asyncio
 async def test_consume_stores_external_channel_continuation_separately() -> None:
     """External Channel continuation never becomes a Goal continuation."""
-    mailbox_item_service = _MailboxService()
+    continuation_recorder = _ContinuationRecorder()
     event_publisher = _EventPublisher()
     broker = _Broker()
     repository = _AgentSessionRepository()
@@ -693,18 +657,25 @@ async def test_consume_stores_external_channel_continuation_separately() -> None
     )
 
     result = await _service(
-        mailbox_item_service=mailbox_item_service,
+        continuation_recorder=continuation_recorder,
         event_publisher=event_publisher,
         broker=broker,
         agent_session_repository=repository,
     ).consume(
         snapshot := _snapshot(),
-        toolkits=[ToolkitBinding(toolkit, "external_channel", False)],
+        toolkits=[
+            ToolkitBinding(
+                toolkit,
+                "external_channel",
+                "external_channel",
+                False,
+            )
+        ],
         run_id="run-001",
     )
 
     assert result is True
-    [enqueue] = mailbox_item_service.enqueued_batches[0]
+    [enqueue] = continuation_recorder.enqueued_batches[0]
     assert enqueue.kind == MailboxItemKind.EXTERNAL_CHANNEL_CONTINUATION
     assert enqueue.metadata == {
         "source": "external_channel",
@@ -722,7 +693,7 @@ async def test_consume_stores_external_channel_continuation_separately() -> None
 @pytest.mark.asyncio
 async def test_consume_stores_typed_scheduled_task_continuation() -> None:
     """Scheduled continuation preserves its internal cycle binding and presentation."""
-    mailbox_item_service = _MailboxService()
+    continuation_recorder = _ContinuationRecorder()
     event_publisher = _EventPublisher()
     broker = _Broker()
     repository = _AgentSessionRepository()
@@ -738,18 +709,18 @@ async def test_consume_stores_typed_scheduled_task_continuation() -> None:
     )
 
     result = await _service(
-        mailbox_item_service=mailbox_item_service,
+        continuation_recorder=continuation_recorder,
         event_publisher=event_publisher,
         broker=broker,
         agent_session_repository=repository,
     ).consume(
         snapshot := _snapshot(),
-        toolkits=[ToolkitBinding(toolkit, "scheduled", False)],
+        toolkits=[ToolkitBinding(toolkit, "scheduled", "scheduled", False)],
         run_id="run-001",
     )
 
     assert result is True
-    [enqueue] = mailbox_item_service.enqueued_batches[0]
+    [enqueue] = continuation_recorder.enqueued_batches[0]
     assert enqueue.kind is MailboxItemKind.SCHEDULED_TASK_CONTINUATION
     assert enqueue.metadata == {
         "source": "scheduled_task",
@@ -769,7 +740,7 @@ async def test_consume_stores_typed_scheduled_task_continuation() -> None:
 @pytest.mark.asyncio
 async def test_archived_session_keeps_only_matching_scheduled_continuation() -> None:
     """Archived Sessions reject unrelated idle continuations without reopening."""
-    mailbox_item_service = _MailboxService()
+    continuation_recorder = _ContinuationRecorder()
     event_publisher = _EventPublisher()
     broker = _Broker()
     repository = _AgentSessionRepository(status=AgentSessionStatus.ARCHIVED)
@@ -795,18 +766,18 @@ async def test_archived_session_keeps_only_matching_scheduled_continuation() -> 
     )
 
     result = await _service(
-        mailbox_item_service=mailbox_item_service,
+        continuation_recorder=continuation_recorder,
         event_publisher=event_publisher,
         broker=broker,
         agent_session_repository=repository,
     ).consume(
         snapshot := _snapshot(),
-        toolkits=[ToolkitBinding(toolkit, "scheduled", False)],
+        toolkits=[ToolkitBinding(toolkit, "scheduled", "scheduled", False)],
         run_id="run-001",
     )
 
     assert result is True
-    [enqueue] = mailbox_item_service.enqueued_batches[0]
+    [enqueue] = continuation_recorder.enqueued_batches[0]
     assert enqueue.kind is MailboxItemKind.SCHEDULED_TASK_CONTINUATION
     assert isinstance(enqueue.payload, ScheduledTaskContinuationMailboxPayload)
     assert enqueue.payload.cycle_id == "c" * 32
@@ -817,20 +788,20 @@ async def test_archived_session_keeps_only_matching_scheduled_continuation() -> 
 @pytest.mark.asyncio
 async def test_consume_uses_snapshot_workspace_for_idle_hook() -> None:
     """Idle hook context uses the canonical execution snapshot workspace."""
-    mailbox_item_service = _MailboxService()
+    continuation_recorder = _ContinuationRecorder()
     event_publisher = _EventPublisher()
     broker = _Broker()
     repository = _AgentSessionRepository(workspace_id="workspace-authoritative")
     toolkit = _IdleToolkit([])
 
     result = await _service(
-        mailbox_item_service=mailbox_item_service,
+        continuation_recorder=continuation_recorder,
         event_publisher=event_publisher,
         broker=broker,
         agent_session_repository=repository,
     ).consume(
         _snapshot(workspace_id="workspace-snapshot"),
-        toolkits=[ToolkitBinding(toolkit, "goal", False)],
+        toolkits=[ToolkitBinding(toolkit, "goal", "goal", False)],
         run_id="run-001",
     )
 

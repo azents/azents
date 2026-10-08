@@ -25,12 +25,16 @@ from azents.core.credentials import (
 from azents.core.enums import LLMProvider
 from azents.core.kimi_oauth import KimiOAuthConnectionMethod
 from azents.core.xai_oauth import XaiOAuthConnectionMethod, XaiOAuthConnectionStatus
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
+from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
+from azents.repos.subscription_usage_read import SubscriptionUsageReadRepository
 from azents.services.chatgpt_oauth.data import ProviderRejected, ProviderUnavailable
 from azents.services.kimi_oauth.data import ProviderRejected as KimiProviderRejected
 from azents.services.kimi_oauth.data import (
     ProviderUnavailable as KimiProviderUnavailable,
 )
+from azents.services.oauth_runtime_clients import create_runtime_oauth_client_factories
 from azents.services.xai_oauth.data import (
     ProviderEntitlementDenied as XaiProviderEntitlementDenied,
 )
@@ -64,11 +68,11 @@ class _SessionManager:
     def __init__(self) -> None:
         self.session = AsyncSession()
 
-    def __call__(self) -> AbstractAsyncContextManager[AsyncSession]:
+    def __call__(self) -> AbstractAsyncContextManager[WriteSession]:
         return self
 
-    async def __aenter__(self) -> AsyncSession:
-        return self.session
+    async def __aenter__(self) -> WriteSession:
+        return ReadWriteSession(self.session)
 
     async def __aexit__(self, *_args: object) -> None:
         return None
@@ -245,15 +249,21 @@ async def _service(
     http_client = httpx.AsyncClient(transport=transport)
     return _SubscriptionUsageFixture(
         service=SubscriptionUsageService(
-            repository=repository,
+            read_repository=SubscriptionUsageReadRepository(
+                repository=repository,
+                read_session_manager=_SessionManager(),
+            ),
             chatgpt_oauth_runtime_repository=AsyncMock(),
             xai_oauth_runtime_repository=AsyncMock(),
-            session_manager=_SessionManager(),
+            runtime_oauth_clients=create_runtime_oauth_client_factories(),
             http_client=http_client,
             chatgpt_usage_base_url="https://usage.example.test/backend-api",
             xai_usage_base_url="https://xai-usage.example.test/v1",
             openrouter_usage_base_url="https://openrouter.example.test/api/v1",
             kimi_usage_base_url="https://kimi-usage.example.test/coding/v1",
+            kimi_oauth_runtime_repository=KimiOAuthRuntimeRepository(
+                session_manager=_SessionManager(), integration_repository=repository
+            ),
         ),
         repository=repository,
     )

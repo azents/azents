@@ -3,20 +3,20 @@
 import asyncio
 import datetime
 from collections.abc import Iterator
-from typing import Any, cast
 
 import pytest
 from testcontainers.redis import RedisContainer
 
 from azents.core.enums import ExternalChannelConversationScopeKind
-from azents.core.redis import create_redis_client
-from azents.services.external_channel.conversation import (
+from azents.core.external_channel_conversation_data import (
+    ExternalChannelConversationLockLease,
     ExternalChannelConversationLockOwnershipLost,
     ExternalChannelConversationLockTimeout,
     ExternalChannelConversationLockUnavailable,
     ExternalChannelConversationScope,
     ExternalChannelOperationDeadline,
 )
+from azents.core.redis import create_redis_client
 from azents.services.external_channel.conversation_lock import (
     InMemoryExternalChannelConversationLock,
     RedisExternalChannelConversationLock,
@@ -75,11 +75,12 @@ async def test_memory_lock_serializes_same_digest() -> None:
 @pytest.mark.asyncio
 async def test_memory_lease_asserts_after_release() -> None:
     lock = InMemoryExternalChannelConversationLock()
-    lease = cast(Any, None)
+    lease: ExternalChannelConversationLockLease | None = None
     async with lock.acquire(scope=_scope(), deadline=_deadline()) as owned:
         lease = owned
         await owned.assert_owned()
     with pytest.raises(ExternalChannelConversationLockOwnershipLost):
+        assert lease is not None
         await lease.assert_owned()
 
 
@@ -95,13 +96,22 @@ async def test_expired_deadline_does_not_create_redis_operation() -> None:
             *,
             nx: bool,
             px: int,
-        ) -> asyncio.Future[object]:
+        ) -> asyncio.Future[bool | None]:
             del nx, px
             nonlocal created
             created = True
             return asyncio.get_running_loop().create_future()
 
-    lock = RedisExternalChannelConversationLock(cast(Any, _NeverCalledRedis()))
+        async def eval(
+            self,
+            script: str,
+            numkeys: int,
+            /,
+            *keys_and_args: bytes | str | int | float,
+        ) -> object:
+            raise AssertionError("Expired admission must not call Redis")
+
+    lock = RedisExternalChannelConversationLock(_NeverCalledRedis())
     with pytest.raises(ExternalChannelConversationLockTimeout):
         async with lock.acquire(scope=_scope(), deadline=_deadline(-1)):
             pass
@@ -175,9 +185,13 @@ class _FakeRedis:
         self.values[key] = (value, px)
         return True
 
-    async def eval(self, script: str, _numkeys: int, key: str, *args: object) -> int:
+    async def eval(
+        self, script: str, _numkeys: int, /, *keys_and_args: bytes | str | int | float
+    ) -> int:
         if self.unavailable:
             raise OSError("redis unavailable")
+        key, *args = keys_and_args
+        assert isinstance(key, str)
         current = self.values.get(key)
         owner = str(args[0])
         if "PEXPIRE" in script:
@@ -199,7 +213,7 @@ class _FakeRedis:
 async def test_redis_lock_uses_owner_fencing_without_memory_fallback() -> None:
     redis = _FakeRedis()
     lock = RedisExternalChannelConversationLock(
-        cast(Any, redis),
+        redis,
         lease_ttl_seconds=1.0,
         renewal_interval_seconds=0.2,
     )

@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import NamedTuple
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentLifecycleStatus,
@@ -24,6 +23,20 @@ from azents.core.enums import (
     ExternalChannelSetupClaimStatus,
     ExternalChannelTransport,
     ExternalChannelWorkProjectionStatus,
+)
+from azents.core.external_channel_management import (
+    ManagedApprovalRequest,
+    ManagedBinding,
+    ManagedBlock,
+    ManagedChannelDefault,
+    ManagedConnection,
+    ManagedGrant,
+    ManagedMultiConnection,
+    ManagedMultiRoute,
+    ManagedSlackManagementHandoff,
+    ManagedWork,
+    ManagedWorkSource,
+    ManagedWorkTask,
 )
 from azents.core.external_channel_provider import (
     DiscordThreadAutoArchiveDurationMinutes,
@@ -47,20 +60,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelResource,
     RDBExternalChannelSetupClaim,
 )
-from azents.repos.external_channel.management_data import (
-    ManagedApprovalRequest,
-    ManagedBinding,
-    ManagedBlock,
-    ManagedChannelDefault,
-    ManagedConnection,
-    ManagedGrant,
-    ManagedMultiConnection,
-    ManagedMultiRoute,
-    ManagedSlackManagementHandoff,
-    ManagedWork,
-    ManagedWorkSource,
-    ManagedWorkTask,
-)
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.external_channel.work import (
     projection_state,
     terminate_binding_with_plans,
@@ -162,13 +162,13 @@ class ExternalChannelManagementRepository:
 
     async def list_connections(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         agent_id: str,
     ) -> list[ManagedConnection]:
         rows = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(RDBExternalChannelConnection, RDBExternalChannelAgentRoute)
                 .join(
                     RDBExternalChannelAgentRoute,
@@ -193,7 +193,7 @@ class ExternalChannelManagementRepository:
 
     async def update_connection_access_policy(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         agent_id: str,
@@ -202,7 +202,7 @@ class ExternalChannelManagementRepository:
     ) -> ManagedConnection | None:
         """Persist one dedicated route's non-secret ingress policy."""
         row = (
-            await session.execute(
+            await session.write_session.execute(
                 sa.select(RDBExternalChannelConnection, RDBExternalChannelAgentRoute)
                 .join(
                     RDBExternalChannelAgentRoute,
@@ -221,20 +221,19 @@ class ExternalChannelManagementRepository:
                     RDBExternalChannelConnection.status
                     != ExternalChannelConnectionStatus.DISCONNECTED,
                 )
-                .with_for_update()
             )
         ).one_or_none()
         if row is None:
             return None
         connection, route = row
         route.open_access_enabled = open_access_enabled
-        await session.flush()
-        await session.refresh(route, attribute_names=["updated_at"])
+        await session.write_session.flush()
+        await session.write_session.refresh(route, attribute_names=["updated_at"])
         return _connection(connection, route)
 
     async def list_multi_connections(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         provider: ExternalChannelProvider | None,
@@ -272,7 +271,7 @@ class ExternalChannelManagementRepository:
             .subquery()
         )
         rows = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(
                     RDBExternalChannelConnection,
                     sa.func.coalesce(active_route_counts.c.active_agent_count, 0).label(
@@ -321,7 +320,7 @@ class ExternalChannelManagementRepository:
 
     async def list_agent_multi_connections(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         agent_id: str,
@@ -355,7 +354,7 @@ class ExternalChannelManagementRepository:
             .subquery()
         )
         rows = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(
                     RDBExternalChannelConnection,
                     sa.func.coalesce(active_route_counts.c.active_agent_count, 0).label(
@@ -409,15 +408,14 @@ class ExternalChannelManagementRepository:
 
     async def get_multi_connection(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         connection_id: str,
         provider: ExternalChannelProvider,
-        lock: bool = False,
         include_disconnected: bool = False,
     ) -> RDBExternalChannelConnection | None:
-        """Fetch one provider-scoped Multi App, optionally under a row lock."""
+        """Fetch one provider-scoped Multi App, without serializing descriptions."""
         predicates: list[sa.ColumnElement[bool]] = [
             RDBExternalChannelConnection.id == connection_id,
             RDBExternalChannelConnection.workspace_id == workspace_id,
@@ -430,13 +428,38 @@ class ExternalChannelManagementRepository:
                 != ExternalChannelConnectionStatus.DISCONNECTED
             )
         statement = sa.select(RDBExternalChannelConnection).where(*predicates)
-        if lock:
-            statement = statement.with_for_update()
-        return await session.scalar(statement)
+        return await session.read_session.scalar(statement)
+
+    async def lock_multi_connection_for_transition(
+        self,
+        session: WriteSession,
+        *,
+        workspace_id: str,
+        connection_id: str,
+        provider: ExternalChannelProvider,
+        include_disconnected: bool = False,
+    ) -> RDBExternalChannelConnection | None:
+        """Guard an exact destructive connection-generation transition."""
+        predicates: list[sa.ColumnElement[bool]] = [
+            RDBExternalChannelConnection.id == connection_id,
+            RDBExternalChannelConnection.workspace_id == workspace_id,
+            RDBExternalChannelConnection.provider == provider,
+            RDBExternalChannelConnection.app_mode == ExternalChannelAppMode.MULTI,
+        ]
+        if not include_disconnected:
+            predicates.append(
+                RDBExternalChannelConnection.status
+                != ExternalChannelConnectionStatus.DISCONNECTED
+            )
+        statement = sa.select(RDBExternalChannelConnection).where(*predicates)
+        statement = statement.with_for_update().execution_options(
+            populate_existing=True
+        )
+        return await session.write_session.scalar(statement)
 
     async def get_managed_multi_connection(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         connection_id: str,
@@ -453,7 +476,7 @@ class ExternalChannelManagementRepository:
         )
         if connection is None:
             return None
-        active_agent_count = await session.scalar(
+        active_agent_count = await session.write_session.scalar(
             sa.select(sa.func.count())
             .select_from(RDBExternalChannelAgentRoute)
             .where(
@@ -465,7 +488,7 @@ class ExternalChannelManagementRepository:
                 RDBExternalChannelAgentRoute.agent_id.is_not(None),
             )
         )
-        configured_default_count = await session.scalar(
+        configured_default_count = await session.write_session.scalar(
             sa.select(sa.func.count())
             .select_from(RDBExternalChannelChannelDefault)
             .where(
@@ -482,7 +505,7 @@ class ExternalChannelManagementRepository:
 
     async def replace_multi_slack_configuration(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         connection_id: str,
@@ -491,14 +514,16 @@ class ExternalChannelManagementRepository:
         encrypted_credentials: str,
     ) -> ManagedMultiConnection | None:
         """Replace complete Slack Multi App configuration without exposing secrets."""
-        connection = await self.get_multi_connection(
+        connection = await self.lock_multi_connection_for_transition(
             session,
             workspace_id=workspace_id,
             connection_id=connection_id,
             provider=ExternalChannelProvider.SLACK,
-            lock=True,
         )
-        if connection is None:
+        if (
+            connection is None
+            or connection.status is ExternalChannelConnectionStatus.DISCONNECTING
+        ):
             return None
         connection.provider_app_id = provider_app_id
         connection.provider_tenant_id = None
@@ -521,8 +546,8 @@ class ExternalChannelManagementRepository:
         connection.slack_presence_lease_owner = None
         connection.slack_presence_lease_until = None
         connection.slack_presence_heartbeat_at = None
-        await session.flush()
-        await session.refresh(connection, attribute_names=["updated_at"])
+        await session.write_session.flush()
+        await session.write_session.refresh(connection, attribute_names=["updated_at"])
         return await self.get_managed_multi_connection(
             session,
             workspace_id=workspace_id,
@@ -532,7 +557,7 @@ class ExternalChannelManagementRepository:
 
     async def replace_multi_discord_configuration(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         connection_id: str,
@@ -541,14 +566,16 @@ class ExternalChannelManagementRepository:
         provider_config: dict[str, object],
     ) -> ManagedMultiConnection | None:
         """Fence one Workspace Discord configuration before callback activation."""
-        connection = await self.get_multi_connection(
+        connection = await self.lock_multi_connection_for_transition(
             session,
             workspace_id=workspace_id,
             connection_id=connection_id,
             provider=ExternalChannelProvider.DISCORD,
-            lock=True,
         )
-        if connection is None:
+        if (
+            connection is None
+            or connection.status is ExternalChannelConnectionStatus.DISCONNECTING
+        ):
             return None
         await _release_discord_app_claim(session, connection_id=connection.id)
         _reset_discord_configuration(
@@ -557,8 +584,8 @@ class ExternalChannelManagementRepository:
             encrypted_credentials=encrypted_credentials,
             provider_config=provider_config,
         )
-        await session.flush()
-        await session.refresh(connection, attribute_names=["updated_at"])
+        await session.write_session.flush()
+        await session.write_session.refresh(connection, attribute_names=["updated_at"])
         return await self.get_managed_multi_connection(
             session,
             workspace_id=workspace_id,
@@ -568,7 +595,7 @@ class ExternalChannelManagementRepository:
 
     async def update_multi_discord_thread_auto_archive_duration(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection: RDBExternalChannelConnection,
         duration: DiscordThreadAutoArchiveDurationMinutes,
@@ -581,8 +608,8 @@ class ExternalChannelManagementRepository:
         ):
             return None
         _set_discord_thread_auto_archive_duration(connection, duration=duration)
-        await session.flush()
-        await session.refresh(connection, attribute_names=["updated_at"])
+        await session.write_session.flush()
+        await session.write_session.refresh(connection, attribute_names=["updated_at"])
         return await self.get_managed_multi_connection(
             session,
             workspace_id=connection.workspace_id,
@@ -592,7 +619,7 @@ class ExternalChannelManagementRepository:
 
     async def update_multi_discord_url_preview_suppression(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection: RDBExternalChannelConnection,
         suppress_url_previews: bool,
@@ -608,8 +635,8 @@ class ExternalChannelManagementRepository:
             connection,
             suppress_url_previews=suppress_url_previews,
         )
-        await session.flush()
-        await session.refresh(connection, attribute_names=["updated_at"])
+        await session.write_session.flush()
+        await session.write_session.refresh(connection, attribute_names=["updated_at"])
         return await self.get_managed_multi_connection(
             session,
             workspace_id=connection.workspace_id,
@@ -619,7 +646,7 @@ class ExternalChannelManagementRepository:
 
     async def list_multi_routes(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         connection_id: str,
@@ -640,7 +667,7 @@ class ExternalChannelManagementRepository:
         if connection is None:
             return None
         rows = (
-            await session.execute(
+            await session.write_session.execute(
                 sa.select(RDBExternalChannelAgentRoute, RDBAgent.name)
                 .outerjoin(
                     RDBAgent,
@@ -663,7 +690,7 @@ class ExternalChannelManagementRepository:
 
     async def get_multi_route(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         connection_id: str,
@@ -672,7 +699,7 @@ class ExternalChannelManagementRepository:
     ) -> ManagedMultiRoute | None:
         """Load one Multi App route under its Workspace owner."""
         row = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(RDBExternalChannelAgentRoute, RDBAgent.name)
                 .join(
                     RDBExternalChannelConnection,
@@ -699,7 +726,7 @@ class ExternalChannelManagementRepository:
 
     async def get_multi_route_by_agent(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         connection_id: str,
@@ -708,7 +735,7 @@ class ExternalChannelManagementRepository:
     ) -> ManagedMultiRoute | None:
         """Load the stable Multi App association for one Agent identity."""
         row = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(RDBExternalChannelAgentRoute, RDBAgent.name)
                 .join(
                     RDBExternalChannelConnection,
@@ -735,7 +762,7 @@ class ExternalChannelManagementRepository:
 
     async def list_multi_channel_defaults(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         connection_id: str,
@@ -756,7 +783,7 @@ class ExternalChannelManagementRepository:
         if connection is None:
             return None
         rows = (
-            await session.execute(
+            await session.write_session.execute(
                 sa.select(
                     RDBExternalChannelChannelDefault,
                     RDBExternalChannelAgentRoute,
@@ -787,7 +814,7 @@ class ExternalChannelManagementRepository:
 
     async def replace_multi_channel_default(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         connection_id: str,
@@ -798,16 +825,15 @@ class ExternalChannelManagementRepository:
         now: datetime.datetime,
     ) -> ExternalChannelChannelDefaultTransition | None:
         """Replace one active channel default after validating its Multi route."""
-        connection = await self.get_multi_connection(
+        connection = await self.lock_multi_connection_for_transition(
             session,
             workspace_id=workspace_id,
             connection_id=connection_id,
             provider=provider,
-            lock=True,
         )
         if connection is None:
             return None
-        route = await session.scalar(
+        route = await session.write_session.scalar(
             sa.select(RDBExternalChannelAgentRoute)
             .where(
                 RDBExternalChannelAgentRoute.id == route_id,
@@ -821,7 +847,7 @@ class ExternalChannelManagementRepository:
         )
         if route is None or route.agent_id is None:
             return None
-        agent = await session.scalar(
+        agent = await session.write_session.scalar(
             sa.select(RDBAgent)
             .where(
                 RDBAgent.id == route.agent_id,
@@ -832,7 +858,7 @@ class ExternalChannelManagementRepository:
         )
         if agent is None:
             return None
-        existing = await session.scalar(
+        existing = await session.write_session.scalar(
             sa.select(RDBExternalChannelChannelDefault)
             .where(
                 RDBExternalChannelChannelDefault.connection_id == connection.id,
@@ -876,9 +902,9 @@ class ExternalChannelManagementRepository:
             invalidated_at=None,
             invalidation_reason=None,
         )
-        session.add(channel_default)
-        await session.flush()
-        await session.refresh(
+        session.write_session.add(channel_default)
+        await session.write_session.flush()
+        await session.write_session.refresh(
             channel_default,
             attribute_names=["created_at", "updated_at"],
         )
@@ -896,7 +922,7 @@ class ExternalChannelManagementRepository:
 
     async def clear_multi_channel_default(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         connection_id: str,
@@ -905,16 +931,15 @@ class ExternalChannelManagementRepository:
         now: datetime.datetime,
     ) -> ExternalChannelChannelDefaultTransition | None:
         """Invalidate one active default and all selected-Agent parent state."""
-        connection = await self.get_multi_connection(
+        connection = await self.lock_multi_connection_for_transition(
             session,
             workspace_id=workspace_id,
             connection_id=connection_id,
             provider=provider,
-            lock=True,
         )
         if connection is None:
             return None
-        channel_default = await session.scalar(
+        channel_default = await session.write_session.scalar(
             sa.select(RDBExternalChannelChannelDefault)
             .where(
                 RDBExternalChannelChannelDefault.connection_id == connection.id,
@@ -939,12 +964,12 @@ class ExternalChannelManagementRepository:
         channel_default.status = ExternalChannelChannelDefaultStatus.INVALIDATED
         channel_default.invalidated_at = now
         channel_default.invalidation_reason = "cleared"
-        await session.flush()
+        await session.write_session.flush()
         return transition
 
     async def _terminalize_channel_participation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection_id: str,
         provider_parent_channel_id: str,
@@ -954,7 +979,7 @@ class ExternalChannelManagementRepository:
         claim_status: ExternalChannelSetupClaimStatus,
     ) -> ExternalChannelChannelDefaultTransition:
         """Terminalize only selected-Agent parent state in canonical lock order."""
-        setting = await session.scalar(
+        setting = await session.write_session.scalar(
             sa.select(RDBExternalChannelParticipationSetting)
             .where(
                 RDBExternalChannelParticipationSetting.connection_id == connection_id,
@@ -965,7 +990,7 @@ class ExternalChannelManagementRepository:
             )
             .with_for_update()
         )
-        claim = await session.scalar(
+        claim = await session.write_session.scalar(
             sa.select(RDBExternalChannelSetupClaim)
             .where(
                 RDBExternalChannelSetupClaim.connection_id == connection_id,
@@ -983,7 +1008,7 @@ class ExternalChannelManagementRepository:
         )
         interactions = list(
             (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBExternalChannelInteraction)
                     .where(
                         RDBExternalChannelInteraction.connection_id == connection_id,
@@ -1005,7 +1030,7 @@ class ExternalChannelManagementRepository:
                 )
             ).all()
         )
-        resource = await session.scalar(
+        resource = await session.write_session.scalar(
             sa.select(RDBExternalChannelResource)
             .where(
                 RDBExternalChannelResource.connection_id == connection_id,
@@ -1019,7 +1044,7 @@ class ExternalChannelManagementRepository:
         binding = (
             None
             if resource is None or old_route_id is None
-            else await session.scalar(
+            else await session.write_session.scalar(
                 sa.select(RDBExternalChannelBinding)
                 .where(
                     RDBExternalChannelBinding.resource_id == resource.id,
@@ -1054,7 +1079,7 @@ class ExternalChannelManagementRepository:
                 reason=reason,
             )
             disconnected_parent_binding_count = 1
-        await session.flush()
+        await session.write_session.flush()
         return ExternalChannelChannelDefaultTransition(
             channel_default=None,
             changed=True,
@@ -1067,7 +1092,7 @@ class ExternalChannelManagementRepository:
 
     async def load_multi_management_handoff(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         interaction_id: str,
@@ -1075,7 +1100,7 @@ class ExternalChannelManagementRepository:
     ) -> ManagedSlackManagementHandoff | None:
         """Resolve opaque Slack management state under Workspace authority."""
         row = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(RDBExternalChannelInteraction, RDBExternalChannelConnection)
                 .join(
                     RDBExternalChannelConnection,
@@ -1123,12 +1148,11 @@ class ExternalChannelManagementRepository:
 
     async def get_connection(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         agent_id: str,
         connection_id: str,
-        lock: bool = False,
         include_disconnected: bool = False,
     ) -> ExternalChannelConnectionRow | None:
         route_owner = RDBExternalChannelAgentRoute.agent_id == agent_id
@@ -1167,13 +1191,61 @@ class ExternalChannelManagementRepository:
                 *status_predicates,
             )
         )
-        row = (await session.execute(statement)).one_or_none()
+        row = (await session.read_session.execute(statement)).one_or_none()
         if row is None:
             return None
-        if not lock:
-            return ExternalChannelConnectionRow(row[0], row[1])
+        return ExternalChannelConnectionRow(row[0], row[1])
+
+    async def lock_connection_for_transition(
+        self,
+        session: WriteSession,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        connection_id: str,
+        include_disconnected: bool = False,
+    ) -> ExternalChannelConnectionRow | None:
+        route_owner = RDBExternalChannelAgentRoute.agent_id == agent_id
+        if include_disconnected:
+            route_owner = sa.or_(
+                route_owner,
+                sa.and_(
+                    RDBExternalChannelConnection.status
+                    == ExternalChannelConnectionStatus.DISCONNECTED,
+                    RDBExternalChannelAgentRoute.agent_id_snapshot == agent_id,
+                ),
+            )
+        status_predicates = (
+            ()
+            if include_disconnected
+            else (
+                RDBExternalChannelConnection.status
+                != ExternalChannelConnectionStatus.DISCONNECTED,
+            )
+        )
+        statement = (
+            sa.select(RDBExternalChannelConnection, RDBExternalChannelAgentRoute)
+            .join(
+                RDBExternalChannelAgentRoute,
+                RDBExternalChannelAgentRoute.connection_id
+                == RDBExternalChannelConnection.id,
+            )
+            .where(
+                RDBExternalChannelConnection.id == connection_id,
+                RDBExternalChannelConnection.workspace_id == workspace_id,
+                route_owner,
+                RDBExternalChannelConnection.app_mode == ExternalChannelAppMode.SINGLE,
+                RDBExternalChannelAgentRoute.connection_app_mode
+                == ExternalChannelAppMode.SINGLE,
+                self._has_sole_route(),
+                *status_predicates,
+            )
+        )
+        row = (await session.write_session.execute(statement)).one_or_none()
+        if row is None:
+            return None
         connection_snapshot, route_snapshot = row
-        connection = await session.scalar(
+        connection = await session.write_session.scalar(
             sa.select(RDBExternalChannelConnection)
             .where(
                 RDBExternalChannelConnection.id == connection_snapshot.id,
@@ -1183,6 +1255,7 @@ class ExternalChannelManagementRepository:
                 *status_predicates,
             )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if connection is None:
             return None
@@ -1194,7 +1267,7 @@ class ExternalChannelManagementRepository:
             locked_route_owner = (
                 RDBExternalChannelAgentRoute.agent_id_snapshot == agent_id
             )
-        route = await session.scalar(
+        route = await session.write_session.scalar(
             sa.select(RDBExternalChannelAgentRoute)
             .where(
                 RDBExternalChannelAgentRoute.id == route_snapshot.id,
@@ -1204,6 +1277,7 @@ class ExternalChannelManagementRepository:
                 == ExternalChannelAppMode.SINGLE,
             )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if route is None:
             return None
@@ -1211,7 +1285,7 @@ class ExternalChannelManagementRepository:
 
     async def replace_slack_configuration(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         agent_id: str,
@@ -1220,17 +1294,18 @@ class ExternalChannelManagementRepository:
         transport: ExternalChannelTransport,
         encrypted_credentials: str,
     ) -> ManagedConnection | None:
-        """Replace one Slack connection configuration without a lifecycle guard."""
-        row = await self.get_connection(
+        """Fence one Slack configuration generation through the replacement."""
+        row = await self.lock_connection_for_transition(
             session,
             workspace_id=workspace_id,
             agent_id=agent_id,
             connection_id=connection_id,
-            lock=True,
         )
         if row is None:
             return None
         connection, route = row
+        if connection.status is ExternalChannelConnectionStatus.DISCONNECTING:
+            return None
         connection.provider_app_id = provider_app_id
         connection.provider_tenant_id = None
         connection.provider_bot_user_id = None
@@ -1252,13 +1327,13 @@ class ExternalChannelManagementRepository:
         connection.slack_presence_lease_owner = None
         connection.slack_presence_lease_until = None
         connection.slack_presence_heartbeat_at = None
-        await session.flush()
-        await session.refresh(connection, attribute_names=["updated_at"])
+        await session.write_session.flush()
+        await session.write_session.refresh(connection, attribute_names=["updated_at"])
         return _connection(connection, route)
 
     async def replace_discord_configuration(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         agent_id: str,
@@ -1268,17 +1343,19 @@ class ExternalChannelManagementRepository:
         provider_config: dict[str, object],
     ) -> ManagedConnection | None:
         """Fence a dedicated Discord configuration before callback activation."""
-        row = await self.get_connection(
+        row = await self.lock_connection_for_transition(
             session,
             workspace_id=workspace_id,
             agent_id=agent_id,
             connection_id=connection_id,
-            lock=True,
         )
         if row is None:
             return None
         connection, route = row
-        if connection.provider is not ExternalChannelProvider.DISCORD:
+        if (
+            connection.provider is not ExternalChannelProvider.DISCORD
+            or connection.status is ExternalChannelConnectionStatus.DISCONNECTING
+        ):
             return None
         await _release_discord_app_claim(session, connection_id=connection.id)
         _reset_discord_configuration(
@@ -1287,13 +1364,13 @@ class ExternalChannelManagementRepository:
             encrypted_credentials=encrypted_credentials,
             provider_config=provider_config,
         )
-        await session.flush()
-        await session.refresh(connection, attribute_names=["updated_at"])
+        await session.write_session.flush()
+        await session.write_session.refresh(connection, attribute_names=["updated_at"])
         return _connection(connection, route)
 
     async def update_discord_thread_auto_archive_duration(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         agent_id: str,
@@ -1306,7 +1383,6 @@ class ExternalChannelManagementRepository:
             workspace_id=workspace_id,
             agent_id=agent_id,
             connection_id=connection_id,
-            lock=True,
         )
         if row is None:
             return None
@@ -1317,13 +1393,13 @@ class ExternalChannelManagementRepository:
         ):
             return None
         _set_discord_thread_auto_archive_duration(connection, duration=duration)
-        await session.flush()
-        await session.refresh(connection, attribute_names=["updated_at"])
+        await session.write_session.flush()
+        await session.write_session.refresh(connection, attribute_names=["updated_at"])
         return _connection(connection, route)
 
     async def update_discord_url_preview_suppression(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         agent_id: str,
@@ -1336,7 +1412,6 @@ class ExternalChannelManagementRepository:
             workspace_id=workspace_id,
             agent_id=agent_id,
             connection_id=connection_id,
-            lock=True,
         )
         if row is None:
             return None
@@ -1350,20 +1425,20 @@ class ExternalChannelManagementRepository:
             connection,
             suppress_url_previews=suppress_url_previews,
         )
-        await session.flush()
-        await session.refresh(connection, attribute_names=["updated_at"])
+        await session.write_session.flush()
+        await session.write_session.refresh(connection, attribute_names=["updated_at"])
         return _connection(connection, route)
 
     async def list_bindings(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         agent_id: str,
         agent_session_id: str,
     ) -> list[ManagedBinding]:
         rows = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(
                     RDBExternalChannelBinding,
                     RDBExternalChannelResource,
@@ -1432,7 +1507,7 @@ class ExternalChannelManagementRepository:
 
     async def get_binding_mutation_scope(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         agent_id: str,
@@ -1441,7 +1516,7 @@ class ExternalChannelManagementRepository:
     ) -> ExternalChannelBindingMutationScope | None:
         """Resolve the provider scope needed for a coordinated binding mutation."""
         row = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(
                     RDBExternalChannelAgentRoute.connection_id,
                     RDBExternalChannelResource.provider_resource_key,
@@ -1481,7 +1556,7 @@ class ExternalChannelManagementRepository:
 
     async def update_binding_response_mode(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         agent_id: str,
@@ -1492,7 +1567,7 @@ class ExternalChannelManagementRepository:
     ) -> bool:
         """Update a thread Binding or one parent setting and Binding atomically."""
         snapshot = (
-            await session.execute(
+            await session.write_session.execute(
                 sa.select(
                     RDBExternalChannelBinding.route_id,
                     RDBExternalChannelBinding.resource_id,
@@ -1519,53 +1594,44 @@ class ExternalChannelManagementRepository:
         if snapshot is None:
             return False
         route_id, resource_id, connection_id = snapshot
-        connection = await session.scalar(
-            sa.select(RDBExternalChannelConnection)
-            .where(
+        connection = await session.write_session.scalar(
+            sa.select(RDBExternalChannelConnection).where(
                 RDBExternalChannelConnection.id == connection_id,
                 RDBExternalChannelConnection.workspace_id == workspace_id,
             )
-            .with_for_update()
         )
         if connection is None:
             return False
-        route = await session.scalar(
-            sa.select(RDBExternalChannelAgentRoute)
-            .where(
+        route = await session.write_session.scalar(
+            sa.select(RDBExternalChannelAgentRoute).where(
                 RDBExternalChannelAgentRoute.id == route_id,
                 RDBExternalChannelAgentRoute.connection_id == connection.id,
             )
-            .with_for_update()
         )
         if route is None:
             return False
-        resource = await session.scalar(
-            sa.select(RDBExternalChannelResource)
-            .where(
+        resource = await session.write_session.scalar(
+            sa.select(RDBExternalChannelResource).where(
                 RDBExternalChannelResource.id == resource_id,
                 RDBExternalChannelResource.connection_id == connection.id,
             )
-            .with_for_update()
         )
         if resource is None:
             return False
-        binding = await session.scalar(
-            sa.select(RDBExternalChannelBinding)
-            .where(
+        binding = await session.write_session.scalar(
+            sa.select(RDBExternalChannelBinding).where(
                 RDBExternalChannelBinding.id == binding_id,
                 RDBExternalChannelBinding.route_id == route.id,
                 RDBExternalChannelBinding.resource_id == resource.id,
                 RDBExternalChannelBinding.agent_session_id == agent_session_id,
                 RDBExternalChannelBinding.disconnected_at.is_(None),
             )
-            .with_for_update()
         )
         if binding is None:
             return False
         if resource.resource_type is ExternalChannelResourceType.PARENT_CHANNEL:
-            setting = await session.scalar(
-                sa.select(RDBExternalChannelParticipationSetting)
-                .where(
+            setting = await session.write_session.scalar(
+                sa.select(RDBExternalChannelParticipationSetting).where(
                     RDBExternalChannelParticipationSetting.connection_id
                     == connection.id,
                     RDBExternalChannelParticipationSetting.provider_parent_channel_id
@@ -1574,7 +1640,6 @@ class ExternalChannelManagementRepository:
                     RDBExternalChannelParticipationSetting.status
                     == ExternalChannelParticipationSettingStatus.ACTIVE,
                 )
-                .with_for_update()
             )
             if setting is None:
                 return False
@@ -1583,12 +1648,12 @@ class ExternalChannelManagementRepository:
             setting.configured_by_user_id = configured_by_user_id
             setting.configured_by_principal_id = None
         binding.response_mode = response_mode
-        await session.flush()
+        await session.write_session.flush()
         return True
 
     async def disconnect_binding(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         agent_id: str,
@@ -1598,7 +1663,7 @@ class ExternalChannelManagementRepository:
         reason: str,
     ) -> tuple[ProviderEffectPlan, ...] | None:
         snapshot = (
-            await session.execute(
+            await session.write_session.execute(
                 sa.select(
                     RDBExternalChannelBinding.route_id,
                     RDBExternalChannelBinding.resource_id,
@@ -1634,7 +1699,7 @@ class ExternalChannelManagementRepository:
         if snapshot is None:
             return None
         route_id, resource_id, connection_id = snapshot
-        connection = await session.scalar(
+        connection = await session.write_session.scalar(
             sa.select(RDBExternalChannelConnection)
             .where(
                 RDBExternalChannelConnection.id == connection_id,
@@ -1644,7 +1709,7 @@ class ExternalChannelManagementRepository:
         )
         if connection is None:
             return None
-        route = await session.scalar(
+        route = await session.write_session.scalar(
             sa.select(RDBExternalChannelAgentRoute)
             .where(
                 RDBExternalChannelAgentRoute.id == route_id,
@@ -1654,7 +1719,7 @@ class ExternalChannelManagementRepository:
         )
         if route is None:
             return None
-        resource = await session.scalar(
+        resource = await session.write_session.scalar(
             sa.select(RDBExternalChannelResource)
             .where(
                 RDBExternalChannelResource.id == resource_id,
@@ -1664,7 +1729,7 @@ class ExternalChannelManagementRepository:
         )
         if resource is None:
             return None
-        binding = await session.scalar(
+        binding = await session.write_session.scalar(
             sa.select(RDBExternalChannelBinding)
             .where(
                 RDBExternalChannelBinding.id == binding_id,
@@ -1686,7 +1751,7 @@ class ExternalChannelManagementRepository:
 
     async def disconnect_parent_binding_for_participation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection_id: str,
         route_id: str,
@@ -1695,12 +1760,12 @@ class ExternalChannelManagementRepository:
         now: datetime.datetime,
     ) -> tuple[ProviderEffectPlan, ...] | None:
         """Disconnect one exact parent binding after participation locks are held."""
-        connection = await session.scalar(
+        connection = await session.write_session.scalar(
             sa.select(RDBExternalChannelConnection)
             .where(RDBExternalChannelConnection.id == connection_id)
             .with_for_update()
         )
-        route = await session.scalar(
+        route = await session.write_session.scalar(
             sa.select(RDBExternalChannelAgentRoute)
             .where(
                 RDBExternalChannelAgentRoute.id == route_id,
@@ -1708,7 +1773,7 @@ class ExternalChannelManagementRepository:
             )
             .with_for_update()
         )
-        resource = await session.scalar(
+        resource = await session.write_session.scalar(
             sa.select(RDBExternalChannelResource)
             .where(
                 RDBExternalChannelResource.id == resource_id,
@@ -1718,7 +1783,7 @@ class ExternalChannelManagementRepository:
             )
             .with_for_update()
         )
-        binding = await session.scalar(
+        binding = await session.write_session.scalar(
             sa.select(RDBExternalChannelBinding)
             .where(
                 RDBExternalChannelBinding.id == binding_id,
@@ -1739,19 +1804,18 @@ class ExternalChannelManagementRepository:
 
     async def begin_connection_disconnect(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         agent_id: str,
         connection_id: str,
         now: datetime.datetime,
     ) -> tuple[ProviderEffectPlan, ...] | None:
-        row = await self.get_connection(
+        row = await self.lock_connection_for_transition(
             session,
             workspace_id=workspace_id,
             agent_id=agent_id,
             connection_id=connection_id,
-            lock=True,
             include_disconnected=True,
         )
         if row is None:
@@ -1763,7 +1827,7 @@ class ExternalChannelManagementRepository:
         )
         resources = list(
             (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBExternalChannelResource)
                     .where(RDBExternalChannelResource.id.in_(resource_ids))
                     .order_by(RDBExternalChannelResource.id)
@@ -1773,7 +1837,7 @@ class ExternalChannelManagementRepository:
         )
         bindings = list(
             (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBExternalChannelBinding)
                     .where(RDBExternalChannelBinding.route_id == route.id)
                     .order_by(RDBExternalChannelBinding.resource_id)
@@ -1796,12 +1860,12 @@ class ExternalChannelManagementRepository:
                     reason="connection_disconnected",
                 )
             )
-        await session.flush()
+        await session.write_session.flush()
         return tuple(cleanup_plans)
 
     async def complete_connection_disconnect(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         agent_id: str,
@@ -1810,7 +1874,7 @@ class ExternalChannelManagementRepository:
     ) -> ManagedConnection | None:
         del now
         row = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(
                     RDBExternalChannelConnection,
                     RDBExternalChannelAgentRoute,
@@ -1841,7 +1905,7 @@ class ExternalChannelManagementRepository:
 
     async def list_grants(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         agent_session_id: str | None,
@@ -1858,7 +1922,7 @@ class ExternalChannelManagementRepository:
             )
         predicates.append(RDBExternalChannelAccessGrant.revoked_at.is_(None))
         rows = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(
                     RDBExternalChannelAccessGrant,
                     RDBExternalChannelPrincipal,
@@ -1876,12 +1940,12 @@ class ExternalChannelManagementRepository:
 
     async def list_blocks(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
     ) -> list[ManagedBlock]:
         rows = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(RDBExternalChannelBlock, RDBExternalChannelPrincipal)
                 .join(
                     RDBExternalChannelPrincipal,
@@ -1896,13 +1960,13 @@ class ExternalChannelManagementRepository:
 
     async def grant_belongs_to_agent(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         grant_id: str,
     ) -> bool:
         return bool(
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(
                     sa.exists().where(
                         RDBExternalChannelAccessGrant.id == grant_id,
@@ -1914,13 +1978,13 @@ class ExternalChannelManagementRepository:
 
     async def block_belongs_to_agent(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         block_id: str,
     ) -> bool:
         return bool(
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(
                     sa.exists().where(
                         RDBExternalChannelBlock.id == block_id,
@@ -1932,12 +1996,12 @@ class ExternalChannelManagementRepository:
 
     async def get_approval_request(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         access_request_id: str,
     ) -> ManagedApprovalRequest | None:
         row = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(
                     RDBExternalChannelAccessRequest,
                     RDBExternalChannelAgentRoute,
@@ -1996,7 +2060,7 @@ class ExternalChannelManagementRepository:
 
     async def terminate_binding(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         binding: RDBExternalChannelBinding,
         resource: RDBExternalChannelResource,
@@ -2223,12 +2287,12 @@ def _reset_discord_configuration(
 
 
 async def _release_discord_app_claim(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     connection_id: str,
 ) -> None:
     """Release every current Discord App claim owned by one connection."""
-    await session.execute(
+    await session.write_session.execute(
         sa.delete(RDBExternalChannelAppClaim).where(
             RDBExternalChannelAppClaim.provider == ExternalChannelProvider.DISCORD,
             RDBExternalChannelAppClaim.connection_id == connection_id,

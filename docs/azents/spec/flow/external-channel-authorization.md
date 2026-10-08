@@ -6,15 +6,33 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [external-channel, agent, conversation]
 code_paths:
+  - python/apps/azents/src/azents/core/external_channel_interaction.py
+  - python/apps/azents/src/azents/core/external_channel_selection.py
+  - python/apps/azents/src/azents/core/external_channel_participation.py
+  - python/apps/azents/src/azents/core/external_channel_shortcut_source.py
+  - python/apps/azents/src/azents/repos/external_channel/interaction_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/selector_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/participation_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/shortcut_source_operations.py
+  - python/apps/azents/src/azents/core/agent_automatic_project.py
+  - python/apps/azents/src/azents/core/external_channel_access.py
+  - python/apps/azents/src/azents/core/external_channel_conversation_data.py
+  - python/apps/azents/src/azents/core/external_channel_conversation_preparation.py
+  - python/apps/azents/src/azents/core/external_channel_ingestion.py
+  - python/apps/azents/src/azents/core/external_channel_participation_state.py
+  - python/apps/azents/src/azents/core/external_channel_selector_state.py
+  - python/apps/azents/src/azents/core/mailbox_errors.py
+  - python/apps/azents/src/azents/repos/external_channel/access_operations.py
+  - python/apps/azents/src/azents/repos/mailbox_runtime_operations.py
+  - python/apps/azents/src/azents/repos/session_lifecycle_operations.py
   - python/apps/azents/src/azents/services/external_channel/access.py
   - python/apps/azents/src/azents/services/external_channel/ingestion.py
   - python/apps/azents/src/azents/services/external_channel/ingestion_replay.py
-  - python/apps/azents/src/azents/services/external_channel/mailbox_ingestion_store.py
+  - python/apps/azents/src/azents/repos/external_channel/mailbox_ingestion.py
   - python/apps/azents/src/azents/services/external_channel/mailbox_wake.py
   - python/apps/azents/src/azents/services/external_channel/transport_ingestion.py
   - python/apps/azents/src/azents/services/external_channel/interaction.py
   - python/apps/azents/src/azents/services/external_channel/selector.py
-  - python/apps/azents/src/azents/services/external_channel/selector_state.py
   - python/apps/azents/src/azents/services/external_channel/shortcut_source.py
   - python/apps/azents/src/azents/services/external_channel/discord_events.py
   - python/apps/azents/src/azents/services/external_channel/discord_http.py
@@ -25,7 +43,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_account_link.py
   - python/apps/azents/src/azents/services/external_channel/participation.py
   - python/apps/azents/src/azents/services/external_channel/management.py
-  - python/apps/azents/src/azents/services/root_agent_session_creation/**
+  - python/apps/azents/src/azents/repos/root_agent_session_creation.py
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/repos/external_channel/repository.py
   - python/apps/azents/src/azents/repos/external_channel/model_settings.py
@@ -43,13 +61,28 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
-last_verified_at: 2026-09-29
-spec_version: 27
+last_verified_at: 2026-10-06
+spec_version: 32
 ---
 
 # External Channel Authorization
 
 ## Principal Boundary
+
+Selector catalog projection and Discord component scope checks complete native
+PostgreSQL read-only operations before returning detached authorized data.
+Immutable route selection, setup-route assignment, default creation and related
+interaction/claim changes remain repository-owned writable atomic groups with the
+existing actor, active Agent, connection, resource, selection and terminal-state
+predicates. Participation settings use completed repository operations:
+independent settings, claim and thread-scope reads finish before external
+coordination or provider work; parent, thread and location mutations retain
+their exact generation or timestamp conditional updates and database lock order.
+Provider cleanup intents and setup replay execute after commit. Descriptive reads
+may observe previously committed state while a writer holds a row lock; they do
+not authorize a future mutation without that mutation's existing revalidation.
+No provider actor becomes an execution User and no route/access or response-mode
+fallback is introduced by this ownership boundary.
 
 An External Channel participant is an `ExternalChannelPrincipal`, not an Azents User
 or WorkspaceUser. Provider identity is scoped by provider tenant and user ID. Human,
@@ -234,6 +267,15 @@ there is no single parent Binding.
 
 ## Linked Account and Shared Model Settings Authorization
 
+Ordinary linked-account/settings inspection and draft editing use scoped
+descriptive authorization without blanket parent/link/User/grant read locks.
+Draft edits condition persistence on the existing exact identity, active status
+and expiry. Actual OAuth link finalization and model-setting apply perform their
+own final mutation guards, retaining exact User/auth-session/link eligibility,
+block/grant and route lifecycle authority through commit. These final guards do
+not become authority for later ordinary descriptions or bypass the independent
+captured-model input acceptance.
+
 Optional external-account linking is an additional identity proof, not an admission
 policy. Every existing principal grant, block, open-access decision, setup control,
 response mode, and location mutation remains authorized independently. An unlinked
@@ -251,14 +293,44 @@ membership, origin/candidate, connection generation, and active uniqueness in on
 commit. Conflicts and cross-user lookup remain nondisclosing.
 
 A linked human may open and Apply private model settings only for the exact connected
-Binding and root Session for which both provider participation and current
-web-equivalent User authority succeed. The operation revalidates active User,
-membership, link, connection, Resource, Binding, Session, Agent, model options,
-grant/block policy, actor and draft ownership. Relevant revoke, block, membership,
-account, unlink, archive, and connection writes share row or transaction fences.
-Native lock acquisition is nonblocking and the complete DB-only operation has a
-bounded retry; exhaustion returns a retryable busy result without mutation or
-provider I/O. An observed applied-profile generation rejects stale and ABA drafts.
+Binding and root Session for which provider participation and web-equivalent User
+authority succeed. Editor/draft descriptions use ordinary authorization reads and
+private draft persistence retains its live expiry/unapplied/uncancelled conditions.
+Actual Apply revalidates active User, membership, link, connection, Resource,
+Binding, Session, Agent, model options, grant/block policy, actor and draft ownership
+under its exact final mutation guards. The existing Agent/principal authorization
+key protects absent-row block creation and grant deletion through final acceptance;
+it is not inherited by ordinary participation descriptions. Relevant revoke,
+account, unlink, archive and configuration writes remain ordered with actual Apply.
+Final native mutation fences use ordinary waiting acquisition, including the
+same-key authorization advisory fence. Routing rows precede the advisory fence,
+which precedes Principal/Agent exclusion; linked User precedes Link and Agent
+precedes root Session. Locked identities, complete authorization and DB-current
+draft expiry are revalidated after waiting. The existing 250ms per-acquisition
+lock timeout and three DB-only attempts return the existing retryable busy result
+on exhaustion without mutation or provider I/O; they are not a total-operation
+deadline. Draft reopen also refreshes authorization and expiry after its write
+wait. An observed applied-profile generation rejects stale and ABA drafts.
+
+Authenticated OAuth claim and finalization remain separate DB operations around
+one provider exchange. Claim waits in Section -> User -> auth Session -> exact
+OPEN Attempt order, then checks current expiry and exact context before consuming
+state. Finalization uses the same authority order followed by the active identity
+Link, rechecking current User/auth Session authority after the final wait. A
+temporary holder is not a reason to exchange the code again. No new local claim
+timeout or post-exchange Attempt-expiry contract is added; cancellation and genuine
+authorization loss remain failures. Finalization keeps its existing DB-only
+retry/uniqueness reconciliation and provider work remains outside it.
+
+Owner unlink uses exact-owner conditional revocation DML with ordinary row
+waiting and the existing bounded database retry/busy contract. Already-revoked
+matching links retain their original revocation metadata. Current User/auth
+Session and elapsed expiry are revalidated after a write wait before commit.
+Matching accepted-model mutation replay observes immutable committed identity
+and profile/audit values without a redundant exclusive replay-row lock.
+Final authorization, unique Apply identity and once-only generation/audit/notice
+remain authoritative; neither simplification retries provider effects or adds
+a new OAuth callback recovery contract.
 
 Execution-option group metadata does not grant model or integration authority.
 Private model handlers validate exclusive selections against the bounded selected
@@ -291,6 +363,20 @@ Binding before Edit or Delete. A valid provider principal for another Binding or
 Session cannot mutate the Task.
 
 ## Changelog
+
+- **2026-10-06** (spec_version 32) — Replaced nonwaiting model/OAuth fences with
+  ordinary acquisition and post-wait authority/expiry checks, preserving existing
+  bounded model recovery and single-use exchange/generation/audit/notice effects.
+
+- **2026-10-05** (spec_version 30) — Completed selector and participation repository
+  ownership with native read-only descriptive operations, writable atomic
+  authorization/selection groups and post-commit replay/cleanup intents; retained
+  existing actor, generation, timestamp and immutable-route fences.
+
+- **2026-10-05** (spec_version 30) — Reconciled code-path discovery with current
+  defining modules; system behavior is unchanged.
+
+- **2026-10-05** (spec_version 29) — Clarified ordinary model-editor authorization versus final Apply/security guards and the exact Agent/principal absent-block/grant-revocation protocol.
 
 - **2026-09-12** (spec_version 26) — Added two-sided external-account proof and
   exact-target linked User model-setting authorization while preserving independent

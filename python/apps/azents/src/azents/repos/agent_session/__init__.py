@@ -1,22 +1,29 @@
 """AgentSession repository."""
 
-import asyncio
 import datetime
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
-from psycopg.errors import LockNotAvailable
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
-from sqlalchemy.exc import OperationalError
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from azents.core.agent import AgentModelSelection, SelectableModelSettings
+from azents.core.agent_session_data import (
+    AgentSession,
+    AgentSessionCreate,
+    AgentSessionEnsureTeamPrimaryResult,
+    AgentSessionPage,
+    AgentSessionProjectionPage,
+    AgentSessionSidebarSummary,
+    AgentSessionUnreadTerminalRunProjection,
+    PendingSessionCommand,
+    SessionAgent,
+    SessionWorkingFolderContext,
+)
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentRuntimeCapability,
@@ -33,10 +40,7 @@ from azents.core.enums import (
     SessionWorkingFolderBindingState,
     SessionWorkingFolderCleanupStatus,
 )
-from azents.core.inference_profile import (
-    SessionAppliedInferenceProfile,
-    SessionInferenceState,
-)
+from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_availability import PrimaryModelReservation
 from azents.core.model_execution_options import ModelExecutionOptionId
@@ -46,31 +50,24 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.agent_session_unread_run import RDBAgentSessionUnreadRun
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.model_candidate_health import RDBModelCandidateHealth
 from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_runtime import AgentRuntimeRepository
-
-from .data import (
-    AgentSession,
-    AgentSessionCreate,
-    AgentSessionEnsureTeamPrimaryResult,
-    AgentSessionPage,
-    AgentSessionProjectionPage,
-    AgentSessionSidebarSummary,
-    AgentSessionUnreadTerminalRunProjection,
-    PendingSessionCommand,
-    SessionAgent,
-    SessionWorkingFolderContext,
+from azents.repos.historical_memory_consolidation.lifecycle import (
+    source_availability_in_session,
 )
+from azents.repos.lifecycle_target import ArchiveRetention, LifecycleTargetRepository
+from azents.repos.session_execution_record import SessionExecutionRecordRepository
 
 SESSION_HANDLE_INSERT_ATTEMPTS = 10
 _ROOT_SESSION_AGENT_NAME = "root"
 _ROOT_SESSION_AGENT_PATH = "/root"
 _DEFAULT_SESSION_AGENT_TYPE = "default"
 _CHILD_SESSION_AGENT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
-_OWNER_GENERATION_LOCK_RETRY_SECONDS = 0.01
 
 
 def validate_session_agent_child_name(name: str) -> None:
@@ -136,7 +133,7 @@ class AgentSessionRepository:
 
     async def create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: AgentSessionCreate,
     ) -> AgentSession:
         """Create AgentSession."""
@@ -147,7 +144,7 @@ class AgentSessionRepository:
             else None
         )
         if root_authority is None:
-            lifecycle_status = await session.scalar(
+            lifecycle_status = await session.write_session.scalar(
                 sa.select(RDBAgent.lifecycle_status).where(
                     RDBAgent.id == create.agent_id
                 )
@@ -155,59 +152,56 @@ class AgentSessionRepository:
             if lifecycle_status is not AgentLifecycleStatus.ACTIVE:
                 raise ValueError("Agent is not active for Session creation")
         for _ in range(SESSION_HANDLE_INSERT_ATTEMPTS):
-            result = await session.execute(
-                pg_insert(RDBAgentSession)
-                .values(
-                    id=uuid7().hex,
-                    workspace_id=create.workspace_id,
-                    agent_id=create.agent_id,
-                    handle=generate_session_handle(),
-                    session_kind=create.session_kind,
-                    status=AgentSessionStatus.ACTIVE,
-                    title=create.title,
-                    primary_kind=create.primary_kind,
-                    product_mode=create.product_mode,
-                    associated_user_id=create.associated_user_id,
-                    start_reason=create.start_reason,
-                )
-                .on_conflict_do_nothing(index_elements=[RDBAgentSession.handle])
-                .returning(RDBAgentSession)
+            rdb = await self._insert_conversation_session(
+                session,
+                workspace_id=create.workspace_id,
+                agent_id=create.agent_id,
+                session_kind=create.session_kind,
+                title=create.title,
+                primary_kind=create.primary_kind,
+                product_mode=create.product_mode,
+                associated_user_id=create.associated_user_id,
+                start_reason=create.start_reason,
+                lifecycle_root_session_id=None,
             )
-            rdb = result.scalar_one_or_none()
-            if rdb is not None:
-                if root_authority is not None:
-                    await self._create_root_session_agent_tree(
-                        session,
-                        agent_session_id=rdb.id,
-                        root_session_handle=rdb.handle,
-                        workspace_id=rdb.workspace_id,
-                        agent_id=rdb.agent_id,
-                        authority=root_authority,
-                    )
-                    await self._confirm_root_creation_authority(
-                        session,
-                        agent_id=rdb.agent_id,
-                        authority=root_authority,
-                    )
-                await session.flush()
-                return self._build(rdb)
-
+            if rdb is None:
+                continue
+            if root_authority is not None:
+                conversation = self._require_conversation(rdb)
+                await self._create_root_session_agent_tree(
+                    session,
+                    agent_session_id=rdb.id,
+                    root_session_handle=conversation.handle,
+                    workspace_id=rdb.workspace_id,
+                    agent_id=rdb.agent_id,
+                    authority=root_authority,
+                )
+                await self._confirm_root_creation_authority(
+                    session, agent_id=rdb.agent_id, authority=root_authority
+                )
+            await session.write_session.flush()
+            return self._build(rdb)
         raise RuntimeError("AgentSession handle generation exhausted retry attempts")
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> AgentSession | None:
         """Fetch AgentSession by ID."""
-        rdb = await session.get(RDBAgentSession, agent_session_id)
+        rdb = await session.read_session.scalar(
+            sa.select(RDBAgentSession)
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
+            .where(RDBAgentSession.id == agent_session_id)
+            .execution_options(populate_existing=True)
+        )
         if rdb is None:
             return None
         return self._build(rdb)
 
     async def list_by_ids(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_session_ids: Sequence[str],
     ) -> dict[str, AgentSession]:
@@ -215,18 +209,20 @@ class AgentSessionRepository:
         ids = list(dict.fromkeys(agent_session_ids))
         if not ids:
             return {}
-        result = await session.execute(
-            sa.select(RDBAgentSession).where(RDBAgentSession.id.in_(ids))
+        result = await session.read_session.execute(
+            sa.select(RDBAgentSession)
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
+            .where(RDBAgentSession.id.in_(ids))
         )
         return {rdb.id: self._build(rdb) for rdb in result.scalars()}
 
     async def get_session_agent_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> SessionAgent | None:
         """Fetch SessionAgent linked to an AgentSession."""
-        rdb = await session.scalar(
+        rdb = await session.read_session.scalar(
             sa.select(RDBSessionAgent).where(
                 RDBSessionAgent.agent_session_id == agent_session_id
             )
@@ -237,12 +233,12 @@ class AgentSessionRepository:
 
     async def get_working_folder_context_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
     ) -> SessionWorkingFolderContext | None:
         """Load stored working-folder ownership for one SessionAgent."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBSessionAgentContext)
             .join(
                 RDBSessionAgent,
@@ -257,7 +253,7 @@ class AgentSessionRepository:
 
     async def lock_working_folder_binding_by_session_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
     ) -> LockedSessionWorkingFolderBinding | None:
@@ -265,8 +261,9 @@ class AgentSessionRepository:
         current_agent = aliased(RDBSessionAgent)
         root_agent = aliased(RDBSessionAgent)
         root_session = aliased(RDBAgentSession)
-        result = await session.execute(
-            sa.select(RDBSessionAgentContext, root_session.handle)
+        root_conversation = aliased(RDBConversation)
+        result = await session.write_session.execute(
+            sa.select(RDBSessionAgentContext, root_conversation.handle)
             .join(
                 current_agent,
                 current_agent.context_id == RDBSessionAgentContext.id,
@@ -279,6 +276,7 @@ class AgentSessionRepository:
                 root_session,
                 root_session.id == root_agent.agent_session_id,
             )
+            .join(root_conversation, root_conversation.session_id == root_session.id)
             .where(current_agent.agent_session_id == session_id)
             .with_for_update(of=RDBSessionAgentContext)
         )
@@ -293,7 +291,7 @@ class AgentSessionRepository:
 
     async def bind_pending_working_folder(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         context_id: str,
         expected_agent_id: str,
@@ -301,7 +299,7 @@ class AgentSessionRepository:
         working_folder_path: str,
     ) -> SessionWorkingFolderContext | None:
         """Bind one exact pending root context without reopening terminal states."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBSessionAgentContext)
             .where(
                 RDBSessionAgentContext.id == context_id,
@@ -323,19 +321,19 @@ class AgentSessionRepository:
             .returning(RDBSessionAgentContext)
         )
         context = result.scalar_one_or_none()
-        await session.flush()
+        await session.write_session.flush()
         if context is None:
             return None
         return self._build_working_folder_context(context)
 
     async def mark_working_folder_cleanup_pending(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         root_session_id: str,
     ) -> SessionWorkingFolderContext | None:
         """Mark one root Session working-folder cleanup pending under row lock."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBSessionAgentContext)
             .join(
                 RDBSessionAgent,
@@ -359,12 +357,12 @@ class AgentSessionRepository:
         )
         context.working_folder_cleanup_summary = None
         context.working_folder_cleanup_completed_at = None
-        await session.flush()
+        await session.write_session.flush()
         return self._build_working_folder_context(context)
 
     async def complete_working_folder_cleanup(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         context_id: str,
         status: SessionWorkingFolderCleanupStatus,
@@ -380,7 +378,7 @@ class AgentSessionRepository:
         if len(summary) > 500:
             raise ValueError("Working-folder cleanup summary exceeds 500 characters")
         result = _cursor_result(
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBSessionAgentContext)
                 .where(
                     RDBSessionAgentContext.id == context_id,
@@ -394,41 +392,43 @@ class AgentSessionRepository:
                 )
             )
         )
-        await session.flush()
+        await session.write_session.flush()
         return result.rowcount == 1
 
     async def get_root_session_agent_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> SessionAgent | None:
         """Fetch root SessionAgent for the tree containing an AgentSession."""
         current = await self.get_session_agent_by_session_id(session, agent_session_id)
         if current is None:
             return None
-        rdb = await session.get(RDBSessionAgent, current.root_session_agent_id)
+        rdb = await session.read_session.get(
+            RDBSessionAgent, current.root_session_agent_id
+        )
         if rdb is None:
             return None
         return self._build_session_agent(rdb)
 
     async def get_session_agent_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_agent_id: str,
     ) -> SessionAgent | None:
         """Fetch SessionAgent by ID."""
-        rdb = await session.get(RDBSessionAgent, session_agent_id)
+        rdb = await session.read_session.get(RDBSessionAgent, session_agent_id)
         if rdb is None:
             return None
         return self._build_session_agent(rdb)
 
     async def lock_session_agent_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_agent_id: str,
     ) -> SessionAgent | None:
         """Fetch SessionAgent by ID with a row lock."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBSessionAgent)
             .where(RDBSessionAgent.id == session_agent_id)
             .with_for_update()
@@ -440,12 +440,12 @@ class AgentSessionRepository:
 
     async def list_session_agent_tree(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         root_session_agent_id: str,
     ) -> list[SessionAgent]:
         """Fetch all SessionAgents in a root tree ordered by path."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBSessionAgent)
             .where(RDBSessionAgent.root_session_agent_id == root_session_agent_id)
             .order_by(RDBSessionAgent.path.asc())
@@ -454,13 +454,13 @@ class AgentSessionRepository:
 
     async def list_descendant_session_agents(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_agent_id: str,
         include_self: bool,
     ) -> list[SessionAgent]:
         """Fetch descendants for a SessionAgent inside its root tree."""
-        current = await session.get(RDBSessionAgent, session_agent_id)
+        current = await session.read_session.get(RDBSessionAgent, session_agent_id)
         if current is None:
             raise ValueError("SessionAgent not found")
         descendant_prefix = f"{current.path}/"
@@ -476,7 +476,7 @@ class AgentSessionRepository:
                     RDBSessionAgent.path.startswith(descendant_prefix, autoescape=True),
                 ),
             ]
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBSessionAgent)
             .where(*conditions)
             .order_by(RDBSessionAgent.path.asc())
@@ -485,7 +485,7 @@ class AgentSessionRepository:
 
     async def get_session_agent_by_path(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         root_session_agent_id: str,
         path: str,
@@ -496,7 +496,7 @@ class AgentSessionRepository:
             and path != _ROOT_SESSION_AGENT_PATH
         ):
             raise ValueError("SessionAgent path must be absolute under /root")
-        rdb = await session.scalar(
+        rdb = await session.read_session.scalar(
             sa.select(RDBSessionAgent).where(
                 RDBSessionAgent.root_session_agent_id == root_session_agent_id,
                 RDBSessionAgent.path == path,
@@ -508,13 +508,15 @@ class AgentSessionRepository:
 
     async def resolve_session_agent_path(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         current_session_agent_id: str,
         path: str,
     ) -> SessionAgent | None:
         """Resolve an absolute or current-agent-relative SessionAgent path."""
-        current = await session.get(RDBSessionAgent, current_session_agent_id)
+        current = await session.read_session.get(
+            RDBSessionAgent, current_session_agent_id
+        )
         if current is None:
             raise ValueError("SessionAgent not found")
 
@@ -540,7 +542,7 @@ class AgentSessionRepository:
 
     async def create_child_session_agent(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         parent_session_agent_id: str,
         name: str,
@@ -550,14 +552,14 @@ class AgentSessionRepository:
     ) -> SessionAgent:
         """Create a child SessionAgent and linked hidden AgentSession."""
         validate_session_agent_child_name(name)
-        root_session_agent_id = await session.scalar(
+        root_session_agent_id = await session.write_session.scalar(
             sa.select(RDBSessionAgent.root_session_agent_id).where(
                 RDBSessionAgent.id == parent_session_agent_id
             )
         )
         if root_session_agent_id is None:
             raise ValueError("Parent SessionAgent not found")
-        root_agent = await session.scalar(
+        root_agent = await session.write_session.scalar(
             sa.select(RDBSessionAgent)
             .where(
                 RDBSessionAgent.id == root_session_agent_id,
@@ -567,7 +569,7 @@ class AgentSessionRepository:
         )
         if root_agent is None:
             raise ValueError("Root SessionAgent not found")
-        root_session = await session.get(
+        root_session = await session.write_session.get(
             RDBAgentSession,
             root_agent.agent_session_id,
             populate_existing=True,
@@ -576,14 +578,15 @@ class AgentSessionRepository:
             raise ValueError("Root AgentSession is not active")
         if root_session.stop_requested_at is not None:
             raise ValueError("Root AgentSession is stopping")
-        parent_row = await session.execute(
+        parent_row = await session.write_session.execute(
             sa.select(RDBSessionAgent, RDBAgentSession)
             .join(
                 RDBAgentSession,
                 RDBAgentSession.id == RDBSessionAgent.agent_session_id,
             )
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
             .where(RDBSessionAgent.id == parent_session_agent_id)
-            .with_for_update()
+            .with_for_update(of=(RDBSessionAgent, RDBAgentSession))
             .execution_options(populate_existing=True)
         )
         parent = parent_row.one_or_none()
@@ -598,7 +601,7 @@ class AgentSessionRepository:
             raise ValueError("Parent AgentSession is stopping")
         child_path = _join_session_agent_path(parent_agent.path, name)
 
-        existing = await session.scalar(
+        existing = await session.write_session.scalar(
             sa.select(RDBSessionAgent.id).where(
                 RDBSessionAgent.root_session_agent_id
                 == parent_agent.root_session_agent_id,
@@ -613,6 +616,7 @@ class AgentSessionRepository:
             workspace_id=parent_agent_session.workspace_id,
             agent_id=parent_agent_session.agent_id,
             title=title,
+            lifecycle_root_session_id=root_agent.agent_session_id,
         )
         rdb = RDBSessionAgent(
             context_id=parent_agent.context_id,
@@ -625,20 +629,20 @@ class AgentSessionRepository:
             parent_session_agent_id=parent_agent.id,
             last_task_message=last_task_message,
         )
-        session.add(rdb)
-        await session.flush()
-        await session.refresh(rdb)
+        session.write_session.add(rdb)
+        await session.write_session.flush()
+        await session.write_session.refresh(rdb)
         return self._build_session_agent(rdb)
 
     async def update_session_agent_last_task_message(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_agent_id: str,
         last_task_message: str | None,
     ) -> SessionAgent | None:
         """Update the latest task/message preview for a SessionAgent."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBSessionAgent)
             .where(RDBSessionAgent.id == session_agent_id)
             .values(last_task_message=last_task_message)
@@ -647,17 +651,17 @@ class AgentSessionRepository:
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
+        await session.write_session.flush()
         return self._build_session_agent(rdb)
 
     async def mark_session_agent_message_activity(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_agent_id: str,
     ) -> SessionAgent | None:
         """Record the latest agent-to-agent message activity time."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBSessionAgent)
             .where(RDBSessionAgent.id == session_agent_id)
             .values(last_message_at=sa.func.now())
@@ -666,19 +670,19 @@ class AgentSessionRepository:
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
+        await session.write_session.flush()
         return self._build_session_agent(rdb)
 
     async def update_session_agent_observation_cursor(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_agent_id: str,
         parent_observed_run_index: int | None,
         parent_observed_event_id: str | None,
     ) -> SessionAgent | None:
         """Update the terminal-result observation cursor for a SessionAgent."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBSessionAgent)
             .where(RDBSessionAgent.id == session_agent_id)
             .values(
@@ -690,12 +694,12 @@ class AgentSessionRepository:
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
+        await session.write_session.flush()
         return self._build_session_agent(rdb)
 
     async def advance_session_agent_observation_cursor(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_agent_id: str,
         parent_session_agent_id: str,
@@ -703,7 +707,7 @@ class AgentSessionRepository:
         parent_observed_event_id: str | None,
     ) -> SessionAgent | None:
         """Advance a direct child's cursor without allowing regression."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBSessionAgent)
             .where(
                 RDBSessionAgent.id == session_agent_id,
@@ -723,21 +727,22 @@ class AgentSessionRepository:
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
+        await session.write_session.flush()
         return self._build_session_agent(rdb)
 
     async def list_by_workspace(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         workspace_id: str,
     ) -> list[AgentSession]:
         """Fetch workspace Team AgentSession list in latest-first order."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgentSession)
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
             .where(
                 RDBAgentSession.workspace_id == workspace_id,
-                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
-                RDBAgentSession.product_mode == AgentSessionProductMode.TEAM,
+                RDBConversation.session_kind == AgentSessionKind.ROOT,
+                RDBConversation.product_mode == AgentSessionProductMode.TEAM,
             )
             .order_by(RDBAgentSession.updated_at.desc())
         )
@@ -745,7 +750,7 @@ class AgentSessionRepository:
 
     async def list_active_by_agent_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
     ) -> list[AgentSession]:
         """Fetch active Team Agent sessions with team primary first.
@@ -754,21 +759,22 @@ class AgentSessionRepository:
         not by assistant/tool/system activity.
         """
         primary_order = sa.case(
-            (RDBAgentSession.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY, 0),
+            (RDBConversation.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY, 0),
             else_=1,
         )
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgentSession)
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
             .where(
                 RDBAgentSession.agent_id == agent_id,
-                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
-                RDBAgentSession.product_mode == AgentSessionProductMode.TEAM,
+                RDBConversation.session_kind == AgentSessionKind.ROOT,
+                RDBConversation.product_mode == AgentSessionProductMode.TEAM,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
             )
             .order_by(
                 primary_order,
-                RDBAgentSession.pinned.desc(),
-                RDBAgentSession.last_user_input_at.desc(),
+                RDBConversation.pinned.desc(),
+                RDBConversation.last_user_input_at.desc(),
                 RDBAgentSession.updated_at.desc(),
                 RDBAgentSession.id.asc(),
             )
@@ -777,23 +783,24 @@ class AgentSessionRepository:
 
     async def list_active_user_by_agent_and_user(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         associated_user_id: str,
     ) -> list[AgentSession]:
         """Fetch active User Sessions owned by one User for an Agent."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgentSession)
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
             .where(
                 RDBAgentSession.agent_id == agent_id,
-                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
-                RDBAgentSession.product_mode == AgentSessionProductMode.USER,
-                RDBAgentSession.associated_user_id == associated_user_id,
+                RDBConversation.session_kind == AgentSessionKind.ROOT,
+                RDBConversation.product_mode == AgentSessionProductMode.USER,
+                RDBConversation.associated_user_id == associated_user_id,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
             )
             .order_by(
-                RDBAgentSession.last_user_input_at.desc(),
+                RDBConversation.last_user_input_at.desc(),
                 RDBAgentSession.updated_at.desc(),
             )
         )
@@ -801,19 +808,20 @@ class AgentSessionRepository:
 
     async def list_active_user_roots_by_workspace_and_user(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         associated_user_id: str,
     ) -> list[AgentSession]:
         """Fetch active User root Sessions for one Workspace member."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgentSession)
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
             .where(
                 RDBAgentSession.workspace_id == workspace_id,
-                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
-                RDBAgentSession.product_mode == AgentSessionProductMode.USER,
-                RDBAgentSession.associated_user_id == associated_user_id,
+                RDBConversation.session_kind == AgentSessionKind.ROOT,
+                RDBConversation.product_mode == AgentSessionProductMode.USER,
+                RDBConversation.associated_user_id == associated_user_id,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
             )
             .order_by(RDBAgentSession.created_at, RDBAgentSession.id)
@@ -822,17 +830,18 @@ class AgentSessionRepository:
 
     async def list_user_roots_by_user(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         associated_user_id: str,
     ) -> list[AgentSession]:
         """Fetch all User root Sessions owned by one User."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgentSession)
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
             .where(
-                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
-                RDBAgentSession.product_mode == AgentSessionProductMode.USER,
-                RDBAgentSession.associated_user_id == associated_user_id,
+                RDBConversation.session_kind == AgentSessionKind.ROOT,
+                RDBConversation.product_mode == AgentSessionProductMode.USER,
+                RDBConversation.associated_user_id == associated_user_id,
             )
             .order_by(RDBAgentSession.created_at, RDBAgentSession.id)
         )
@@ -840,16 +849,16 @@ class AgentSessionRepository:
 
     async def has_any_for_associated_user(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         associated_user_id: str,
     ) -> bool:
         """Return whether any Session rows remain for an associated User."""
         return bool(
-            await session.scalar(
+            await session.write_session.scalar(
                 sa.select(
                     sa.exists().where(
-                        RDBAgentSession.associated_user_id == associated_user_id
+                        RDBConversation.associated_user_id == associated_user_id
                     )
                 )
             )
@@ -857,17 +866,18 @@ class AgentSessionRepository:
 
     async def list_root_trees_by_agent_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
     ) -> list[AgentSession]:
         """List every root tree for Agent decommission reconciliation."""
         rows = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(RDBAgentSession)
+                .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
                 .where(
                     RDBAgentSession.agent_id == agent_id,
-                    RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                    RDBConversation.session_kind == AgentSessionKind.ROOT,
                 )
                 .order_by(RDBAgentSession.created_at, RDBAgentSession.id)
             )
@@ -876,20 +886,20 @@ class AgentSessionRepository:
 
     async def has_any_for_agent_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
     ) -> bool:
         """Return whether any Session row remains for an Agent."""
         return bool(
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(sa.exists().where(RDBAgentSession.agent_id == agent_id))
             )
         )
 
     async def list_active_unread_by_agent_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
         *,
         auto_archive_ttl_days: int,
@@ -907,7 +917,7 @@ class AgentSessionRepository:
 
     async def _list_active_unread_page_by_agent_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
         *,
         auto_archive_ttl_days: int,
@@ -917,7 +927,7 @@ class AgentSessionRepository:
     ) -> AgentSessionProjectionPage:
         """Fetch an active-root projection page with optional pin filtering."""
         primary_order = sa.case(
-            (RDBAgentSession.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY, 0),
+            (RDBConversation.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY, 0),
             else_=1,
         )
         tree_activity = (
@@ -931,20 +941,24 @@ class AgentSessionRepository:
                 RDBAgentSession,
                 RDBAgentSession.id == RDBSessionAgent.agent_session_id,
             )
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
             .where(RDBAgentSession.agent_id == agent_id)
             .group_by(RDBSessionAgent.root_session_agent_id)
             .subquery()
         )
         filters = [
             RDBAgentSession.agent_id == agent_id,
-            RDBAgentSession.session_kind == AgentSessionKind.ROOT,
-            RDBAgentSession.product_mode == AgentSessionProductMode.TEAM,
+            RDBConversation.session_kind == AgentSessionKind.ROOT,
+            RDBConversation.product_mode == AgentSessionProductMode.TEAM,
             RDBAgentSession.status == AgentSessionStatus.ACTIVE,
         ]
         if pinned is not None:
-            filters.append(RDBAgentSession.pinned.is_(pinned))
-        total_count = await session.scalar(
-            sa.select(sa.func.count()).select_from(RDBAgentSession).where(*filters)
+            filters.append(RDBConversation.pinned.is_(pinned))
+        total_count = await session.read_session.scalar(
+            sa.select(sa.func.count())
+            .select_from(RDBAgentSession)
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
+            .where(*filters)
         )
         query = (
             sa.select(
@@ -952,6 +966,7 @@ class AgentSessionRepository:
                 RDBAgentSessionUnreadRun.run_id,
                 tree_activity.c.latest_activity_at,
             )
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
             .outerjoin(
                 RDBAgentSessionUnreadRun,
                 RDBAgentSessionUnreadRun.session_id == RDBAgentSession.id,
@@ -968,8 +983,8 @@ class AgentSessionRepository:
             .where(*filters)
             .order_by(
                 primary_order,
-                RDBAgentSession.pinned.desc(),
-                RDBAgentSession.last_user_input_at.desc(),
+                RDBConversation.pinned.desc(),
+                RDBConversation.last_user_input_at.desc(),
                 RDBAgentSession.updated_at.desc(),
                 RDBAgentSession.id.asc(),
             )
@@ -977,7 +992,7 @@ class AgentSessionRepository:
         )
         if limit is not None:
             query = query.limit(limit)
-        result = await session.execute(query)
+        result = await session.read_session.execute(query)
         return AgentSessionProjectionPage(
             items=[
                 AgentSessionUnreadTerminalRunProjection(
@@ -985,9 +1000,9 @@ class AgentSessionRepository:
                     unread_terminal_run_id=unread_terminal_run_id,
                     auto_archive_after=(
                         None
-                        if agent_session.primary_kind
+                        if self._require_conversation(agent_session).primary_kind
                         == AgentSessionPrimaryKind.TEAM_PRIMARY
-                        or agent_session.pinned
+                        or self._require_conversation(agent_session).pinned
                         else (latest_activity_at or agent_session.last_activity_at)
                         + datetime.timedelta(days=auto_archive_ttl_days)
                     ),
@@ -1003,7 +1018,7 @@ class AgentSessionRepository:
 
     async def list_active_unread_page_by_agent_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
         *,
         auto_archive_ttl_days: int,
@@ -1022,7 +1037,7 @@ class AgentSessionRepository:
 
     async def list_active_sidebar_summary_by_agent_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
         *,
         auto_archive_ttl_days: int,
@@ -1052,12 +1067,13 @@ class AgentSessionRepository:
 
     async def get_with_unread_terminal_run_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> AgentSessionUnreadTerminalRunProjection | None:
         """Fetch one Session with its shared unread Run boundary."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgentSession, RDBAgentSessionUnreadRun.run_id)
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
             .outerjoin(
                 RDBAgentSessionUnreadRun,
                 RDBAgentSessionUnreadRun.session_id == RDBAgentSession.id,
@@ -1076,17 +1092,18 @@ class AgentSessionRepository:
 
     async def list_archived_by_agent_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
     ) -> list[AgentSession]:
         """Fetch archived Team root sessions in latest-archive-first order."""
         rows = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(RDBAgentSession)
+                .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
                 .where(
                     RDBAgentSession.agent_id == agent_id,
-                    RDBAgentSession.session_kind == AgentSessionKind.ROOT,
-                    RDBAgentSession.product_mode == AgentSessionProductMode.TEAM,
+                    RDBConversation.session_kind == AgentSessionKind.ROOT,
+                    RDBConversation.product_mode == AgentSessionProductMode.TEAM,
                     RDBAgentSession.status == AgentSessionStatus.ARCHIVED,
                 )
                 .order_by(
@@ -1099,7 +1116,7 @@ class AgentSessionRepository:
 
     async def list_archived_page_by_agent_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
         *,
         offset: int,
@@ -1108,16 +1125,20 @@ class AgentSessionRepository:
         """Fetch one latest-archive-first root-session page."""
         filters = [
             RDBAgentSession.agent_id == agent_id,
-            RDBAgentSession.session_kind == AgentSessionKind.ROOT,
-            RDBAgentSession.product_mode == AgentSessionProductMode.TEAM,
+            RDBConversation.session_kind == AgentSessionKind.ROOT,
+            RDBConversation.product_mode == AgentSessionProductMode.TEAM,
             RDBAgentSession.status == AgentSessionStatus.ARCHIVED,
         ]
-        total_count = await session.scalar(
-            sa.select(sa.func.count()).select_from(RDBAgentSession).where(*filters)
+        total_count = await session.read_session.scalar(
+            sa.select(sa.func.count())
+            .select_from(RDBAgentSession)
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
+            .where(*filters)
         )
         rows = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(RDBAgentSession)
+                .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
                 .where(*filters)
                 .order_by(
                     RDBAgentSession.archived_at.desc(),
@@ -1135,20 +1156,21 @@ class AgentSessionRepository:
 
     async def list_auto_archive_candidates(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         limit: int,
     ) -> list[AgentSession]:
         """List oldest active non-primary Team roots not protected by a pin."""
         rows = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(RDBAgentSession)
+                .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
                 .where(
-                    RDBAgentSession.session_kind == AgentSessionKind.ROOT,
-                    RDBAgentSession.product_mode == AgentSessionProductMode.TEAM,
+                    RDBConversation.session_kind == AgentSessionKind.ROOT,
+                    RDBConversation.product_mode == AgentSessionProductMode.TEAM,
                     RDBAgentSession.status == AgentSessionStatus.ACTIVE,
-                    RDBAgentSession.primary_kind.is_(None),
-                    RDBAgentSession.pinned.is_(False),
+                    RDBConversation.primary_kind.is_(None),
+                    RDBConversation.pinned.is_(False),
                 )
                 .order_by(RDBAgentSession.last_activity_at, RDBAgentSession.id)
                 .limit(limit)
@@ -1158,19 +1180,20 @@ class AgentSessionRepository:
 
     async def get_latest_active_non_primary(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
     ) -> AgentSession | None:
         """Fetch newest active non-primary Team AgentSession by creation time."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgentSession)
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
             .where(
                 RDBAgentSession.agent_id == agent_id,
-                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
-                RDBAgentSession.product_mode == AgentSessionProductMode.TEAM,
+                RDBConversation.session_kind == AgentSessionKind.ROOT,
+                RDBConversation.product_mode == AgentSessionProductMode.TEAM,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
-                RDBAgentSession.primary_kind.is_(None),
+                RDBConversation.primary_kind.is_(None),
             )
             .order_by(RDBAgentSession.created_at.desc())
             .limit(1)
@@ -1178,302 +1201,112 @@ class AgentSessionRepository:
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        return self._build(rdb)
+        return self._build(await self._refresh_conversation(session, rdb))
+
+    async def fence_active_mailbox_target(
+        self,
+        session: WriteSession,
+        agent_session_id: str,
+    ) -> AgentSession | None:
+        """Retain exact active target admission through its mailbox transaction."""
+        result = await session.write_session.execute(
+            self._conversation_update(
+                predicates=[
+                    RDBAgentSession.id == agent_session_id,
+                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                ],
+                values={
+                    "owner_generation": RDBAgentSession.owner_generation,
+                    "updated_at": RDBAgentSession.updated_at,
+                },
+            )
+            .returning(RDBAgentSession.id)
+            .execution_options(populate_existing=True)
+        )
+        current = result.scalar_one_or_none()
+        return (
+            None
+            if current is None
+            else self._build(await self._refresh_conversation(session, current))
+        )
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_session_id: str,
     ) -> AgentSession | None:
-        """Lock one AgentSession after its referenced Agent in stable FK order."""
-        if not await self._lock_agent_parent_for_session_write(
-            session,
-            agent_session_id,
-            nowait=False,
-        ):
-            return None
-        result = await session.execute(
+        """Fence the exact Session mutation without excluding unrelated Agent work."""
+        result = await session.write_session.execute(
             sa.select(RDBAgentSession)
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
             .where(RDBAgentSession.id == agent_session_id)
             # SQLAlchemy renders key_share=True as PostgreSQL
             # ``FOR NO KEY UPDATE``. Admission updates only non-key columns
             # such as run_state while allowing FK KEY SHARE references.
-            .with_for_update(key_share=True)
+            .with_for_update(key_share=True, of=RDBAgentSession)
             .execution_options(populate_existing=True)
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        return self._build(rdb)
-
-    async def wait_for_execution_lock_by_id(
-        self,
-        session: AsyncSession,
-        agent_session_id: str,
-    ) -> AgentSession | None:
-        """Acquire execution admission before the caller takes other row locks.
-
-        A failed attempt releases its root gate and FK locks before retrying.
-        Call only at the beginning of a transaction; callers with existing
-        mutations must use the single-attempt ``lock_execution_by_id`` instead.
-        """
-        while True:
-            try:
-                return await self.lock_execution_by_id(session, agent_session_id)
-            except OperationalError as exc:
-                if not isinstance(exc.orig, LockNotAvailable):
-                    raise
-                await asyncio.sleep(_OWNER_GENERATION_LOCK_RETRY_SECONDS)
-
-    async def lock_execution_by_id(
-        self,
-        session: AsyncSession,
-        agent_session_id: str,
-    ) -> AgentSession | None:
-        """Acquire one tree-ordered execution lock attempt without lock waits.
-
-        Lock the existing root tree gate before Agent, Session, and Run work.
-        Source, root, and direct-parent Sessions are acquired together so later
-        terminal parent delivery cannot wait on an inverse Session-to-root path.
-        NOWAIT and the savepoint release all locks from a failed attempt.
-        """
-        async with session.begin_nested():
-            source = await self.get_session_agent_by_session_id(
-                session,
-                agent_session_id,
-            )
-            if source is None:
-                return None
-            root = await session.scalar(
-                sa.select(RDBSessionAgent)
-                .where(RDBSessionAgent.id == source.root_session_agent_id)
-                .with_for_update(nowait=True)
-            )
-            if root is None:
-                return None
-            session_ids = {agent_session_id, root.agent_session_id}
-            if source.parent_session_agent_id is not None:
-                parent = await self.get_session_agent_by_id(
-                    session,
-                    source.parent_session_agent_id,
-                )
-                if parent is not None:
-                    session_ids.add(parent.agent_session_id)
-            agent_ids = (
-                await session.scalars(
-                    sa.select(RDBAgentSession.agent_id)
-                    .where(RDBAgentSession.id.in_(session_ids))
-                    .distinct()
-                )
-            ).all()
-            await session.execute(
-                sa.select(RDBAgent.id)
-                .where(RDBAgent.id.in_(agent_ids))
-                .order_by(RDBAgent.id)
-                .with_for_update(read=True, key_share=True, nowait=True)
-            )
-            locked_sessions = (
-                await session.scalars(
-                    sa.select(RDBAgentSession)
-                    .where(RDBAgentSession.id.in_(session_ids))
-                    .order_by(RDBAgentSession.id)
-                    .with_for_update(key_share=True, nowait=True)
-                    .execution_options(populate_existing=True)
-                )
-            ).all()
-            for locked_session in locked_sessions:
-                if locked_session.id == agent_session_id:
-                    return self._build(locked_session)
-            return None
-
-    async def lock_by_id_nowait(
-        self,
-        session: AsyncSession,
-        agent_session_id: str,
-    ) -> AgentSession | None:
-        """Try to lock one Session and its Agent parent without waiting."""
-        if not await self._lock_agent_parent_for_session_write(
-            session,
-            agent_session_id,
-            nowait=True,
-        ):
-            return None
-        result = await session.execute(
-            sa.select(RDBAgentSession)
-            .where(RDBAgentSession.id == agent_session_id)
-            .with_for_update(key_share=True, nowait=True)
-            .execution_options(populate_existing=True)
-        )
-        rdb = result.scalar_one_or_none()
-        return None if rdb is None else self._build(rdb)
-
-    async def _lock_agent_parent_for_session_write(
-        self,
-        session: AsyncSession,
-        agent_session_id: str,
-        *,
-        nowait: bool,
-    ) -> bool:
-        """Serialize Session writes without blocking Agent FK references."""
-        agent_id = await session.scalar(
-            sa.select(RDBAgentSession.agent_id).where(
-                RDBAgentSession.id == agent_session_id
-            )
-        )
-        if agent_id is None:
-            return False
-        locked_agent_id = await session.scalar(
-            sa.select(RDBAgent.id)
-            .where(RDBAgent.id == agent_id)
-            # Match AgentRepository.lock_by_id's ``FOR NO KEY UPDATE``.
-            # Escalating to ``FOR UPDATE`` can deadlock with root creation,
-            # which holds an FK key-share lock before its final Agent CAS.
-            .with_for_update(key_share=True, nowait=nowait)
-        )
-        return locked_agent_id is not None
-
-    async def lock_agent_parent_for_session(
-        self,
-        session: AsyncSession,
-        agent_session_id: str,
-    ) -> bool:
-        """Lock the Session's Agent parent in FK-compatible order."""
-        agent_id = await session.scalar(
-            sa.select(RDBAgentSession.agent_id).where(
-                RDBAgentSession.id == agent_session_id
-            )
-        )
-        if agent_id is None:
-            return False
-        locked_agent_id = await session.scalar(
-            sa.select(RDBAgent.id)
-            .where(RDBAgent.id == agent_id)
-            .with_for_update(read=True, key_share=True)
-        )
-        return locked_agent_id is not None
-
-    async def lock_agent_parent_for_session_nowait(
-        self,
-        session: AsyncSession,
-        agent_session_id: str,
-    ) -> bool:
-        """Try to lock the Session's Agent parent without waiting."""
-        agent_id = await session.scalar(
-            sa.select(RDBAgentSession.agent_id).where(
-                RDBAgentSession.id == agent_session_id
-            )
-        )
-        if agent_id is None:
-            return False
-        locked_agent_id = await session.scalar(
-            sa.select(RDBAgent.id)
-            .where(RDBAgent.id == agent_id)
-            .with_for_update(read=True, key_share=True, nowait=True)
-        )
-        return locked_agent_id is not None
+        return self._build(await self._refresh_conversation(session, rdb))
 
     async def set_pinned(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         pinned: bool,
     ) -> AgentSession | None:
         """Set automatic-archive protection for one active root Session."""
-        result = await session.execute(
-            sa.update(RDBAgentSession)
-            .where(
-                RDBAgentSession.id == session_id,
-                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
-                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
-            )
-            .values(pinned=pinned)
-            .returning(RDBAgentSession)
+        result = await session.write_session.execute(
+            self._conversation_update(
+                predicates=[
+                    RDBAgentSession.id == session_id,
+                    RDBConversation.session_kind == AgentSessionKind.ROOT,
+                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                ],
+                values={"pinned": pinned},
+            ).returning(RDBAgentSession.id)
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
-        return self._build(rdb)
+        await session.write_session.flush()
+        return self._build(await self._refresh_conversation(session, rdb))
 
     async def claim_owner_generation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_session_id: str,
     ) -> int:
-        """Claim ownership only while the authoritative root remains active.
-
-        Session-owned transactions can already hold an AgentSession row before
-        they reach the root tree lifecycle lock. Use non-blocking Session row
-        locks and roll back the nested attempt so this root-first claim never
-        completes an inverse lock cycle.
-        """
-        while True:
-            try:
-                async with session.begin_nested():
-                    return await self._claim_owner_generation_once(
-                        session,
-                        agent_session_id,
-                    )
-            except OperationalError as exc:
-                if not isinstance(exc.orig, LockNotAvailable):
-                    raise
-                await asyncio.sleep(_OWNER_GENERATION_LOCK_RETRY_SECONDS)
-
-    async def _claim_owner_generation_once(
-        self,
-        session: AsyncSession,
-        agent_session_id: str,
-    ) -> int:
-        """Attempt one root-first owner claim without waiting on Session rows."""
-        root_session_agent_id = await session.scalar(
-            sa.select(RDBSessionAgent.root_session_agent_id).where(
-                RDBSessionAgent.agent_session_id == agent_session_id
-            )
-        )
-        if root_session_agent_id is None:
+        """Advance the exact Session owner row, serializing critical commits only."""
+        source = await self.get_session_agent_by_session_id(session, agent_session_id)
+        if source is None:
             raise ValueError("AgentSession tree not found")
-        root_agent = await session.scalar(
-            sa.select(RDBSessionAgent)
-            .where(
-                RDBSessionAgent.id == root_session_agent_id,
-                RDBSessionAgent.kind == SessionAgentKind.ROOT,
-            )
-            .with_for_update()
-        )
-        if root_agent is None:
+        root = await self.get_session_agent_by_id(session, source.root_session_agent_id)
+        if root is None:
             raise ValueError("Root SessionAgent not found")
-        root_session = await session.scalar(
-            sa.select(RDBAgentSession)
-            .where(RDBAgentSession.id == root_agent.agent_session_id)
-            .with_for_update(nowait=True)
-            .execution_options(populate_existing=True)
-        )
+        root_session = await self.get_by_id(session, root.agent_session_id)
         if root_session is None or root_session.status is not AgentSessionStatus.ACTIVE:
             raise ValueError("Root AgentSession is not active")
-
-        if root_session.id == agent_session_id:
-            claimed_session = root_session
-        else:
-            claimed_session = await session.scalar(
-                sa.select(RDBAgentSession)
-                .where(RDBAgentSession.id == agent_session_id)
-                .with_for_update(nowait=True)
-                .execution_options(populate_existing=True)
-            )
-        if (
-            claimed_session is None
-            or claimed_session.status is not AgentSessionStatus.ACTIVE
-        ):
+        result = await session.write_session.execute(
+            self._conversation_update(
+                predicates=[
+                    RDBAgentSession.id == agent_session_id,
+                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                ],
+                values={"owner_generation": RDBAgentSession.owner_generation + 1},
+            ).returning(RDBAgentSession.owner_generation)
+        )
+        generation = result.scalar_one_or_none()
+        if generation is None:
             raise ValueError("AgentSession not found")
-
-        claimed_session.owner_generation += 1
-        await session.flush()
-        return claimed_session.owner_generation
+        return generation
 
     async def fence_purge_owner_generations(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_ids: Sequence[str],
     ) -> int:
@@ -1481,19 +1314,19 @@ class AgentSessionRepository:
         if not session_ids:
             return 0
         fenced_ids = (
-            await session.scalars(
-                sa.update(RDBAgentSession)
-                .where(RDBAgentSession.id.in_(session_ids))
-                .values(owner_generation=RDBAgentSession.owner_generation + 1)
-                .returning(RDBAgentSession.id)
+            await session.write_session.scalars(
+                self._conversation_update(
+                    predicates=[RDBAgentSession.id.in_(session_ids)],
+                    values={"owner_generation": RDBAgentSession.owner_generation + 1},
+                ).returning(RDBAgentSession.id)
             )
         ).all()
-        await session.flush()
+        await session.write_session.flush()
         return len(fenced_ids)
 
     async def list_session_agent_subtree_session_ids(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_session_id: str,
     ) -> list[str]:
@@ -1504,12 +1337,6 @@ class AgentSessionRepository:
         )
         if linked_agent is None:
             return [agent_session_id]
-        locked_root = await self.lock_session_agent_by_id(
-            session,
-            linked_agent.root_session_agent_id,
-        )
-        if locked_root is None:
-            return [agent_session_id]
         descendants = await self.list_descendant_session_agents(
             session,
             session_agent_id=linked_agent.id,
@@ -1519,33 +1346,35 @@ class AgentSessionRepository:
 
     async def get_team_primary_by_agent_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
     ) -> AgentSession | None:
         """Fetch active team primary AgentSession of Agent."""
-        result = await session.execute(
-            sa.select(RDBAgentSession).where(
+        result = await session.read_session.execute(
+            sa.select(RDBAgentSession)
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
+            .where(
                 RDBAgentSession.agent_id == agent_id,
-                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
-                RDBAgentSession.product_mode == AgentSessionProductMode.TEAM,
-                RDBAgentSession.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY,
+                RDBConversation.session_kind == AgentSessionKind.ROOT,
+                RDBConversation.product_mode == AgentSessionProductMode.TEAM,
+                RDBConversation.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
             )
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        return self._build(rdb)
+        return self._build(await self._refresh_conversation(session, rdb))
 
     async def ensure_team_primary_for_agent(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         agent_id: str,
     ) -> AgentSessionEnsureTeamPrimaryResult:
         """Ensure active team primary AgentSession for Agent."""
-        lifecycle_status = await session.scalar(
+        lifecycle_status = await session.write_session.scalar(
             sa.select(RDBAgent.lifecycle_status).where(RDBAgent.id == agent_id)
         )
         if lifecycle_status is not AgentLifecycleStatus.ACTIVE:
@@ -1565,7 +1394,7 @@ class AgentSessionRepository:
 
     async def _create_team_primary_if_absent(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         agent_id: str,
@@ -1577,57 +1406,45 @@ class AgentSessionRepository:
             agent_id=agent_id,
         )
         for _ in range(SESSION_HANDLE_INSERT_ATTEMPTS):
-            result = await session.execute(
-                pg_insert(RDBAgentSession)
-                .values(
-                    id=uuid7().hex,
-                    workspace_id=workspace_id,
-                    agent_id=agent_id,
-                    handle=generate_session_handle(),
-                    session_kind=AgentSessionKind.ROOT,
-                    status=AgentSessionStatus.ACTIVE,
-                    title=None,
-                    primary_kind=AgentSessionPrimaryKind.TEAM_PRIMARY,
-                    product_mode=AgentSessionProductMode.TEAM,
-                    associated_user_id=None,
-                    start_reason=start_reason,
-                )
-                .on_conflict_do_nothing()
-                .returning(RDBAgentSession)
+            rdb = await self._insert_conversation_session(
+                session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                session_kind=AgentSessionKind.ROOT,
+                title=None,
+                primary_kind=AgentSessionPrimaryKind.TEAM_PRIMARY,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+                start_reason=start_reason,
+                lifecycle_root_session_id=None,
             )
-            rdb = result.scalar_one_or_none()
             if rdb is not None:
+                conversation = self._require_conversation(rdb)
                 await self._create_root_session_agent_tree(
                     session,
                     agent_session_id=rdb.id,
-                    root_session_handle=rdb.handle,
+                    root_session_handle=conversation.handle,
                     workspace_id=rdb.workspace_id,
                     agent_id=rdb.agent_id,
                     authority=root_authority,
                 )
                 await self._confirm_root_creation_authority(
-                    session,
-                    agent_id=rdb.agent_id,
-                    authority=root_authority,
+                    session, agent_id=rdb.agent_id, authority=root_authority
                 )
-                await session.flush()
+                await session.write_session.flush()
                 return AgentSessionEnsureTeamPrimaryResult(
-                    session=self._build(rdb),
-                    created=True,
+                    session=self._build(rdb), created=True
                 )
-
             primary = await self.get_team_primary_by_agent_id(session, agent_id)
             if primary is not None:
                 return AgentSessionEnsureTeamPrimaryResult(
-                    session=primary,
-                    created=False,
+                    session=primary, created=False
                 )
-
         raise RuntimeError("AgentSession handle generation exhausted retry attempts")
 
     async def update_title(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         title: str | None,
@@ -1642,83 +1459,83 @@ class AgentSessionRepository:
             values["title_generated_at"] = None
             values["title_generation_event_id"] = None
             values["title_model_operation_state"] = None
-        result = await session.execute(
-            sa.update(RDBAgentSession)
-            .where(RDBAgentSession.id == session_id)
-            .values(**values)
-            .returning(RDBAgentSession)
+        result = await session.write_session.execute(
+            self._conversation_update(
+                predicates=[RDBAgentSession.id == session_id], values={**values}
+            ).returning(RDBAgentSession.id)
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
-        return self._build(rdb)
+        await session.write_session.flush()
+        return self._build(await self._refresh_conversation(session, rdb))
 
     async def set_initial_auto_title_if_unset(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         title: str,
         event_id: str | None,
     ) -> AgentSession | None:
         """Set first-message title only while no title source exists."""
-        result = await session.execute(
-            sa.update(RDBAgentSession)
-            .where(
-                RDBAgentSession.id == session_id,
-                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
-                RDBAgentSession.title_source.is_(None),
-            )
-            .values(
-                title=title,
-                title_source=AgentSessionTitleSource.AUTO_INITIAL,
-                title_generated_at=sa.func.now(),
-                title_generation_event_id=event_id,
-            )
-            .returning(RDBAgentSession)
+        result = await session.write_session.execute(
+            self._conversation_update(
+                predicates=[
+                    RDBAgentSession.id == session_id,
+                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                    RDBConversation.title_source.is_(None),
+                ],
+                values={
+                    "title": title,
+                    "title_source": AgentSessionTitleSource.AUTO_INITIAL,
+                    "title_generated_at": sa.func.now(),
+                    "title_generation_event_id": event_id,
+                },
+            ).returning(RDBAgentSession.id)
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
-        return self._build(rdb)
+        await session.write_session.flush()
+        return self._build(await self._refresh_conversation(session, rdb))
 
     async def replace_initial_auto_title(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         title: str,
         event_id: str,
     ) -> AgentSession | None:
         """Replace initial automatic title for the same initial prompt event."""
-        result = await session.execute(
-            sa.update(RDBAgentSession)
-            .where(
-                RDBAgentSession.id == session_id,
-                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
-                RDBAgentSession.title_source == AgentSessionTitleSource.AUTO_INITIAL,
-                RDBAgentSession.title_generation_event_id == event_id,
-            )
-            .values(
-                title=title,
-                title_source=AgentSessionTitleSource.AUTO_GENERATED,
-                title_generated_at=sa.func.now(),
-                title_generation_event_id=event_id,
-                title_model_operation_state=None,
-            )
-            .returning(RDBAgentSession)
+        result = await session.write_session.execute(
+            self._conversation_update(
+                predicates=[
+                    RDBAgentSession.id == session_id,
+                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                    RDBConversation.title_source
+                    == AgentSessionTitleSource.AUTO_INITIAL,
+                    RDBConversation.title_generation_event_id == event_id,
+                ],
+                values={
+                    "title": title,
+                    "title_source": AgentSessionTitleSource.AUTO_GENERATED,
+                    "title_generated_at": sa.func.now(),
+                    "title_generation_event_id": event_id,
+                    "title_model_operation_state": None,
+                },
+            ).returning(RDBAgentSession.id)
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
-        return self._build(rdb)
+        await session.write_session.flush()
+        return self._build(await self._refresh_conversation(session, rdb))
 
     async def set_primary_model_reservation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         reservation: PrimaryModelReservation | None,
@@ -1727,12 +1544,12 @@ class AgentSessionRepository:
         """Replace a Primary reservation under an optional generation fence."""
         predicates: list[sa.ColumnElement[bool]] = [
             RDBAgentSession.id == session_id,
-            RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+            RDBConversation.session_kind == AgentSessionKind.ROOT,
             RDBAgentSession.status == AgentSessionStatus.ACTIVE,
         ]
         if expected_reservation_generation is not None:
             predicates.append(
-                RDBAgentSession.primary_model_reservation[
+                RDBConversation.primary_model_reservation[
                     "reservation_generation"
                 ].astext.cast(sa.BigInteger)
                 == expected_reservation_generation
@@ -1744,62 +1561,66 @@ class AgentSessionRepository:
         }
         if reservation is not None:
             predicates.append(
-                RDBAgentSession.primary_model_reservation_generation
+                RDBConversation.primary_model_reservation_generation
                 < reservation.reservation_generation
             )
             values["primary_model_reservation_generation"] = (
                 reservation.reservation_generation
             )
-        result = await session.execute(
-            sa.update(RDBAgentSession)
-            .where(*predicates)
-            .values(**values)
-            .returning(RDBAgentSession)
+        result = await session.write_session.execute(
+            self._conversation_update(
+                predicates=[*predicates], values={**values}
+            ).returning(RDBAgentSession.id)
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
-        return self._build(rdb)
+        await session.write_session.flush()
+        return self._build(await self._refresh_conversation(session, rdb))
 
     async def set_title_model_operation_state(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         generation_event_id: str,
         operation: ModelOperationSnapshot | None,
     ) -> AgentSession | None:
         """Set title operation state only for the current generation event."""
-        result = await session.execute(
-            sa.update(RDBAgentSession)
-            .where(
-                RDBAgentSession.id == session_id,
-                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
-                RDBAgentSession.title_source == AgentSessionTitleSource.AUTO_INITIAL,
-                RDBAgentSession.title_generation_event_id == generation_event_id,
-            )
-            .values(
-                title_model_operation_state=(
-                    operation.model_dump(mode="json") if operation is not None else None
-                )
-            )
-            .returning(RDBAgentSession)
+        result = await session.write_session.execute(
+            self._conversation_update(
+                predicates=[
+                    RDBAgentSession.id == session_id,
+                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                    RDBConversation.title_source
+                    == AgentSessionTitleSource.AUTO_INITIAL,
+                    RDBConversation.title_generation_event_id == generation_event_id,
+                ],
+                values={
+                    "title_model_operation_state": operation.model_dump(mode="json")
+                    if operation is not None
+                    else None
+                },
+            ).returning(RDBAgentSession.id)
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
-        return self._build(rdb)
+        await session.write_session.flush()
+        return self._build(await self._refresh_conversation(session, rdb))
 
     async def lock_root_tree_sessions(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         root_session_id: str,
     ) -> list[AgentSession]:
-        """Lock all AgentSessions in one root SessionAgent tree."""
-        root_agent = await session.scalar(
+        """Lock complete tree membership inside the owning lifecycle operation.
+
+        Child creation shares the root gate. Confirmed database aborts are
+        recovered by the complete operation owner, not a partial row-set retry.
+        """
+        root_agent = await session.write_session.scalar(
             sa.select(RDBSessionAgent)
             .where(
                 RDBSessionAgent.agent_session_id == root_session_id,
@@ -1813,18 +1634,45 @@ class AgentSessionRepository:
             RDBSessionAgent.root_session_agent_id == root_agent.id
         )
         rows = (
-            await session.execute(
+            await session.write_session.execute(
                 sa.select(RDBAgentSession)
+                .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
                 .where(RDBAgentSession.id.in_(session_ids))
                 .order_by(RDBAgentSession.id)
-                .with_for_update()
+                .with_for_update(key_share=True, of=RDBAgentSession)
+                .execution_options(populate_existing=True)
             )
         ).scalars()
         return [self._build(row) for row in rows]
 
+    async def archive_conversation_resources(
+        self,
+        session: WriteSession,
+        *,
+        root_session_id: str,
+        session_ids: Sequence[str],
+    ) -> None:
+        """Retire actual Conversation resources without writing common lifecycle."""
+        await self._release_primary_model_reservations(session, session_ids=session_ids)
+        await session.write_session.execute(
+            sa.update(RDBConversation)
+            .where(RDBConversation.session_id.in_(session_ids))
+            .values(primary_model_reservation=None, title_model_operation_state=None)
+        )
+        root_profile = await session.write_session.scalar(
+            sa.select(RDBConversation.session_id).where(
+                RDBConversation.session_id == root_session_id
+            )
+        )
+        if root_profile is not None:
+            await source_availability_in_session(
+                session, source_session_id=root_session_id, denied=True
+            )
+        await session.write_session.flush()
+
     async def archive_tree(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         root_session_id: str,
         session_ids: Sequence[str],
@@ -1834,61 +1682,51 @@ class AgentSessionRepository:
         retention_days: int | None,
         end_reason: AgentSessionEndReason | None = None,
     ) -> None:
-        """Archive a complete root tree and snapshot policy on its root."""
-        await self._release_primary_model_reservations(
+        """Archive Conversation resources through the common lifecycle writer."""
+        await self.archive_conversation_resources(
+            session, root_session_id=root_session_id, session_ids=session_ids
+        )
+        await LifecycleTargetRepository().archive_status(
             session,
+            root_session_id=root_session_id,
             session_ids=session_ids,
-        )
-        await session.execute(
-            sa.update(RDBAgentSession)
-            .where(RDBAgentSession.id.in_(session_ids))
-            .values(
-                status=AgentSessionStatus.ARCHIVED,
-                ended_at=archived_at,
-                end_reason=end_reason,
-                run_state=AgentSessionRunState.IDLE,
-                primary_model_reservation=None,
-                title_model_operation_state=None,
-            )
-        )
-        await session.execute(
-            sa.update(RDBAgentSession)
-            .where(RDBAgentSession.id == root_session_id)
-            .values(
+            retention=ArchiveRetention(
                 archived_at=archived_at,
                 purge_after=purge_after,
-                archive_policy_revision=policy_revision,
-                archive_retention_days_snapshot=retention_days,
-            )
+                policy_revision=policy_revision,
+                retention_days=retention_days,
+            ),
+            end_reason=end_reason,
         )
-        await session.flush()
 
     async def restore_tree(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         root_session_id: str,
         session_ids: Sequence[str],
     ) -> None:
         """Restore a complete archived tree and clear root archive metadata."""
-        await session.execute(
-            sa.update(RDBAgentSession)
-            .where(RDBAgentSession.id.in_(session_ids))
-            .values(status=AgentSessionStatus.ACTIVE)
-        )
-        await session.execute(
-            sa.update(RDBAgentSession)
-            .where(RDBAgentSession.id == root_session_id)
-            .values(
-                archived_at=None,
-                purge_after=None,
-                archive_policy_revision=None,
-                archive_retention_days_snapshot=None,
-                ended_at=None,
-                end_reason=None,
+        await session.write_session.execute(
+            self._conversation_update(
+                predicates=[RDBAgentSession.id.in_(session_ids)],
+                values={"status": AgentSessionStatus.ACTIVE},
             )
         )
-        await session.execute(
+        await session.write_session.execute(
+            self._conversation_update(
+                predicates=[RDBAgentSession.id == root_session_id],
+                values={
+                    "archived_at": None,
+                    "purge_after": None,
+                    "archive_policy_revision": None,
+                    "archive_retention_days_snapshot": None,
+                    "ended_at": None,
+                    "end_reason": None,
+                },
+            )
+        )
+        await session.write_session.execute(
             sa.update(RDBSessionAgentContext)
             .where(
                 RDBSessionAgentContext.id.in_(
@@ -1905,60 +1743,62 @@ class AgentSessionRepository:
                 working_folder_cleanup_completed_at=None,
             )
         )
-        await session.flush()
+        await source_availability_in_session(
+            session, source_session_id=root_session_id, denied=False
+        )
+        await session.write_session.flush()
 
     async def archive(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_session_id: str,
         *,
         ended_at: datetime.datetime,
         end_reason: AgentSessionEndReason | None = None,
     ) -> None:
-        """Transition one AgentSession to archived state for legacy callers."""
-        await self._release_primary_model_reservations(
-            session,
-            session_ids=[agent_session_id],
+        """Archive one Conversation in the caller's existing DB composition."""
+        await self.archive_conversation_resources(
+            session, root_session_id=agent_session_id, session_ids=[agent_session_id]
         )
-        await session.execute(
-            sa.update(RDBAgentSession)
-            .where(RDBAgentSession.id == agent_session_id)
-            .values(
-                status=AgentSessionStatus.ARCHIVED,
-                ended_at=ended_at,
-                end_reason=end_reason,
-                primary_model_reservation=None,
-                title_model_operation_state=None,
+        await session.write_session.execute(
+            self._conversation_update(
+                predicates=[RDBAgentSession.id == agent_session_id],
+                values={
+                    "status": AgentSessionStatus.ARCHIVED,
+                    "ended_at": ended_at,
+                    "end_reason": end_reason,
+                },
             )
         )
-        await session.flush()
+        await session.write_session.flush()
 
     async def _release_primary_model_reservations(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_ids: Sequence[str],
     ) -> None:
         """Release exact candidate-health claims before archiving Sessions."""
         rows = (
-            await session.execute(
+            await session.write_session.execute(
                 sa.select(
                     RDBAgentSession.id,
                     RDBAgentSession.workspace_id,
-                    RDBAgentSession.primary_model_reservation,
+                    RDBConversation.primary_model_reservation,
                 )
+                .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
                 .where(
                     RDBAgentSession.id.in_(session_ids),
-                    RDBAgentSession.primary_model_reservation.is_not(None),
+                    RDBConversation.primary_model_reservation.is_not(None),
                 )
-                .with_for_update()
+                .with_for_update(of=RDBAgentSession)
             )
         ).all()
         for session_id, workspace_id, reservation_payload in rows:
             if reservation_payload is None:
                 continue
             reservation = PrimaryModelReservation.model_validate(reservation_payload)
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBModelCandidateHealth)
                 .where(
                     RDBModelCandidateHealth.workspace_id == workspace_id,
@@ -1983,56 +1823,58 @@ class AgentSessionRepository:
 
     async def claim_lifecycle_start(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_session_id: str,
         *,
         now: datetime.datetime,
     ) -> bool:
         """Claim AgentSession lifecycle start marker once initially."""
         result = _cursor_result(
-            await session.execute(
-                sa.update(RDBAgentSession)
-                .where(
-                    RDBAgentSession.id == agent_session_id,
-                    RDBAgentSession.lifecycle_started_at.is_(None),
+            await session.write_session.execute(
+                self._conversation_update(
+                    predicates=[
+                        RDBAgentSession.id == agent_session_id,
+                        RDBAgentSession.lifecycle_started_at.is_(None),
+                    ],
+                    values={"lifecycle_started_at": now},
                 )
-                .values(lifecycle_started_at=now)
             )
         )
-        await session.flush()
+        await session.write_session.flush()
         return result.rowcount == 1
 
     async def get_lifecycle_started_at(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> datetime.datetime | None:
         """Fetch AgentSession lifecycle start marker time."""
-        result = await session.execute(
-            sa.select(RDBAgentSession.lifecycle_started_at).where(
-                RDBAgentSession.id == agent_session_id
-            )
+        result = await session.read_session.execute(
+            sa.select(RDBAgentSession.lifecycle_started_at)
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
+            .where(RDBAgentSession.id == agent_session_id)
         )
         return result.scalar_one_or_none()
 
     async def lock_compaction_plan_if_current(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         expected_head_event_id: str | None,
         expected_tail_event_id: str,
     ) -> bool:
         """Lock the Session and verify the planned compaction boundaries."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBAgentSession)
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
             .where(RDBAgentSession.id == session_id)
-            .with_for_update()
+            .with_for_update(of=RDBAgentSession)
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:
             raise ValueError("AgentSession not found")
-        latest_event_id = await session.scalar(
+        latest_event_id = await session.write_session.scalar(
             sa.select(RDBEvent.id)
             .where(
                 RDBEvent.session_id == session_id,
@@ -2048,12 +1890,12 @@ class AgentSessionRepository:
 
     async def move_model_input_head(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
         event_id: str,
     ) -> AgentSession:
         """Move Model input head to specified event."""
-        event_id_row = await session.scalar(
+        event_id_row = await session.write_session.scalar(
             sa.select(RDBEvent.id).where(
                 RDBEvent.session_id == session_id,
                 RDBEvent.id == event_id,
@@ -2062,28 +1904,29 @@ class AgentSessionRepository:
         if event_id_row is None:
             raise ValueError("Model input head event not found in session")
 
-        rdb = await session.get(RDBAgentSession, session_id)
+        rdb = await session.write_session.get(RDBAgentSession, session_id)
         if rdb is None:
             raise ValueError("AgentSession not found")
         rdb.model_input_head_event_id = event_id
-        await session.flush()
-        await session.refresh(rdb)
-        return self._build(rdb)
+        await session.write_session.flush()
+        await session.write_session.refresh(rdb)
+        return self._build(await self._refresh_conversation(session, rdb))
 
     async def list_model_file_gc_lagging(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         limit: int,
     ) -> list[ModelFileGCLaggingSession]:
         """List sessions whose ModelFile GC cursor is behind the input head."""
         rows = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(
                     RDBAgentSession.id,
                     RDBAgentSession.model_input_head_event_id,
                     RDBAgentSession.model_file_gc_cursor_event_id,
                 )
+                .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
                 .where(
                     RDBAgentSession.model_input_head_event_id.is_not(None),
                     sa.or_(
@@ -2109,71 +1952,74 @@ class AgentSessionRepository:
 
     async def advance_model_file_gc_cursor(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         cursor_event_id: str,
         updated_at: datetime.datetime,
     ) -> None:
         """Advance the ModelFile GC cursor for a session."""
-        await session.execute(
-            sa.update(RDBAgentSession)
-            .where(
-                RDBAgentSession.id == session_id,
-                sa.or_(
-                    RDBAgentSession.model_file_gc_cursor_event_id.is_(None),
-                    RDBAgentSession.model_file_gc_cursor_event_id <= cursor_event_id,
-                ),
-            )
-            .values(
-                model_file_gc_cursor_event_id=cursor_event_id,
-                model_file_gc_updated_at=updated_at,
+        await session.write_session.execute(
+            self._conversation_update(
+                predicates=[
+                    RDBAgentSession.id == session_id,
+                    sa.or_(
+                        RDBAgentSession.model_file_gc_cursor_event_id.is_(None),
+                        RDBAgentSession.model_file_gc_cursor_event_id
+                        <= cursor_event_id,
+                    ),
+                ],
+                values={
+                    "model_file_gc_cursor_event_id": cursor_event_id,
+                    "model_file_gc_updated_at": updated_at,
+                },
             )
         )
-        await session.flush()
+        await session.write_session.flush()
 
     async def set_inference_state(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         inference_state: SessionInferenceState,
     ) -> AgentSession:
         """Persist the resolved inference configuration for the next turn."""
-        result = await session.execute(
-            sa.update(RDBAgentSession)
-            .where(RDBAgentSession.id == session_id)
-            .values(
-                current_model_target_label=inference_state.model_target_label,
-                current_model_selection=inference_state.model_selection.model_dump(
-                    mode="json"
-                ),
-                current_model_settings=inference_state.model_settings.model_dump(
-                    mode="json"
-                ),
-                current_reasoning_effort=inference_state.reasoning_effort,
-                current_enabled_execution_options=[
-                    option.value for option in inference_state.enabled_execution_options
-                ],
-                current_effective_context_window_tokens=(
-                    inference_state.effective_context_window_tokens
-                ),
-                current_effective_auto_compaction_threshold_tokens=(
-                    inference_state.effective_auto_compaction_threshold_tokens
-                ),
-                current_inference_resolved_at=inference_state.resolved_at,
-            )
-            .returning(RDBAgentSession)
+        result = await session.write_session.execute(
+            self._conversation_update(
+                predicates=[RDBAgentSession.id == session_id],
+                values={
+                    "current_model_target_label": inference_state.model_target_label,
+                    "current_model_selection": (
+                        inference_state.model_selection.model_dump(mode="json")
+                    ),
+                    "current_model_settings": inference_state.model_settings.model_dump(
+                        mode="json"
+                    ),
+                    "current_reasoning_effort": inference_state.reasoning_effort,
+                    "current_enabled_execution_options": [
+                        option.value
+                        for option in inference_state.enabled_execution_options
+                    ],
+                    "current_effective_context_window_tokens": (
+                        inference_state.effective_context_window_tokens
+                    ),
+                    "current_effective_auto_compaction_threshold_tokens": (
+                        inference_state.effective_auto_compaction_threshold_tokens
+                    ),
+                    "current_inference_resolved_at": inference_state.resolved_at,
+                },
+            ).returning(RDBAgentSession.id)
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:
             raise ValueError("AgentSession not found")
-        await session.flush()
-        return self._build(rdb)
+        await session.write_session.flush()
+        return self._build(await self._refresh_conversation(session, rdb))
 
     async def set_applied_inference_profile(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         model_target_label: str,
@@ -2181,30 +2027,30 @@ class AgentSessionRepository:
         enabled_execution_options: list[ModelExecutionOptionId],
     ) -> AgentSession:
         """Replace the Session-owned applied model intent."""
-        result = await session.execute(
-            sa.update(RDBAgentSession)
-            .where(RDBAgentSession.id == session_id)
-            .values(
-                applied_model_target_label=model_target_label,
-                applied_reasoning_effort=reasoning_effort,
-                applied_enabled_execution_options=[
-                    option.value for option in enabled_execution_options
-                ],
-                applied_profile_generation=(
-                    RDBAgentSession.applied_profile_generation + 1
-                ),
-            )
-            .returning(RDBAgentSession)
+        result = await session.write_session.execute(
+            self._conversation_update(
+                predicates=[RDBAgentSession.id == session_id],
+                values={
+                    "applied_model_target_label": model_target_label,
+                    "applied_reasoning_effort": reasoning_effort,
+                    "applied_enabled_execution_options": [
+                        option.value for option in enabled_execution_options
+                    ],
+                    "applied_profile_generation": (
+                        RDBAgentSession.applied_profile_generation + 1
+                    ),
+                },
+            ).returning(RDBAgentSession.id)
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:
             raise ValueError("AgentSession not found")
-        await session.flush()
-        return self._build(rdb)
+        await session.write_session.flush()
+        return self._build(await self._refresh_conversation(session, rdb))
 
     async def replace_stale_applied_inference_profiles(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         valid_model_target_labels: Sequence[str],
@@ -2216,81 +2062,81 @@ class AgentSessionRepository:
         if not valid_model_target_labels:
             raise ValueError("Agent must have at least one valid model target label")
 
-        result = await session.execute(
-            sa.update(RDBAgentSession)
-            .where(
-                RDBAgentSession.agent_id == agent_id,
-                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
-                RDBAgentSession.applied_model_target_label.is_not(None),
-                ~RDBAgentSession.applied_model_target_label.in_(
-                    valid_model_target_labels
-                ),
-            )
-            .values(
-                applied_model_target_label=model_target_label,
-                applied_reasoning_effort=reasoning_effort,
-                applied_enabled_execution_options=[
-                    option.value for option in enabled_execution_options
+        result = await session.write_session.execute(
+            self._conversation_update(
+                predicates=[
+                    RDBAgentSession.agent_id == agent_id,
+                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                    RDBAgentSession.applied_model_target_label.is_not(None),
+                    ~RDBAgentSession.applied_model_target_label.in_(
+                        valid_model_target_labels
+                    ),
                 ],
-                applied_profile_generation=(
-                    RDBAgentSession.applied_profile_generation + 1
-                ),
-                updated_at=sa.func.now(),
-            )
-            .returning(RDBAgentSession.id)
+                values={
+                    "applied_model_target_label": model_target_label,
+                    "applied_reasoning_effort": reasoning_effort,
+                    "applied_enabled_execution_options": [
+                        option.value for option in enabled_execution_options
+                    ],
+                    "applied_profile_generation": (
+                        RDBAgentSession.applied_profile_generation + 1
+                    ),
+                    "updated_at": sa.func.now(),
+                },
+            ).returning(RDBAgentSession.id)
         )
         replaced_session_ids = result.scalars().all()
-        await session.flush()
+        await session.write_session.flush()
         return len(replaced_session_ids)
 
-    async def mark_running(self, session: AsyncSession, session_id: str) -> None:
+    async def mark_running(self, session: WriteSession, session_id: str) -> None:
         """Transition AgentSession run state to RUNNING."""
-        updated_id = await session.scalar(
-            sa.update(RDBAgentSession)
-            .where(
-                RDBAgentSession.id == session_id,
-                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
-            )
-            .values(
-                run_state=AgentSessionRunState.RUNNING,
-                run_heartbeat_at=sa.func.now(),
-            )
-            .returning(RDBAgentSession.id)
+        updated_id = await session.write_session.scalar(
+            self._conversation_update(
+                predicates=[
+                    RDBAgentSession.id == session_id,
+                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                ],
+                values={
+                    "run_state": AgentSessionRunState.RUNNING,
+                    "run_heartbeat_at": sa.func.now(),
+                },
+            ).returning(RDBAgentSession.id)
         )
         if updated_id is None:
             raise ValueError("Active AgentSession not found")
-        await session.flush()
+        await session.write_session.flush()
 
     async def mark_running_for_input_wakeup(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
     ) -> None:
         """Transition AgentSession to RUNNING recovery target on buffered input."""
-        if not await self.lock_agent_parent_for_session(session, session_id):
-            raise ValueError("AgentSession parent Agent not found")
-        updated_id = await session.scalar(
-            sa.update(RDBAgentSession)
-            .where(
-                RDBAgentSession.id == session_id,
-                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
-                RDBAgentSession.run_state != AgentSessionRunState.RUNNING,
-            )
-            .values(
-                run_state=AgentSessionRunState.RUNNING,
-                run_heartbeat_at=sa.func.now(),
-            )
-            .returning(RDBAgentSession.id)
+        updated_id = await session.write_session.scalar(
+            self._conversation_update(
+                predicates=[
+                    RDBAgentSession.id == session_id,
+                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                    RDBAgentSession.run_state != AgentSessionRunState.RUNNING,
+                ],
+                values={
+                    "run_state": AgentSessionRunState.RUNNING,
+                    "run_heartbeat_at": sa.func.now(),
+                },
+            ).returning(RDBAgentSession.id)
         )
         if updated_id is not None:
-            await session.flush()
+            await session.write_session.flush()
             return
         current = (
-            await session.execute(
+            await session.write_session.execute(
                 sa.select(
                     RDBAgentSession.status,
                     RDBAgentSession.run_state,
-                ).where(RDBAgentSession.id == session_id)
+                )
+                .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
+                .where(RDBAgentSession.id == session_id)
             )
         ).one_or_none()
         if current != (
@@ -2298,44 +2144,42 @@ class AgentSessionRepository:
             AgentSessionRunState.RUNNING,
         ):
             raise ValueError("Active AgentSession not found")
-        await session.flush()
+        await session.write_session.flush()
 
     async def admit_input_wakeup(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
     ) -> AgentSession | None:
         """Atomically validate an input-eligible Session and request its wake."""
-        if not await self.lock_agent_parent_for_session(session, session_id):
-            return None
-        result = await session.execute(
-            sa.update(RDBAgentSession)
-            .where(
-                RDBAgentSession.id == session_id,
-                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
-                RDBAgentSession.stop_requested_at.is_(None),
-            )
-            .values(
-                run_state=AgentSessionRunState.RUNNING,
-                run_heartbeat_at=sa.case(
-                    (
-                        RDBAgentSession.run_state != AgentSessionRunState.RUNNING,
-                        sa.func.now(),
+        result = await session.write_session.execute(
+            self._conversation_update(
+                predicates=[
+                    RDBAgentSession.id == session_id,
+                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                    RDBAgentSession.stop_requested_at.is_(None),
+                ],
+                values={
+                    "run_state": AgentSessionRunState.RUNNING,
+                    "run_heartbeat_at": sa.case(
+                        (
+                            RDBAgentSession.run_state != AgentSessionRunState.RUNNING,
+                            sa.func.now(),
+                        ),
+                        else_=RDBAgentSession.run_heartbeat_at,
                     ),
-                    else_=RDBAgentSession.run_heartbeat_at,
-                ),
-            )
-            .returning(RDBAgentSession)
+                },
+            ).returning(RDBAgentSession.id)
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
-        return self._build(rdb)
+        await session.write_session.flush()
+        return self._build(await self._refresh_conversation(session, rdb))
 
     async def consume_pending_idle_continuation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         run_id: str,
@@ -2362,22 +2206,22 @@ class AgentSessionRepository:
                 stop_requester_user_id=None,
                 stop_request_id=None,
             )
-        result = await session.execute(
-            sa.update(RDBAgentSession)
-            .where(
-                RDBAgentSession.id == session_id,
-                RDBAgentSession.status.in_(allowed_statuses),
-                RDBAgentSession.pending_idle_continuation_run_id == run_id,
-            )
-            .values(**values)
-            .returning(RDBAgentSession.id)
+        result = await session.write_session.execute(
+            self._conversation_update(
+                predicates=[
+                    RDBAgentSession.id == session_id,
+                    RDBAgentSession.status.in_(allowed_statuses),
+                    RDBConversation.pending_idle_continuation_run_id == run_id,
+                ],
+                values={**values},
+            ).returning(RDBAgentSession.id)
         )
-        await session.flush()
+        await session.write_session.flush()
         return result.scalar_one_or_none() is not None
 
     async def enqueue_pending_command(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         command_id: str,
@@ -2386,120 +2230,126 @@ class AgentSessionRepository:
         requester_user_id: str | None,
     ) -> AgentSession | None:
         """Store single pending command in idle AgentSession and mark running."""
-        result = await session.execute(
-            sa.update(RDBAgentSession)
-            .where(
-                RDBAgentSession.id == session_id,
-                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
-                RDBAgentSession.run_state == AgentSessionRunState.IDLE,
-                RDBAgentSession.pending_command_id.is_(None),
-            )
-            .values(
-                pending_command_id=command_id,
-                pending_command_name=command_name,
-                pending_command_payload=payload,
-                pending_command_requester_user_id=requester_user_id,
-                pending_command_created_at=sa.func.now(),
-                run_state=AgentSessionRunState.RUNNING,
-                run_heartbeat_at=sa.func.now(),
-            )
-            .returning(RDBAgentSession)
+        result = await session.write_session.execute(
+            self._conversation_update(
+                predicates=[
+                    RDBAgentSession.id == session_id,
+                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                    RDBAgentSession.run_state == AgentSessionRunState.IDLE,
+                    RDBConversation.pending_command_id.is_(None),
+                ],
+                values={
+                    "pending_command_id": command_id,
+                    "pending_command_name": command_name,
+                    "pending_command_payload": payload,
+                    "pending_command_requester_user_id": requester_user_id,
+                    "pending_command_created_at": sa.func.now(),
+                    "run_state": AgentSessionRunState.RUNNING,
+                    "run_heartbeat_at": sa.func.now(),
+                },
+            ).returning(RDBAgentSession.id)
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
-        return self._build(rdb)
+        await session.write_session.flush()
+        return self._build(await self._refresh_conversation(session, rdb))
 
     async def get_pending_command_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> PendingSessionCommand | None:
         """Fetch pending command for AgentSession."""
-        result = await session.execute(
-            sa.select(RDBAgentSession).where(
+        result = await session.read_session.execute(
+            sa.select(RDBAgentSession)
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
+            .where(
                 RDBAgentSession.id == session_id,
-                RDBAgentSession.pending_command_id.is_not(None),
+                RDBConversation.pending_command_id.is_not(None),
             )
         )
         rdb = result.scalar_one_or_none()
         if (
             rdb is None
-            or rdb.pending_command_id is None
-            or rdb.pending_command_name is None
-            or rdb.pending_command_payload is None
-            or rdb.pending_command_created_at is None
+            or rdb.conversation is None
+            or rdb.conversation.pending_command_id is None
+            or rdb.conversation.pending_command_name is None
+            or rdb.conversation.pending_command_payload is None
+            or rdb.conversation.pending_command_created_at is None
         ):
             return None
         return PendingSessionCommand(
-            id=rdb.pending_command_id,
-            name=rdb.pending_command_name,
-            payload=dict(rdb.pending_command_payload),
-            requester_user_id=rdb.pending_command_requester_user_id,
-            created_at=rdb.pending_command_created_at,
+            id=rdb.conversation.pending_command_id,
+            name=rdb.conversation.pending_command_name,
+            payload=dict(rdb.conversation.pending_command_payload),
+            requester_user_id=rdb.conversation.pending_command_requester_user_id,
+            created_at=rdb.conversation.pending_command_created_at,
         )
 
     async def clear_pending_command(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         command_id: str,
     ) -> None:
         """Remove processed pending command."""
-        await session.execute(
-            sa.update(RDBAgentSession)
-            .where(
-                RDBAgentSession.id == session_id,
-                RDBAgentSession.pending_command_id == command_id,
-            )
-            .values(
-                pending_command_id=None,
-                pending_command_name=None,
-                pending_command_payload=None,
-                pending_command_requester_user_id=None,
-                pending_command_created_at=None,
+        await session.write_session.execute(
+            self._conversation_update(
+                predicates=[
+                    RDBAgentSession.id == session_id,
+                    RDBConversation.pending_command_id == command_id,
+                ],
+                values={
+                    "pending_command_id": None,
+                    "pending_command_name": None,
+                    "pending_command_payload": None,
+                    "pending_command_requester_user_id": None,
+                    "pending_command_created_at": None,
+                },
             )
         )
-        await session.flush()
+        await session.write_session.flush()
 
     async def request_stop(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         stop_request_id: str,
         stop_requester_user_id: str | None,
     ) -> AgentSession | None:
         """Record stop intent on running AgentSession."""
-        result = await session.execute(
-            sa.update(RDBAgentSession)
-            .where(
-                RDBAgentSession.id == session_id,
-                RDBAgentSession.run_state == AgentSessionRunState.RUNNING,
-            )
-            .values(
-                stop_requested_at=sa.func.now(),
-                stop_requester_user_id=stop_requester_user_id,
-                stop_request_id=stop_request_id,
-            )
-            .returning(RDBAgentSession)
+        result = await session.write_session.execute(
+            self._conversation_update(
+                predicates=[
+                    RDBAgentSession.id == session_id,
+                    RDBAgentSession.run_state == AgentSessionRunState.RUNNING,
+                ],
+                values={
+                    "stop_requested_at": sa.func.now(),
+                    "stop_requester_user_id": stop_requester_user_id,
+                    "stop_request_id": stop_request_id,
+                },
+            ).returning(RDBAgentSession.id)
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
-        return self._build(rdb)
+        await session.write_session.flush()
+        return self._build(await self._refresh_conversation(session, rdb))
 
     async def has_stop_request(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> bool:
         """Check whether AgentSession has stop intent."""
-        result = await session.execute(
-            sa.select(RDBAgentSession.id).where(
+        result = await session.read_session.execute(
+            sa.select(RDBAgentSession.id)
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
+            .where(
                 RDBAgentSession.id == session_id,
                 RDBAgentSession.stop_requested_at.is_not(None),
             )
@@ -2508,58 +2358,62 @@ class AgentSessionRepository:
 
     async def clear_stop_request(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
     ) -> None:
         """Remove processed stop intent."""
-        await session.execute(
-            sa.update(RDBAgentSession)
-            .where(RDBAgentSession.id == session_id)
-            .values(
-                stop_requested_at=None,
-                stop_requester_user_id=None,
-                stop_request_id=None,
+        await session.write_session.execute(
+            self._conversation_update(
+                predicates=[RDBAgentSession.id == session_id],
+                values={
+                    "stop_requested_at": None,
+                    "stop_requester_user_id": None,
+                    "stop_request_id": None,
+                },
             )
         )
-        await session.flush()
+        await session.write_session.flush()
 
-    async def mark_idle(self, session: AsyncSession, session_id: str) -> None:
+    async def mark_idle(self, session: WriteSession, session_id: str) -> None:
         """Transition AgentSession run state to IDLE."""
-        await session.execute(
-            sa.update(RDBAgentSession)
-            .where(RDBAgentSession.id == session_id)
-            .values(
-                run_state=AgentSessionRunState.IDLE,
-                stop_requested_at=None,
-                stop_requester_user_id=None,
-                stop_request_id=None,
+        await session.write_session.execute(
+            self._conversation_update(
+                predicates=[RDBAgentSession.id == session_id],
+                values={
+                    "run_state": AgentSessionRunState.IDLE,
+                    "stop_requested_at": None,
+                    "stop_requester_user_id": None,
+                    "stop_request_id": None,
+                },
             )
         )
-        await session.flush()
+        await session.write_session.flush()
 
-    async def heartbeat_running(self, session: AsyncSession, session_id: str) -> None:
+    async def heartbeat_running(self, session: WriteSession, session_id: str) -> None:
         """Update heartbeat time of RUNNING AgentSession."""
-        await session.execute(
-            sa.update(RDBAgentSession)
-            .where(
-                RDBAgentSession.id == session_id,
-                RDBAgentSession.run_state == AgentSessionRunState.RUNNING,
+        await session.write_session.execute(
+            self._conversation_update(
+                predicates=[
+                    RDBAgentSession.id == session_id,
+                    RDBAgentSession.run_state == AgentSessionRunState.RUNNING,
+                ],
+                values={"run_heartbeat_at": sa.func.now()},
             )
-            .values(run_heartbeat_at=sa.func.now())
         )
-        await session.flush()
+        await session.write_session.flush()
 
     async def find_stuck_running(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         stale_threshold: datetime.timedelta,
         limit: int,
     ) -> list[AgentSession]:
         """Fetch old RUNNING AgentSession list."""
         cutoff = sa.func.now() - stale_threshold
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgentSession)
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
             .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
             .where(
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
@@ -2574,7 +2428,7 @@ class AgentSessionRepository:
 
     async def _create_root_session_agent_tree(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_session_id: str,
         root_session_handle: str,
@@ -2604,8 +2458,8 @@ class AgentSessionRepository:
             working_folder_cleanup_completed_at=None,
         )
         context.id = context_id
-        session.add(context)
-        await session.flush()
+        session.write_session.add(context)
+        await session.write_session.flush()
         root_agent = RDBSessionAgent(
             context_id=context_id,
             root_session_agent_id=root_session_agent_id,
@@ -2617,18 +2471,18 @@ class AgentSessionRepository:
             parent_session_agent_id=None,
         )
         root_agent.id = root_session_agent_id
-        session.add(root_agent)
+        session.write_session.add(root_agent)
         context.root_session_agent_id = root_session_agent_id
 
     async def _root_creation_authority(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
     ) -> _RootCreationAuthority:
         """Prepare root authority and lock its managed Runtime before FK writes."""
         row = (
-            await session.execute(
+            await session.write_session.execute(
                 sa.select(
                     RDBAgent.lifecycle_status,
                     RDBAgent.runtime_capability,
@@ -2648,7 +2502,7 @@ class AgentSessionRepository:
         if runtime_capability is not AgentRuntimeCapability.MANAGED:
             raise RuntimeError("Agent Runtime is being removed")
         runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent_id)
-        locked_runtime_id = await session.scalar(
+        locked_runtime_id = await session.write_session.scalar(
             sa.select(RDBAgentRuntime.id)
             .where(RDBAgentRuntime.id == runtime.id)
             .with_for_update(read=True, key_share=True)
@@ -2662,7 +2516,7 @@ class AgentSessionRepository:
 
     async def _confirm_root_creation_authority(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         authority: _RootCreationAuthority,
@@ -2673,7 +2527,7 @@ class AgentSessionRepository:
             if isinstance(authority, _RuntimeFreeRootCreationAuthority)
             else AgentRuntimeCapability.MANAGED
         )
-        confirmed_id = await session.scalar(
+        confirmed_id = await session.write_session.scalar(
             sa.update(RDBAgent)
             .where(
                 RDBAgent.id == agent_id,
@@ -2694,38 +2548,91 @@ class AgentSessionRepository:
 
     async def _create_linked_subagent_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         agent_id: str,
         title: str | None,
+        lifecycle_root_session_id: str,
     ) -> RDBAgentSession:
         """Create the hidden AgentSession backing a child SessionAgent."""
         for _ in range(SESSION_HANDLE_INSERT_ATTEMPTS):
-            result = await session.execute(
+            rdb = await self._insert_conversation_session(
+                session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                session_kind=AgentSessionKind.SUBAGENT,
+                title=title,
+                primary_kind=None,
+                product_mode=None,
+                associated_user_id=None,
+                start_reason=AgentSessionStartReason.INITIAL,
+                lifecycle_root_session_id=lifecycle_root_session_id,
+            )
+            if rdb is not None:
+                await session.write_session.flush()
+                return rdb
+        raise RuntimeError("AgentSession handle generation exhausted retry attempts")
+
+    @staticmethod
+    def _require_conversation(current: RDBAgentSession) -> RDBConversation:
+        """Require the joined public profile, without inventing identity fields."""
+        profile = current.conversation
+        if profile is None:
+            raise ValueError("Session has no public Conversation profile")
+        return profile
+
+    async def _insert_conversation_session(
+        self,
+        session: WriteSession,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        session_kind: AgentSessionKind,
+        title: str | None,
+        primary_kind: AgentSessionPrimaryKind | None,
+        product_mode: AgentSessionProductMode | None,
+        associated_user_id: str | None,
+        start_reason: AgentSessionStartReason,
+        lifecycle_root_session_id: str | None,
+    ) -> RDBAgentSession | None:
+        """Rollback the whole paired creation trial on either uniqueness race."""
+        async with session.write_session.begin_nested() as trial:
+            current = await session.write_session.scalar(
                 pg_insert(RDBAgentSession)
                 .values(
                     id=uuid7().hex,
                     workspace_id=workspace_id,
                     agent_id=agent_id,
-                    handle=generate_session_handle(),
-                    session_kind=AgentSessionKind.SUBAGENT,
+                    lifecycle_root_session_id=lifecycle_root_session_id,
                     status=AgentSessionStatus.ACTIVE,
-                    title=title,
-                    primary_kind=None,
-                    product_mode=None,
-                    associated_user_id=None,
-                    start_reason=AgentSessionStartReason.INITIAL,
+                    start_reason=start_reason,
                 )
-                .on_conflict_do_nothing(index_elements=[RDBAgentSession.handle])
                 .returning(RDBAgentSession)
             )
-            rdb = result.scalar_one_or_none()
-            if rdb is not None:
-                await session.flush()
-                return rdb
-
-        raise RuntimeError("AgentSession handle generation exhausted retry attempts")
+            if current is None:
+                raise RuntimeError("Common Session insertion did not return a row")
+            profile = await session.write_session.scalar(
+                pg_insert(RDBConversation)
+                .values(
+                    session_id=current.id,
+                    agent_id=agent_id,
+                    session_status=current.status,
+                    handle=generate_session_handle(),
+                    session_kind=session_kind,
+                    title=title,
+                    primary_kind=primary_kind,
+                    product_mode=product_mode,
+                    associated_user_id=associated_user_id,
+                )
+                .on_conflict_do_nothing()
+                .returning(RDBConversation)
+            )
+            if profile is None:
+                await trial.rollback()
+                return None
+            current.conversation = profile
+            return current
 
     @staticmethod
     def _validate_create(create: AgentSessionCreate) -> None:
@@ -2791,99 +2698,137 @@ class AgentSessionRepository:
             cleanup_status=rdb.working_folder_cleanup_status,
         )
 
+    @staticmethod
+    def _conversation_update(
+        *, predicates: Sequence[sa.ColumnElement[bool]], values: Mapping[str, object]
+    ) -> sa.Update:
+        """Mutate one joined public identity without dual storage writers."""
+        common_table = RDBAgentSession.__table__
+        conversation_table = RDBConversation.__table__
+        if not isinstance(common_table, sa.Table) or not isinstance(
+            conversation_table, sa.Table
+        ):
+            raise TypeError("Session and Conversation storage must be concrete tables")
+        conversation_fields = frozenset(
+            [
+                "associated_user_id",
+                "handle",
+                "last_user_input_at",
+                "pending_command_created_at",
+                "pending_command_id",
+                "pending_command_name",
+                "pending_command_payload",
+                "pending_command_requester_user_id",
+                "pending_idle_continuation_run_id",
+                "pinned",
+                "primary_kind",
+                "primary_model_reservation",
+                "primary_model_reservation_generation",
+                "product_mode",
+                "session_kind",
+                "title",
+                "title_generated_at",
+                "title_generation_event_id",
+                "title_model_operation_state",
+                "title_source",
+            ]
+        )
+        profile_values = {
+            key: value for key, value in values.items() if key in conversation_fields
+        }
+        common_values = {
+            key: value
+            for key, value in values.items()
+            if key not in conversation_fields
+        }
+        if profile_values:
+            locked = (
+                sa.select(RDBAgentSession.id)
+                .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
+                .where(*predicates)
+                # Serialize owner mutations while allowing live FK references.
+                .with_for_update(of=RDBAgentSession, key_share=True)
+                .cte("locked_conversation_session")
+            )
+            changed = (
+                sa.update(conversation_table)
+                .where(
+                    RDBConversation.session_id.in_(sa.select(locked.c.id)),
+                    RDBConversation.session_id == RDBAgentSession.id,
+                    *predicates,
+                )
+                .values(**profile_values)
+                .returning(conversation_table.c.session_id)
+                .cte("changed_conversation")
+            )
+            return (
+                sa.update(common_table)
+                .where(RDBAgentSession.id.in_(sa.select(changed.c.session_id)))
+                .values(**(common_values or {"updated_at": sa.func.now()}))
+            )
+        return (
+            sa.update(RDBAgentSession)
+            .where(RDBConversation.session_id == RDBAgentSession.id, *predicates)
+            .values(**common_values)
+            .execution_options(synchronize_session="fetch")
+        )
+
+    @staticmethod
+    async def _refresh_conversation(
+        session: ReadSession, current: RDBAgentSession | str
+    ) -> RDBAgentSession:
+        """Reload the authoritative joined values after a multi-table mutation."""
+        session_id = current if isinstance(current, str) else current.id
+        updated = await session.read_session.scalar(
+            sa.select(RDBAgentSession)
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
+            .where(RDBAgentSession.id == session_id)
+            .execution_options(populate_existing=True)
+        )
+        if updated is None:
+            raise ValueError("Public Conversation is unavailable")
+        return updated
+
     def _build(self, rdb: RDBAgentSession) -> AgentSession:
-        """Convert RDB model to domain model."""
-        applied_inference_profile = None
-        if rdb.applied_model_target_label is not None:
-            applied_inference_profile = SessionAppliedInferenceProfile(
-                model_target_label=rdb.applied_model_target_label,
-                reasoning_effort=rdb.applied_reasoning_effort,
-                enabled_execution_options=rdb.applied_enabled_execution_options,
-            )
-        inference_state: SessionInferenceState | None = None
-        if rdb.current_model_target_label is not None:
-            if (
-                rdb.current_model_selection is None
-                or rdb.current_model_settings is None
-                or rdb.current_effective_context_window_tokens is None
-                or rdb.current_effective_auto_compaction_threshold_tokens is None
-                or rdb.current_inference_resolved_at is None
-            ):
-                raise ValueError("AgentSession has incomplete inference state")
-            inference_state = SessionInferenceState(
-                model_target_label=rdb.current_model_target_label,
-                model_selection=AgentModelSelection.model_validate(
-                    rdb.current_model_selection
-                ),
-                model_settings=SelectableModelSettings.model_validate(
-                    rdb.current_model_settings
-                ),
-                reasoning_effort=rdb.current_reasoning_effort,
-                enabled_execution_options=rdb.current_enabled_execution_options,
-                effective_context_window_tokens=(
-                    rdb.current_effective_context_window_tokens
-                ),
-                effective_auto_compaction_threshold_tokens=(
-                    rdb.current_effective_auto_compaction_threshold_tokens
-                ),
-                resolved_at=rdb.current_inference_resolved_at,
-            )
+        """Project a required Conversation profile over the shared Session."""
+        conversation = rdb.conversation
+        if conversation is None:
+            raise ValueError("Session has no public Conversation profile")
+        common = SessionExecutionRecordRepository.build(rdb)
         return AgentSession(
-            id=rdb.id,
-            workspace_id=rdb.workspace_id,
-            agent_id=rdb.agent_id,
-            handle=rdb.handle,
-            inference_state=inference_state,
-            applied_inference_profile=applied_inference_profile,
-            applied_profile_generation=rdb.applied_profile_generation,
-            session_kind=rdb.session_kind,
-            status=rdb.status,
-            primary_kind=rdb.primary_kind,
-            product_mode=rdb.product_mode,
-            associated_user_id=rdb.associated_user_id,
-            start_reason=rdb.start_reason,
-            title=rdb.title,
-            title_source=rdb.title_source,
-            title_generated_at=rdb.title_generated_at,
-            title_generation_event_id=rdb.title_generation_event_id,
+            **common.model_dump(
+                exclude={"lifecycle_root_session_id", "model_file_gc_updated_at"}
+            ),
+            associated_user_id=conversation.associated_user_id,
+            handle=conversation.handle,
+            last_user_input_at=conversation.last_user_input_at,
+            pending_command_created_at=conversation.pending_command_created_at,
+            pending_command_id=conversation.pending_command_id,
+            pending_command_name=conversation.pending_command_name,
+            pending_command_payload=conversation.pending_command_payload,
+            pending_command_requester_user_id=conversation.pending_command_requester_user_id,
+            pending_idle_continuation_run_id=conversation.pending_idle_continuation_run_id,
+            pinned=conversation.pinned,
+            primary_kind=conversation.primary_kind,
             primary_model_reservation=(
-                PrimaryModelReservation.model_validate(rdb.primary_model_reservation)
-                if rdb.primary_model_reservation is not None
+                PrimaryModelReservation.model_validate(
+                    conversation.primary_model_reservation
+                )
+                if conversation.primary_model_reservation is not None
                 else None
             ),
-            primary_model_reservation_generation=(
-                rdb.primary_model_reservation_generation
-            ),
+            primary_model_reservation_generation=conversation.primary_model_reservation_generation,
+            product_mode=conversation.product_mode,
+            session_kind=conversation.session_kind,
+            title=conversation.title,
+            title_generated_at=conversation.title_generated_at,
+            title_generation_event_id=conversation.title_generation_event_id,
             title_model_operation_state=(
-                ModelOperationSnapshot.model_validate(rdb.title_model_operation_state)
-                if rdb.title_model_operation_state is not None
+                ModelOperationSnapshot.model_validate(
+                    conversation.title_model_operation_state
+                )
+                if conversation.title_model_operation_state is not None
                 else None
             ),
-            last_user_input_at=rdb.last_user_input_at,
-            last_activity_at=rdb.last_activity_at,
-            pinned=rdb.pinned,
-            end_reason=rdb.end_reason,
-            model_input_head_event_id=rdb.model_input_head_event_id,
-            model_file_gc_cursor_event_id=rdb.model_file_gc_cursor_event_id,
-            started_at=rdb.started_at,
-            lifecycle_started_at=rdb.lifecycle_started_at,
-            run_state=rdb.run_state,
-            run_heartbeat_at=rdb.run_heartbeat_at,
-            pending_idle_continuation_run_id=(rdb.pending_idle_continuation_run_id),
-            owner_generation=rdb.owner_generation,
-            pending_command_id=rdb.pending_command_id,
-            pending_command_name=rdb.pending_command_name,
-            pending_command_payload=rdb.pending_command_payload,
-            pending_command_requester_user_id=rdb.pending_command_requester_user_id,
-            pending_command_created_at=rdb.pending_command_created_at,
-            stop_requested_at=rdb.stop_requested_at,
-            stop_requester_user_id=rdb.stop_requester_user_id,
-            stop_request_id=rdb.stop_request_id,
-            archived_at=rdb.archived_at,
-            purge_after=rdb.purge_after,
-            archive_policy_revision=rdb.archive_policy_revision,
-            archive_retention_days_snapshot=rdb.archive_retention_days_snapshot,
-            ended_at=rdb.ended_at,
-            created_at=rdb.created_at,
-            updated_at=rdb.updated_at,
+            title_source=conversation.title_source,
         )

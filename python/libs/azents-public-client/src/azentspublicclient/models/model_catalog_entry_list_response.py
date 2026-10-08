@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.llm_catalog_scope import LLMCatalogScope
 from azentspublicclient.models.model_catalog_entry_response import ModelCatalogEntryResponse
-from azentspublicclient.models.model_catalog_sync_attempt_response import ModelCatalogSyncAttemptResponse
+from azentspublicclient.models.model_catalog_sync_status_response import ModelCatalogSyncStatusResponse
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -32,9 +32,8 @@ class ModelCatalogEntryListResponse(BaseModel):
     """ # noqa: E501
     catalog_id: StrictStr
     catalog_scope: LLMCatalogScope
-    current_snapshot_id: Optional[StrictStr]
-    current_snapshot_created_at: Optional[datetime]
-    latest_attempt: Optional[ModelCatalogSyncAttemptResponse]
+    last_success_at: Optional[datetime]
+    latest_sync: Optional[ModelCatalogSyncStatusResponse]
     stale: StrictBool
     sync_available_at: Optional[datetime]
     automatic_retry_blocked: StrictBool
@@ -43,7 +42,7 @@ class ModelCatalogEntryListResponse(BaseModel):
     limit: StrictInt
     offset: StrictInt
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["catalog_id", "catalog_scope", "current_snapshot_id", "current_snapshot_created_at", "latest_attempt", "stale", "sync_available_at", "automatic_retry_blocked", "entries", "total", "limit", "offset"]
+    __properties: ClassVar[List[str]] = ["catalog_id", "catalog_scope", "last_success_at", "latest_sync", "stale", "sync_available_at", "automatic_retry_blocked", "entries", "total", "limit", "offset"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -86,9 +85,9 @@ class ModelCatalogEntryListResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of latest_attempt
-        if self.latest_attempt:
-            _dict['latest_attempt'] = self.latest_attempt.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of latest_sync
+        if self.latest_sync:
+            _dict['latest_sync'] = self.latest_sync.to_dict()
         # override the default output from pydantic by calling `to_dict()` of each item in entries (list)
         _items = []
         if self.entries:
@@ -101,20 +100,15 @@ class ModelCatalogEntryListResponse(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
-        # set to None if current_snapshot_id (nullable) is None
+        # set to None if last_success_at (nullable) is None
         # and model_fields_set contains the field
-        if self.current_snapshot_id is None and "current_snapshot_id" in self.model_fields_set:
-            _dict['current_snapshot_id'] = None
+        if self.last_success_at is None and "last_success_at" in self.model_fields_set:
+            _dict['last_success_at'] = None
 
-        # set to None if current_snapshot_created_at (nullable) is None
+        # set to None if latest_sync (nullable) is None
         # and model_fields_set contains the field
-        if self.current_snapshot_created_at is None and "current_snapshot_created_at" in self.model_fields_set:
-            _dict['current_snapshot_created_at'] = None
-
-        # set to None if latest_attempt (nullable) is None
-        # and model_fields_set contains the field
-        if self.latest_attempt is None and "latest_attempt" in self.model_fields_set:
-            _dict['latest_attempt'] = None
+        if self.latest_sync is None and "latest_sync" in self.model_fields_set:
+            _dict['latest_sync'] = None
 
         # set to None if sync_available_at (nullable) is None
         # and model_fields_set contains the field
@@ -132,12 +126,13 @@ class ModelCatalogEntryListResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "catalog_id": obj.get("catalog_id"),
             "catalog_scope": obj.get("catalog_scope"),
-            "current_snapshot_id": obj.get("current_snapshot_id"),
-            "current_snapshot_created_at": obj.get("current_snapshot_created_at"),
-            "latest_attempt": ModelCatalogSyncAttemptResponse.from_dict(obj["latest_attempt"]) if obj.get("latest_attempt") is not None else None,
+            "last_success_at": obj.get("last_success_at"),
+            "latest_sync": ModelCatalogSyncStatusResponse.from_dict(obj["latest_sync"]) if obj.get("latest_sync") is not None else None,
             "stale": obj.get("stale"),
             "sync_available_at": obj.get("sync_available_at"),
             "automatic_retry_blocked": obj.get("automatic_retry_blocked"),
@@ -145,6 +140,7 @@ class ModelCatalogEntryListResponse(BaseModel):
             "total": obj.get("total"),
             "limit": obj.get("limit"),
             "offset": obj.get("offset")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

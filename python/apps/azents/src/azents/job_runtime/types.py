@@ -102,6 +102,7 @@ class JobHandlerDefinition:
     key: str
     handler: JobHandler
     rerun_on_coalesce: bool = False
+    max_concurrency: int | None = None
 
 
 class JobHandlerRegistry:
@@ -117,6 +118,11 @@ class JobHandlerRegistry:
                 raise ValueError(
                     f"Duplicate registered job handler key: {definition.key}"
                 )
+            if (
+                definition.max_concurrency is not None
+                and definition.max_concurrency < 1
+            ):
+                raise ValueError("Registered job handler concurrency must be positive.")
             handlers[definition.key] = definition
         self._handlers: Mapping[str, JobHandlerDefinition] = handlers
 
@@ -129,6 +135,15 @@ class JobHandlerRegistry:
         """Return whether an active execution consumes one coalesced rerun."""
         definition = self._handlers.get(key)
         return definition is not None and definition.rerun_on_coalesce
+
+    def max_concurrency(self, key: str) -> int | None:
+        """Return the optional handler-local admission limit."""
+        definition = self._handlers.get(key)
+        return None if definition is None else definition.max_concurrency
+
+    def definitions(self) -> tuple[JobHandlerDefinition, ...]:
+        """Return registered definitions in stable construction order."""
+        return tuple(self._handlers.values())
 
 
 class JobHandle(Protocol):

@@ -75,6 +75,21 @@ class BuiltinToolRule(ABC):
         ...
 
 
+def builtin_tool_configurable(
+    capabilities: BuiltinToolModelCapabilities, *, tool: str
+) -> bool:
+    """Read configuration potential from the final supported-tool list.
+
+    Saved request constraints are evaluated only at actual dispatch. Configuration
+    does not invent an effort or function-tool context to filter supported choices.
+
+    :param capabilities: the selected model's saved capability snapshot
+    :param tool: the route-projected built-in capability name
+    :returns: whether the saved facts allow this tool to be configured
+    """
+    return tool in capabilities.built_in_tools.supported
+
+
 class WebSearchRule(BuiltinToolRule):
     """Web Search: unified web search tool routed automatically by provider format.
 
@@ -86,8 +101,7 @@ class WebSearchRule(BuiltinToolRule):
 
     def validate(self, ctx: BuiltinToolValidationContext) -> list[str]:
         """Validate Web Search compatibility."""
-        supported = ctx.provider_model.capabilities.built_in_tools.supported
-        if self.name in supported:
+        if builtin_tool_configurable(ctx.provider_model.capabilities, tool=self.name):
             return []
         return [
             f"Model '{ctx.provider_model.model_identifier}'"
@@ -96,14 +110,13 @@ class WebSearchRule(BuiltinToolRule):
 
 
 class ImageGenerationRule(BuiltinToolRule):
-    """Image Generation: provider-hosted image creation capability."""
+    """Image Generation: route-projected image creation capability."""
 
     name = "image_generation"
 
     def validate(self, ctx: BuiltinToolValidationContext) -> list[str]:
         """Validate Image Generation compatibility."""
-        supported = ctx.provider_model.capabilities.built_in_tools.supported
-        if self.name in supported:
+        if builtin_tool_configurable(ctx.provider_model.capabilities, tool=self.name):
             return []
         return [
             f"Model '{ctx.provider_model.model_identifier}'"
@@ -117,14 +130,6 @@ BUILTIN_TOOL_RULES: dict[str, BuiltinToolRule] = {
 }
 """Registered built-in tool validation rule registry."""
 
-_IMAGE_GENERATION_OPENAI_MODEL_PREFIXES = (
-    "gpt-6",
-    "gpt-5",
-    "gpt-4.1",
-    "gpt-4o",
-    "o3",
-)
-
 
 def supported_builtin_capabilities(
     *,
@@ -134,9 +139,9 @@ def supported_builtin_capabilities(
 ) -> list[str]:
     """Return built-in tools supported by trusted provider metadata and policy."""
     supported: list[str] = []
-    if (
-        metadata.get("supports_web_search") is True
-        or provider == LLMProvider.CHATGPT_OAUTH
+    if metadata.get("supports_web_search") is True or (
+        provider == LLMProvider.CHATGPT_OAUTH
+        and metadata.get("supports_web_search") is not False
     ):
         supported.append("web_search")
     if _supports_image_generation(
@@ -154,15 +159,18 @@ def _supports_image_generation(
     model_identifier: str,
     metadata: Mapping[str, object],
 ) -> bool:
-    if provider in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
-        if metadata.get("supports_function_calling") is False:
-            return False
-        if metadata.get("mode") not in {None, "chat"}:
-            return False
-        normalized = model_identifier.removeprefix("openai/").lower()
-        return normalized.startswith(_IMAGE_GENERATION_OPENAI_MODEL_PREFIXES) or any(
-            _string_sequence_contains(metadata.get(key), "image_generation")
-            for key in ("supported_builtin_tools", "experimental_supported_tools")
+    if provider in {
+        LLMProvider.OPENAI,
+        LLMProvider.CHATGPT_OAUTH,
+        LLMProvider.XAI,
+        LLMProvider.XAI_OAUTH,
+    }:
+        # This is a registered client executor, not a hosted model output form.
+        # Its request owner needs a supported function route and conversation
+        # mode; similarly named models do not establish either prerequisite.
+        return (
+            metadata.get("mode") in {"chat", "responses"}
+            and metadata.get("supports_function_calling") is True
         )
 
     explicit = metadata.get("supports_image_generation")
@@ -174,11 +182,6 @@ def _supports_image_generation(
         if _string_sequence_contains(value, "image_generation"):
             return True
 
-    if provider in {LLMProvider.XAI, LLMProvider.XAI_OAUTH}:
-        return (
-            metadata.get("mode") == "chat"
-            and metadata.get("supports_function_calling") is True
-        )
     return False
 
 

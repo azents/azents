@@ -27,6 +27,7 @@ from azents.engine.tooling.tool_search import (
     project_tool_catalog,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.toolkit_state import (
     ToolkitStateConflictError,
     ToolkitStateRepository,
@@ -60,6 +61,7 @@ def _entry(
         ),
         source=ToolCatalogSource(
             slug=slug,
+            namespace=slug,
             toolkit_type=toolkit_type,
             toolkit_class="TestToolkit",
             display_name="GitHub",
@@ -107,7 +109,7 @@ class _MemoryToolkitStateRepository(ToolkitStateRepository):
 
     async def get(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         session_id: str,
@@ -119,7 +121,7 @@ class _MemoryToolkitStateRepository(ToolkitStateRepository):
 
     async def save(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         state: ToolkitStateUpsert,
     ) -> ToolkitStateRecord:
         del session
@@ -163,15 +165,16 @@ def _record(state: ToolkitStateUpsert, *, version: int) -> ToolkitStateRecord:
 
 
 @asynccontextmanager
-async def _session_manager() -> AsyncIterator[AsyncSession]:
-    async with AsyncSession() as session:
+async def _session_manager() -> AsyncIterator[WriteSession]:
+    async with AsyncSession() as raw_session:
+        session = ReadWriteSession(raw_session)
         yield session
 
 
 def _working_set_store(
     repository: ToolkitStateRepository,
 ) -> ToolWorkingSetStore:
-    session_manager: SessionManager[AsyncSession] = _session_manager
+    session_manager: SessionManager[WriteSession] = _session_manager
     return ToolWorkingSetStore(
         session_manager=session_manager,
         repository=repository,
@@ -432,7 +435,8 @@ async def test_working_set_clear_uses_caller_session_and_retries_conflict() -> N
     await store.activate("agent-1", "session-1", ["old"])
     repository.conflict_next_update = True
 
-    async with AsyncSession() as session:
+    async with AsyncSession() as raw_session:
+        session = ReadWriteSession(raw_session)
         cleared = await store.clear_in_session(session, "agent-1", "session-1")
 
     assert cleared.tool_names == []

@@ -5,7 +5,8 @@ import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import Any, Literal, cast
+from typing import Literal
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -16,6 +17,10 @@ from azents.core.enums import (
     ExternalChannelResourceType,
 )
 from azents.engine.events.types import Event, ExternalChannelMessagePayload
+from azents.repos.external_channel.thread_title_read import (
+    ExternalChannelThreadTitleReadRepository,
+)
+from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.discord_delivery import (
     DiscordDeliveryClient,
     DiscordDeliveryResult,
@@ -25,6 +30,7 @@ from azents.services.external_channel.discord_sdk import DiscordSDKUnavailable
 from azents.services.external_channel.thread_title import (
     ExternalChannelThreadTitleService,
 )
+from azents.testing.types import require_instance
 
 
 class _DiscordClient:
@@ -32,7 +38,7 @@ class _DiscordClient:
         self,
         *,
         current_name: str,
-        read_status: str = "present",
+        read_status: Literal["present", "missing", "failed", "unknown"] = "present",
         open_error: Exception | None = None,
     ) -> None:
         self.current_name = current_name
@@ -58,7 +64,7 @@ class _DiscordClient:
     async def read_thread_title(self, **kwargs: str) -> DiscordThreadTitleReadResult:
         self.read_calls.append(kwargs)
         return DiscordThreadTitleReadResult(
-            status=cast(Any, self.read_status),
+            status=self.read_status,
             name=self.current_name if self.read_status == "present" else None,
             error_kind=None,
         )
@@ -74,13 +80,18 @@ class _DiscordClient:
 
 
 def _service(client: _DiscordClient) -> ExternalChannelThreadTitleService:
+    dependency = MagicMock(spec=DiscordDeliveryClient)
+    dependency.open = client.open
     return ExternalChannelThreadTitleService(
-        session_manager=cast(Any, object()),
-        external_channel_repository=cast(Any, object()),
-        agent_repository=cast(Any, object()),
-        agent_session_repository=cast(Any, object()),
-        credentials_codec=cast(Any, object()),
-        discord_client=cast(DiscordDeliveryClient, client),
+        repository=require_instance(
+            MagicMock(spec=ExternalChannelThreadTitleReadRepository),
+            ExternalChannelThreadTitleReadRepository,
+        ),
+        credentials_codec=require_instance(
+            MagicMock(spec=ExternalChannelCredentialsCodec),
+            ExternalChannelCredentialsCodec,
+        ),
+        discord_client=require_instance(dependency, DiscordDeliveryClient),
     )
 
 

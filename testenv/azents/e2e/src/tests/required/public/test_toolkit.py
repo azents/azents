@@ -1,6 +1,7 @@
-"""Public API Toolkit E2E test.
+"""Representative Toolkit lifecycle, scope, attachment and authority E2E flows.
 
-Toolkit CRUD, Scope t, Agent t/t t verifyt.
+Identifier/default, status-only validation and duplicate constraints are covered
+by the backend Toolkit API/repository ``validation_audit_test.py`` contracts.
 """
 
 from typing import NamedTuple
@@ -283,6 +284,7 @@ class TestToolkitCrud:
         assert created.id is not None
         assert created.toolkit_type == "mcp"
         assert created.name == "My MCP Toolkit"
+        assert created.slug == "my_mcp_toolkit"
         assert created.description == "test toolkit"
         assert created.enabled is True
         assert created.config["server_url"] == "https://example.com/mcp"
@@ -379,52 +381,6 @@ class TestToolkitCrud:
             )
         assert exc_info.value.status == 404
 
-    def test_invalid_toolkit_type_returns_400(
-        self,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
-    ) -> None:
-        """existst t toolkit_typet create t 400t returnt."""
-        owner_token, handle, _, _ = _setup_workspace(
-            public_api_client, admin_api_client
-        )
-        api = ToolkitV1Api(public_api_client)
-
-        with pytest.raises(ApiException) as exc_info:
-            api.toolkit_v1_create_toolkit_config(
-                handle=handle,
-                toolkit_config_create_request=ToolkitConfigCreateRequest(
-                    toolkit_type="nonexistent_tool",
-                    name="Bad Toolkit",
-                    config={},
-                ),
-                _headers={"Authorization": f"Bearer {owner_token}"},
-            )
-        assert exc_info.value.status == 400
-
-    def test_shell_toolkit_creation_blocked(
-        self,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
-    ) -> None:
-        """Shell toolkit config create t 400t returnt."""
-        owner_token, handle, _, _ = _setup_workspace(
-            public_api_client, admin_api_client
-        )
-        api = ToolkitV1Api(public_api_client)
-
-        with pytest.raises(ApiException) as exc_info:
-            api.toolkit_v1_create_toolkit_config(
-                handle=handle,
-                toolkit_config_create_request=ToolkitConfigCreateRequest(
-                    toolkit_type="shell",
-                    name="Shell Toolkit",
-                    config={"allowed_domains": [], "denied_domains": []},
-                ),
-                _headers={"Authorization": f"Bearer {owner_token}"},
-            )
-        assert exc_info.value.status == 400
-
     def test_member_cannot_create_toolkit(
         self,
         public_api_client: azentspublicclient.ApiClient,
@@ -496,31 +452,6 @@ class TestToolkitScope:
         assert len(scopes.items) == 1
         assert scopes.items[0].scope_type == "workspace"
         assert scopes.items[0].scope_id == workspace_id
-
-    def test_duplicate_scope_returns_409(
-        self,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
-    ) -> None:
-        """t createt Workspace Scopet t create t 409t returnt."""
-        owner_token, handle, _, _ = _setup_workspace(
-            public_api_client, admin_api_client
-        )
-        api = ToolkitV1Api(public_api_client)
-        headers = {"Authorization": f"Bearer {owner_token}"}
-
-        toolkit_id = _create_toolkit(
-            public_api_client, token=owner_token, handle=handle
-        )
-
-        # Workspace scopet t createt, t scopet t t 409
-        with pytest.raises(ApiException) as exc_info:
-            api.toolkit_v1_create_toolkit_scope(
-                handle=handle,
-                toolkit_config_id=toolkit_id,
-                _headers=headers,
-            )
-        assert exc_info.value.status == 409
 
     def test_delete_scope(
         self,
@@ -680,22 +611,16 @@ class TestToolkitAvailableAndAttach:
         )
         assert len(agent_toolkits_after.items) == 0
 
-    def test_duplicate_toolkit_attach_returns_409(
+    def test_duplicate_stored_slugs_attach_to_the_same_agent(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
-        """t Toolkitt Agentt t t t 409t returnt."""
+        """Persist and attach two different Toolkits with one shared base Slug."""
         owner_token, handle, integration_id, model_selection = _setup_workspace(
             public_api_client, admin_api_client
         )
-        api = ToolkitV1Api(public_api_client)
         headers = {"Authorization": f"Bearer {owner_token}"}
-
-        toolkit_id = _create_toolkit(
-            public_api_client, token=owner_token, handle=handle, name="MCP 1"
-        )
-
         agent_id = _create_agent(
             public_api_client,
             token=owner_token,
@@ -703,28 +628,52 @@ class TestToolkitAvailableAndAttach:
             integration_id=integration_id,
             model_selection=model_selection,
         )
+        api = ToolkitV1Api(public_api_client)
+        duplicate_slug = f"duplicate_{unique()}"
+        toolkits = [
+            api.toolkit_v1_create_toolkit_config(
+                handle=handle,
+                toolkit_config_create_request=ToolkitConfigCreateRequest(
+                    toolkit_type="mcp",
+                    slug=duplicate_slug,
+                    name=f"Duplicate MCP {index}",
+                    config={
+                        "server_url": f"https://example.com/mcp/{index}",
+                        "auth_type": "none",
+                        "timeout": 30.0,
+                    },
+                    enabled=True,
+                ),
+                _headers=headers,
+            )
+            for index in (1, 2)
+        ]
 
-        # t t t success
-        api.toolkit_v1_attach_toolkit_to_agent(
-            handle=handle,
-            agent_id=agent_id,
-            agent_toolkit_attach_request=AgentToolkitAttachRequest(
-                toolkit_id=toolkit_id
-            ),
-            _headers=headers,
-        )
-
-        # t Toolkit t → 409
-        with pytest.raises(ApiException) as exc_info:
+        attachments = [
             api.toolkit_v1_attach_toolkit_to_agent(
                 handle=handle,
                 agent_id=agent_id,
                 agent_toolkit_attach_request=AgentToolkitAttachRequest(
-                    toolkit_id=toolkit_id
+                    toolkit_id=toolkit.id,
                 ),
                 _headers=headers,
             )
-        assert exc_info.value.status == 409
+            for toolkit in toolkits
+        ]
+
+        assert len({attachment.toolkit_id for attachment in attachments}) == 2
+        management = api.toolkit_v1_list_agent_toolkit_management(
+            handle=handle,
+            agent_id=agent_id,
+            _headers=headers,
+        )
+        toolkit_ids = {toolkit.id for toolkit in toolkits}
+        stored_slugs = [
+            item.toolkit.slug
+            for item in management.items
+            if item.toolkit.id in toolkit_ids
+        ]
+        assert stored_slugs == [duplicate_slug, duplicate_slug]
 
     def test_unavailable_toolkit_returns_403(
         self,

@@ -12,6 +12,7 @@ from pydantic import TypeAdapter
 from azents.core.enums import AgentSessionRunState, EventKind
 from azents.core.goal import GoalState, GoalStateSnapshot
 from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.json_value import JSONValue
 from azents.core.skill_projection import SkillProjectionItem, resolve_active_skill
 from azents.engine.events.action_messages import (
     AgentCreateGitWorktreeAction,
@@ -32,17 +33,16 @@ from azents.engine.tools.deps import (
 )
 from azents.engine.tools.skill import (
     SkillActionProjectionReader,
-    SkillStateStore,
     load_skill_projection_for_actions,
     skill_action_id,
     skill_actions_from_snapshot,
     skill_item_from_vfs_entry,
 )
-from azents.rdb.models.event import JSONValue
 from azents.repos.mailbox.promotion import (
     MailboxGoalCreate,
     MailboxSkillRevalidation,
 )
+from azents.repos.skill_state_store import SkillStateStore
 from azents.services.vfs import (
     VfsFileResolutionError,
     VfsResolvedFile,
@@ -394,6 +394,7 @@ class TurnActionCapabilityRegistry:
                 except (VfsFileResolutionError, ValueError) as exc:
                     logger.warning(
                         "Managed Skill action resolution failed",
+                        exc_info=True,
                         extra={
                             "agent_id": context.agent_id,
                             "session_id": context.session_id,

@@ -2,7 +2,7 @@
 
 import datetime
 from dataclasses import dataclass
-from typing import cast
+from unittest.mock import AsyncMock
 
 import pytest
 import sqlalchemy as sa
@@ -10,6 +10,7 @@ from azcommon.result import Success
 from azcommon.uuid import uuid7
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
     AgentRunStatus,
     AgentSessionProductMode,
@@ -18,26 +19,26 @@ from azents.core.enums import (
     MailboxSchedulingMode,
     ScheduledTaskScheduleType,
 )
+from azents.core.mailbox_data import MailboxItemCreate
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.mailbox_item import RDBMailboxItem
 from azents.rdb.models.scheduled_task import RDBScheduledTask
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.mailbox import MailboxRepository
-from azents.repos.mailbox.data import MailboxItemCreate
 from azents.repos.scheduled_task.data import ScheduledTaskCreate
 from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleRepository
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
-from azents.repos.scheduled_task_cycle import (
+from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
+from azents.repos.scheduled_task_cycle.data import (
     ScheduledTaskCycleRecord,
-    ScheduledTaskCycleRepository,
     ScheduledTaskCycleSnapshot,
 )
 from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
@@ -72,11 +73,12 @@ class _BindingFenceSession:
         self.locked_task = locked_task
         self.deleted: list[object] = []
         self.flushed = False
-
-    async def scalar(self, query: object) -> RDBScheduledTask:
-        """Return the Task visible at the final lock boundary."""
-        del query
-        return self.locked_task
+        _raw_session = AsyncMock(spec=AsyncSession)
+        session = ReadWriteSession(_raw_session)
+        _raw_session.scalar.return_value = locked_task
+        _raw_session.delete.side_effect = self.delete
+        _raw_session.flush.side_effect = self.flush
+        self.session: WriteSession = session
 
     async def delete(self, row: object) -> None:
         """Record unexpected deletion."""
@@ -108,7 +110,7 @@ def _rdb_task(*, binding_id: str) -> RDBScheduledTask:
     return task
 
 
-async def _create_subject(session: AsyncSession, *, handle: str) -> _Subject:
+async def _create_subject(session: WriteSession, *, handle: str) -> _Subject:
     """Create a complete root Session authority fixture."""
     workspace_repository = WorkspaceRepository()
     workspace_result = await workspace_repository.create(
@@ -126,8 +128,8 @@ async def _create_subject(session: AsyncSession, *, handle: str) -> _Subject:
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
     agent = RDBAgent(
         workspace_id=workspace_id,
         name="Scheduled lifecycle test agent",
@@ -160,8 +162,8 @@ async def _create_subject(session: AsyncSession, *, handle: str) -> _Subject:
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     created = await AgentSessionRepository().create(
         session,
         AgentSessionCreate(
@@ -180,7 +182,7 @@ async def _create_subject(session: AsyncSession, *, handle: str) -> _Subject:
 
 
 async def _create_task_cycle(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     subject: _Subject,
     title: str,
@@ -204,7 +206,7 @@ async def _create_task_cycle(
             timezone=None,
         ),
     )
-    task_row = await session.get(RDBScheduledTask, task.id)
+    task_row = await session.read_session.get(RDBScheduledTask, task.id)
     assert task_row is not None
     task_row.active_cycle_id = cycle_id
     task_row.active_scheduled_for = _NOW
@@ -261,8 +263,8 @@ async def _create_task_cycle(
             requested_enabled_execution_options=[],
             status=AgentRunStatus.RUNNING,
         )
-        session.add(run)
-        await session.flush()
+        session.write_session.add(run)
+        await session.write_session.flush()
         cycle = await cycle_repository.start(
             session,
             record=cycle,
@@ -275,7 +277,7 @@ async def _create_task_cycle(
             trigger.id,
         )
         run_id = run.id
-    await session.flush()
+    await session.write_session.flush()
     return _TaskCycle(
         task_id=task.id,
         cycle=cycle,
@@ -296,7 +298,7 @@ class TestScheduledTaskLifecycleRepository:
         session = _BindingFenceSession(locked)
 
         cleanup = await ScheduledTaskLifecycleRepository()._terminate_tasks(
-            cast(AsyncSession, session),
+            session.session,
             tasks=[candidate],
             expected_binding_id="b" * 32,
         )
@@ -308,7 +310,7 @@ class TestScheduledTaskLifecycleRepository:
 
     async def test_terminate_session_tree_deletes_prestart_and_preserves_started(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Archive removes Task authority but preserves a started cycle and Run."""
         subject = await _create_subject(
@@ -339,13 +341,19 @@ class TestScheduledTaskLifecycleRepository:
         assert cleanup.preserved_started_cycle_count == 1
         assert cleanup.cleanup_plans == ()
         assert (
-            await rdb_session.scalar(
+            await rdb_session.read_session.scalar(
                 sa.select(sa.func.count()).select_from(RDBScheduledTask)
             )
             == 0
         )
-        assert await rdb_session.get(RDBMailboxItem, admitted.trigger_id) is None
-        assert await rdb_session.get(RDBMailboxItem, started.trigger_id) is None
+        assert (
+            await rdb_session.read_session.get(RDBMailboxItem, admitted.trigger_id)
+            is None
+        )
+        assert (
+            await rdb_session.read_session.get(RDBMailboxItem, started.trigger_id)
+            is None
+        )
         cycle_repository = ScheduledTaskCycleRepository(ToolkitStateRepository())
         assert (
             await cycle_repository.get(
@@ -365,11 +373,13 @@ class TestScheduledTaskLifecycleRepository:
         assert preserved is not None
         assert preserved.state.current_run_id == started.run_id
         assert started.run_id is not None
-        assert await rdb_session.get(RDBAgentRun, started.run_id) is not None
+        assert (
+            await rdb_session.read_session.get(RDBAgentRun, started.run_id) is not None
+        )
 
     async def test_archive_allows_only_exact_started_scheduled_runs(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Ordinary or mismatched active Runs retain the archive block."""
         subject = await _create_subject(
@@ -400,8 +410,8 @@ class TestScheduledTaskLifecycleRepository:
             requested_enabled_execution_options=[],
             status=AgentRunStatus.PENDING,
         )
-        rdb_session.add(ordinary)
-        await rdb_session.flush()
+        rdb_session.write_session.add(ordinary)
+        await rdb_session.write_session.flush()
 
         assert not await repository.archive_allows_active_runs(
             rdb_session,
@@ -412,7 +422,7 @@ class TestScheduledTaskLifecycleRepository:
 
     async def test_archive_allows_prestart_trigger_for_transactional_cleanup(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A valid pre-start trigger may be removed by the archive transaction."""
         subject = await _create_subject(
@@ -434,7 +444,7 @@ class TestScheduledTaskLifecycleRepository:
 
     async def test_terminate_session_tree_deletes_orphan_trigger(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Archive removes a Scheduled trigger after its Task and cycle disappeared."""
         subject = await _create_subject(
@@ -447,9 +457,9 @@ class TestScheduledTaskLifecycleRepository:
             title="Orphaned admitted task",
             started=False,
         )
-        task = await rdb_session.get(RDBScheduledTask, admitted.task_id)
+        task = await rdb_session.read_session.get(RDBScheduledTask, admitted.task_id)
         assert task is not None
-        await rdb_session.delete(task)
+        await rdb_session.write_session.delete(task)
         assert await ScheduledTaskCycleRepository(
             ToolkitStateRepository()
         ).delete_if_admitted(
@@ -458,7 +468,7 @@ class TestScheduledTaskLifecycleRepository:
             session_id=subject.session_id,
             cycle_id=admitted.cycle.state.cycle_id,
         )
-        await rdb_session.flush()
+        await rdb_session.write_session.flush()
         repository = ScheduledTaskLifecycleRepository()
 
         before = await repository.verify_session_tree(
@@ -477,11 +487,14 @@ class TestScheduledTaskLifecycleRepository:
         assert cleanup.deleted_task_count == 0
         assert cleanup.deleted_admitted_cycle_count == 0
         assert cleanup.deleted_trigger_count == 1
-        assert await rdb_session.get(RDBMailboxItem, admitted.trigger_id) is None
+        assert (
+            await rdb_session.read_session.get(RDBMailboxItem, admitted.trigger_id)
+            is None
+        )
 
     async def test_terminate_binding_deletes_orphan_admitted_cycle_and_trigger(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Binding termination removes cycle-owned work without a Task row."""
         subject = await _create_subject(
@@ -541,7 +554,7 @@ class TestScheduledTaskLifecycleRepository:
         assert cleanup.deleted_task_count == 0
         assert cleanup.deleted_admitted_cycle_count == 1
         assert cleanup.deleted_trigger_count == 1
-        assert await rdb_session.get(RDBMailboxItem, trigger.id) is None
+        assert await rdb_session.read_session.get(RDBMailboxItem, trigger.id) is None
         assert (
             await ScheduledTaskCycleRepository(ToolkitStateRepository()).get(
                 rdb_session,
@@ -554,7 +567,7 @@ class TestScheduledTaskLifecycleRepository:
 
     async def test_purge_waits_for_started_cycle_and_verifies_absence(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Permanent purge remains fenced until preserved cycle state is gone."""
         subject = await _create_subject(

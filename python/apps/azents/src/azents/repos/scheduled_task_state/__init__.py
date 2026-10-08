@@ -5,10 +5,10 @@ from typing import Any
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ScheduledTaskStatus
 from azents.rdb.models.scheduled_task_state import RDBScheduledTaskState
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import ScheduledTaskState
 
@@ -18,7 +18,7 @@ class ScheduledTaskStateRepository:
 
     async def ensure_state(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         task_key: str,
         next_run_at: datetime.datetime,
@@ -35,8 +35,8 @@ class ScheduledTaskStateRepository:
             .values(task_key=task_key, next_run_at=next_run_at)
             .on_conflict_do_nothing(index_elements=["task_key"])
         )
-        await session.execute(stmt)
-        await session.flush()
+        await session.write_session.execute(stmt)
+        await session.write_session.flush()
         state = await self.get(session, task_key)
         if state is None:
             raise RuntimeError("Scheduled task state ensure failed")
@@ -44,34 +44,34 @@ class ScheduledTaskStateRepository:
 
     async def list_states(
         self,
-        session: AsyncSession,
+        session: ReadSession,
     ) -> list[ScheduledTaskState]:
         """List task states ordered by task key."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBScheduledTaskState).order_by(RDBScheduledTaskState.task_key)
         )
         return [self._build(row) for row in result.scalars()]
 
     async def get(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         task_key: str,
     ) -> ScheduledTaskState | None:
         """Fetch one task state."""
-        rdb = await session.get(RDBScheduledTaskState, task_key)
+        rdb = await session.read_session.get(RDBScheduledTaskState, task_key)
         if rdb is None:
             return None
         return self._build(rdb)
 
     async def trigger(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         task_key: str,
         now: datetime.datetime,
     ) -> ScheduledTaskState | None:
         """Request a manual run by marking the task due."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBScheduledTaskState)
             .where(RDBScheduledTaskState.task_key == task_key)
             .values(next_run_at=now, manual_requested_at=now)
@@ -80,12 +80,12 @@ class ScheduledTaskStateRepository:
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
+        await session.write_session.flush()
         return self._build(rdb)
 
     async def claim_due(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         task_key: str,
         now: datetime.datetime,
@@ -93,7 +93,7 @@ class ScheduledTaskStateRepository:
         lease_until: datetime.datetime,
     ) -> ScheduledTaskState | None:
         """Atomically claim a due task with an expired or empty lease."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBScheduledTaskState)
             .where(
                 RDBScheduledTaskState.task_key == task_key,
@@ -115,12 +115,12 @@ class ScheduledTaskStateRepository:
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
+        await session.write_session.flush()
         return self._build(rdb)
 
     async def mark_success(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         task_key: str,
         lease_owner: str,
@@ -129,7 +129,7 @@ class ScheduledTaskStateRepository:
         result_summary: dict[str, Any] | None,
     ) -> ScheduledTaskState | None:
         """Record successful task execution and release lease."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBScheduledTaskState)
             .where(
                 RDBScheduledTaskState.task_key == task_key,
@@ -154,12 +154,12 @@ class ScheduledTaskStateRepository:
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
+        await session.write_session.flush()
         return self._build(rdb)
 
     async def mark_failure(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         task_key: str,
         lease_owner: str,
@@ -169,7 +169,7 @@ class ScheduledTaskStateRepository:
         error_message: str,
     ) -> ScheduledTaskState | None:
         """Record failed task execution and release lease."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBScheduledTaskState)
             .where(
                 RDBScheduledTaskState.task_key == task_key,
@@ -194,7 +194,7 @@ class ScheduledTaskStateRepository:
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
+        await session.write_session.flush()
         return self._build(rdb)
 
     def _build(self, rdb: RDBScheduledTaskState) -> ScheduledTaskState:

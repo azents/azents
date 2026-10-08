@@ -9,6 +9,7 @@ import {
   type AgentToolkitManagementState,
   type AgentToolkitMutationState,
   canAuthorizeAgentToolkitOAuth,
+  completedToolkitEditor,
   decodeAgentToolkitOAuthCallback,
   projectAgentToolkitManagementState,
 } from "../agentToolkitManagementState";
@@ -23,21 +24,25 @@ export interface AgentToolkitManagementContainerOutput extends AgentToolkitManag
   state: AgentToolkitManagementState;
   editor: AgentToolkitEditorState;
   mutationState: AgentToolkitMutationState;
-  selectedToolkitId: string | null;
   deleteTarget: AgentToolkitManagementItemResponse | null;
   pending: boolean;
   attachPending: boolean;
+  setupPending: boolean;
+  attachPendingId: string | null;
   deletePending: boolean;
   canAuthorizeShared: boolean;
   authorizationPendingId: string | null;
   onAuthorize: (item: AgentToolkitManagementItemResponse) => void;
-  onSelectedToolkitChange: (toolkitId: string | null) => void;
   onStartAdd: () => void;
-  onToolkitTypeChange: (toolkitType: string | null) => void;
-  onConfigureSelectedType: () => void;
+  onCatalogTabChange: (tab: "new" | "workspace") => void;
+  onConfigureType: (toolkitType: string) => void;
+  onDetails: (toolkitConfigId: string) => void;
   onEdit: (toolkitConfigId: string) => void;
   onCloseEditor: () => void;
-  onAttach: () => void;
+  onCompleteSetup: () => void;
+  onSetupPendingChange: (pending: boolean) => void;
+  onRetryRead: () => void;
+  onAttach: (toolkitId: string) => void;
   onDetach: (agentToolkitId: string) => void;
   onToggle: (item: AgentToolkitManagementItemResponse) => void;
   onRequestDelete: (item: AgentToolkitManagementItemResponse) => void;
@@ -51,15 +56,13 @@ export function useAgentToolkitManagementContainer({
 }: AgentToolkitManagementContainerProps): AgentToolkitManagementContainerOutput {
   const t = useTranslations("workspace.agents.toolkitManagement");
   const utils = trpc.useUtils();
-  const [selectedToolkitId, setSelectedToolkitId] = useState<string | null>(
-    null,
-  );
   const [editor, setEditor] = useState<AgentToolkitEditorState>({
     type: "CLOSED",
   });
   const [mutationState, setMutationState] = useState<AgentToolkitMutationState>(
     { type: "IDLE" },
   );
+  const [setupPending, setSetupPending] = useState(false);
   const [deleteTarget, setDeleteTarget] =
     useState<AgentToolkitManagementItemResponse | null>(null);
   const [authorizationPendingId, setAuthorizationPendingId] = useState<
@@ -72,14 +75,16 @@ export function useAgentToolkitManagementContainer({
   const canAuthorizeShared =
     memberQuery.data?.role === "owner" || memberQuery.data?.role === "manager";
   const invalidate = useCallback(async (): Promise<void> => {
-    await utils.toolkit.listAgentManagement.invalidate({ handle, agentId });
+    // The query owns read errors; an acknowledged write is still committed.
+    await utils.toolkit.listAgentManagement
+      .invalidate({ handle, agentId })
+      .catch(() => null);
   }, [agentId, handle, utils.toolkit.listAgentManagement]);
   const attachMutation = trpc.toolkit.attachToAgent.useMutation({
     onSuccess: async () => {
       setMutationState({ type: "IDLE" });
-      setSelectedToolkitId(null);
-      await invalidate();
       setEditor({ type: "CLOSED" });
+      await invalidate();
     },
     onError: (error) =>
       setMutationState({ type: "ERROR", message: error.message }),
@@ -224,9 +229,12 @@ export function useAgentToolkitManagementContainer({
     ],
   );
   const closeEditor = useCallback((): void => {
+    if (setupPending || attachMutation.isPending) {
+      return;
+    }
     setEditor({ type: "CLOSED" });
     void invalidate();
-  }, [invalidate]);
+  }, [invalidate, setupPending, attachMutation.isPending]);
 
   return {
     handle,
@@ -234,41 +242,51 @@ export function useAgentToolkitManagementContainer({
     state,
     editor,
     mutationState,
-    selectedToolkitId,
     deleteTarget,
     pending:
       detachMutation.isPending ||
       updateMutation.isPending ||
       deleteMutation.isPending,
     attachPending: attachMutation.isPending,
+    setupPending,
+    attachPendingId: attachMutation.isPending
+      ? attachMutation.variables.toolkitId
+      : null,
     deletePending: deleteMutation.isPending,
     canAuthorizeShared,
     authorizationPendingId,
     onAuthorize,
-    onSelectedToolkitChange: setSelectedToolkitId,
     onStartAdd: () => {
       setMutationState({ type: "IDLE" });
-      setEditor({ type: "SELECT_TYPE", toolkitType: null });
+      setEditor({ type: "CATALOG", tab: "new" });
     },
-    onToolkitTypeChange: (toolkitType) => {
+    onCatalogTabChange: (tab) => {
       setMutationState({ type: "IDLE" });
-      setSelectedToolkitId(null);
-      setEditor({ type: "SELECT_TYPE", toolkitType });
+      setEditor({ type: "CATALOG", tab });
     },
-    onConfigureSelectedType: () => {
-      if (editor.type === "SELECT_TYPE" && editor.toolkitType != null) {
-        setEditor({ type: "CREATE", toolkitType: editor.toolkitType });
-      }
-    },
+    onConfigureType: (toolkitType) =>
+      setEditor({ type: "CREATE", toolkitType }),
+    onDetails: (toolkitConfigId) =>
+      setEditor({ type: "DETAIL", toolkitConfigId }),
     onEdit: (toolkitConfigId) => setEditor({ type: "EDIT", toolkitConfigId }),
     onCloseEditor: closeEditor,
-    onAttach: () => {
-      if (selectedToolkitId) {
+    onSetupPendingChange: setSetupPending,
+    onRetryRead: () => {
+      void utils.toolkit.listAgentManagement.invalidate({ handle, agentId });
+      void utils.toolkit.listToolkits.invalidate();
+    },
+    onCompleteSetup: () => {
+      setSetupPending(false);
+      setEditor((current) => completedToolkitEditor(current, editor));
+      void invalidate();
+    },
+    onAttach: (toolkitId) => {
+      if (!attachMutation.isPending) {
         setMutationState({ type: "IDLE" });
         attachMutation.mutate({
           handle,
           agentId,
-          toolkitId: selectedToolkitId,
+          toolkitId,
         });
       }
     },

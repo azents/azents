@@ -16,6 +16,7 @@ from azents.engine.events.types import (
     Event,
     validate_event_payload,
 )
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.engine_tool_result_operation import (
     EngineToolResultOperationRepository,
@@ -42,14 +43,14 @@ class _SessionManager:
         self.active = False
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[_Session]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         """Yield one session and commit only after successful admission."""
         assert not self.active
         session = _Session()
         self.sessions.append(session)
         self.active = True
         try:
-            yield session
+            yield ReadWriteSession(session)
         except BaseException:
             raise
         else:
@@ -85,18 +86,18 @@ class _RunRepository:
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
     ) -> _RunState:
         """Return the configured locked Run."""
         del run_id
         assert self.manager.active
-        assert session is self.manager.sessions[-1]
+        assert session.read_session is self.manager.sessions[-1]
         return self.run
 
     async def update_phase(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
         phase: AgentRunPhase,
         *,
@@ -105,7 +106,7 @@ class _RunRepository:
         """Record the phase selected after result admission."""
         del run_id
         assert self.manager.active
-        assert session is self.manager.sessions[-1]
+        assert session.read_session is self.manager.sessions[-1]
         self.updates.append((phase, active_tool_calls))
         return object()
 
@@ -117,10 +118,10 @@ class _TranscriptRepository:
         self.manager = manager
         self.creates: list[EventCreate] = []
 
-    async def append(self, session: AsyncSession, create: EventCreate) -> Event:
+    async def append(self, session: ReadSession, create: EventCreate) -> Event:
         """Append while the operation transaction remains active."""
         assert self.manager.active
-        assert session is self.manager.sessions[-1]
+        assert session.read_session is self.manager.sessions[-1]
         self.creates.append(create)
         return Event(
             id=f"{len(self.creates):032d}",
@@ -156,6 +157,7 @@ async def test_tool_result_finalization_closes_transaction_before_returning() ->
     )
     transcript = _TranscriptRepository(manager)
     repository = EngineToolResultOperationRepository(
+        owner=None,
         session_manager=manager,
         run_repository=runs,
         transcript_repository=transcript,
@@ -195,6 +197,7 @@ async def test_terminal_run_result_does_not_rewrite_active_call_state() -> None:
         ),
     )
     repository = EngineToolResultOperationRepository(
+        owner=None,
         session_manager=manager,
         run_repository=runs,
         transcript_repository=_TranscriptRepository(manager),
@@ -220,6 +223,7 @@ async def test_identity_mismatch_aborts_completed_operation() -> None:
     """Mismatched result identity commits no transaction."""
     manager = _SessionManager()
     repository = EngineToolResultOperationRepository(
+        owner=None,
         session_manager=manager,
         run_repository=_RunRepository(
             manager,

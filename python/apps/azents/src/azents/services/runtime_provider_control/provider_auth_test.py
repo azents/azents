@@ -27,17 +27,24 @@ from azents.core.enums import (
     RuntimeProviderRegistrationMethod,
     RuntimeProviderScope,
 )
+from azents.core.runtime_provider_control import (
+    KubernetesServiceAccountTokenReview,
+    RuntimeProviderCredentialAuthentication,
+    RuntimeProviderCredentialUnavailable,
+)
+from azents.core.runtime_provider_data import RuntimeProvider
 from azents.rdb.session import SessionManager
-from azents.repos.runtime_provider.data import RuntimeProvider
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.repos.runtime_provider_auth_operations import (
+    RuntimeProviderAuthenticationOperationRepository,
+)
 from azents.repos.runtime_provider_binding.data import RuntimeProviderAuthBinding
 from azents.repos.runtime_provider_binding.repository import (
     RuntimeProviderAuthBindingRepository,
 )
-from azents.services.runtime_provider_control.data import (
-    KubernetesServiceAccountTokenReview,
-    RuntimeProviderCredentialAuthentication,
-    RuntimeProviderCredentialUnavailable,
+from azents.repos.runtime_provider_control.repository import (
+    RuntimeProviderControlRepository,
 )
 from azents.services.runtime_provider_control.provider_auth import (
     KubernetesApiTokenReviewer,
@@ -87,13 +94,49 @@ class _TokenReviewer:
 
 @asynccontextmanager
 async def _session_context(
-    session: AsyncSession,
-) -> AsyncGenerator[AsyncSession, None]:
+    session: WriteSession,
+) -> AsyncGenerator[WriteSession, None]:
     yield session
 
 
-def _session_manager(session: AsyncSession) -> SessionManager[AsyncSession]:
+def _session_manager(session: WriteSession) -> SessionManager[WriteSession]:
     return lambda: _session_context(session)
+
+
+@dataclass
+class _ObservedAuthScope:
+    """Observe completed operation ownership without granting it to application code."""
+
+    session: WriteSession
+    active: bool = False
+    entered: bool = False
+    exited: bool = False
+
+    @asynccontextmanager
+    async def __call__(self) -> AsyncGenerator[WriteSession, None]:
+        self.active = True
+        self.entered = True
+        try:
+            yield self.session
+        finally:
+            self.active = False
+            self.exited = True
+
+
+@dataclass(frozen=True)
+class _BoundaryTokenReviewer:
+    scope: _ObservedAuthScope
+    result: KubernetesServiceAccountTokenReview
+
+    async def review(
+        self, *, token: str, audience: str
+    ) -> KubernetesServiceAccountTokenReview:
+        """External workload verification precedes entry into the DB owner."""
+        assert not self.scope.active
+        assert not self.scope.entered
+        assert token == "service-account-token"
+        assert audience == "azents-runtime-control"
+        return self.result
 
 
 def _authentication(
@@ -408,9 +451,12 @@ async def test_kubernetes_verifier_rejects_invalid_workload_evidence(
 ) -> None:
     session = AsyncMock(spec=AsyncSession)
     verifier = KubernetesServiceAccountProviderAuthVerifier(
-        session_manager=_session_manager(session),
-        provider_repository=AsyncMock(spec=RuntimeProviderRepository),
-        binding_repository=AsyncMock(spec=RuntimeProviderAuthBindingRepository),
+        operations=RuntimeProviderAuthenticationOperationRepository(
+            session_manager=_session_manager(session),
+            provider_repository=AsyncMock(spec=RuntimeProviderRepository),
+            binding_repository=AsyncMock(spec=RuntimeProviderAuthBindingRepository),
+            repository=AsyncMock(spec=RuntimeProviderControlRepository),
+        ),
         token_reviewer=_TokenReviewer(review),
     )
 
@@ -430,9 +476,12 @@ async def test_kubernetes_verifier_resolves_exact_bootstrap_binding() -> None:
     binding_repository.mark_authenticated.return_value = True
     provider_repository.get_by_id.return_value = _kubernetes_provider()
     verifier = KubernetesServiceAccountProviderAuthVerifier(
-        session_manager=_session_manager(session),
-        provider_repository=provider_repository,
-        binding_repository=binding_repository,
+        operations=RuntimeProviderAuthenticationOperationRepository(
+            session_manager=_session_manager(session),
+            provider_repository=provider_repository,
+            binding_repository=binding_repository,
+            repository=AsyncMock(spec=RuntimeProviderControlRepository),
+        ),
         token_reviewer=_TokenReviewer(
             KubernetesServiceAccountTokenReview(
                 authenticated=True,
@@ -453,6 +502,39 @@ async def test_kubernetes_verifier_resolves_exact_bootstrap_binding() -> None:
     binding_repository.mark_authenticated.assert_awaited_once()
 
 
+async def test_token_review_precedes_database_owner_and_return_follows_exit() -> None:
+    """No external review or application projection runs in a live DB scope."""
+    session = AsyncMock(spec=AsyncSession)
+    scope = _ObservedAuthScope(session)
+    bindings = AsyncMock(spec=RuntimeProviderAuthBindingRepository)
+    providers = AsyncMock(spec=RuntimeProviderRepository)
+    bindings.get_active_by_subject.return_value = _kubernetes_binding()
+    bindings.mark_authenticated.return_value = True
+    providers.get_by_id.return_value = _kubernetes_provider()
+    verifier = KubernetesServiceAccountProviderAuthVerifier(
+        operations=RuntimeProviderAuthenticationOperationRepository(
+            session_manager=scope,
+            repository=AsyncMock(spec=RuntimeProviderControlRepository),
+            provider_repository=providers,
+            binding_repository=bindings,
+        ),
+        token_reviewer=_BoundaryTokenReviewer(
+            scope=scope,
+            result=KubernetesServiceAccountTokenReview(
+                authenticated=True,
+                username=_SUBJECT,
+                audiences=frozenset({"azents-runtime-control"}),
+                evidence_expires_at=_NOW + datetime.timedelta(minutes=5),
+            ),
+        ),
+    )
+    result = await verifier.verify(secret="service-account-token", now=_NOW)
+    assert result.binding_id == "binding-1"
+    assert scope.entered
+    assert scope.exited
+    assert not scope.active
+
+
 @pytest.mark.asyncio
 async def test_kubernetes_verifier_rejects_concurrent_binding_revocation() -> None:
     session = AsyncMock(spec=AsyncSession)
@@ -462,9 +544,12 @@ async def test_kubernetes_verifier_rejects_concurrent_binding_revocation() -> No
     binding_repository.mark_authenticated.return_value = False
     provider_repository.get_by_id.return_value = _kubernetes_provider()
     verifier = KubernetesServiceAccountProviderAuthVerifier(
-        session_manager=_session_manager(session),
-        provider_repository=provider_repository,
-        binding_repository=binding_repository,
+        operations=RuntimeProviderAuthenticationOperationRepository(
+            session_manager=_session_manager(session),
+            provider_repository=provider_repository,
+            binding_repository=binding_repository,
+            repository=AsyncMock(spec=RuntimeProviderControlRepository),
+        ),
         token_reviewer=_TokenReviewer(
             KubernetesServiceAccountTokenReview(
                 authenticated=True,

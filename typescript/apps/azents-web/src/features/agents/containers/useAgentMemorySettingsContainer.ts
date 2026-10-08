@@ -2,28 +2,23 @@
 
 /** Agent Memory settings container. */
 
-import { useState } from "react";
+import { useTranslations } from "next-intl";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
+import type {
+  ConsolidatedMemoryState,
+  DraftState,
+  HistoricalMemoryListState,
+  HistoricalMemoryScopeValue,
+  HistoricalMemoryView,
+  MemoryDraft,
+  MemoryKindValue,
+  MemoryPaginationState,
+  SavedMemoryListState,
+  SavedMemoryScopeValue,
+} from "../types";
 import type { AgentResponse, MemoryResponse } from "@azents/public-client";
-
-export type MemoryScopeValue = "agent" | "user";
-
-export interface MemoryDraft {
-  type: string;
-  name: string;
-  description: string;
-  content: string;
-}
-
-type DraftState =
-  | { type: "create"; draft: MemoryDraft }
-  | { type: "edit"; memoryId: string; draft: MemoryDraft }
-  | null;
-
-export type MemoryListState =
-  | { type: "LOADING" }
-  | { type: "ERROR"; message: string }
-  | { type: "LOADED"; memories: MemoryResponse[] };
+import type { RefCallback } from "react";
 
 export interface AgentMemorySettingsContainerProps {
   handle: string;
@@ -34,16 +29,30 @@ export interface AgentMemorySettingsContainerOutput {
   handle: string;
   agent: AgentResponse;
   memoryEnabled: boolean;
-  scope: MemoryScopeValue;
-  query: string;
-  listState: MemoryListState;
+  kind: MemoryKindValue;
+  savedScope: SavedMemoryScopeValue;
+  historicalScope: HistoricalMemoryScopeValue;
+  savedQuery: string;
+  historicalQuery: string;
+  savedListState: SavedMemoryListState;
+  historicalListState: HistoricalMemoryListState;
   draftState: DraftState;
   actionError: string | null;
   saving: boolean;
   deletingId: string | null;
   togglingMemory: boolean;
-  onScopeChange: (scope: MemoryScopeValue) => void;
-  onQueryChange: (query: string) => void;
+  historicalView: HistoricalMemoryView;
+  consolidatedState: ConsolidatedMemoryState;
+  paginationState: MemoryPaginationState;
+  scrollRootRef: RefCallback<HTMLDivElement>;
+  scrollEndRef: RefCallback<HTMLDivElement>;
+  onHistoricalViewChange: (view: HistoricalMemoryView) => void;
+  onRetryNextPage: () => void;
+  onKindChange: (kind: MemoryKindValue) => void;
+  onSavedScopeChange: (scope: SavedMemoryScopeValue) => void;
+  onHistoricalScopeChange: (scope: HistoricalMemoryScopeValue) => void;
+  onSavedQueryChange: (query: string) => void;
+  onHistoricalQueryChange: (query: string) => void;
   onMemoryEnabledChange: (enabled: boolean) => void;
   onStartCreate: () => void;
   onStartEdit: (memory: MemoryResponse) => void;
@@ -76,25 +85,105 @@ function normalizeError(error: unknown): string {
   return "Unknown error";
 }
 
+/** Observe the active list inside its real scrolling container. */
+export function useMemoryScrollPagination({
+  enabled,
+  pageKey,
+  listKey,
+  onNextPage,
+}: {
+  enabled: boolean;
+  pageKey: string;
+  listKey: string;
+  onNextPage: () => void;
+}): {
+  scrollRootRef: RefCallback<HTMLDivElement>;
+  scrollEndRef: RefCallback<HTMLDivElement>;
+} {
+  const [root, setRoot] = useState<HTMLDivElement | null>(null);
+  const [end, setEnd] = useState<HTMLDivElement | null>(null);
+  const nextPage = useRef(onNextPage);
+  useEffect(() => {
+    if (root !== null) {
+      root.scrollTop = 0;
+    }
+  }, [root, listKey]);
+  useEffect(() => {
+    nextPage.current = onNextPage;
+  }, [onNextPage]);
+  useEffect(() => {
+    if (!enabled || root === null || end === null) {
+      return;
+    }
+    let requested = false;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!requested && entries.some((entry) => entry.isIntersecting)) {
+          requested = true;
+          nextPage.current();
+        }
+      },
+      { root },
+    );
+    observer.observe(end);
+    return () => observer.disconnect();
+  }, [enabled, root, end, pageKey]);
+  return { scrollRootRef: setRoot, scrollEndRef: setEnd };
+}
+
 export function useAgentMemorySettingsContainer({
   handle,
   agent,
 }: AgentMemorySettingsContainerProps): AgentMemorySettingsContainerOutput {
+  const t = useTranslations("workspace.agents.memorySettings");
   const utils = trpc.useUtils();
-  const [scope, setScope] = useState<MemoryScopeValue>("agent");
-  const [query, setQuery] = useState("");
+  const [kind, setKind] = useState<MemoryKindValue>("saved");
+  const [savedScope, setSavedScope] = useState<SavedMemoryScopeValue>("agent");
+  const [historicalScope, setHistoricalScope] =
+    useState<HistoricalMemoryScopeValue>("team");
+  const [savedQuery, setSavedQuery] = useState("");
+  const [historicalQuery, setHistoricalQuery] = useState("");
+  const [historicalView, setHistoricalView] =
+    useState<HistoricalMemoryView>("overview");
   const [draftState, setDraftState] = useState<DraftState>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [memoryEnabled, setMemoryEnabled] = useState(agent.memory_enabled);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const listQuery = trpc.agent.listMemories.useQuery({
-    handle,
-    agentId: agent.id,
-    scope,
-    type: null,
-    query: query.trim() === "" ? null : query.trim(),
-  });
+  const savedListQuery = trpc.agent.listMemories.useInfiniteQuery(
+    {
+      handle,
+      agentId: agent.id,
+      scope: savedScope,
+      type: null,
+      query: savedQuery.trim() === "" ? null : savedQuery.trim(),
+      limit: 20,
+    },
+    {
+      enabled: kind === "saved",
+      getNextPageParam: (lastPage) => lastPage.next_cursor,
+    },
+  );
+
+  const historicalListQuery =
+    trpc.agent.listHistoricalMemories.useInfiniteQuery(
+      {
+        handle,
+        agentId: agent.id,
+        scope: historicalScope,
+        query: historicalQuery.trim() === "" ? null : historicalQuery.trim(),
+        limit: 20,
+      },
+      {
+        enabled: kind === "historical" && historicalView === "sessions",
+        getNextPageParam: (lastPage) => lastPage.next_cursor,
+      },
+    );
+
+  const consolidatedQuery = trpc.agent.getConsolidatedMemory.useQuery(
+    { handle, agentId: agent.id, scope: historicalScope },
+    { enabled: kind === "historical" && historicalView === "overview" },
+  );
 
   const createMutation = trpc.agent.createMemory.useMutation({
     onSuccess: () => {
@@ -106,19 +195,29 @@ export function useAgentMemorySettingsContainer({
   });
 
   const updateMutation = trpc.agent.updateMemory.useMutation({
-    onSuccess: () => {
+    onSuccess: (memory, input) => {
       setDraftState(null);
       setActionError(null);
       void utils.agent.listMemories.invalidate();
+      void utils.agent.getMemory.invalidate({
+        handle: input.handle,
+        agentId: input.agentId,
+        memoryId: memory.id,
+      });
     },
     onError: (error) => setActionError(normalizeError(error)),
   });
 
   const deleteMutation = trpc.agent.deleteMemory.useMutation({
     onMutate: (input) => setDeletingId(input.memoryId),
-    onSuccess: () => {
+    onSuccess: (_data, input) => {
       setActionError(null);
       void utils.agent.listMemories.invalidate();
+      void utils.agent.getMemory.invalidate({
+        handle: input.handle,
+        agentId: input.agentId,
+        memoryId: input.memoryId,
+      });
     },
     onError: (error) => setActionError(normalizeError(error)),
     onSettled: () => setDeletingId(null),
@@ -137,30 +236,106 @@ export function useAgentMemorySettingsContainer({
     },
   });
 
-  const listState: MemoryListState = listQuery.isLoading
+  const savedData = savedListQuery.data ?? null;
+  const historicalData = historicalListQuery.data ?? null;
+  const savedListState: SavedMemoryListState = savedListQuery.isLoading
     ? { type: "LOADING" }
-    : listQuery.isError
-      ? { type: "ERROR", message: normalizeError(listQuery.error) }
-      : { type: "LOADED", memories: listQuery.data?.items ?? [] };
+    : savedListQuery.isError && savedData === null
+      ? { type: "ERROR", message: normalizeError(savedListQuery.error) }
+      : {
+          type: "LOADED",
+          memories:
+            savedListQuery.data?.pages.flatMap((page) => page.items) ?? [],
+        };
+
+  const historicalListState: HistoricalMemoryListState =
+    historicalListQuery.isLoading
+      ? { type: "LOADING" }
+      : historicalListQuery.isError && historicalData === null
+        ? {
+            type: "ERROR",
+            message: normalizeError(historicalListQuery.error),
+          }
+        : {
+            type: "LOADED",
+            memories:
+              historicalListQuery.data?.pages.flatMap((page) => page.items) ??
+              [],
+            hasMore: historicalListQuery.hasNextPage,
+          };
+
+  const consolidatedState: ConsolidatedMemoryState = consolidatedQuery.isLoading
+    ? { type: "LOADING" }
+    : consolidatedQuery.isError
+      ? { type: "ERROR", message: normalizeError(consolidatedQuery.error) }
+      : {
+          type: "LOADED",
+          markdown: consolidatedQuery.data?.markdown ?? null,
+          publishedAt: consolidatedQuery.data?.published_at ?? null,
+        };
+  const activeList = kind === "saved" ? savedListQuery : historicalListQuery;
+  const paginationState: MemoryPaginationState = activeList.isFetchingNextPage
+    ? { type: "LOADING" }
+    : activeList.isFetchNextPageError
+      ? { type: "ERROR", message: normalizeError(activeList.error) }
+      : activeList.hasNextPage
+        ? { type: "IDLE" }
+        : { type: "END" };
+  const fetchNextPage = useCallback((): void => {
+    if (activeList.hasNextPage && !activeList.isFetching) {
+      void activeList.fetchNextPage();
+    }
+  }, [activeList]);
+  const scrollRefs = useMemoryScrollPagination({
+    enabled:
+      (kind === "saved" || historicalView === "sessions") &&
+      activeList.hasNextPage &&
+      !activeList.isFetching &&
+      !activeList.isFetchNextPageError,
+    listKey: `${kind}:${savedScope}:${historicalScope}:${savedQuery}:${historicalQuery}:${historicalView}`,
+    pageKey: `${activeList.data?.pages.length ?? 0}`,
+    onNextPage: fetchNextPage,
+  });
 
   return {
     handle,
     agent,
     memoryEnabled,
-    scope,
-    query,
-    listState,
+    kind,
+    savedScope,
+    historicalScope,
+    savedQuery,
+    historicalQuery,
+    savedListState,
+    historicalListState,
     draftState,
     actionError,
     saving: createMutation.isPending || updateMutation.isPending,
     deletingId,
     togglingMemory: toggleMutation.isPending,
-    onScopeChange: (nextScope) => {
-      setScope(nextScope);
+    historicalView,
+    consolidatedState,
+    paginationState,
+    ...scrollRefs,
+    onHistoricalViewChange: setHistoricalView,
+    onRetryNextPage: fetchNextPage,
+    onKindChange: (nextKind) => {
+      setKind(nextKind);
+      setHistoricalView("overview");
       setDraftState(null);
       setActionError(null);
     },
-    onQueryChange: setQuery,
+    onSavedScopeChange: (nextScope) => {
+      setSavedScope(nextScope);
+      setDraftState(null);
+      setActionError(null);
+    },
+    onHistoricalScopeChange: (scope) => {
+      setHistoricalScope(scope);
+      setHistoricalView("overview");
+    },
+    onSavedQueryChange: setSavedQuery,
+    onHistoricalQueryChange: setHistoricalQuery,
     onMemoryEnabledChange: (enabled) => {
       setMemoryEnabled(enabled);
       toggleMutation.mutate({
@@ -197,7 +372,7 @@ export function useAgentMemorySettingsContainer({
         createMutation.mutate({
           handle,
           agentId: agent.id,
-          scope,
+          scope: savedScope,
           ...draftState.draft,
         });
         return;
@@ -210,6 +385,9 @@ export function useAgentMemorySettingsContainer({
       });
     },
     onDeleteMemory: (memory) => {
+      if (!window.confirm(t("deleteConfirm", { name: memory.name }))) {
+        return;
+      }
       deleteMutation.mutate({
         handle,
         agentId: agent.id,

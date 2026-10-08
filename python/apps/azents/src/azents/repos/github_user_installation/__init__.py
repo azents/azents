@@ -1,12 +1,15 @@
 """GitHub per-user Installation Repository."""
 
+from collections.abc import Sequence
+
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.github_installation import GitHubInstallationSnapshot
 from azents.rdb.models.github_user_installation import RDBGithubUserInstallation
+from azents.rdb.session_capabilities import ReadSession
 
 
 class GithubUserInstallationRepository:
@@ -14,10 +17,10 @@ class GithubUserInstallationRepository:
 
     async def sync(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         user_id: str,
         platform_app_id: str,
-        installations: list[dict[str, object]],
+        installations: Sequence[GitHubInstallationSnapshot],
     ) -> None:
         """Synchronize one user's installation list for one Platform App."""
         if not platform_app_id:
@@ -26,22 +29,12 @@ class GithubUserInstallationRepository:
         api_installation_ids: set[int] = set()
 
         for inst in installations:
-            inst_id = inst.get("id")
-            if not isinstance(inst_id, int):
-                continue
-
-            account = inst.get("account")
-            if not isinstance(account, dict):
-                continue
-
-            login = account.get("login")
-            account_type = account.get("type")
-            avatar_url = account.get("avatar_url", "")
-
-            if not isinstance(login, str) or not isinstance(account_type, str):
-                continue
-            if not isinstance(avatar_url, str):
-                avatar_url = ""
+            inst_id = inst.installation_id
+            login = inst.account_login
+            account_type = inst.account_type
+            avatar_url = (
+                inst.account_avatar_url if inst.account_avatar_url is not None else ""
+            )
 
             api_installation_ids.add(inst_id)
             stmt = insert(RDBGithubUserInstallation).values(
@@ -66,10 +59,10 @@ class GithubUserInstallationRepository:
                     "updated_at": sa.func.now(),
                 },
             )
-            await session.execute(stmt)
+            await session.read_session.execute(stmt)
 
         if api_installation_ids:
-            await session.execute(
+            await session.read_session.execute(
                 delete(RDBGithubUserInstallation).where(
                     RDBGithubUserInstallation.user_id == user_id,
                     RDBGithubUserInstallation.platform_app_id == platform_app_id,
@@ -79,7 +72,7 @@ class GithubUserInstallationRepository:
                 )
             )
         else:
-            await session.execute(
+            await session.read_session.execute(
                 delete(RDBGithubUserInstallation).where(
                     RDBGithubUserInstallation.user_id == user_id,
                     RDBGithubUserInstallation.platform_app_id == platform_app_id,
@@ -88,13 +81,13 @@ class GithubUserInstallationRepository:
 
     async def has_access(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         user_id: str,
         platform_app_id: str,
         installation_id: int,
     ) -> bool:
         """Check App-scoped installation ownership."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             select(RDBGithubUserInstallation.id).where(
                 RDBGithubUserInstallation.user_id == user_id,
                 RDBGithubUserInstallation.platform_app_id == platform_app_id,
@@ -105,7 +98,7 @@ class GithubUserInstallationRepository:
 
     async def list_accessible_installation_ids(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         user_id: str,
         platform_app_id: str,
@@ -114,7 +107,7 @@ class GithubUserInstallationRepository:
         """Return selected App-scoped installation authority rows."""
         if not installation_ids:
             return frozenset()
-        result = await session.execute(
+        result = await session.read_session.execute(
             select(RDBGithubUserInstallation.installation_id).where(
                 RDBGithubUserInstallation.user_id == user_id,
                 RDBGithubUserInstallation.platform_app_id == platform_app_id,

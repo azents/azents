@@ -5,26 +5,29 @@ from collections.abc import Sequence
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentSessionStatus,
     MailboxItemKind,
     MailboxSchedulingMode,
 )
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import AgentRunRepository
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.mailbox import MailboxRepository
-from azents.repos.mailbox.data import (
+from azents.core.mailbox_data import (
     MailboxEnvelopePayload,
     MailboxItem,
     MailboxItemCreate,
 )
+from azents.core.session_execution_data import SessionExecutionRecord
+from azents.core.session_resource_authority import SessionExecutionOwner
+from azents.rdb.deps import get_session_manager
+from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
+from azents.repos.agent_execution import AgentRunRepository
+from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.mailbox import MailboxRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
-from azents.repos.session_execution import (
-    CanonicalExecutionOwnerGenerationStaleError,
+from azents.repos.session_execution.ownership import (
+    fence_owned_session_mutation,
+    validate_session_execution_owner,
 )
 
 
@@ -75,7 +78,7 @@ class IdleContinuationRepository:
     """Own idle eligibility and atomic continuation finalization."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
     agent_session_repository: Annotated[
@@ -104,11 +107,14 @@ class IdleContinuationRepository:
     ) -> IdleBoundaryEligibility:
         """Return completed pre-hook true-idle eligibility."""
         async with self.session_manager() as session:
+            current = await validate_session_execution_owner(
+                session, SessionExecutionOwner(session_id, owner_generation)
+            )
             return await self._eligibility(
                 session,
                 session_id,
                 run_id,
-                owner_generation=owner_generation,
+                current=current,
             )
 
     async def finalize(
@@ -122,11 +128,14 @@ class IdleContinuationRepository:
         """Revalidate, admit continuations, and consume the boundary atomically."""
         try:
             async with self.session_manager() as session:
+                current = await fence_owned_session_mutation(
+                    session, SessionExecutionOwner(session_id, owner_generation)
+                )
                 eligibility = await self._eligibility(
                     session,
                     session_id,
                     run_id,
-                    owner_generation=owner_generation,
+                    current=current,
                 )
                 if not eligibility.eligible:
                     return IdleContinuationFinalization(
@@ -170,23 +179,19 @@ class IdleContinuationRepository:
 
     async def _eligibility(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
         run_id: str,
         *,
-        owner_generation: int,
+        current: SessionExecutionRecord,
     ) -> IdleBoundaryEligibility:
-        """Evaluate the canonical true-idle fence in one transaction."""
-        locked = await self.agent_session_repository.wait_for_execution_lock_by_id(
-            session,
-            session_id,
+        """Evaluate true-idle state after observation or mutation admission."""
+        locked = current
+        conversation = await self.agent_session_repository.get_by_id(
+            session, session_id
         )
-        if locked is None:
-            raise ValueError("AgentSession not found")
-        if locked.owner_generation != owner_generation:
-            raise CanonicalExecutionOwnerGenerationStaleError(
-                "Session owner generation is stale during idle continuation"
-            )
+        if conversation is None:
+            return IdleBoundaryEligibility(False, None)
         archived_cycle_id: str | None = None
         if locked.status is not AgentSessionStatus.ACTIVE:
             if locked.status is not AgentSessionStatus.ARCHIVED:
@@ -204,9 +209,9 @@ class IdleContinuationRepository:
             if cycle is None or cycle.state.current_run_id != run_id:
                 return IdleBoundaryEligibility(False, None)
             archived_cycle_id = cycle_id
-        if locked.pending_idle_continuation_run_id != run_id:
+        if conversation.pending_idle_continuation_run_id != run_id:
             return IdleBoundaryEligibility(False, None)
-        if locked.pending_command_id is not None:
+        if conversation.pending_command_id is not None:
             return IdleBoundaryEligibility(False, None)
         pending_wake_input = (
             await self.mailbox_repository.has_by_session_id_and_scheduling_mode(
@@ -227,7 +232,7 @@ class IdleContinuationRepository:
 
     async def _enqueue(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         input: IdleContinuationInput,
     ) -> IdleContinuationAdmission:
         """Idempotently create one wake-producing continuation."""

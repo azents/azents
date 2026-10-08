@@ -8,26 +8,29 @@ from typing import Annotated
 
 import httpx
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ExternalChannelProvider
+from azents.core.external_channel_conversation_data import (
+    ExternalChannelHistoryCredentialsInvalid,
+    ExternalChannelHistoryRange,
+    ExternalChannelHistoryTemporaryFailure,
+    ExternalChannelOperationDeadline,
+)
 from azents.core.external_channel_file import external_channel_file_metadata_items
+from azents.core.external_channel_ingestion import (
+    ExternalChannelCanonicalHistoryMessage,
+    ExternalChannelTriggerLocator,
+)
 from azents.core.external_channel_provider import (
     DiscordConnectionCredentials,
     SlackConnectionCredentials,
 )
 from azents.core.external_channel_reference import provider_reference_mappings_size
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.ingestion_history_read import (
+    ExternalChannelHistoryReadRepository,
+)
 from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
-)
-from azents.services.external_channel.conversation import (
-    ExternalChannelHistoryCredentialsInvalid,
-    ExternalChannelHistoryRange,
-    ExternalChannelHistoryTemporaryFailure,
-    ExternalChannelOperationDeadline,
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.discord_events import DiscordNormalizedMessage
@@ -38,10 +41,6 @@ from azents.services.external_channel.discord_history import (
 from azents.services.external_channel.discord_sdk import (
     DiscordSDKClientFactory,
     get_discord_sdk_client_factory,
-)
-from azents.services.external_channel.ingestion import (
-    ExternalChannelCanonicalHistoryMessage,
-    ExternalChannelTriggerLocator,
 )
 from azents.services.external_channel.slack_events import (
     SlackConversationClient,
@@ -92,13 +91,9 @@ def get_ingestion_discord_conversation_client(
 class ExternalChannelProviderHistoryReader:
     """Read provider history and return one provider-neutral canonical range."""
 
-    session_manager: Annotated[
-        SessionManager[AsyncSession],
-        Depends(get_session_manager),
-    ]
-    repository: Annotated[
-        ExternalChannelRepository,
-        Depends(ExternalChannelRepository.create),
+    read_operations: Annotated[
+        ExternalChannelHistoryReadRepository,
+        Depends(ExternalChannelHistoryReadRepository),
     ]
     credentials_codec: Annotated[
         ExternalChannelCredentialsCodec,
@@ -121,11 +116,9 @@ class ExternalChannelProviderHistoryReader:
         deadline: ExternalChannelOperationDeadline,
     ) -> ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage]:
         """Read one exact-trigger range without retaining credentials or raw pages."""
-        async with self.session_manager() as session:
-            configuration = await self.repository.get_connection_configuration(
-                session,
-                connection_id=locator.connection_id,
-            )
+        configuration = await self.read_operations.get_configuration(
+            connection_id=locator.connection_id
+        )
         if (
             configuration is None
             or configuration.provider is not locator.provider
@@ -298,11 +291,9 @@ async def _optional_slack_reference_cache(
     reference_user_ids: set[str] = set()
     channel_ids: set[str] = set()
     for message in messages:
-        message_user_ids, message_channel_ids = slack_message_reference_ids(
-            message.normalized_body
-        )
-        reference_user_ids.update(message_user_ids)
-        channel_ids.update(message_channel_ids)
+        references = slack_message_reference_ids(message.normalized_body)
+        reference_user_ids.update(references.user_ids)
+        channel_ids.update(references.channel_ids)
 
     user_ids = [
         *author_ids,
@@ -364,7 +355,9 @@ def _canonical_slack(
     reference_cache: dict[str, dict[str, str]],
 ) -> ExternalChannelCanonicalHistoryMessage:
     """Convert one normalized Slack history item without a raw event dependency."""
-    user_ids, channel_ids = slack_message_reference_ids(message.normalized_body)
+    references = slack_message_reference_ids(message.normalized_body)
+    user_ids = references.user_ids
+    channel_ids = references.channel_ids
     if message.provider_user_id is not None:
         user_ids.add(message.provider_user_id)
     reference_mappings: dict[str, object] = {}

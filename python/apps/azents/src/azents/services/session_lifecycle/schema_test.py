@@ -1,6 +1,6 @@
 """Installed PostgreSQL lifecycle graph reader and validator tests."""
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from azents.core.session_lifecycle import (
     SessionLifecycleOwnershipManifest,
@@ -8,15 +8,20 @@ from azents.core.session_lifecycle import (
     SessionLifecycleResourceClassification,
     SessionLifecycleResourceKind,
 )
-from azents.services.session_lifecycle.registry import (
+from azents.core.session_lifecycle_registry import (
     get_session_lifecycle_ownership_manifest,
 )
-from azents.services.session_lifecycle.schema import (
+from azents.core.session_lifecycle_schema import (
     PostgreSQLForeignKey,
     PostgreSQLForeignKeyDeleteAction,
-    PostgreSQLSessionLifecycleGraphReader,
-    SessionLifecycleSchemaValidator,
 )
+from azents.rdb.session_capabilities import (
+    create_read_only_session_manager,
+)
+from azents.repos.session_lifecycle_schema import (
+    PostgreSQLSessionLifecycleGraphRepository,
+)
+from azents.services.session_lifecycle.schema import SessionLifecycleSchemaValidator
 
 
 def _foreign_key(
@@ -115,12 +120,13 @@ def test_external_channel_manifest_excludes_canonical_provider_state() -> None:
 
 
 async def test_installed_catalog_reader_exposes_worktree_finalizer_boundary(
-    rdb_session: AsyncSession,
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
 ) -> None:
     """Installed worktree FKs retain the explicit database finalizer boundary."""
-    foreign_keys = await PostgreSQLSessionLifecycleGraphReader().read_foreign_keys(
-        rdb_session
-    )
+    foreign_keys = await PostgreSQLSessionLifecycleGraphRepository(
+        create_read_only_session_manager(rdb_engine)
+    ).read_foreign_keys()
     worktree_foreign_keys = [
         foreign_key
         for foreign_key in foreign_keys
@@ -157,12 +163,13 @@ async def test_installed_catalog_reader_exposes_worktree_finalizer_boundary(
 
 
 async def test_installed_catalog_restricts_agent_decommission_lifecycle_roots(
-    rdb_session: AsyncSession,
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
 ) -> None:
     """Fresh migrated PostgreSQL protects Agent and Workspace lifecycle roots."""
-    foreign_keys = await PostgreSQLSessionLifecycleGraphReader().read_foreign_keys(
-        rdb_session
-    )
+    foreign_keys = await PostgreSQLSessionLifecycleGraphRepository(
+        create_read_only_session_manager(rdb_engine)
+    ).read_foreign_keys()
     expected_constraints = {
         "agents_workspace_id_fkey",
         "agent_sessions_workspace_id_fkey",

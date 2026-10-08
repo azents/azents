@@ -38,12 +38,42 @@ class TestRuntimeInfrastructureProfileSpec(unittest.TestCase):
                 profile_kind = 'docker_container',
                 contract_family = 'docker.container-profile',
                 schema_version = 2,
-                runner_resources = { },
-                workspace_volume = { },
-                network_policy = { },
+                runner_resources = azentspublicclient.models.docker_container_resources.DockerContainerResources(
+                    cpu_reservation_millicores = 1.0, 
+                    cpu_limit_millicores = 1.0, 
+                    memory_reservation_bytes = 1.0, 
+                    memory_limit_bytes = 1.0, ),
+                workspace_volume = azentspublicclient.models.kubernetes_workspace_volume.KubernetesWorkspaceVolume(
+                    storage_class_name = '0', 
+                    storage_request_bytes = 1.0, ),
+                network_policy = azentspublicclient.models.runtime_network_policy_module.RuntimeNetworkPolicyModule(
+                    allowed_cidrs = [
+                        ''
+                        ], 
+                    denied_cidrs = [
+                        ''
+                        ], ),
                 service_account_name = '',
-                scheduling = { },
-                dind = { },
+                scheduling = azentspublicclient.models.kubernetes_scheduling_module.KubernetesSchedulingModule(
+                    node_selector = {
+                        'key' : ''
+                        }, 
+                    tolerations = [
+                        azentspublicclient.models.kubernetes_toleration.KubernetesToleration(
+                            key = '0', 
+                            operator = 'Equal', 
+                            value = '', 
+                            effect = 'NoSchedule', 
+                            toleration_seconds = 0.0, )
+                        ], ),
+                dind = azentspublicclient.models.kubernetes_din_d_module.KubernetesDinDModule(
+                    engine_resources = azentspublicclient.models.kubernetes_container_resources.KubernetesContainerResources(
+                        cpu_request_millicores = 1.0, 
+                        cpu_limit_millicores = 1.0, 
+                        memory_request_bytes = 1.0, 
+                        memory_limit_bytes = 1.0, ), 
+                    docker_storage_bytes = 1.0, 
+                    shared_temporary_storage_bytes = 1.0, ),
                 network_access = None,
                 network_name = ''
             )
@@ -52,12 +82,42 @@ class TestRuntimeInfrastructureProfileSpec(unittest.TestCase):
                 profile_kind = 'docker_container',
                 contract_family = 'docker.container-profile',
                 schema_version = 2,
-                runner_resources = { },
-                workspace_volume = { },
-                network_policy = { },
+                runner_resources = azentspublicclient.models.docker_container_resources.DockerContainerResources(
+                    cpu_reservation_millicores = 1.0, 
+                    cpu_limit_millicores = 1.0, 
+                    memory_reservation_bytes = 1.0, 
+                    memory_limit_bytes = 1.0, ),
+                workspace_volume = azentspublicclient.models.kubernetes_workspace_volume.KubernetesWorkspaceVolume(
+                    storage_class_name = '0', 
+                    storage_request_bytes = 1.0, ),
+                network_policy = azentspublicclient.models.runtime_network_policy_module.RuntimeNetworkPolicyModule(
+                    allowed_cidrs = [
+                        ''
+                        ], 
+                    denied_cidrs = [
+                        ''
+                        ], ),
                 service_account_name = '',
-                scheduling = { },
-                dind = { },
+                scheduling = azentspublicclient.models.kubernetes_scheduling_module.KubernetesSchedulingModule(
+                    node_selector = {
+                        'key' : ''
+                        }, 
+                    tolerations = [
+                        azentspublicclient.models.kubernetes_toleration.KubernetesToleration(
+                            key = '0', 
+                            operator = 'Equal', 
+                            value = '', 
+                            effect = 'NoSchedule', 
+                            toleration_seconds = 0.0, )
+                        ], ),
+                dind = azentspublicclient.models.kubernetes_din_d_module.KubernetesDinDModule(
+                    engine_resources = azentspublicclient.models.kubernetes_container_resources.KubernetesContainerResources(
+                        cpu_request_millicores = 1.0, 
+                        cpu_limit_millicores = 1.0, 
+                        memory_request_bytes = 1.0, 
+                        memory_limit_bytes = 1.0, ), 
+                    docker_storage_bytes = 1.0, 
+                    shared_temporary_storage_bytes = 1.0, ),
                 network_access = None,
                 network_name = '',
         )

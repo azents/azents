@@ -4,10 +4,9 @@ import datetime
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
-from typing import cast
 
 from azents.core.enums import ExternalChannelConversationScopeKind
-from azents.services.external_channel.conversation import (
+from azents.core.external_channel_conversation_data import (
     ExternalChannelConversationLockLease,
     ExternalChannelConversationScope,
     ExternalChannelOperationDeadline,
@@ -16,6 +15,15 @@ from azents.services.external_channel.conversation import (
 from azents.services.external_channel.participation_lock import (
     NamespacedExternalChannelParticipationLock,
 )
+
+
+@dataclass
+class _Lease:
+    async def assert_owned(self) -> None:
+        pass
+
+    async def release(self) -> None:
+        pass
 
 
 @dataclass
@@ -33,7 +41,7 @@ class _ConversationLock:
 
         @asynccontextmanager
         async def owned() -> AsyncIterator[ExternalChannelConversationLockLease]:
-            yield cast(ExternalChannelConversationLockLease, object())
+            yield _Lease()
 
         return owned()
 

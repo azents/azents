@@ -7,12 +7,11 @@ import secrets
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Protocol
 
-from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
-from azents.services.external_channel.conversation import (
+from azents.core.external_channel_conversation_data import (
     ExternalChannelConversationLock,
     ExternalChannelConversationLockLease,
     ExternalChannelConversationLockOwnershipLost,
@@ -45,6 +44,18 @@ if redis.call("GET", KEYS[1]) == ARGV[1] then
 end
 return 0
 """
+
+
+class ConversationLockRedis(Protocol):
+    """Awaitable Redis commands used by owner-token lease fencing."""
+
+    def set(
+        self, key: str, value: str, /, *, nx: bool, px: int
+    ) -> Awaitable[bool | str | bytes | None]: ...
+
+    def eval(
+        self, script: str, numkeys: int, /, *keys_and_args: bytes | str | int | float
+    ) -> Awaitable[object]: ...
 
 
 def _remaining_seconds(deadline: ExternalChannelOperationDeadline) -> float:
@@ -142,7 +153,7 @@ class InMemoryExternalChannelConversationLock(ExternalChannelConversationLock):
 
 @dataclass
 class _RedisLease:
-    redis: Redis
+    redis: ConversationLockRedis
     key: str
     owner: str
     ttl_milliseconds: int
@@ -161,9 +172,7 @@ class _RedisLease:
             )
         try:
             result = await _await_with_deadline(
-                lambda: cast(Any, self.redis).eval(
-                    _ASSERT_SCRIPT, 1, self.key, self.owner
-                ),
+                lambda: self.redis.eval(_ASSERT_SCRIPT, 1, self.key, self.owner),
                 deadline=self.deadline,
             )
         except ExternalChannelConversationLockTimeout:
@@ -184,7 +193,7 @@ class _RedisLease:
                 if self.released:
                     return
                 try:
-                    result = await cast(Any, self.redis).eval(
+                    result = await self.redis.eval(
                         _RENEW_SCRIPT,
                         1,
                         self.key,
@@ -206,7 +215,7 @@ class _RedisLease:
             self.renewal_task.cancel()
             await asyncio.gather(self.renewal_task, return_exceptions=True)
         try:
-            result = await cast(Any, self.redis).eval(
+            result = await self.redis.eval(
                 _RELEASE_SCRIPT,
                 1,
                 self.key,
@@ -227,7 +236,7 @@ class RedisExternalChannelConversationLock(ExternalChannelConversationLock):
 
     def __init__(
         self,
-        redis: Redis,
+        redis: ConversationLockRedis,
         *,
         key_prefix: str = _DEFAULT_KEY_PREFIX,
         lease_ttl_seconds: float = 30.0,

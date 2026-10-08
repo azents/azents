@@ -1,6 +1,6 @@
 # ModelModalities
 
-Input/output modalities supported by the model.
+Supported input/output forms; absent entries mean unsupported.
 
 ## Properties
 

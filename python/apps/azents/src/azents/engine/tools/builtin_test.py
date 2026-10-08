@@ -11,7 +11,9 @@ from typing import Any, Protocol, runtime_checkable
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from cryptography.fernet import Fernet
 
+from azents.core.crypto import CredentialCipher
 from azents.core.engine_tool_state import AgentsAppendixDedupeState
 from azents.core.enums import (
     AgentRuntimeCapability,
@@ -21,6 +23,7 @@ from azents.core.enums import (
     RuntimeProviderObservedState,
     RuntimeRunnerState,
 )
+from azents.core.historical_memory_context import MemoryContextPrompt
 from azents.core.runtime_capabilities import (
     RuntimeCapabilityResolver,
     RuntimeCapabilitySnapshot,
@@ -29,6 +32,11 @@ from azents.core.runtime_profile import (
     RuntimeConfigurationDocument,
     RuntimeConfigurationStateStatus,
 )
+from azents.core.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
+)
+from azents.core.session_workspace_project import SessionWorkspaceProject
 from azents.core.tools import (
     ResolveContext,
     ShellToolkitConfig,
@@ -41,7 +49,7 @@ from azents.engine.events.engine_events import (
     RuntimeReadyEvent,
 )
 from azents.engine.events.types import ClientToolResultPayload, Event
-from azents.engine.hooks.types import SessionCompactHookContext
+from azents.engine.hooks.types import RunStartHookContext, SessionCompactHookContext
 from azents.engine.run.emit import PublishedEvent, durable, handle_engine_event
 from azents.engine.run.types import (
     FunctionTool,
@@ -54,8 +62,9 @@ from azents.engine.tools import builtin as builtin_module
 from azents.engine.tools.builtin import (
     BuiltinToolkit,
     BuiltinToolkitProvider,
-    MemoryReadToolkit,
+    MemoryContextToolkit,
     MemoryWriteToolkit,
+    ReadableStorageToolkit,
     RuntimeRunnerFileStorage,
     RuntimeToolkit,
 )
@@ -93,15 +102,18 @@ from azents.engine.tools.write import make_write_tool
 from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.engine_tool_repositories import (
+    EngineToolRepositories,
+    get_engine_tool_repositories,
+)
 from azents.repos.memory import MemoryRepository
-from azents.repos.memory.data import MemorySummary
 from azents.repos.runtime_profile.data import (
     RuntimeConfigurationAppliedSlot,
     RuntimeConfigurationSlot,
     RuntimeConfigurationState,
 )
+from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
-from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.runtime.transfer.runtime_image_read import (
     RuntimeImageReadError,
     RuntimeImageReadService,
@@ -116,8 +128,10 @@ from azents.services.agent_runtime.lifecycle_data import (
 )
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
+from azents.services.historical_memory.context_snapshot import (
+    MemoryContextSnapshotService,
+)
 from azents.services.runtime_storage_error import RuntimeStorageError
-from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.services.session_working_folder_binding import (
     SessionWorkingFolderAuthority,
     SessionWorkingFolderBindingService,
@@ -151,9 +165,7 @@ async def test_ready_runtime_for_agent_forwards_shared_wait_options() -> None:
     service.resolve_operation_target.return_value = target
 
     result = await builtin_module._ready_runtime_for_agent(
-        agent_runtime_repo=AsyncMock(spec=AgentRuntimeRepository),
         agent_runtime_service=service,
-        session_manager=_make_mock_session_manager(),
         agent_id="agent-1",
         wait_timeout_seconds=4.0,
         poll_interval_seconds=0.25,
@@ -169,6 +181,47 @@ async def test_ready_runtime_for_agent_forwards_shared_wait_options() -> None:
     )
 
 
+async def test_readable_storage_toolkit_exposes_generic_reads_without_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Runtime denial does not remove read, grep, or glob from model context."""
+    monkeypatch.setattr(
+        builtin_module,
+        "_resolve_associated_user_id",
+        AsyncMock(return_value=None),
+    )
+    toolkit = ReadableStorageToolkit(
+        config=ShellToolkitConfig(memory_enabled=True),
+        agent_id="agent-1",
+        session_id="session-1",
+        vfs_read_router=AsyncMock(),
+        repositories=_tool_repositories(
+            session_manager=_make_mock_session_manager(),
+            memory_repo=_make_mock_memory_repo(),
+        ),
+    )
+    toolkit.set_runtime_capability_resolver(
+        RuntimeCapabilityResolver.from_agent(
+            state=AgentRuntimeCapability.NONE,
+            version=1,
+        )
+    )
+    authority = SessionResourceAuthority(
+        workspace_id="ws-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        root_session_id="session-1",
+        run_id="run-1",
+        run_index=1,
+        owner_generation=1,
+    )
+
+    state = await toolkit.update_context(_make_context(resource_authority=authority))
+
+    assert state.status.value == "enabled"
+    assert {tool.spec.name for tool in state.tools} == {"read", "grep", "glob"}
+
+
 def test_runtime_toolkit_requires_prompt_selected_authority() -> None:
     """Runtime tools fail closed before any desired Profile was presented."""
     toolkit = _make_toolkit()
@@ -176,6 +229,58 @@ def test_runtime_toolkit_requires_prompt_selected_authority() -> None:
 
     with pytest.raises(RuntimeStorageError, match="currently unavailable"):
         toolkit._required_runtime_authority()
+
+
+async def test_file_tool_owner_registers_mutations_once_without_starting_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The generic owner assembles lazy native adapters, not duplicate tools."""
+    monkeypatch.setattr(
+        builtin_module, "_resolve_associated_user_id", AsyncMock(return_value=None)
+    )
+    runtime = _make_toolkit()
+    generic = ReadableStorageToolkit(
+        config=ShellToolkitConfig(memory_enabled=True),
+        agent_id="agent-1",
+        session_id="session-1",
+        repositories=_tool_repositories(
+            session_manager=_make_mock_session_manager(),
+        ),
+        vfs_read_router=AsyncMock(),
+    )
+    generic.set_runtime_capability_resolver(
+        RuntimeCapabilityResolver.from_agent(
+            state=AgentRuntimeCapability.MANAGED, version=1
+        )
+    )
+    generic.set_runtime_storage_provider(runtime)
+    authority = SessionResourceAuthority(
+        workspace_id="ws-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        root_session_id="session-1",
+        run_id="run-1",
+        run_index=1,
+        owner_generation=1,
+    )
+    state = await generic.update_context(_make_context(resource_authority=authority))
+    assert {tool.spec.name for tool in state.tools} == {
+        "read",
+        "grep",
+        "glob",
+        "write",
+        "edit",
+        "delete",
+        "apply_patch",
+    }
+    _runtime_repo(runtime).get_by_agent_id.assert_not_awaited()
+    tool = _find_tool(state.tools, "write")
+    with pytest.raises(FunctionToolError, match="VFS mutation mount is unavailable"):
+        await tool.handler('{"path":"azents://skills/global/SKILL.md","content":"no"}')
+    _runtime_repo(runtime).get_by_agent_id.assert_not_awaited()
+    native_state = await runtime.update_context(_make_context())
+    names = [tool.spec.name for tool in [*state.tools, *native_state.tools]]
+    assert len(names) == len(set(names))
 
 
 def test_agents_appendix_supports_filesystem_root_workspace() -> None:
@@ -217,7 +322,6 @@ def _make_resolve_context(
         credentials_json=None,
         agent_id=agent_id,
         session_id=session_id,
-        session=AsyncMock(),
         web_url="https://example.test",
         oauth_secret_key="test-secret",
         workspace_id=workspace_id,
@@ -235,24 +339,86 @@ def _make_mock_session_manager() -> SessionManager[AsyncMock]:
     return _session_manager
 
 
-def _make_mock_memory_repo(
-    agent_summaries: list[MemorySummary] | None = None,
-) -> MemoryRepository:
+def _make_mock_memory_repo() -> MemoryRepository:
     """Create MemoryRepository mock for tests."""
-    repo = AsyncMock(spec=MemoryRepository)
+    return AsyncMock(spec=MemoryRepository)
 
-    async def _list_summaries(
-        session: object,  # noqa: ARG001
+
+def _tool_repositories(
+    *,
+    session_manager: SessionManager[AsyncMock],
+    memory_repo: MemoryRepository | None = None,
+    agent_runtime_repo: AgentRuntimeRepository | None = None,
+    agent_session_repository: AgentSessionRepository | None = None,
+    project_repo: SessionWorkspaceProjectRepository | None = None,
+    runtime_profile_repository: RuntimeProfileRepository | None = None,
+) -> EngineToolRepositories:
+    """Compose actual completed operations around the existing owned DB fixtures."""
+    return get_engine_tool_repositories(
+        session_manager=session_manager,
+        read_session_manager=session_manager,
+        cipher=CredentialCipher(Fernet.generate_key().decode()),
+        memory_repository=memory_repo
+        if memory_repo is not None
+        else _make_mock_memory_repo(),
+        agent_runtime_repository=agent_runtime_repo
+        if agent_runtime_repo is not None
+        else _make_runtime_repo(),
+        agent_session_repository=agent_session_repository
+        if agent_session_repository is not None
+        else AsyncMock(spec=AgentSessionRepository),
+        runtime_profile_repository=runtime_profile_repository
+        if runtime_profile_repository is not None
+        else AsyncMock(spec=RuntimeProfileRepository),
+        project_repository=project_repo
+        if project_repo is not None
+        else AsyncMock(spec=SessionWorkspaceProjectRepository),
+    )
+
+
+class _MemoryContextSnapshotServiceDouble(MemoryContextSnapshotService):
+    """Explicit async Memory snapshot service double."""
+
+    def __init__(self, prompt: str) -> None:
+        self.prompt = prompt
+        self.session_ids: list[str] = []
+        self.refresh_session_ids: list[str] = []
+        self.compaction_refreshes: list[bool] = []
+        self.refresh_available = True
+
+    def with_owner(
+        self, owner: SessionExecutionOwner
+    ) -> "_MemoryContextSnapshotServiceDouble":
+        del owner
+        return self
+
+    async def refresh_snapshot(
+        self,
         *,
-        agent_id: str,  # noqa: ARG001
-        user_id: str | None,
-        type: str | None = None,  # noqa: ARG001
-    ) -> list[MemorySummary]:
-        assert user_id is None
-        return agent_summaries or []
+        session_id: str,
+        after_compaction: bool,
+    ) -> bool:
+        """Record explicit lifecycle refreshes independently of prompt reads."""
+        self.refresh_session_ids.append(session_id)
+        self.compaction_refreshes.append(after_compaction)
+        return self.refresh_available
 
-    repo.list_summaries = _list_summaries
-    return repo
+    async def context_for_turn(
+        self,
+        *,
+        session_id: str,
+    ) -> MemoryContextPrompt:
+        """Record the canonical root identity and return the configured prompt."""
+        self.session_ids.append(session_id)
+        return MemoryContextPrompt(
+            text=self.prompt, native_replay_context="synthetic-memory-selection"
+        )
+
+
+def _make_memory_snapshot_service(
+    prompt: str = "",
+) -> _MemoryContextSnapshotServiceDouble:
+    return _MemoryContextSnapshotServiceDouble(prompt)
 
 
 def _make_runtime_repo(
@@ -780,7 +946,7 @@ class _FakeRunnerOperations:
                     ),
                     size_bytes=attachment.size,
                 )
-                for attachment in attachments
+                for attachment in attachments.files
             ),
             final_cursor="0-1",
         )
@@ -854,7 +1020,9 @@ def _runner_operations(toolkit: RuntimeToolkit) -> _FakeRunnerOperations:
 
 def _runtime_repo(toolkit: RuntimeToolkit) -> AsyncMock:
     """Return the mocked Runtime repository attached to a toolkit."""
-    return require_instance(toolkit.agent_runtime_repo, AsyncMock)
+    return require_instance(
+        toolkit.repositories.runtime.agent_runtime_repository, AsyncMock
+    )
 
 
 def _runtime_service(toolkit: RuntimeToolkit) -> AsyncMock:
@@ -974,6 +1142,31 @@ def _make_toolkit(
     agent_runtime_service.resolve_operation_target.side_effect = (
         resolve_operation_target
     )
+
+    async def project_operation_target(
+        requested_agent_id: str,
+    ) -> RuntimeOperationTarget | None:
+        runtime = await agent_runtime_repo.get_by_agent_id(object(), requested_agent_id)
+        if (
+            runtime.desired_state is not RuntimeDesiredState.RUNNING
+            or runtime.runner_state is not RuntimeRunnerState.READY
+            or runtime.workspace_path is None
+        ):
+            return None
+        return RuntimeOperationTarget(
+            id=runtime.id,
+            runtime_capability_version=1,
+            desired_generation=runtime.desired_generation,
+            runner_generation=runtime.runner_generation,
+            configuration_sequence=runtime.configuration_sequence,
+            configuration_digest="a" * 64,
+            workspace_path=runtime.workspace_path,
+        )
+
+    agent_runtime_service.project_operation_target.side_effect = (
+        project_operation_target
+    )
+
     project_repo = AsyncMock(spec=SessionWorkspaceProjectRepository)
     project_repo.list_projects.return_value = projects or []
     agent_session_repository = AsyncMock(spec=AgentSessionRepository)
@@ -1010,6 +1203,23 @@ def _make_toolkit(
     session_working_folder_binding_service.resolve_bound_authority.side_effect = (
         resolve_binding
     )
+
+    async def project_binding(
+        *, agent_id: str, session_id: str, runtime_target: RuntimeOperationTarget
+    ) -> SessionWorkingFolderAuthority:
+        return await resolve_binding(
+            agent_id=agent_id,
+            session_id=session_id,
+            runtime_target=runtime_target,
+            capability_snapshot=RuntimeCapabilitySnapshot(
+                state=AgentRuntimeCapability.MANAGED,
+                version=runtime_target.runtime_capability_version,
+            ),
+        )
+
+    binding_service = session_working_folder_binding_service
+    binding_service.project_bound_authority_for_target.side_effect = project_binding
+
     if agents_store is None:
         agents_store = _FakeAgentsAppendixDedupeStateStore()
     if server_to_runtime_transfer_service is None:
@@ -1027,12 +1237,8 @@ def _make_toolkit(
         vfs_projection_service=None,
         agent_id=agent_id,
         runner_operations=runner_operations,
-        session_manager=session_manager,
-        agent_runtime_repo=agent_runtime_repo,
         agent_runtime_service=agent_runtime_service,
-        agent_session_repository=agent_session_repository,
-        session_working_folder_binding_service=(session_working_folder_binding_service),
-        project_repo=project_repo,
+        session_working_folder_binding_service=session_working_folder_binding_service,
         agents_store=agents_store,
         server_to_runtime_transfer_service=server_to_runtime_transfer_service,
         runtime_image_read_service=runtime_image_read_service,
@@ -1040,6 +1246,13 @@ def _make_toolkit(
         runtime_to_provider_delivery_service=runtime_to_provider_delivery_service,
         import_file_staging_configuration=_test_import_staging_configuration(),
         runtime_capability_resolver=runtime_capability_resolver,
+        repositories=_tool_repositories(
+            session_manager=session_manager,
+            agent_runtime_repo=agent_runtime_repo,
+            agent_session_repository=agent_session_repository,
+            project_repo=project_repo,
+            runtime_profile_repository=agent_runtime_service.runtime_profile_repository,
+        ),
     )
     toolkit.set_session_id(session_id)
     toolkit._expected_runtime_authority = RuntimeOperationAuthority(
@@ -1075,8 +1288,10 @@ def _make_builtin_toolkit(
     toolkit = BuiltinToolkit(
         config=config or ShellToolkitConfig(),
         agent_id=agent_id,
-        session_manager=session_manager or _make_mock_session_manager(),
-        memory_repo=memory_repo or _make_mock_memory_repo(),
+        repositories=_tool_repositories(
+            session_manager=session_manager or _make_mock_session_manager(),
+            memory_repo=memory_repo or _make_mock_memory_repo(),
+        ),
     )
     toolkit.set_session_id(session_id)
     return toolkit
@@ -1118,6 +1333,9 @@ class TestBuiltinToolkitProviderResolve:
             configuration_digest="a" * 64,
             workspace_path="/workspace/agent",
         )
+        runtime_service.project_operation_target.return_value = (
+            runtime_service.resolve_operation_target.return_value
+        )
         binding_service = AsyncMock(spec=SessionWorkingFolderBindingService)
         binding_service.resolve_bound_authority.return_value = (
             SessionWorkingFolderAuthority(
@@ -1128,17 +1346,18 @@ class TestBuiltinToolkitProviderResolve:
                 runtime_capability_version=1,
             )
         )
+        binding_service.project_bound_authority_for_target.return_value = (
+            binding_service.resolve_bound_authority.return_value
+        )
         provider = BuiltinToolkitProvider(
             exchange_file_service=AsyncMock(spec=ExchangeFileService),
             artifact_service=AsyncMock(spec=ArtifactService),
             model_file_service=AsyncMock(),
             vfs_projection_service=None,
+            vfs_read_router=AsyncMock(),
             agents_store=agents_store,
-            session_manager=_make_mock_session_manager(),
-            memory_repo=_make_mock_memory_repo(),
-            agent_runtime_repo=agent_runtime_repo,
+            memory_context_snapshot_service=_make_memory_snapshot_service(),
             agent_runtime_service=runtime_service,
-            agent_session_repository=AsyncMock(spec=AgentSessionRepository),
             session_working_folder_binding_service=binding_service,
             runner_operations=_FakeRunnerOperations(
                 {
@@ -1147,12 +1366,19 @@ class TestBuiltinToolkitProviderResolve:
                     "/workspace/agent/app/file.py": b"print('hi')",
                 }
             ),
-            project_repo=project_repo,
             server_to_runtime_transfer_service=AsyncMock(),
             runtime_image_read_service=None,
             runtime_to_server_publication_service=AsyncMock(),
             runtime_to_provider_delivery_service=AsyncMock(),
             import_file_staging_configuration=_test_import_staging_configuration(),
+            repositories=_tool_repositories(
+                session_manager=_make_mock_session_manager(),
+                memory_repo=_make_mock_memory_repo(),
+                agent_runtime_repo=agent_runtime_repo,
+                agent_session_repository=AsyncMock(spec=AgentSessionRepository),
+                project_repo=project_repo,
+                runtime_profile_repository=runtime_service.runtime_profile_repository,
+            ),
         )
         toolkit = await provider.resolve(
             ShellToolkitConfig(),
@@ -1246,9 +1472,14 @@ class TestRuntimeToolkitUpdateContext:
         assert "exec_command" in names
         assert "write_stdin" in names
         assert "bash" not in names
-        assert "edit" in names
-        assert "apply_patch" in names
-        assert {"read", "write", "delete", "glob", "grep"} <= names
+        assert {"write", "edit", "delete", "apply_patch"}.isdisjoint(names)
+        assert {tool.spec.name for tool in toolkit.make_mutation_tools()} == {
+            "write",
+            "edit",
+            "delete",
+            "apply_patch",
+        }
+        assert {"read", "glob", "grep"}.isdisjoint(names)
         assert names.isdisjoint({"import_file", "present_file", "read_image"})
 
     @pytest.mark.asyncio
@@ -1256,8 +1487,8 @@ class TestRuntimeToolkitUpdateContext:
         """Capability admission keeps the apply_patch transport adapter intact."""
         toolkit = _make_toolkit()
 
-        state = await toolkit.update_context(_make_context())
-        apply_patch = _find_tool(state.tools, "apply_patch")
+        await toolkit.update_context(_make_context())
+        apply_patch = _find_tool(toolkit.make_mutation_tools(), "apply_patch")
 
         assert isinstance(apply_patch.handler, PlaintextCustomToolHandler)
 
@@ -1274,7 +1505,7 @@ class TestRuntimeToolkitUpdateContext:
             return RuntimeCapabilitySnapshot(
                 state=(
                     AgentRuntimeCapability.MANAGED
-                    if provider_calls <= 3
+                    if provider_calls == 0
                     else AgentRuntimeCapability.NONE
                 ),
                 version=1,
@@ -1286,8 +1517,9 @@ class TestRuntimeToolkitUpdateContext:
             current_snapshot_provider=current_snapshot_provider,
         )
         toolkit = _make_toolkit(runtime_capability_resolver=resolver)
-        state = await toolkit.update_context(_make_context())
-        apply_patch = _find_tool(state.tools, "apply_patch")
+        await toolkit.update_context(_make_context())
+        assert provider_calls == 0
+        apply_patch = _find_tool(toolkit.make_mutation_tools(), "apply_patch")
 
         assert isinstance(apply_patch.handler, PlaintextCustomToolHandler)
         with pytest.raises(FunctionToolError) as error:
@@ -1412,7 +1644,7 @@ class TestRuntimeToolkitUpdateContext:
 
     @pytest.mark.asyncio
     async def test_update_context_does_not_wait_for_runtime_ready(self) -> None:
-        """A starting Runtime still exposes every required file service."""
+        """A starting Runtime still exposes process and file-mutation services."""
         transfer_service = AsyncMock()
         publication_service = AsyncMock()
         delivery_service = AsyncMock()
@@ -1426,9 +1658,10 @@ class TestRuntimeToolkitUpdateContext:
 
         state = await toolkit.update_context(_make_context())
 
-        assert {"exec_command", "write_stdin", "read"} <= {
+        assert {"exec_command", "write_stdin"} <= {
             tool.spec.name for tool in state.tools
         }
+        assert "write" in {tool.spec.name for tool in toolkit.make_mutation_tools()}
         instruction_context = require_instance(
             toolkit._agents_context,
             RuntimeInstructionContext,
@@ -1504,7 +1737,7 @@ class TestRuntimeToolkitUpdateContext:
         )
         await storage.delete("/workspace/agent/new.txt", agent_id="agent-1")
 
-        assert [attachment.uri for attachment in globbed] == [
+        assert [attachment.uri for attachment in globbed.files] == [
             "/workspace/agent/dir/item.txt",
             "/workspace/agent/file.txt",
             "/workspace/agent/new.txt",
@@ -1536,8 +1769,11 @@ class TestRuntimeToolkitUpdateContext:
             },
         )
         toolkit.set_runtime_agent_id("parent-agent")
-        state = await toolkit.update_context(_make_context())
-        read_tool = _find_tool(state.tools, "read")
+        await toolkit.update_context(_make_context())
+        read_tool = make_read_text_tool(
+            session_storage=toolkit.make_readable_storage(),
+            agent_id="child-agent",
+        )
         runner_operations = _runner_operations(toolkit)
         runtime_repo = _runtime_repo(toolkit)
 
@@ -1562,11 +1798,11 @@ class TestRuntimeToolkitUpdateContext:
         assert runtime_repo.get_by_agent_id.await_args.args[1] == "parent-agent"
 
     @pytest.mark.asyncio
-    async def test_read_and_agents_appendix_log_runtime_diagnostics(
+    async def test_read_and_agents_appendix_log_appendix_diagnostics(
         self,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Visible read and AGENTS appendix retain separate Runtime diagnostics."""
+        """Readable Runtime paths retain AGENTS appendix diagnostics."""
         caplog.set_level(logging.INFO)
         toolkit = _make_toolkit(
             storage_files={
@@ -1574,8 +1810,11 @@ class TestRuntimeToolkitUpdateContext:
                 "/workspace/agent/file.txt": b"body",
             }
         )
-        state = await toolkit.update_context(_make_context())
-        read_tool = _find_tool(state.tools, "read")
+        await toolkit.update_context(_make_context())
+        read_tool = make_read_text_tool(
+            session_storage=toolkit.make_readable_storage(),
+            agent_id="agent-1",
+        )
         runtime_repo = _runtime_repo(toolkit)
 
         output = await read_tool.handler(
@@ -1591,17 +1830,6 @@ class TestRuntimeToolkitUpdateContext:
 
         assert decision is not None
         assert runtime_repo.get_by_agent_id.await_count == 2
-        tool_record = next(
-            record
-            for record in caplog.records
-            if record.getMessage() == "Processed Runtime file tool"
-        )
-        tool_fields = vars(tool_record)
-        assert tool_fields["tool_name"] == "read"
-        assert tool_fields["tool_status"] == "completed"
-        assert tool_fields["runtime_operation_count"] == 1
-        assert tool_fields["session_id"] == "session-1"
-        assert tool_fields["tool_duration_ms"] >= 0
         appendix_record = next(
             record
             for record in caplog.records
@@ -2110,9 +2338,7 @@ async def test_runtime_file_storage_reads_one_bounded_range() -> None:
     )
     storage = RuntimeRunnerFileStorage(
         runner_operations=runner_operations,
-        agent_runtime_repo=_make_runtime_repo(),
         agent_runtime_service=AsyncMock(),
-        session_manager=_make_mock_session_manager(),
         runtime_agent_id="agent-1",
         owner_session_id="session-1",
     )
@@ -2153,9 +2379,7 @@ async def test_runtime_file_storage_revalidates_authority_for_each_operation() -
     service.resolve_operation_target.return_value = target
     storage = RuntimeRunnerFileStorage(
         runner_operations=runner_operations,
-        agent_runtime_repo=_make_runtime_repo(),
         agent_runtime_service=service,
-        session_manager=_make_mock_session_manager(),
         runtime_agent_id="agent-1",
         owner_session_id="session-1",
         expected_authority_provider=lambda: authority,
@@ -2182,9 +2406,7 @@ async def test_runtime_file_range_maps_runner_disconnect_to_storage_error() -> N
     runner_operations.read_unavailable_message = "runner disconnected"
     storage = RuntimeRunnerFileStorage(
         runner_operations=runner_operations,
-        agent_runtime_repo=_make_runtime_repo(),
         agent_runtime_service=AsyncMock(),
-        session_manager=_make_mock_session_manager(),
         runtime_agent_id="agent-1",
         owner_session_id="session-1",
     )
@@ -2207,9 +2429,7 @@ async def test_runtime_text_storage_maps_runner_disconnect_to_storage_error() ->
     runner_operations.read_unavailable_message = "runner disconnected"
     storage = RuntimeRunnerFileStorage(
         runner_operations=runner_operations,
-        agent_runtime_repo=_make_runtime_repo(),
         agent_runtime_service=AsyncMock(),
-        session_manager=_make_mock_session_manager(),
         runtime_agent_id="agent-1",
         owner_session_id="session-1",
     )
@@ -2234,9 +2454,7 @@ async def test_runtime_text_storage_maps_runner_decode_error() -> None:
     )
     storage = RuntimeRunnerFileStorage(
         runner_operations=runner_operations,
-        agent_runtime_repo=_make_runtime_repo(),
         agent_runtime_service=AsyncMock(),
-        session_manager=_make_mock_session_manager(),
         runtime_agent_id="agent-1",
         owner_session_id="session-1",
     )
@@ -2263,9 +2481,7 @@ async def test_runtime_text_storage_maps_unsupported_encoding() -> None:
     )
     storage = RuntimeRunnerFileStorage(
         runner_operations=runner_operations,
-        agent_runtime_repo=_make_runtime_repo(),
         agent_runtime_service=AsyncMock(),
-        session_manager=_make_mock_session_manager(),
         runtime_agent_id="agent-1",
         owner_session_id="session-1",
     )
@@ -2291,162 +2507,250 @@ async def test_runtime_text_storage_maps_unsupported_encoding() -> None:
 
 
 class TestBuiltinToolkitMemoryPrompt:
-    """Test whether memory information is included in prompt from update_context()."""
+    """Memory cutover prompt and mutation-surface tests."""
 
     @pytest.mark.asyncio
-    async def test_memory_enabled_includes_memory_rules(self) -> None:
-        """When memory_enabled=True, memory rules are included in prompt."""
-        config = ShellToolkitConfig(memory_enabled=True)
+    async def test_memory_enabled_includes_vfs_and_write_rules(self) -> None:
+        """Legacy builtin binding exposes generic VFS guidance and Saved writes."""
         toolkit = _make_builtin_toolkit(
-            config=config,
+            config=ShellToolkitConfig(memory_enabled=True),
             session_manager=_make_mock_session_manager(),
             memory_repo=_make_mock_memory_repo(),
         )
-        ctx = _make_context()
-        await toolkit.update_context(ctx)
-        assert (await toolkit.get_static_prompt(_make_context())) == ""
-        assert "Memories" in (await toolkit.get_dynamic_prompt(ctx))
-        dynamic_prompt = await toolkit.get_dynamic_prompt(ctx)
-        assert "Memory Rules" in dynamic_prompt
-        assert "loaded Agent Memory summaries as the primary index" in dynamic_prompt
-        assert "shared Agent Memory only" in dynamic_prompt
-        assert "User-scope Memory is unavailable" in dynamic_prompt
-        assert "ranked partial matches" in dynamic_prompt
+        context = _make_context()
+
+        state = await toolkit.update_context(context)
+        prompt = await toolkit.get_dynamic_prompt(context)
+
+        assert {tool.spec.name for tool in state.tools} == {
+            "save_memory",
+            "delete_memory",
+        }
+        assert "azents://memory/README.md" in prompt
+        assert "narrow `glob`" in prompt
+        assert "`grep` roots" in prompt
+        assert "with `agent` scope" in prompt
+        assert "What NOT to save" in prompt
 
     @pytest.mark.asyncio
     async def test_memory_disabled_excludes_memory(self) -> None:
-        """When memory_enabled=False, there is no memory-related prompt."""
-        config = ShellToolkitConfig(memory_enabled=False)
-        toolkit = _make_builtin_toolkit(config=config)
-        ctx = _make_context()
-        await toolkit.update_context(ctx)
-        assert "Memories" not in (await toolkit.get_static_prompt(_make_context()))
-        assert (await toolkit.get_dynamic_prompt(ctx)) == ""
+        """Memory disablement removes mutation tools and dynamic guidance."""
+        toolkit = _make_builtin_toolkit(config=ShellToolkitConfig(memory_enabled=False))
+        context = _make_context()
+
+        assert (await toolkit.update_context(context)).tools == []
+        assert await toolkit.get_dynamic_prompt(context) == ""
 
     @pytest.mark.asyncio
-    async def test_memory_write_prompt_reuses_read_shared_rules(self) -> None:
-        """Read prompt owns shared memory rules because write is never bound alone."""
-        config = ShellToolkitConfig(memory_enabled=True)
-        session_manager = _make_mock_session_manager()
-        memory_repo = _make_mock_memory_repo()
-        read_toolkit = MemoryReadToolkit(
-            config=config,
+    async def test_context_and_write_bindings_keep_separate_prompts(self) -> None:
+        """Boundary context owns VFS guidance and mutation owns write policy."""
+        context_toolkit = MemoryContextToolkit(
+            config=ShellToolkitConfig(memory_enabled=True),
             agent_id="agent-1",
-            session_manager=session_manager,
-            memory_repo=memory_repo,
-        )
-        write_toolkit = MemoryWriteToolkit(
-            config=config,
-            agent_id="agent-1",
-            session_manager=session_manager,
-            memory_repo=memory_repo,
-        )
-        ctx = _make_context()
-
-        read_prompt = await read_toolkit.get_dynamic_prompt(ctx)
-        write_prompt = await write_toolkit.get_dynamic_prompt(ctx)
-
-        assert "Types of memory" in read_prompt
-        assert "shared Agent Memory only" in read_prompt
-        assert "User-scope Memory is unavailable" in read_prompt
-        assert "Types of memory" not in write_prompt
-        assert "with `agent` scope" in write_prompt
-        assert "private personal preferences" in write_prompt
-        assert "What NOT to save" in write_prompt
-        assert "Duplicate prevention" in write_prompt
-        assert "empty search result alone" in write_prompt
-
-    @pytest.mark.asyncio
-    async def test_memory_index_included(self) -> None:
-        """When agent memory exists, index content is included in prompt."""
-        config = ShellToolkitConfig(memory_enabled=True)
-        toolkit = _make_builtin_toolkit(
-            config=config,
-            session_manager=_make_mock_session_manager(),
-            memory_repo=_make_mock_memory_repo(
-                agent_summaries=[
-                    MemorySummary(
-                        name="my-project",
-                        type="project",
-                        description="my project description",
-                    ),
-                ],
+            memory_context_snapshot_service=_make_memory_snapshot_service(
+                "## Memories\n\nSelected boundary snapshot"
             ),
         )
-        ctx = _make_context()
-        await toolkit.update_context(ctx)
-        assert "my-project" in (await toolkit.get_dynamic_prompt(ctx))
-        assert "my project description" in (await toolkit.get_dynamic_prompt(ctx))
-
-    @pytest.mark.asyncio
-    async def test_builtin_toolkit_excludes_runtime_tools(self) -> None:
-        """BuiltinToolkit does not expose shell/file tools."""
-        toolkit = BuiltinToolkit(
+        context_toolkit.set_session_id("session-1")
+        write_toolkit = MemoryWriteToolkit(
             config=ShellToolkitConfig(memory_enabled=True),
             agent_id="agent-1",
-            session_manager=_make_mock_session_manager(),
-            memory_repo=_make_mock_memory_repo(),
-        )
-        ctx = _make_context()
-
-        state = await toolkit.update_context(ctx)
-
-        tool_names = {tool.spec.name for tool in state.tools}
-        assert "save_memory" in tool_names
-        assert "search_memories" in tool_names
-        assert {
-            "search_sessions",
-            "read_session_history",
-            "read_session_tool_result",
-        } <= tool_names
-        assert "bash" not in tool_names
-        assert "exec_command" not in tool_names
-        assert "Runtime Files" not in (await toolkit.get_static_prompt(_make_context()))
-        assert "Memories" in (await toolkit.get_dynamic_prompt(ctx))
-
-    @pytest.mark.asyncio
-    async def test_history_tools_are_memory_gated_in_read_binding(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The root/subagent Memory read binding owns the three history tools."""
-        monkeypatch.setattr(
-            builtin_module,
-            "_resolve_associated_user_id",
-            AsyncMock(return_value=None),
+            repositories=_tool_repositories(
+                session_manager=_make_mock_session_manager(),
+                memory_repo=_make_mock_memory_repo(),
+            ),
         )
         context = _make_context()
-        enabled = MemoryReadToolkit(
+
+        context_prompt = await context_toolkit.get_dynamic_prompt(context)
+        write_prompt = await write_toolkit.get_dynamic_prompt(context)
+
+        assert "Selected boundary snapshot" in context_prompt
+        assert "azents://memory/README.md" in context_prompt
+        assert "never mutates Saved Memory automatically" in context_prompt
+        assert "What NOT to save" not in context_prompt
+        assert "What NOT to save" in write_prompt
+        assert "azents://memory/README.md" in write_prompt
+        assert (await context_toolkit.update_context(context)).tools == []
+        assert {
+            tool.spec.name
+            for tool in (await write_toolkit.update_context(context)).tools
+        } == {
+            "save_memory",
+            "delete_memory",
+        }
+
+    @pytest.mark.asyncio
+    async def test_subagent_memory_prompt_uses_canonical_root_session(self) -> None:
+        """Subagents inherit the root snapshot without widening its authority."""
+        snapshot_service = _make_memory_snapshot_service("root snapshot")
+        toolkit = MemoryContextToolkit(
             config=ShellToolkitConfig(memory_enabled=True),
             agent_id="agent-1",
-            session_manager=_make_mock_session_manager(),
-            memory_repo=_make_mock_memory_repo(),
+            memory_context_snapshot_service=snapshot_service,
         )
-        enabled.set_session_id("session-1")
-        exposed = (await enabled.update_context(context)).tools
-        names = [tool.spec.name for tool in exposed]
-        for name in (
-            "search_sessions",
-            "read_session_history",
-            "read_session_tool_result",
-        ):
-            assert names.count(name) == 1
-            spec = next(tool.spec for tool in exposed if tool.spec.name == name)
-            assert spec.input_schema["type"] == "object"
-            assert "oneOf" not in spec.input_schema
-            assert "anyOf" not in spec.input_schema
+        toolkit.set_session_id("subagent-session")
+        toolkit.bind_execution_authority(
+            SessionResourceAuthority(
+                workspace_id="workspace-1",
+                agent_id="agent-1",
+                session_id="subagent-session",
+                root_session_id="root-session",
+                run_id="run-1",
+                run_index=1,
+                owner_generation=1,
+            )
+        )
 
-        disabled = MemoryReadToolkit(
+        run_start = toolkit.hooks().get("on_run_start")
+        compact = toolkit.hooks().get("on_session_compact")
+        assert run_start is not None
+        assert compact is not None
+        await run_start(
+            RunStartHookContext(
+                workspace_id="workspace-1",
+                agent_id="agent-1",
+                session_id="subagent-session",
+                run_id="child-run",
+            )
+        )
+        await compact(
+            SessionCompactHookContext(
+                workspace_id="workspace-1",
+                agent_id="agent-1",
+                session_id="subagent-session",
+                run_id="child-run",
+            )
+        )
+        prompt = await toolkit.get_dynamic_prompt(_make_context())
+
+        assert "root snapshot" in prompt
+        assert "azents://memory/README.md" in prompt
+        assert snapshot_service.session_ids == ["root-session"]
+        assert snapshot_service.refresh_session_ids == []
+
+    @pytest.mark.asyncio
+    async def test_root_run_preparation_refreshes_once_before_model_loop(self) -> None:
+        """Run-start preparation owns selection; repeated model calls only read."""
+        service = _make_memory_snapshot_service("first snapshot")
+        toolkit = MemoryContextToolkit(
+            config=ShellToolkitConfig(memory_enabled=True),
+            agent_id="agent-1",
+            memory_context_snapshot_service=service,
+        )
+        toolkit.set_session_id("root-session")
+        hook = toolkit.hooks().get("on_run_start")
+        assert hook is not None
+        await hook(
+            RunStartHookContext(
+                workspace_id="workspace-1",
+                agent_id="agent-1",
+                session_id="root-session",
+                run_id="first-run",
+            )
+        )
+        assert service.session_ids == []
+        assert service.refresh_session_ids == ["root-session"]
+        assert service.compaction_refreshes == [False]
+        for _ in range(3):
+            assert "first snapshot" in await toolkit.get_dynamic_prompt(_make_context())
+        assert service.compaction_refreshes == [False]
+
+        service.prompt = "next snapshot"
+        await hook(
+            RunStartHookContext(
+                workspace_id="workspace-1",
+                agent_id="agent-1",
+                session_id="root-session",
+                run_id="second-run",
+            )
+        )
+        assert "next snapshot" in await toolkit.get_dynamic_prompt(_make_context())
+        assert service.compaction_refreshes == [False, False]
+
+    @pytest.mark.asyncio
+    async def test_compaction_hook_refreshes_on_same_run_context_reconstruction(
+        self,
+    ) -> None:
+        """Compaction is an independent boundary, not the start of a later Run."""
+        service = _make_memory_snapshot_service("before compaction")
+        toolkit = MemoryContextToolkit(
+            config=ShellToolkitConfig(memory_enabled=True),
+            agent_id="agent-1",
+            memory_context_snapshot_service=service,
+        )
+        toolkit.set_session_id("root-session")
+        start = toolkit.hooks().get("on_run_start")
+        compact = toolkit.hooks().get("on_session_compact")
+        assert start is not None
+        assert compact is not None
+        await start(
+            RunStartHookContext(
+                workspace_id="workspace-1",
+                agent_id="agent-1",
+                session_id="root-session",
+                run_id="same-run",
+            )
+        )
+        context = _make_context()
+        assert "before compaction" in await toolkit.get_dynamic_prompt(context)
+        await compact(
+            SessionCompactHookContext(
+                workspace_id="workspace-1",
+                agent_id="agent-1",
+                session_id="root-session",
+                run_id="same-run",
+            )
+        )
+        assert service.compaction_refreshes == [False]
+        service.prompt = "after committed compaction"
+        assert "after committed compaction" in await toolkit.get_dynamic_prompt(context)
+        assert service.compaction_refreshes == [False, True]
+        await toolkit.get_dynamic_prompt(context)
+        assert service.compaction_refreshes == [False, True]
+
+    @pytest.mark.asyncio
+    async def test_failed_run_preparation_does_not_render_prior_snapshot(self) -> None:
+        """A failed refresh must not quietly reuse previously selected memory."""
+        service = _make_memory_snapshot_service("must not render")
+        service.refresh_available = False
+        toolkit = MemoryContextToolkit(
+            config=ShellToolkitConfig(memory_enabled=True),
+            agent_id="agent-1",
+            memory_context_snapshot_service=service,
+        )
+        toolkit.set_session_id("root-session")
+        hook = toolkit.hooks().get("on_run_start")
+        assert hook is not None
+        await hook(
+            RunStartHookContext(
+                workspace_id="workspace-1",
+                agent_id="agent-1",
+                session_id="root-session",
+                run_id="run",
+            )
+        )
+        assert "must not render" not in await toolkit.get_dynamic_prompt(
+            _make_context()
+        )
+        assert service.session_ids == []
+
+    @pytest.mark.asyncio
+    async def test_memory_context_disabled_has_no_prompt_or_tools(self) -> None:
+        """Disabled Memory context does not expose guidance or domain tools."""
+        toolkit = MemoryContextToolkit(
             config=ShellToolkitConfig(memory_enabled=False),
             agent_id="agent-1",
-            session_manager=_make_mock_session_manager(),
-            memory_repo=_make_mock_memory_repo(),
+            memory_context_snapshot_service=_make_memory_snapshot_service(
+                "must not render"
+            ),
         )
-        disabled.set_session_id("session-1")
-        assert (await disabled.update_context(context)).tools == []
-        builtin_disabled = _make_builtin_toolkit(
-            config=ShellToolkitConfig(memory_enabled=False)
-        )
-        assert (await builtin_disabled.update_context(context)).tools == []
+        toolkit.set_session_id("session-1")
+        context = _make_context()
+
+        assert (await toolkit.update_context(context)).tools == []
+        assert await toolkit.get_dynamic_prompt(context) == ""
+        assert toolkit.hooks() == {}
 
 
 # ---------------------------------------------------------------------------
@@ -2657,7 +2961,7 @@ class TestProcessToolHandler:
             return RuntimeCapabilitySnapshot(
                 state=(
                     AgentRuntimeCapability.MANAGED
-                    if provider_calls < 7
+                    if provider_calls < 3
                     else AgentRuntimeCapability.NONE
                 ),
                 version=1,
@@ -3077,8 +3381,8 @@ class TestEditHandler:
         """File content is replaced by the Runner-native edit operation."""
         files = {"/workspace/agent/config.txt": b"old_value"}
         toolkit = _make_toolkit(storage_files=files)
-        state = await toolkit.update_context(_make_context())
-        tool = _find_tool(state.tools, "edit")
+        await toolkit.update_context(_make_context())
+        tool = _find_tool(toolkit.make_mutation_tools(), "edit")
         runner_operations = _runner_operations(toolkit)
 
         result = await tool.handler(
@@ -3093,3 +3397,37 @@ class TestEditHandler:
         assert isinstance(result, str)
         assert runner_operations.files["/workspace/agent/config.txt"] == b"new_value"
         assert runner_operations.file_operation_calls == [("edit", "session-1")]
+
+
+@pytest.mark.asyncio
+async def test_runtime_projection_rejects_retained_configuration_mismatch() -> None:
+    """A lagged target cannot contribute paths from a different prompt authority."""
+    toolkit = _make_toolkit()
+    toolkit._expected_runtime_authority = RuntimeOperationAuthority(
+        configuration_sequence=99, configuration_digest="b" * 64, desired_generation=7
+    )
+    assert await toolkit._resolve_projection_runtime_target() is None
+    service = _runtime_service(toolkit)
+    service.resolve_operation_target.assert_not_awaited()
+    service.ensure_started_for_agent.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_runtime_projection_rejects_captured_capability_mismatch() -> None:
+    """Description never treats a new version as authority for an old snapshot."""
+    toolkit = _make_toolkit()
+    target = RuntimeOperationTarget(
+        id="runtime-1",
+        runtime_capability_version=2,
+        desired_generation=7,
+        runner_generation=1,
+        configuration_sequence=1,
+        configuration_digest="a" * 64,
+        workspace_path="/workspace/agent",
+    )
+    assert await toolkit._resolve_projection_binding(target) is None
+    binding = require_instance(
+        toolkit.session_working_folder_binding_service, AsyncMock
+    )
+    binding.project_bound_authority_for_target.assert_not_awaited()
+    binding.resolve_authority.assert_not_awaited()

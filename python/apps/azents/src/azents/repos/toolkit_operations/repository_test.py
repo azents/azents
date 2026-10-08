@@ -4,6 +4,7 @@ import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
+from typing import NamedTuple
 from unittest.mock import AsyncMock
 
 import pytest
@@ -12,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import MCPOAuthConnectionStatus, ToolkitScopeType
 from azents.core.system_setting import SystemSettingFieldSource
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.github_user_installation import GithubUserInstallationRepository
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
@@ -28,11 +30,12 @@ from azents.repos.toolkit.data import (
     ToolkitScope,
     ToolkitUpdate,
 )
+from azents.repos.toolkit_namespace import ToolkitNamespaceRepository
+from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 
 from . import ToolkitOperationsRepository
 from .data import (
-    EffectiveSlugConflict,
     PlatformAuthorityRejected,
     PlatformToolkitAuthority,
     ToolkitWorkspaceMismatch,
@@ -47,13 +50,13 @@ class _TrackedSessionManager:
     """Deterministic commit/rollback probe for one repository operation."""
 
     def __init__(self) -> None:
-        self.session = AsyncMock(spec=AsyncSession)
+        self.session = ReadWriteSession(AsyncMock(spec=AsyncSession))
         self.active = False
         self.committed = False
         self.rolled_back = False
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         self.active = True
         try:
             yield self.session
@@ -108,40 +111,49 @@ def _create() -> ToolkitCreate:
     )
 
 
+class _ToolkitFixture(NamedTuple):
+    """Repository and observable collaborators for Toolkit operations."""
+
+    repository: ToolkitOperationsRepository
+    toolkits: AsyncMock
+    scopes: AsyncMock
+    oauth: AsyncMock
+    github: AsyncMock
+    settings: AsyncMock
+
+
 def _repository(
     session_manager: _TrackedSessionManager,
-) -> tuple[
-    ToolkitOperationsRepository,
-    AsyncMock,
-    AsyncMock,
-    AsyncMock,
-    AsyncMock,
-    AsyncMock,
-]:
+) -> _ToolkitFixture:
     toolkit_repository = AsyncMock(spec=ToolkitRepository)
     scope_repository = AsyncMock(spec=ToolkitScopeRepository)
     oauth_repository = AsyncMock(spec=MCPOAuthConnectionRepository)
     github_repository = AsyncMock(spec=GithubUserInstallationRepository)
     system_setting_repository = AsyncMock(spec=SystemSettingRepository)
     agent_toolkit_repository = AsyncMock(spec=AgentToolkitRepository)
+    agent_toolkit_repository.list_agent_ids_by_toolkit.return_value = []
+    workspace_repository = AsyncMock(spec=WorkspaceRepository)
+    workspace_repository.get_by_id.return_value = SimpleNamespace()
     repository = ToolkitOperationsRepository(
         toolkit_repository=toolkit_repository,
         scope_repository=scope_repository,
         agent_toolkit_repository=agent_toolkit_repository,
         agent_repository=AsyncMock(spec=AgentRepository),
+        namespace_repository=AsyncMock(spec=ToolkitNamespaceRepository),
+        workspace_repository=workspace_repository,
         workspace_user_repository=AsyncMock(spec=WorkspaceUserRepository),
         github_installation_repository=github_repository,
         oauth_connection_repository=oauth_repository,
         system_setting_repository=system_setting_repository,
         session_manager=session_manager,
     )
-    return (
-        repository,
-        toolkit_repository,
-        scope_repository,
-        oauth_repository,
-        github_repository,
-        system_setting_repository,
+    return _ToolkitFixture(
+        repository=repository,
+        toolkits=toolkit_repository,
+        scopes=scope_repository,
+        oauth=oauth_repository,
+        github=github_repository,
+        settings=system_setting_repository,
     )
 
 
@@ -160,7 +172,7 @@ async def test_create_composes_scope_and_oauth_summary_in_one_transaction() -> N
     repository, toolkit_repo, scope_repo, oauth_repo, _, _ = _repository(
         session_manager
     )
-    toolkit_repo.create.return_value = Success(_toolkit())
+    toolkit_repo.create.return_value = _toolkit()
     scope_repo.create.return_value = Success(_scope())
     summary = MCPOAuthConnectionSummary(
         status=MCPOAuthConnectionStatus.CONNECTED,
@@ -191,7 +203,7 @@ async def test_create_rolls_back_when_oauth_attach_fails() -> None:
     repository, toolkit_repo, scope_repo, oauth_repo, _, _ = _repository(
         session_manager
     )
-    toolkit_repo.create.return_value = Success(_toolkit())
+    toolkit_repo.create.return_value = _toolkit()
     scope_repo.create.return_value = Success(_scope())
     oauth_repo.get_summary_by_toolkit_id.side_effect = _OAuthAttachFailure
 
@@ -218,13 +230,14 @@ async def test_update_revalidates_current_toolkit_and_workspace(
     """A stale preflight cannot authorize a deleted or moved Toolkit mutation."""
     session_manager = _TrackedSessionManager()
     repository, toolkit_repo, _, _, _, _ = _repository(session_manager)
-    toolkit_repo.get_shared_by_id_for_update.return_value = locked_toolkit
+    toolkit_repo.get_shared_by_id.return_value = locked_toolkit
 
     result = await repository.update(
         "toolkit-1",
         ToolkitUpdate(name="Updated"),
         workspace_id="workspace-1",
         expected_toolkit_type="mcp",
+        slug_reset_canonical_name=None,
         platform_authority=None,
     )
 
@@ -249,22 +262,24 @@ async def test_update_rejects_platform_reconnect_race_before_mutation() -> None:
         ToolkitUpdate(name="Updated"),
         workspace_id="workspace-1",
         expected_toolkit_type="github",
+        slug_reset_canonical_name=None,
         platform_authority=_platform_authority(),
     )
 
     assert isinstance(result, Failure)
     assert isinstance(result.error, PlatformAuthorityRejected)
     assert result.error.detail == "GitHub Platform App reconnect is required."
-    toolkit_repo.get_shared_by_id_for_update.assert_not_awaited()
+    toolkit_repo.get_shared_by_id.assert_not_awaited()
     toolkit_repo.update_by_id.assert_not_awaited()
     github_repo.list_accessible_installation_ids.assert_not_awaited()
 
 
-async def test_slug_update_locks_all_attached_agents_before_conflict_checks() -> None:
-    """Preserve shared namespace lock ordering in the completed operation."""
+async def test_slug_update_reallocates_attached_agents_in_sorted_order() -> None:
+    """Only actual namespace allocation owns per-Agent claim serialization."""
     session_manager = _TrackedSessionManager()
     repository, toolkit_repo, _, _, _, _ = _repository(session_manager)
-    toolkit_repo.get_shared_by_id_for_update.return_value = _toolkit()
+    toolkit_repo.get_shared_by_id.return_value = _toolkit()
+    toolkit_repo.claim_shared_namespace_mutation.return_value = _toolkit()
     repository.agent_toolkit_repository = AsyncMock(spec=AgentToolkitRepository)
     repository.agent_toolkit_repository.list_agent_ids_by_toolkit.return_value = [
         "agent-a",
@@ -272,45 +287,62 @@ async def test_slug_update_locks_all_attached_agents_before_conflict_checks() ->
     ]
     agent_repo = AsyncMock(spec=AgentRepository)
     repository.agent_repository = agent_repo
+    namespace_repo = AsyncMock(spec=ToolkitNamespaceRepository)
+    repository.namespace_repository = namespace_repo
     events: list[str] = []
 
-    async def lock(session: AsyncSession, agent_id: str) -> None:
+    async def lock(session: WriteSession, agent_id: str) -> None:
         assert session is session_manager.session
         assert session_manager.active
         events.append(f"lock:{agent_id}")
 
-    async def conflict(
-        session: AsyncSession,
-        *,
-        agent_id: str,
-        workspace_id: str,
-        toolkit_id: str,
-        slug: str,
-        enabled: bool,
-    ) -> bool:
-        assert session is session_manager.session
-        assert (workspace_id, toolkit_id, slug, enabled) == (
-            "workspace-1",
-            "toolkit-1",
-            "renamed",
-            True,
-        )
-        events.append(f"check:{agent_id}")
-        return agent_id == "agent-b"
-
-    agent_repo.lock_by_id.side_effect = lock
-    toolkit_repo.has_effective_slug_conflict.side_effect = conflict
+    agent_repo.get_by_id.side_effect = lock
+    toolkit_repo.update_by_id.return_value = Success(
+        _toolkit().model_copy(update={"slug": "renamed"})
+    )
     result = await repository.update(
         "toolkit-1",
         ToolkitUpdate(slug="renamed"),
         workspace_id="workspace-1",
         expected_toolkit_type="mcp",
+        slug_reset_canonical_name=None,
         platform_authority=None,
     )
 
-    assert result == Failure(EffectiveSlugConflict(slug="renamed"))
-    assert events == ["lock:agent-a", "lock:agent-b", "check:agent-a", "check:agent-b"]
-    toolkit_repo.update_by_id.assert_not_awaited()
+    assert isinstance(result, Success)
+    assert events == []
+    toolkit_repo.update_by_id.assert_awaited_once()
+    assert [
+        call.kwargs["agent_id"] for call in namespace_repo.ensure_active.await_args_list
+    ] == ["agent-a", "agent-b"]
+
+
+async def test_blank_slug_reset_uses_locked_current_name() -> None:
+    """Derive a reset Slug from the Name in the locked mutation snapshot."""
+    session_manager = _TrackedSessionManager()
+    repository, toolkit_repo, _, _, _, _ = _repository(session_manager)
+    current = _toolkit().model_copy(
+        update={"name": "Current Production", "slug": "old"}
+    )
+    toolkit_repo.get_shared_by_id.return_value = current
+    toolkit_repo.claim_shared_namespace_mutation.return_value = current
+    toolkit_repo.update_by_id.return_value = Success(
+        current.model_copy(update={"slug": "current_production"})
+    )
+
+    result = await repository.update(
+        current.id,
+        ToolkitUpdate(),
+        workspace_id=current.workspace_id,
+        expected_toolkit_type=current.toolkit_type,
+        slug_reset_canonical_name="MCP",
+        platform_authority=None,
+    )
+
+    assert isinstance(result, Success)
+    call = toolkit_repo.update_by_id.await_args
+    assert call is not None
+    assert call.args[2]["slug"] == "current_production"
 
 
 async def test_update_rejects_revoked_installation_before_mutation() -> None:
@@ -327,6 +359,7 @@ async def test_update_rejects_revoked_installation_before_mutation() -> None:
         ToolkitUpdate(name="Updated"),
         workspace_id="workspace-1",
         expected_toolkit_type="github",
+        slug_reset_canonical_name=None,
         platform_authority=_platform_authority(),
     )
 
@@ -335,5 +368,5 @@ async def test_update_rejects_revoked_installation_before_mutation() -> None:
     assert result.error.detail == (
         "GitHub installation is not accessible to this user."
     )
-    toolkit_repo.get_shared_by_id_for_update.assert_not_awaited()
+    toolkit_repo.get_shared_by_id.assert_not_awaited()
     toolkit_repo.update_by_id.assert_not_awaited()

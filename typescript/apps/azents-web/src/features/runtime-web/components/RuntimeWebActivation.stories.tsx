@@ -22,6 +22,7 @@ const offService: RuntimeWebServiceResponse = {
 };
 
 const baseArgs: RuntimeWebActivationContainerOutput = {
+  applicationUrl: offService.url,
   state: {
     type: "READY",
     service: offService,
@@ -92,6 +93,20 @@ export const AlreadyOn = {
     await expect(
       canvas.getByRole("link", { name: "Open service" }),
     ).toHaveAttribute("href", offService.url);
+  },
+} satisfies Story;
+
+export const AlreadyOnDeepLink = {
+  args: {
+    ...AlreadyOn.args,
+    applicationUrl:
+      "https://preview.runtime.example.com/catalog/item?view=grid#details",
+  },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("link", { name: "Open service" }),
+    ).toHaveAttribute("href", args.applicationUrl);
   },
 } satisfies Story;
 

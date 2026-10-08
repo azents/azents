@@ -19,7 +19,7 @@ import json
 
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Any, ClassVar, Dict, List
+from typing import Any, ClassVar, Dict
 from typing_extensions import Annotated
 from typing import Optional, Set
 from typing_extensions import Self
@@ -31,7 +31,6 @@ class RuntimeWebSeparateTicketResponse(BaseModel):
     ticket_secret: Annotated[str, Field(min_length=32, strict=True, max_length=128)]
     service_id: Annotated[str, Field(min_length=32, strict=True, max_length=32)]
     expires_at: datetime
-    additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["ticket_secret", "service_id", "expires_at"]
 
     model_config = ConfigDict(
@@ -64,10 +63,8 @@ class RuntimeWebSeparateTicketResponse(BaseModel):
         * `None` is only added to the output dict for nullable fields that
           were set at model initialization. Other fields with value `None`
           are ignored.
-        * Fields in `self.additional_properties` are added to the output dict.
         """
         excluded_fields: Set[str] = set([
-            "additional_properties",
         ])
 
         _dict = self.model_dump(
@@ -75,11 +72,6 @@ class RuntimeWebSeparateTicketResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # puts key-value pairs in additional_properties in the top level
-        if self.additional_properties is not None:
-            for _key, _value in self.additional_properties.items():
-                _dict[_key] = _value
-
         return _dict
 
     @classmethod
@@ -91,16 +83,14 @@ class RuntimeWebSeparateTicketResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "ticket_secret": obj.get("ticket_secret"),
             "service_id": obj.get("service_id"),
             "expires_at": obj.get("expires_at")
+            }.items() if _key in obj
         })
-        # store additional fields in additional_properties
-        for _key in obj.keys():
-            if _key not in cls.__properties:
-                _obj.additional_properties[_key] = obj.get(_key)
-
         return _obj
 
 

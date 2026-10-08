@@ -2,10 +2,9 @@
 
 import datetime
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.enums import OwnerLifecycleStatus
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.owner_lifecycle import OwnerLifecycleRepository
 
 
@@ -14,7 +13,7 @@ class TestOwnerLifecycleRepository:
 
     async def test_membership_archive_reopens_completed_job(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Requeue a completed membership-archive job for a later membership loss."""
         repo = OwnerLifecycleRepository()

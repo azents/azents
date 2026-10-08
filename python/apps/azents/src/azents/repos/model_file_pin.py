@@ -4,11 +4,11 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentRunStatus
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.model_file_pin import RDBModelFilePin
+from azents.rdb.session_capabilities import WriteSession
 
 
 class ModelFilePinRepository:
@@ -16,7 +16,7 @@ class ModelFilePinRepository:
 
     async def pin_many(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         run_id: str,
@@ -33,7 +33,7 @@ class ModelFilePinRepository:
         ]
         if not rows:
             return
-        await session.execute(
+        await session.write_session.execute(
             pg_insert(RDBModelFilePin)
             .values(rows)
             .on_conflict_do_nothing(
@@ -43,24 +43,24 @@ class ModelFilePinRepository:
                 ]
             )
         )
-        await session.flush()
+        await session.write_session.flush()
 
-    async def release_run(self, session: AsyncSession, *, run_id: str) -> None:
+    async def release_run(self, session: WriteSession, *, run_id: str) -> None:
         """Release all pins held by one run."""
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBModelFilePin).where(RDBModelFilePin.run_id == run_id)
         )
-        await session.flush()
+        await session.write_session.flush()
 
     async def release_terminal_run_pins(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         limit: int,
     ) -> int:
         """Clear stale pins whose AgentRun is already terminal."""
         rows = (
-            await session.execute(
+            await session.write_session.execute(
                 sa.select(RDBModelFilePin.model_file_id, RDBModelFilePin.run_id)
                 .join(RDBAgentRun, RDBAgentRun.id == RDBModelFilePin.run_id)
                 .where(
@@ -86,6 +86,8 @@ class ModelFilePinRepository:
             )
             for model_file_id, run_id in rows
         ]
-        await session.execute(sa.delete(RDBModelFilePin).where(sa.or_(*clauses)))
-        await session.flush()
+        await session.write_session.execute(
+            sa.delete(RDBModelFilePin).where(sa.or_(*clauses))
+        )
+        await session.write_session.flush()
         return len(rows)

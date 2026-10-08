@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock
 import pytest
 from PIL import Image
 
+from azents.core.upload_images import StoredImage
 from azents.services.uploads import UploadValidationError
 from azents.services.uploads.handlers.avatar import AvatarUploadHandler
-from azents.services.uploads.schema import StoredImage
 
 
 def _make_png(width: int, height: int) -> bytes:
@@ -60,6 +60,29 @@ class TestValidate:
     async def test_rejects_invalid_bytes(self, handler: AvatarUploadHandler) -> None:
         with pytest.raises(UploadValidationError, match="invalid image"):
             await handler.validate(b"\x00\x01\x02 not an image")
+
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            RuntimeError("unexpected image decoder failure"),
+            MemoryError("resource failure"),
+        ],
+    )
+    async def test_unexpected_decoder_failure_propagates(
+        self,
+        handler: AvatarUploadHandler,
+        monkeypatch: pytest.MonkeyPatch,
+        failure: Exception,
+    ) -> None:
+        """Classify malformed image data without hiding unrelated failures."""
+
+        def fail_open(*args: object, **kwargs: object) -> Image.Image:
+            raise failure
+
+        monkeypatch.setattr(Image, "open", fail_open)
+        with pytest.raises(type(failure)) as raised:
+            await handler.validate(b"synthetic-image-input")
+        assert raised.value is failure
 
 
 class TestProcessAndPublish:

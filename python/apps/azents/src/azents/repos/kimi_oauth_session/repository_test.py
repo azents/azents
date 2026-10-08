@@ -2,17 +2,18 @@
 
 import datetime
 import uuid
+from typing import NamedTuple
 
 from azcommon.result import Success
 from cryptography.fernet import Fernet
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.crypto import CredentialCipher
 from azents.core.kimi_oauth import KimiOAuthConnectionMethod
+from azents.core.workspace import WorkspaceCreate
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 
 from .data import KimiOAuthSessionCreate
 from .repository import KimiOAuthSessionRepository
@@ -20,9 +21,16 @@ from .repository import KimiOAuthSessionRepository
 _TEST_KEY = Fernet.generate_key().decode()
 
 
+class _OAuthSessionFixture(NamedTuple):
+    """Repository and identity for one created OAuth Session."""
+
+    repository: KimiOAuthSessionRepository
+    session_id: str
+
+
 async def _create_session(
-    session: AsyncSession,
-) -> tuple[KimiOAuthSessionRepository, str]:
+    session: WriteSession,
+) -> _OAuthSessionFixture:
     """Create a pending Kimi OAuth session for tests."""
     suffix = uuid.uuid4().hex[:12]
     workspace_repo = WorkspaceRepository()
@@ -56,11 +64,11 @@ async def _create_session(
             + datetime.timedelta(minutes=5),
         ),
     )
-    return repo, created.id
+    return _OAuthSessionFixture(repository=repo, session_id=created.id)
 
 
 async def test_increase_poll_interval_accumulates_slow_down(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Apply the RFC 8628 five-second increment on every slow_down."""
     repo, session_id = await _create_session(rdb_session)

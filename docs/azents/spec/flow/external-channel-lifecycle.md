@@ -6,10 +6,31 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [external-channel, agent, conversation]
 code_paths:
+  - python/apps/azents/src/azents/core/exchange_file_errors.py
+  - python/apps/azents/src/azents/core/external_channel_access.py
+  - python/apps/azents/src/azents/core/external_channel_conversation_data.py
+  - python/apps/azents/src/azents/core/external_channel_conversation_preparation.py
+  - python/apps/azents/src/azents/core/external_channel_ingestion.py
+  - python/apps/azents/src/azents/core/session_lifecycle_registry.py
+  - python/apps/azents/src/azents/core/session_lifecycle_schema.py
+  - python/apps/azents/src/azents/repos/session_lifecycle_schema.py
+  - python/apps/azents/src/azents/services/session_lifecycle/schema.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/repos/discord_connection_dependencies.py
+  - python/apps/azents/src/azents/repos/external_channel/access_operations.py
+  - python/apps/azents/src/azents/repos/chat_operations.py
+  - python/apps/azents/src/azents/repos/session_lifecycle_operations.py
   - python/apps/azents/src/azents/core/external_channel_session_presence.py
   - python/apps/azents/src/azents/core/session_lifecycle.py
   - python/apps/azents/src/azents/repos/external_channel/connection.py
+  - python/apps/azents/src/azents/repos/external_channel/connection_revocation_operations.py
+  - python/apps/azents/src/azents/services/external_channel/connection_revocation.py
   - python/apps/azents/src/azents/repos/external_channel/lifecycle.py
+  - python/apps/azents/src/azents/repos/external_channel_lifecycle_participant.py
+  - python/apps/azents/src/azents/repos/scheduled_task_lifecycle_participant.py
+  - python/apps/azents/src/azents/repos/archived_session_purge_operations.py
+  - python/apps/azents/src/azents/repos/session_lifecycle_purge_operations.py
+  - python/apps/azents/src/azents/core/session_lifecycle_purge.py
   - python/apps/azents/src/azents/repos/external_channel/management_operations.py
   - python/apps/azents/src/azents/repos/external_channel/management_operation_data.py
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
@@ -42,8 +63,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-10-01
-spec_version: 45
+last_verified_at: 2026-10-05
+spec_version: 50
 ---
 
 # External Channel Lifecycle
@@ -121,14 +142,17 @@ connected parent Binding with its process-local provider cleanup plans, and pres
 Resource, Binding, Session, and concrete mode. The replacement route starts without a
 participation setting; a later eligible top-level mention begins setup. Stale impact
 previews fail with conflict instead of applying a destructive mutation against newer
-state.
+state. Impact previews use ordinary connection/route/count reads, tolerate
+committed lag, and never acquire destructive transition locks. The actual confirmed
+mutation still validates its existing generation and exact lifecycle references.
 
 Editing a visible Slack connection replaces App ID, HTTP/Socket transport, and the
 complete submitted credential set in one operation. It clears stale provider
 identity, capability, health, Socket lease, Work presence lease, and gap projections,
 increments the configuration generation, and immediately validates the replacement
-configuration. No lifecycle status prevents editing a visible connection, and no
-transport fallback occurs.
+configuration. Single and Multi replacement serialize the actual configuration
+generation transition and reject a connection already disconnecting or disconnected;
+a stale replacement cannot resurrect it. No transport fallback occurs.
 
 Editing a visible Discord connection replaces the submitted Application identity,
 target Guild configuration, and complete Bot credential set in one fenced operation.
@@ -205,7 +229,12 @@ creates leave-presence and Tracker cleanup only for bindings that were still
 connected, removes active route authority, marks resources unavailable, and clears
 provider identity and credentials. Cleanup targets are captured before the purge and
 attempted after the terminal commit. A repeated uninstall is idempotent and creates
-no duplicate presence control. In-flight validation
+no duplicate presence control. The completed revocation repository operation applies
+the required configuration generation and optional Socket lease owner predicates,
+captures terminal cleanup targets, and purges provider state in one atomic scope.
+A stale predicate leaves the connection unchanged; purge failure rolls back the
+terminal transition. The service attempts captured cleanup only after commit and
+scope exit. In-flight validation
 results are generation-fenced so they cannot overwrite a newer edit or disconnect.
 The connection service reads its Workspace-owned configuration through a completed
 repository operation, performs provider validation with no active database
@@ -227,9 +256,12 @@ does not run a second Gateway reconnect or Resume loop. A one-minute continuous
 unready deadline preserves brief SDK-owned Resume but cancels and discards a client
 that remains unavailable, records a fenced degraded gap, releases its lease, and lets
 the connection be reclaimed with a fresh client. The current Gateway owner also
-reconciles process-local typing tasks from ready active Work under the same lease and
-generation fences. Awaiting Work is excluded. A restart or Resume restores still-ready
-targets; Work finished or awaiting during the gap is absent. Typing provider failure
+reconciles process-local typing tasks from ready active Work whose bound Session is
+running with a running AgentRun and no stop request, under the same lease and generation
+fences. Awaiting Work is excluded. A restart or Resume restores only still-running
+targets; Work finished, awaiting, or without running execution during the gap is absent.
+Run termination or Session idle state removes typing without finishing retained Work.
+Typing provider failure
 does not change connection health.
 
 Slack Socket Mode keeps one SDK lifecycle per current fenced lease. SDK endpoint
@@ -253,8 +285,15 @@ creates no recovery work.
 ## Session Archive and Restore
 
 External Channel is registered as the `session.external-channel` lifecycle participant.
+Its DB-only participant operations live in repository composition, not in a service
+that receives live Sessions. Archive/purge operations compose the narrower lifecycle
+repository atomically with their root transition and participant state. The lifecycle
+service only consumes detached committed provider cleanup plans; it owns no DB scope.
+Scheduled participant persistence uses the same repository-only boundary.
 
-Archive uses the explicit terminal transition policy inside the caller-owned archive transaction:
+Archive uses the explicit terminal transition policy inside the archive
+repository's transaction. The concrete lifecycle operation composes participant
+mutations and the root transition in registry order:
 
 1. lock connected bindings in the Session subtree;
 2. set their terminal disconnect timestamps and preserve their history;
@@ -275,6 +314,15 @@ bookkeeping remain terminal. Restore never reactivates External Channel state;
 managers must establish new provider state explicitly.
 
 ## Permanent Session Purge
+
+Installed lifecycle ownership diagnostics read the PostgreSQL foreign-key and
+referential-trigger graph through the completed
+`PostgreSQLSessionLifecycleGraphRepository` native read-only operation. Detached
+graph contracts are defined in `core/session_lifecycle_schema.py`; the service
+schema validator performs only pure ownership and reachable-delete-path checks
+after the repository scope closes. This ownership boundary preserves existing
+manifest classifications and complete violation paths and does not change purge
+or parent-delete authority.
 
 Newly fenced jobs include the participant in their immutable purge snapshot. Jobs
 that were already fenced before the participant was registered retain their
@@ -341,6 +389,23 @@ started cycles, removes residual Task/trigger/cycle state, and verifies absence
 before finalization.
 
 ## Changelog
+
+- **2026-10-05** (spec_version 50) — Moved External Channel and Scheduled
+  lifecycle participant DB composition below services while preserving atomic
+  archive/purge finalization and detached post-commit provider cleanup.
+
+- **2026-10-05 (spec_version49)** — Integrated completed channel action/revocation
+  and Scheduled Channel effects with selection/scheduled/lease ownership, retaining
+  exact owner, configuration and claim fences at atomic mutation boundaries.
+
+- **2026-10-05** (spec_version 48) — Made authenticated Slack revocation a
+  completed repository operation with atomic conditional terminal/purge mutation,
+  rollback on purge failure, and detached post-commit cleanup plans.
+
+- **2026-10-05** (spec_version 47) — Made Multi disconnect impact previews independent of connection/route locks and kept exact Single/Multi credential-generation transitions separate from ordinary metadata captures.
+
+- **2026-10-03** (spec_version 46) — Restricted typing restoration and renewal to
+  Work with running execution, including after stop-request cleanup.
 
 - **2026-09-12** (spec_version 45) — Added Session purge ordering for private
   external model drafts and clarified Workspace/User link-proof cleanup and retained

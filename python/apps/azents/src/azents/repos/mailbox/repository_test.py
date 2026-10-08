@@ -1,6 +1,5 @@
 """MailboxRepository tests."""
 
-from types import SimpleNamespace
 from typing import NamedTuple
 from unittest.mock import AsyncMock, MagicMock
 
@@ -8,9 +7,11 @@ import pytest
 import sqlalchemy as sa
 from azcommon.result import Success
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
     AgentSessionProductMode,
     LLMProvider,
@@ -19,23 +20,23 @@ from azents.core.enums import (
     RuntimeRunnerState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.mailbox_data import MailboxItemCreate
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
 )
 
 from . import MailboxRepository
-from .data import MailboxItemCreate
 
 
 class _AgentSessionFixture(NamedTuple):
@@ -46,7 +47,7 @@ class _AgentSessionFixture(NamedTuple):
     workspace_id: str
 
 
-async def _create_workspace(session: AsyncSession, handle: str) -> str:
+async def _create_workspace(session: WriteSession, handle: str) -> str:
     """Create Workspace for tests."""
     repo = WorkspaceRepository()
     result = await repo.create(
@@ -58,13 +59,13 @@ async def _create_workspace(session: AsyncSession, handle: str) -> str:
     return workspace_id
 
 
-async def _create_user(session: AsyncSession, email: str) -> str:
+async def _create_user(session: WriteSession, email: str) -> str:
     """Create User for tests."""
     user = await UserRepository().create(session, UserCreate(email=email))
     return user.id
 
 
-async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> str:
+async def _create_agent(session: WriteSession, workspace_id: str, slug: str) -> str:
     """Create Agent for tests."""
 
     integration = RDBLLMProviderIntegration(
@@ -74,8 +75,8 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
 
     agent = RDBAgent(
         workspace_id=workspace_id,
@@ -109,13 +110,13 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     return agent.id
 
 
 async def _create_agent_session(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     handle: str,
     slug: str,
@@ -178,11 +179,13 @@ class TestMailboxRepository:
     async def test_detach_sender_user_id_clears_retained_rows(self) -> None:
         """Detach one deleted User from retained MailboxItems."""
         session = MagicMock(spec=AsyncSession)
-        session.execute = AsyncMock(return_value=SimpleNamespace(rowcount=3))
+        result = MagicMock(spec=CursorResult)
+        result.rowcount = 3
+        session.execute = AsyncMock(return_value=result)
         session.flush = AsyncMock()
 
         detached = await MailboxRepository().detach_sender_user_id(
-            session,
+            ReadWriteSession(session),
             sender_user_id="user-1",
         )
 
@@ -195,7 +198,7 @@ class TestMailboxRepository:
 
     async def test_create_round_trips_jsonb_fields(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Preserve JSONB snapshot fields without damage on creation."""
         session_id, user_id, _ = await _create_agent_session(
@@ -232,7 +235,7 @@ class TestMailboxRepository:
 
     async def test_pending_queries_use_scheduling_mode_and_kind(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Query scheduling intent independently from the payload kind."""
         session_id, user_id, _ = await _create_agent_session(
@@ -279,7 +282,7 @@ class TestMailboxRepository:
 
     async def test_list_and_flush_order_by_buffer_id(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Session list and flush ready list use buffer id ASC order."""
         session_id, user_id, _ = await _create_agent_session(
@@ -327,7 +330,7 @@ class TestMailboxRepository:
 
     async def test_delete_by_session_and_id_is_session_scoped(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Delete only when both session_id and buffer_id match."""
         session_id, user_id, _ = await _create_agent_session(
@@ -373,7 +376,7 @@ class TestMailboxRepository:
 
     async def test_lock_by_session_and_id_is_exactly_session_scoped(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Exact locking returns only the requested Session-owned MailboxItem."""
         session_id, user_id, _ = await _create_agent_session(
@@ -412,7 +415,7 @@ class TestMailboxRepository:
 
     async def test_claim_for_flush_and_delete_claimed_are_session_scoped(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Flush claim/delete processes only target session rows in id order."""
         session_id, user_id, _ = await _create_agent_session(
@@ -467,7 +470,7 @@ class TestMailboxRepository:
 
     async def test_direct_session_delete_is_rejected(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Protect pending buffers by rejecting direct AgentSession deletion."""
         session_id, user_id, _ = await _create_agent_session(
@@ -489,17 +492,17 @@ class TestMailboxRepository:
             IntegrityError,
             match="session_agents_agent_session_id_fkey",
         ):
-            async with rdb_session.begin_nested():
-                await rdb_session.execute(
+            async with rdb_session.write_session.begin_nested():
+                await rdb_session.write_session.execute(
                     sa.delete(RDBAgentSession).where(RDBAgentSession.id == session_id)
                 )
-                await rdb_session.flush()
+                await rdb_session.write_session.flush()
 
         assert await repo.get_by_id(rdb_session, created.id) is not None
 
     async def test_move_by_session_id_preserves_buffer_identity(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Session rollover transfer preserves buffer id and snapshot."""
         from_session_id, user_id, _ = await _create_agent_session(

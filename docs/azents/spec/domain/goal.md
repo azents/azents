@@ -5,6 +5,19 @@ tags: [backend, engine]
 spec_type: domain
 domain: goal
 code_paths:
+  - python/apps/azents/src/azents/core/agent_session_input_data.py
+  - python/apps/azents/src/azents/core/chat_data.py
+  - python/apps/azents/src/azents/core/chat_projection.py
+  - python/apps/azents/src/azents/core/exchange_file_errors.py
+  - python/apps/azents/src/azents/core/mailbox_errors.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/core/session_workspace_paths.py
+  - python/apps/azents/src/azents/repos/chat_operations.py
+  - python/apps/azents/src/azents/repos/goal/store.py
+  - python/apps/azents/src/azents/repos/mailbox_runtime_operations.py
+  - python/apps/azents/src/azents/repos/skill_state_store.py
+  - python/apps/azents/src/azents/repos/session_lifecycle_operations.py
+  - python/apps/azents/src/azents/repos/user_stop.py
   - python/apps/azents/src/azents/engine/tools/goal.py
   - python/apps/azents/src/azents/engine/events/pydantic_ai_lowering.py
   - python/apps/azents/src/azents/engine/events/system_reminders.py
@@ -17,8 +30,8 @@ code_paths:
   - python/apps/azents/src/azents/services/chat/**
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - typescript/apps/azents-web/src/features/chat/**
-last_verified_at: 2026-09-30
-spec_version: 16
+last_verified_at: 2026-10-05
+spec_version: 18
 ---
 
 # Goal Domain Spec
@@ -55,6 +68,18 @@ Status meanings:
 - `blocked`: the agent determined it cannot make meaningful progress because the same blocking
   condition persists.
 - `complete`: the Goal is finished.
+
+### State and execution mutation boundary
+
+Goal payload load, create, clear, objective and status changes are private Session
+Toolkit State operations. They use existing version CAS without a generic root,
+Agent or ancestor owner lock. The resolved Toolkit still binds one immutable
+execution identity. Actual Goal completion briefing Event publication verifies
+that the captured owner Session matches the target, then holds the exact Session
+owner-generation mutation fence through Event commit. An obsolete Worker cannot
+append current transcript output; ordinary Goal descriptions never inherit that
+critical Event fence. Public requester mutations explicitly use their existing
+non-execution authority rather than inventing a Worker owner.
 
 ## 2. Tool Contract
 
@@ -270,6 +295,11 @@ Primary checks:
 
 
 ## Changelog
+
+- **2026-10-05** (spec_version 18) — Reconciled code-path discovery with current
+  defining modules; system behavior is unchanged.
+
+- **2026-10-05** (spec_version 17) — Made private Goal payload operations independent of root-tree owner gates while retaining exact owner Session fencing for durable Goal briefing Events.
 
 - **2026-09-30** (spec_version 16) — Mapped Goal-owned continuation to current provider
   model-message lowering without changing Goal state, event ownership or idle-continuation policy.

@@ -5,7 +5,6 @@ from dataclasses import dataclass, replace
 from typing import Annotated, Literal, NamedTuple
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
 from azents.core.deps import get_config
@@ -21,6 +20,10 @@ from azents.core.external_account_link import (
     ExternalAccountNativeLinkState,
     VerifiedExternalAccountActor,
 )
+from azents.core.external_channel_participation import (
+    ExternalChannelParticipationError,
+    ExternalChannelParticipationSettings,
+)
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.core.external_channel_session_presence import (
     build_external_channel_session_url,
@@ -33,6 +36,7 @@ from azents.core.external_model_settings import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.discord_settings_read import DiscordSettingsReadRepository
 from azents.repos.external_channel.data import ExternalChannelInteraction
 from azents.repos.external_channel.repository import ExternalChannelRepository
@@ -76,9 +80,7 @@ from azents.services.external_channel.model_execution_controls import (
 )
 from azents.services.external_channel.model_settings import ExternalModelSettingsService
 from azents.services.external_channel.participation import (
-    ExternalChannelParticipationError,
     ExternalChannelParticipationService,
-    ExternalChannelParticipationSettings,
 )
 
 
@@ -133,7 +135,7 @@ class DiscordSettingsResponseService:
     """Render and mutate provider-native settings through canonical participation."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
     repository: Annotated[
@@ -736,7 +738,7 @@ def _settings_response(
     settings: ExternalChannelParticipationSettings,
     origin_interaction_id: str,
     secret: str,
-    web_url: str,
+    web_url: str | None,
     response_type: Literal[4, 7],
     personal: DiscordPrivatePresentations | None = None,
 ) -> dict[str, object]:
@@ -935,7 +937,7 @@ def _response_mode_options(
 def _settings_session_url(
     *,
     settings: ExternalChannelParticipationSettings,
-    web_url: str,
+    web_url: str | None,
 ) -> str | None:
     navigation = settings.session_navigation
     if navigation is None:

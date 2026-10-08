@@ -16,6 +16,7 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     LLMProvider,
 )
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.engine_read import (
@@ -34,11 +35,12 @@ from azents.testing.model_selection import (
 
 async def test_engine_reads_complete_their_sessions_before_returning() -> None:
     """Engine snapshots return only after their repository transactions close."""
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
     transaction_active = False
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         nonlocal transaction_active
         transaction_active = True
         try:
@@ -96,7 +98,7 @@ async def test_engine_reads_complete_their_sessions_before_returning() -> None:
     toolkit_repository = AsyncMock(spec=ToolkitRepository)
 
     async def get_agent(
-        current_session: AsyncSession,
+        current_session: WriteSession,
         agent_id: str,
     ) -> Agent:
         assert transaction_active
@@ -105,7 +107,7 @@ async def test_engine_reads_complete_their_sessions_before_returning() -> None:
         return agent
 
     async def get_integration(
-        current_session: AsyncSession,
+        current_session: WriteSession,
         integration_id: str,
     ) -> LLMProviderIntegrationWithSecrets:
         assert transaction_active
@@ -114,7 +116,7 @@ async def test_engine_reads_complete_their_sessions_before_returning() -> None:
         return integration
 
     async def list_toolkits(
-        current_session: AsyncSession,
+        current_session: WriteSession,
         agent_id: str,
         *,
         workspace_id: str,

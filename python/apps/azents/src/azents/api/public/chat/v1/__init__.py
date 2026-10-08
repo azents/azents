@@ -7,7 +7,6 @@ import asyncio
 import dataclasses
 import logging
 import re
-from collections.abc import AsyncIterator
 from datetime import datetime
 from textwrap import dedent
 from typing import Annotated, Literal, NoReturn, assert_never
@@ -27,7 +26,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from azents.broker.broadcast import (
-    WebSocketBroadcast,
+    BaseWebSocketBroadcast,
     WebSocketBroadcastPublishError,
 )
 from azents.broker.deps import get_broker
@@ -35,6 +34,18 @@ from azents.broker.types import (
     SessionBroker,
     SessionStopSignal,
     SessionWakeUp,
+)
+from azents.broker.websocket_deps import get_websocket_broadcast
+from azents.core.agent_session_input_data import (
+    AgentSessionInputError,
+    AgentSessionInputIdempotencyConflict,
+    AgentSessionInputInactiveSession,
+    AgentSessionInputInvalidInferenceProfile,
+    AgentSessionInputSessionNotFound,
+    AgentSessionInputSubagentReadOnly,
+    AgentSessionInputWrongAgent,
+    BufferedAgentSessionInputResult,
+    CreatedAgentSessionInputResult,
 )
 from azents.core.auth.deps import (
     CurrentUser,
@@ -48,34 +59,7 @@ from azents.core.auth.jwt import (
     create_ws_ticket,
     verify_ws_ticket,
 )
-from azents.core.config import AuthConfig, Config
-from azents.core.deps import get_appctx, get_auth_config
-from azents.core.enums import AgentSessionKind, AgentSessionStatus
-from azents.core.exchange_upload import ExchangeUploadError
-from azents.core.redis import create_redis_client
-from azents.engine.events.action_messages import CommandAction, PublicTurnAction
-from azents.engine.events.types import FileOutputPart
-from azents.engine.run.commands import COMMAND_REGISTRY, list_registered_commands
-from azents.engine.run.input import InputMessage
-from azents.repos.mailbox.data import MailboxItem
-from azents.services.agent_session_input import (
-    AgentSessionInputError,
-    AgentSessionInputIdempotencyConflict,
-    AgentSessionInputInactiveSession,
-    AgentSessionInputInvalidInferenceProfile,
-    AgentSessionInputService,
-    AgentSessionInputSessionNotFound,
-    AgentSessionInputSubagentReadOnly,
-    AgentSessionInputWrongAgent,
-    BufferedAgentSessionInputResult,
-    CreatedAgentSessionInputResult,
-)
-from azents.services.archived_session_retention import (
-    ArchivedSessionRetentionService,
-)
-from azents.services.chat import ChatSessionService
-from azents.services.chat.context import SessionContextService
-from azents.services.chat.data import (
+from azents.core.chat_data import (
     AgentNotFound,
     DeleteMailboxItemError,
     InvalidGoalStatusTransition,
@@ -91,6 +75,40 @@ from azents.services.chat.data import (
     UnreadTerminalRunNotTerminal,
     UpdateGoalStatusInput,
 )
+from azents.core.config import AuthConfig, Config
+from azents.core.deps import get_appctx, get_auth_config
+from azents.core.enums import AgentSessionKind, AgentSessionStatus
+from azents.core.exchange_file_errors import (
+    FileAccessDenied,
+    FileExpired,
+    FileNotFound,
+    FileRetentionOwnerConflict,
+    FileUnavailable,
+)
+from azents.core.exchange_file_errors import (
+    SessionNotFound as ExchangeSessionNotFound,
+)
+from azents.core.exchange_upload import ExchangeUploadError
+from azents.core.mailbox_data import MailboxItem
+from azents.core.model_availability_operations import (
+    SessionModelAvailabilityNotFound,
+    SessionModelReservationConflict,
+)
+from azents.core.session_workspace_paths import (
+    InvalidProjectPath,
+)
+from azents.engine.events.action_messages import CommandAction, PublicTurnAction
+from azents.engine.events.types import FileOutputPart
+from azents.engine.run.commands import COMMAND_REGISTRY, list_registered_commands
+from azents.engine.run.input import InputMessage
+from azents.services.agent_session_input import (
+    AgentSessionInputService,
+)
+from azents.services.archived_session_retention import (
+    ArchivedSessionRetentionService,
+)
+from azents.services.chat import ChatSessionService
+from azents.services.chat.context import SessionContextService
 from azents.services.chat.live_events import (
     LiveEventStore,
     get_live_event_store,
@@ -130,21 +148,9 @@ from azents.services.chat_write import ChatWriteService
 from azents.services.exchange_file import (
     ExchangeFileError,
     ExchangeFileService,
-    FileAccessDenied,
-    FileExpired,
-    FileNotFound,
-    FileRetentionOwnerConflict,
     FileTooLarge,
-    FileUnavailable,
 )
-from azents.services.exchange_file import (
-    SessionNotFound as ExchangeSessionNotFound,
-)
-from azents.services.model_availability import (
-    SessionModelAvailabilityNotFound,
-    SessionModelAvailabilityService,
-    SessionModelReservationConflict,
-)
+from azents.services.model_availability import SessionModelAvailabilityService
 from azents.services.model_file import ModelFileService
 from azents.services.project_browser_manifest import (
     ProjectBrowserAccessDenied,
@@ -166,7 +172,6 @@ from azents.services.session_workspace_project import (
     AgentNotFound as ProjectAgentNotFound,
 )
 from azents.services.session_workspace_project import (
-    InvalidProjectPath,
     ProjectAccessDenied,
     ProjectNotFound,
     ProjectPathCleanupInProgress,
@@ -298,22 +303,14 @@ router = APIRouter()
 
 async def get_ws_broadcast(
     appctx: Annotated[AppContext[Config], Depends(get_appctx)],
-) -> WebSocketBroadcast:
+) -> BaseWebSocketBroadcast:
     """WebSocketBroadcast dependency for Web API, cached by AppContext."""
 
-    async def create() -> AsyncIterator[WebSocketBroadcast]:
-        redis = create_redis_client(appctx.config.redis.url)
-        broadcast = WebSocketBroadcast(redis)
-        try:
-            yield broadcast
-        finally:
-            await redis.aclose()
-
-    return await appctx.get_variable(f"{__name__}.get_ws_broadcast", create)
+    return await get_websocket_broadcast(appctx)
 
 
 async def _publish_chat_event_best_effort(
-    broadcast: WebSocketBroadcast,
+    broadcast: BaseWebSocketBroadcast,
     *,
     session_id: str,
     event: dict[str, object],
@@ -398,7 +395,7 @@ class _SubscriptionRegistration:
 
 async def _run_session_loops(
     websocket: WebSocket,
-    broadcast: WebSocketBroadcast,
+    broadcast: BaseWebSocketBroadcast,
     *,
     session_id: str,
     send_lock: asyncio.Lock,
@@ -453,7 +450,7 @@ async def chat_websocket(
     session_id: str,
     auth_config: Annotated[AuthConfig, Depends(get_auth_config)],
     chat_service: Annotated[ChatSessionService, Depends()],
-    broadcast: Annotated[WebSocketBroadcast, Depends(get_ws_broadcast)],
+    broadcast: Annotated[BaseWebSocketBroadcast, Depends(get_ws_broadcast)],
 ) -> None:
     """WebSocket endpoint for existing sessions.
 
@@ -640,7 +637,7 @@ async def _write_message_via_rest(
     exchange_file_service: ExchangeFileService,
     model_file_service: ModelFileService,
     broker: SessionBroker,
-    broadcast: WebSocketBroadcast,
+    broadcast: BaseWebSocketBroadcast,
     live_event_store: LiveEventStore,
     request: ChatMessageWriteRequest,
     *,
@@ -693,7 +690,7 @@ async def _write_message_via_rest(
 async def _prepare_session_working_folder_via_rest(
     chat_service: ChatSessionService,
     broker: SessionBroker,
-    broadcast: WebSocketBroadcast,
+    broadcast: BaseWebSocketBroadcast,
     live_event_store: LiveEventStore,
     request: PrepareSessionWorkingFolderRequest,
     *,
@@ -761,7 +758,7 @@ def _create_chat_input_message(
 async def _finalize_message_write_response(
     chat_service: ChatSessionService,
     broker: SessionBroker,
-    broadcast: WebSocketBroadcast,
+    broadcast: BaseWebSocketBroadcast,
     live_event_store: LiveEventStore,
     *,
     agent_id: str,
@@ -960,7 +957,7 @@ async def update_session_goal(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     chat_service: Annotated[ChatSessionService, Depends()],
     broker: Annotated[SessionBroker, Depends(get_broker)],
-    broadcast: Annotated[WebSocketBroadcast, Depends(get_ws_broadcast)],
+    broadcast: Annotated[BaseWebSocketBroadcast, Depends(get_ws_broadcast)],
 ) -> GoalStateResponse:
     """Update or delete the goal of an existing session."""
     _validate_session_id(session_id)
@@ -1008,7 +1005,7 @@ async def update_session_goal_status(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     chat_service: Annotated[ChatSessionService, Depends()],
     broker: Annotated[SessionBroker, Depends(get_broker)],
-    broadcast: Annotated[WebSocketBroadcast, Depends(get_ws_broadcast)],
+    broadcast: Annotated[BaseWebSocketBroadcast, Depends(get_ws_broadcast)],
 ) -> GoalStateResponse:
     """Pause or resume the goal state of an existing session under user control."""
     _validate_session_id(session_id)
@@ -1168,7 +1165,7 @@ async def create_input(
     exchange_file_service: Annotated[ExchangeFileService, Depends()],
     model_file_service: Annotated[ModelFileService, Depends()],
     broker: Annotated[SessionBroker, Depends(get_broker)],
-    broadcast: Annotated[WebSocketBroadcast, Depends(get_ws_broadcast)],
+    broadcast: Annotated[BaseWebSocketBroadcast, Depends(get_ws_broadcast)],
     live_event_store: Annotated[LiveEventStore, Depends(get_live_event_store)],
     turn_action_capabilities: Annotated[TurnActionCapabilityRegistry, Depends()],
     timezone: str | None = None,
@@ -1200,7 +1197,7 @@ async def create_team_agent_session_message(
     chat_service: Annotated[ChatSessionService, Depends()],
     agent_session_input_service: Annotated[AgentSessionInputService, Depends()],
     broker: Annotated[SessionBroker, Depends(get_broker)],
-    broadcast: Annotated[WebSocketBroadcast, Depends(get_ws_broadcast)],
+    broadcast: Annotated[BaseWebSocketBroadcast, Depends(get_ws_broadcast)],
     live_event_store: Annotated[LiveEventStore, Depends(get_live_event_store)],
     timezone: str | None = None,
 ) -> ChatWriteResponse:
@@ -1228,7 +1225,7 @@ async def create_user_agent_session_message(
     chat_service: Annotated[ChatSessionService, Depends()],
     agent_session_input_service: Annotated[AgentSessionInputService, Depends()],
     broker: Annotated[SessionBroker, Depends(get_broker)],
-    broadcast: Annotated[WebSocketBroadcast, Depends(get_ws_broadcast)],
+    broadcast: Annotated[BaseWebSocketBroadcast, Depends(get_ws_broadcast)],
     live_event_store: Annotated[LiveEventStore, Depends(get_live_event_store)],
     timezone: str | None = None,
 ) -> ChatWriteResponse:
@@ -1258,7 +1255,7 @@ async def prepare_session_working_folder(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     chat_service: Annotated[ChatSessionService, Depends()],
     broker: Annotated[SessionBroker, Depends(get_broker)],
-    broadcast: Annotated[WebSocketBroadcast, Depends(get_ws_broadcast)],
+    broadcast: Annotated[BaseWebSocketBroadcast, Depends(get_ws_broadcast)],
     live_event_store: Annotated[LiveEventStore, Depends(get_live_event_store)],
 ) -> ChatWriteResponse:
     """Request a manual retry of canonical Session-folder preparation."""
@@ -1280,7 +1277,7 @@ async def _write_new_session_message_via_rest(
     chat_service: ChatSessionService,
     agent_session_input_service: AgentSessionInputService,
     broker: SessionBroker,
-    broadcast: WebSocketBroadcast,
+    broadcast: BaseWebSocketBroadcast,
     live_event_store: LiveEventStore,
     request: ChatSessionCreateMessageWriteRequest,
     *,
@@ -1507,7 +1504,7 @@ async def _write_turn_action_via_rest(
     chat_service: ChatSessionService,
     agent_session_input_service: AgentSessionInputService,
     broker: SessionBroker,
-    broadcast: WebSocketBroadcast,
+    broadcast: BaseWebSocketBroadcast,
     live_event_store: LiveEventStore,
     turn_action_capabilities: TurnActionCapabilityRegistry,
     request: ChatInputWriteRequest,
@@ -1567,7 +1564,7 @@ async def _write_input_via_rest(
     exchange_file_service: ExchangeFileService,
     model_file_service: ModelFileService,
     broker: SessionBroker,
-    broadcast: WebSocketBroadcast,
+    broadcast: BaseWebSocketBroadcast,
     live_event_store: LiveEventStore,
     turn_action_capabilities: TurnActionCapabilityRegistry,
     request: ChatInputWriteRequest,
@@ -2840,7 +2837,7 @@ async def delete_mailbox_item(
     mailbox_item_id: str,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     chat_service: Annotated[ChatSessionService, Depends()],
-    broadcast: Annotated[WebSocketBroadcast, Depends(get_ws_broadcast)],
+    broadcast: Annotated[BaseWebSocketBroadcast, Depends(get_ws_broadcast)],
 ) -> None:
     """Idempotently delete the pending mailbox item."""
     _validate_session_id(session_id)

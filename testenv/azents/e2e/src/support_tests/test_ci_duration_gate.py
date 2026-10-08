@@ -1,15 +1,28 @@
 """Focused tests for the compact E2E duration gate."""
 
 import json
+import subprocess
+import sys
 from collections.abc import Sequence
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
+from support import ci_duration_gate
 from support.ci_duration_gate import (
+    CandidateTiming,
+    DurationReport,
     EvidenceError,
+    InvalidCandidateTiming,
     Sample,
+    _candidate_report,
+    _decode_candidate,
+    _decode_comments,
+    _decode_pull_text,
+    _decode_runs,
+    _decode_test_phase,
+    affected_pull_numbers,
     compare,
     evaluate,
     load_lanes,
@@ -20,6 +33,145 @@ from support.ci_duration_gate import (
 
 _HEAD = "a" * 40
 _BASE = "b" * 40
+
+
+@pytest.mark.parametrize(
+    ("completed_sha", "expected"),
+    [
+        (_BASE, (2020, 2026)),
+        (_HEAD, (2026, 2028)),
+        ("d" * 40, (2020, 2031)),
+        ("f" * 40, ()),
+    ],
+)
+def test_completed_sha_selects_candidate_and_stacked_dependents(
+    completed_sha: str, expected: tuple[int, ...]
+) -> None:
+    def row(
+        number: int, head_sha: str, base_sha: str, repository: str
+    ) -> dict[str, object]:
+        return {
+            "number": number,
+            "state": "open",
+            "head": {"sha": head_sha, "repo": {"full_name": repository}},
+            "base": {"sha": base_sha},
+        }
+
+    pages = [
+        [
+            row(2020, _BASE, "d" * 40, "azents/azents"),
+            row(2031, "e" * 40, "d" * 40, "azents/azents"),
+        ],
+        [
+            row(2026, _HEAD, _BASE, "azents/azents"),
+            row(2028, "c" * 40, _HEAD, "azents/azents"),
+            row(77, _BASE, _BASE, "someone/fork"),
+            {**row(78, _BASE, _BASE, "azents/azents"), "state": "closed"},
+        ],
+    ]
+
+    def command(args: Sequence[str]) -> str:
+        assert list(args) == [
+            "gh",
+            "api",
+            "--paginate",
+            "--slurp",
+            "repos/azents/azents/pulls?state=open&per_page=100",
+        ]
+        return json.dumps(pages)
+
+    assert affected_pull_numbers("azents/azents", completed_sha, command) == expected
+
+
+def test_targets_cli_emits_dependent_pull_numbers(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    payload = [
+        [
+            {
+                "number": 2026,
+                "state": "open",
+                "head": {"sha": _HEAD, "repo": {"full_name": "azents/azents"}},
+                "base": {"sha": _BASE},
+            }
+        ]
+    ]
+    assert (
+        main(
+            ["targets", "--repository", "azents/azents", "--completed-sha", _BASE],
+            command_runner=lambda args: json.dumps(payload),
+        )
+        == 0
+    )
+    assert capsys.readouterr().out == "2026\n"
+
+
+def test_target_selection_rejects_invalid_sha_before_listing() -> None:
+    def command(args: Sequence[str]) -> str:
+        raise AssertionError("Invalid completion events must not query GitHub.")
+
+    with pytest.raises(EvidenceError, match="completed_sha_unavailable"):
+        affected_pull_numbers("azents/azents", "invalid", command)
+
+
+@pytest.mark.parametrize("valid_conclusion", ["success", "failure"])
+def test_candidate_skips_cancelled_duplicate_without_hiding_failures(
+    tmp_path: Path, valid_conclusion: str
+) -> None:
+    """Cancelled diagnostics cannot supersede real same-head evidence."""
+    downloads: list[int] = []
+
+    def command(args: Sequence[str]) -> str:
+        values = list(args)
+        joined = " ".join(values)
+        if f"head_sha={_HEAD}" in joined:
+            return json.dumps(
+                {
+                    "workflow_runs": [
+                        {"id": 30, "status": "completed", "conclusion": "cancelled"},
+                        {
+                            "id": 20,
+                            "status": "completed",
+                            "conclusion": valid_conclusion,
+                        },
+                    ]
+                }
+            )
+        if "gh run download 20" in joined:
+            downloads.append(20)
+            destination = Path(values[values.index("--dir") + 1])
+            destination.mkdir(parents=True)
+            (destination / "report.json").write_text(
+                json.dumps({"head_sha": _HEAD, "lanes": {"web-1": "109"}}),
+                encoding="utf-8",
+            )
+            return ""
+        raise AssertionError(values)
+
+    candidate = _candidate_report("azents/azents", _HEAD, tmp_path, command)
+
+    assert candidate.run_id == 20
+    assert downloads == [20]
+
+
+def test_cancelled_candidate_inventory_has_no_validation_evidence(
+    tmp_path: Path,
+) -> None:
+    """Cancellation alone never fabricates a valid candidate or a pass."""
+
+    def command(args: Sequence[str]) -> str:
+        if f"head_sha={_HEAD}" in " ".join(args):
+            return json.dumps(
+                {
+                    "workflow_runs": [
+                        {"id": 30, "status": "completed", "conclusion": "cancelled"}
+                    ]
+                }
+            )
+        raise AssertionError(list(args))
+
+    with pytest.raises(EvidenceError, match="candidate_evidence_unavailable"):
+        _candidate_report("azents/azents", _HEAD, tmp_path, command)
 
 
 def _pull(head_repository: str = "azents/azents") -> str:
@@ -189,7 +341,7 @@ def test_missing_base_evidence_reports_neutral_with_current_time(
     assert "⚠️ Comparison unavailable" in render(report)
 
 
-def test_terminal_missing_base_publishes_success(tmp_path: Path) -> None:
+def test_terminal_missing_base_gate_does_not_publish_status(tmp_path: Path) -> None:
     current = tmp_path / "current"
     _lanes(current, {"web-1": "123"})
     posts: list[list[str]] = []
@@ -201,7 +353,7 @@ def test_terminal_missing_base_publishes_success(tmp_path: Path) -> None:
             return json.dumps({"workflow_runs": []})
         if "/statuses/" in joined and "--method POST" in joined:
             posts.append(values)
-            return ""
+            raise subprocess.TimeoutExpired(values, 90)
         raise AssertionError(values)
 
     exit_code = main(
@@ -223,13 +375,12 @@ def test_terminal_missing_base_publishes_success(tmp_path: Path) -> None:
             str(tmp_path / "report.json"),
             "--report-markdown",
             str(tmp_path / "summary.md"),
-            "--publish-status",
         ],
         command_runner=command,
     )
 
     assert exit_code == 0
-    assert any("state=success" in item for item in posts[0])
+    assert not posts
     assert "⚠️ Comparison unavailable" in (tmp_path / "summary.md").read_text()
 
 
@@ -286,7 +437,7 @@ def test_invalid_candidate_evidence_remains_a_failure(tmp_path: Path) -> None:
     assert "Candidate timing invalid" in render(report)
 
 
-def test_gate_publishes_pending_without_failing_for_active_base(
+def test_active_base_gate_preserves_verdict_without_status_publication(
     tmp_path: Path,
 ) -> None:
     current = tmp_path / "current"
@@ -331,14 +482,16 @@ def test_gate_publishes_pending_without_failing_for_active_base(
             str(tmp_path / "report.json"),
             "--report-markdown",
             str(tmp_path / "summary.md"),
-            "--publish-status",
         ],
         command_runner=command,
     )
 
     assert exit_code == 0
-    assert any("state=pending" in item for item in posts[0])
-    assert any(f"target_url={run_url}" in item for item in posts[0])
+    assert not posts
+    report = json.loads((tmp_path / "report.json").read_text())
+    assert report["outcome"] == "comparison_unavailable"
+    assert report["reason"] == "base_workflow_running"
+    assert report["base_run_url"] == run_url
 
 
 def test_markdown_keeps_summary_visible_and_evidence_collapsed() -> None:
@@ -366,7 +519,7 @@ def test_regression_and_unavailable_are_explained_in_plain_language() -> None:
         _HEAD,
         _BASE,
     )
-    unavailable_report = {
+    unavailable_report: DurationReport = {
         **regression,
         "outcome": "comparison_unavailable",
         "reason": "compatible_base_run_unavailable",
@@ -382,7 +535,10 @@ def test_regression_and_unavailable_are_explained_in_plain_language() -> None:
     assert "Base timing artifact unavailable" in unavailable_markdown
 
 
-def test_recheck_uses_latest_candidate_values_with_new_base(tmp_path: Path) -> None:
+@pytest.mark.parametrize("publication_times_out", [False, True])
+def test_recheck_uses_latest_candidate_values_with_new_base(
+    tmp_path: Path, publication_times_out: bool
+) -> None:
     statuses: list[list[str]] = []
     patches: list[list[str]] = []
     comment_reads: list[list[str]] = []
@@ -435,6 +591,8 @@ def test_recheck_uses_latest_candidate_values_with_new_base(tmp_path: Path) -> N
             return ""
         if "/statuses/" in joined and "--method POST" in joined:
             statuses.append(values)
+            if publication_times_out:
+                raise subprocess.TimeoutExpired(values, 90)
             return ""
         if joined.endswith("issues/3/comments?per_page=100"):
             comment_reads.append(values)
@@ -443,6 +601,14 @@ def test_recheck_uses_latest_candidate_values_with_new_base(tmp_path: Path) -> N
             patches.append(values)
             return ""
         raise AssertionError(values)
+
+    if publication_times_out:
+        with pytest.raises(subprocess.TimeoutExpired):
+            recheck("azents/azents", 3, tmp_path, command)
+        assert len(statuses) == 1
+        assert any("state=success" in item for item in statuses[0])
+        assert not patches
+        return
 
     summary = recheck("azents/azents", 3, tmp_path, command)
 
@@ -602,3 +768,157 @@ def test_recheck_drops_stale_head_before_publication(
     )
     assert expected in summary
     assert len(posts) == int(change_after_status)
+
+
+def test_phase_decoder_projects_only_gate_fields() -> None:
+    record = _decode_test_phase(
+        '{"record_type":"test_phase","node_id":"test::example",'
+        '"phase":"call","duration_seconds":"1.25","outcome":"passed"}'
+    )
+    assert record is not None
+    assert record.node_id == "test::example"
+    assert record.phase == "call"
+    assert record.duration_seconds == Decimal("1.25")
+    assert _decode_test_phase('{"record_type":"fixture","fixture":"server"}') is None
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"node_id": ""},
+        {"node_id": True},
+        {"phase": "unknown"},
+        {"duration_seconds": True},
+        {"duration_seconds": None},
+        {"duration_seconds": "NaN"},
+        {"outcome": None},
+        {"unknown": "value"},
+    ],
+)
+def test_phase_decoder_rejects_invalid_contract_fields(
+    changes: dict[str, object],
+) -> None:
+    payload = {
+        "record_type": "test_phase",
+        "node_id": "test::example",
+        "phase": "call",
+        "duration_seconds": 1.25,
+        "outcome": "passed",
+        **changes,
+    }
+    with pytest.raises(EvidenceError):
+        _decode_test_phase(json.dumps(payload))
+
+
+def test_current_and_compact_reports_decode_to_candidate_measurements() -> None:
+    current = compare(
+        {"web-1": Decimal("90")},
+        Sample(7, {"web-1": Decimal("100")}),
+        _HEAD,
+        _BASE,
+        diagnostics={"web-1": {"call": Decimal("90"), "wall": Decimal("110")}},
+    )
+    decoded = _decode_candidate(json.dumps(current))
+    assert decoded.head_sha == _HEAD
+    assert isinstance(decoded.timing, CandidateTiming)
+    assert decoded.timing.lanes == {"web-1": Decimal("90")}
+    assert decoded.timing.diagnostics["web-1"] == {
+        "call": Decimal("90"),
+        "wall": Decimal("110"),
+    }
+    compact = _decode_candidate(
+        json.dumps({"head_sha": _HEAD, "lanes": {"web-1": "90"}})
+    )
+    assert isinstance(compact.timing, CandidateTiming)
+    assert compact.timing.diagnostics == {}
+    # Historic explicit null diagnostics and null diagnostic cells are absence.
+    nullable = _decode_candidate(
+        json.dumps(
+            {"head_sha": _HEAD, "lanes": {"web-1": "90"}, "lane_diagnostics": None}
+        )
+    )
+    assert isinstance(nullable.timing, CandidateTiming)
+    assert nullable.timing.diagnostics == {}
+    assert set(current) == set(DurationReport.__annotations__)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"lanes": {}},
+        {"lanes": {"web-1": True}},
+        {"lanes": {"web-1": "-1"}},
+        {"lanes": {"not-a-lane": "90"}},
+        {"schema_version": True},
+        {"schema_version": 1.0},
+        {"schema_version": 2},
+        {"metric": "other-metric"},
+        {"unknown": True},
+        {"lane_diagnostics": {"web-1": {"unexpected": 1}}},
+    ],
+)
+def test_invalid_candidate_is_typed_failure_not_absent_evidence(
+    changes: dict[str, object],
+) -> None:
+    decoded = _decode_candidate(
+        json.dumps({"head_sha": _HEAD, "lanes": {"web-1": "90"}, **changes})
+    )
+    assert decoded.head_sha == _HEAD
+    assert isinstance(decoded.timing, InvalidCandidateTiming)
+
+
+@pytest.mark.parametrize("status", [None, False, 17, ""])
+def test_run_decoder_does_not_turn_malformed_status_into_completed(
+    status: object,
+) -> None:
+    with pytest.raises(EvidenceError, match="invalid_run_status"):
+        _decode_runs(
+            json.dumps({"workflow_runs": [{"id": 7, "status": status}]}),
+            "azents/azents",
+        )
+
+
+def test_github_ingress_projects_extensible_fields_without_raw_payloads() -> None:
+    runs = _decode_runs(
+        '{"workflow_runs":[{"id":7,"extra":"GitHub-owned field"},{"id":true}]}',
+        "azents/azents",
+    )
+    assert len(runs) == 1
+    assert runs[0].status == "completed"
+    assert runs[0].url == "https://github.com/azents/azents/actions/runs/7"
+    pull = _decode_pull_text(_pull())
+    assert pull.head_sha == _HEAD
+    assert pull.base_sha == _BASE
+    assert pull.head_repository == "azents/azents"
+    comments = _decode_comments(
+        '[[{"id":42,"body":"sticky","extra":true}],'
+        '[{"id":true,"body":"invalid"},{"id":43,"body":null}]]'
+    )
+    assert len(comments) == 1
+    assert comments[0].comment_id == 42
+    assert comments[0].body == "sticky"
+
+
+def test_gate_still_imports_without_site_packages_on_python312_syntax(
+    tmp_path: Path,
+) -> None:
+    """The trusted workflow helper has no dependency on the E2E environment."""
+    script = """
+import ast
+import pathlib
+import runpy
+import sys
+path = pathlib.Path(sys.argv[1])
+ast.parse(path.read_text(), feature_version=(3, 12))
+namespace = runpy.run_path(str(path), run_name="duration_gate_stdlib_import")
+assert "pydantic" not in sys.modules
+assert namespace["METRIC"] == "pytest-call-total-v1"
+"""
+    subprocess.run(
+        [sys.executable, "-I", "-S", "-c", script, ci_duration_gate.__file__],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )

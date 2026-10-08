@@ -13,6 +13,7 @@ from azcommon.infra.s3.service import S3Service
 from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSession, SessionAgent
 from azents.core.config import Config, FileLifecycleConfig, WorkspaceS3Config
 from azents.core.enums import (
     AgentRunStatus,
@@ -25,6 +26,7 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.core.llm_catalog import ModelCapabilities, ModelModalities, ModelModality
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.events.file_parts import ModelFileLoweringContent
 from azents.engine.events.openai_responses import OpenAIResponsesLowerer
 from azents.engine.events.types import (
@@ -44,8 +46,8 @@ from azents.engine.tools.import_file import (
     make_import_file_tool,
 )
 from azents.engine.tools.testing import FakeSharedStorage
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.repos.artifact import ArtifactRepository
 from azents.repos.artifact.data import Artifact, ArtifactCreate
 from azents.repos.artifact.operations import ArtifactOperationRepository
@@ -53,7 +55,6 @@ from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUser
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.services.artifact import ArtifactService
-from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.testing.types import is_string_object_dict
 
 _NOW = datetime.datetime.now(datetime.timezone.utc)
@@ -65,7 +66,7 @@ class _FakeArtifactRepository(ArtifactRepository):
     def __init__(self) -> None:
         self.artifacts: dict[str, Artifact] = {}
 
-    async def create(self, session: AsyncSession, create: ArtifactCreate) -> Artifact:
+    async def create(self, session: ReadSession, create: ArtifactCreate) -> Artifact:
         """Store Artifact create input."""
         del session
         artifact_id = create.id
@@ -100,7 +101,7 @@ class _FakeArtifactRepository(ArtifactRepository):
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         artifact_id: str,
     ) -> Artifact | None:
         """Fetch Artifact by ID."""
@@ -109,7 +110,7 @@ class _FakeArtifactRepository(ArtifactRepository):
 
     async def get_by_storage_key(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         storage_key: str,
     ) -> Artifact | None:
         """Fetch Artifact by storage key."""
@@ -121,7 +122,7 @@ class _FakeArtifactRepository(ArtifactRepository):
 
     async def expire_due(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         now: datetime.datetime,
         limit: int,
@@ -143,7 +144,7 @@ class _FakeArtifactRepository(ArtifactRepository):
 
     async def mark_blob_deleted(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         artifact_id: str,
         blob_deleted_at: datetime.datetime,
@@ -160,7 +161,7 @@ class _FakeAgentSessionRepository(AgentSessionRepository):
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> AgentSession | None:
         """Fetch AgentSession."""
@@ -196,7 +197,7 @@ class _FakeAgentSessionRepository(AgentSessionRepository):
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> AgentSession | None:
         """Fetch and lock the deterministic fixture Session."""
@@ -204,7 +205,7 @@ class _FakeAgentSessionRepository(AgentSessionRepository):
 
     async def get_root_session_agent_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> SessionAgent | None:
         """Return the deterministic root Session identity."""
@@ -219,7 +220,7 @@ class _FakeWorkspaceUserRepository(WorkspaceUserRepository):
 
     async def get_by_workspace_and_user(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         workspace_id: str,
         user_id: str,
     ) -> WorkspaceUser | None:
@@ -293,7 +294,7 @@ class _AuthorityArtifactService(ArtifactService):
 
     async def _has_valid_resource_authority(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         authority: SessionResourceAuthority,
         *,
         lock: bool = False,
@@ -304,7 +305,7 @@ class _AuthorityArtifactService(ArtifactService):
 
 
 @asynccontextmanager
-async def _session_manager() -> AsyncGenerator[AsyncSession, None]:
+async def _session_manager() -> AsyncGenerator[WriteSession, None]:
     """Session manager for tests."""
     yield AsyncMock(spec=AsyncSession)
 
@@ -418,6 +419,7 @@ async def test_artifact_output_import_and_expiration_e2e_path() -> None:
     artifact = created.value
 
     lowerer = OpenAIResponsesLowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",
@@ -455,6 +457,7 @@ async def test_artifact_output_import_and_expiration_e2e_path() -> None:
                 ),
             ),
         ],
+        native_replay_context=None,
         model="gpt-5.1",
     )
     lowered_output = request.input[-1]["output"]
@@ -506,6 +509,7 @@ async def test_artifact_output_import_and_expiration_e2e_path() -> None:
 async def test_attachment_output_lowers_as_metadata_only() -> None:
     """Attachment lowers to bounded metadata text, not rich input."""
     lowerer = OpenAIResponsesLowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",
@@ -543,6 +547,7 @@ async def test_attachment_output_lowers_as_metadata_only() -> None:
                 ),
             ),
         ],
+        native_replay_context=None,
         model="gpt-5.1",
     )
 
@@ -587,6 +592,7 @@ async def test_file_part_capability_branch_e2e_path() -> None:
     ]
 
     image_request = OpenAIResponsesLowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",
@@ -595,7 +601,7 @@ async def test_file_part_capability_branch_e2e_path() -> None:
             modalities=ModelModalities(input=[ModelModality.IMAGE])
         ),
         model_file_resolver=_StaticModelFileResolver(),
-    ).lower(transcript, model="gpt-5.1")
+    ).lower(transcript, native_replay_context=None, model="gpt-5.1")
     assert image_request.input[-1]["output"] == [
         {
             "type": "input_image",
@@ -605,11 +611,12 @@ async def test_file_part_capability_branch_e2e_path() -> None:
     ]
 
     text_only_request = OpenAIResponsesLowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",
         model="text-only",
-    ).lower(transcript, model="text-only")
+    ).lower(transcript, native_replay_context=None, model="text-only")
     output = text_only_request.input[-1]["output"]
     assert isinstance(output, list)
     first_output = output[0]

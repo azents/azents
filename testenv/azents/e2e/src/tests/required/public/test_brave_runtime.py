@@ -26,18 +26,14 @@ from tests.required.public.test_agent_execution_persistence import (
     auth_headers,
     json_object_payload,
 )
-from tests.required.public.test_brave_search import _submit, _tool_events
-from tests.required.public.test_per_prompt_inference_profile import (
-    _create_profile_session,
-)
-from tests.required.public.test_provider_image_generation import (
-    _wait_for_idle,
+from tests.required.public.test_brave_search import (
+    _completed_success_sessions,
+    _tool_events,
 )
 from tests.required.public.test_runtime_optional_capability import (
     _create_workspace,
 )
 
-_KINDS = ("web", "context", "news", "images", "videos")
 E2E_PLANNER_FALLBACK_WEIGHT = 30.0
 
 
@@ -98,25 +94,12 @@ def test_brave_five_tools_with_managed_runtime(
         workspace_handle=workspace.handle,
         agent_id=agent.id,
     )
-    for kind in _KINDS:
-        session_id = _create_profile_session(
-            server_url=azents_public_server_url,
-            token=workspace.token,
-            agent_id=agent.id,
-        )
-        _submit(
-            server_url=azents_public_server_url,
-            token=workspace.token,
-            agent_id=agent.id,
-            session_id=session_id,
-            kind=kind,
-        )
-        _wait_for_idle(
-            server_url=azents_public_server_url,
-            token=workspace.token,
-            agent_id=agent.id,
-            session_id=session_id,
-        )
+    sessions = _completed_success_sessions(
+        server_url=azents_public_server_url,
+        token=workspace.token,
+        agent_id=agent.id,
+    )
+    for kind, session_id in sessions.items():
         events = _tool_events(
             server_url=azents_public_server_url,
             token=workspace.token,

@@ -9,7 +9,6 @@ from azcommon.datetime import tznow
 from cryptography.fernet import Fernet
 from fastapi import HTTPException
 from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
 from azents.api.public.runtime_provider_enrollment.v1 import exchange_credential
@@ -23,8 +22,17 @@ from azents.core.enums import (
     RuntimeProviderBootstrapAdapterKind,
     RuntimeProviderKind,
 )
+from azents.core.runtime_provider_bootstrap import (
+    RuntimeProviderBootstrapDeclarationInput,
+    RuntimeProviderBootstrapSnapshot,
+)
+from azents.core.runtime_provider_control import (
+    RuntimeProviderCredentialUnavailable,
+    RuntimeProviderEnrollmentUnavailable,
+)
 from azents.core.runtime_provider_credential import RuntimeProviderCredentialVerifier
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_provider.data import RuntimeProviderBootstrapSourceCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_binding.data import (
@@ -33,45 +41,40 @@ from azents.repos.runtime_provider_binding.data import (
 from azents.repos.runtime_provider_binding.repository import (
     RuntimeProviderAuthBindingRepository,
 )
+from azents.repos.runtime_provider_bootstrap_operations import (
+    RuntimeProviderBootstrapOperations,
+)
 from azents.repos.runtime_provider_control.repository import (
     RuntimeProviderControlRepository,
 )
 from azents.repos.system_setting.repository import SystemSettingRepository
-from azents.services.runtime_provider_bootstrap.data import (
-    RuntimeProviderBootstrapDeclarationInput,
-    RuntimeProviderBootstrapSnapshot,
-)
 from azents.services.runtime_provider_bootstrap.service import (
     RuntimeProviderBootstrapService,
 )
-from azents.services.runtime_provider_control.data import (
-    RuntimeProviderCredentialUnavailable,
-    RuntimeProviderEnrollmentUnavailable,
+from azents.services.runtime_provider_control.deps import (
+    create_runtime_provider_enrollment_service,
 )
 from azents.services.runtime_provider_control.rate_limit import (
     RedisRuntimeProviderEnrollmentRateLimiter,
-)
-from azents.services.runtime_provider_control.service import (
-    RuntimeProviderEnrollmentService,
 )
 
 
 @asynccontextmanager
 async def _session_context(
-    session: AsyncSession,
-) -> AsyncGenerator[AsyncSession, None]:
+    session: WriteSession,
+) -> AsyncGenerator[WriteSession, None]:
     """Expose one test session through the production SessionManager shape."""
     yield session
 
 
-def _session_manager(session: AsyncSession) -> SessionManager[AsyncSession]:
+def _session_manager(session: WriteSession) -> SessionManager[WriteSession]:
     """Build one production-shaped SessionManager."""
     return lambda: _session_context(session)
 
 
 async def _create_bootstrap_issued_token_binding(
     *,
-    session: AsyncSession,
+    session: WriteSession,
     provider_repository: RuntimeProviderRepository,
     binding_repository: RuntimeProviderAuthBindingRepository,
     provider_id: str,
@@ -80,7 +83,6 @@ async def _create_bootstrap_issued_token_binding(
     declaration = await provider_repository.get_bootstrap_declaration_by_provider_id(
         session,
         provider_id=provider_id,
-        for_update=False,
     )
     assert declaration is not None
     binding = await binding_repository.create(
@@ -115,17 +117,19 @@ class TestRuntimeProviderEnrollmentService:
 
     async def test_bootstrap_source_can_issue_only_for_owned_declaration(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Another trusted source cannot enroll a Provider it does not own."""
         session_manager = _session_manager(rdb_session)
         provider_repository = RuntimeProviderRepository()
         binding_repository = RuntimeProviderAuthBindingRepository()
         bootstrap_result = await RuntimeProviderBootstrapService(
-            session_manager=session_manager,
-            repository=provider_repository,
-            system_setting_repository=SystemSettingRepository(),
-            binding_repository=binding_repository,
+            operations=RuntimeProviderBootstrapOperations(
+                session_manager=session_manager,
+                repository=provider_repository,
+                system_setting_repository=SystemSettingRepository(),
+                binding_repository=binding_repository,
+            ),
         ).reconcile(
             RuntimeProviderBootstrapSnapshot(
                 source_key="helm/default/azents",
@@ -164,7 +168,7 @@ class TestRuntimeProviderEnrollmentService:
                 adapter_kind=RuntimeProviderBootstrapAdapterKind.HELM_FILE,
             ),
         )
-        service = RuntimeProviderEnrollmentService(
+        service = create_runtime_provider_enrollment_service(
             session_manager=session_manager,
             repository=RuntimeProviderControlRepository(),
             provider_repository=provider_repository,
@@ -195,17 +199,19 @@ class TestRuntimeProviderEnrollmentService:
 
     async def test_new_bootstrap_connection_revokes_only_older_credentials(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Credential rotation keeps the old credential until the new one connects."""
         session_manager = _session_manager(rdb_session)
         provider_repository = RuntimeProviderRepository()
         binding_repository = RuntimeProviderAuthBindingRepository()
         bootstrap_result = await RuntimeProviderBootstrapService(
-            session_manager=session_manager,
-            repository=provider_repository,
-            system_setting_repository=SystemSettingRepository(),
-            binding_repository=binding_repository,
+            operations=RuntimeProviderBootstrapOperations(
+                session_manager=session_manager,
+                repository=provider_repository,
+                system_setting_repository=SystemSettingRepository(),
+                binding_repository=binding_repository,
+            ),
         ).reconcile(
             RuntimeProviderBootstrapSnapshot(
                 source_key="helm/default/azents",
@@ -237,7 +243,7 @@ class TestRuntimeProviderEnrollmentService:
             binding_repository=binding_repository,
             provider_id=provider_id,
         )
-        service = RuntimeProviderEnrollmentService(
+        service = create_runtime_provider_enrollment_service(
             session_manager=session_manager,
             repository=RuntimeProviderControlRepository(),
             provider_repository=provider_repository,
@@ -313,7 +319,7 @@ class TestRuntimeProviderEnrollmentService:
 
     async def test_redis_reset_keeps_invalid_durable_grants_unavailable(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
         redis_url: str,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -322,10 +328,12 @@ class TestRuntimeProviderEnrollmentService:
         provider_repository = RuntimeProviderRepository()
         binding_repository = RuntimeProviderAuthBindingRepository()
         bootstrap_result = await RuntimeProviderBootstrapService(
-            session_manager=session_manager,
-            repository=provider_repository,
-            system_setting_repository=SystemSettingRepository(),
-            binding_repository=binding_repository,
+            operations=RuntimeProviderBootstrapOperations(
+                session_manager=session_manager,
+                repository=provider_repository,
+                system_setting_repository=SystemSettingRepository(),
+                binding_repository=binding_repository,
+            ),
         ).reconcile(
             RuntimeProviderBootstrapSnapshot(
                 source_key="helm/redis-reset/azents",
@@ -358,7 +366,7 @@ class TestRuntimeProviderEnrollmentService:
             provider_id=provider_id,
         )
         repository = RuntimeProviderControlRepository()
-        service = RuntimeProviderEnrollmentService(
+        service = create_runtime_provider_enrollment_service(
             session_manager=session_manager,
             repository=repository,
             provider_repository=provider_repository,
@@ -399,7 +407,7 @@ class TestRuntimeProviderEnrollmentService:
             issued_by_source_id=bootstrap_result.source_id,
         )
         monkeypatch.setattr(
-            "azents.services.runtime_provider_control.service.tznow",
+            "azents.repos.runtime_provider_control.operations.tznow",
             lambda: now + datetime.timedelta(minutes=2),
         )
 

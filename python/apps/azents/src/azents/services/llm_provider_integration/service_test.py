@@ -4,7 +4,6 @@ import datetime
 
 from azcommon.result import Success
 from cryptography.fernet import Fernet
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.credentials import (
     ApiKeySecrets,
@@ -13,11 +12,15 @@ from azents.core.credentials import (
 )
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import LLMCatalogPurpose, LLMCatalogScope, LLMProvider
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
+from azents.repos.llm_provider_integration.operations import (
+    LLMProviderIntegrationOperations,
+)
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.services.llm_provider_integration import (
     LLMProviderIntegrationService,
     catalog_sync_required_for_update,
@@ -86,7 +89,7 @@ def test_validate_provider_update_rejects_generic_secrets_for_kimi() -> None:
 
 
 async def test_create_chatgpt_oauth_creates_integration_catalog(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Create the account-scoped catalog in the integration transaction."""
     async with rdb_session_manager() as session:
@@ -105,11 +108,14 @@ async def test_create_chatgpt_oauth_creates_integration_catalog(
 
     catalog_repository = LLMCatalogRepository()
     service = LLMProviderIntegrationService(
-        repository=LLMProviderIntegrationRepository(
-            CredentialCipher(Fernet.generate_key().decode())
-        ),
-        catalog_repository=catalog_repository,
-        session_manager=rdb_session_manager,
+        operations=LLMProviderIntegrationOperations(
+            repository=LLMProviderIntegrationRepository(
+                CredentialCipher(Fernet.generate_key().decode())
+            ),
+            catalog_repository=catalog_repository,
+            session_manager=rdb_session_manager,
+            read_session_manager=rdb_session_manager,
+        )
     )
     created = await service.create(
         LLMProviderIntegrationCreateInput(
@@ -144,4 +150,6 @@ async def test_create_chatgpt_oauth_creates_integration_catalog(
     assert catalog is not None
     assert catalog.scope == LLMCatalogScope.INTEGRATION
     assert catalog.provider == LLMProvider.CHATGPT_OAUTH
-    assert catalog.current_snapshot_id is None
+    assert catalog.last_success_at is None
+    assert catalog.entry_count == 0
+    assert catalog.sync_status is None

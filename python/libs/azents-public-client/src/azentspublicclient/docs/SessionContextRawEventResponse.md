@@ -8,7 +8,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **id** | **str** | Event ID | 
 **kind** | **str** | Event kind | 
-**payload** | **Dict[str, object]** | Event payload | 
+**payload** | **object** | Event payload | 
 **external_id** | **str** |  | [optional] 
 **adapter** | **str** |  | [optional] 
 **provider** | **str** |  | [optional] 

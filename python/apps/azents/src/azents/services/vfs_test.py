@@ -9,7 +9,9 @@ from typing import Any
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import AgentSessionProductMode
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.tools import (
     ResolveContext,
     Toolkit,
@@ -23,26 +25,30 @@ from azents.core.vfs import (
     make_vfs_source_revision,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_execution.data import AgentRunCreate
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.agent_session.repository_test import _create_agent, _create_workspace
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
 from azents.repos.toolkit import ToolkitRepository
-from azents.repos.toolkit.data import EffectiveToolkitSlugConflict
-from azents.services.session_resource_authority import SessionExecutionOwner
+from azents.repos.toolkit.data import EffectiveToolkitNamespaceMissing
+from azents.repos.vfs_projection_operations import (
+    VfsEffectiveToolkitConfig,
+    VfsProjectionOperations,
+    VfsRun,
+    VfsRunSnapshot,
+    VfsSessionRecord,
+    VfsToolkitSnapshot,
+)
 from azents.services.vfs import (
     GLOBAL_RELEASE_SOURCE,
     ReleaseVfsCatalog,
     VfsCatalogSnapshot,
-    VfsEffectiveToolkitConfig,
     VfsFileResolutionError,
     VfsProjectionService,
-    VfsRun,
-    VfsSessionRecord,
 )
 
 
@@ -111,13 +117,13 @@ class _RunRepository:
     def __init__(self, projection: VfsProjection) -> None:
         self.projection = projection
 
-    async def get_by_id(self, session: _Session, run_id: str) -> VfsRun:
+    async def get_by_id(self, session: ReadSession, run_id: str) -> VfsRun:
         del session, run_id
         return _Run(session_id="session-1", vfs_projection=self.projection)
 
     async def set_vfs_projection_if_unset(
         self,
-        session: _Session,
+        session: WriteSession,
         *,
         run_id: str,
         session_id: str,
@@ -132,7 +138,7 @@ class _SessionRepository:
     """AgentSessionRepository test double."""
 
     async def get_by_id(
-        self, session: _Session, agent_session_id: str
+        self, session: ReadSession, agent_session_id: str
     ) -> VfsSessionRecord:
         del session, agent_session_id
         return _Session(agent_id="agent-1", workspace_id="workspace-1")
@@ -144,14 +150,14 @@ class _MappedRunRepository:
     def __init__(self, runs: dict[str, VfsRun]) -> None:
         self.runs = runs
 
-    async def get_by_id(self, session: _Session, run_id: str) -> VfsRun | None:
+    async def get_by_id(self, session: ReadSession, run_id: str) -> VfsRun | None:
         """Return the configured run without falling back to another run."""
         del session
         return self.runs.get(run_id)
 
     async def set_vfs_projection_if_unset(
         self,
-        session: _Session,
+        session: WriteSession,
         *,
         run_id: str,
         session_id: str,
@@ -169,7 +175,7 @@ class _MappedSessionRepository:
         self.sessions = sessions
 
     async def get_by_id(
-        self, session: _Session, agent_session_id: str
+        self, session: ReadSession, agent_session_id: str
     ) -> VfsSessionRecord | None:
         """Return the configured Session ownership record."""
         del session
@@ -179,13 +185,13 @@ class _MappedSessionRepository:
 class _UnusedRunRepository:
     """Fail if preview-only tests unexpectedly load a run."""
 
-    async def get_by_id(self, session: _Session, run_id: str) -> VfsRun | None:
+    async def get_by_id(self, session: ReadSession, run_id: str) -> VfsRun | None:
         del session, run_id
         raise AssertionError("Run repository is not used by preview")
 
     async def set_vfs_projection_if_unset(
         self,
-        session: _Session,
+        session: WriteSession,
         *,
         run_id: str,
         session_id: str,
@@ -199,7 +205,7 @@ class _UnusedSessionRepository:
     """Fail if preview-only tests unexpectedly load a session."""
 
     async def get_by_id(
-        self, session: _Session, agent_session_id: str
+        self, session: ReadSession, agent_session_id: str
     ) -> VfsSessionRecord | None:
         del session, agent_session_id
         raise AssertionError("Session repository is not used by preview")
@@ -210,7 +216,7 @@ class _EmptyToolkitRepository:
 
     async def list_effective_for_agent(
         self,
-        session: _Session,
+        session: ReadSession,
         agent_id: str,
         *,
         workspace_id: str,
@@ -241,7 +247,7 @@ class _OneToolkitRepository:
 
     async def list_effective_for_agent(
         self,
-        session: _Session,
+        session: ReadSession,
         agent_id: str,
         *,
         workspace_id: str,
@@ -264,17 +270,16 @@ class _ConflictingToolkitRepository:
 
     async def list_effective_for_agent(
         self,
-        session: _Session,
+        session: ReadSession,
         agent_id: str,
         *,
         workspace_id: str,
     ) -> list[VfsEffectiveToolkitConfig]:
         """Fail before VFS publishes a partial provider projection."""
         del session, workspace_id
-        raise EffectiveToolkitSlugConflict(
+        raise EffectiveToolkitNamespaceMissing(
             agent_id=agent_id,
-            slug="duplicate",
-            toolkit_ids=("toolkit-1", "toolkit-2"),
+            toolkit_id="toolkit-1",
         )
 
 
@@ -313,20 +318,55 @@ class _BlockingReleaseVfsCatalog(ReleaseVfsCatalog):
 
 
 @asynccontextmanager
-async def _session_manager() -> AsyncIterator[_Session]:
-    yield _Session(agent_id="", workspace_id="")
+async def _session_manager() -> AsyncIterator[WriteSession]:
+    async with AsyncSession() as session:
+        yield ReadWriteSession(session)
+
+
+@dataclass(frozen=True)
+class _VfsTestOperations:
+    """Expose the completed boundary over explicit disconnected DB primitives."""
+
+    primitives: VfsProjectionOperations
+
+    def with_owner(self, owner: SessionExecutionOwner) -> "_VfsTestOperations":
+        """Require the real fenced repository for owner-generation tests."""
+        del owner
+        raise AssertionError("Disconnected fixtures do not implement durable ownership")
+
+    async def read_run(self, *, run_id: str, session_id: str) -> VfsRunSnapshot | None:
+        return await self.primitives.read_run(run_id=run_id, session_id=session_id)
+
+    async def publish_projection(
+        self, *, run_id: str, session_id: str, projection: VfsProjection
+    ) -> VfsProjection:
+        return await self.primitives.publish_projection(
+            run_id=run_id, session_id=session_id, projection=projection
+        )
+
+    async def list_effective_toolkits(
+        self, *, agent_id: str, workspace_id: str
+    ) -> tuple[VfsToolkitSnapshot, ...]:
+        return await self.primitives.list_effective_toolkits(
+            agent_id=agent_id, workspace_id=workspace_id
+        )
 
 
 def _projection_service(
     projection: VfsProjection,
-) -> VfsProjectionService[_Session]:
+) -> VfsProjectionService:
     return VfsProjectionService(
-        session_manager=_session_manager,
+        operations=_VfsTestOperations(
+            primitives=VfsProjectionOperations(
+                session_manager=_session_manager,
+                agent_run_repository=_RunRepository(projection),
+                agent_session_repository=_SessionRepository(),
+                toolkit_repository=_EmptyToolkitRepository(),
+                owner=None,
+            )
+        ),
         toolkit_registry={},
         catalog=ReleaseVfsCatalog(),
-        agent_run_repository=_RunRepository(projection),
-        agent_session_repository=_SessionRepository(),
-        toolkit_repository=_EmptyToolkitRepository(),
         required_provider_sources={},
     )
 
@@ -345,12 +385,17 @@ async def test_release_catalog_reuses_an_empty_catalog() -> None:
 async def test_preview_includes_platform_skill_creator_without_attachments() -> None:
     """The global Skill Creator does not depend on a ToolkitConfig attachment."""
     service = VfsProjectionService(
-        session_manager=_session_manager,
+        operations=_VfsTestOperations(
+            primitives=VfsProjectionOperations(
+                session_manager=_session_manager,
+                agent_run_repository=_UnusedRunRepository(),
+                agent_session_repository=_UnusedSessionRepository(),
+                toolkit_repository=_EmptyToolkitRepository(),
+                owner=None,
+            )
+        ),
         toolkit_registry={},
         catalog=ReleaseVfsCatalog(),
-        agent_run_repository=_UnusedRunRepository(),
-        agent_session_repository=_UnusedSessionRepository(),
-        toolkit_repository=_EmptyToolkitRepository(),
         required_provider_sources={},
     )
 
@@ -366,12 +411,17 @@ async def test_preview_includes_required_scheduled_skill_without_attachment() ->
     """Root preview projects the required Scheduled release source."""
     provider = _ScheduledReleaseProvider()
     service = VfsProjectionService(
-        session_manager=_session_manager,
+        operations=_VfsTestOperations(
+            primitives=VfsProjectionOperations(
+                session_manager=_session_manager,
+                agent_run_repository=_UnusedRunRepository(),
+                agent_session_repository=_UnusedSessionRepository(),
+                toolkit_repository=_EmptyToolkitRepository(),
+                owner=None,
+            )
+        ),
         toolkit_registry={},
         catalog=ReleaseVfsCatalog(),
-        agent_run_repository=_UnusedRunRepository(),
-        agent_session_repository=_UnusedSessionRepository(),
-        toolkit_repository=_EmptyToolkitRepository(),
         required_provider_sources={"scheduled": provider},
     )
 
@@ -391,12 +441,17 @@ async def test_preview_includes_effective_agent_owned_provider_source() -> None:
     """An effective direct-owner Toolkit enables its Provider release source."""
     provider = _ScheduledReleaseProvider()
     service = VfsProjectionService(
-        session_manager=_session_manager,
+        operations=_VfsTestOperations(
+            primitives=VfsProjectionOperations(
+                session_manager=_session_manager,
+                agent_run_repository=_UnusedRunRepository(),
+                agent_session_repository=_UnusedSessionRepository(),
+                toolkit_repository=_OneToolkitRepository(),
+                owner=None,
+            )
+        ),
         toolkit_registry={"scheduled": provider},
         catalog=ReleaseVfsCatalog(),
-        agent_run_repository=_UnusedRunRepository(),
-        agent_session_repository=_UnusedSessionRepository(),
-        toolkit_repository=_OneToolkitRepository(),
         required_provider_sources={},
     )
 
@@ -411,16 +466,21 @@ async def test_preview_includes_effective_agent_owned_provider_source() -> None:
 async def test_preview_fails_closed_on_duplicate_effective_slug() -> None:
     """Do not publish VFS sources from a corrupted effective Toolkit set."""
     service = VfsProjectionService(
-        session_manager=_session_manager,
+        operations=_VfsTestOperations(
+            primitives=VfsProjectionOperations(
+                session_manager=_session_manager,
+                agent_run_repository=_UnusedRunRepository(),
+                agent_session_repository=_UnusedSessionRepository(),
+                toolkit_repository=_ConflictingToolkitRepository(),
+                owner=None,
+            )
+        ),
         toolkit_registry={},
         catalog=ReleaseVfsCatalog(),
-        agent_run_repository=_UnusedRunRepository(),
-        agent_session_repository=_UnusedSessionRepository(),
-        toolkit_repository=_ConflictingToolkitRepository(),
         required_provider_sources={},
     )
 
-    with pytest.raises(EffectiveToolkitSlugConflict):
+    with pytest.raises(EffectiveToolkitNamespaceMissing):
         await service.build_preview(
             agent_id="agent-1",
             workspace_id="workspace-1",
@@ -441,26 +501,31 @@ async def test_run_projection_scopes_required_source_to_root_execution(
     """Persisted root projections include Scheduled while subagents exclude it."""
     provider = _ScheduledReleaseProvider()
     service = VfsProjectionService(
-        session_manager=_session_manager,
+        operations=_VfsTestOperations(
+            primitives=VfsProjectionOperations(
+                session_manager=_session_manager,
+                agent_run_repository=_MappedRunRepository(
+                    {
+                        "run-1": _Run(
+                            session_id="session-1",
+                            vfs_projection=None,
+                        )
+                    }
+                ),
+                agent_session_repository=_MappedSessionRepository(
+                    {
+                        "session-1": _Session(
+                            agent_id="agent-1",
+                            workspace_id="workspace-1",
+                        )
+                    }
+                ),
+                toolkit_repository=_EmptyToolkitRepository(),
+                owner=None,
+            )
+        ),
         toolkit_registry={},
         catalog=ReleaseVfsCatalog(),
-        agent_run_repository=_MappedRunRepository(
-            {
-                "run-1": _Run(
-                    session_id="session-1",
-                    vfs_projection=None,
-                )
-            }
-        ),
-        agent_session_repository=_MappedSessionRepository(
-            {
-                "session-1": _Session(
-                    agent_id="agent-1",
-                    workspace_id="workspace-1",
-                )
-            }
-        ),
-        toolkit_repository=_EmptyToolkitRepository(),
         required_provider_sources={"scheduled": provider},
     )
 
@@ -477,7 +542,7 @@ async def test_run_projection_scopes_required_source_to_root_execution(
 
 
 async def test_run_projection_commit_rejects_owner_takeover_after_build_starts(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A stale builder cannot fix its projection on a Run recovered by a new owner."""
     session_repository = AgentSessionRepository()
@@ -510,12 +575,15 @@ async def test_run_projection_commit_rejects_owner_takeover_after_build_starts(
 
     catalog = _BlockingReleaseVfsCatalog()
     service = VfsProjectionService(
-        session_manager=rdb_session_manager,
+        operations=VfsProjectionOperations(
+            session_manager=rdb_session_manager,
+            agent_run_repository=run_repository,
+            agent_session_repository=session_repository,
+            toolkit_repository=ToolkitRepository(),
+            owner=None,
+        ),
         toolkit_registry={},
         catalog=catalog,
-        agent_run_repository=run_repository,
-        agent_session_repository=session_repository,
-        toolkit_repository=ToolkitRepository(),
         required_provider_sources={},
     )
     old_owner = service.for_execution(
@@ -655,34 +723,39 @@ async def test_subagent_run_loads_its_own_projection() -> None:
     )
     child_projection = make_vfs_projection([child_revision])
     service = VfsProjectionService(
-        session_manager=_session_manager,
+        operations=_VfsTestOperations(
+            primitives=VfsProjectionOperations(
+                session_manager=_session_manager,
+                agent_run_repository=_MappedRunRepository(
+                    {
+                        "parent-run": _Run(
+                            session_id="parent-session",
+                            vfs_projection=parent_projection,
+                        ),
+                        "child-run": _Run(
+                            session_id="child-session",
+                            vfs_projection=child_projection,
+                        ),
+                    }
+                ),
+                agent_session_repository=_MappedSessionRepository(
+                    {
+                        "parent-session": _Session(
+                            agent_id="parent-agent",
+                            workspace_id="workspace-1",
+                        ),
+                        "child-session": _Session(
+                            agent_id="child-agent",
+                            workspace_id="workspace-1",
+                        ),
+                    }
+                ),
+                toolkit_repository=_EmptyToolkitRepository(),
+                owner=None,
+            )
+        ),
         toolkit_registry={},
         catalog=ReleaseVfsCatalog(),
-        agent_run_repository=_MappedRunRepository(
-            {
-                "parent-run": _Run(
-                    session_id="parent-session",
-                    vfs_projection=parent_projection,
-                ),
-                "child-run": _Run(
-                    session_id="child-session",
-                    vfs_projection=child_projection,
-                ),
-            }
-        ),
-        agent_session_repository=_MappedSessionRepository(
-            {
-                "parent-session": _Session(
-                    agent_id="parent-agent",
-                    workspace_id="workspace-1",
-                ),
-                "child-session": _Session(
-                    agent_id="child-agent",
-                    workspace_id="workspace-1",
-                ),
-            }
-        ),
-        toolkit_repository=_EmptyToolkitRepository(),
         required_provider_sources={},
     )
 

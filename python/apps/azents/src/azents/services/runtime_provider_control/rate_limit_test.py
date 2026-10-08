@@ -1,14 +1,40 @@
 """Runtime Provider enrollment rate limit tests."""
 
-from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from redis.asyncio import Redis
 
 from azents.services.runtime_provider_control.rate_limit import (
+    InMemoryRuntimeProviderEnrollmentRateLimiter,
     RedisRuntimeProviderEnrollmentRateLimiter,
     RuntimeProviderEnrollmentRateLimited,
 )
+from azents.testing.types import require_instance
+
+
+@pytest.mark.asyncio
+async def test_memory_limit_preserves_window_and_grant_source_isolation() -> None:
+    now = 0.0
+
+    def clock() -> float:
+        return now
+
+    limiter = InMemoryRuntimeProviderEnrollmentRateLimiter(clock=clock)
+    for _ in range(10):
+        await limiter.acquire(grant_id="grant", source_address="source")
+    with pytest.raises(RuntimeProviderEnrollmentRateLimited) as rejected:
+        await limiter.acquire(grant_id="grant", source_address="source")
+    assert rejected.value.retry_after_seconds == 60
+    await limiter.acquire(grant_id="other-grant", source_address="source")
+    await limiter.acquire(grant_id="grant", source_address="other-source")
+    now = 30.0
+    with pytest.raises(RuntimeProviderEnrollmentRateLimited) as rejected:
+        await limiter.acquire(grant_id="grant", source_address="source")
+    assert rejected.value.retry_after_seconds == 30
+    now = 60.0
+    await limiter.acquire(grant_id="grant", source_address="source")
+    assert len(limiter.windows) == 1
 
 
 class FakeRedis:
@@ -27,7 +53,9 @@ class FakeRedis:
 async def test_rate_limiter_allows_attempt_within_window() -> None:
     """Attempts through the configured maximum are admitted."""
     redis = FakeRedis([10, 23])
-    limiter = RedisRuntimeProviderEnrollmentRateLimiter(cast(Redis, cast(Any, redis)))
+    client = MagicMock(spec=Redis)
+    client.eval = AsyncMock(side_effect=redis.eval)
+    limiter = RedisRuntimeProviderEnrollmentRateLimiter(require_instance(client, Redis))
 
     await limiter.acquire(grant_id="grant-1", source_address="192.0.2.10")
 
@@ -41,9 +69,9 @@ async def test_rate_limiter_allows_attempt_within_window() -> None:
 @pytest.mark.asyncio
 async def test_rate_limiter_rejects_excess_attempt_with_ttl() -> None:
     """Excess attempts expose only the remaining retry interval."""
-    limiter = RedisRuntimeProviderEnrollmentRateLimiter(
-        cast(Redis, cast(Any, FakeRedis([11, 17])))
-    )
+    client = MagicMock(spec=Redis)
+    client.eval = AsyncMock(side_effect=FakeRedis([11, 17]).eval)
+    limiter = RedisRuntimeProviderEnrollmentRateLimiter(require_instance(client, Redis))
 
     with pytest.raises(RuntimeProviderEnrollmentRateLimited) as error:
         await limiter.acquire(grant_id="grant-1", source_address="192.0.2.10")

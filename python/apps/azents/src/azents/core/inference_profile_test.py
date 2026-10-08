@@ -5,7 +5,8 @@ import datetime
 import pytest
 from pydantic import ValidationError
 
-from azents.core.agent import AgentModelSelection
+from azents.core.agent import AgentModelSelection, ModelParameters
+from azents.core.chat_projection import _session_profile_fallback
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
@@ -13,14 +14,28 @@ from azents.core.inference_profile import (
     RequestedInferenceProfile,
     SessionAppliedInferenceProfile,
     SessionInferenceState,
+    validate_requested_profile_against_options,
 )
 from azents.core.llm_catalog import ModelCapabilities, ModelReasoningEffort
+from azents.core.model_capability_contract import (
+    ModelCapabilityFeature,
+    ModelFeatureCondition,
+    ModelRequestConstraints,
+)
+from azents.core.model_capability_evidence import ProviderCapabilityEvidence
+from azents.core.model_capability_projection import project_capabilities
+from azents.core.model_catalog_source import CatalogFact
 from azents.core.model_execution_options import ModelExecutionOptionId
-from azents.testing.model_selection import make_test_model_settings
+from azents.repos.agent.data import Agent
+from azents.testing.model_selection import (
+    make_test_model_settings,
+    make_test_selectable_model_options,
+)
 
 
 def _selection() -> AgentModelSelection:
     return AgentModelSelection(
+        pricing=None,
         llm_provider_integration_id="integration-secret-boundary",
         provider=LLMProvider.OPENAI,
         model_identifier="gpt-5.4",
@@ -267,3 +282,64 @@ def test_nonhistorical_profiles_require_explicit_enabled_options(
     del payload["enabled_execution_options"]
     with pytest.raises(ValidationError, match="enabled_execution_options"):
         profile_type.model_validate(payload)
+
+
+def test_profile_selection_keeps_conditional_effort_potential() -> None:
+    caps = project_capabilities(
+        provider=LLMProvider.OPENAI,
+        exact_model="gpt-5.4",
+        source_model=None,
+        evidence=ProviderCapabilityEvidence(
+            reasoning=CatalogFact(state="value", value=True),
+            reasoning_efforts=CatalogFact(
+                state="value",
+                value=(ModelReasoningEffort.HIGH,),
+            ),
+        ),
+        model_developer=LLMModelDeveloper.OPENAI,
+    )
+    caps.request_constraints = ModelRequestConstraints(
+        known_default=None,
+        feature_conditions=(
+            ModelFeatureCondition(
+                feature=ModelCapabilityFeature.REASONING,
+                reasoning_efforts=("high",),
+                function_tools=True,
+            ),
+        ),
+    )
+    before = caps.model_dump_json()
+    options = make_test_selectable_model_options(
+        _selection().model_copy(update={"normalized_capabilities": caps}),
+        label="Quality",
+    )
+    profile = RequestedInferenceProfile(
+        model_target_label="Quality",
+        reasoning_effort=ModelReasoningEffort.HIGH,
+        enabled_execution_options=[],
+    )
+    assert caps.configurable_reasoning_efforts() == [ModelReasoningEffort.HIGH]
+    assert validate_requested_profile_against_options(options, profile) == options[0]
+    parameters = ModelParameters(
+        temperature=0.0,
+        top_p=0.0,
+        top_k=7,
+        stop_sequences=[],
+        reasoning_effort=ModelReasoningEffort.HIGH,
+    )
+    agent = Agent.model_construct(
+        selectable_model_options=options,
+        main_model_label="Quality",
+        model_parameters=parameters,
+    )
+    parameters_before = parameters.model_dump_json()
+    fallback = _session_profile_fallback(agent)
+    assert fallback.label == "Quality"
+    assert fallback.reasoning_effort is ModelReasoningEffort.HIGH
+    assert parameters.model_dump_json() == parameters_before
+    with pytest.raises(ValueError, match="Reasoning effort"):
+        validate_requested_profile_against_options(
+            options,
+            profile.model_copy(update={"reasoning_effort": ModelReasoningEffort.NONE}),
+        )
+    assert caps.model_dump_json() == before

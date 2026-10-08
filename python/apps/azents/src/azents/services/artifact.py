@@ -1,6 +1,5 @@
 """Artifact service."""
 
-import asyncio
 import dataclasses
 import datetime
 import hashlib
@@ -18,10 +17,11 @@ from azcommon.types import JSONValue
 from azcommon.uuid import uuid7
 from fastapi import Depends
 
-from azents.core.config import Config
+from azents.core.config import Config, require_workspace_s3_bucket
 from azents.core.deps import get_config
 from azents.core.enums import ArtifactStatus
 from azents.core.s3.deps import get_s3_service
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.repos.artifact import artifact_storage_key
 from azents.repos.artifact.data import Artifact, ArtifactCreate
 from azents.repos.artifact.operations import (
@@ -30,7 +30,6 @@ from azents.repos.artifact.operations import (
 )
 from azents.repos.file_metadata_authority import FileResourceAuthority
 from azents.services.file_lifecycle_policy import artifact_expires_at
-from azents.services.session_resource_authority import SessionResourceAuthority
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +148,7 @@ class ArtifactService:
         succeeded = False
         try:
             await self.s3_service.upload(
-                bucket=self.config.workspace_s3.bucket,
+                bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                 key=uploaded_object_key,
                 body=body,
                 content_type=media_type,
@@ -215,7 +214,7 @@ class ArtifactService:
         succeeded = False
         try:
             await self.s3_service.upload(
-                bucket=self.config.workspace_s3.bucket,
+                bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                 key=object_key,
                 body=body,
                 content_type=media_type,
@@ -298,7 +297,7 @@ class ArtifactService:
                 await self.s3_service.copy_verified_transfer_object_to_product(
                     source=source,
                     destination=S3ObjectIdentity(
-                        bucket=self.config.workspace_s3.bucket,
+                        bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                         key=object_key,
                     ),
                     expected_size=size_bytes,
@@ -378,40 +377,6 @@ class ArtifactService:
             "publication ID is already committed with different metadata"
         )
 
-    async def _has_committed_verified_publication(
-        self,
-        *,
-        authority: SessionResourceAuthority,
-        size_bytes: int,
-        sha256: str,
-        media_type: str,
-        publication_id: str,
-    ) -> bool:
-        """Preserve the final object when commit outcome cannot be disproven."""
-        try:
-            existing = await self.operation_repository.load_verified_publication(
-                authority=_repository_authority(authority),
-                artifact_id=publication_id,
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            return True
-        if isinstance(existing, Failure) or existing.value is None:
-            return isinstance(existing, Failure)
-        try:
-            self._validated_existing_verified_publication(
-                existing=existing.value,
-                authority=authority,
-                size_bytes=size_bytes,
-                sha256=sha256,
-                media_type=media_type,
-                publication_id=publication_id,
-            )
-        except RuntimeError:
-            return True
-        return True
-
     async def resolve_for_authority(
         self,
         *,
@@ -433,7 +398,7 @@ class ArtifactService:
         if artifact.value.status == ArtifactStatus.EXPIRED:
             return Failure(ArtifactExpired())
         body = await self.s3_service.download_bytes(
-            bucket=self.config.workspace_s3.bucket,
+            bucket=require_workspace_s3_bucket(self.config.workspace_s3),
             key=artifact.value.storage_key,
         )
         if body is None:
@@ -507,7 +472,7 @@ class ArtifactService:
         if artifact.value.status == ArtifactStatus.EXPIRED:
             return Failure(ArtifactExpired())
         body = await self.s3_service.download_bytes(
-            bucket=self.config.workspace_s3.bucket,
+            bucket=require_workspace_s3_bucket(self.config.workspace_s3),
             key=artifact.value.storage_key,
         )
         if body is None:
@@ -519,7 +484,7 @@ class ArtifactService:
         if object_key is None:
             return
         await self.s3_service.delete(
-            bucket=self.config.workspace_s3.bucket,
+            bucket=require_workspace_s3_bucket(self.config.workspace_s3),
             key=object_key,
         )
 

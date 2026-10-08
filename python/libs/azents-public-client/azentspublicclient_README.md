@@ -91,9 +91,12 @@ Class | Method | HTTP request | Description
 *AgentV1Api* | [**agent_v1_delete_agent_memory**](azentspublicclient/docs/AgentV1Api.md#agent_v1_delete_agent_memory) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id} | Delete Agent Memory
 *AgentV1Api* | [**agent_v1_finalize_avatar**](azentspublicclient/docs/AgentV1Api.md#agent_v1_finalize_avatar) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar/finalize | Finalize Avatar
 *AgentV1Api* | [**agent_v1_get_agent**](azentspublicclient/docs/AgentV1Api.md#agent_v1_get_agent) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id} | Get Agent
+*AgentV1Api* | [**agent_v1_get_agent_consolidated_memory**](azentspublicclient/docs/AgentV1Api.md#agent_v1_get_agent_consolidated_memory) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/consolidated-memory | Get Agent Consolidated Memory
+*AgentV1Api* | [**agent_v1_get_agent_historical_memory**](azentspublicclient/docs/AgentV1Api.md#agent_v1_get_agent_historical_memory) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id} | Get Agent Historical Memory
 *AgentV1Api* | [**agent_v1_get_agent_memory**](azentspublicclient/docs/AgentV1Api.md#agent_v1_get_agent_memory) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id} | Get Agent Memory
 *AgentV1Api* | [**agent_v1_get_automatic_session_projects**](azentspublicclient/docs/AgentV1Api.md#agent_v1_get_automatic_session_projects) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/automatic-session-projects | Get Automatic Session Projects
 *AgentV1Api* | [**agent_v1_list_agent_admins**](azentspublicclient/docs/AgentV1Api.md#agent_v1_list_agent_admins) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/admins | List Agent Admins
+*AgentV1Api* | [**agent_v1_list_agent_historical_memories**](azentspublicclient/docs/AgentV1Api.md#agent_v1_list_agent_historical_memories) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories | List Agent Historical Memories
 *AgentV1Api* | [**agent_v1_list_agent_memories**](azentspublicclient/docs/AgentV1Api.md#agent_v1_list_agent_memories) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories | List Agent Memories
 *AgentV1Api* | [**agent_v1_list_agents**](azentspublicclient/docs/AgentV1Api.md#agent_v1_list_agents) | **GET** /agent/v1/workspaces/{handle}/agents | List Agents
 *AgentV1Api* | [**agent_v1_remove_agent_admin**](azentspublicclient/docs/AgentV1Api.md#agent_v1_remove_agent_admin) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/admins/{admin_workspace_user_id} | Remove Agent Admin
@@ -480,6 +483,11 @@ Class | Method | HTTP request | Description
  - [AwsConfig](azentspublicclient/docs/AwsConfig.md)
  - [AwsSecrets](azentspublicclient/docs/AwsSecrets.md)
  - [BuiltinToolConfig](azentspublicclient/docs/BuiltinToolConfig.md)
+ - [CatalogOffPeakRule](azentspublicclient/docs/CatalogOffPeakRule.md)
+ - [CatalogPriceIssue](azentspublicclient/docs/CatalogPriceIssue.md)
+ - [CatalogPriceRate](azentspublicclient/docs/CatalogPriceRate.md)
+ - [CatalogPriceRules](azentspublicclient/docs/CatalogPriceRules.md)
+ - [CatalogTimeWindow](azentspublicclient/docs/CatalogTimeWindow.md)
  - [ChatEditMessageWriteRequest](azentspublicclient/docs/ChatEditMessageWriteRequest.md)
  - [ChatEventPageResponse](azentspublicclient/docs/ChatEventPageResponse.md)
  - [ChatEventResponse](azentspublicclient/docs/ChatEventResponse.md)
@@ -508,6 +516,7 @@ Class | Method | HTTP request | Description
  - [CleanupSessionGitWorktreeRequest](azentspublicclient/docs/CleanupSessionGitWorktreeRequest.md)
  - [CommandAction](azentspublicclient/docs/CommandAction.md)
  - [ConnectionAccessPolicyRequest](azentspublicclient/docs/ConnectionAccessPolicyRequest.md)
+ - [ConsolidatedMemoryResponse](azentspublicclient/docs/ConsolidatedMemoryResponse.md)
  - [CreateGitWorktreeAction](azentspublicclient/docs/CreateGitWorktreeAction.md)
  - [CreateInvitationRequest](azentspublicclient/docs/CreateInvitationRequest.md)
  - [CreateJoinRequestRequest](azentspublicclient/docs/CreateJoinRequestRequest.md)
@@ -578,9 +587,12 @@ Class | Method | HTTP request | Description
  - [GoalUpdateRequest](azentspublicclient/docs/GoalUpdateRequest.md)
  - [HTTPValidationError](azentspublicclient/docs/HTTPValidationError.md)
  - [HealthStatus](azentspublicclient/docs/HealthStatus.md)
+ - [HistoricalMemoryListResponse](azentspublicclient/docs/HistoricalMemoryListResponse.md)
+ - [HistoricalMemoryResponse](azentspublicclient/docs/HistoricalMemoryResponse.md)
+ - [HistoricalMemorySettingsScope](azentspublicclient/docs/HistoricalMemorySettingsScope.md)
  - [ImageFile](azentspublicclient/docs/ImageFile.md)
- - [ImageGenerationCatalogAttemptResponse](azentspublicclient/docs/ImageGenerationCatalogAttemptResponse.md)
  - [ImageGenerationCatalogEntryResponse](azentspublicclient/docs/ImageGenerationCatalogEntryResponse.md)
+ - [ImageGenerationCatalogSyncStatusResponse](azentspublicclient/docs/ImageGenerationCatalogSyncStatusResponse.md)
  - [ImageGenerationModelCatalogResponse](azentspublicclient/docs/ImageGenerationModelCatalogResponse.md)
  - [ImageThumbnails](azentspublicclient/docs/ImageThumbnails.md)
  - [InputActionAttachmentPolicyResponse](azentspublicclient/docs/InputActionAttachmentPolicyResponse.md)
@@ -654,20 +666,25 @@ Class | Method | HTTP request | Description
  - [ModelBuiltInToolCapabilities](azentspublicclient/docs/ModelBuiltInToolCapabilities.md)
  - [ModelCandidateIdentity](azentspublicclient/docs/ModelCandidateIdentity.md)
  - [ModelCapabilities](azentspublicclient/docs/ModelCapabilities.md)
+ - [ModelCapabilityFeature](azentspublicclient/docs/ModelCapabilityFeature.md)
  - [ModelCatalogEntryListResponse](azentspublicclient/docs/ModelCatalogEntryListResponse.md)
  - [ModelCatalogEntryResponse](azentspublicclient/docs/ModelCatalogEntryResponse.md)
- - [ModelCatalogSyncAttemptResponse](azentspublicclient/docs/ModelCatalogSyncAttemptResponse.md)
  - [ModelCatalogSyncResponse](azentspublicclient/docs/ModelCatalogSyncResponse.md)
+ - [ModelCatalogSyncStatusResponse](azentspublicclient/docs/ModelCatalogSyncStatusResponse.md)
  - [ModelCompatibilityCapabilities](azentspublicclient/docs/ModelCompatibilityCapabilities.md)
  - [ModelContextWindow](azentspublicclient/docs/ModelContextWindow.md)
  - [ModelExecutionOptionDefinition](azentspublicclient/docs/ModelExecutionOptionDefinition.md)
  - [ModelExecutionOptionId](azentspublicclient/docs/ModelExecutionOptionId.md)
+ - [ModelFeatureCondition](azentspublicclient/docs/ModelFeatureCondition.md)
  - [ModelModalities](azentspublicclient/docs/ModelModalities.md)
  - [ModelModality](azentspublicclient/docs/ModelModality.md)
  - [ModelParameterCapabilities](azentspublicclient/docs/ModelParameterCapabilities.md)
  - [ModelParameters](azentspublicclient/docs/ModelParameters.md)
+ - [ModelPricingDefinition](azentspublicclient/docs/ModelPricingDefinition.md)
+ - [ModelPricingUnavailableReason](azentspublicclient/docs/ModelPricingUnavailableReason.md)
  - [ModelReasoningCapabilities](azentspublicclient/docs/ModelReasoningCapabilities.md)
  - [ModelReasoningEffort](azentspublicclient/docs/ModelReasoningEffort.md)
+ - [ModelRequestConstraints](azentspublicclient/docs/ModelRequestConstraints.md)
  - [ModelToolCallingCapabilities](azentspublicclient/docs/ModelToolCallingCapabilities.md)
  - [MultiChannelDefaultRequest](azentspublicclient/docs/MultiChannelDefaultRequest.md)
  - [MultiDiscordThreadAutoArchiveDurationRequest](azentspublicclient/docs/MultiDiscordThreadAutoArchiveDurationRequest.md)
@@ -697,6 +714,8 @@ Class | Method | HTTP request | Description
  - [PreviewPasswordResetTokenResponse](azentspublicclient/docs/PreviewPasswordResetTokenResponse.md)
  - [PreviewSignupTokenRequest](azentspublicclient/docs/PreviewSignupTokenRequest.md)
  - [PreviewSignupTokenResponse](azentspublicclient/docs/PreviewSignupTokenResponse.md)
+ - [PriceMetric](azentspublicclient/docs/PriceMetric.md)
+ - [PriceTier](azentspublicclient/docs/PriceTier.md)
  - [PrimaryModelReservation](azentspublicclient/docs/PrimaryModelReservation.md)
  - [ProjectBrowserEmptyStateResponse](azentspublicclient/docs/ProjectBrowserEmptyStateResponse.md)
  - [ProjectBrowserEntryCapabilitiesResponse](azentspublicclient/docs/ProjectBrowserEntryCapabilitiesResponse.md)
@@ -706,6 +725,7 @@ Class | Method | HTTP request | Description
  - [ProjectBrowserManifestPreviewRequest](azentspublicclient/docs/ProjectBrowserManifestPreviewRequest.md)
  - [ProjectBrowserManifestResponse](azentspublicclient/docs/ProjectBrowserManifestResponse.md)
  - [ProjectBrowserModeResponse](azentspublicclient/docs/ProjectBrowserModeResponse.md)
+ - [ReasoningEffortValue](azentspublicclient/docs/ReasoningEffortValue.md)
  - [ReceivedInvitationListResponse](azentspublicclient/docs/ReceivedInvitationListResponse.md)
  - [ReceivedInvitationResponse](azentspublicclient/docs/ReceivedInvitationResponse.md)
  - [RedeemPasswordResetTokenRequest](azentspublicclient/docs/RedeemPasswordResetTokenRequest.md)

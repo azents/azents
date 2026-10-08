@@ -25,11 +25,11 @@ from typing_extensions import Self
 
 class ModelReasoningCapabilities(BaseModel):
     """
-    Represents reasoning capability.
+    Final reasoning support and the supported selectable effort list.
     """ # noqa: E501
     supported: Optional[StrictBool] = False
     effort_levels: Optional[List[ModelReasoningEffort]] = None
-    summaries: Optional[StrictBool] = None
+    summaries: Optional[StrictBool] = False
     additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["supported", "effort_levels", "summaries"]
 
@@ -79,11 +79,6 @@ class ModelReasoningCapabilities(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
-        # set to None if summaries (nullable) is None
-        # and model_fields_set contains the field
-        if self.summaries is None and "summaries" in self.model_fields_set:
-            _dict['summaries'] = None
-
         return _dict
 
     @classmethod
@@ -95,10 +90,13 @@ class ModelReasoningCapabilities(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "supported": obj.get("supported") if obj.get("supported") is not None else False,
             "effort_levels": obj.get("effort_levels"),
-            "summaries": obj.get("summaries")
+            "summaries": obj.get("summaries") if obj.get("summaries") is not None else False
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

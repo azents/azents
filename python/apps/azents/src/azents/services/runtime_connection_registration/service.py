@@ -8,18 +8,19 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Protocol
 
-from azents_runtime_control.provider import RuntimeProviderOperationalDiagnostics
 from azents_runtime_control.transfer import (
     RUNNER_TRANSFER_CAPABILITY,
     RUNNER_TRANSFER_PROTOCOL_VERSION,
 )
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import RuntimeConnectionAuthorityKind
+from azents.core.runtime_connection_registration import (
+    RuntimeConnectionRegistrationUnavailable,
+)
+from azents.core.runtime_provider_control import RuntimeProviderCredentialAuthentication
 from azents.core.runtime_runner_credential import RuntimeRunnerCredential
-from azents.rdb.session import SessionManager
-from azents.repos.runtime_connection_generation.data import (
-    RuntimeConnectionGeneration,
+from azents.repos.runtime_connection_registration_operations import (
+    RuntimeProviderConnectionRegistrationOperationRepository,
+    RuntimeRunnerConnectionRegistrationOperationRepository,
 )
 from azents.runtime.control_protocol.data import (
     RuntimeProviderRegistration,
@@ -34,11 +35,6 @@ from azents.runtime.coordination.data import (
     RuntimeConnectionRecord,
 )
 from azents.runtime.coordination.store import RuntimeCoordinationStore
-from azents.services.runtime_provider_control.data import (
-    RuntimeProviderCredentialAuthentication,
-)
-
-from .data import RuntimeConnectionRegistrationUnavailable
 
 _DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 20
 _DEFAULT_CONNECTION_TTL_SECONDS = 60
@@ -74,86 +70,12 @@ class RuntimeRunnerConnectionRegistrar(Protocol):
         ...
 
 
-class RuntimeConnectionGenerationAuthority(Protocol):
-    async def allocate_generation(
-        self,
-        session: AsyncSession,
-        *,
-        connection_kind: RuntimeConnectionAuthorityKind,
-        subject_id: str,
-    ) -> RuntimeConnectionGeneration:
-        """Allocate the next durable generation."""
-        ...
-
-    async def generation_is_current_high_water(
-        self,
-        session: AsyncSession,
-        *,
-        connection_kind: RuntimeConnectionAuthorityKind,
-        subject_id: str,
-        generation: int,
-    ) -> bool:
-        """Return whether one generation remains current."""
-        ...
-
-    async def accept_generation(
-        self,
-        session: AsyncSession,
-        *,
-        connection_kind: RuntimeConnectionAuthorityKind,
-        subject_id: str,
-        generation: int,
-    ) -> RuntimeConnectionGeneration | None:
-        """Accept one current high-water generation."""
-        ...
-
-
-class RuntimeProviderConnectionAuthority(Protocol):
-    async def validate_connection_authority_in_transaction(
-        self,
-        session: AsyncSession,
-        *,
-        authentication: RuntimeProviderCredentialAuthentication,
-        validated_at: datetime,
-    ) -> None:
-        """Validate Provider authority inside a caller-owned transaction."""
-        ...
-
-    async def create_connection_in_transaction(
-        self,
-        session: AsyncSession,
-        *,
-        authentication: RuntimeProviderCredentialAuthentication,
-        connection_id: str,
-        generation: int,
-        reported_provider_type: str,
-        reported_protocol_version: str,
-        operational_diagnostics: RuntimeProviderOperationalDiagnostics | None,
-        authorized_at: datetime,
-        connected_at: datetime,
-    ) -> object:
-        """Persist Provider acceptance inside a caller-owned transaction."""
-        ...
-
-
-class RuntimeRunnerConnectionAuthority(Protocol):
-    async def authorize_runner_in_transaction(
-        self,
-        session: AsyncSession,
-        credential: RuntimeRunnerCredential,
-    ) -> bool:
-        """Validate Runner authority inside a caller-owned transaction."""
-        ...
-
-
 @dataclasses.dataclass(frozen=True)
 class RuntimeProviderConnectionRegistrationService:
     """Register Provider connections across durable and volatile authority."""
 
-    session_manager: SessionManager[AsyncSession]
-    generation_repository: RuntimeConnectionGenerationAuthority
+    operations: RuntimeProviderConnectionRegistrationOperationRepository
     coordination_store: RuntimeCoordinationStore
-    provider_control: RuntimeProviderConnectionAuthority
     clock: Callable[[], datetime]
     heartbeat_interval_seconds: int = _DEFAULT_HEARTBEAT_INTERVAL_SECONDS
     connection_ttl_seconds: int = _DEFAULT_CONNECTION_TTL_SECONDS
@@ -196,20 +118,11 @@ class RuntimeProviderConnectionRegistrationService:
         )
         if not staged:
             raise RuntimeConnectionRegistrationUnavailable("candidate_stage_rejected")
-        async with self.session_manager() as session:
-            if not await self.generation_repository.generation_is_current_high_water(
-                session,
-                connection_kind=RuntimeConnectionAuthorityKind.PROVIDER,
-                subject_id=authentication.provider_resource_id,
-                generation=generation,
-            ):
-                raise RuntimeConnectionRegistrationUnavailable("superseded")
-            await self.provider_control.validate_connection_authority_in_transaction(
-                session,
-                authentication=authentication,
-                validated_at=self.clock(),
-            )
-
+        await self.operations.observe(
+            authentication=authentication,
+            generation=generation,
+            validated_at=self.clock(),
+        )
         promotion = await self.coordination_store.promote_connection_candidate(
             kind=record.kind,
             subject_id=record.subject_id,
@@ -222,28 +135,14 @@ class RuntimeProviderConnectionRegistrationService:
             or promotion.connection is None
         ):
             raise RuntimeConnectionRegistrationUnavailable(promotion.status.value)
-
         try:
-            async with self.session_manager() as session:
-                accepted = await self.generation_repository.accept_generation(
-                    session,
-                    connection_kind=RuntimeConnectionAuthorityKind.PROVIDER,
-                    subject_id=authentication.provider_resource_id,
-                    generation=generation,
-                )
-                if accepted is None:
-                    raise RuntimeConnectionRegistrationUnavailable("superseded")
-                await self.provider_control.create_connection_in_transaction(
-                    session,
-                    authentication=authentication,
-                    connection_id=registration.connection_id,
-                    generation=generation,
-                    reported_provider_type=registration.provider_type,
-                    reported_protocol_version=registration.protocol_version,
-                    operational_diagnostics=registration.operational_diagnostics,
-                    authorized_at=self.clock(),
-                    connected_at=registered_at,
-                )
+            await self.operations.accept(
+                authentication=authentication,
+                generation=generation,
+                registration=registration,
+                authorized_at=self.clock(),
+                registered_at=registered_at,
+            )
         except asyncio.CancelledError:
             await asyncio.shield(
                 self.coordination_store.revoke_connection(
@@ -255,12 +154,9 @@ class RuntimeProviderConnectionRegistrationService:
             raise
         except Exception:
             await self.coordination_store.revoke_connection(
-                kind=record.kind,
-                subject_id=record.subject_id,
-                generation=generation,
+                kind=record.kind, subject_id=record.subject_id, generation=generation
             )
             raise
-
         return RuntimeProviderRegistrationAccepted(
             provider_id=registration.provider_id,
             connection_id=registration.connection_id,
@@ -269,23 +165,15 @@ class RuntimeProviderConnectionRegistrationService:
         )
 
     async def _allocate(self, subject_id: str) -> int:
-        async with self.session_manager() as session:
-            state = await self.generation_repository.allocate_generation(
-                session,
-                connection_kind=RuntimeConnectionAuthorityKind.PROVIDER,
-                subject_id=subject_id,
-            )
-        return state.high_water_generation
+        return await self.operations.allocate(subject_id)
 
 
 @dataclasses.dataclass(frozen=True)
 class RuntimeRunnerConnectionRegistrationService:
     """Register Runner connections across durable and volatile authority."""
 
-    session_manager: SessionManager[AsyncSession]
-    generation_repository: RuntimeConnectionGenerationAuthority
+    operations: RuntimeRunnerConnectionRegistrationOperationRepository
     coordination_store: RuntimeCoordinationStore
-    runner_authentication: RuntimeRunnerConnectionAuthority
     generation_observer: RuntimeRunnerGenerationObserver | None
     heartbeat_interval_seconds: int = _DEFAULT_HEARTBEAT_INTERVAL_SECONDS
     connection_ttl_seconds: int = _DEFAULT_CONNECTION_TTL_SECONDS
@@ -331,20 +219,11 @@ class RuntimeRunnerConnectionRegistrationService:
         )
         if not staged:
             raise RuntimeConnectionRegistrationUnavailable("candidate_stage_rejected")
-        async with self.session_manager() as session:
-            if not await self.generation_repository.generation_is_current_high_water(
-                session,
-                connection_kind=RuntimeConnectionAuthorityKind.RUNNER,
-                subject_id=registration.runtime_id,
-                generation=generation,
-            ):
-                raise RuntimeConnectionRegistrationUnavailable("superseded")
-            if not await self.runner_authentication.authorize_runner_in_transaction(
-                session,
-                authentication,
-            ):
-                raise RuntimeConnectionRegistrationUnavailable("authority_changed")
-
+        await self.operations.observe(
+            authentication=authentication,
+            generation=generation,
+            registration=registration,
+        )
         promotion = await self.coordination_store.promote_connection_candidate(
             kind=record.kind,
             subject_id=record.subject_id,
@@ -357,22 +236,12 @@ class RuntimeRunnerConnectionRegistrationService:
             or promotion.connection is None
         ):
             raise RuntimeConnectionRegistrationUnavailable(promotion.status.value)
-
         try:
-            async with self.session_manager() as session:
-                if not await self.runner_authentication.authorize_runner_in_transaction(
-                    session,
-                    authentication,
-                ):
-                    raise RuntimeConnectionRegistrationUnavailable("authority_changed")
-                accepted = await self.generation_repository.accept_generation(
-                    session,
-                    connection_kind=RuntimeConnectionAuthorityKind.RUNNER,
-                    subject_id=registration.runtime_id,
-                    generation=generation,
-                )
-                if accepted is None:
-                    raise RuntimeConnectionRegistrationUnavailable("superseded")
+            await self.operations.accept(
+                authentication=authentication,
+                generation=generation,
+                registration=registration,
+            )
         except asyncio.CancelledError:
             await asyncio.shield(
                 self.coordination_store.revoke_connection(
@@ -384,17 +253,14 @@ class RuntimeRunnerConnectionRegistrationService:
             raise
         except Exception:
             await self.coordination_store.revoke_connection(
-                kind=record.kind,
-                subject_id=record.subject_id,
-                generation=generation,
+                kind=record.kind, subject_id=record.subject_id, generation=generation
             )
             raise
-
         previous = promotion.previous_connection
         if (
             previous is not None
             and previous.generation != generation
-            and self.generation_observer is not None
+            and (self.generation_observer is not None)
         ):
             try:
                 await self.generation_observer.on_runner_replaced(
@@ -420,10 +286,4 @@ class RuntimeRunnerConnectionRegistrationService:
         )
 
     async def _allocate(self, subject_id: str) -> int:
-        async with self.session_manager() as session:
-            state = await self.generation_repository.allocate_generation(
-                session,
-                connection_kind=RuntimeConnectionAuthorityKind.RUNNER,
-                subject_id=subject_id,
-            )
-        return state.high_water_generation
+        return await self.operations.allocate(subject_id)

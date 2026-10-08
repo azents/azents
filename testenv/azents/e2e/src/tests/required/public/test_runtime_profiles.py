@@ -147,8 +147,10 @@ def _login_main_web(
     driver.delete_all_cookies()
     driver.get(f"{base_url}/login")
     email_input = _wait(driver).until(ec.element_to_be_clickable((By.NAME, "email")))
-    email_input.send_keys(email, Keys.ENTER)
-    _wait(driver).until(ec.url_contains("/login/password"))
+    email_input.send_keys(email)
+    if not driver.find_elements(By.NAME, "password"):
+        email_input.send_keys(Keys.ENTER)
+        _wait(driver).until(ec.url_contains("/login/password"))
     password_input = _wait(driver).until(
         ec.element_to_be_clickable((By.NAME, "password"))
     )
@@ -548,6 +550,10 @@ async def _assert_stale_runner_action_is_fenced(
     valkey_container: DockerContainer,
 ) -> None:
     """Replace one probe, submit one stale action, and preserve current state."""
+    stale_close_count = _container_log_marker_count(
+        runtime_control_container,
+        _RUNTIME_RUNNER_STALE_CLOSE_MARKER,
+    )
     inflight: _InflightProbeOperation | None = None
     if action == "result":
         inflight = await _start_inflight_probe_operation(
@@ -587,10 +593,6 @@ async def _assert_stale_runner_action_is_fenced(
     assert current.runtime.runner_generation is not None
     current_generation = current.runtime.runner_generation
     current_runner_state = current.runtime.runner_state
-    stale_close_count = _container_log_marker_count(
-        runtime_control_container,
-        _RUNTIME_RUNNER_STALE_CLOSE_MARKER,
-    )
     try:
         if action == "heartbeat":
             with pytest.raises(RuntimeRunnerControlStreamClosed):

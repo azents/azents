@@ -20,13 +20,9 @@ from azents.core.enums import (
     ModelFileStatus,
 )
 from azents.engine.events.filters import (
-    EventAttachmentAvailabilityFilter,
     EventAutoCompactionFilter,
     EventCompactor,
-    EventFilePartPlaceholderFilter,
-    EventPreLowerFilterPipeline,
     NativeRequestSizeGuard,
-    NoopPreLowerFilter,
     PostLowerFilterPipeline,
 )
 from azents.engine.events.protocols import NativeModelRequest
@@ -52,11 +48,13 @@ from azents.engine.events.types import (
     build_native_compat_key,
 )
 from azents.engine.run.errors import CompactionFailedError, CompactionPlanStaleError
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.compaction_operation import (
     CompactionCommitContext,
     CompactionOperationRepository,
 )
+from azents.repos.engine_input_projection import EngineInputProjectionRepository
 from azents.repos.model_operation_completion import ModelOperationCompletion
 from azents.repos.toolkit_state.engine import ToolWorkingSetStore
 from azents.testing.types import is_string_object_dict
@@ -83,23 +81,31 @@ class _SessionManager:
     """Create short test sessions and commit them on clean scope exit."""
 
     def __init__(self) -> None:
-        self.sessions: list[_Session] = []
+        self.sessions: list[WriteSession] = []
         self.active_scopes = 0
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[_Session]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         """Yield one tracked session scope."""
         session = _Session()
-        self.sessions.append(session)
+        capability_session = ReadWriteSession(session)
+        self.sessions.append(capability_session)
         self.active_scopes += 1
         try:
-            yield session
+            yield capability_session
         except BaseException:
             raise
         else:
             await session.commit()
         finally:
             self.active_scopes -= 1
+
+
+def _tracked_session(session: WriteSession) -> _Session:
+    """Return the concrete test session behind a capability wrapper."""
+    raw_session = session.write_session
+    assert isinstance(raw_session, _Session)
+    return raw_session
 
 
 class _TranscriptRepo:
@@ -110,7 +116,7 @@ class _TranscriptRepo:
 
     async def update_payload(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         event_id: str,
         payload: EventPayload,
     ) -> Event:
@@ -126,7 +132,7 @@ class _TranscriptRepo:
 
     async def append(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         create: EventCreate,
     ) -> Event:
         """Materialize append request as in-memory event."""
@@ -153,7 +159,7 @@ class _SessionRepo:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> "_SessionRepo":
         """Return current test Session state."""
@@ -162,7 +168,7 @@ class _SessionRepo:
 
     async def lock_compaction_plan_if_current(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         expected_head_event_id: str | None,
@@ -178,7 +184,7 @@ class _SessionRepo:
 
     async def move_model_input_head(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
         event_id: str,
     ) -> object:
@@ -202,17 +208,17 @@ class _ModelOperationCompletionRepo:
         self.session_manager = session_manager
         self.session_repo = session_repo
         self.error = error
-        self.completions: list[tuple[AsyncSession, ModelOperationCompletion]] = []
+        self.completions: list[tuple[ReadSession, ModelOperationCompletion]] = []
 
     async def complete_success_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         completion: ModelOperationCompletion,
     ) -> None:
         """Record completion after the model-input head moves and before commit."""
         assert session is self.session_manager.sessions[-1]
         assert self.session_repo.model_input_head_event_id is not None
-        assert self.session_manager.sessions[-1].commit_count == 0
+        assert _tracked_session(self.session_manager.sessions[-1]).commit_count == 0
         if self.error is not None:
             raise self.error
         self.completions.append((session, completion))
@@ -224,7 +230,7 @@ class _ToolWorkingSetStore(ToolWorkingSetStore):
     def __init__(self, *, session_manager: _SessionManager) -> None:
         super().__init__(session_manager=session_manager)
         self.tracked_session_manager = session_manager
-        self.cleared: list[tuple[AsyncSession, str, str]] = []
+        self.cleared: list[tuple[ReadSession, str, str]] = []
 
     def with_session_manager(
         self,
@@ -236,13 +242,16 @@ class _ToolWorkingSetStore(ToolWorkingSetStore):
 
     async def clear_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
         session_id: str,
     ) -> ToolWorkingSetState:
         """Record the clear before the final commit."""
         assert session is self.tracked_session_manager.sessions[-1]
-        assert self.tracked_session_manager.sessions[-1].commit_count == 0
+        assert (
+            _tracked_session(self.tracked_session_manager.sessions[-1]).commit_count
+            == 0
+        )
         self.cleared.append((session, agent_id, session_id))
         return ToolWorkingSetState()
 
@@ -260,6 +269,7 @@ def _compactor(
     session_repo.events = transcript_repo.events
     return EventCompactor(
         operation_repository=CompactionOperationRepository(
+            owner=None,
             session_manager=resolved_session_manager,
             transcript_repository=transcript_repo,
             agent_session_repository=session_repo,
@@ -308,11 +318,6 @@ def _usage(prompt_tokens: int) -> TokenUsagePayload:
         prompt_tokens=prompt_tokens,
         completion_tokens=5,
         total_tokens=prompt_tokens + 5,
-        raw={
-            "input_tokens": prompt_tokens,
-            "output_tokens": 5,
-            "total_tokens": prompt_tokens + 5,
-        },
     )
 
 
@@ -337,7 +342,7 @@ class _ModelFileStatusRepo:
 
     async def list_statuses_for_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         model_file_ids: Sequence[str],
@@ -361,7 +366,7 @@ class _ExchangeFileStatusRepo:
 
     async def list_statuses_by_object_key(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         object_keys: Sequence[str],
     ) -> dict[str, ExchangeFileStatus]:
@@ -391,10 +396,13 @@ async def test_attachment_availability_filter_marks_expired_attachment() -> None
         {"exchange/workspace/files/random/original": ExchangeFileStatus.EXPIRED}
     )
 
-    result = await EventAttachmentAvailabilityFilter(
+    result = await EngineInputProjectionRepository(
         exchange_file_repository=status_repo,
-        transcript_repo=transcript_repo,
-    ).apply(_Session(), transcript)
+        model_file_repository=_ModelFileStatusRepo({}),
+        transcript_repository=transcript_repo,
+    ).apply_in_session(
+        ReadWriteSession(_Session()), session_id="session-1", transcript=transcript
+    )
 
     assert status_repo.calls == [("exchange/workspace/files/random/original",)]
     payload = result[0].payload
@@ -418,10 +426,13 @@ async def test_attachment_availability_filter_marks_missing_exchange_unavailable
     transcript_repo = _TranscriptRepo(transcript)
     status_repo = _ExchangeFileStatusRepo({})
 
-    result = await EventAttachmentAvailabilityFilter(
+    result = await EngineInputProjectionRepository(
         exchange_file_repository=status_repo,
-        transcript_repo=transcript_repo,
-    ).apply(_Session(), transcript)
+        model_file_repository=_ModelFileStatusRepo({}),
+        transcript_repository=transcript_repo,
+    ).apply_in_session(
+        ReadWriteSession(_Session()), session_id="session-1", transcript=transcript
+    )
 
     payload = result[0].payload
     assert isinstance(payload, UserMessagePayload)
@@ -442,10 +453,13 @@ async def test_attachment_availability_filter_ignores_non_exchange_uri() -> None
     transcript_repo = _TranscriptRepo(transcript)
     status_repo = _ExchangeFileStatusRepo({})
 
-    result = await EventAttachmentAvailabilityFilter(
+    result = await EngineInputProjectionRepository(
         exchange_file_repository=status_repo,
-        transcript_repo=transcript_repo,
-    ).apply(_Session(), transcript)
+        model_file_repository=_ModelFileStatusRepo({}),
+        transcript_repository=transcript_repo,
+    ).apply_in_session(
+        ReadWriteSession(_Session()), session_id="session-1", transcript=transcript
+    )
 
     assert status_repo.calls == []
     assert result == transcript
@@ -477,10 +491,13 @@ async def test_attachment_availability_filter_updates_tool_output_part() -> None
         {"exchange/workspace/files/result/original": ExchangeFileStatus.EXPIRED}
     )
 
-    result = await EventAttachmentAvailabilityFilter(
+    result = await EngineInputProjectionRepository(
         exchange_file_repository=status_repo,
-        transcript_repo=transcript_repo,
-    ).apply(_Session(), transcript)
+        model_file_repository=_ModelFileStatusRepo({}),
+        transcript_repository=transcript_repo,
+    ).apply_in_session(
+        ReadWriteSession(_Session()), session_id="session-1", transcript=transcript
+    )
 
     payload = result[0].payload
     assert isinstance(payload, ClientToolResultPayload)
@@ -508,11 +525,13 @@ async def test_filepart_placeholder_filter_rewrites_deleted_user_filepart() -> N
     transcript_repo = _TranscriptRepo(transcript)
     status_repo = _ModelFileStatusRepo({"m" * 32: ModelFileStatus.DELETED})
 
-    result = await EventFilePartPlaceholderFilter(
-        session_id="session-1",
+    result = await EngineInputProjectionRepository(
+        exchange_file_repository=_ExchangeFileStatusRepo({}),
         model_file_repository=status_repo,
-        transcript_repo=transcript_repo,
-    ).apply(_Session(), transcript)
+        transcript_repository=transcript_repo,
+    ).apply_in_session(
+        ReadWriteSession(_Session()), session_id="session-1", transcript=transcript
+    )
 
     assert status_repo.calls == [("session-1", ("m" * 32,))]
     payload = result[0].payload
@@ -548,11 +567,13 @@ async def test_filepart_placeholder_filter_rewrites_missing_tool_filepart() -> N
     transcript_repo = _TranscriptRepo(transcript)
     status_repo = _ModelFileStatusRepo({})
 
-    result = await EventFilePartPlaceholderFilter(
-        session_id="session-1",
+    result = await EngineInputProjectionRepository(
+        exchange_file_repository=_ExchangeFileStatusRepo({}),
         model_file_repository=status_repo,
-        transcript_repo=transcript_repo,
-    ).apply(_Session(), transcript)
+        transcript_repository=transcript_repo,
+    ).apply_in_session(
+        ReadWriteSession(_Session()), session_id="session-1", transcript=transcript
+    )
 
     payload = result[0].payload
     assert isinstance(payload, ClientToolResultPayload)
@@ -586,11 +607,13 @@ async def test_filepart_placeholder_filter_rewrites_missing_assistant_filepart()
     transcript_repo = _TranscriptRepo(transcript)
     status_repo = _ModelFileStatusRepo({})
 
-    result = await EventFilePartPlaceholderFilter(
-        session_id="session-1",
+    result = await EngineInputProjectionRepository(
+        exchange_file_repository=_ExchangeFileStatusRepo({}),
         model_file_repository=status_repo,
-        transcript_repo=transcript_repo,
-    ).apply(_Session(), transcript)
+        transcript_repository=transcript_repo,
+    ).apply_in_session(
+        ReadWriteSession(_Session()), session_id="session-1", transcript=transcript
+    )
 
     payload = result[0].payload
     assert isinstance(payload, AssistantMessagePayload)
@@ -619,11 +642,13 @@ async def test_filepart_placeholder_filter_keeps_available_filepart() -> None:
     transcript_repo = _TranscriptRepo(transcript)
     status_repo = _ModelFileStatusRepo({"m" * 32: ModelFileStatus.AVAILABLE})
 
-    result = await EventFilePartPlaceholderFilter(
-        session_id="session-1",
+    result = await EngineInputProjectionRepository(
+        exchange_file_repository=_ExchangeFileStatusRepo({}),
         model_file_repository=status_repo,
-        transcript_repo=transcript_repo,
-    ).apply(_Session(), transcript)
+        transcript_repository=transcript_repo,
+    ).apply_in_session(
+        ReadWriteSession(_Session()), session_id="session-1", transcript=transcript
+    )
 
     assert result == transcript
     assert transcript_repo.events == transcript
@@ -730,7 +755,9 @@ async def test_compactor_opens_no_transaction_during_external_summary_call() -> 
     )
 
     assert len(session_manager.sessions) == 2
-    assert [session.commit_count for session in session_manager.sessions] == [1, 1]
+    assert [
+        _tracked_session(session).commit_count for session in session_manager.sessions
+    ] == [1, 1]
 
 
 async def test_compactor_rejects_input_appended_during_summary() -> None:
@@ -755,7 +782,7 @@ async def test_compactor_rejects_input_appended_during_summary() -> None:
         assert session_manager.active_scopes == 0
         assert len(session_manager.sessions) == 1
         await transcript_repo.append(
-            concurrent_session,
+            ReadWriteSession(concurrent_session),
             EventCreate(
                 session_id="session-1",
                 kind=EventKind.USER_MESSAGE,
@@ -1117,7 +1144,7 @@ async def test_compactor_commits_run_state_after_head_move_before_commit() -> No
     assert working_set_store.cleared == [
         (session_manager.sessions[-1], "agent-1", "session-1")
     ]
-    assert session_manager.sessions[-1].commit_count == 1
+    assert _tracked_session(session_manager.sessions[-1]).commit_count == 1
 
 
 async def test_compactor_commit_state_failure_prevents_final_commit() -> None:
@@ -1165,7 +1192,7 @@ async def test_compactor_commit_state_failure_prevents_final_commit() -> None:
             ),
         )
 
-    assert session_manager.sessions[-1].commit_count == 0
+    assert _tracked_session(session_manager.sessions[-1]).commit_count == 0
     assert working_set_store.cleared == []
 
 
@@ -2024,21 +2051,12 @@ async def test_auto_compaction_counts_events_after_latest_turn_marker() -> None:
     assert result[0].kind == EventKind.COMPACTION_SUMMARY
 
 
-async def test_pre_lower_pipeline_and_native_request_guard() -> None:
-    """Pipeline is applied in order, and post-lower guard rejects oversized input."""
-    event = _event(
-        "1",
-        EventKind.USER_MESSAGE,
-        UserMessagePayload(sender_user_id=None, content="hello"),
-    )
-    result = await EventPreLowerFilterPipeline([NoopPreLowerFilter()]).apply(
-        _Session(),
-        [event],
-    )
-    assert result == [event]
-
+async def test_native_request_guard_and_post_lower_pipeline() -> None:
+    """Post-lower guard rejects oversized input and counts all request parts."""
     guard = NativeRequestSizeGuard(max_input_chars=4)
-    request = NativeModelRequest(model="gpt-5.1", input=[{"content": "too long"}])
+    request = NativeModelRequest(
+        native_replay_context=None, model="gpt-5.1", input=[{"content": "too long"}]
+    )
     try:
         guard.apply(request)
     except ValueError as exc:
@@ -2047,6 +2065,7 @@ async def test_pre_lower_pipeline_and_native_request_guard() -> None:
         raise AssertionError("guard must reject oversized request")
 
     tool_schema_request = NativeModelRequest(
+        native_replay_context=None,
         model="gpt-5.1",
         input=[],
         tools=[{"name": "tool", "description": "x" * 100}],
@@ -2060,7 +2079,12 @@ async def test_pre_lower_pipeline_and_native_request_guard() -> None:
         raise AssertionError("guard must count tools and instructions")
 
     pipeline = PostLowerFilterPipeline([NativeRequestSizeGuard(max_input_chars=100)])
-    assert pipeline.apply(NativeModelRequest(model="gpt-5.1", input=[])).input == []
+    assert (
+        pipeline.apply(
+            NativeModelRequest(native_replay_context=None, model="gpt-5.1", input=[])
+        ).input
+        == []
+    )
 
 
 def _event(

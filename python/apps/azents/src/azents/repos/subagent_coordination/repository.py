@@ -1,7 +1,6 @@
 """Bounded subagent coordination projection repository."""
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentRunStatus,
@@ -13,6 +12,7 @@ from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.mailbox_item import RDBMailboxItem
 from azents.rdb.models.session_agent import RDBSessionAgent
+from azents.rdb.session_capabilities import ReadSession
 from azents.repos.subagent_coordination.data import (
     SubagentCoordinationSnapshot,
     SubagentCoordinationSnapshotRow,
@@ -24,7 +24,7 @@ class SubagentCoordinationRepository:
 
     async def project_root_tree(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         current_session_id: str,
         configured_capacity: int,
@@ -164,7 +164,7 @@ class SubagentCoordinationRepository:
                 ranked.c.path.asc(),
             )
         )
-        result = await session.execute(statement)
+        result = await session.read_session.execute(statement)
         mappings = result.mappings().all()
         if not mappings:
             return None

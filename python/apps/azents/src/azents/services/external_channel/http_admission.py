@@ -5,23 +5,27 @@ from dataclasses import dataclass, field
 from typing import Annotated, assert_never
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
+    ExternalChannelIngressAuthorityKind,
     ExternalChannelIngressProfile,
     ExternalChannelInteractionStatus,
     ExternalChannelProvider,
     ExternalChannelTransport,
 )
+from azents.core.external_channel_ingestion import (
+    ExternalChannelIngestionOutcomeKind,
+    ExternalChannelIngressAuthority,
+)
 from azents.core.external_channel_provider import SlackConnectionCredentials
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.http_admission_read import (
+    ExternalChannelHTTPAdmissionReadRepository,
+)
 from azents.services.external_channel.admission import ExternalChannelAdmissionService
 from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
@@ -30,11 +34,6 @@ from azents.services.external_channel.connection_revocation import (
     ExternalChannelConnectionRevocationService,
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
-from azents.services.external_channel.ingestion import (
-    ExternalChannelIngestionOutcomeKind,
-    ExternalChannelIngressAuthority,
-    ExternalChannelIngressAuthorityKind,
-)
 from azents.services.external_channel.interaction import (
     ExternalChannelInteractionHandoff,
     ExternalChannelInteractionProcessor,
@@ -91,13 +90,9 @@ class SlackHTTPRetryableIngestion(RuntimeError):
 class SlackHTTPAdmissionService:
     """Verify a Slack callback and durably admit it before acknowledgement."""
 
-    session_manager: Annotated[
-        SessionManager[AsyncSession],
-        Depends(get_session_manager),
-    ]
-    repository: Annotated[
-        ExternalChannelRepository,
-        Depends(ExternalChannelRepository.create),
+    read_operations: Annotated[
+        ExternalChannelHTTPAdmissionReadRepository,
+        Depends(ExternalChannelHTTPAdmissionReadRepository),
     ]
     credentials_codec: Annotated[
         ExternalChannelCredentialsCodec,
@@ -146,14 +141,9 @@ class SlackHTTPAdmissionService:
             route, SlackEventRouteIdentity | SlackInteractionRouteIdentity
         ):
             raise AssertionError("Slack callback route is not exhaustive.")
-        async with self.session_manager() as session:
-            configuration = (
-                await self.repository.get_slack_http_configuration_by_provider_identity(
-                    session,
-                    provider_app_id=route.app_id,
-                    provider_tenant_id=route.tenant_id,
-                )
-            )
+        configuration = await self.read_operations.get_slack_configuration(
+            provider_app_id=route.app_id, provider_tenant_id=route.tenant_id
+        )
         if configuration is None:
             raise SlackHTTPUnauthorized("Slack callback could not be authenticated.")
         if (

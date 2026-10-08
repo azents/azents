@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Any, ClassVar, Dict, List
+from typing import Any, ClassVar, Dict
 from typing_extensions import Annotated
 from typing import Optional, Set
 from typing_extensions import Self
@@ -29,7 +29,6 @@ class ModelCandidateIdentity(BaseModel):
     """ # noqa: E501
     llm_provider_integration_id: Annotated[str, Field(min_length=1, strict=True)]
     model_identifier: Annotated[str, Field(min_length=1, strict=True)]
-    additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["llm_provider_integration_id", "model_identifier"]
 
     model_config = ConfigDict(
@@ -62,10 +61,8 @@ class ModelCandidateIdentity(BaseModel):
         * `None` is only added to the output dict for nullable fields that
           were set at model initialization. Other fields with value `None`
           are ignored.
-        * Fields in `self.additional_properties` are added to the output dict.
         """
         excluded_fields: Set[str] = set([
-            "additional_properties",
         ])
 
         _dict = self.model_dump(
@@ -73,11 +70,6 @@ class ModelCandidateIdentity(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # puts key-value pairs in additional_properties in the top level
-        if self.additional_properties is not None:
-            for _key, _value in self.additional_properties.items():
-                _dict[_key] = _value
-
         return _dict
 
     @classmethod
@@ -89,15 +81,13 @@ class ModelCandidateIdentity(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "llm_provider_integration_id": obj.get("llm_provider_integration_id"),
             "model_identifier": obj.get("model_identifier")
+            }.items() if _key in obj
         })
-        # store additional fields in additional_properties
-        for _key in obj.keys():
-            if _key not in cls.__properties:
-                _obj.additional_properties[_key] = obj.get(_key)
-
         return _obj
 
 

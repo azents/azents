@@ -20,7 +20,7 @@ from typing_extensions import Self
 
 class UnsupportedMediaPolicy(str, Enum):
     """
-    Unsupported media handling policy.
+    Descriptive unsupported media handling policy.
     """
 
     """

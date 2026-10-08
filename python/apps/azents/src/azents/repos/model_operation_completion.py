@@ -5,7 +5,6 @@ import datetime
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.model_operation import (
     ModelOperationCandidateOutcomeStatus,
@@ -13,6 +12,8 @@ from azents.core.model_operation import (
     ModelOperationState,
     mark_model_operation_succeeded,
 )
+from azents.core.session_resource_authority import SessionExecutionOwner
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_execution.data import AgentRunPatch
 from azents.repos.agent_session import AgentSessionRepository
@@ -21,6 +22,7 @@ from azents.repos.model_candidate_health.data import ModelCandidateIdentity
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
+from azents.repos.session_execution.ownership import fence_owned_session_mutation
 
 
 @dataclasses.dataclass(frozen=True)
@@ -53,15 +55,13 @@ class ModelOperationCompletionRepository:
 
     async def complete_success_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         completion: ModelOperationCompletion,
     ) -> None:
         """Settle operation success in the caller's database-only transaction."""
-        current_session = (
-            await self.agent_session_repository.wait_for_execution_lock_by_id(
-                session,
-                completion.session_id,
-            )
+        current_session = await fence_owned_session_mutation(
+            session,
+            SessionExecutionOwner(completion.session_id, completion.owner_generation),
         )
         if (
             current_session is None

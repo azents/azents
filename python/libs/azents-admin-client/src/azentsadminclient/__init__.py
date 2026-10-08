@@ -41,6 +41,8 @@ __all__ = [
     "ApiAttributeError",
     "ApiException",
     "AdminWorkspaceRuntimeProfileDetailResponse",
+    "AgentSessionRunState",
+    "AgentSessionStatus",
     "ArchiveRetentionApplicationResponse",
     "ArchiveRetentionPreviewRequest",
     "ArchiveRetentionPreviewResponse",
@@ -57,6 +59,7 @@ __all__ = [
     "EmailVerificationListResponse",
     "EmailVerificationResponse",
     "ErrorLevel",
+    "EventKind",
     "ExternalAccountOAuthDetailResponse",
     "ExternalAccountOAuthFieldResponse",
     "ExternalAccountOAuthHealthResponse",
@@ -69,6 +72,8 @@ __all__ = [
     "FileLifecycleSettingsUpdateResponse",
     "HTTPValidationError",
     "HealthStatus",
+    "HistoricalMemoryExecutionDetailResponse",
+    "HistoricalMemoryExecutionPatchRequest",
     "InvitationListResponse",
     "InvitationResponse",
     "InvitationStatus",
@@ -140,6 +145,10 @@ __all__ = [
     "RuntimeRecreationOperationStatus",
     "RuntimeRecreationTargetKind",
     "SentryDiagnostics",
+    "SessionDiagnosticEvent",
+    "SessionDiagnosticEventPage",
+    "SessionDiagnosticFile",
+    "SessionDiagnosticMetadata",
     "SignupTokenDeliveryMethod",
     "SignupTokenListResponse",
     "SignupTokenResponse",
@@ -152,7 +161,7 @@ __all__ = [
     "SystemModelCatalogRefreshListResponse",
     "SystemModelCatalogRefreshResponse",
     "SystemModelCatalogResponse",
-    "SystemModelCatalogSyncAttemptResponse",
+    "SystemModelCatalogSyncStatusResponse",
     "SystemSettingAuditEventListResponse",
     "SystemSettingAuditEventResponse",
     "SystemSettingAuditEventType",
@@ -225,6 +234,8 @@ from azentsadminclient.exceptions import ApiException as ApiException
 
 # import models into sdk package
 from azentsadminclient.models.admin_workspace_runtime_profile_detail_response import AdminWorkspaceRuntimeProfileDetailResponse as AdminWorkspaceRuntimeProfileDetailResponse
+from azentsadminclient.models.agent_session_run_state import AgentSessionRunState as AgentSessionRunState
+from azentsadminclient.models.agent_session_status import AgentSessionStatus as AgentSessionStatus
 from azentsadminclient.models.archive_retention_application_response import ArchiveRetentionApplicationResponse as ArchiveRetentionApplicationResponse
 from azentsadminclient.models.archive_retention_preview_request import ArchiveRetentionPreviewRequest as ArchiveRetentionPreviewRequest
 from azentsadminclient.models.archive_retention_preview_response import ArchiveRetentionPreviewResponse as ArchiveRetentionPreviewResponse
@@ -241,6 +252,7 @@ from azentsadminclient.models.docker_container_resources import DockerContainerR
 from azentsadminclient.models.email_verification_list_response import EmailVerificationListResponse as EmailVerificationListResponse
 from azentsadminclient.models.email_verification_response import EmailVerificationResponse as EmailVerificationResponse
 from azentsadminclient.models.error_level import ErrorLevel as ErrorLevel
+from azentsadminclient.models.event_kind import EventKind as EventKind
 from azentsadminclient.models.external_account_o_auth_detail_response import ExternalAccountOAuthDetailResponse as ExternalAccountOAuthDetailResponse
 from azentsadminclient.models.external_account_o_auth_field_response import ExternalAccountOAuthFieldResponse as ExternalAccountOAuthFieldResponse
 from azentsadminclient.models.external_account_o_auth_health_response import ExternalAccountOAuthHealthResponse as ExternalAccountOAuthHealthResponse
@@ -253,6 +265,8 @@ from azentsadminclient.models.file_lifecycle_settings_update_request import File
 from azentsadminclient.models.file_lifecycle_settings_update_response import FileLifecycleSettingsUpdateResponse as FileLifecycleSettingsUpdateResponse
 from azentsadminclient.models.http_validation_error import HTTPValidationError as HTTPValidationError
 from azentsadminclient.models.health_status import HealthStatus as HealthStatus
+from azentsadminclient.models.historical_memory_execution_detail_response import HistoricalMemoryExecutionDetailResponse as HistoricalMemoryExecutionDetailResponse
+from azentsadminclient.models.historical_memory_execution_patch_request import HistoricalMemoryExecutionPatchRequest as HistoricalMemoryExecutionPatchRequest
 from azentsadminclient.models.invitation_list_response import InvitationListResponse as InvitationListResponse
 from azentsadminclient.models.invitation_response import InvitationResponse as InvitationResponse
 from azentsadminclient.models.invitation_status import InvitationStatus as InvitationStatus
@@ -324,6 +338,10 @@ from azentsadminclient.models.runtime_recreation_operation_response import Runti
 from azentsadminclient.models.runtime_recreation_operation_status import RuntimeRecreationOperationStatus as RuntimeRecreationOperationStatus
 from azentsadminclient.models.runtime_recreation_target_kind import RuntimeRecreationTargetKind as RuntimeRecreationTargetKind
 from azentsadminclient.models.sentry_diagnostics import SentryDiagnostics as SentryDiagnostics
+from azentsadminclient.models.session_diagnostic_event import SessionDiagnosticEvent as SessionDiagnosticEvent
+from azentsadminclient.models.session_diagnostic_event_page import SessionDiagnosticEventPage as SessionDiagnosticEventPage
+from azentsadminclient.models.session_diagnostic_file import SessionDiagnosticFile as SessionDiagnosticFile
+from azentsadminclient.models.session_diagnostic_metadata import SessionDiagnosticMetadata as SessionDiagnosticMetadata
 from azentsadminclient.models.signup_token_delivery_method import SignupTokenDeliveryMethod as SignupTokenDeliveryMethod
 from azentsadminclient.models.signup_token_list_response import SignupTokenListResponse as SignupTokenListResponse
 from azentsadminclient.models.signup_token_response import SignupTokenResponse as SignupTokenResponse
@@ -336,7 +354,7 @@ from azentsadminclient.models.system_model_catalog_list_response import SystemMo
 from azentsadminclient.models.system_model_catalog_refresh_list_response import SystemModelCatalogRefreshListResponse as SystemModelCatalogRefreshListResponse
 from azentsadminclient.models.system_model_catalog_refresh_response import SystemModelCatalogRefreshResponse as SystemModelCatalogRefreshResponse
 from azentsadminclient.models.system_model_catalog_response import SystemModelCatalogResponse as SystemModelCatalogResponse
-from azentsadminclient.models.system_model_catalog_sync_attempt_response import SystemModelCatalogSyncAttemptResponse as SystemModelCatalogSyncAttemptResponse
+from azentsadminclient.models.system_model_catalog_sync_status_response import SystemModelCatalogSyncStatusResponse as SystemModelCatalogSyncStatusResponse
 from azentsadminclient.models.system_setting_audit_event_list_response import SystemSettingAuditEventListResponse as SystemSettingAuditEventListResponse
 from azentsadminclient.models.system_setting_audit_event_response import SystemSettingAuditEventResponse as SystemSettingAuditEventResponse
 from azentsadminclient.models.system_setting_audit_event_type import SystemSettingAuditEventType as SystemSettingAuditEventType

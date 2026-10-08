@@ -5,6 +5,7 @@ import base64
 import dataclasses
 import datetime
 import functools
+import json
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from io import BytesIO
@@ -12,15 +13,19 @@ from types import SimpleNamespace
 from typing import Annotated, Literal
 from unittest.mock import AsyncMock
 
+import httpx2
 import pytest
 from azcommon.result import Failure, Success
 from fastapi import Depends
 from fastapi.dependencies.utils import get_dependant
+from openai import AsyncOpenAI
 from PIL import Image
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.engine.events.engine_adapter as engine_adapter_module
+from azents.core.agent import SelectableModelCandidate
+from azents.core.agent_session_data import AgentSession, SessionAgent
 from azents.core.chatgpt_oauth import CHATGPT_OAUTH_BACKEND_BASE_URL
 from azents.core.credentials import XaiOAuthSecrets
 from azents.core.engine_tool_state import ToolWorkingSetState
@@ -40,9 +45,25 @@ from azents.core.enums import (
     SessionAgentKind,
 )
 from azents.core.inference_profile import SessionInferenceState
-from azents.core.llm_catalog import ModelBuiltInToolCapabilities, ModelCapabilities
+from azents.core.llm_catalog import (
+    ModelBuiltInToolCapabilities,
+    ModelCapabilities,
+    ModelReasoningEffort,
+    ModelToolCallingCapabilities,
+)
+from azents.core.model_capability_contract import (
+    ModelCapabilityFeature,
+    ModelFeatureCondition,
+    ModelRequestConstraints,
+)
+from azents.core.model_capability_evidence import ProviderCapabilityEvidence
+from azents.core.model_capability_projection import project_capabilities
+from azents.core.model_catalog_source import CatalogFact
 from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.core.openai_client_config import OpenAIResponsesClientConfig
 from azents.core.openrouter import OPENROUTER_API_BASE_URL, OPENROUTER_APP_TITLE
+from azents.core.session_execution_data import SessionExecutionRecord
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
 from azents.engine.context.compaction import (
     SummaryModelCall,
@@ -65,12 +86,12 @@ from azents.engine.events.execution import (
 )
 from azents.engine.events.filters import (
     EventAutoCompactionFilter,
-    EventPreLowerFilterPipeline,
     PostLowerFilterPipeline,
 )
 from azents.engine.events.openai_responses import (
     OpenAIResponsesModelAdapter,
     OpenAIResponsesRequest,
+    OpenAISDKResponsesClient,
 )
 from azents.engine.events.protocols import (
     NativeRequestInspection,
@@ -87,6 +108,7 @@ from azents.engine.events.tool_invocation import (
     UnboundedClientToolResult,
 )
 from azents.engine.events.types import (
+    ActiveToolCall,
     AgentRunState,
     ClientToolCallPayload,
     CompactionSummaryPayload,
@@ -111,13 +133,16 @@ from azents.engine.hooks.types import (
     TurnStartHookContext,
     TurnStartResult,
 )
-from azents.engine.model_assembly import ModelAssemblyMetadata
 from azents.engine.model_factories import get_model_sdk_factories
+from azents.engine.model_stream import ModelStreamCallContext, ModelStreamWatchdog
 from azents.engine.run.client_tool_compatibility import ClientToolModelProfile
 from azents.engine.run.contracts import RunContext, RunRequest, ToolkitBinding
 from azents.engine.run.emit import Emit
 from azents.engine.run.errors import CompactionFailedError, ModelCallError
-from azents.engine.run.model_transport import InMemoryModelTransportState
+from azents.engine.run.model_transport import (
+    InMemoryModelTransportState,
+    ModelTransportState,
+)
 from azents.engine.run.turn_action_bridge import TurnActionBridgeBoundary
 from azents.engine.run.types import (
     USER_STOP_CANCEL_MESSAGE,
@@ -134,23 +159,47 @@ from azents.engine.tools.run_tool_to_file import (
 )
 from azents.engine.tools.xai_image_generation import XaiImagineClientFactory
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
+from azents.repos.agent import AgentRepository
+from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.repos.agent_session_system_prompt_snapshot import (
     AgentSessionSystemPromptSnapshotRepository,
 )
-from azents.repos.compaction_operation import CompactionCommitContext
+from azents.repos.compaction_operation import (
+    CompactionCommitContext,
+    CompactionOperationRepository,
+)
+from azents.repos.engine_event_repositories import EngineEventRepositoryFactory
+from azents.repos.engine_input_projection import EngineInputProjectionRepository
+from azents.repos.engine_model_input_operation import (
+    EngineModelInputOperationRepository,
+)
+from azents.repos.engine_output_operation import EngineOutputOperationRepository
+from azents.repos.engine_resolve import get_engine_resolve_repositories
+from azents.repos.exchange_file import ExchangeFileRepository
+from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
+from azents.repos.model_candidate_health import ModelCandidateHealthRepository
+from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_file_pin import ModelFilePinRepository
+from azents.repos.model_operation_completion import ModelOperationCompletionRepository
 from azents.repos.provider_output_operation import ProviderOutputOperationRepository
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
+from azents.repos.session_execution_record import SessionExecutionRecordRepository
+from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
+from azents.repos.toolkit import ToolkitRepository
 from azents.repos.toolkit_state.engine import ToolWorkingSetStore
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
-from azents.services.terminal_finalization import TerminalRunFinalizationCoordinator
+from azents.services.model_listing.providers import _candidate_from_xai_api_key_model
+from azents.services.model_metadata_projection import (
+    project_integration_replacement_entries,
+)
+from azents.services.oauth_runtime_clients import create_runtime_oauth_client_factories
 from azents.services.xai_imagine import (
     XaiImagineAuthenticationError,
     XaiImagineClient,
@@ -161,8 +210,12 @@ from azents.services.xai_oauth.data import (
     ProviderRejected,
     ProviderUnavailable,
 )
-from azents.testing.model_metadata import make_test_model_metadata_service
+from azents.testing.model_metadata import (
+    make_test_source,
+    make_test_source_payload,
+)
 from azents.testing.model_selection import (
+    make_test_model_candidate,
     make_test_model_selection,
     make_test_model_settings,
 )
@@ -192,34 +245,77 @@ class _SessionContext:
         """Store fake session."""
         self.session = session or _Session()
 
-    async def __aenter__(self) -> AsyncSession:
+    async def __aenter__(self) -> WriteSession:
         """Return fake session."""
-        return self.session
+        return ReadWriteSession(self.session)
 
     async def __aexit__(self, *exc: object) -> None:
         """No-op exit."""
 
 
 @pytest.fixture(autouse=True)
-def _fake_execution_owner_lock(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep assembly tests in memory; real lock behavior has repository tests."""
+def _fake_execution_owner_operations(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep assembly in memory; PostgreSQL tests verify exact mutation fencing."""
 
-    async def lock_owner(
+    async def get_owner(
         self: AgentSessionRepository,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> AgentSession | None:
         del self, session_id
-        assert isinstance(session, _Session)
-        if session.owner_generation is None:
+        raw_session = session.read_session
+        assert isinstance(raw_session, _Session)
+        if raw_session.owner_generation is None:
             return None
         return _agent_session().model_copy(
-            update={"owner_generation": session.owner_generation}
+            update={"owner_generation": raw_session.owner_generation}
         )
 
-    monkeypatch.setattr(
-        AgentSessionRepository, "wait_for_execution_lock_by_id", lock_owner
-    )
+    async def fence_owner(
+        session: WriteSession, owner: SessionExecutionOwner
+    ) -> SessionExecutionRecord:
+        current = await get_common_owner(
+            SessionExecutionRecordRepository(), session, owner.session_id
+        )
+        if current is None:
+            raise ValueError("AgentSession not found")
+        if current.owner_generation != owner.owner_generation:
+            raise CanonicalExecutionOwnerGenerationStaleError(
+                "Session owner generation is stale"
+            )
+        return current
+
+    async def get_common_owner(
+        self: SessionExecutionRecordRepository,
+        session: ReadSession,
+        session_id: str,
+    ) -> SessionExecutionRecord | None:
+        del self
+        public = await get_owner(AgentSessionRepository(), session, session_id)
+        if public is None:
+            return None
+        return SessionExecutionRecord.model_validate(
+            {
+                **public.model_dump(),
+                "lifecycle_root_session_id": None,
+                "model_file_gc_updated_at": None,
+            }
+        )
+
+    monkeypatch.setattr(AgentSessionRepository, "get_by_id", get_owner)
+    monkeypatch.setattr(SessionExecutionRecordRepository, "get_by_id", get_common_owner)
+    for module in (
+        "engine_event_operation",
+        "engine_execution_operation",
+        "engine_model_input_operation",
+        "engine_output_operation",
+        "engine_tool_result_operation",
+        "engine_run_finalization_operation",
+        "compaction_operation",
+    ):
+        monkeypatch.setattr(
+            f"azents.repos.{module}.fence_owned_session_mutation", fence_owner
+        )
 
 
 class _Session(AsyncSession):
@@ -243,7 +339,7 @@ class _ToolWorkingSetStore(ToolWorkingSetStore):
         self.states: dict[tuple[str, str], ToolWorkingSetState] = {}
 
     def with_session_manager(
-        self, session_manager: SessionManager[AsyncSession]
+        self, session_manager: SessionManager[WriteSession]
     ) -> ToolWorkingSetStore:
         """Keep in-memory state while assembling an owner-bound execution."""
         del session_manager
@@ -282,7 +378,7 @@ class _ToolWorkingSetStore(ToolWorkingSetStore):
 
     async def clear_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
         session_id: str,
     ) -> ToolWorkingSetState:
@@ -352,16 +448,56 @@ class _RunRepo:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
     ) -> AgentRunState | None:
         """Return existing run state when retry reuses a run id."""
         del session, run_id
         return self._state
 
+    async def lock_by_id(
+        self, session: ReadSession, run_id: str
+    ) -> AgentRunState | None:
+        """Return the current Run for repository composition wiring."""
+        return await self.get_by_id(session, run_id)
+
+    async def update_phase(
+        self,
+        session: ReadSession,
+        run_id: str,
+        phase: AgentRunPhase,
+        *,
+        active_tool_calls: list[ActiveToolCall] | None = None,
+    ) -> AgentRunState:
+        """Apply typed phase changes when an adapter test uses actual execution."""
+        current = await self.get_by_id(session, run_id)
+        if current is None:
+            raise ValueError("Agent run not found")
+        self._state = current.model_copy(
+            update={
+                "phase": phase,
+                "active_tool_calls": (
+                    current.active_tool_calls
+                    if active_tool_calls is None
+                    else active_tool_calls
+                ),
+            }
+        )
+        return self._state
+
+    async def mark_parent_result_suppressed(
+        self, session: ReadSession, *, run_id: str, finalized_at: datetime.datetime
+    ) -> AgentRunState:
+        """Keep the detached Run contract for completed repository wiring."""
+        del finalized_at
+        current = await self.get_by_id(session, run_id)
+        if current is None:
+            raise ValueError("Agent run not found")
+        return current
+
     async def create(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         create: AgentRunCreate,
     ) -> AgentRunState:
         """Record create call."""
@@ -391,7 +527,7 @@ class _RunRepo:
 
     async def mark_terminal(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
         status: AgentRunStatus,
         *,
@@ -414,7 +550,7 @@ class _RunRepo:
 
     async def update_retry_state(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
         retry_state: object | None,
     ) -> object:
@@ -429,7 +565,7 @@ class _AgentSessionRepo(AgentSessionRepository):
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> AgentSession | None:
         """Handle session lookup call."""
@@ -438,7 +574,7 @@ class _AgentSessionRepo(AgentSessionRepository):
 
     async def get_root_session_agent_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> SessionAgent | None:
         """Return root SessionAgent without using an unbound test DB session."""
@@ -461,7 +597,7 @@ class _EventSessionHeadRepo:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> _EventSessionHeadState:
         """Return head state."""
@@ -478,7 +614,7 @@ class _TranscriptRepo:
 
     async def list_for_model_input(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
         *,
         head_event_id: str | None = None,
@@ -490,7 +626,7 @@ class _TranscriptRepo:
 
     async def get_by_external_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
         external_id: str,
     ) -> Event | None:
@@ -507,7 +643,7 @@ class _TranscriptRepo:
 
     async def append(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         create: EventCreate,
     ) -> Event:
         """Convert Event append call to test event."""
@@ -534,11 +670,11 @@ class _Compactor:
         self.reason: str | None = None
         self.commit_context: CompactionCommitContext | None = None
 
-    def with_session_manager(
-        self, session_manager: SessionManager[AsyncSession]
+    def with_operations(
+        self, operations: CompactionOperationRepository
     ) -> "_Compactor":
         """Return the in-memory compactor for assembly tests."""
-        del session_manager
+        del operations
         return self
 
     async def compact(
@@ -596,11 +732,11 @@ class _Compactor:
 class _FailingCompactor:
     """Failing compactor for tests."""
 
-    def with_session_manager(
-        self, session_manager: SessionManager[AsyncSession]
+    def with_operations(
+        self, operations: CompactionOperationRepository
     ) -> "_FailingCompactor":
         """Return the failing compactor for assembly tests."""
-        del session_manager
+        del operations
         return self
 
     async def compact(
@@ -1099,6 +1235,7 @@ def test_hooked_tool_executor_forwards_request_cancel() -> None:
         inner=inner,
         dispatcher=RuntimeHookDispatcher(),
         providers=[],
+        toolkit_namespaces={},
         workspace_id="workspace-1",
         agent_id="agent-1",
         session_id="session-1",
@@ -1124,6 +1261,7 @@ async def test_working_set_recency_refreshes_before_hook_denial() -> None:
         inner=_RecordingToolInvoker(),
         dispatcher=RuntimeHookDispatcher(),
         providers=[RuntimeHookProviderRef(slug="deny", toolkit=_DenyHookToolkit())],
+        toolkit_namespaces={"service__probe": "deny"},
         workspace_id="workspace-1",
         agent_id="agent-1",
         session_id="session-1",
@@ -1161,8 +1299,12 @@ async def test_assembled_tool_chain_rechecks_owner_after_before_hook() -> None:
         execution_factory=_capture_execution_factory(execution),
     )
     request = RunRequest(
+        model_capabilities=ModelCapabilities(
+            tool_calling=ModelToolCallingCapabilities(supported=True)
+        ),
+        top_k=None,
         model_assembly_metadata=None,
-        compaction_assembly_metadata=None,
+        compaction_candidate=make_test_model_candidate(),
         enabled_execution_options=[],
         session_id="session-1",
         user_messages=[],
@@ -1171,6 +1313,7 @@ async def test_assembled_tool_chain_rechecks_owner_after_before_hook() -> None:
             ToolkitBinding(
                 toolkit=toolkit,
                 slug="takeover",
+                base_slug="takeover",
                 use_prefix=True,
                 toolkit_type="github",
             )
@@ -1220,8 +1363,12 @@ async def test_event_engine_adapter_runs_execution() -> None:
         emit
         async for emit in adapter.run(
             RunRequest(
+                model_capabilities=ModelCapabilities(
+                    tool_calling=ModelToolCallingCapabilities(supported=True)
+                ),
+                top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -1237,6 +1384,7 @@ async def test_event_engine_adapter_runs_execution() -> None:
                 compaction_provider_integration_id=None,
             ),
             RunContext(
+                model_operation_completion=None,
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 turn_action_bridge_boundary=TurnActionBridgeBoundary(),
@@ -1272,8 +1420,12 @@ async def test_disabled_tool_search_exposes_complete_catalog() -> None:
         execution_factory=_capture_execution_factory(execution),
     )
     request = RunRequest(
+        model_capabilities=ModelCapabilities(
+            tool_calling=ModelToolCallingCapabilities(supported=True)
+        ),
+        top_k=None,
         model_assembly_metadata=None,
-        compaction_assembly_metadata=None,
+        compaction_candidate=make_test_model_candidate(),
         enabled_execution_options=[],
         session_id="session-1",
         user_messages=[],
@@ -1282,6 +1434,7 @@ async def test_disabled_tool_search_exposes_complete_catalog() -> None:
             ToolkitBinding(
                 toolkit=toolkit,
                 slug="service",
+                base_slug="service",
                 use_prefix=True,
                 toolkit_type="github",
             )
@@ -1471,8 +1624,12 @@ async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
         execution_factory=_capture_execution_factory(execution),
     )
     request = RunRequest(
+        model_capabilities=ModelCapabilities(
+            tool_calling=ModelToolCallingCapabilities(supported=True)
+        ),
+        top_k=None,
         model_assembly_metadata=None,
-        compaction_assembly_metadata=None,
+        compaction_candidate=make_test_model_candidate(),
         enabled_execution_options=[],
         session_id="session-1",
         user_messages=[],
@@ -1481,6 +1638,7 @@ async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
             ToolkitBinding(
                 toolkit=toolkit,
                 slug="service",
+                base_slug="service",
                 use_prefix=True,
                 toolkit_type="github",
             )
@@ -1499,6 +1657,7 @@ async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
         async for emit in adapter.run(
             request,
             RunContext(
+                model_operation_completion=None,
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 turn_action_bridge_boundary=TurnActionBridgeBoundary(),
@@ -1587,8 +1746,12 @@ async def test_runtime_provider_adds_run_tool_to_file_as_direct_tool() -> None:
         execution_factory=_capture_execution_factory(execution),
     )
     request = RunRequest(
+        model_capabilities=ModelCapabilities(
+            tool_calling=ModelToolCallingCapabilities(supported=True)
+        ),
+        top_k=None,
         model_assembly_metadata=None,
-        compaction_assembly_metadata=None,
+        compaction_candidate=make_test_model_candidate(),
         enabled_execution_options=[],
         session_id="session-1",
         user_messages=[],
@@ -1597,6 +1760,7 @@ async def test_runtime_provider_adds_run_tool_to_file_as_direct_tool() -> None:
             ToolkitBinding(
                 toolkit=_RunToolProviderToolkit(),
                 slug="runtime",
+                base_slug="runtime",
                 use_prefix=False,
                 toolkit_type=None,
             )
@@ -1658,8 +1822,12 @@ async def _prepare_profiled_model_call(
         resolved_at=datetime.datetime.now(datetime.UTC),
     )
     request = RunRequest(
+        model_capabilities=ModelCapabilities(
+            tool_calling=ModelToolCallingCapabilities(supported=True)
+        ),
+        top_k=None,
         model_assembly_metadata=None,
-        compaction_assembly_metadata=None,
+        compaction_candidate=make_test_model_candidate(),
         enabled_execution_options=enabled_execution_options or [],
         session_id="session-1",
         user_messages=[],
@@ -1668,6 +1836,7 @@ async def _prepare_profiled_model_call(
             ToolkitBinding(
                 toolkit=_ProfiledCandidateToolkit(),
                 slug="profiled",
+                base_slug="profiled",
                 use_prefix=False,
                 toolkit_type=None,
             )
@@ -1776,8 +1945,9 @@ async def test_openai_image_generation_is_bound_as_client_function_tool(
         emit
         async for emit in adapter.run(
             RunRequest(
+                top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -1786,9 +1956,10 @@ async def test_openai_image_generation_is_bound_as_client_function_tool(
                 provider=provider,
                 model="gpt-5.6-luna",
                 model_capabilities=ModelCapabilities(
+                    tool_calling=ModelToolCallingCapabilities(supported=True),
                     built_in_tools=ModelBuiltInToolCapabilities(
                         supported=["image_generation", "web_search"]
-                    )
+                    ),
                 ),
                 credential_kwargs=credential_kwargs,
                 workspace_id="workspace-1",
@@ -1803,6 +1974,7 @@ async def test_openai_image_generation_is_bound_as_client_function_tool(
                 ],
             ),
             RunContext(
+                model_operation_completion=None,
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 turn_action_bridge_boundary=TurnActionBridgeBoundary(),
@@ -1828,34 +2000,292 @@ async def test_openai_image_generation_is_bound_as_client_function_tool(
     )
 
 
+class _SDKWireBuiltinExecution(_Execution):
+    """Exercise EngineAdapter's actual preparer and its official SDK transport."""
+
+    def __init__(
+        self,
+        *,
+        adapter: OpenAIResponsesModelAdapter,
+        watchdog: ModelStreamWatchdog,
+    ) -> None:
+        super().__init__()
+        self.adapter = adapter
+        self.watchdog = watchdog
+
+    async def run(
+        self,
+        request: AgentRunExecutionRequest,
+        *,
+        check_stop: CheckStop | None = None,
+        poll_input_events: object = None,
+    ) -> AgentRunStatus:
+        await super().run(
+            request,
+            check_stop=check_stop,
+            poll_input_events=poll_input_events,
+        )
+        assert self.prepared_model_call is not None
+        native = self.prepared_model_call.native_request
+        assert isinstance(native, OpenAIResponsesRequest)
+        events = [
+            event
+            async for event in self.adapter.stream(
+                native,
+                watchdog=self.watchdog,
+                timeout_policy=self.watchdog.resolve_policy(
+                    provider="openai",
+                    model=native.model,
+                    inference_profile=None,
+                ),
+                call_context=ModelStreamCallContext(
+                    call_kind="sampling",
+                    provider="openai",
+                    provider_integration_id=None,
+                    model=native.model,
+                    session_id="session-1",
+                    run_id=request.run_id,
+                    attempt_number=None,
+                    check_stop=check_stop,
+                ),
+            )
+        ]
+        assert len(events) == 1
+        return AgentRunStatus.COMPLETED
+
+
+@pytest.mark.parametrize(
+    ("tool", "state", "effort", "default_none", "allowed"),
+    [
+        ("web_search", "conditional", "none", False, True),
+        ("web_search", "conditional", "high", False, False),
+        ("web_search", "conditional", None, False, False),
+        ("web_search", "conditional", None, True, True),
+        ("web_search", "unknown", "none", False, False),
+        ("image_generation", "supported", None, False, True),
+        ("image_generation", "conditional", "none", False, True),
+        ("image_generation", "conditional", "high", False, False),
+        ("image_generation", "unknown", "none", False, False),
+    ],
+)
+async def test_actual_engine_builtin_admission_and_condition_gate_before_sdk_wire(
+    tool: Literal["web_search", "image_generation"],
+    state: Literal["supported", "conditional", "unknown"],
+    effort: Literal["none", "high"] | None,
+    default_none: bool,
+    allowed: bool,
+) -> None:
+    """Configuration potential reaches ownership, then actual dispatch is gated."""
+    bodies: list[dict[str, object]] = []
+
+    async def respond(wire_request: httpx2.Request) -> httpx2.Response:
+        body = json.loads((await wire_request.aread()).decode())
+        assert isinstance(body, dict)
+        bodies.append(body)
+        response = {
+            "id": "resp_synthetic",
+            "object": "response",
+            "created_at": 1.0,
+            "status": "completed",
+            "model": "exact-client-image-model",
+            "output": [],
+            "tools": [],
+            "tool_choice": "auto",
+            "parallel_tool_calls": True,
+            "error": None,
+            "incomplete_details": None,
+        }
+        event = {
+            "type": "response.completed",
+            "sequence_number": 1,
+            "response": response,
+        }
+        return httpx2.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=f"data: {json.dumps(event)}\n\ndata: [DONE]\n\n",
+            request=wire_request,
+        )
+
+    def client_factory(
+        *, config: OpenAIResponsesClientConfig
+    ) -> OpenAISDKResponsesClient:
+        del config
+        return OpenAISDKResponsesClient(
+            AsyncOpenAI(
+                api_key="synthetic-test-key",
+                base_url="https://provider.example/v1",
+                http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(respond)),
+            ),
+            websocket_headers=None,
+        )
+
+    def execution_factory(
+        *,
+        model_call_preparer: ModelCallPreparer[NativeRequestInspection],
+        model_adapter: object,
+        model_stream_watchdog: ModelStreamWatchdog,
+        **kwargs: object,
+    ) -> _SDKWireBuiltinExecution:
+        del kwargs
+        assert isinstance(model_adapter, OpenAIResponsesModelAdapter)
+        execution = _SDKWireBuiltinExecution(
+            adapter=model_adapter,
+            watchdog=model_stream_watchdog,
+        )
+        execution.model_call_preparer = model_call_preparer
+        return execution
+
+    caps = project_capabilities(
+        provider=LLMProvider.OPENAI,
+        exact_model="exact-client-image-model",
+        source_model=None,
+        model_developer=None,
+        evidence=ProviderCapabilityEvidence(
+            function_calling=CatalogFact(state="value", value=True),
+            reasoning=CatalogFact(state="value", value=True),
+            reasoning_efforts=CatalogFact(
+                state="value",
+                value=(ModelReasoningEffort.NONE, ModelReasoningEffort.HIGH),
+            ),
+            default_reasoning_effort=CatalogFact(
+                state="value" if default_none else "absent",
+                value=ModelReasoningEffort.NONE if default_none else None,
+            ),
+            client_image_generation=CatalogFact(state="value", value=True),
+            hosted_image_generation=CatalogFact(state="value", value=False),
+        ),
+    )
+    caps.built_in_tools.supported = [tool] if state != "unknown" else []
+    caps.request_constraints = ModelRequestConstraints(
+        known_default="none" if default_none else None,
+        feature_conditions=(
+            ModelFeatureCondition(
+                feature=ModelCapabilityFeature.IMAGE_GENERATION
+                if tool == "image_generation"
+                else ModelCapabilityFeature.WEB_SEARCH,
+                reasoning_efforts=("none",),
+                function_tools=tool == "image_generation",
+            ),
+        )
+        if state == "conditional"
+        else (),
+    )
+    adapter = _agent_engine_adapter(execution_factory=execution_factory)
+    adapter.sdk_factories = dataclasses.replace(
+        adapter.sdk_factories,
+        openai_responses=client_factory,
+    )
+    request = RunRequest(
+        top_k=None,
+        model_assembly_metadata=None,
+        compaction_candidate=make_test_model_candidate(),
+        enabled_execution_options=[],
+        session_id="session-1",
+        user_messages=[],
+        agent_prompt=None,
+        toolkits=[
+            ToolkitBinding(
+                toolkit=_PromptHookToolkit(),
+                slug="prompt",
+                base_slug="prompt",
+                use_prefix=False,
+                toolkit_type=None,
+            )
+        ]
+        if tool == "web_search"
+        else [],
+        provider=LLMProvider.OPENAI,
+        model="exact-client-image-model",
+        model_capabilities=caps,
+        reasoning_effort=effort,
+        credential_kwargs={"api_key": "synthetic-test-key"},
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        tool_search_enabled=False,
+        auto_compaction_threshold_tokens=None,
+        inference_state=None,
+        compaction_provider_integration_id=None,
+        builtin_tools=[BuiltinToolSpec(name=tool, config={})],
+    )
+    if not allowed:
+        with pytest.raises(ValueError, match="Required builtin tool is not supported"):
+            _ = [emit async for emit in adapter.run(request, _run_context())]
+        assert bodies == []
+        return
+    _ = [emit async for emit in adapter.run(request, _run_context())]
+    assert len(bodies) == 1
+    tools = bodies[0]["tools"]
+    assert isinstance(tools, list)
+    if tool == "image_generation":
+        assert any(
+            isinstance(t, dict)
+            and t.get("type") == "function"
+            and t.get("name") == tool
+            for t in tools
+        )
+        assert not any(
+            isinstance(t, dict) and t.get("type") == "image_generation" for t in tools
+        )
+    else:
+        assert any(isinstance(t, dict) and t.get("type") == "web_search" for t in tools)
+    if effort is None:
+        assert "reasoning" not in bodies[0]
+
+
 async def test_xai_image_generation_is_bound_as_client_function_tool(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Expose Imagine to Grok without lowering it as a provider-hosted tool."""
+    """Lower repaired catalog capabilities to client Imagine and native search."""
     caplog.set_level("INFO", logger=engine_adapter_module.__name__)
     execution = _Execution()
     adapter = _agent_engine_adapter(
         session_manager=_session_context,
         execution_factory=_capture_execution_factory(execution),
     )
+    source = make_test_source(
+        make_test_source_payload(
+            {
+                "xai/grok-4": {
+                    "litellm_provider": "xai",
+                    "supports_web_search": True,
+                    "supports_function_calling": True,
+                    "mode": "chat",
+                }
+            }
+        )
+    )
+    [entry] = project_integration_replacement_entries(
+        integration_id="integration",
+        provider=LLMProvider.XAI,
+        candidates=[
+            _candidate_from_xai_api_key_model(
+                model_id="grok-4",
+                created=0,
+                extra=None,
+                fetched_at=datetime.datetime(2026, 10, 2, tzinfo=datetime.UTC),
+            )
+        ],
+        source=source,
+        provider_listing_source="xai:developer_models",
+    )
 
     _ = [
         emit
         async for emit in adapter.run(
             RunRequest(
+                top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
                 agent_prompt=None,
                 toolkits=[],
                 provider=LLMProvider.XAI,
-                model="xai/grok-4",
-                model_capabilities=ModelCapabilities(
-                    built_in_tools=ModelBuiltInToolCapabilities(
-                        supported=["image_generation"]
-                    )
+                model="grok-4",
+                model_capabilities=ModelCapabilities.model_validate(
+                    entry.normalized_capabilities
                 ),
                 credential_kwargs={"api_key": "xai-api-key"},
                 workspace_id="workspace-1",
@@ -1864,9 +2294,13 @@ async def test_xai_image_generation_is_bound_as_client_function_tool(
                 auto_compaction_threshold_tokens=None,
                 inference_state=None,
                 compaction_provider_integration_id=None,
-                builtin_tools=[BuiltinToolSpec(name="image_generation", config={})],
+                builtin_tools=[
+                    BuiltinToolSpec(name="image_generation", config={}),
+                    BuiltinToolSpec(name="web_search", config={}),
+                ],
             ),
             RunContext(
+                model_operation_completion=None,
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 turn_action_bridge_boundary=TurnActionBridgeBoundary(),
@@ -1885,6 +2319,10 @@ async def test_xai_image_generation_is_bound_as_client_function_tool(
     assert [tool.name for tool in prepared_request.parameters.function_tools] == [
         "image_generation"
     ]
+    assert prepared_request.parameters.native_tools == []
+    assert prepared_request.settings.get("openai_native_tools") == [
+        {"type": "web_search"}
+    ]
     projection_record = next(
         record
         for record in caplog.records
@@ -1901,7 +2339,7 @@ async def test_xai_oauth_refresh_updates_later_model_turn_credentials(
     """Reuse a forced-refresh token for later model calls and tool bindings."""
     tokens: list[str] = []
     execution = _Execution()
-    integration_repository = AsyncMock()
+    integration_repository = AsyncMock(spec=LLMProviderIntegrationRepository)
     integration_repository.get_by_id_with_secrets.return_value = SimpleNamespace(
         workspace_id="workspace-1",
         provider=LLMProvider.XAI_OAUTH,
@@ -1932,8 +2370,9 @@ async def test_xai_oauth_refresh_updates_later_model_turn_credentials(
         xai_imagine_client_factory=_refreshing_imagine_client_factory(tokens),
     )
     request = RunRequest(
+        top_k=None,
         model_assembly_metadata=None,
-        compaction_assembly_metadata=None,
+        compaction_candidate=make_test_model_candidate(),
         enabled_execution_options=[],
         session_id="session-1",
         user_messages=[],
@@ -1942,7 +2381,8 @@ async def test_xai_oauth_refresh_updates_later_model_turn_credentials(
         provider=LLMProvider.XAI_OAUTH,
         model="xai/grok-4",
         model_capabilities=ModelCapabilities(
-            built_in_tools=ModelBuiltInToolCapabilities(supported=["image_generation"])
+            tool_calling=ModelToolCallingCapabilities(supported=True),
+            built_in_tools=ModelBuiltInToolCapabilities(supported=["image_generation"]),
         ),
         credential_kwargs={"api_key": "old-access-token"},
         workspace_id="workspace-1",
@@ -2015,7 +2455,7 @@ async def test_xai_oauth_refresh_preserves_failure_classification(
     expected_message: str,
 ) -> None:
     """Keep forced-refresh credential, entitlement, and outage errors distinct."""
-    integration_repository = AsyncMock()
+    integration_repository = AsyncMock(spec=LLMProviderIntegrationRepository)
     integration_repository.get_by_id_with_secrets.return_value = SimpleNamespace(
         workspace_id="workspace-1",
         provider=LLMProvider.XAI_OAUTH,
@@ -2034,8 +2474,12 @@ async def test_xai_oauth_refresh_preserves_failure_classification(
         xai_imagine_client_factory=_refreshing_imagine_client_factory([]),
     )
     request = RunRequest(
+        model_capabilities=ModelCapabilities(
+            tool_calling=ModelToolCallingCapabilities(supported=True)
+        ),
+        top_k=None,
         model_assembly_metadata=None,
-        compaction_assembly_metadata=None,
+        compaction_candidate=make_test_model_candidate(),
         enabled_execution_options=[],
         session_id="session-1",
         user_messages=[],
@@ -2075,8 +2519,12 @@ async def test_adapter_yields_model_output_before_run_completion() -> None:
 
     stream = adapter.run(
         RunRequest(
+            model_capabilities=ModelCapabilities(
+                tool_calling=ModelToolCallingCapabilities(supported=True)
+            ),
+            top_k=None,
             model_assembly_metadata=None,
-            compaction_assembly_metadata=None,
+            compaction_candidate=make_test_model_candidate(),
             enabled_execution_options=[],
             session_id="session-1",
             user_messages=[],
@@ -2092,6 +2540,7 @@ async def test_adapter_yields_model_output_before_run_completion() -> None:
             compaction_provider_integration_id=None,
         ),
         RunContext(
+            model_operation_completion=None,
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
             turn_action_bridge_boundary=TurnActionBridgeBoundary(),
@@ -2128,8 +2577,12 @@ async def test_adapter_forwards_user_stop_cancellation_to_execution() -> None:
         """Receive external cancellation while consuming adapter stream."""
         async for _emit in adapter.run(
             RunRequest(
+                model_capabilities=ModelCapabilities(
+                    tool_calling=ModelToolCallingCapabilities(supported=True)
+                ),
+                top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -2145,6 +2598,7 @@ async def test_adapter_forwards_user_stop_cancellation_to_execution() -> None:
                 compaction_provider_integration_id=None,
             ),
             RunContext(
+                model_operation_completion=None,
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 turn_action_bridge_boundary=TurnActionBridgeBoundary(),
@@ -2183,8 +2637,12 @@ async def test_adapter_drains_run_task_on_stream_close() -> None:
 
     stream = adapter.run(
         RunRequest(
+            model_capabilities=ModelCapabilities(
+                tool_calling=ModelToolCallingCapabilities(supported=True)
+            ),
+            top_k=None,
             model_assembly_metadata=None,
-            compaction_assembly_metadata=None,
+            compaction_candidate=make_test_model_candidate(),
             enabled_execution_options=[],
             session_id="session-1",
             user_messages=[],
@@ -2200,6 +2658,7 @@ async def test_adapter_drains_run_task_on_stream_close() -> None:
             compaction_provider_integration_id=None,
         ),
         RunContext(
+            model_operation_completion=None,
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
             turn_action_bridge_boundary=TurnActionBridgeBoundary(),
@@ -2233,13 +2692,17 @@ async def test_event_engine_adapter_includes_turn_start_injected_prompts() -> No
         emit
         async for emit in adapter.run(
             RunRequest(
+                model_capabilities=ModelCapabilities(
+                    tool_calling=ModelToolCallingCapabilities(supported=True)
+                ),
+                top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
                 agent_prompt="agent prompt",
-                toolkits=[ToolkitBinding(_PromptHookToolkit(), "hooks", True)],
+                toolkits=[ToolkitBinding(_PromptHookToolkit(), "hooks", "hooks", True)],
                 model="gpt-5.1",
                 credential_kwargs={"api_key": "test"},
                 workspace_id="workspace-1",
@@ -2250,6 +2713,7 @@ async def test_event_engine_adapter_includes_turn_start_injected_prompts() -> No
                 compaction_provider_integration_id=None,
             ),
             RunContext(
+                model_operation_completion=None,
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 turn_action_bridge_boundary=TurnActionBridgeBoundary(),
@@ -2290,8 +2754,12 @@ async def test_adapter_propagates_user_visible_model_call_error() -> None:
     with pytest.raises(ModelCallError, match="Missing scopes"):
         async for emit in adapter.run(
             RunRequest(
+                model_capabilities=ModelCapabilities(
+                    tool_calling=ModelToolCallingCapabilities(supported=True)
+                ),
+                top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -2307,6 +2775,7 @@ async def test_adapter_propagates_user_visible_model_call_error() -> None:
                 compaction_provider_integration_id=None,
             ),
             RunContext(
+                model_operation_completion=None,
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 turn_action_bridge_boundary=TurnActionBridgeBoundary(),
@@ -2393,8 +2862,12 @@ async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
         emit
         async for emit in adapter.run(
             RunRequest(
+                model_capabilities=ModelCapabilities(
+                    tool_calling=ModelToolCallingCapabilities(supported=True)
+                ),
+                top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -2414,6 +2887,7 @@ async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
                 compaction_provider_integration_id=None,
             ),
             RunContext(
+                model_operation_completion=None,
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 turn_action_bridge_boundary=TurnActionBridgeBoundary(),
@@ -2465,8 +2939,12 @@ async def test_openrouter_model_binding_keeps_responses_and_exact_model_id() -> 
         emit
         async for emit in adapter.run(
             RunRequest(
+                model_capabilities=ModelCapabilities(
+                    tool_calling=ModelToolCallingCapabilities(supported=True)
+                ),
+                top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -2490,6 +2968,7 @@ async def test_openrouter_model_binding_keeps_responses_and_exact_model_id() -> 
                 compaction_provider_integration_id=None,
             ),
             RunContext(
+                model_operation_completion=None,
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 turn_action_bridge_boundary=TurnActionBridgeBoundary(),
@@ -2546,8 +3025,12 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
         emit
         async for emit in adapter.run(
             RunRequest(
+                model_capabilities=ModelCapabilities(
+                    tool_calling=ModelToolCallingCapabilities(supported=True)
+                ),
+                top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -2566,6 +3049,7 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
                 compaction_max_input_tokens=32_000,
             ),
             RunContext(
+                model_operation_completion=None,
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
                 turn_action_bridge_boundary=TurnActionBridgeBoundary(),
@@ -2578,22 +3062,34 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
         )
     ]
 
-    pre_lower_filter = captured["pre_lower_filter"]
+    input_operation_repository = captured["model_input_operation_repository"]
+    assert isinstance(input_operation_repository, EngineModelInputOperationRepository)
+    input_projection_repository = input_operation_repository.input_projection_repository
     auto_compaction_filter = captured["auto_compaction_filter"]
     post_lower_filter = captured["post_lower_filter"]
-    assert isinstance(pre_lower_filter, EventPreLowerFilterPipeline)
+    assert isinstance(input_projection_repository, EngineInputProjectionRepository)
     assert isinstance(auto_compaction_filter, EventAutoCompactionFilter)
     assert isinstance(post_lower_filter, PostLowerFilterPipeline)
-    assert [item.__class__.__name__ for item in pre_lower_filter.filters] == [
-        "EventAttachmentAvailabilityFilter",
-        "EventFilePartPlaceholderFilter",
-    ]
+    assert isinstance(
+        input_projection_repository.exchange_file_repository,
+        ExchangeFileRepository,
+    )
+    assert isinstance(
+        input_projection_repository.model_file_repository,
+        ModelFileRepository,
+    )
+    assert isinstance(
+        input_projection_repository.transcript_repository,
+        EventTranscriptRepository,
+    )
     assert [item.__class__.__name__ for item in post_lower_filter.filters] == [
         "NativeRequestSizeGuard",
     ]
-    assert captured["session_repo"] is session_head_repo
+    assert input_operation_repository.session_head_repository is session_head_repo
+    output_operation_repository = captured["output_operation_repository"]
+    assert isinstance(output_operation_repository, EngineOutputOperationRepository)
     assert isinstance(
-        captured["system_prompt_snapshot_repo"],
+        output_operation_repository.system_prompt_repository,
         AgentSessionSystemPromptSnapshotRepository,
     )
     model_adapter = captured["model_adapter"]
@@ -2628,6 +3124,7 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
     )
     captured_prompts: dict[str, str] = {}
     prepared_requests: list[RunRequest] = []
+    summary_context = _run_context()
 
     async def prepare_compaction_request(request: RunRequest) -> RunRequest:
         """Replace the compaction route before summary dispatch."""
@@ -2639,27 +3136,40 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
             compaction_model="claude-prepared",
             compaction_credential_kwargs={"api_key": "prepared"},
             compaction_max_input_tokens=8_000,
+            compaction_candidate=SelectableModelCandidate(
+                model_selection=make_test_model_selection(
+                    provider=LLMProvider.ANTHROPIC,
+                    model_identifier="claude-prepared",
+                    integration_id="integration-prepared",
+                ),
+                settings=make_test_model_settings().model_copy(
+                    update={"max_output_tokens": 1600}
+                ),
+            ),
         )
 
     async def summarize(
         *,
-        provider: LLMProvider,
-        provider_integration_id: str | None,
-        model: str,
+        candidate: SelectableModelCandidate,
+        transport_state: ModelTransportState,
         credential_kwargs: dict[str, object],
-        assembly_metadata: ModelAssemblyMetadata | None,
+        effective_input_tokens: int,
         system_prompt: str,
         user_prompt: str,
         conversation_text: str,
-        max_output_tokens: int,
         session_id: str | None = None,
     ) -> str:
         """Replace summary model call."""
-        captured_prompts["provider"] = provider.value
-        captured_prompts["provider_integration_id"] = provider_integration_id or ""
-        captured_prompts["model"] = model
+        assert transport_state is summary_context.model_transport_state
+        captured_prompts["provider"] = candidate.model_selection.provider.value
+        captured_prompts["provider_integration_id"] = (
+            candidate.model_selection.llm_provider_integration_id
+        )
+        captured_prompts["model"] = candidate.model_selection.model_identifier
         captured_prompts["api_key"] = str(credential_kwargs["api_key"])
-        captured_prompts["max_output_tokens"] = str(max_output_tokens)
+        captured_prompts["max_output_tokens"] = str(
+            candidate.settings.max_output_tokens
+        )
         del session_id
         captured_prompts["system_prompt"] = system_prompt
         captured_prompts["user_prompt"] = user_prompt
@@ -2683,8 +3193,12 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
         emit
         async for emit in adapter.compact(
             RunRequest(
+                model_capabilities=ModelCapabilities(
+                    tool_calling=ModelToolCallingCapabilities(supported=True)
+                ),
+                top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -2700,7 +3214,7 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
                 compaction_provider_integration_id=None,
             ),
             dataclasses.replace(
-                _run_context(),
+                summary_context,
                 prepare_compaction_request=prepare_compaction_request,
             ),
         )
@@ -2724,7 +3238,7 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
     assert captured_prompts["provider_integration_id"] == "integration-prepared"
     assert captured_prompts["model"] == "claude-prepared"
     assert captured_prompts["api_key"] == "prepared"
-    assert captured_prompts["max_output_tokens"] == "4000"
+    assert captured_prompts["max_output_tokens"] == "1600"
     assert compactor.commit_context == CompactionCommitContext(
         workspace_id="workspace-1",
         agent_id="agent-1",
@@ -2749,27 +3263,24 @@ async def test_manual_compact_runs_compaction_summary_hook() -> None:
 
     async def summarize(
         *,
-        provider: LLMProvider,
-        provider_integration_id: str | None,
-        model: str,
+        candidate: SelectableModelCandidate,
+        transport_state: ModelTransportState,
         credential_kwargs: dict[str, object],
-        assembly_metadata: ModelAssemblyMetadata | None,
+        effective_input_tokens: int,
         system_prompt: str,
         user_prompt: str,
         conversation_text: str,
-        max_output_tokens: int,
         session_id: str | None = None,
     ) -> str:
         """Return compact summary."""
         del (
-            provider,
-            provider_integration_id,
-            model,
+            candidate,
             credential_kwargs,
+            effective_input_tokens,
             system_prompt,
             user_prompt,
         )
-        del conversation_text, max_output_tokens, session_id
+        del conversation_text, session_id
         return "summary"
 
     adapter = _agent_engine_adapter(
@@ -2789,13 +3300,17 @@ async def test_manual_compact_runs_compaction_summary_hook() -> None:
         emit
         async for emit in adapter.compact(
             RunRequest(
+                model_capabilities=ModelCapabilities(
+                    tool_calling=ModelToolCallingCapabilities(supported=True)
+                ),
+                top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
                 agent_prompt=None,
-                toolkits=[ToolkitBinding(toolkit, "hookkit", True)],
+                toolkits=[ToolkitBinding(toolkit, "hookkit", "hookkit", True)],
                 model="gpt-5.1",
                 credential_kwargs={"api_key": "test"},
                 workspace_id="workspace-1",
@@ -2877,27 +3392,24 @@ async def test_manual_compact_trims_summary_input_to_checkpoint_and_tail() -> No
 
     async def summarize(
         *,
-        provider: LLMProvider,
-        provider_integration_id: str | None,
-        model: str,
+        candidate: SelectableModelCandidate,
+        transport_state: ModelTransportState,
         credential_kwargs: dict[str, object],
-        assembly_metadata: ModelAssemblyMetadata | None,
+        effective_input_tokens: int,
         system_prompt: str,
         user_prompt: str,
         conversation_text: str,
-        max_output_tokens: int,
         session_id: str | None = None,
     ) -> str:
         """Capture summary input."""
         del (
-            provider,
-            provider_integration_id,
-            model,
+            candidate,
             credential_kwargs,
+            effective_input_tokens,
             system_prompt,
             user_prompt,
         )
-        del max_output_tokens, session_id
+        del session_id
         captured["conversation_text"] = conversation_text
         return "summary"
 
@@ -2918,8 +3430,12 @@ async def test_manual_compact_trims_summary_input_to_checkpoint_and_tail() -> No
         emit
         async for emit in adapter.compact(
             RunRequest(
+                model_capabilities=ModelCapabilities(
+                    tool_calling=ModelToolCallingCapabilities(supported=True)
+                ),
+                top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -2982,8 +3498,12 @@ async def test_manual_compact_propagates_compaction_failure() -> None:
 
     iterator = adapter.compact(
         RunRequest(
+            model_capabilities=ModelCapabilities(
+                tool_calling=ModelToolCallingCapabilities(supported=True)
+            ),
+            top_k=None,
             model_assembly_metadata=None,
-            compaction_assembly_metadata=None,
+            compaction_candidate=make_test_model_candidate(),
             enabled_execution_options=[],
             session_id="session-1",
             user_messages=[],
@@ -3139,6 +3659,7 @@ async def _noop_publish(_event: object) -> None:
 def _run_context() -> RunContext:
     """Return manual compaction run context for tests."""
     return RunContext(
+        model_operation_completion=None,
         owner_generation=1,
         tool_admission_barrier=_OpenToolAdmissionBarrier(),
         turn_action_bridge_boundary=TurnActionBridgeBoundary(),
@@ -3173,40 +3694,79 @@ def _agent_engine_adapter(
 ) -> AgentEngineAdapter:
     """Create AgentEngineAdapter for tests."""
     watchdog = make_test_model_stream_watchdog()
-    return AgentEngineAdapter(
-        sdk_factories=get_model_sdk_factories(),
+    store = tool_working_set_store or _ToolWorkingSetStore()
+    runs = run_repo or _RunRepo()
+    sessions = agent_session_repo or _AgentSessionRepo()
+    heads = session_head_repo or _EventSessionHeadRepo(None)
+    transcript = transcript_repo or _TranscriptRepo([])
+    system_prompts = AgentSessionSystemPromptSnapshotRepository()
+    file_pins = _ModelFilePinRepo()
+    model_operations = ModelOperationCompletionRepository(
+        agent_session_repository=AgentSessionRepository(),
+        agent_run_repository=AgentRunRepository(),
+        model_candidate_health_repository=ModelCandidateHealthRepository(
+            session_manager=session_manager
+        ),
+    )
+    terminal_operations = require_instance(
+        AsyncMock(spec=TerminalRunFinalizationRepository),
+        TerminalRunFinalizationRepository,
+    )
+    output_metadata = AsyncMock(spec=ProviderOutputOperationRepository)
+    integration = require_instance(
+        integration_repository or AsyncMock(spec=LLMProviderIntegrationRepository),
+        LLMProviderIntegrationRepository,
+    )
+    repository_factory = EngineEventRepositoryFactory(
         session_manager=session_manager,
-        tool_working_set_store=(tool_working_set_store or _ToolWorkingSetStore()),
+        run_repository=runs,
+        agent_session_repository=sessions,
+        session_head_repository=heads,
+        transcript_repository=transcript,
+        event_payload_repository=EventTranscriptRepository(),
+        tool_working_set_repository=store,
+        system_prompt_repository=system_prompts,
+        model_file_pin_repository=file_pins,
+        model_operation_repository=model_operations,
+        terminal_repository=terminal_operations,
+        output_metadata_repository=output_metadata,
+        compaction_repository=CompactionOperationRepository(
+            owner=None,
+            session_manager=session_manager,
+            transcript_repository=transcript,
+            agent_session_repository=sessions,
+            model_operation_completion_repository=model_operations,
+            tool_working_set_store=store,
+        ),
+        exchange_file_repository=ExchangeFileRepository(),
+        model_file_repository=ModelFileRepository(),
+    )
+    return AgentEngineAdapter(
+        repository_factory=repository_factory,
+        resolve_repositories=get_engine_resolve_repositories(
+            session_manager=session_manager,
+            agent_repository=AgentRepository(),
+            integration_repository=integration,
+            toolkit_repository=ToolkitRepository(cipher=None),
+        ),
+        oauth_clients=create_runtime_oauth_client_factories(),
+        sdk_factories=get_model_sdk_factories(),
         artifact_service=artifact_service or _ArtifactService(),
         exchange_file_service=exchange_file_service or _ExchangeFileService(),
         model_file_service=model_file_service or _ModelFileService(),
-        provider_output_operation_repository=AsyncMock(
-            spec=ProviderOutputOperationRepository
-        ),
-        integration_repository=integration_repository or AsyncMock(),
-        metadata_service=make_test_model_metadata_service(snapshot=None),
-        xai_imagine_client_factory=(
-            xai_imagine_client_factory or _xai_imagine_client_factory()
-        ),
+        provider_output_operation_repository=output_metadata,
+        xai_imagine_client_factory=xai_imagine_client_factory
+        or _xai_imagine_client_factory(),
         config=config or EventEngineAdapterConfig(),
         model_stream_watchdog=watchdog,
         execution_factory=execution_factory or (lambda **kwargs: _Execution()),
-        run_repo=run_repo or _RunRepo(),
-        agent_session_repo=agent_session_repo or _AgentSessionRepo(),
-        session_head_repo=session_head_repo or _EventSessionHeadRepo(None),
-        transcript_repo=transcript_repo or _TranscriptRepo([]),
-        system_prompt_snapshot_repo=AgentSessionSystemPromptSnapshotRepository(),
-        model_file_pin_repo=_ModelFilePinRepo(),
-        terminal_finalization_coordinator=require_instance(
-            AsyncMock(spec=TerminalRunFinalizationCoordinator),
-            TerminalRunFinalizationCoordinator,
-        ),
         compactor=compactor or _Compactor(),
         summary_model_call=summary_model_call
         or functools.partial(
             summarize_text_with_model,
             watchdog=watchdog,
             sdk_factories=get_model_sdk_factories(),
+            websocket_enabled=False,
         ),
     )
 
@@ -3214,3 +3774,50 @@ def _agent_engine_adapter(
 def _events(emits: list[Emit]) -> list[object]:
     """Return emit event list."""
     return [emit.event for emit in emits]
+
+
+async def test_engine_adapter_forwards_top_k_to_native_codec_denial() -> None:
+    execution = _Execution()
+    adapter = _agent_engine_adapter(
+        execution_factory=_capture_execution_factory(execution),
+    )
+    request = RunRequest(
+        model_capabilities=ModelCapabilities(
+            tool_calling=ModelToolCallingCapabilities(supported=True)
+        ),
+        top_k=37,
+        model_assembly_metadata=None,
+        compaction_candidate=make_test_model_candidate(),
+        enabled_execution_options=[],
+        session_id="session-1",
+        user_messages=[],
+        agent_prompt=None,
+        toolkits=[],
+        model="gpt-5.1",
+        credential_kwargs={"api_key": "synthetic-key"},
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        tool_search_enabled=False,
+        auto_compaction_threshold_tokens=None,
+        inference_state=None,
+        compaction_provider_integration_id=None,
+    )
+    with pytest.raises(ValueError, match="top-k has no mapping"):
+        _ = [
+            emit
+            async for emit in adapter.run(
+                request,
+                RunContext(
+                    model_operation_completion=None,
+                    owner_generation=1,
+                    tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                    turn_action_bridge_boundary=TurnActionBridgeBoundary(),
+                    model_transport_state=InMemoryModelTransportState(
+                        websocket_enabled=False
+                    ),
+                    run_id="0" * 32,
+                    publish_event=_noop_publish,
+                ),
+            )
+        ]
+    assert execution.prepared_model_call is None

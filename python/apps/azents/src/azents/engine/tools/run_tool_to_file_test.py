@@ -19,6 +19,7 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
 )
 
 from azents.core.enums import ArtifactStatus, ModelFileStatus
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.events.generated_files import PendingGeneratedFileOutput
 from azents.engine.events.tool_invocation import (
     ClientToolInvoker,
@@ -70,10 +71,9 @@ from azents.runtime.transfer.server_to_runtime import (
 )
 from azents.services.artifact import ArtifactTransferSource
 from azents.services.exchange_file import ExchangeFileTransferSource
-from azents.services.file_storage import GrepResult, TextReadResult
+from azents.services.file_storage import GlobResult, GrepResult, TextReadResult
 from azents.services.model_file import ModelFileDownload
 from azents.services.runtime_storage_error import RuntimeStorageError
-from azents.services.session_resource_authority import SessionResourceAuthority
 
 
 class _Invoker(ClientToolInvoker):
@@ -195,7 +195,7 @@ class _Storage:
         *,
         agent_id: str,
         exclude_patterns: List[str] | None,
-    ) -> List[RuntimeAttachment]:
+    ) -> GlobResult:
         del pattern, agent_id, exclude_patterns
         raise NotImplementedError
 
@@ -931,12 +931,14 @@ def _catalog(tools: Mapping[str, FunctionTool]) -> ToolCatalog:
     typed_tools = {name: tool for name, tool in tools.items()}
     source = ToolCatalogSource(
         slug="builtin",
+        namespace="builtin",
         toolkit_type=None,
         toolkit_class="RuntimeBuiltinTool",
         display_name="Runtime",
         use_prefix=False,
     )
     return ToolCatalog(
+        native_replay_context=None,
         tools=MappingProxyType(typed_tools),
         wire_dialects=MappingProxyType({name: "json_function" for name in typed_tools}),
         entries=MappingProxyType(

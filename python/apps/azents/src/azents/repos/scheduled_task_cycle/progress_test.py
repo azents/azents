@@ -4,6 +4,7 @@ import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
+from typing import NamedTuple
 from unittest.mock import AsyncMock
 
 import pytest
@@ -24,6 +25,7 @@ from azents.core.external_channel_provider_effect import (
     ProviderOperationKey,
     ProviderTarget,
 )
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
@@ -64,14 +66,14 @@ class _TransactionTracker:
     """Create sessions whose transaction lifetime is directly observable."""
 
     def __init__(self) -> None:
-        self.sessions: list[AsyncSession] = []
+        self.sessions: list[_TrackedSession] = []
 
     @asynccontextmanager
-    async def session_manager(self) -> AsyncIterator[AsyncSession]:
+    async def session_manager(self) -> AsyncIterator[WriteSession]:
         session = _TrackedSession()
         self.sessions.append(session)
         try:
-            yield session
+            yield ReadWriteSession(session)
         finally:
             session.active = False
             await session.close()
@@ -143,14 +145,16 @@ def _plan(
     )
 
 
-def _repository(
-    tracker: _TransactionTracker,
-) -> tuple[
-    ScheduledTaskProgressRepository,
-    AsyncMock,
-    AsyncMock,
-    AsyncMock,
-]:
+class _RepositoryFixture(NamedTuple):
+    """Named progress repository and its transaction collaborators."""
+
+    repository: ScheduledTaskProgressRepository
+    run_repository: AsyncMock
+    cycle_repository: AsyncMock
+    provider_repository: AsyncMock
+
+
+def _repository(tracker: _TransactionTracker) -> _RepositoryFixture:
     run_repository = AsyncMock(spec=AgentRunRepository)
     cycle_repository = AsyncMock(spec=ScheduledTaskCycleRepository)
     provider_repository = AsyncMock(spec=ExternalChannelWorkRepository)
@@ -166,7 +170,12 @@ def _repository(
             ExternalChannelWorkRepository,
         ),
     )
-    return repository, run_repository, cycle_repository, provider_repository
+    return _RepositoryFixture(
+        repository=repository,
+        run_repository=run_repository,
+        cycle_repository=cycle_repository,
+        provider_repository=provider_repository,
+    )
 
 
 def _scheduled_run() -> SimpleNamespace:
@@ -190,9 +199,11 @@ def _task() -> ExternalChannelWorkTask:
 @pytest.mark.asyncio
 async def test_prepare_progress_commits_plans_and_stable_operation_seeds() -> None:
     tracker = _TransactionTracker()
-    repository, run_repository, cycle_repository, provider_repository = _repository(
-        tracker
-    )
+    fixture = _repository(tracker)
+    repository = fixture.repository
+    run_repository = fixture.run_repository
+    cycle_repository = fixture.cycle_repository
+    provider_repository = fixture.provider_repository
     initial = _cycle()
     updated = _cycle(desired_revision=1, version=3)
     claimed = _cycle(
@@ -213,7 +224,7 @@ async def test_prepare_progress_commits_plans_and_stable_operation_seeds() -> No
     cycle_repository.claim_tracker_projection.return_value = claimed
 
     async def prepare_tracker(
-        _session: AsyncSession,
+        _session: WriteSession,
         **kwargs: object,
     ) -> ProviderEffectPlan:
         seed = kwargs["operation_seed"]
@@ -221,7 +232,7 @@ async def test_prepare_progress_commits_plans_and_stable_operation_seeds() -> No
         return _plan(ExternalChannelDeliveryOperation.PROGRESS_CREATE, seed=seed)
 
     async def prepare_reply(
-        _session: AsyncSession,
+        _session: WriteSession,
         **kwargs: object,
     ) -> tuple[ProviderEffectPlan, ...]:
         seed = kwargs["operation_seed"]
@@ -276,7 +287,10 @@ async def test_prepare_progress_commits_plans_and_stable_operation_seeds() -> No
 @pytest.mark.asyncio
 async def test_initial_tracker_preserves_scheduled_presentation_and_seed() -> None:
     tracker = _TransactionTracker()
-    repository, _, cycle_repository, provider_repository = _repository(tracker)
+    fixture = _repository(tracker)
+    repository = fixture.repository
+    cycle_repository = fixture.cycle_repository
+    provider_repository = fixture.provider_repository
     cycle_repository.get_started.return_value = _cycle()
     cycle_repository.claim_tracker_projection.return_value = _cycle(version=3)
     provider_repository.prepare_binding_effect.return_value = _plan(
@@ -307,7 +321,10 @@ async def test_initial_tracker_preserves_scheduled_presentation_and_seed() -> No
 @pytest.mark.asyncio
 async def test_not_scheduled_precedes_scheduled_only_validation() -> None:
     tracker = _TransactionTracker()
-    repository, run_repository, cycle_repository, _ = _repository(tracker)
+    fixture = _repository(tracker)
+    repository = fixture.repository
+    run_repository = fixture.run_repository
+    cycle_repository = fixture.cycle_repository
     run_repository.get_by_id.return_value = None
 
     preparation = await repository.prepare_progress(
@@ -330,7 +347,10 @@ async def test_not_scheduled_precedes_scheduled_only_validation() -> None:
 @pytest.mark.asyncio
 async def test_admission_rejects_superseded_and_inactive_cycles() -> None:
     tracker = _TransactionTracker()
-    repository, run_repository, cycle_repository, _ = _repository(tracker)
+    fixture = _repository(tracker)
+    repository = fixture.repository
+    run_repository = fixture.run_repository
+    cycle_repository = fixture.cycle_repository
     run_repository.get_by_id.return_value = _scheduled_run()
     cycle_repository.lock.side_effect = [_cycle(version=5), None]
 
@@ -357,7 +377,9 @@ async def test_admission_rejects_superseded_and_inactive_cycles() -> None:
 @pytest.mark.asyncio
 async def test_settlement_uses_fresh_completed_repository_transaction() -> None:
     tracker = _TransactionTracker()
-    repository, _, cycle_repository, _ = _repository(tracker)
+    fixture = _repository(tracker)
+    repository = fixture.repository
+    cycle_repository = fixture.cycle_repository
     effect_plan = _plan(
         ExternalChannelDeliveryOperation.PROGRESS_CREATE,
         seed=f"scheduled-tracker:{_CYCLE_ID}:1:0",

@@ -20,6 +20,14 @@ from azents.services.file_lifecycle_cleanup import (
     FileLifecycleCleanupService,
     FileLifecycleCleanupSummary,
 )
+from azents.services.historical_memory.consolidation_discovery import (
+    ConsolidationDiscoverySummary,
+    HistoricalMemoryConsolidationDiscoveryService,
+)
+from azents.services.historical_memory.discovery import (
+    HistoricalMemoryDiscoveryService,
+    HistoricalMemoryDiscoverySummary,
+)
 from azents.services.llm_catalog import (
     SystemCatalogProjectionService,
     SystemCatalogProjectionSummary,
@@ -102,6 +110,25 @@ class _CatalogProjectionContainer:
         return self.service
 
 
+class _HistoricalMemoryDiscoveryContainer:
+    """Container test double for Historical Memory discovery."""
+
+    def __init__(
+        self,
+        service: HistoricalMemoryDiscoveryService,
+        consolidation: HistoricalMemoryConsolidationDiscoveryService,
+    ) -> None:
+        self.service = service
+        self.consolidation = consolidation
+
+    async def solve(self, target: type[object]) -> object:
+        """Return the configured discovery service."""
+        if target is HistoricalMemoryDiscoveryService:
+            return self.service
+        assert target is HistoricalMemoryConsolidationDiscoveryService
+        return self.consolidation
+
+
 @pytest.mark.asyncio
 async def test_system_catalog_handler_publishes_replacement_authority() -> None:
     """The existing scheduled task owns replacement catalog publication."""
@@ -111,7 +138,7 @@ async def test_system_catalog_handler_publishes_replacement_authority() -> None:
             SystemCatalogProjectionSummary(
                 provider=LLMProvider.OPENAI,
                 catalog_id="catalog-id",
-                snapshot_id="snapshot-id",
+                last_success_at=None,
                 visible_count=3,
                 hidden_count=2,
             )
@@ -134,7 +161,7 @@ async def test_system_catalog_handler_publishes_replacement_authority() -> None:
         {
             "provider": "openai",
             "catalog_id": "catalog-id",
-            "snapshot_id": "snapshot-id",
+            "last_success_at": None,
             "visible_count": 3,
             "hidden_count": 2,
         }
@@ -375,3 +402,61 @@ def test_external_account_oauth_cleanup_is_registered_with_a_distinct_key() -> N
     assert all(
         definition.key != "external_account_link_cleanup" for definition in definitions
     )
+
+
+@pytest.mark.asyncio
+async def test_historical_memory_discovery_handler_returns_dispatch_summary() -> None:
+    """Scheduler completion covers discovery and dispatch, not model work."""
+    service = Mock()
+    consolidation = Mock()
+    consolidation.discover_once = AsyncMock(
+        return_value=ConsolidationDiscoverySummary(2, 2)
+    )
+    service.discover_once = AsyncMock(
+        return_value=HistoricalMemoryDiscoverySummary(
+            admitted=4,
+            due_agents=3,
+            dispatched=3,
+        )
+    )
+    now = datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC)
+    context = TaskContext(
+        task_key="historical_memory_discovery",
+        attempt_started_at=now,
+        lease_owner="scheduler-1",
+        deadline=now + datetime.timedelta(minutes=2),
+        manual_triggered=False,
+        container=_HistoricalMemoryDiscoveryContainer(service, consolidation),  # ty: ignore[invalid-argument-type] # Focused container implements only solve().
+    )
+
+    result = await registry.historical_memory_discovery_handler(context)
+
+    assert result.summary == {
+        "task_key": "historical_memory_discovery",
+        "attempt_started_at": now.isoformat(),
+        "manual_triggered": False,
+        "admitted": 4,
+        "due_agents": 3,
+        "dispatched": 3,
+        "consolidation_due_units": 2,
+        "consolidation_dispatched": 2,
+    }
+    service.discover_once.assert_awaited_once_with()
+    consolidation.discover_once.assert_awaited_once_with()
+
+
+def test_historical_memory_discovery_is_registered_and_enabled() -> None:
+    """The completed Memory cutover enables bounded five-minute discovery."""
+    definitions = registry.get_task_definitions()
+    matches = [
+        definition
+        for definition in definitions
+        if definition.key == "historical_memory_discovery"
+    ]
+
+    assert matches == [registry.HISTORICAL_MEMORY_DISCOVERY_TASK]
+    definition = matches[0]
+    assert definition.interval == datetime.timedelta(minutes=5)
+    assert definition.timeout == datetime.timedelta(minutes=2)
+    assert definition.retry_policy.kind == "bounded_backoff"
+    assert definition.enabled_by_default is True

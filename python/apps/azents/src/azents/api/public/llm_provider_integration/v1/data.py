@@ -19,16 +19,17 @@ from azents.core.credentials import (
 from azents.core.enums import LLMCatalogScope, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
 from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.core.model_pricing import ModelPricingDefinition
 from azents.repos.llm_provider_integration.data import LLMProviderIntegration
 from azents.services.image_generation_catalog.data import (
-    ImageGenerationCatalogAttemptOutput,
     ImageGenerationCatalogEntryOutput,
+    ImageGenerationCatalogSyncStatusOutput,
     ImageGenerationModelCatalogOutput,
 )
 from azents.services.llm_catalog import (
     ModelCatalogEntryListOutput,
     ModelCatalogEntryOutput,
-    ModelCatalogSyncAttemptOutput,
+    ModelCatalogSyncStatusOutput,
     SystemCatalogProjectionSummary,
 )
 from azents.services.llm_provider_integration.data import (
@@ -61,6 +62,7 @@ class ModelCatalogEntryResponse(BaseModel):
     visibility_status: str
     publisher: str | None
     family: str | None
+    pricing: ModelPricingDefinition
     source_metadata: dict[str, Any] | None
     projection_metadata: dict[str, Any] | None
 
@@ -81,15 +83,15 @@ class ModelCatalogEntryResponse(BaseModel):
             visibility_status=entry.visibility_status.value,
             publisher=entry.publisher,
             family=entry.family,
+            pricing=entry.pricing,
             source_metadata=entry.source_metadata,
             projection_metadata=entry.projection_metadata,
         )
 
 
-class ModelCatalogSyncAttemptResponse(BaseModel):
-    """Latest model catalog sync attempt response."""
+class ModelCatalogSyncStatusResponse(BaseModel):
+    """Current model catalog synchronization response."""
 
-    id: str
     status: str
     started_at: datetime.datetime
     finished_at: datetime.datetime | None
@@ -104,8 +106,8 @@ class ModelCatalogSyncAttemptResponse(BaseModel):
     @classmethod
     def convert_from(
         cls,
-        attempt: ModelCatalogSyncAttemptOutput,
-    ) -> "ModelCatalogSyncAttemptResponse":
+        attempt: ModelCatalogSyncStatusOutput,
+    ) -> "ModelCatalogSyncStatusResponse":
         """Convert service output to response model."""
         return cls.model_validate(attempt.model_dump())
 
@@ -115,9 +117,8 @@ class ModelCatalogEntryListResponse(BaseModel):
 
     catalog_id: str
     catalog_scope: LLMCatalogScope
-    current_snapshot_id: str | None
-    current_snapshot_created_at: datetime.datetime | None
-    latest_attempt: ModelCatalogSyncAttemptResponse | None
+    last_success_at: datetime.datetime | None
+    latest_sync: ModelCatalogSyncStatusResponse | None
     stale: bool
     sync_available_at: datetime.datetime | None
     automatic_retry_blocked: bool
@@ -135,11 +136,10 @@ class ModelCatalogEntryListResponse(BaseModel):
         return cls(
             catalog_id=data.catalog_id,
             catalog_scope=data.catalog_scope,
-            current_snapshot_id=data.current_snapshot_id,
-            current_snapshot_created_at=data.current_snapshot_created_at,
-            latest_attempt=(
-                ModelCatalogSyncAttemptResponse.convert_from(data.latest_attempt)
-                if data.latest_attempt is not None
+            last_success_at=data.last_success_at,
+            latest_sync=(
+                ModelCatalogSyncStatusResponse.convert_from(data.latest_sync)
+                if data.latest_sync is not None
                 else None
             ),
             stale=data.stale,
@@ -157,7 +157,7 @@ class ModelCatalogSyncResponse(BaseModel):
 
     provider: LLMProvider
     catalog_id: str
-    snapshot_id: str | None
+    last_success_at: datetime.datetime | None
     visible_count: int
     hidden_count: int
     status: str
@@ -174,7 +174,7 @@ class ModelCatalogSyncResponse(BaseModel):
         return cls(
             provider=summary.provider,
             catalog_id=summary.catalog_id,
-            snapshot_id=summary.snapshot_id,
+            last_success_at=summary.last_success_at,
             visible_count=summary.visible_count,
             hidden_count=summary.hidden_count,
             status=summary.status,
@@ -218,10 +218,9 @@ class ImageGenerationCatalogEntryResponse(BaseModel):
         )
 
 
-class ImageGenerationCatalogAttemptResponse(BaseModel):
-    """Latest image-generation catalog synchronization attempt response."""
+class ImageGenerationCatalogSyncStatusResponse(BaseModel):
+    """Current image-generation synchronization response."""
 
-    id: str
     status: str
     started_at: datetime.datetime
     finished_at: datetime.datetime | None
@@ -236,8 +235,8 @@ class ImageGenerationCatalogAttemptResponse(BaseModel):
     @classmethod
     def convert_from(
         cls,
-        attempt: ImageGenerationCatalogAttemptOutput,
-    ) -> "ImageGenerationCatalogAttemptResponse":
+        attempt: ImageGenerationCatalogSyncStatusOutput,
+    ) -> "ImageGenerationCatalogSyncStatusResponse":
         """Convert service output to response model."""
         return cls.model_validate(attempt.model_dump())
 
@@ -248,13 +247,10 @@ class ImageGenerationModelCatalogResponse(BaseModel):
     default_available: bool
     explicit_selection_supported: bool
     catalog_id: str | None
-    snapshot_id: str | None
-    snapshot_configuration_version: int | None
-    current_configuration_version: int | None
-    snapshot_created_at: datetime.datetime | None
-    latest_attempt: ImageGenerationCatalogAttemptResponse | None
+    last_success_at: datetime.datetime | None
+    latest_sync: ImageGenerationCatalogSyncStatusResponse | None
     stale: bool
-    generation_current: bool
+    usable: bool
     sync_available_at: datetime.datetime | None
     automatic_retry_blocked: bool
     entries: list[ImageGenerationCatalogEntryResponse]
@@ -270,17 +266,14 @@ class ImageGenerationModelCatalogResponse(BaseModel):
             default_available=data.default_available,
             explicit_selection_supported=data.explicit_selection_supported,
             catalog_id=data.catalog_id,
-            snapshot_id=data.snapshot_id,
-            snapshot_configuration_version=data.snapshot_configuration_version,
-            current_configuration_version=data.current_configuration_version,
-            snapshot_created_at=data.snapshot_created_at,
-            latest_attempt=(
-                ImageGenerationCatalogAttemptResponse.convert_from(data.latest_attempt)
-                if data.latest_attempt is not None
+            last_success_at=data.last_success_at,
+            latest_sync=(
+                ImageGenerationCatalogSyncStatusResponse.convert_from(data.latest_sync)
+                if data.latest_sync is not None
                 else None
             ),
             stale=data.stale,
-            generation_current=data.generation_current,
+            usable=data.usable,
             sync_available_at=data.sync_available_at,
             automatic_retry_blocked=data.automatic_retry_blocked,
             entries=[

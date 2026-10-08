@@ -2,10 +2,16 @@
 
 import datetime
 from typing import Any
+from unittest.mock import MagicMock
 
 from azcommon.result import Failure, Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSessionCreate
+from azents.core.chat_data import (
+    SessionAccessDenied,
+    SubagentTreeNode,
+)
+from azents.core.chat_projection import _finalize_subagent_tree_nodes
 from azents.core.enums import (
     AgentRunStatus,
     AgentSessionProductMode,
@@ -13,10 +19,12 @@ from azents.core.enums import (
     LLMProvider,
     WorkspaceUserRole,
 )
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
@@ -27,25 +35,38 @@ from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
+from azents.repos.chat_operations import ChatOperationsRepository
+from azents.repos.external_channel.lifecycle import ExternalChannelLifecycleRepository
+from azents.repos.goal.store import GoalStateStore
+from azents.repos.lifecycle_target import LifecycleTargetRepository
+from azents.repos.mailbox import MailboxRepository
+from azents.repos.mailbox.admission import MailboxAdmissionRepository
 from azents.repos.message import MessageRepository
+from azents.repos.root_agent_session_creation import (
+    RootAgentSessionCreationRepository,
+)
 from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleRepository
+from azents.repos.scheduled_task_lifecycle_participant import (
+    ScheduledTaskLifecycleParticipantRepository,
+)
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
+from azents.repos.session_lifecycle_operations import (
+    SessionLifecycleOperationsRepository,
+)
+from azents.repos.session_lifecycle_purge_operations import (
+    SessionLifecyclePurgeOperations,
+)
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
+from azents.repos.toolkit_state.engine import TodoStateStore
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
-from azents.services.root_agent_session_creation import (
-    RootAgentSessionCreationService,
-)
 from azents.services.runtime_terminal.invalidation import (
     NoopRuntimeTerminalInvalidationPublisher,
 )
-from azents.services.scheduled_task.lifecycle import ScheduledTaskLifecycleService
 from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,
 )
@@ -53,15 +74,14 @@ from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
 )
+from azents.testing.types import require_instance
 
 from . import (
     ChatSessionService,
-    _finalize_subagent_tree_nodes,
 )
-from .data import SessionAccessDenied, SubagentTreeNode
 
 
-async def _create_workspace(session: AsyncSession, handle: str) -> str:
+async def _create_workspace(session: WriteSession, handle: str) -> str:
     """Create Workspace for tests."""
     result = await WorkspaceRepository().create(
         session, WorkspaceCreate(name="Subagent Tree test", handle=handle)
@@ -73,7 +93,7 @@ async def _create_workspace(session: AsyncSession, handle: str) -> str:
 
 
 async def _add_workspace_user(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     workspace_id: str,
     email: str,
@@ -93,7 +113,7 @@ async def _add_workspace_user(
     return user.id
 
 
-async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> str:
+async def _create_agent(session: WriteSession, workspace_id: str, slug: str) -> str:
     """Create Agent for tests."""
     integration = RDBLLMProviderIntegration(
         workspace_id=workspace_id,
@@ -102,8 +122,8 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
 
     agent = RDBAgent(
         workspace_id=workspace_id,
@@ -137,15 +157,15 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     runtime = RDBAgentRuntime(
         workspace_id=workspace_id,
         agent_id=agent.id,
     )
     runtime.workspace_path = "/workspace/agent"
-    session.add(runtime)
-    await session.flush()
+    session.write_session.add(runtime)
+    await session.write_session.flush()
     return agent.id
 
 
@@ -178,11 +198,51 @@ def _tree_node(
 
 
 def _make_chat_service(**kwargs: Any) -> ChatSessionService:  # noqa: ANN401
-    """Construct ChatSessionService with test-owned dependencies."""
-    return ChatSessionService(**kwargs)
+    """Compose completed database operations and external test collaborators."""
+    manager = kwargs.pop("session_manager")
+    root = kwargs.pop("root_agent_session_creation_service")
+    kwargs.pop("mailbox_item_service")
+    registry = kwargs.pop("lifecycle_orchestrator").registry
+    scheduled = kwargs.pop("scheduled_task_lifecycle_service")
+    database_keys = (
+        "message_repository",
+        "agent_repository",
+        "agent_project_preset_repository",
+        "agent_project_catalog_repository",
+        "agent_project_default_repository",
+        "session_git_worktree_repository",
+        "agent_run_repository",
+        "action_execution_repository",
+        "event_transcript_repository",
+        "agent_session_repository",
+        "agent_runtime_repository",
+        "archived_session_retention_repository",
+        "workspace_user_repository",
+        "session_workspace_project_repository",
+        "mailbox_admission_repository",
+    )
+    database = {key: kwargs.pop(key) for key in database_keys}
+    lifecycle = SessionLifecycleOperationsRepository(
+        registry=registry,
+        agent_session_repository=database["agent_session_repository"],
+        lifecycle_target_repository=LifecycleTargetRepository(),
+        retention_repository=database["archived_session_retention_repository"],
+        external_channel_repository=ExternalChannelLifecycleRepository(),
+        scheduled_task_repository=scheduled.repository,
+    )
+    operations = ChatOperationsRepository(
+        **database,
+        root_session_repository=root,
+        mailbox_repository=MailboxRepository(),
+        lifecycle_operations=lifecycle,
+        goal_store=GoalStateStore(session_manager=manager, owner=None),
+        todo_store=TodoStateStore(session_manager=manager),
+        session_manager=manager,
+    )
+    return ChatSessionService(operations=operations, **kwargs)
 
 
-def _service(rdb_session_manager: SessionManager[AsyncSession]) -> ChatSessionService:
+def _service(rdb_session_manager: SessionManager[WriteSession]) -> ChatSessionService:
     """Create ChatSessionService for tests."""
     return _make_chat_service(
         message_repository=MessageRepository(),
@@ -196,7 +256,7 @@ def _service(rdb_session_manager: SessionManager[AsyncSession]) -> ChatSessionSe
         event_transcript_repository=EventTranscriptRepository(),
         agent_session_repository=AgentSessionRepository(),
         agent_runtime_repository=AgentRuntimeRepository(),
-        root_agent_session_creation_service=RootAgentSessionCreationService(
+        root_agent_session_creation_service=RootAgentSessionCreationRepository(
             agent_session_repository=AgentSessionRepository(),
             agent_repository=AgentRepository(),
             automatic_project_repository=AgentAutomaticProjectRepository(),
@@ -206,10 +266,20 @@ def _service(rdb_session_manager: SessionManager[AsyncSession]) -> ChatSessionSe
         workspace_user_repository=WorkspaceUserRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
         mailbox_item_service=object(),
+        mailbox_admission_repository=MailboxAdmissionRepository(
+            session_manager=rdb_session_manager,
+            mailbox_item_repository=MailboxRepository(),
+            agent_session_repository=AgentSessionRepository(),
+        ),
         session_git_worktree_service=object(),
-        lifecycle_orchestrator=get_session_lifecycle_orchestrator(),
+        lifecycle_orchestrator=get_session_lifecycle_orchestrator(
+            require_instance(
+                MagicMock(spec=SessionLifecyclePurgeOperations),
+                SessionLifecyclePurgeOperations,
+            )
+        ),
         external_channel_lifecycle_service=object(),
-        scheduled_task_lifecycle_service=ScheduledTaskLifecycleService(
+        scheduled_task_lifecycle_service=ScheduledTaskLifecycleParticipantRepository(
             ScheduledTaskLifecycleRepository()
         ),
         terminal_invalidation_publisher=NoopRuntimeTerminalInvalidationPublisher(),
@@ -278,7 +348,7 @@ class TestSubagentTreeProjection:
 
     async def test_projects_nested_tree_from_child_session_access(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Build a reconnect-safe tree projection from durable DB state."""
         repo = AgentSessionRepository()
@@ -407,7 +477,7 @@ class TestSubagentTreeProjection:
 
     async def test_interrupted_parent_projects_all_descendants_interrupted(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Propagate interrupted status from a parent to every descendant."""
         repo = AgentSessionRepository()
@@ -562,7 +632,7 @@ class TestSubagentTreeProjection:
 
     async def test_denies_tree_projection_without_workspace_membership(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Do not expose hidden subagent sessions to non-members."""
         repo = AgentSessionRepository()

@@ -10,11 +10,13 @@ Method | HTTP request | Description
 [**system_settings_v1_confirm_platform_github_app_candidate**](SystemSettingsV1Api.md#system_settings_v1_confirm_platform_github_app_candidate) | **POST** /system-setting/v1/sections/platform-github-app/candidate/confirm | Confirm Platform Github App Candidate
 [**system_settings_v1_get_external_account_oauth_setting**](SystemSettingsV1Api.md#system_settings_v1_get_external_account_oauth_setting) | **GET** /system-setting/v1/sections/external-account-oauth/{provider} | Get External Account Oauth Setting
 [**system_settings_v1_get_external_channel_files_setting**](SystemSettingsV1Api.md#system_settings_v1_get_external_channel_files_setting) | **GET** /system-setting/v1/sections/external-channel-files | Get External Channel Files Setting
+[**system_settings_v1_get_historical_memory_execution_setting**](SystemSettingsV1Api.md#system_settings_v1_get_historical_memory_execution_setting) | **GET** /system-setting/v1/sections/historical-memory-execution | Get Historical Memory Execution Setting
 [**system_settings_v1_get_platform_github_app_setting**](SystemSettingsV1Api.md#system_settings_v1_get_platform_github_app_setting) | **GET** /system-setting/v1/sections/platform-github-app | Get Platform Github App Setting
 [**system_settings_v1_list_system_setting_audit_events**](SystemSettingsV1Api.md#system_settings_v1_list_system_setting_audit_events) | **GET** /system-setting/v1/audit-events | List System Setting Audit Events
 [**system_settings_v1_list_system_setting_sections**](SystemSettingsV1Api.md#system_settings_v1_list_system_setting_sections) | **GET** /system-setting/v1/sections | List System Setting Sections
 [**system_settings_v1_patch_external_account_oauth_setting**](SystemSettingsV1Api.md#system_settings_v1_patch_external_account_oauth_setting) | **PATCH** /system-setting/v1/sections/external-account-oauth/{provider} | Patch External Account Oauth Setting
 [**system_settings_v1_patch_external_channel_files_setting**](SystemSettingsV1Api.md#system_settings_v1_patch_external_channel_files_setting) | **PATCH** /system-setting/v1/sections/external-channel-files | Patch External Channel Files Setting
+[**system_settings_v1_patch_historical_memory_execution_setting**](SystemSettingsV1Api.md#system_settings_v1_patch_historical_memory_execution_setting) | **PATCH** /system-setting/v1/sections/historical-memory-execution | Patch Historical Memory Execution Setting
 [**system_settings_v1_patch_platform_github_app_setting**](SystemSettingsV1Api.md#system_settings_v1_patch_platform_github_app_setting) | **PATCH** /system-setting/v1/sections/platform-github-app | Patch Platform Github App Setting
 [**system_settings_v1_validate_platform_github_app_candidate**](SystemSettingsV1Api.md#system_settings_v1_validate_platform_github_app_candidate) | **POST** /system-setting/v1/sections/platform-github-app/candidate/validate | Validate Platform Github App Candidate
 
@@ -481,6 +483,78 @@ This endpoint does not need any parameter.
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
+# **system_settings_v1_get_historical_memory_execution_setting**
+> HistoricalMemoryExecutionDetailResponse system_settings_v1_get_historical_memory_execution_setting()
+
+Get Historical Memory Execution Setting
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentsadminclient
+from azentsadminclient.models.historical_memory_execution_detail_response import HistoricalMemoryExecutionDetailResponse
+from azentsadminclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentsadminclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentsadminclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentsadminclient.SystemSettingsV1Api(api_client)
+
+    try:
+        # Get Historical Memory Execution Setting
+        api_response = api_instance.system_settings_v1_get_historical_memory_execution_setting()
+        print("The response of SystemSettingsV1Api->system_settings_v1_get_historical_memory_execution_setting:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling SystemSettingsV1Api->system_settings_v1_get_historical_memory_execution_setting: %s\n" % e)
+```
+
+
+
+### Parameters
+
+This endpoint does not need any parameter.
+
+### Return type
+
+[**HistoricalMemoryExecutionDetailResponse**](HistoricalMemoryExecutionDetailResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
 # **system_settings_v1_get_platform_github_app_setting**
 > PlatformGitHubAppDetailResponse system_settings_v1_get_platform_github_app_setting()
 
@@ -853,6 +927,85 @@ Name | Type | Description  | Notes
 ### Return type
 
 [**ExternalChannelFilesDetailResponse**](ExternalChannelFilesDetailResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**409** | The expected System Settings version is stale. |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **system_settings_v1_patch_historical_memory_execution_setting**
+> HistoricalMemoryExecutionDetailResponse system_settings_v1_patch_historical_memory_execution_setting(historical_memory_execution_patch_request)
+
+Patch Historical Memory Execution Setting
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentsadminclient
+from azentsadminclient.models.historical_memory_execution_detail_response import HistoricalMemoryExecutionDetailResponse
+from azentsadminclient.models.historical_memory_execution_patch_request import HistoricalMemoryExecutionPatchRequest
+from azentsadminclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentsadminclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentsadminclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentsadminclient.SystemSettingsV1Api(api_client)
+    historical_memory_execution_patch_request = azentsadminclient.HistoricalMemoryExecutionPatchRequest() # HistoricalMemoryExecutionPatchRequest | 
+
+    try:
+        # Patch Historical Memory Execution Setting
+        api_response = api_instance.system_settings_v1_patch_historical_memory_execution_setting(historical_memory_execution_patch_request)
+        print("The response of SystemSettingsV1Api->system_settings_v1_patch_historical_memory_execution_setting:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling SystemSettingsV1Api->system_settings_v1_patch_historical_memory_execution_setting: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **historical_memory_execution_patch_request** | [**HistoricalMemoryExecutionPatchRequest**](HistoricalMemoryExecutionPatchRequest.md)|  | 
+
+### Return type
+
+[**HistoricalMemoryExecutionDetailResponse**](HistoricalMemoryExecutionDetailResponse.md)
 
 ### Authorization
 

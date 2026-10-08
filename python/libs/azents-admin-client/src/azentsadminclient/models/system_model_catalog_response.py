@@ -17,25 +17,26 @@ import pprint
 import re  # noqa: F401
 import json
 
+from datetime import datetime
 from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentsadminclient.models.system_catalog_provider import SystemCatalogProvider
-from azentsadminclient.models.system_model_catalog_sync_attempt_response import SystemModelCatalogSyncAttemptResponse
+from azentsadminclient.models.system_model_catalog_sync_status_response import SystemModelCatalogSyncStatusResponse
 from typing import Optional, Set
 from typing_extensions import Self
 
 class SystemModelCatalogResponse(BaseModel):
     """
-    System model catalog response.
+    SystemModelCatalogResponse
     """ # noqa: E501
     provider: SystemCatalogProvider
     catalog_id: Optional[StrictStr]
-    snapshot_id: Optional[StrictStr]
+    last_success_at: Optional[datetime]
     visible_count: StrictInt
     hidden_count: StrictInt
-    latest_attempt: Optional[SystemModelCatalogSyncAttemptResponse]
+    latest_sync: Optional[SystemModelCatalogSyncStatusResponse]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["provider", "catalog_id", "snapshot_id", "visible_count", "hidden_count", "latest_attempt"]
+    __properties: ClassVar[List[str]] = ["provider", "catalog_id", "last_success_at", "visible_count", "hidden_count", "latest_sync"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -78,9 +79,9 @@ class SystemModelCatalogResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of latest_attempt
-        if self.latest_attempt:
-            _dict['latest_attempt'] = self.latest_attempt.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of latest_sync
+        if self.latest_sync:
+            _dict['latest_sync'] = self.latest_sync.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -91,15 +92,15 @@ class SystemModelCatalogResponse(BaseModel):
         if self.catalog_id is None and "catalog_id" in self.model_fields_set:
             _dict['catalog_id'] = None
 
-        # set to None if snapshot_id (nullable) is None
+        # set to None if last_success_at (nullable) is None
         # and model_fields_set contains the field
-        if self.snapshot_id is None and "snapshot_id" in self.model_fields_set:
-            _dict['snapshot_id'] = None
+        if self.last_success_at is None and "last_success_at" in self.model_fields_set:
+            _dict['last_success_at'] = None
 
-        # set to None if latest_attempt (nullable) is None
+        # set to None if latest_sync (nullable) is None
         # and model_fields_set contains the field
-        if self.latest_attempt is None and "latest_attempt" in self.model_fields_set:
-            _dict['latest_attempt'] = None
+        if self.latest_sync is None and "latest_sync" in self.model_fields_set:
+            _dict['latest_sync'] = None
 
         return _dict
 
@@ -112,13 +113,16 @@ class SystemModelCatalogResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "provider": obj.get("provider"),
             "catalog_id": obj.get("catalog_id"),
-            "snapshot_id": obj.get("snapshot_id"),
+            "last_success_at": obj.get("last_success_at"),
             "visible_count": obj.get("visible_count"),
             "hidden_count": obj.get("hidden_count"),
-            "latest_attempt": SystemModelCatalogSyncAttemptResponse.from_dict(obj["latest_attempt"]) if obj.get("latest_attempt") is not None else None
+            "latest_sync": SystemModelCatalogSyncStatusResponse.from_dict(obj["latest_sync"]) if obj.get("latest_sync") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

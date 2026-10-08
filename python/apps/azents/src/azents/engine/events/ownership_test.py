@@ -6,9 +6,10 @@ from collections.abc import Sequence
 
 import pytest
 from azcommon.uuid import uuid7
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import AgentRunStatus, AgentSessionProductMode, EventKind
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.context.compaction import CompactionSummaryBudget
 from azents.engine.events.engine_adapter import _OwnerBoundClientToolInvoker
 from azents.engine.events.execution import AgentRunExecution, AgentRunExecutionRequest
@@ -19,6 +20,7 @@ from azents.engine.events.execution_test import (
     _ModelAdapter,
     _Normalizer,
     _OpenToolAdmissionBarrier,
+    _OutputMetadataRepository,
     _PostFilter,
     _tool_call_event,
     _ToolExecutor,
@@ -38,18 +40,30 @@ from azents.engine.events.types import (
 )
 from azents.engine.run.turn_action_bridge import TurnActionBridgeBoundary
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.agent_session.repository_test import _create_agent, _create_workspace
 from azents.repos.compaction_operation import CompactionOperationRepository
-from azents.repos.model_candidate_health import ModelCandidateHealthRepository
-from azents.repos.model_operation_completion import (
-    ModelOperationCompletionRepository,
+from azents.repos.engine_event_mutation import EngineEventMutationRepository
+from azents.repos.engine_execution_operation import EngineExecutionOperationRepository
+from azents.repos.engine_model_input_operation import (
+    EngineModelInputOperationRepository,
 )
+from azents.repos.engine_output_operation import EngineOutputOperationRepository
+from azents.repos.engine_run_finalization_operation import (
+    EngineRunFinalizationOperationRepository,
+)
+from azents.repos.engine_tool_result_operation import (
+    EngineToolResultOperationRepository,
+)
+from azents.repos.model_candidate_health import ModelCandidateHealthRepository
+from azents.repos.model_operation_completion import ModelOperationCompletionRepository
 from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStaleError
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
+from azents.repos.session_execution.ownership import (
+    SessionExecutionAuthorityRepository,
+)
 from azents.repos.toolkit_state.engine import ToolWorkingSetStore
 from azents.testing.model_stream import make_test_model_stream_watchdog
 
@@ -58,12 +72,13 @@ from azents.testing.model_stream import make_test_model_stream_watchdog
 class _ExecutionState:
     session_id: str
     run_id: str
-    owner: OwnerBoundSessionManager
+    owner: SessionExecutionOwner
+    session_manager: SessionManager[WriteSession]
     input_event: Event
 
 
 async def _create_execution(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
 ) -> _ExecutionState:
     """Create committed durable authority and input before starting external work."""
     sessions = AgentSessionRepository()
@@ -104,17 +119,17 @@ async def _create_execution(
     return _ExecutionState(
         session_id=created.id,
         run_id=run.id,
-        owner=OwnerBoundSessionManager(
-            session_manager=session_manager,
+        owner=SessionExecutionOwner(
             session_id=created.id,
             owner_generation=generation,
         ),
+        session_manager=session_manager,
         input_event=event,
     )
 
 
 async def _take_over(
-    session_manager: SessionManager[AsyncSession], state: _ExecutionState
+    session_manager: SessionManager[WriteSession], state: _ExecutionState
 ) -> None:
     """Claim the next owner with repository code, never a test-only SQL update."""
     async with session_manager() as session:
@@ -145,8 +160,57 @@ def _execution(
     tool_executor: _ToolExecutor,
 ) -> AgentRunExecution[NativeModelRequest, NativeEvent]:
     """Use actual durable repositories with fake external model/tool providers."""
+    runs = AgentRunRepository()
+    transcript = EventTranscriptRepository()
+    mutations = EngineEventMutationRepository(transcript_repository=transcript)
+    results = EngineToolResultOperationRepository(
+        owner=state.owner,
+        session_manager=state.session_manager,
+        run_repository=runs,
+        transcript_repository=transcript,
+    )
     return AgentRunExecution(
-        session_manager=state.owner,
+        execution_operation_repository=EngineExecutionOperationRepository(
+            owner=state.owner,
+            session_manager=state.session_manager,
+            run_repository=runs,
+            model_file_pin_repository=None,
+        ),
+        model_input_operation_repository=EngineModelInputOperationRepository(
+            owner=state.owner,
+            session_manager=state.session_manager,
+            run_repository=runs,
+            transcript_repository=transcript,
+            session_head_repository=None,
+            tool_result_repository=results,
+            input_projection_repository=None,
+        ),
+        tool_result_operation_repository=results,
+        output_operation_repository=EngineOutputOperationRepository(
+            owner=state.owner,
+            session_manager=state.session_manager,
+            run_repository=runs,
+            event_mutation_repository=mutations,
+            metadata_repository=_OutputMetadataRepository(failure=None),
+            tool_result_repository=results,
+            system_prompt_repository=None,
+        ),
+        run_finalization_operation_repository=EngineRunFinalizationOperationRepository(
+            owner=state.owner,
+            session_manager=state.session_manager,
+            run_repository=runs,
+            event_mutation_repository=mutations,
+            model_operation_repository=ModelOperationCompletionRepository(
+                agent_session_repository=AgentSessionRepository(),
+                agent_run_repository=runs,
+                model_candidate_health_repository=ModelCandidateHealthRepository(
+                    session_manager=state.session_manager
+                ),
+            ),
+            terminal_finalization_repository=None,
+            model_file_pin_repository=None,
+        ),
+        model_operation_completion=None,
         post_lower_filter=_PostFilter(),
         model_stream_watchdog=make_test_model_stream_watchdog(),
         model_stream_provider="test",
@@ -159,7 +223,7 @@ def _execution(
 
 
 async def test_old_model_response_cannot_commit_output_or_terminal_state(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Takeover completes during a blocked stream and rejects its later output."""
     state = await _create_execution(rdb_session_manager)
@@ -221,12 +285,21 @@ class _RecordingInvoker:
 
 
 async def test_superseded_tool_admission_never_invokes_external_handler(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """The adapter's actual tool wrapper rejects a revoked owner before I/O."""
     state = await _create_execution(rdb_session_manager)
     inner = _RecordingInvoker()
-    invoker = _OwnerBoundClientToolInvoker(inner=inner, owner=state.owner)
+    invoker = _OwnerBoundClientToolInvoker(
+        inner=inner,
+        owner=SessionExecutionAuthorityRepository(
+            session_manager=rdb_session_manager,
+            owner=SessionExecutionOwner(
+                session_id=state.session_id,
+                owner_generation=state.owner.owner_generation,
+            ),
+        ),
+    )
     await _take_over(rdb_session_manager, state)
     with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
         await invoker.invoke(
@@ -256,7 +329,7 @@ class _BlockedToolExecutor(_ToolExecutor):
 
 
 async def test_completed_old_tool_cannot_commit_result_after_takeover(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """An already admitted call may complete, but its obsolete result is fenced."""
     state = await _create_execution(rdb_session_manager)
@@ -293,7 +366,7 @@ async def test_completed_old_tool_cannot_commit_result_after_takeover(
 
 
 async def test_old_compaction_summary_cannot_move_new_owner_input_head(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Summary generation is outside the transaction and its commit is fenced."""
     state = await _create_execution(rdb_session_manager)
@@ -310,7 +383,8 @@ async def test_old_compaction_summary_cannot_move_new_owner_input_head(
 
     compactor = EventCompactor(
         operation_repository=CompactionOperationRepository(
-            session_manager=rdb_session_manager,
+            owner=state.owner,
+            session_manager=state.session_manager,
             transcript_repository=EventTranscriptRepository(),
             agent_session_repository=AgentSessionRepository(),
             model_operation_completion_repository=(
@@ -325,10 +399,10 @@ async def test_old_compaction_summary_cannot_move_new_owner_input_head(
                 )
             ),
             tool_working_set_store=ToolWorkingSetStore(
-                session_manager=rdb_session_manager
+                session_manager=state.session_manager
             ),
         ),
-    ).with_session_manager(state.owner)
+    )
     task = asyncio.create_task(
         compactor.compact(
             session_id=state.session_id,

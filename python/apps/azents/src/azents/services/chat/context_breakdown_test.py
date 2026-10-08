@@ -1,9 +1,8 @@
 """Session context breakdown tests for provider-tool semantics."""
 
 import datetime
-from types import SimpleNamespace
-from typing import cast
 
+from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     EventKind,
     ExternalChannelPrincipalAuthorType,
@@ -26,7 +25,6 @@ from azents.engine.events.types import (
     SystemPromptFragmentPayload,
     build_native_compat_key,
 )
-from azents.repos.agent_session.data import AgentSession
 from azents.services.chat.context import (
     SessionContextSystemPrompt,
     _build_breakdown,
@@ -198,14 +196,11 @@ def test_context_breakdown_counts_external_file_metadata() -> None:
 def test_context_projection_uses_session_prompt_snapshot() -> None:
     """Expose snapshot prompt analysis without reading a turn marker."""
     now = datetime.datetime.now(datetime.UTC)
-    agent_session = cast(
-        AgentSession,
-        SimpleNamespace(
-            id="session-1",
-            agent_id="agent-1",
-            created_at=now,
-            updated_at=now,
-        ),
+    agent_session = AgentSession.model_construct(
+        id="session-1",
+        agent_id="agent-1",
+        created_at=now,
+        updated_at=now,
     )
     final_prompt = SystemPromptFragmentPayload(
         id="final",

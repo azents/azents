@@ -36,20 +36,19 @@ class TestAgentToolkitConfigCreateRequest(unittest.TestCase):
         if include_optional:
             return AgentToolkitConfigCreateRequest(
                 toolkit_type = '',
-                slug = 'p0',
+                slug = '',
                 name = '',
                 description = '',
-                config = { },
+                config = azentspublicclient.models.config.Config(),
                 prompt = '',
-                credentials = { },
+                credentials = None,
                 enabled = True,
                 always_expose_tools = True
             )
         else:
             return AgentToolkitConfigCreateRequest(
                 toolkit_type = '',
-                name = '',
-                config = { },
+                config = azentspublicclient.models.config.Config(),
         )
         """
 

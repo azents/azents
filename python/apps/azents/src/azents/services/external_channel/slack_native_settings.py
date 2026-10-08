@@ -15,6 +15,9 @@ from azents.core.external_account_link import (
     ExternalAccountLinkState,
     VerifiedExternalAccountActor,
 )
+from azents.core.external_channel_participation import (
+    ExternalChannelParticipationSettings,
+)
 from azents.core.external_model_settings import (
     ExternalModelActorContext,
     ExternalModelDraftSelection,
@@ -32,9 +35,6 @@ from azents.services.external_channel.model_execution_controls import (
     update_execution_control,
 )
 from azents.services.external_channel.model_settings import ExternalModelSettingsService
-from azents.services.external_channel.participation import (
-    ExternalChannelParticipationSettings,
-)
 from azents.services.external_channel.slack_events import SlackInteractionView
 from azents.services.external_channel.slack_native_protocol import (
     SlackNativeControl,
@@ -79,6 +79,8 @@ class SlackNativeSettingsService:
 
     def web_url(self, path: str) -> str:
         """Use only the deployment web origin and service-owned relative paths."""
+        if self.config.web_url is None:
+            raise ValueError("Azents web navigation is not configured.")
         base = self.config.web_url.rstrip("/")
         parsed = urlsplit(base)
         if parsed.scheme not in {"https", "http"} or not parsed.netloc:

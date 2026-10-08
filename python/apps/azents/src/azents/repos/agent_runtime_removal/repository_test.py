@@ -5,7 +5,6 @@ from typing import NamedTuple
 from uuid import uuid4
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentRuntimeRemovalStage,
@@ -14,6 +13,11 @@ from azents.core.enums import (
 )
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.workspace import RDBWorkspace
+from azents.rdb.session_capabilities import WriteSession
+from azents.repos.agent_runtime_removal_finalizer import (
+    AgentRuntimeRemovalFinalizerRepository,
+)
+from azents.repos.agent_runtime_removal_scope import AgentRuntimeRemovalScopeRepository
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
@@ -30,15 +34,15 @@ class _AgentFixture(NamedTuple):
     agent_id: str
 
 
-async def _create_agent(session: AsyncSession) -> _AgentFixture:
+async def _create_agent(session: WriteSession) -> _AgentFixture:
     """Create one Workspace and Agent for removal repository tests."""
     suffix = uuid4().hex[:8]
     workspace = RDBWorkspace(
         name="Runtime removal test",
         handle=f"runtime-removal-{suffix}",
     )
-    session.add(workspace)
-    await session.flush()
+    session.write_session.add(workspace)
+    await session.write_session.flush()
     agent = RDBAgent(
         workspace_id=workspace.id,
         name="Runtime removal Agent",
@@ -51,8 +55,8 @@ async def _create_agent(session: AsyncSession) -> _AgentFixture:
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     return _AgentFixture(
         workspace_id=workspace.id,
         agent_id=agent.id,
@@ -60,7 +64,7 @@ async def _create_agent(session: AsyncSession) -> _AgentFixture:
 
 
 async def test_create_claim_progress_complete_and_recreate(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Persist one active operation and retain completed history."""
     workspace_id, agent_id = await _create_agent(rdb_session)
@@ -117,6 +121,7 @@ async def test_create_claim_progress_complete_and_recreate(
         rdb_session,
         operation_id=claimed.id,
         lease_owner="worker-1",
+        expected_attempt=claimed.attempt_count,
         stage=AgentRuntimeRemovalStage.CLEANING_PRODUCT_STATE,
         now=claimed_at,
     )
@@ -125,6 +130,7 @@ async def test_create_claim_progress_complete_and_recreate(
             rdb_session,
             operation_id=claimed.id,
             lease_owner="worker-1",
+            expected_attempt=claimed.attempt_count,
             expected_cursor_context_id=None,
             cursor_context_id="context-1",
             scanned_count=-1,
@@ -137,6 +143,7 @@ async def test_create_claim_progress_complete_and_recreate(
             rdb_session,
             operation_id=claimed.id,
             lease_owner="worker-1",
+            expected_attempt=claimed.attempt_count,
             expected_cursor_context_id=None,
             cursor_context_id="context-1",
             scanned_count=1,
@@ -148,6 +155,7 @@ async def test_create_claim_progress_complete_and_recreate(
         rdb_session,
         operation_id=claimed.id,
         lease_owner="worker-1",
+        expected_attempt=claimed.attempt_count,
         expected_cursor_context_id=None,
         cursor_context_id="context-2",
         scanned_count=2,
@@ -159,6 +167,7 @@ async def test_create_claim_progress_complete_and_recreate(
         rdb_session,
         operation_id=claimed.id,
         lease_owner="worker-1",
+        expected_attempt=claimed.attempt_count,
         expected_cursor_context_id=None,
         cursor_context_id="context-2",
         scanned_count=2,
@@ -171,6 +180,7 @@ async def test_create_claim_progress_complete_and_recreate(
             rdb_session,
             operation_id=claimed.id,
             lease_owner="worker-1",
+            expected_attempt=claimed.attempt_count,
             expected_cursor_context_id="context-2",
             cursor_context_id="context-1",
             scanned_count=1,
@@ -182,6 +192,7 @@ async def test_create_claim_progress_complete_and_recreate(
         rdb_session,
         operation_id=claimed.id,
         lease_owner="worker-1",
+        expected_attempt=claimed.attempt_count,
         expected_cursor_context_id="context-2",
         cursor_context_id="context-3",
         scanned_count=1,
@@ -193,6 +204,7 @@ async def test_create_claim_progress_complete_and_recreate(
         rdb_session,
         operation_id=claimed.id,
         lease_owner="worker-1",
+        expected_attempt=claimed.attempt_count,
         expected_cursor_context_id="context-3",
         cursor_context_id="context-3",
         scanned_count=0,
@@ -204,6 +216,7 @@ async def test_create_claim_progress_complete_and_recreate(
         rdb_session,
         operation_id=claimed.id,
         lease_owner="worker-1",
+        expected_attempt=claimed.attempt_count,
         required=False,
         target_generation=None,
         requested_at=None,
@@ -213,6 +226,7 @@ async def test_create_claim_progress_complete_and_recreate(
         rdb_session,
         operation_id=claimed.id,
         lease_owner="worker-1",
+        expected_attempt=claimed.attempt_count,
         acknowledgement_kind=(
             RuntimeTerminalDeleteAcknowledgementKind.NO_PHYSICAL_BINDING
         ),
@@ -222,6 +236,7 @@ async def test_create_claim_progress_complete_and_recreate(
         rdb_session,
         operation_id=claimed.id,
         lease_owner="worker-1",
+        expected_attempt=claimed.attempt_count,
         stage=AgentRuntimeRemovalStage.FINALIZING,
         now=claimed_at,
     )
@@ -229,6 +244,7 @@ async def test_create_claim_progress_complete_and_recreate(
         rdb_session,
         operation_id=claimed.id,
         lease_owner="worker-1",
+        expected_attempt=claimed.attempt_count,
         now=claimed_at,
     )
 
@@ -265,6 +281,7 @@ async def test_create_claim_progress_complete_and_recreate(
         rdb_session,
         operation_id=next_claimed.id,
         lease_owner="worker-2",
+        expected_attempt=next_claimed.attempt_count,
         required=True,
         target_generation=4,
         requested_at=next_claimed_at,
@@ -274,6 +291,7 @@ async def test_create_claim_progress_complete_and_recreate(
         rdb_session,
         operation_id=next_claimed.id,
         lease_owner="worker-2",
+        expected_attempt=next_claimed.attempt_count,
         acknowledgement_kind=(
             RuntimeTerminalDeleteAcknowledgementKind.NO_PHYSICAL_BINDING
         ),
@@ -283,6 +301,7 @@ async def test_create_claim_progress_complete_and_recreate(
         rdb_session,
         operation_id=next_claimed.id,
         lease_owner="worker-2",
+        expected_attempt=next_claimed.attempt_count,
         acknowledgement_kind=(RuntimeTerminalDeleteAcknowledgementKind.PROVIDER_REPORT),
         acknowledged_at=next_claimed_at + datetime.timedelta(seconds=1),
     )
@@ -291,3 +310,125 @@ async def test_create_claim_progress_complete_and_recreate(
     assert persisted.physical_delete_acknowledgement_kind is (
         RuntimeTerminalDeleteAcknowledgementKind.NO_PHYSICAL_BINDING
     )
+
+
+async def test_same_lease_owner_reclaim_rejects_old_attempt_mutations(
+    rdb_session: WriteSession,
+) -> None:
+    """A stable Worker identity never grants completion to a reclaimed attempt."""
+    workspace_id, agent_id = await _create_agent(rdb_session)
+    repository = AgentRuntimeRemovalRepository()
+    now = datetime.datetime.now(datetime.UTC)
+    created = await repository.create_or_get_active(
+        rdb_session,
+        agent_id=agent_id,
+        workspace_id=workspace_id,
+        requested_by_workspace_user_id="workspace-user-1",
+        idempotency_key="same-owner-reclaim",
+        expected_capability_version=1,
+        committed_capability_version=2,
+        agent_runtime_id=None,
+        confirmed_at=now,
+        destructive_scope_version=1,
+        active_root_session_count=0,
+        active_subagent_count=0,
+        active_run_count=0,
+        queued_runtime_action_count=0,
+    )
+    first = await repository.claim_due(
+        rdb_session,
+        now=now,
+        lease_owner="stable-worker",
+        lease_until=now + datetime.timedelta(seconds=1),
+    )
+    assert first is not None
+    reclaimed_at = now + datetime.timedelta(seconds=2)
+    winner = await repository.claim_due(
+        rdb_session,
+        now=reclaimed_at,
+        lease_owner="stable-worker",
+        lease_until=reclaimed_at + datetime.timedelta(minutes=1),
+    )
+    assert winner is not None
+    assert winner.id == first.id == created.operation.id
+    assert winner.lease_owner == first.lease_owner
+    assert winner.attempt_count == first.attempt_count + 1
+    assert not await repository.set_stage(
+        rdb_session,
+        operation_id=first.id,
+        lease_owner="stable-worker",
+        expected_attempt=first.attempt_count,
+        stage=AgentRuntimeRemovalStage.FINALIZING,
+        now=reclaimed_at,
+    )
+    assert not await repository.record_cleanup_progress(
+        rdb_session,
+        operation_id=first.id,
+        lease_owner="stable-worker",
+        expected_attempt=first.attempt_count,
+        expected_cursor_context_id=None,
+        cursor_context_id="obsolete-context",
+        scanned_count=1,
+        invalidated_count=1,
+        completed=True,
+        now=reclaimed_at,
+    )
+    assert not await repository.record_physical_delete_target(
+        rdb_session,
+        operation_id=first.id,
+        lease_owner="stable-worker",
+        expected_attempt=first.attempt_count,
+        required=True,
+        target_generation=4,
+        requested_at=reclaimed_at,
+        now=reclaimed_at,
+    )
+    assert not await repository.record_physical_delete_acknowledgement(
+        rdb_session,
+        operation_id=first.id,
+        lease_owner="stable-worker",
+        expected_attempt=first.attempt_count,
+        acknowledgement_kind=RuntimeTerminalDeleteAcknowledgementKind.PROVIDER_REPORT,
+        acknowledged_at=reclaimed_at,
+    )
+    assert not await repository.mark_retry(
+        rdb_session,
+        operation_id=first.id,
+        lease_owner="stable-worker",
+        expected_attempt=first.attempt_count,
+        next_attempt_at=reclaimed_at,
+        error_kind="obsolete",
+        error_summary="Obsolete attempt.",
+        now=reclaimed_at,
+    )
+    assert not await repository.mark_completed(
+        rdb_session,
+        operation_id=first.id,
+        lease_owner="stable-worker",
+        expected_attempt=first.attempt_count,
+        now=reclaimed_at,
+    )
+    assert await repository.set_stage(
+        rdb_session,
+        operation_id=winner.id,
+        lease_owner="stable-worker",
+        expected_attempt=winner.attempt_count,
+        stage=AgentRuntimeRemovalStage.FINALIZING,
+        now=reclaimed_at,
+    )
+    finalizer = AgentRuntimeRemovalFinalizerRepository(
+        scope_repository=AgentRuntimeRemovalScopeRepository()
+    )
+    assert not await finalizer.finalize(
+        rdb_session,
+        operation_id=first.id,
+        lease_owner="stable-worker",
+        expected_attempt=first.attempt_count,
+        now=reclaimed_at,
+    )
+    current = await repository.get_by_id(rdb_session, winner.id)
+    assert current is not None
+    assert current.status is AgentRuntimeRemovalStatus.RUNNING
+    assert current.attempt_count == winner.attempt_count
+    assert current.cleanup_cursor_context_id is None
+    assert current.physical_deletion_required is None

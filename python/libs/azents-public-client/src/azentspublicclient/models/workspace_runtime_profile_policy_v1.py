@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict, StrictInt, field_validator
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, ClassVar, Dict, Optional
 from azentspublicclient.models.runtime_network_policy_module import RuntimeNetworkPolicyModule
 from typing import Optional, Set
 from typing_extensions import Self
@@ -29,7 +29,6 @@ class WorkspaceRuntimeProfilePolicyV1(BaseModel):
     """ # noqa: E501
     schema_version: StrictInt
     network_restriction: Optional[RuntimeNetworkPolicyModule]
-    additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["schema_version", "network_restriction"]
 
     @field_validator('schema_version')
@@ -69,10 +68,8 @@ class WorkspaceRuntimeProfilePolicyV1(BaseModel):
         * `None` is only added to the output dict for nullable fields that
           were set at model initialization. Other fields with value `None`
           are ignored.
-        * Fields in `self.additional_properties` are added to the output dict.
         """
         excluded_fields: Set[str] = set([
-            "additional_properties",
         ])
 
         _dict = self.model_dump(
@@ -83,11 +80,6 @@ class WorkspaceRuntimeProfilePolicyV1(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of network_restriction
         if self.network_restriction:
             _dict['network_restriction'] = self.network_restriction.to_dict()
-        # puts key-value pairs in additional_properties in the top level
-        if self.additional_properties is not None:
-            for _key, _value in self.additional_properties.items():
-                _dict[_key] = _value
-
         # set to None if network_restriction (nullable) is None
         # and model_fields_set contains the field
         if self.network_restriction is None and "network_restriction" in self.model_fields_set:
@@ -104,15 +96,13 @@ class WorkspaceRuntimeProfilePolicyV1(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "schema_version": obj.get("schema_version"),
             "network_restriction": RuntimeNetworkPolicyModule.from_dict(obj["network_restriction"]) if obj.get("network_restriction") is not None else None
+            }.items() if _key in obj
         })
-        # store additional fields in additional_properties
-        for _key in obj.keys():
-            if _key not in cls.__properties:
-                _obj.additional_properties[_key] = obj.get(_key)
-
         return _obj
 
 

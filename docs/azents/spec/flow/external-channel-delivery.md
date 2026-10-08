@@ -6,10 +6,25 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [external-channel, agent, conversation, toolkit]
 code_paths:
+  - python/apps/azents/src/azents/repos/external_channel/thread_title_read.py
+  - python/apps/azents/src/azents/core/exchange_file_errors.py
+  - python/apps/azents/src/azents/core/external_channel_conversation_data.py
+  - python/apps/azents/src/azents/core/external_channel_ingestion.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/repos/discord_connection_dependencies.py
+  - python/apps/azents/src/azents/repos/engine_resolve.py
+  - python/apps/azents/src/azents/repos/engine_tool_repositories.py
+  - python/apps/azents/src/azents/repos/scheduled_task_terminal_operations.py
+  - python/apps/azents/src/azents/repos/scheduled_task_channel_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/action_operations.py
+  - python/apps/azents/src/azents/repos/skill_state_store.py
+  - python/apps/azents/src/azents/repos/vfs_projection_operations.py
+  - python/apps/azents/src/azents/repos/vfs_read_authority.py
   - python/apps/azents/src/azents/core/external_channel_progress.py
   - python/apps/azents/src/azents/core/external_channel_file.py
   - python/apps/azents/src/azents/core/external_channel_provider.py
   - python/apps/azents/src/azents/core/external_channel_provider_effect.py
+  - python/apps/azents/src/azents/core/external_channel_effect_intent.py
   - python/apps/azents/src/azents/core/external_channel_session_presence.py
   - python/apps/azents/src/azents/core/external_channel_title.py
   - python/apps/azents/src/azents/core/discord_external_channel_presentation.py
@@ -22,7 +37,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/channel_action.py
   - python/apps/azents/src/azents/services/external_channel/discord_http.py
   - python/apps/azents/src/azents/services/external_channel/file_transfer.py
-  - python/apps/azents/src/azents/services/external_channel/mailbox_ingestion_store.py
+  - python/apps/azents/src/azents/repos/external_channel/mailbox_ingestion.py
   - python/apps/azents/src/azents/services/external_channel/presentation.py
   - python/apps/azents/src/azents/services/external_channel/provider_control.py
   - python/apps/azents/src/azents/services/external_channel/slack_events.py
@@ -39,17 +54,17 @@ code_paths:
   - python/apps/azents/src/azents/services/scheduled_task/channel.py
   - python/apps/azents/src/azents/services/scheduled_task/control.py
   - python/apps/azents/src/azents/services/exchange_file/**
-  - python/apps/azents/src/azents/services/session_resource_authority.py
+  - python/apps/azents/src/azents/repos/session_resource_authority.py
   - python/apps/azents/src/azents/repos/external_channel/management.py
-  - python/apps/azents/src/azents/repos/external_channel/management_data.py
+  - python/apps/azents/src/azents/core/external_channel_management.py
   - python/apps/azents/src/azents/repos/external_channel/work.py
   - python/apps/azents/src/azents/repos/external_channel/work_data.py
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
   - python/apps/azents/src/azents/repos/external_channel/file_access.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-10-01
-spec_version: 63
+last_verified_at: 2026-10-07
+spec_version: 68
 ---
 
 # External Channel Delivery and Channel Work
@@ -155,16 +170,40 @@ for Discord multipart file-message create, Discord CDN attachment bytes, Slack
 private-file bytes, and Slack external-upload bytes; each retains its exact origin,
 length, chunk, authority, and one-attempt contract.
 
-`ExternalChannelActionService.execute` commits the canonical Channel Work transition
-before provider I/O and returns an ordered tuple of process-local effect plans. It then
-revalidates the current Agent, Session, binding, resource, route, connection,
-credentials, capability, and effect-specific authority before attempting each effect
-without an open database transaction.
+The action service sequences completed Channel Action repository operations.
+Independent active-Binding availability and Work snapshot reads use native
+PostgreSQL read-only scopes. The action repository commits the canonical Channel
+Work transition and returns ordered process-local effect plans before provider I/O.
+Separate completed operations revalidate the current Agent, Session, binding,
+resource, route, connection, credentials, capability, and effect-specific authority
+before each effect, then settle its outcome through native projection CAS.
+Awaiting-input settlement and Discord delivery-channel retention also complete
+inside repository-owned scopes. Provider, Runtime, and file I/O begin only after
+each scope closes; the service receives no live database handles.
 
-For an Agent execution, the initial transition and every effect admission or
-settlement transaction additionally lock and validate the exact PostgreSQL Session
-owner generation. A stale Worker cannot commit Work progress, finish or request
-input, start a not-yet-admitted provider effect, or settle an already-started effect.
+Effect operations decode the current payload's consumed application metadata into
+an immutable intent before authority, settlement, and presentation decisions. The
+intent carries Work identity/revision/part, access/setup identity, retained message
+identity, Tracker kind/host, and presence state; opaque provider extensions remain
+available only to the provider adapter. Decoding occurs at the operation boundary,
+not target construction, so permitted payload assembly cannot leave cached stale
+metadata. An omitted part keeps the historical zero default; explicit null or a
+non-integer part remains ineligible for settlement, and existing integer/boolean
+and string predicates are preserved. Reply planning carries validated conversation
+scope alongside each provider payload, and Discord target retention decodes its
+consumed provider/delivery identity before a reuse or mutation decision.
+
+For an Agent execution, effect admission observes the exact PostgreSQL Session
+owner generation without a root-tree lock. An observed stale Worker cannot begin
+a not-yet-admitted provider effect. This completed check does not hold ownership
+across external I/O. Private canonical Work/progress updates use existing Toolkit
+State CAS, and delayed effect settlement is conditioned on its exact Work cycle
+and desired progress revision; it cannot overwrite replacement Work. Harmless
+projection settlement does not inherit a generic Session owner mutation fence.
+First-control creation claims the exact request projection before returning a
+process-local provider plan; delete-control capture only observes retained identity.
+Actual outcome settlement compares the exact message/cycle/revision identity.
+These boundaries do not create replay authority for an ambiguous provider write.
 Scheduled presentation uses the same execution-bound action service. The binding's
 process-local serialization lock is shared by execution-bound service clones.
 
@@ -327,6 +366,12 @@ failure, cancellation, ambiguity, or process interruption ends the operation wit
 retry, reconciliation, backfill, durable attempt state, or impact on the committed
 Session title and Agent execution.
 
+Thread-title authority is captured by one completed native read-only repository
+operation joining the exact Resource, Binding, Session, route, connection and
+Agent identities. Credential decoding follows scope closure; the existing
+provisional-title check, one GET/at-most-one PATCH and no-retry behavior remain
+unchanged.
+
 ## Activity Tracker Lifecycle
 
 - Conversational replies use `chat.postMessage` with Slack `markdown_text` in the bound thread. The Tool schema and the provider delivery boundary enforce Slack's current 12,000-character Markdown limit before a mutation request.
@@ -334,7 +379,8 @@ Session title and Agent execution.
   Channel Work cycle before Session wake-up. Slack cycles are visible for an eligible
   explicit invocation and hidden for an ordinary message admitted by an existing
   all-messages Binding. Discord cycles are always initially hidden; active connected
-  ready Work is projected through Gateway typing instead. Initial Slack checking
+  ready Work with running execution is projected through Gateway typing instead.
+  Initial Slack checking
   visibility does not depend on a `channel_action` call.
 - Initial binding acceptance separately creates one Session presence control and the
   eligible Slack initial Activity Tracker plan in the same transaction as the
@@ -387,25 +433,27 @@ Session title and Agent execution.
   Channel Work Embed. A Scheduled Task-owned initial Tracker instead uses
   `Scheduled Task` as the Embed title and places the Schedule title followed by the
   human-readable schedule timing in its body.
-  A state-only conversational progress change updates the current Tracker host in
-  place even when tasks changed, or creates one notification-suppressed standalone
-  Tracker when none exists.
+  A conversational progress change with the same ordered task titles updates the
+  current Tracker host in place, or creates one notification-suppressed standalone
+  Tracker when none exists. Completion, reopening, task IDs, details, output, and
+  sources do not affect the title-list comparison.
   A message-only Action delivers the reply without changing Tracker presentation.
   A confirmed `message_not_found` failure when updating a Tracker retires that
   missing host identity while retaining the failed outcome and canonical Work.
   The next ordinary progress Action creates a notification-suppressed standalone
   replacement. Permission, rate-limit, ambiguous, and stale-revision outcomes
   retain their existing identity and recovery boundaries.
-  When an explicitly supplied ordered task snapshot differs from the canonical
-  pre-transition tasks and the Action also contains a conversational message, Tracker
-  relocation runs before the reply: it removes the previous host first:
+  When the ordered titles of explicitly supplied tasks differ from the canonical
+  pre-transition task titles, Tracker relocation runs whether or not the Action
+  contains a conversational message. Renaming, adding, removing, or reordering task
+  titles triggers relocation. It removes the previous host first:
   standalone hosts are deleted, while reply hosts keep their conversational content
   and have only Tracker Embeds and controls cleared. Confirmed removal permits
   notification-suppressed standalone creation with the complete latest Tracker.
-  Reply delivery follows the relocation attempt and is not gated by Tracker
-  success. An identical task replacement or title-only progress change updates the
+  Any reply delivery follows the relocation attempt and is not gated by Tracker
+  success. An unchanged task-title list or work-title-only progress change updates the
   current standalone or reply host in place. The normal successful relocation path
-  therefore exposes at most one Tracker immediately before the reply, while
+  therefore exposes at most one Tracker, before any requested reply, while
   temporary absence is allowed between removal and creation. Creation and update
   both send a `View session` link derived from the current canonical Workspace,
   Agent, and Session target. Conversational Tracker creation and update also derive
@@ -429,7 +477,7 @@ snapshot, desired revision, retained provider identity, and whether each Tracker
 is hosted by a standalone message or a conversational reply. Every progress effect is
 revalidated against its exact desired revision before provider I/O; a newer canonical
 snapshot makes an older pending progress effect not attempted. For changed Discord
-tasks accompanied by a message, process-local effect dependencies require confirmed
+task-title lists, process-local effect dependencies require confirmed
 previous-host removal before silent standalone Tracker creation when a current host
 exists; otherwise creation proceeds directly. Reply delivery does not gate relocation.
 Failed or
@@ -532,20 +580,27 @@ Tracker state, or reply delivery.
 
 ## Discord Typing Presence
 
-Every ready active Discord conversational Work requests typing regardless of Tracker
-visibility; awaiting Work is excluded until same-binding input or `continue` resumes
-it. The current lease-fenced Discord Gateway owner derives distinct exact delivery
-channels from PostgreSQL Binding, Resource, Session, Agent, route, connection,
-App-claim, lease, and Work authority. It uses the existing long-lived
+Ready active Discord conversational Work requests typing regardless of Tracker
+visibility only while its bound Session is running, has a running AgentRun, and has
+no stop request. Awaiting Work is excluded until same-binding input or `continue`
+resumes it and execution is running. Retained Work with no Run, a pending Run, or
+only terminal Runs does not request typing. The current lease-fenced Discord Gateway
+owner derives distinct exact delivery channels from PostgreSQL Binding, Resource,
+Session, AgentRun, Agent, route, connection, App-claim, lease, and Work authority.
+It uses the existing long-lived
 `discord.Client`, public `get_partial_messageable()`, and awaitable public `typing()`
 operation to maintain one renewal task per Bot/channel.
 
 Ready and Resume reconcile immediately and then periodically before the provider's
 ten-second indicator expiry. Several Work cycles targeting one channel share one task
-until the final cycle finishes. Target removal, `finish`, `ignore`, binding
+while at least one contributing cycle has running execution. Run completion, failure,
+stop, or Session idle state removes its contribution at the next reconciliation,
+even when Work remains active. Target removal, `finish`, `ignore`, binding
 termination, disconnect, lease loss, Client close, and process shutdown cancel and
-await renewal tasks. Gateway restart reloads still-active targets; Work finished while
-the Gateway is unavailable is not restored.
+await renewal tasks. Gateway restart reloads only targets with still-running execution;
+Work finished or execution stopped while the Gateway is unavailable is not restored.
+Cancellation stops renewal; an already-sent indicator expires on Discord's
+provider-defined timeout because the public API has no explicit typing-clear operation.
 
 Discord exposes no explicit stop operation, so the final indicator may remain until
 provider expiry after renewal stops. HTTP or OS failures are sanitized, retried at a
@@ -587,6 +642,14 @@ not roll back the terminal lifecycle transition and creates no recovery work.
 Scheduled Task provider effects use the same immediate process-local execution
 boundary as other External Channel effects but have Scheduled-owned state.
 
+The Scheduled Channel repository completes exact-Binding registration and deletion
+preparation before provider execution. Terminal reply parts and captured Tracker
+cleanup plans are prepared in one database-only operation; a preparation failure
+rolls back that entire group and publishes no provider effect. Existing completed
+Scheduled progress operations retain their exact Task/cycle and revision CAS.
+Execution-bound clones bind provider admission without imposing a generic Session
+owner fence on Scheduled descriptions or already-admitted result settlement.
+
 - Task creation commits before one registration message is attempted. Slack uses
   native Edit and confirmed Cancel controls. Discord resolves an exact
   authorization-derived Session and Task Web edit URL at delivery time and pairs
@@ -616,6 +679,24 @@ outbox, compensation, canonical rollback, or fallback target. Recovery of an
 already-committed terminal result does not replay provider publication.
 
 ## Changelog
+
+- **2026-10-07** (spec_version 68) — Recreate Discord Trackers for ordered task-title
+  list changes regardless of reply presence; retain in-place edits for status and
+  metadata changes.
+- **2026-10-05** (spec_version 67) — Completed exact thread-title authority in a native read-only repository before credential decoding and the one-shot Discord effect.
+
+
+- **2026-10-05** (spec_version 66) — Moved Channel Action and Scheduled Channel
+  presentation transaction ownership into completed repository operations, retaining
+  native read-only descriptions, atomic terminal preparation, and post-scope provider I/O.
+
+- **2026-10-05** (spec_version 66) — Reconciled code-path discovery with current
+  defining modules; system behavior is unchanged.
+
+- **2026-10-05** (spec_version 65) — Documented short nonlocking effect admission and Work cycle/revision CAS settlement independently of exact critical Session output fencing; control delete capture does not claim execution.
+
+- **2026-10-03** (spec_version 64) — Required running Session and AgentRun authority
+  for Discord typing, preserving retained Work after stop, failure, or completion.
 
 - **2026-09-30** (spec_version 63) — Documented HTTP-authoritative 128 MiB ingress,
   direct Runner GET/PUT, and the unchanged trusted provider-delivery boundary.

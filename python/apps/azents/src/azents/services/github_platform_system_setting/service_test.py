@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.crypto import CredentialCipher
 from azents.core.system_setting import (
@@ -16,23 +15,29 @@ from azents.core.system_setting import (
     SystemSettingSection,
     SystemSettingValidationStatus,
 )
-from azents.rdb.session import SessionManager
-from azents.repos.github_platform_system_setting.repository import (
-    PlatformGitHubAppSystemSettingRepository,
-)
-from azents.repos.system_setting.repository import SystemSettingRepository
-from azents.services.system_setting.data import (
+from azents.core.system_setting_data import (
     SystemSettingActivated,
     SystemSettingCandidatePending,
     SystemSettingMutation,
 )
-from azents.services.system_setting.service import (
-    SystemSettingsService,
-    get_system_setting_registry,
+from azents.core.system_setting_payload import SystemSettingPayloadResolver
+from azents.core.system_setting_registry import get_system_setting_registry
+from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
+from azents.repos.github_platform_system_setting.binding import (
+    PlatformGitHubAppBindingRepository,
 )
+from azents.repos.github_platform_system_setting.operations import (
+    PlatformGitHubAppImpactRepository,
+)
+from azents.repos.github_platform_system_setting.repository import (
+    PlatformGitHubAppSystemSettingRepository,
+)
+from azents.repos.system_setting.operations import SystemSettingsRepository
+from azents.repos.system_setting.repository import SystemSettingRepository
+from azents.services.system_setting.service import SystemSettingsService
 from azents.testing.types import require_instance
 
-from .binding import PlatformGitHubAppBindingService
 from .client import (
     PlatformGitHubAppExternalValidation,
     PlatformGitHubAppValidationClient,
@@ -50,29 +55,35 @@ def _private_key() -> str:
 
 
 def _service(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     validation_client: PlatformGitHubAppValidationClient,
 ) -> PlatformGitHubAppSystemSettingService:
     key = Fernet.generate_key().decode()
     cipher = CredentialCipher(key)
-    impact_repository = PlatformGitHubAppSystemSettingRepository()
-    generic = SystemSettingsService(
+    query = PlatformGitHubAppSystemSettingRepository()
+    impact_repository = PlatformGitHubAppImpactRepository(
         session_manager=session_manager,
-        repository=SystemSettingRepository(),
-        registry=get_system_setting_registry(),
-        cipher=cipher,
-        environment=SystemSettingEnvironment(values={}),
-        generation_hasher=SystemSettingGenerationHasher(key),
+        impact_repository=query,
+        bindings=PlatformGitHubAppBindingRepository(repository=query, cipher=cipher),
+    )
+    generic = SystemSettingsService(
+        repository=SystemSettingsRepository(
+            session_manager=session_manager,
+            read_session_manager=session_manager,
+            repository=SystemSettingRepository(),
+            payloads=SystemSettingPayloadResolver(
+                registry=get_system_setting_registry(),
+                cipher=cipher,
+                environment=SystemSettingEnvironment(values={}),
+                generation_hasher=SystemSettingGenerationHasher(key),
+            ),
+            github_impact=impact_repository,
+        )
     )
     return PlatformGitHubAppSystemSettingService(
         system_settings=generic,
         validation_client=validation_client,
         impact_repository=impact_repository,
-        binding_service=PlatformGitHubAppBindingService(
-            repository=impact_repository,
-            cipher=cipher,
-        ),
-        session_manager=session_manager,
     )
 
 
@@ -96,7 +107,7 @@ def _mutation(private_key: str) -> SystemSettingMutation:
 
 
 async def test_valid_candidate_without_impact_auto_activates(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A first valid App with no existing bindings activates immediately."""
     client = MagicMock(spec=PlatformGitHubAppValidationClient)
@@ -124,7 +135,7 @@ async def test_valid_candidate_without_impact_auto_activates(
 
 
 async def test_invalid_private_key_never_calls_github(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Local validation persists a sanitized invalid candidate without egress."""
     client = MagicMock(spec=PlatformGitHubAppValidationClient)

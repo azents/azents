@@ -97,35 +97,11 @@ class RedeemSignupTokenOutput(VerifyCodeOutput):
 
 
 @dataclasses.dataclass(frozen=True)
-class InvalidSignupToken:
-    """Invalid signup token."""
-
-    pass
-
-
-@dataclasses.dataclass(frozen=True)
-class SignupTokenEmailMismatch:
-    """Signup token email mismatch."""
-
-    pass
-
-
-@dataclasses.dataclass(frozen=True)
-class SignupTokenEmailAlreadyRegistered:
-    """Email already signed up."""
-
-    email: str
-
-
-@dataclasses.dataclass(frozen=True)
 class WeakSignupPassword:
     """Weak signup password."""
 
     message: str
 
 
-@dataclasses.dataclass(frozen=True)
-class SignupEmailDeliveryUnavailable:
-    """Signup email delivery unavailable."""
-
-    pass
+class SignupEmailDeliveryUnavailable(RuntimeError):
+    """Email signup cannot complete because delivery is unavailable."""

@@ -13,80 +13,25 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Literal, NamedTuple, TypeAlias
 
-from azents_runtime_control.apply_patch import (
-    MAX_APPLY_PATCH_BASE_PATH_BYTES,
-    MAX_APPLY_PATCH_BYTES,
-)
+from azents_runtime_control import v4a
 from azents_runtime_control.runner import JsonValue
+from azents_runtime_control.v4a import (
+    ApplyPatchLimits,
+    PatchAction,
+    PatchOperation,
+    PatchOperationSummary,
+    PatchPlan,
+)
+from azents_runtime_control.v4a import (
+    PatchUpdate as _PatchUpdate,
+)
+from azents_runtime_control.v4a import (
+    SourceText as _SourceText,
+)
 
-PatchAction: TypeAlias = Literal["add", "update", "delete"]
 PatchPhase: TypeAlias = Literal["parse", "preflight", "stage", "revalidate", "commit"]
-PatchLineKind: TypeAlias = Literal["context", "add", "remove"]
 FaultPoint: TypeAlias = Literal["stage", "commit"]
 PATCH_SCHEMA_VERSION = 1
-
-
-@dataclasses.dataclass(frozen=True)
-class ApplyPatchLimits:
-    """Bounded resource limits for one patch operation."""
-
-    max_patch_bytes: int = MAX_APPLY_PATCH_BYTES
-    max_operations: int = 100
-    max_hunks: int = 500
-    max_path_bytes: int = MAX_APPLY_PATCH_BASE_PATH_BYTES
-    max_file_bytes: int = 8 * 1024 * 1024
-    max_aggregate_bytes: int = 32 * 1024 * 1024
-
-
-@dataclasses.dataclass(frozen=True)
-class PatchLine:
-    """One parsed update-hunk line."""
-
-    kind: PatchLineKind
-    text: str
-
-
-@dataclasses.dataclass(frozen=True)
-class PatchHunk:
-    """One parsed update hunk."""
-
-    anchor: str | None
-    lines: tuple[PatchLine, ...]
-    end_of_file: bool
-
-
-@dataclasses.dataclass(frozen=True)
-class PatchOperationSummary:
-    """One patch operation identity."""
-
-    path: str
-    action: PatchAction
-
-    def payload(self) -> dict[str, JsonValue]:
-        """Return the Runtime protocol payload shape."""
-        return {"path": self.path, "action": self.action}
-
-
-@dataclasses.dataclass(frozen=True)
-class PatchOperation:
-    """One immutable patch file operation."""
-
-    path: str
-    action: PatchAction
-    add_lines: tuple[str, ...] = ()
-    hunks: tuple[PatchHunk, ...] = ()
-
-    def summary(self) -> PatchOperationSummary:
-        """Return the operation identity used by terminal results."""
-        return PatchOperationSummary(path=self.path, action=self.action)
-
-
-@dataclasses.dataclass(frozen=True)
-class PatchPlan:
-    """One complete parsed patch."""
-
-    operations: tuple[PatchOperation, ...]
-    hunk_count: int
 
 
 @dataclasses.dataclass(frozen=True)
@@ -154,26 +99,21 @@ ApplyPatchFaultInjector: TypeAlias = Callable[[FaultPoint, int, PatchOperation],
 
 
 @dataclasses.dataclass(frozen=True)
-class _SourceText:
-    data: bytes
-    lines: tuple[str, ...]
-    newline: Literal["\n", "\r\n"]
-    final_newline: bool
+class _StatSignature:
+    """Named filesystem identity used for patch revalidation."""
+
+    device: int
+    inode: int
+    mode: int
+    size: int
+    mtime_ns: int
 
 
 @dataclasses.dataclass(frozen=True)
 class _PathFingerprint:
     resolved_path: Path
-    stat_signature: tuple[int, int, int, int, int] | None
+    stat_signature: _StatSignature | None
     content_sha256: str | None
-
-
-class _PatchUpdate(NamedTuple):
-    """Updated file bytes and line-count changes."""
-
-    output: bytes
-    added_lines: int
-    removed_lines: int
 
 
 class _PathObservation(NamedTuple):
@@ -192,13 +132,6 @@ class _PreparedOperation:
     staged_path: Path | None
     output: bytes | None
     change: PatchChange
-
-
-@dataclasses.dataclass(frozen=True)
-class _MatchedHunk:
-    start: int
-    end: int
-    replacement: tuple[str, ...]
 
 
 class _PatchFailureError(Exception):
@@ -293,180 +226,11 @@ def execute_apply_patch(
 
 
 def parse_patch(patch: bytes, *, limits: ApplyPatchLimits | None = None) -> PatchPlan:
-    """Parse one complete strict V4A patch into an immutable plan."""
-    effective_limits = limits or ApplyPatchLimits()
-    if b"\x00" in patch:
-        raise _failure(
-            phase="parse",
-            reason="invalid_encoding",
-            message="Patch contains a NUL byte",
-        )
+    """Adapt the shared strict parser's failures to native operation metadata."""
     try:
-        text = patch.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise _failure(
-            phase="parse",
-            reason="invalid_encoding",
-            message="Patch must be valid UTF-8",
-        ) from exc
-    if "\r" in text:
-        raise _failure(
-            phase="parse",
-            reason="invalid_newline",
-            message="Patch syntax must use LF newlines",
-        )
-    lines = text.split("\n")
-    if not lines or lines[0] != "*** Begin Patch":
-        raise _parse_failure(
-            "missing_begin_marker", "Patch must begin with *** Begin Patch"
-        )
-    operations: list[PatchOperation] = []
-    seen_paths: set[str] = set()
-    hunk_count = 0
-    index = 1
-    found_end = False
-    while index < len(lines):
-        line = lines[index]
-        if line == "*** End Patch":
-            found_end = True
-            index += 1
-            break
-        if line.startswith("*** Add File: "):
-            path = line.removeprefix("*** Add File: ")
-            _validate_patch_path(path, limits=effective_limits)
-            _record_unique_path(path, seen_paths)
-            index += 1
-            add_lines: list[str] = []
-            while index < len(lines) and not _starts_structural_line(lines[index]):
-                add_line = lines[index]
-                if not add_line.startswith("+"):
-                    raise _parse_failure(
-                        "invalid_add_line", f"Add file line must begin with +: {path}"
-                    )
-                add_lines.append(add_line[1:])
-                index += 1
-            if not add_lines:
-                raise _parse_failure(
-                    "empty_add_operation",
-                    f"Add file operation must contain at least one line: {path}",
-                )
-            operations.append(
-                PatchOperation(path=path, action="add", add_lines=tuple(add_lines))
-            )
-        elif line.startswith("*** Update File: "):
-            path = line.removeprefix("*** Update File: ")
-            _validate_patch_path(path, limits=effective_limits)
-            _record_unique_path(path, seen_paths)
-            index += 1
-            hunks: list[PatchHunk] = []
-            while index < len(lines):
-                current = lines[index]
-                if _starts_operation_or_end(current):
-                    break
-                if current == "@@":
-                    anchor = None
-                elif current.startswith("@@ ") and len(current) > 3:
-                    anchor = current[3:]
-                else:
-                    raise _parse_failure(
-                        "invalid_hunk_header", f"Update hunk must begin with @@: {path}"
-                    )
-                index += 1
-                patch_lines: list[PatchLine] = []
-                end_of_file = False
-                while index < len(lines):
-                    current = lines[index]
-                    if current == "*** End of File":
-                        if not patch_lines:
-                            raise _parse_failure(
-                                "empty_hunk",
-                                f"Update hunk must contain patch lines: {path}",
-                            )
-                        end_of_file = True
-                        index += 1
-                        break
-                    if (
-                        current == "@@"
-                        or current.startswith("@@ ")
-                        or _starts_operation_or_end(current)
-                    ):
-                        break
-                    if current.startswith(" "):
-                        patch_lines.append(PatchLine("context", current[1:]))
-                    elif current.startswith("+"):
-                        patch_lines.append(PatchLine("add", current[1:]))
-                    elif current.startswith("-"):
-                        patch_lines.append(PatchLine("remove", current[1:]))
-                    else:
-                        raise _parse_failure(
-                            "invalid_hunk_line",
-                            f"Update hunk line has an invalid prefix: {path}",
-                        )
-                    index += 1
-                if not patch_lines:
-                    raise _parse_failure(
-                        "empty_hunk", f"Update hunk must contain patch lines: {path}"
-                    )
-                hunks.append(
-                    PatchHunk(
-                        anchor=anchor,
-                        lines=tuple(patch_lines),
-                        end_of_file=end_of_file,
-                    )
-                )
-                hunk_count += 1
-                if hunk_count > effective_limits.max_hunks:
-                    raise _parse_failure(
-                        "too_many_hunks", "Patch exceeds the maximum hunk count"
-                    )
-                if (
-                    end_of_file
-                    and index < len(lines)
-                    and not _starts_operation_or_end(lines[index])
-                ):
-                    raise _parse_failure(
-                        "content_after_end_of_file",
-                        f"Unexpected content after *** End of File: {path}",
-                    )
-            if not hunks:
-                raise _parse_failure(
-                    "empty_update_operation",
-                    f"Update file operation must contain at least one hunk: {path}",
-                )
-            operations.append(
-                PatchOperation(path=path, action="update", hunks=tuple(hunks))
-            )
-        elif line.startswith("*** Delete File: "):
-            path = line.removeprefix("*** Delete File: ")
-            _validate_patch_path(path, limits=effective_limits)
-            _record_unique_path(path, seen_paths)
-            operations.append(PatchOperation(path=path, action="delete"))
-            index += 1
-        elif line.startswith("*** Move to:") or line.startswith("*** Move File:"):
-            raise _parse_failure(
-                "unsupported_move", "Move and rename operations are not supported"
-            )
-        else:
-            raise _parse_failure(
-                "invalid_operation_marker",
-                f"Unexpected patch line at operation boundary: line {index + 1}",
-            )
-        if len(operations) > effective_limits.max_operations:
-            raise _parse_failure(
-                "too_many_operations", "Patch exceeds the maximum file operation count"
-            )
-    if not found_end:
-        raise _parse_failure("missing_end_marker", "Patch must end with *** End Patch")
-    if not operations:
-        raise _parse_failure(
-            "empty_patch", "Patch must contain at least one file operation"
-        )
-    if any(line.strip() for line in lines[index:]):
-        raise _parse_failure(
-            "trailing_content",
-            "Patch contains non-whitespace content after *** End Patch",
-        )
-    return PatchPlan(operations=tuple(operations), hunk_count=hunk_count)
+        return v4a.parse_patch(patch, limits=limits)
+    except v4a.V4aPatchError as exc:
+        raise _pure_failure(exc) from exc
 
 
 def _prepare_operations(
@@ -729,111 +493,10 @@ def _apply_update(
     operation: PatchOperation,
     source: _SourceText,
 ) -> _PatchUpdate:
-    if not source.lines:
-        if len(operation.hunks) != 1:
-            raise _update_failure(
-                operation,
-                "ambiguous_empty_insertion",
-                "An empty source file accepts exactly one pure-add hunk",
-            )
-        hunk = operation.hunks[0]
-        if _existing_hunk_lines(hunk):
-            raise _update_failure(
-                operation,
-                "missing_context",
-                "Update context does not match the empty source file",
-            )
-        if hunk.anchor is not None:
-            raise _update_failure(
-                operation,
-                "anchor_not_found",
-                "Update anchor does not exist in the empty source file",
-            )
-        output_lines = tuple(line.text for line in hunk.lines if line.kind == "add")
-        return _PatchUpdate(
-            output=_encode_source_lines(
-                output_lines,
-                newline=source.newline,
-                final_newline=source.final_newline,
-            ),
-            added_lines=len(output_lines),
-            removed_lines=0,
-        )
-    matches: list[_MatchedHunk] = []
-    cursor = 0
-    added_lines = 0
-    removed_lines = 0
-    for hunk in operation.hunks:
-        existing = _existing_hunk_lines(hunk)
-        if not existing:
-            raise _update_failure(
-                operation,
-                "pure_add_non_empty_source",
-                "A non-empty source file requires exact context or removed lines",
-            )
-        search_start = cursor
-        if hunk.anchor is not None:
-            anchor_matches = [
-                index
-                for index in range(cursor, len(source.lines))
-                if source.lines[index] == hunk.anchor
-            ]
-            if not anchor_matches:
-                raise _update_failure(
-                    operation,
-                    "anchor_not_found",
-                    f"Update anchor was not found: {operation.path}",
-                )
-            if len(anchor_matches) > 1:
-                raise _update_failure(
-                    operation,
-                    "ambiguous_anchor",
-                    f"Update anchor is ambiguous: {operation.path}",
-                )
-            search_start = anchor_matches[0] + 1
-        occurrences = _find_occurrences(
-            source.lines,
-            existing,
-            start=search_start,
-        )
-        if hunk.end_of_file:
-            occurrences = [
-                start
-                for start in occurrences
-                if start + len(existing) == len(source.lines)
-            ]
-        if not occurrences:
-            reason = "end_of_file_mismatch" if hunk.end_of_file else "missing_context"
-            raise _update_failure(
-                operation,
-                reason,
-                f"Update context was not found exactly: {operation.path}",
-            )
-        if len(occurrences) > 1:
-            raise _update_failure(
-                operation,
-                "ambiguous_context",
-                f"Update context occurs more than once: {operation.path}",
-            )
-        start = occurrences[0]
-        end = start + len(existing)
-        replacement = tuple(line.text for line in hunk.lines if line.kind != "remove")
-        matches.append(_MatchedHunk(start, end, replacement))
-        cursor = end
-        added_lines += sum(line.kind == "add" for line in hunk.lines)
-        removed_lines += sum(line.kind == "remove" for line in hunk.lines)
-    output_lines = list(source.lines)
-    for match in reversed(matches):
-        output_lines[match.start : match.end] = match.replacement
-    return _PatchUpdate(
-        output=_encode_source_lines(
-            tuple(output_lines),
-            newline=source.newline,
-            final_newline=source.final_newline,
-        ),
-        added_lines=added_lines,
-        removed_lines=removed_lines,
-    )
+    try:
+        return v4a.apply_update(operation, source)
+    except v4a.V4aPatchError as exc:
+        raise _pure_failure(exc) from exc
 
 
 def _read_source_text(
@@ -861,53 +524,12 @@ def _read_source_text(
             failed=operation,
             not_attempted=remaining,
         ) from exc
-    if len(data) > max_bytes:
-        raise _file_size_failure(operation, remaining)
-    if b"\x00" in data:
-        raise _failure(
-            phase="preflight",
-            reason="binary_file",
-            message=f"Patch source is not a supported text file: {operation.path}",
-            failed=operation,
-            not_attempted=remaining,
-        )
     try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise _failure(
-            phase="preflight",
-            reason="invalid_utf8",
-            message=f"Patch source is not valid UTF-8: {operation.path}",
-            failed=operation,
-            not_attempted=remaining,
-        ) from exc
-    newline = _source_newline(text, operation, remaining)
-    normalized = text.replace("\r\n", "\n")
-    final_newline = normalized.endswith("\n")
-    if not normalized:
-        lines: tuple[str, ...] = ()
-    elif final_newline:
-        lines = tuple(normalized[:-1].split("\n"))
-    else:
-        lines = tuple(normalized.split("\n"))
-    return _SourceText(data, lines, newline, final_newline)
-
-
-def _source_newline(
-    text: str,
-    operation: PatchOperation,
-    remaining: Sequence[PatchOperation],
-) -> Literal["\n", "\r\n"]:
-    without_crlf = text.replace("\r\n", "")
-    if "\r" in without_crlf or ("\r\n" in text and "\n" in without_crlf):
-        raise _failure(
-            phase="preflight",
-            reason="mixed_newlines",
-            message=f"Patch source mixes or has unsupported newlines: {operation.path}",
-            failed=operation,
-            not_attempted=remaining,
+        return v4a.decode_source_text(
+            data, operation=operation, max_bytes=max_bytes, remaining=remaining
         )
-    return "\r\n" if "\r\n" in text else "\n"
+    except v4a.V4aPatchError as exc:
+        raise _pure_failure(exc) from exc
 
 
 def _observe_path(
@@ -1113,7 +735,7 @@ def _stage_output(base: Path, item: _PreparedOperation) -> Path:
         if item.source is not None and item.fingerprint.stat_signature is not None:
             os.chmod(
                 staged_path,
-                stat.S_IMODE(item.fingerprint.stat_signature[2]),
+                stat.S_IMODE(item.fingerprint.stat_signature.mode),
             )
     except OSError:
         staged_path.unlink(missing_ok=True)
@@ -1200,81 +822,15 @@ def _check_deadline(
         )
 
 
-def _validate_patch_path(path: str, *, limits: ApplyPatchLimits) -> None:
-    if not path:
-        raise _parse_failure("empty_path", "Patch path must not be empty")
-    if len(path.encode()) > limits.max_path_bytes:
-        raise _parse_failure("path_too_long", "Patch path exceeds the byte limit")
-    if PurePosixPath(path).is_absolute():
-        raise _parse_failure("absolute_path", "Patch paths must be relative")
-    if any(component in {"", ".", ".."} for component in path.split("/")):
-        raise _parse_failure(
-            "invalid_path_component",
-            "Patch paths must not contain empty, current, or parent components",
-        )
-
-
-def _record_unique_path(path: str, seen_paths: set[str]) -> None:
-    if path in seen_paths:
-        raise _parse_failure(
-            "duplicate_path", f"Each patch path may appear only once: {path}"
-        )
-    seen_paths.add(path)
-
-
-def _starts_structural_line(line: str) -> bool:
-    return line == "*** End Patch" or line.startswith("*** ")
-
-
-def _starts_operation_or_end(line: str) -> bool:
-    return line == "*** End Patch" or line.startswith(
-        ("*** Add File: ", "*** Update File: ", "*** Delete File: ")
-    )
-
-
-def _existing_hunk_lines(hunk: PatchHunk) -> tuple[str, ...]:
-    return tuple(line.text for line in hunk.lines if line.kind != "add")
-
-
-def _find_occurrences(
-    source: Sequence[str],
-    needle: Sequence[str],
-    *,
-    start: int,
-) -> list[int]:
-    if not needle:
-        return []
-    maximum = len(source) - len(needle)
-    if maximum < start:
-        return []
-    return [
-        index
-        for index in range(start, maximum + 1)
-        if tuple(source[index : index + len(needle)]) == tuple(needle)
-    ]
-
-
-def _encode_source_lines(
-    lines: Sequence[str],
-    *,
-    newline: Literal["\n", "\r\n"],
-    final_newline: bool,
-) -> bytes:
-    text = newline.join(lines)
-    if final_newline:
-        text += newline
-    return text.encode()
-
-
 def _stat_signature(
     value: os.stat_result,
-) -> tuple[int, int, int, int, int]:
-    return (
-        value.st_dev,
-        value.st_ino,
-        value.st_mode,
-        value.st_size,
-        value.st_mtime_ns,
+) -> _StatSignature:
+    return _StatSignature(
+        device=value.st_dev,
+        inode=value.st_ino,
+        mode=value.st_mode,
+        size=value.st_size,
+        mtime_ns=value.st_mtime_ns,
     )
 
 
@@ -1303,20 +859,14 @@ def _failure(
     )
 
 
-def _parse_failure(reason: str, message: str) -> _PatchFailureError:
-    return _failure(phase="parse", reason=reason, message=message)
-
-
-def _update_failure(
-    operation: PatchOperation,
-    reason: str,
-    message: str,
-) -> _PatchFailureError:
+def _pure_failure(error: v4a.V4aPatchError) -> _PatchFailureError:
+    """Keep native result shape while shared primitives remain I/O-free."""
     return _failure(
-        phase="preflight",
-        reason=reason,
-        message=message,
-        failed=operation,
+        phase=error.phase,
+        reason=error.reason,
+        message=error.message,
+        failed=error.failed,
+        not_attempted=error.remaining,
     )
 
 
@@ -1348,15 +898,10 @@ def _operation_index(
 __all__ = [
     "ApplyPatchFailure",
     "ApplyPatchFaultInjector",
-    "ApplyPatchLimits",
     "ApplyPatchResult",
     "ApplyPatchSuccess",
     "PATCH_SCHEMA_VERSION",
     "PatchChange",
-    "PatchHunk",
-    "PatchLine",
-    "PatchOperation",
-    "PatchPlan",
     "execute_apply_patch",
     "parse_patch",
 ]

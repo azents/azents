@@ -25,16 +25,17 @@ from azents.core.enums import (
     RuntimeRunnerState,
     RuntimeTerminalDeleteAcknowledgementKind,
 )
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.workspace import RDBWorkspace
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime.data import AgentRuntimeFailurePatch
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
@@ -43,7 +44,7 @@ from azents.testing.model_selection import (
 from . import AgentRuntimeRepository
 
 
-async def _create_workspace(session: AsyncSession, handle: str) -> str:
+async def _create_workspace(session: WriteSession, handle: str) -> str:
     """Create Workspace for tests."""
     repo = WorkspaceRepository()
     result = await repo.create(
@@ -56,7 +57,7 @@ async def _create_workspace(session: AsyncSession, handle: str) -> str:
 
 
 async def _create_agent(
-    session: AsyncSession,
+    session: WriteSession,
     workspace_id: str,
     slug: str,
 ) -> str:
@@ -69,8 +70,8 @@ async def _create_agent(
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
 
     agent = RDBAgent(
         workspace_id=workspace_id,
@@ -104,8 +105,8 @@ async def _create_agent(
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     return agent.id
 
 
@@ -130,7 +131,8 @@ class TestAgentRuntimeRepository:
             async with AsyncSession(
                 rdb_engine,
                 expire_on_commit=False,
-            ) as setup_session:
+            ) as _raw_setup_session:
+                setup_session = ReadWriteSession(_raw_setup_session)
                 workspace_id = await _create_workspace(
                     setup_session,
                     f"runtime-selection-lock-{suffix}",
@@ -145,12 +147,13 @@ class TestAgentRuntimeRepository:
                     agent_id,
                 )
                 runtime_id = runtime.id
-                await setup_session.commit()
+                await setup_session.write_session.commit()
 
             async with AsyncSession(
                 rdb_engine,
                 expire_on_commit=False,
-            ) as selection_session:
+            ) as _raw_selection_session:
+                selection_session = ReadWriteSession(_raw_selection_session)
                 locked = await AgentRepository().get_runtime_selection_input_for_update(
                     selection_session,
                     agent_id,
@@ -162,9 +165,10 @@ class TestAgentRuntimeRepository:
                     async with AsyncSession(
                         rdb_engine,
                         expire_on_commit=False,
-                    ) as update_session:
+                    ) as _raw_update_session:
+                        update_session = ReadWriteSession(_raw_update_session)
                         update_started.set()
-                        result = await update_session.execute(
+                        result = await update_session.write_session.execute(
                             sa.update(RDBAgent)
                             .where(RDBAgent.id == agent_id)
                             .values(
@@ -174,14 +178,15 @@ class TestAgentRuntimeRepository:
                             )
                             .returning(RDBAgent.runtime_profile_selection_version)
                         )
-                        await update_session.commit()
+                        await update_session.write_session.commit()
                         return result.scalar_one()
 
                 async def record_state() -> object:
                     async with AsyncSession(
                         rdb_engine,
                         expire_on_commit=False,
-                    ) as report_session:
+                    ) as _raw_report_session:
+                        report_session = ReadWriteSession(_raw_report_session)
                         updated = await (
                             AgentRuntimeRepository().record_provider_connection_state(
                                 report_session,
@@ -189,7 +194,7 @@ class TestAgentRuntimeRepository:
                                 RuntimeProviderConnectionState.CONNECTED,
                             )
                         )
-                        await report_session.commit()
+                        await report_session.write_session.commit()
                         return updated
 
                 update_task = asyncio.create_task(update_selection())
@@ -203,7 +208,7 @@ class TestAgentRuntimeRepository:
                 report_task = asyncio.create_task(record_state())
                 updated = await asyncio.wait_for(report_task, timeout=5)
                 assert updated is not None
-                await selection_session.commit()
+                await selection_session.write_session.commit()
                 updated_version = await asyncio.wait_for(update_task, timeout=5)
                 assert updated_version == locked.runtime_profile_selection_version + 1
         finally:
@@ -218,30 +223,31 @@ class TestAgentRuntimeRepository:
             async with AsyncSession(
                 rdb_engine,
                 expire_on_commit=False,
-            ) as cleanup_session:
+            ) as _raw_cleanup_session:
+                cleanup_session = ReadWriteSession(_raw_cleanup_session)
                 if runtime_id is not None:
-                    await cleanup_session.execute(
+                    await cleanup_session.write_session.execute(
                         sa.delete(RDBAgentRuntime).where(
                             RDBAgentRuntime.id == runtime_id
                         )
                     )
                 if agent_id is not None:
-                    await cleanup_session.execute(
+                    await cleanup_session.write_session.execute(
                         sa.delete(RDBAgent).where(RDBAgent.id == agent_id)
                     )
                 if workspace_id is not None:
-                    await cleanup_session.execute(
+                    await cleanup_session.write_session.execute(
                         sa.delete(RDBLLMProviderIntegration).where(
                             RDBLLMProviderIntegration.workspace_id == workspace_id
                         )
                     )
-                    await cleanup_session.execute(
+                    await cleanup_session.write_session.execute(
                         sa.delete(RDBWorkspace).where(RDBWorkspace.id == workspace_id)
                     )
-                await cleanup_session.commit()
+                await cleanup_session.write_session.commit()
 
     async def test_ensure_for_agent_creates_one_runtime(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Create only one AgentRuntime per Agent."""
         workspace_id = await _create_workspace(rdb_session, "agent-runtime-ws")
@@ -265,7 +271,7 @@ class TestAgentRuntimeRepository:
         assert first.runner_state == RuntimeRunnerState.UNKNOWN
 
     async def test_attach_provider_binding_upgrades_exact_legacy_runtime(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Attach durable identity only when the historical logical ID matches."""
         workspace_id = await _create_workspace(
@@ -321,7 +327,7 @@ class TestAgentRuntimeRepository:
         assert conflicting is None
 
     async def test_get_by_agent_id_returns_existing_runtime(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Fetch existing AgentRuntime by Agent ID."""
         workspace_id = await _create_workspace(rdb_session, "agent-runtime-get-ws")
@@ -335,7 +341,7 @@ class TestAgentRuntimeRepository:
         assert loaded.id == created.id
 
     async def test_set_desired_state_increments_generation(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """lifecycle command increments desired generation."""
         workspace_id = await _create_workspace(rdb_session, "agent-runtime-desired-ws")
@@ -370,7 +376,7 @@ class TestAgentRuntimeRepository:
         assert command.runtime.workspace_path is None
 
     async def test_repeated_stop_keeps_desired_generation(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Repeating an already targeted STOP is idempotent."""
         workspace_id = await _create_workspace(
@@ -403,7 +409,7 @@ class TestAgentRuntimeRepository:
         assert repeated.runtime.desired_generation == first.runtime.desired_generation
 
     async def test_terminal_delete_acknowledgement_fences_finalization(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Terminal deletion fences lifecycle and late Provider state changes."""
         workspace_id = await _create_workspace(
@@ -511,7 +517,7 @@ class TestAgentRuntimeRepository:
 
     async def test_no_physical_binding_acknowledgement_never_dispatches(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A never-bound logical Runtime terminalizes without Provider work."""
         workspace_id = await _create_workspace(
@@ -594,7 +600,7 @@ class TestAgentRuntimeRepository:
     )
     async def test_no_physical_binding_rejects_observation_or_dispatch_evidence(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
         evidence_values: dict[str, object],
     ) -> None:
         """Any prior observation or route evidence requires physical deletion."""
@@ -609,7 +615,7 @@ class TestAgentRuntimeRepository:
         )
         repository = AgentRuntimeRepository()
         runtime = await repository.ensure_for_agent(rdb_session, agent_id)
-        await rdb_session.execute(
+        await rdb_session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime.id)
             .values(**evidence_values)
@@ -630,7 +636,7 @@ class TestAgentRuntimeRepository:
 
     async def test_rearm_preserves_identity_and_clears_incarnation_state(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Exact deletion acknowledgement permits one higher-generation rearm."""
         workspace_id = await _create_workspace(
@@ -745,7 +751,7 @@ class TestAgentRuntimeRepository:
         assert late_provider is None
 
     async def test_record_provider_and_runner_state(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Store Provider state and Runner-owned workspace path."""
         workspace_id = await _create_workspace(rdb_session, "agent-runtime-observed-ws")
@@ -787,7 +793,7 @@ class TestAgentRuntimeRepository:
         assert runner_runtime.failure_code == "runner_failed"
 
     async def test_stale_provider_report_is_ignored(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Older Provider report generations do not overwrite Runtime state."""
         workspace_id = await _create_workspace(
@@ -837,7 +843,7 @@ class TestAgentRuntimeRepository:
         assert reloaded.failure_code is None
 
     async def test_current_provider_report_is_accepted(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Current Provider report generations can update Runtime state."""
         workspace_id = await _create_workspace(
@@ -871,7 +877,7 @@ class TestAgentRuntimeRepository:
         assert updated.workspace_path is None
 
     async def test_stale_runner_report_is_ignored(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Older Runner generations do not overwrite Runtime availability."""
         workspace_id = await _create_workspace(
@@ -914,7 +920,7 @@ class TestAgentRuntimeRepository:
         assert reloaded.failure_code is None
 
     async def test_same_runner_generation_report_is_accepted(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Same Runner generation can update state for stream-close reports."""
         workspace_id = await _create_workspace(
@@ -950,7 +956,7 @@ class TestAgentRuntimeRepository:
         assert disconnected.workspace_path is None
 
     async def test_lifecycle_dispatch_candidates_track_generation(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Dispatched desired generation is excluded from redispatch candidates."""
         workspace_id = await _create_workspace(rdb_session, "agent-runtime-dispatch-ws")
@@ -991,7 +997,7 @@ class TestAgentRuntimeRepository:
 
     async def test_restart_completion_rearms_same_generation_as_start(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A successful Restart completion queues ordinary Start convergence."""
         workspace_id = await _create_workspace(
@@ -1063,7 +1069,7 @@ class TestAgentRuntimeRepository:
 
     async def test_restart_completion_rejects_stale_provider_generation(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A replaced Provider stream cannot hand off the current Restart."""
         workspace_id = await _create_workspace(
@@ -1107,7 +1113,7 @@ class TestAgentRuntimeRepository:
 
     async def test_restart_completion_rejects_superseded_desired_generation(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A delayed Restart completion cannot rearm a newer lifecycle generation."""
         workspace_id = await _create_workspace(
@@ -1151,7 +1157,7 @@ class TestAgentRuntimeRepository:
 
     async def test_claim_lifecycle_dispatch_retries_unfinished_restart(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A lost Restart completion is retried without duplicate immediate claims."""
         workspace_id = await _create_workspace(
@@ -1184,7 +1190,7 @@ class TestAgentRuntimeRepository:
             command.desired_generation,
         )
         assert dispatched is not None
-        await rdb_session.execute(
+        await rdb_session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime.id)
             .values(
@@ -1217,7 +1223,7 @@ class TestAgentRuntimeRepository:
         assert duplicate_claim is None
 
     async def test_claim_lifecycle_dispatch_claims_generation_once(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Only one Control replica claims dispatch for same desired generation."""
         workspace_id = await _create_workspace(
@@ -1252,7 +1258,7 @@ class TestAgentRuntimeRepository:
         assert second_claim is None
 
     async def test_claim_lifecycle_dispatch_throttles_dropped_start_retry(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Dropped start retry also does not duplicate dispatch right after claim."""
         workspace_id = await _create_workspace(
@@ -1289,7 +1295,7 @@ class TestAgentRuntimeRepository:
             runtime.id,
             command.desired_generation,
         )
-        await rdb_session.execute(
+        await rdb_session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime.id)
             .values(
@@ -1316,7 +1322,7 @@ class TestAgentRuntimeRepository:
         assert duplicate_claim is None
 
     async def test_stop_command_preempts_dispatched_start(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """STOP desired generation dispatches regardless of in-progress START."""
         workspace_id = await _create_workspace(
@@ -1385,7 +1391,7 @@ class TestAgentRuntimeRepository:
         )
 
     async def test_lifecycle_dispatch_candidates_throttle_dropped_start(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Do not redispatch start generation before retry cooldown."""
         workspace_id = await _create_workspace(
@@ -1432,7 +1438,7 @@ class TestAgentRuntimeRepository:
         assert candidates == []
 
     async def test_lifecycle_dispatch_candidates_retry_dropped_start(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Redispatch when connected Provider did not observe start generation."""
         workspace_id = await _create_workspace(
@@ -1480,7 +1486,7 @@ class TestAgentRuntimeRepository:
         assert [candidate.id for candidate in candidates] == [runtime.id]
 
     async def test_lifecycle_dispatch_candidates_retry_current_generation_failure(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Redispatch dropped start after Provider current-generation failure."""
         workspace_id = await _create_workspace(
@@ -1536,7 +1542,7 @@ class TestAgentRuntimeRepository:
         assert [candidate.id for candidate in candidates] == [runtime.id]
 
     async def test_stale_runtime_failure_does_not_overwrite_current_generation(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """A previous lifecycle generation cannot replace the current failure."""
         workspace_id = await _create_workspace(
@@ -1591,7 +1597,7 @@ class TestAgentRuntimeRepository:
         assert reloaded.failure_message == "Current lifecycle failed"
 
     async def test_lifecycle_dispatch_candidates_retry_current_generation_starting(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """If RUNNING desired stalls at STARTING, redispatch same generation start."""
         workspace_id = await _create_workspace(
@@ -1645,7 +1651,7 @@ class TestAgentRuntimeRepository:
         assert retry_claim is not None
 
     async def test_lifecycle_dispatch_candidates_retry_current_generation_stopping(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """If RUNNING desired stalls at STOPPING, redispatch same generation start."""
         workspace_id = await _create_workspace(
@@ -1699,7 +1705,7 @@ class TestAgentRuntimeRepository:
         assert retry_claim is not None
 
     async def test_identical_provider_report_preserves_lifecycle_retry_clock(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Same Provider report does not update start retry baseline time."""
         workspace_id = await _create_workspace(
@@ -1741,7 +1747,7 @@ class TestAgentRuntimeRepository:
         old_state_change_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
             minutes=10
         )
-        await rdb_session.execute(
+        await rdb_session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime.id)
             .values(last_state_change_at=old_state_change_at)
@@ -1765,7 +1771,7 @@ class TestAgentRuntimeRepository:
         assert [candidate.id for candidate in candidates] == [runtime.id]
 
     async def test_provider_observe_candidates_use_provider_observe_clock(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Provider observe interval is separated from unrelated runtime update."""
         workspace_id = await _create_workspace(
@@ -1778,7 +1784,7 @@ class TestAgentRuntimeRepository:
         )
         repo = AgentRuntimeRepository()
         runtime = await repo.ensure_for_agent(rdb_session, agent_id)
-        await rdb_session.execute(
+        await rdb_session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime.id)
             .values(runtime_provider_id="provider-1")
@@ -1804,7 +1810,7 @@ class TestAgentRuntimeRepository:
         old_observe_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
             minutes=10
         )
-        await rdb_session.execute(
+        await rdb_session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime.id)
             .values(
@@ -1834,7 +1840,7 @@ class TestAgentRuntimeRepository:
         assert throttled == []
 
     async def test_provider_observe_rechecks_stopping_runtime(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Stopped desired state is observed until the Provider reports stopped."""
         workspace_id = await _create_workspace(
@@ -1847,7 +1853,7 @@ class TestAgentRuntimeRepository:
         )
         repo = AgentRuntimeRepository()
         runtime = await repo.ensure_for_agent(rdb_session, agent_id)
-        await rdb_session.execute(
+        await rdb_session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime.id)
             .values(runtime_provider_id="provider-1")
@@ -1881,7 +1887,7 @@ class TestAgentRuntimeRepository:
         old_observe_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
             minutes=10
         )
-        await rdb_session.execute(
+        await rdb_session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime.id)
             .values(
@@ -1920,7 +1926,7 @@ class TestAgentRuntimeRepository:
         assert converged == []
 
     async def test_lifecycle_dispatch_candidates_skip_start_timeout_failure(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Control start timeout failure is excluded from redispatch candidates."""
         workspace_id = await _create_workspace(
@@ -1968,7 +1974,7 @@ class TestAgentRuntimeRepository:
         assert candidates == []
 
     async def test_mark_start_timeouts_marks_stale_start_failed(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Runtime exceeding timeout after START converges to failed in Control."""
         workspace_id = await _create_workspace(
@@ -2001,7 +2007,7 @@ class TestAgentRuntimeRepository:
         old_state_change_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
             minutes=10
         )
-        await rdb_session.execute(
+        await rdb_session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime.id)
             .values(last_state_change_at=old_state_change_at)
@@ -2021,7 +2027,7 @@ class TestAgentRuntimeRepository:
         assert timed_out[0].failure_code == "START_TIMEOUT"
 
     async def test_mark_start_timeouts_skips_undispatched_generation(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """A desired generation cannot time out before reaching its Provider."""
         workspace_id = await _create_workspace(
@@ -2048,7 +2054,7 @@ class TestAgentRuntimeRepository:
         old_state_change_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
             minutes=10
         )
-        await rdb_session.execute(
+        await rdb_session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime.id)
             .values(last_state_change_at=old_state_change_at)

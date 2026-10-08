@@ -4,16 +4,22 @@ import dataclasses
 import datetime
 from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
-from typing import ClassVar
-from unittest.mock import AsyncMock
+from typing import ClassVar, Literal
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from azcommon.result import Failure, Success
+from cryptography.fernet import Fernet
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.agent import BuiltinToolConfig, SelectableModelSettings
+from azents.core.agent import (
+    BuiltinToolConfig,
+    ModelParameters,
+    SelectableModelSettings,
+)
 from azents.core.credentials import ApiKeySecrets
+from azents.core.crypto import CredentialCipher
 from azents.core.engine_tool_state import (
     AgentsAppendixDedupeState,
     ClaudeRulesAppendixDedupeState,
@@ -30,6 +36,14 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.model_capability_contract import (
+    ModelCapabilityFeature,
+    ModelFeatureCondition,
+    ModelRequestConstraints,
+)
+from azents.core.model_capability_evidence import ProviderCapabilityEvidence
+from azents.core.model_capability_projection import project_capabilities
+from azents.core.model_catalog_source import CatalogFact
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.runtime_capabilities import RuntimeCapabilityResolver
 from azents.core.tools import (
@@ -40,8 +54,10 @@ from azents.core.tools import (
     ToolkitProvider,
     TurnContext,
 )
+from azents.engine.events.openai_responses import OpenAIResponsesLowerer
 from azents.engine.run.contracts import ToolkitBinding
 from azents.engine.run.input import InputMessage, InvalidModelParameters, InvokeInput
+from azents.engine.run.types import BuiltinToolSpec
 from azents.engine.tools.builtin import BuiltinToolkitProvider
 from azents.engine.tools.claude_rules import ClaudeRulesToolkitProvider
 from azents.engine.tools.dynamic_worktree import (
@@ -53,18 +69,38 @@ from azents.engine.tools.runtime_web import RuntimeWebToolkit, RuntimeWebToolkit
 from azents.engine.tools.scheduled import ScheduledToolkit, ScheduledToolkitProvider
 from azents.engine.tools.subagent import SubagentToolkitProvider
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
+from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
+from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.engine_resolve import (
+    get_engine_resolve_repositories,
+)
+from azents.repos.engine_tool_repositories import get_engine_tool_repositories
 from azents.repos.exchange_file.data import ExchangeFile
+from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
+from azents.repos.memory import MemoryRepository
+from azents.repos.runtime_profile.repository import RuntimeProfileRepository
+from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
+from azents.repos.toolkit import ToolkitRepository
 from azents.repos.toolkit.data import (
     EffectiveToolkitConfig,
-    EffectiveToolkitSlugConflict,
+    EffectiveToolkitNamespaceMissing,
     EffectiveToolkitSource,
     ToolkitConfig,
 )
 from azents.runtime.types import RuntimeDomainConfig
+from azents.services.engine_runtime_tokens import EngineRuntimeTokenResolver
+from azents.services.historical_memory.context_snapshot import (
+    MemoryContextSnapshotService,
+)
 from azents.services.image_generation_catalog import (
     ImageGenerationRuntimeConfigurationError,
+)
+from azents.services.oauth_runtime_clients import (
+    create_runtime_oauth_client_factories,
 )
 from azents.services.runtime_web.service import RuntimeWebService
 from azents.testing.model_metadata import make_test_model_metadata_service
@@ -72,6 +108,7 @@ from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_selectable_model_options,
 )
+from azents.testing.types import require_instance
 
 from . import resolve as resolve_module
 from .resolve import (
@@ -125,15 +162,22 @@ def test_attachment_preview_does_not_advertise_withheld_resource_tools() -> None
 
 
 def _session_manager_for(
-    session: AsyncSession,
-) -> SessionManager[AsyncSession]:
+    session: WriteSession,
+) -> SessionManager[WriteSession]:
     """Return a session manager yielding one test session."""
 
     @asynccontextmanager
-    async def manager() -> AsyncGenerator[AsyncSession, None]:
+    async def manager() -> AsyncGenerator[WriteSession, None]:
         yield session
 
     return manager
+
+
+def _resolution_session() -> WriteSession:
+    """Create a wrapped mock session with a controllable ORM lookup."""
+    raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.get = AsyncMock(return_value=None)
+    return ReadWriteSession(raw_session)
 
 
 def _make_scheduled_provider() -> ScheduledToolkitProvider:
@@ -399,6 +443,7 @@ async def _resolve_failing_registered_toolkit(
             ),
             source=EffectiveToolkitSource.SHARED_ATTACHMENT,
             agent_toolkit_id="agent-toolkit-1",
+            namespace="test_2",
         )
     ]
     return await resolve_agent_tools(
@@ -406,8 +451,6 @@ async def _resolve_failing_registered_toolkit(
         _make_toolkit_context(),
         execution_mode=ToolkitExecutionMode.ROOT,
         toolkit_registry={"test": provider},
-        toolkit_repository=toolkit_repository,
-        session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
         web_url="https://example.test",
         oauth_secret_key="secret",
         mcp_proxy_url=None,
@@ -417,6 +460,13 @@ async def _resolve_failing_registered_toolkit(
         ),
         memory_enabled=False,
         runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
+        repositories=get_engine_resolve_repositories(
+            session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+            agent_repository=AgentRepository(),
+            integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+            toolkit_repository=toolkit_repository,
+        ),
+        workspace_handle=None,
     )
 
 
@@ -429,29 +479,27 @@ async def test_registered_toolkit_binding_captures_direct_exposure_policy() -> N
 
     assert len(bindings) == 1
     assert bindings[0].always_expose_tools is True
+    assert bindings[0].slug == "test_2"
+    assert bindings[0].base_slug == "test"
+    assert bindings[0].toolkit.display_name == "Test"
 
 
-async def test_registered_toolkit_duplicate_slug_fails_before_provider_resolution() -> (
-    None
-):
-    """Fail the effective namespace before resolving any provider."""
-    conflict = EffectiveToolkitSlugConflict(
+async def test_registered_toolkit_missing_namespace_fails_before_resolution() -> None:
+    """Fail missing Foundation namespace authority before provider resolution."""
+    conflict = EffectiveToolkitNamespaceMissing(
         agent_id="agent-1",
-        slug="duplicate",
-        toolkit_ids=("toolkit-1", "toolkit-2"),
+        toolkit_id="toolkit-1",
     )
     toolkit_repository = AsyncMock()
     toolkit_repository.list_effective_for_agent.side_effect = conflict
     provider = AsyncMock()
 
-    with pytest.raises(EffectiveToolkitSlugConflict) as exc_info:
+    with pytest.raises(EffectiveToolkitNamespaceMissing) as exc_info:
         await resolve_agent_tools(
             "agent-1",
             _make_toolkit_context(),
             execution_mode=ToolkitExecutionMode.ROOT,
             toolkit_registry={"test": provider},
-            toolkit_repository=toolkit_repository,
-            session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
             web_url="https://example.test",
             oauth_secret_key="secret",
             mcp_proxy_url=None,
@@ -461,6 +509,13 @@ async def test_registered_toolkit_duplicate_slug_fails_before_provider_resolutio
             ),
             memory_enabled=False,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+                agent_repository=AgentRepository(),
+                integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+                toolkit_repository=toolkit_repository,
+            ),
+            workspace_handle=None,
         )
 
     assert exc_info.value is conflict
@@ -480,22 +535,44 @@ def _make_turn_context() -> TurnContext:
 
 def _make_builtin_provider() -> BuiltinToolkitProvider:
     """Create BuiltinToolkitProvider for resolve_agent_tools tests."""
-    session = AsyncMock(spec=AsyncSession)
-    session.get = AsyncMock(return_value=None)
+    session = ReadWriteSession(AsyncMock(spec=AsyncSession))
+    session.read_session.get = AsyncMock(return_value=None)
+    memory = AsyncMock(spec=MemoryRepository)
+    memory.list_summaries.return_value = []
+    runtimes = AsyncMock(spec=AgentRuntimeRepository)
+    runtimes.get_by_agent_id.return_value = None
+    sessions = AsyncMock(spec=AgentSessionRepository)
+    sessions.get_by_id.return_value = None
+    projects = AsyncMock(spec=SessionWorkspaceProjectRepository)
+    snapshots = Mock(spec=MemoryContextSnapshotService)
+    snapshots.with_owner.return_value = snapshots
+    snapshots.prompt_for_turn.return_value = ""
+    snapshots.refresh_snapshot.return_value = False
     return BuiltinToolkitProvider(
         exchange_file_service=AsyncMock(),
         artifact_service=AsyncMock(),
         model_file_service=AsyncMock(),
         vfs_projection_service=None,
+        vfs_read_router=AsyncMock(),
         agents_store=_FakeAgentsAppendixDedupeStateStore(),
-        session_manager=_session_manager_for(session),
-        memory_repo=AsyncMock(),
-        agent_runtime_repo=AsyncMock(),
+        repositories=get_engine_tool_repositories(
+            session_manager=_session_manager_for(session),
+            read_session_manager=_session_manager_for(session),
+            cipher=CredentialCipher(Fernet.generate_key().decode()),
+            memory_repository=require_instance(memory, MemoryRepository),
+            agent_runtime_repository=require_instance(runtimes, AgentRuntimeRepository),
+            agent_session_repository=require_instance(sessions, AgentSessionRepository),
+            runtime_profile_repository=RuntimeProfileRepository(),
+            project_repository=require_instance(
+                projects, SessionWorkspaceProjectRepository
+            ),
+        ),
+        memory_context_snapshot_service=require_instance(
+            snapshots, MemoryContextSnapshotService
+        ),
         agent_runtime_service=AsyncMock(),
         runner_operations=AsyncMock(),
-        agent_session_repository=AsyncMock(),
         session_working_folder_binding_service=AsyncMock(),
-        project_repo=AsyncMock(),
         server_to_runtime_transfer_service=AsyncMock(),
         runtime_image_read_service=None,
         runtime_to_server_publication_service=AsyncMock(),
@@ -525,6 +602,210 @@ def _make_dynamic_worktree_provider() -> DynamicWorktreeToolkitProvider:
 class TestResolveInvokeInput:
     """resolve_invoke_input tests."""
 
+    @pytest.mark.parametrize("builtin", ["web_search", "image_generation"])
+    async def test_conditional_builtin_setting_reaches_existing_catalog_preparation(
+        self,
+        builtin: Literal["web_search", "image_generation"],
+    ) -> None:
+        agent = _make_agent(
+            reasoning_supported=True, effort_levels=[ModelReasoningEffort.HIGH]
+        )
+        caps = project_capabilities(
+            provider=LLMProvider.OPENAI,
+            exact_model="gpt-4o",
+            source_model=None,
+            model_developer=None,
+            evidence=ProviderCapabilityEvidence(
+                reasoning=CatalogFact(state="value", value=True),
+                reasoning_efforts=CatalogFact(
+                    state="value", value=(ModelReasoningEffort.HIGH,)
+                ),
+            ),
+        )
+        caps.built_in_tools.supported = [builtin]
+        caps.request_constraints = ModelRequestConstraints(
+            feature_conditions=(
+                ModelFeatureCondition(
+                    feature=ModelCapabilityFeature.IMAGE_GENERATION
+                    if builtin == "image_generation"
+                    else ModelCapabilityFeature.WEB_SEARCH,
+                    reasoning_efforts=("none",),
+                    function_tools=None,
+                ),
+            )
+        )
+        agent.model_parameters = ModelParameters(
+            reasoning_effort=ModelReasoningEffort.HIGH
+        )
+        agent.model_selection.normalized_capabilities = caps
+        for option in agent.selectable_model_options:
+            for candidate in option.candidates:
+                candidate.model_selection.normalized_capabilities = caps
+                candidate.settings.builtin_tools = [
+                    BuiltinToolConfig(name=builtin, config={})
+                ]
+        agent_repository = AsyncMock()
+        agent_repository.get_by_id.return_value = agent
+        integration_repository = AsyncMock()
+        integration_repository.get_by_id_with_secrets.return_value = _make_integration()
+        result = await resolve_invoke_input(
+            InvokeInput(agent_id="agent-1", session_id="session-1", messages=[]),
+            exchange_file_service=AsyncMock(),
+            model_file_service=AsyncMock(),
+            image_generation_catalog_service=(
+                image_catalog_service := _make_image_generation_catalog_service()
+            ),
+            model_metadata_service=make_test_model_metadata_service(source=None),
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+                agent_repository=agent_repository,
+                integration_repository=integration_repository,
+                toolkit_repository=ToolkitRepository(cipher=None),
+            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
+        )
+        assert isinstance(result, Success)
+        assert result.value.reasoning_effort == ModelReasoningEffort.HIGH
+        image_catalog_service.validate_runtime.assert_awaited_once()
+        catalog_args = image_catalog_service.validate_runtime.call_args.kwargs
+        assert catalog_args["image_generation_supported"] is (
+            builtin == "image_generation"
+        )
+        assert catalog_args["integration_enabled"] is True
+        assert catalog_args["settings"].builtin_tools == [
+            BuiltinToolConfig(name=builtin, config={})
+        ]
+        if builtin == "image_generation":
+            # EngineAdapter's actual SDK-boundary test covers the subsequent
+            # client-owned dispatch rejection without routing it as hosted.
+            return
+        lowerer = OpenAIResponsesLowerer(
+            top_k=None,
+            provider=LLMProvider.OPENAI,
+            model=result.value.model,
+            credential_kwargs={},
+            model_capabilities=caps,
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            reasoning_effort=result.value.reasoning_effort,
+            tools=None,
+            hosted_tools=[BuiltinToolSpec(name="web_search", config={})],
+        )
+        with pytest.raises(ValueError, match="Required builtin tool is not supported"):
+            lowerer.lower([], native_replay_context=None, model=result.value.model)
+
+    async def test_v2_agent_effort_is_rejected_instead_of_silently_omitted(
+        self,
+    ) -> None:
+        agent = _make_agent()
+        caps = project_capabilities(
+            provider=LLMProvider.OPENAI,
+            exact_model="gpt-4o",
+            source_model=None,
+            model_developer=None,
+            evidence=ProviderCapabilityEvidence(
+                reasoning=CatalogFact(state="value", value=True),
+                reasoning_efforts=CatalogFact(state="value", value=()),
+            ),
+        )
+        agent.model_parameters = ModelParameters(
+            reasoning_effort=ModelReasoningEffort.HIGH
+        )
+        agent.model_selection.normalized_capabilities = caps
+        for option in agent.selectable_model_options:
+            for candidate in option.candidates:
+                candidate.model_selection.normalized_capabilities = caps
+        agent_repository = AsyncMock()
+        agent_repository.get_by_id.return_value = agent
+        integration_repository = AsyncMock()
+        integration_repository.get_by_id_with_secrets.return_value = _make_integration()
+        result = await resolve_invoke_input(
+            InvokeInput(agent_id="agent-1", session_id="session-1", messages=[]),
+            exchange_file_service=AsyncMock(),
+            model_file_service=AsyncMock(),
+            image_generation_catalog_service=_make_image_generation_catalog_service(),
+            model_metadata_service=make_test_model_metadata_service(source=None),
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+                agent_repository=agent_repository,
+                integration_repository=integration_repository,
+                toolkit_repository=ToolkitRepository(cipher=None),
+            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
+        )
+        assert result == Failure(
+            ReasoningEffortUnsupported(
+                model_target_label="default", reasoning_effort=ModelReasoningEffort.HIGH
+            )
+        )
+        assert agent.model_parameters.reasoning_effort is ModelReasoningEffort.HIGH
+
+    async def test_v2_sampling_condition_is_checked_during_profile_preparation(
+        self,
+    ) -> None:
+        agent = _make_agent(
+            reasoning_supported=True, effort_levels=[ModelReasoningEffort.HIGH]
+        )
+        caps = project_capabilities(
+            provider=LLMProvider.OPENAI,
+            exact_model="gpt-4o",
+            source_model=None,
+            model_developer=None,
+            evidence=ProviderCapabilityEvidence(
+                reasoning=CatalogFact(state="value", value=True),
+                reasoning_efforts=CatalogFact(
+                    state="value", value=(ModelReasoningEffort.HIGH,)
+                ),
+            ),
+        )
+        caps.parameters.temperature = True
+        caps.request_constraints = ModelRequestConstraints(
+            feature_conditions=(
+                ModelFeatureCondition(
+                    feature=ModelCapabilityFeature.TEMPERATURE,
+                    reasoning_efforts=("none",),
+                    function_tools=None,
+                ),
+            )
+        )
+        agent.model_parameters = ModelParameters(temperature=0.3)
+        agent.model_selection.normalized_capabilities = caps
+        for option in agent.selectable_model_options:
+            for candidate in option.candidates:
+                candidate.model_selection.normalized_capabilities = caps
+        agent_repository = AsyncMock()
+        agent_repository.get_by_id.return_value = agent
+        integration_repository = AsyncMock()
+        integration_repository.get_by_id_with_secrets.return_value = _make_integration()
+        result = await resolve_invoke_input_with_profile(
+            InvokeInput(agent_id="agent-1", session_id="session-1", messages=[]),
+            context_source=None,
+            requested_profile=RequestedInferenceProfile(
+                model_target_label="default",
+                reasoning_effort=ModelReasoningEffort.HIGH,
+                enabled_execution_options=[],
+            ),
+            exchange_file_service=AsyncMock(),
+            model_file_service=AsyncMock(),
+            image_generation_catalog_service=_make_image_generation_catalog_service(),
+            model_metadata_service=make_test_model_metadata_service(source=None),
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+                agent_repository=agent_repository,
+                integration_repository=integration_repository,
+                toolkit_repository=ToolkitRepository(cipher=None),
+            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
+        )
+        assert result == Failure(
+            InvalidModelParameters(
+                agent_id="agent-1",
+                errors=[
+                    "The selected request does not satisfy temperature conditions."
+                ],
+            )
+        )
+
     async def test_resolves_run_request_from_agent_snapshot(self) -> None:
         """Build RunRequest from Agent snapshot and integration."""
         agent_repository = AsyncMock()
@@ -533,8 +814,8 @@ class TestResolveInvokeInput:
         integration_repository.get_by_id_with_secrets.return_value = _make_integration()
 
         @asynccontextmanager
-        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-            yield AsyncMock(spec=AsyncSession)
+        async def session_manager() -> AsyncGenerator[WriteSession, None]:
+            yield ReadWriteSession(AsyncMock(spec=AsyncSession))
 
         result = await resolve_invoke_input(
             InvokeInput(
@@ -549,13 +830,17 @@ class TestResolveInvokeInput:
                     )
                 ],
             ),
-            agent_repository=agent_repository,
-            integration_repository=integration_repository,
-            session_manager=session_manager,
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
-            image_generation_catalog_service=(_make_image_generation_catalog_service()),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            image_generation_catalog_service=_make_image_generation_catalog_service(),
+            model_metadata_service=make_test_model_metadata_service(source=None),
+            repositories=get_engine_resolve_repositories(
+                session_manager=session_manager,
+                agent_repository=agent_repository,
+                integration_repository=integration_repository,
+                toolkit_repository=ToolkitRepository(cipher=None),
+            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert isinstance(result, Success)
@@ -586,8 +871,8 @@ class TestResolveInvokeInput:
         image_service = _make_image_generation_catalog_service()
         ensure_tokens = AsyncMock(return_value=Success(_make_integration()))
         monkeypatch.setattr(
-            resolve_module,
-            "_ensure_provider_runtime_tokens",
+            EngineRuntimeTokenResolver,
+            "ensure",
             ensure_tokens,
         )
 
@@ -597,13 +882,17 @@ class TestResolveInvokeInput:
                 session_id="session-1",
                 messages=[],
             ),
-            agent_repository=agent_repository,
-            integration_repository=integration_repository,
-            session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=image_service,
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+                agent_repository=agent_repository,
+                integration_repository=integration_repository,
+                toolkit_repository=ToolkitRepository(cipher=None),
+            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert isinstance(result, Success)
@@ -644,8 +933,8 @@ class TestResolveInvokeInput:
         image_service.validate_runtime.return_value = error
         ensure_tokens = AsyncMock()
         monkeypatch.setattr(
-            resolve_module,
-            "_ensure_provider_runtime_tokens",
+            EngineRuntimeTokenResolver,
+            "ensure",
             ensure_tokens,
         )
 
@@ -655,13 +944,17 @@ class TestResolveInvokeInput:
                 session_id="session-1",
                 messages=[],
             ),
-            agent_repository=agent_repository,
-            integration_repository=integration_repository,
-            session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=image_service,
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+                agent_repository=agent_repository,
+                integration_repository=integration_repository,
+                toolkit_repository=ToolkitRepository(cipher=None),
+            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert result == Failure(error)
@@ -709,8 +1002,8 @@ class TestResolveInvokeInput:
         image_service.validate_runtime.return_value = error
         ensure_tokens = AsyncMock()
         monkeypatch.setattr(
-            resolve_module,
-            "_ensure_provider_runtime_tokens",
+            EngineRuntimeTokenResolver,
+            "ensure",
             ensure_tokens,
         )
 
@@ -720,13 +1013,17 @@ class TestResolveInvokeInput:
                 session_id="session-1",
                 messages=[],
             ),
-            agent_repository=agent_repository,
-            integration_repository=integration_repository,
-            session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=image_service,
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+                agent_repository=agent_repository,
+                integration_repository=integration_repository,
+                toolkit_repository=ToolkitRepository(cipher=None),
+            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert result == Failure(error)
@@ -755,7 +1052,7 @@ class TestResolveInvokeInput:
         integration_repository = AsyncMock()
         integration_repository.get_by_id_with_secrets.return_value = _make_integration()
         error = ImageGenerationRuntimeConfigurationError(
-            reason="catalog_generation_mismatch",
+            reason="catalog_unusable",
             integration_id="integ-1",
             model_identifier="gpt-image-2.5-flare",
         )
@@ -774,13 +1071,17 @@ class TestResolveInvokeInput:
                 model_target_label="default",
                 reasoning_effort=None,
             ),
-            agent_repository=agent_repository,
-            integration_repository=integration_repository,
-            session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=image_service,
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+                agent_repository=agent_repository,
+                integration_repository=integration_repository,
+                toolkit_repository=ToolkitRepository(cipher=None),
+            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert result == Failure(error)
@@ -833,13 +1134,17 @@ class TestResolveInvokeInput:
             resolved_model_settings=settings,
             resolved_reasoning_effort=None,
             resolved_enabled_execution_options=[],
-            agent_repository=agent_repository,
-            integration_repository=integration_repository,
-            session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
             image_generation_catalog_service=image_service,
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            model_metadata_service=make_test_model_metadata_service(source=None),
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+                agent_repository=agent_repository,
+                integration_repository=integration_repository,
+                toolkit_repository=ToolkitRepository(cipher=None),
+            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert result == Failure(error)
@@ -856,6 +1161,7 @@ class TestResolveInvokeInput:
         main_context.max_output_tokens = 8_000
         main_capabilities = main_candidate.model_selection.normalized_capabilities
         main_capabilities.built_in_tools.supported = ["web_search"]
+        main_capabilities.parameters.max_output_tokens = True
         main_candidate.settings = SelectableModelSettings(
             context_window_tokens=32_000,
             max_output_tokens=20_000,
@@ -893,13 +1199,17 @@ class TestResolveInvokeInput:
                 session_id="session-1",
                 messages=[],
             ),
-            agent_repository=agent_repository,
-            integration_repository=integration_repository,
-            session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
-            image_generation_catalog_service=(_make_image_generation_catalog_service()),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            image_generation_catalog_service=_make_image_generation_catalog_service(),
+            model_metadata_service=make_test_model_metadata_service(source=None),
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+                agent_repository=agent_repository,
+                integration_repository=integration_repository,
+                toolkit_repository=ToolkitRepository(cipher=None),
+            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert isinstance(result, Success)
@@ -930,13 +1240,17 @@ class TestResolveInvokeInput:
                 session_id="session-1",
                 messages=[],
             ),
-            agent_repository=agent_repository,
-            integration_repository=integration_repository,
-            session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
-            image_generation_catalog_service=(_make_image_generation_catalog_service()),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            image_generation_catalog_service=_make_image_generation_catalog_service(),
+            model_metadata_service=make_test_model_metadata_service(source=None),
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+                agent_repository=agent_repository,
+                integration_repository=integration_repository,
+                toolkit_repository=ToolkitRepository(cipher=None),
+            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert result == Failure(
@@ -955,13 +1269,13 @@ class TestResolveInvokeInput:
         agent_repository = AsyncMock()
         integration_repository = AsyncMock()
 
-        async def get_agent(session: AsyncSession, agent_id: str) -> Agent:
+        async def get_agent(session: WriteSession, agent_id: str) -> Agent:
             del session, agent_id
             assert active_sessions == 1
             return _make_agent()
 
         async def get_integration(
-            session: AsyncSession, integration_id: str
+            session: WriteSession, integration_id: str
         ) -> LLMProviderIntegrationWithSecrets:
             del session, integration_id
             assert active_sessions == 1
@@ -971,27 +1285,25 @@ class TestResolveInvokeInput:
         integration_repository.get_by_id_with_secrets.side_effect = get_integration
 
         @asynccontextmanager
-        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+        async def session_manager() -> AsyncGenerator[WriteSession, None]:
             nonlocal active_sessions
             active_sessions += 1
             try:
-                yield AsyncMock(spec=AsyncSession)
+                yield ReadWriteSession(AsyncMock(spec=AsyncSession))
             finally:
                 active_sessions -= 1
 
         async def ensure_tokens(
-            *,
+            self: EngineRuntimeTokenResolver,
             integration: LLMProviderIntegrationWithSecrets,
-            integration_repository: object,
-            session_manager: object,
         ) -> Success[LLMProviderIntegrationWithSecrets]:
-            del integration_repository, session_manager
+            del self
             assert active_sessions == 0
             return Success(integration)
 
         monkeypatch.setattr(
-            resolve_module,
-            "_ensure_provider_runtime_tokens",
+            EngineRuntimeTokenResolver,
+            "ensure",
             ensure_tokens,
         )
 
@@ -1001,13 +1313,17 @@ class TestResolveInvokeInput:
                 session_id="session-1",
                 messages=[],
             ),
-            agent_repository=agent_repository,
-            integration_repository=integration_repository,
-            session_manager=session_manager,
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
-            image_generation_catalog_service=(_make_image_generation_catalog_service()),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            image_generation_catalog_service=_make_image_generation_catalog_service(),
+            model_metadata_service=make_test_model_metadata_service(source=None),
+            repositories=get_engine_resolve_repositories(
+                session_manager=session_manager,
+                agent_repository=agent_repository,
+                integration_repository=integration_repository,
+                toolkit_repository=ToolkitRepository(cipher=None),
+            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert isinstance(result, Success)
@@ -1023,8 +1339,8 @@ class TestResolveInvokeInput:
         integration_repository.get_by_id_with_secrets.return_value = _make_integration()
 
         @asynccontextmanager
-        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-            yield AsyncMock(spec=AsyncSession)
+        async def session_manager() -> AsyncGenerator[WriteSession, None]:
+            yield ReadWriteSession(AsyncMock(spec=AsyncSession))
 
         result = await resolve_invoke_input_with_profile(
             InvokeInput(
@@ -1038,13 +1354,17 @@ class TestResolveInvokeInput:
                 model_target_label="default",
                 reasoning_effort=None,
             ),
-            agent_repository=agent_repository,
-            integration_repository=integration_repository,
-            session_manager=session_manager,
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
-            image_generation_catalog_service=(_make_image_generation_catalog_service()),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            image_generation_catalog_service=_make_image_generation_catalog_service(),
+            model_metadata_service=make_test_model_metadata_service(source=None),
+            repositories=get_engine_resolve_repositories(
+                session_manager=session_manager,
+                agent_repository=agent_repository,
+                integration_repository=integration_repository,
+                toolkit_repository=ToolkitRepository(cipher=None),
+            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert isinstance(result, Success)
@@ -1072,13 +1392,17 @@ class TestResolveInvokeInput:
                 reasoning_effort=None,
                 enabled_execution_options=[ModelExecutionOptionId.FAST],
             ),
-            agent_repository=agent_repository,
-            integration_repository=integration_repository,
-            session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
-            image_generation_catalog_service=(_make_image_generation_catalog_service()),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            image_generation_catalog_service=_make_image_generation_catalog_service(),
+            model_metadata_service=make_test_model_metadata_service(source=None),
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+                agent_repository=agent_repository,
+                integration_repository=integration_repository,
+                toolkit_repository=ToolkitRepository(cipher=None),
+            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert isinstance(result, Success)
@@ -1105,13 +1429,17 @@ class TestResolveInvokeInput:
                 reasoning_effort=None,
                 enabled_execution_options=[ModelExecutionOptionId.FAST],
             ),
-            agent_repository=agent_repository,
-            integration_repository=integration_repository,
-            session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
-            image_generation_catalog_service=(_make_image_generation_catalog_service()),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            image_generation_catalog_service=_make_image_generation_catalog_service(),
+            model_metadata_service=make_test_model_metadata_service(source=None),
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
+                agent_repository=agent_repository,
+                integration_repository=integration_repository,
+                toolkit_repository=ToolkitRepository(cipher=None),
+            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert result == Failure(
@@ -1127,8 +1455,8 @@ class TestResolveInvokeInput:
         agent_repository.get_by_id.return_value = _make_agent()
 
         @asynccontextmanager
-        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-            yield AsyncMock(spec=AsyncSession)
+        async def session_manager() -> AsyncGenerator[WriteSession, None]:
+            yield ReadWriteSession(AsyncMock(spec=AsyncSession))
 
         result = await resolve_invoke_input_with_profile(
             InvokeInput(
@@ -1142,13 +1470,17 @@ class TestResolveInvokeInput:
                 model_target_label="deleted",
                 reasoning_effort=None,
             ),
-            agent_repository=agent_repository,
-            integration_repository=AsyncMock(),
-            session_manager=session_manager,
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
-            image_generation_catalog_service=(_make_image_generation_catalog_service()),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            image_generation_catalog_service=_make_image_generation_catalog_service(),
+            model_metadata_service=make_test_model_metadata_service(source=None),
+            repositories=get_engine_resolve_repositories(
+                session_manager=session_manager,
+                agent_repository=agent_repository,
+                integration_repository=AsyncMock(),
+                toolkit_repository=ToolkitRepository(cipher=None),
+            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert result == Failure(ModelTargetNotFound(model_target_label="deleted"))
@@ -1165,8 +1497,8 @@ class TestResolveInvokeInput:
         integration_repository.get_by_id_with_secrets.return_value = _make_integration()
 
         @asynccontextmanager
-        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-            yield AsyncMock(spec=AsyncSession)
+        async def session_manager() -> AsyncGenerator[WriteSession, None]:
+            yield ReadWriteSession(AsyncMock(spec=AsyncSession))
 
         result = await resolve_invoke_input_with_profile(
             InvokeInput(
@@ -1180,13 +1512,17 @@ class TestResolveInvokeInput:
                 model_target_label="default",
                 reasoning_effort=ModelReasoningEffort.HIGH,
             ),
-            agent_repository=agent_repository,
-            integration_repository=integration_repository,
-            session_manager=session_manager,
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
-            image_generation_catalog_service=(_make_image_generation_catalog_service()),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            image_generation_catalog_service=_make_image_generation_catalog_service(),
+            model_metadata_service=make_test_model_metadata_service(source=None),
+            repositories=get_engine_resolve_repositories(
+                session_manager=session_manager,
+                agent_repository=agent_repository,
+                integration_repository=integration_repository,
+                toolkit_repository=ToolkitRepository(cipher=None),
+            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert result == Failure(
@@ -1204,8 +1540,8 @@ class TestResolveInvokeInput:
         agent_repository.get_by_id.return_value = _make_agent()
 
         @asynccontextmanager
-        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-            yield AsyncMock(spec=AsyncSession)
+        async def session_manager() -> AsyncGenerator[WriteSession, None]:
+            yield ReadWriteSession(AsyncMock(spec=AsyncSession))
 
         result = await resolve_invoke_input_with_profile(
             InvokeInput(
@@ -1219,13 +1555,17 @@ class TestResolveInvokeInput:
                 model_target_label="default",
                 reasoning_effort=ModelReasoningEffort.HIGH,
             ),
-            agent_repository=agent_repository,
-            integration_repository=AsyncMock(),
-            session_manager=session_manager,
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
-            image_generation_catalog_service=(_make_image_generation_catalog_service()),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            image_generation_catalog_service=_make_image_generation_catalog_service(),
+            model_metadata_service=make_test_model_metadata_service(source=None),
+            repositories=get_engine_resolve_repositories(
+                session_manager=session_manager,
+                agent_repository=agent_repository,
+                integration_repository=AsyncMock(),
+                toolkit_repository=ToolkitRepository(cipher=None),
+            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert result == Failure(
@@ -1244,8 +1584,8 @@ class TestResolveInvokeInput:
         )
 
         @asynccontextmanager
-        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-            yield AsyncMock(spec=AsyncSession)
+        async def session_manager() -> AsyncGenerator[WriteSession, None]:
+            yield ReadWriteSession(AsyncMock(spec=AsyncSession))
 
         result = await resolve_invoke_input_with_profile(
             InvokeInput(
@@ -1259,13 +1599,17 @@ class TestResolveInvokeInput:
                 model_target_label="default",
                 reasoning_effort=ModelReasoningEffort.HIGH,
             ),
-            agent_repository=agent_repository,
-            integration_repository=AsyncMock(),
-            session_manager=session_manager,
             exchange_file_service=AsyncMock(),
             model_file_service=AsyncMock(),
-            image_generation_catalog_service=(_make_image_generation_catalog_service()),
-            model_metadata_service=make_test_model_metadata_service(snapshot=None),
+            image_generation_catalog_service=_make_image_generation_catalog_service(),
+            model_metadata_service=make_test_model_metadata_service(source=None),
+            repositories=get_engine_resolve_repositories(
+                session_manager=session_manager,
+                agent_repository=agent_repository,
+                integration_repository=AsyncMock(),
+                toolkit_repository=ToolkitRepository(cipher=None),
+            ),
+            oauth_clients=create_runtime_oauth_client_factories(),
         )
 
         assert result == Failure(
@@ -1288,8 +1632,7 @@ class TestResolveAgentTools:
         execution_mode: ToolkitExecutionMode,
     ) -> None:
         """Runtime Web authority tools remain available before Runtime startup."""
-        session = AsyncMock(spec=AsyncSession)
-        session.get.return_value = None
+        session = _resolution_session()
         provider = RuntimeWebToolkitProvider(
             service=AsyncMock(spec=RuntimeWebService),
         )
@@ -1299,8 +1642,6 @@ class TestResolveAgentTools:
             _make_toolkit_context(),
             execution_mode=execution_mode,
             toolkit_registry={},
-            toolkit_repository=_empty_toolkit_repository(),
-            session_manager=_session_manager_for(session),
             web_url="https://example.test",
             oauth_secret_key="secret",
             mcp_proxy_url=None,
@@ -1311,6 +1652,13 @@ class TestResolveAgentTools:
             runtime_web_toolkit_provider=provider,
             memory_enabled=False,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(session),
+                agent_repository=AgentRepository(),
+                integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+                toolkit_repository=_empty_toolkit_repository(),
+            ),
+            workspace_handle=None,
         )
 
         assert [binding.slug for binding in bindings] == ["runtime_web"]
@@ -1325,16 +1673,13 @@ class TestResolveAgentTools:
         execution_mode: ToolkitExecutionMode,
     ) -> None:
         """Root and subagent Runs resolve the shared-context worktree Toolkit."""
-        session = AsyncMock(spec=AsyncSession)
-        session.get.return_value = None
+        session = _resolution_session()
 
         bindings = await resolve_agent_tools(
             "agent-1",
             _make_toolkit_context(),
             execution_mode=execution_mode,
             toolkit_registry={},
-            toolkit_repository=_empty_toolkit_repository(),
-            session_manager=_session_manager_for(session),
             web_url="https://example.test",
             oauth_secret_key="secret",
             mcp_proxy_url=None,
@@ -1345,6 +1690,13 @@ class TestResolveAgentTools:
             dynamic_worktree_toolkit_provider=_make_dynamic_worktree_provider(),
             memory_enabled=False,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(session),
+                agent_repository=AgentRepository(),
+                integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+                toolkit_repository=_empty_toolkit_repository(),
+            ),
+            workspace_handle=None,
         )
 
         assert [binding.slug for binding in bindings] == ["dynamic_worktree"]
@@ -1380,16 +1732,13 @@ class TestResolveAgentTools:
 
     async def test_auto_binds_claude_rules_when_runtime_capability_allows(self) -> None:
         """Claude rules Toolkit is auto-bound after Runtime capability admission."""
-        session = AsyncMock(spec=AsyncSession)
-        session.get.return_value = None
+        session = _resolution_session()
 
         bindings = await resolve_agent_tools(
             "agent-1",
             _make_toolkit_context(),
             execution_mode=ToolkitExecutionMode.ROOT,
             toolkit_registry={},
-            toolkit_repository=_empty_toolkit_repository(),
-            session_manager=_session_manager_for(session),
             web_url="https://example.test",
             oauth_secret_key="secret",
             mcp_proxy_url=None,
@@ -1403,46 +1752,43 @@ class TestResolveAgentTools:
             ),
             memory_enabled=True,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=True),
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(session),
+                agent_repository=AgentRepository(),
+                integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+                toolkit_repository=_empty_toolkit_repository(),
+            ),
+            workspace_handle=None,
         )
 
         assert [binding.slug for binding in bindings] == [
-            "memory_read",
+            "memory_context",
             "memory_write",
+            "readable_storage",
             "runtime",
             "claude_rules",
         ]
-        memory_read_state = await bindings[0].toolkit.update_context(
+        memory_context_state = await bindings[0].toolkit.update_context(
             _make_turn_context()
         )
         memory_write_state = await bindings[1].toolkit.update_context(
             _make_turn_context()
         )
-        memory_read_tools = {tool.spec.name for tool in memory_read_state.tools}
         memory_write_tools = {tool.spec.name for tool in memory_write_state.tools}
-        assert memory_read_tools == {
-            "list_memories",
-            "get_memory",
-            "search_memories",
-            "search_sessions",
-            "read_session_history",
-            "read_session_tool_result",
-        }
+        assert memory_context_state.tools == []
         assert memory_write_tools == {"save_memory", "delete_memory"}
 
     async def test_does_not_auto_bind_claude_rules_when_capability_denies(
         self,
     ) -> None:
         """Claude rules Toolkit is not auto-bound without Runtime capability."""
-        session = AsyncMock(spec=AsyncSession)
-        session.get.return_value = None
+        session = _resolution_session()
 
         bindings = await resolve_agent_tools(
             "agent-1",
             _make_toolkit_context(),
             execution_mode=ToolkitExecutionMode.ROOT,
             toolkit_registry={},
-            toolkit_repository=_empty_toolkit_repository(),
-            session_manager=_session_manager_for(session),
             web_url="https://example.test",
             oauth_secret_key="secret",
             mcp_proxy_url=None,
@@ -1456,22 +1802,30 @@ class TestResolveAgentTools:
             ),
             memory_enabled=True,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(session),
+                agent_repository=AgentRepository(),
+                integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+                toolkit_repository=_empty_toolkit_repository(),
+            ),
+            workspace_handle=None,
         )
 
-        assert [binding.slug for binding in bindings] == ["memory_read", "memory_write"]
+        assert [binding.slug for binding in bindings] == [
+            "memory_context",
+            "memory_write",
+            "readable_storage",
+        ]
 
     async def test_auto_binds_subagent_toolkit_in_root_mode(self) -> None:
         """Root sessions receive the coherent subagent collaboration bundle."""
-        session = AsyncMock(spec=AsyncSession)
-        session.get.return_value = None
+        session = _resolution_session()
 
         bindings = await resolve_agent_tools(
             "agent-1",
             _make_toolkit_context(),
             execution_mode=ToolkitExecutionMode.ROOT,
             toolkit_registry={},
-            toolkit_repository=_empty_toolkit_repository(),
-            session_manager=_session_manager_for(session),
             web_url="https://example.test",
             oauth_secret_key="secret",
             mcp_proxy_url=None,
@@ -1482,6 +1836,13 @@ class TestResolveAgentTools:
             subagent_toolkit_provider=_make_subagent_provider(),
             memory_enabled=False,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(session),
+                agent_repository=AgentRepository(),
+                integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+                toolkit_repository=_empty_toolkit_repository(),
+            ),
+            workspace_handle=None,
         )
 
         assert [binding.slug for binding in bindings] == ["subagent"]
@@ -1496,20 +1857,17 @@ class TestResolveAgentTools:
 
     async def test_subagent_mode_filters_root_only_auto_bound_toolkits(self) -> None:
         """Subagent mode keeps read/runtime capabilities and excludes root-only ones."""
-        session = AsyncMock(spec=AsyncSession)
-        session.get.return_value = None
+        session = _resolution_session()
 
         @asynccontextmanager
-        async def goal_session_manager() -> AsyncGenerator[AsyncSession, None]:
-            yield AsyncMock(spec=AsyncSession)
+        async def goal_session_manager() -> AsyncGenerator[WriteSession, None]:
+            yield ReadWriteSession(AsyncMock(spec=AsyncSession))
 
         bindings = await resolve_agent_tools(
             "agent-1",
             _make_toolkit_context(),
             execution_mode=ToolkitExecutionMode.SUBAGENT,
             toolkit_registry={},
-            toolkit_repository=_empty_toolkit_repository(),
-            session_manager=_session_manager_for(session),
             web_url="https://example.test",
             oauth_secret_key="secret",
             mcp_proxy_url=None,
@@ -1522,23 +1880,30 @@ class TestResolveAgentTools:
                 store=_FakeClaudeRulesAppendixDedupeStateStore()
             ),
             goal_toolkit_provider=GoalToolkitProvider(
-                store=GoalStateStore(session_manager=goal_session_manager)
+                store=GoalStateStore(session_manager=goal_session_manager, owner=None)
             ),
             scheduled_toolkit_provider=_make_scheduled_provider(),
             memory_enabled=True,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=True),
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(session),
+                agent_repository=AgentRepository(),
+                integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+                toolkit_repository=_empty_toolkit_repository(),
+            ),
+            workspace_handle=None,
         )
 
         assert [binding.slug for binding in bindings] == [
-            "memory_read",
+            "memory_context",
+            "readable_storage",
             "runtime",
             "claude_rules",
         ]
 
     async def test_scheduled_toolkit_is_unprefixed_and_root_only(self) -> None:
         """Scheduled auto-binding needs no attachment, config, or credentials."""
-        session = AsyncMock(spec=AsyncSession)
-        session.get.return_value = None
+        session = _resolution_session()
         provider = _make_scheduled_provider()
 
         root = await resolve_agent_tools(
@@ -1546,8 +1911,6 @@ class TestResolveAgentTools:
             _make_toolkit_context(),
             execution_mode=ToolkitExecutionMode.ROOT,
             toolkit_registry={},
-            toolkit_repository=_empty_toolkit_repository(),
-            session_manager=_session_manager_for(session),
             web_url="https://example.test",
             oauth_secret_key="secret",
             mcp_proxy_url=None,
@@ -1559,14 +1922,19 @@ class TestResolveAgentTools:
             scheduled_toolkit_provider=provider,
             memory_enabled=False,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=True),
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(session),
+                agent_repository=AgentRepository(),
+                integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+                toolkit_repository=_empty_toolkit_repository(),
+            ),
+            workspace_handle=None,
         )
         subagent = await resolve_agent_tools(
             "agent-1",
             _make_toolkit_context(),
             execution_mode=ToolkitExecutionMode.SUBAGENT,
             toolkit_registry={},
-            toolkit_repository=_empty_toolkit_repository(),
-            session_manager=_session_manager_for(session),
             web_url="https://example.test",
             oauth_secret_key="secret",
             mcp_proxy_url=None,
@@ -1577,13 +1945,59 @@ class TestResolveAgentTools:
             scheduled_toolkit_provider=provider,
             memory_enabled=False,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
+            repositories=get_engine_resolve_repositories(
+                session_manager=_session_manager_for(session),
+                agent_repository=AgentRepository(),
+                integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+                toolkit_repository=_empty_toolkit_repository(),
+            ),
+            workspace_handle=None,
         )
 
-        assert [binding.slug for binding in root] == ["runtime", "scheduled"]
-        assert root[1].use_prefix is False
-        assert root[1].toolkit_type is None
-        assert root[1].toolkit_config_id is None
-        assert root[1].source_revision is not None
-        assert isinstance(root[1].toolkit, ScheduledToolkit)
-        assert root[1].toolkit.runtime_context_store is not None
+        assert [binding.slug for binding in root] == [
+            "readable_storage",
+            "runtime",
+            "scheduled",
+        ]
+        assert root[2].use_prefix is False
+        assert root[2].toolkit_type is None
+        assert root[2].toolkit_config_id is None
+        assert root[2].source_revision is not None
+        assert isinstance(root[2].toolkit, ScheduledToolkit)
+        assert root[2].toolkit.runtime_context_store is not None
         assert subagent == []
+
+
+@pytest.mark.parametrize("top_k", [None, 37])
+async def test_existing_agent_top_k_reaches_run_and_retry_carrier(
+    top_k: int | None,
+) -> None:
+    agent = _make_agent()
+    agent.model_parameters = ModelParameters(top_k=top_k)
+    for option in agent.selectable_model_options:
+        for candidate in option.candidates:
+            candidate.model_selection.normalized_capabilities.parameters.top_k = True
+    before = agent.model_parameters.model_dump_json()
+    agent_repository = AsyncMock()
+    agent_repository.get_by_id.return_value = agent
+    integration_repository = AsyncMock()
+    integration_repository.get_by_id_with_secrets.return_value = _make_integration()
+    session_manager = _session_manager_for(AsyncMock(spec=AsyncSession))
+    result = await resolve_invoke_input(
+        InvokeInput(agent_id="agent-1", session_id="session-1", messages=[]),
+        repositories=get_engine_resolve_repositories(
+            agent_repository=agent_repository,
+            integration_repository=integration_repository,
+            session_manager=session_manager,
+            toolkit_repository=ToolkitRepository(cipher=None),
+        ),
+        oauth_clients=create_runtime_oauth_client_factories(),
+        exchange_file_service=AsyncMock(),
+        model_file_service=AsyncMock(),
+        image_generation_catalog_service=_make_image_generation_catalog_service(),
+        model_metadata_service=make_test_model_metadata_service(source=None),
+    )
+    assert isinstance(result, Success)
+    assert result.value.top_k == top_k
+    assert dataclasses.replace(result.value, user_messages=[]).top_k == top_k
+    assert agent.model_parameters.model_dump_json() == before

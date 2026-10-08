@@ -40,7 +40,7 @@ class TestToolkitListResponse(unittest.TestCase):
                         slug = '', 
                         name = '', 
                         description = '', 
-                        config_schema = { }, 
+                        config_schema = azentspublicclient.models.config_schema.Config Schema(), 
                         system_prompt = '', )
                     ]
             )
@@ -51,7 +51,7 @@ class TestToolkitListResponse(unittest.TestCase):
                         slug = '', 
                         name = '', 
                         description = '', 
-                        config_schema = { }, 
+                        config_schema = azentspublicclient.models.config_schema.Config Schema(), 
                         system_prompt = '', )
                     ],
         )

@@ -1,22 +1,20 @@
 """xAI OAuth connection service tests."""
 
 import uuid
-from typing import cast
 
 import httpx
 from azcommon.result import Failure, Success
 from cryptography.fernet import Fernet
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import LLMCatalogPurpose
-from azents.rdb.session import SessionManager
+from azents.core.workspace import WorkspaceCreate
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.xai_oauth_session import XaiOAuthSessionRepository
 from azents.repos.xai_oauth_session.operations import XaiOAuthOperations
 
@@ -30,13 +28,13 @@ _TEST_KEY = Fernet.generate_key().decode()
 class _SessionManager:
     """Expose a single test DB session as a context manager."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: WriteSession) -> None:
         self.session = session
 
     def __call__(self) -> "_SessionManager":
         return self
 
-    async def __aenter__(self) -> AsyncSession:
+    async def __aenter__(self) -> WriteSession:
         return self.session
 
     async def __aexit__(self, *_args: object) -> None:
@@ -44,7 +42,7 @@ class _SessionManager:
 
 
 async def test_slow_down_increases_and_returns_poll_interval(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Persist and expose every RFC 8628 slow_down interval increment."""
     suffix = uuid.uuid4().hex[:12]
@@ -85,7 +83,7 @@ async def test_slow_down_increases_and_returns_poll_interval(
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
         service = XaiOAuthService(
             XaiOAuthOperations(
-                cast(SessionManager[AsyncSession], _SessionManager(rdb_session)),
+                _SessionManager(rdb_session),
                 XaiOAuthSessionRepository(cipher),
                 LLMProviderIntegrationRepository(cipher),
                 LLMCatalogRepository(),
@@ -117,7 +115,7 @@ async def test_slow_down_increases_and_returns_poll_interval(
 
 
 async def test_connected_device_flow_creates_integration_catalog(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Create the catalog transactionally before queuing the initial sync."""
     suffix = uuid.uuid4().hex[:12]
@@ -166,7 +164,7 @@ async def test_connected_device_flow_creates_integration_catalog(
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
         service = XaiOAuthService(
             XaiOAuthOperations(
-                cast(SessionManager[AsyncSession], _SessionManager(rdb_session)),
+                _SessionManager(rdb_session),
                 XaiOAuthSessionRepository(cipher),
                 LLMProviderIntegrationRepository(cipher),
                 catalog_repo,
@@ -212,7 +210,7 @@ async def test_connected_device_flow_creates_integration_catalog(
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
         reconnect_service = XaiOAuthService(
             XaiOAuthOperations(
-                cast(SessionManager[AsyncSession], _SessionManager(rdb_session)),
+                _SessionManager(rdb_session),
                 XaiOAuthSessionRepository(cipher),
                 repo,
                 catalog_repo,

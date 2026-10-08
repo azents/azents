@@ -12,6 +12,9 @@ from azents.rdb.models.base import RDBModel
 _RUNTIME_WEB_SERVICE_CUTOVER = "a32efa82fd63"
 _CATALOG_EXECUTION_CUTOVER = "4550a9c9083a"
 _PRE_CATALOG_EXECUTION_CUTOVER = "43a0fbdc96fe"
+_TOOLKIT_NAMESPACE_FOUNDATION = "af654664e6b6"
+_TOOLKIT_NAMESPACE_RECONCILE = "a0dac2fe3ca2"
+_TOOLKIT_SLUG_CAPABILITY = "cda14157c46c"
 
 
 def test_single_head_revision(alembic_runner: MigrationContext) -> None:
@@ -114,6 +117,340 @@ def test_catalog_execution_cutover_is_forward_only(
         for column in sa.inspect(alembic_engine).get_columns("llm_catalogs")
     }
     assert "lowerer_target" not in columns
+
+
+def test_toolkit_namespace_foundation_backfills_all_persisted_relations(
+    alembic_runner: MigrationContext,
+    alembic_engine: Engine,
+) -> None:
+    """Backfill shared attachments and Agent-owned Toolkits without rewriting Slugs."""
+    alembic_runner.migrate_up_to(_CATALOG_EXECUTION_CUTOVER)
+    with alembic_engine.begin() as connection:
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO workspaces (id, name, handle)
+                VALUES (
+                    'ws-ns-migration',
+                    'Namespace',
+                    'namespace-migration'
+                )
+                """
+            )
+        )
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO agents (
+                    id, workspace_id, name, model_selection,
+                    lightweight_model_selection, selectable_model_options,
+                    main_model_label, lightweight_model_label, enabled, type,
+                    memory_enabled
+                )
+                VALUES (
+                    'agent-ns-migration',
+                    'ws-ns-migration',
+                    'Namespace migration Agent',
+                    '{}'::jsonb,
+                    '{}'::jsonb,
+                    '[{
+                        "label": "default",
+                        "candidates": [{
+                            "model_selection": {},
+                            "settings": {
+                                "context_window_tokens": null,
+                                "max_output_tokens": null,
+                                "builtin_tools": []
+                            }
+                        }],
+                        "subagent_enabled": true,
+                        "subagent_guidance": null
+                    }]'::jsonb,
+                    'default',
+                    'default',
+                    TRUE,
+                    'public',
+                    TRUE
+                )
+                """
+            )
+        )
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO toolkit_configs (
+                    id, workspace_id, owner_agent_id, toolkit_type, slug, name,
+                    config, enabled
+                )
+                VALUES
+                    (
+                        'toolkit-ns-shared-base',
+                        'ws-ns-migration',
+                        NULL,
+                        'mcp',
+                        'mcp',
+                        'Shared base',
+                        '{}'::jsonb,
+                        FALSE
+                    ),
+                    (
+                        'toolkit-ns-shared-suffix',
+                        'ws-ns-migration',
+                        NULL,
+                        'mcp',
+                        'mcp_2',
+                        'Shared suffix',
+                        '{}'::jsonb,
+                        FALSE
+                    ),
+                    (
+                        'toolkit-ns-owned',
+                        'ws-ns-migration',
+                        'agent-ns-migration',
+                        'mcp',
+                        'mcp',
+                        'Owned',
+                        '{}'::jsonb,
+                        FALSE
+                    )
+                """
+            )
+        )
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO agent_toolkits (id, agent_id, toolkit_id, toolkit_type)
+                VALUES
+                    (
+                        'attachment-ns-base',
+                        'agent-ns-migration',
+                        'toolkit-ns-shared-base',
+                        'mcp'
+                    ),
+                    (
+                        'attachment-ns-suffix',
+                        'agent-ns-migration',
+                        'toolkit-ns-shared-suffix',
+                        'mcp'
+                    )
+                """
+            )
+        )
+
+    alembic_runner.migrate_up_to(_TOOLKIT_NAMESPACE_FOUNDATION)
+    with alembic_engine.connect() as connection:
+        reservations = connection.execute(
+            sa.text(
+                """
+                SELECT toolkit_id, base_slug, ordinal, namespace
+                FROM agent_toolkit_namespace_reservations
+                WHERE agent_id = 'agent-ns-migration'
+                ORDER BY toolkit_id
+                """
+            )
+        ).all()
+        sequences = connection.execute(
+            sa.text(
+                """
+                SELECT base_slug, last_ordinal
+                FROM agent_toolkit_namespace_sequences
+                WHERE agent_id = 'agent-ns-migration'
+                ORDER BY base_slug
+                """
+            )
+        ).all()
+        stored_slugs = connection.execute(
+            sa.text(
+                """
+                SELECT id, slug
+                FROM toolkit_configs
+                WHERE id LIKE 'toolkit-ns-%'
+                ORDER BY id
+                """
+            )
+        ).all()
+
+    assert reservations == [
+        (
+            "toolkit-ns-owned",
+            "mcp",
+            3,
+            "mcp_3",
+        ),
+        (
+            "toolkit-ns-shared-base",
+            "mcp",
+            1,
+            "mcp",
+        ),
+        (
+            "toolkit-ns-shared-suffix",
+            "mcp_2",
+            1,
+            "mcp_2",
+        ),
+    ]
+    assert sequences == [("mcp", 3), ("mcp_2", 1)]
+    assert stored_slugs == [
+        ("toolkit-ns-owned", "mcp"),
+        ("toolkit-ns-shared-base", "mcp"),
+        ("toolkit-ns-shared-suffix", "mcp_2"),
+    ]
+
+
+def test_toolkit_namespace_reader_cutover_reconciles_rolling_writes(
+    alembic_runner: MigrationContext,
+    alembic_engine: Engine,
+) -> None:
+    """Allocate relations written by an older Foundation pod after first backfill."""
+    alembic_runner.migrate_up_to(_TOOLKIT_NAMESPACE_FOUNDATION)
+    with alembic_engine.begin() as connection:
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO workspaces (id, name, handle)
+                VALUES ('ws-ns-reconcile', 'Namespace', 'namespace-reconcile')
+                """
+            )
+        )
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO agents (
+                    id, workspace_id, name, model_selection,
+                    lightweight_model_selection, selectable_model_options,
+                    main_model_label, lightweight_model_label, enabled, type,
+                    memory_enabled
+                )
+                VALUES (
+                    'agent-ns-reconcile',
+                    'ws-ns-reconcile',
+                    'Namespace reconcile Agent',
+                    '{}'::jsonb,
+                    '{}'::jsonb,
+                    '[{
+                        "label": "default",
+                        "candidates": [{
+                            "model_selection": {},
+                            "settings": {
+                                "context_window_tokens": null,
+                                "max_output_tokens": null,
+                                "builtin_tools": []
+                            }
+                        }],
+                        "subagent_enabled": true,
+                        "subagent_guidance": null
+                    }]'::jsonb,
+                    'default',
+                    'default',
+                    TRUE,
+                    'public',
+                    TRUE
+                )
+                """
+            )
+        )
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO toolkit_configs (
+                    id, workspace_id, owner_agent_id, toolkit_type, slug, name,
+                    config, enabled
+                )
+                VALUES
+                    (
+                        'toolkit-ns-reconcile',
+                        'ws-ns-reconcile',
+                        'agent-ns-reconcile',
+                        'mcp',
+                        'late',
+                        'Late Toolkit',
+                        '{}'::jsonb,
+                        TRUE
+                    ),
+                    (
+                        'toolkit-ns-stale',
+                        'ws-ns-reconcile',
+                        'agent-ns-reconcile',
+                        'mcp',
+                        'old_slug',
+                        'Stale Toolkit',
+                        '{}'::jsonb,
+                        TRUE
+                    )
+                """
+            )
+        )
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO agent_toolkit_namespace_reservations (
+                    id, agent_id, toolkit_id, base_slug, ordinal, namespace
+                )
+                VALUES (
+                    'namespace-ns-stale',
+                    'agent-ns-reconcile',
+                    'toolkit-ns-stale',
+                    'old_slug',
+                    1,
+                    'old_slug'
+                )
+                """
+            )
+        )
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO agent_toolkit_namespace_sequences (
+                    id, agent_id, base_slug, last_ordinal
+                )
+                VALUES (
+                    'sequence-ns-stale',
+                    'agent-ns-reconcile',
+                    'old_slug',
+                    1
+                )
+                """
+            )
+        )
+        connection.execute(
+            sa.text(
+                """
+                UPDATE toolkit_configs
+                SET slug = 'new_slug'
+                WHERE id = 'toolkit-ns-stale'
+                """
+            )
+        )
+
+    alembic_runner.migrate_up_to(_TOOLKIT_NAMESPACE_RECONCILE)
+    with alembic_engine.connect() as connection:
+        reservations = connection.execute(
+            sa.text(
+                """
+                SELECT toolkit_id, base_slug, ordinal, namespace
+                FROM agent_toolkit_namespace_reservations
+                WHERE agent_id = 'agent-ns-reconcile'
+                  AND toolkit_id IS NOT NULL
+                ORDER BY toolkit_id
+                """
+            )
+        ).all()
+        retired = connection.execute(
+            sa.text(
+                """
+                SELECT toolkit_id, base_slug, namespace
+                FROM agent_toolkit_namespace_reservations
+                WHERE id = 'namespace-ns-stale'
+                """
+            )
+        ).one()
+
+    assert reservations == [
+        ("toolkit-ns-reconcile", "late", 1, "late"),
+        ("toolkit-ns-stale", "new_slug", 1, "new_slug"),
+    ]
+    assert retired == (None, "old_slug", "old_slug")
 
 
 def test_all_check_constraints_are_named(
@@ -245,3 +582,164 @@ def test_baseline_schema_and_seed_state(
             )
         ).one()
         assert runtime_web_authority_tables == (True, True, True, True)
+
+
+def test_toolkit_slug_capability_removes_indexes_and_guards_downgrade(
+    alembic_runner: MigrationContext,
+    alembic_engine: Engine,
+) -> None:
+    """Allow duplicate stored Slugs and reject index recreation until resolved."""
+    alembic_runner.migrate_up_to(_TOOLKIT_NAMESPACE_RECONCILE)
+    before_indexes = {
+        index["name"]
+        for index in sa.inspect(alembic_engine).get_indexes("toolkit_configs")
+    }
+    assert "uq_toolkit_configs_shared_workspace_slug" in before_indexes
+    assert "uq_toolkit_configs_owner_agent_slug" in before_indexes
+
+    alembic_runner.migrate_up_to(_TOOLKIT_SLUG_CAPABILITY)
+    capability_indexes = {
+        index["name"]
+        for index in sa.inspect(alembic_engine).get_indexes("toolkit_configs")
+    }
+    assert "uq_toolkit_configs_shared_workspace_slug" not in capability_indexes
+    assert "uq_toolkit_configs_owner_agent_slug" not in capability_indexes
+
+    with alembic_engine.begin() as connection:
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO workspaces (id, name, handle)
+                VALUES ('ws-duplicate-slug', 'Duplicate Slug', 'duplicate-slug')
+                """
+            )
+        )
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO toolkit_configs (
+                    id, workspace_id, toolkit_type, slug, name, config, enabled
+                )
+                VALUES
+                    (
+                        'toolkit-duplicate-a',
+                        'ws-duplicate-slug',
+                        'mcp',
+                        'duplicate',
+                        'Duplicate A',
+                        '{}'::jsonb,
+                        TRUE
+                    ),
+                    (
+                        'toolkit-duplicate-b',
+                        'ws-duplicate-slug',
+                        'mcp',
+                        'duplicate',
+                        'Duplicate B',
+                        '{}'::jsonb,
+                        TRUE
+                    )
+                """
+            )
+        )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Cannot recreate Toolkit Slug unique indexes",
+    ):
+        alembic_runner.migrate_down_to(_TOOLKIT_NAMESPACE_RECONCILE)
+
+    with alembic_engine.begin() as connection:
+        connection.execute(
+            sa.text("DELETE FROM toolkit_configs WHERE id = 'toolkit-duplicate-b'")
+        )
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO agents (
+                    id, workspace_id, name, model_selection,
+                    lightweight_model_selection, selectable_model_options,
+                    main_model_label, lightweight_model_label, enabled, type,
+                    memory_enabled
+                )
+                VALUES (
+                    'agent-effective-duplicate',
+                    'ws-duplicate-slug',
+                    'Effective duplicate Agent',
+                    '{}'::jsonb,
+                    '{}'::jsonb,
+                    '[{
+                        "label": "default",
+                        "candidates": [{
+                            "model_selection": {},
+                            "settings": {
+                                "context_window_tokens": null,
+                                "max_output_tokens": null,
+                                "builtin_tools": []
+                            }
+                        }],
+                        "subagent_enabled": true,
+                        "subagent_guidance": null
+                    }]'::jsonb,
+                    'default',
+                    'default',
+                    TRUE,
+                    'public',
+                    TRUE
+                )
+                """
+            )
+        )
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO toolkit_configs (
+                    id, workspace_id, owner_agent_id, toolkit_type,
+                    slug, name, config, enabled
+                )
+                VALUES (
+                    'toolkit-effective-owned',
+                    'ws-duplicate-slug',
+                    'agent-effective-duplicate',
+                    'mcp',
+                    'duplicate',
+                    'Owned duplicate',
+                    '{}'::jsonb,
+                    TRUE
+                )
+                """
+            )
+        )
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO agent_toolkits (
+                    id, agent_id, toolkit_id, toolkit_type
+                )
+                VALUES (
+                    'attachment-effective-duplicate',
+                    'agent-effective-duplicate',
+                    'toolkit-duplicate-a',
+                    'mcp'
+                )
+                """
+            )
+        )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Cannot recreate Toolkit Slug unique indexes",
+    ):
+        alembic_runner.migrate_down_to(_TOOLKIT_NAMESPACE_RECONCILE)
+
+    with alembic_engine.begin() as connection:
+        connection.execute(
+            sa.text("DELETE FROM toolkit_configs WHERE id = 'toolkit-effective-owned'")
+        )
+    alembic_runner.migrate_down_to(_TOOLKIT_NAMESPACE_RECONCILE)
+    restored_indexes = {
+        index["name"]
+        for index in sa.inspect(alembic_engine).get_indexes("toolkit_configs")
+    }
+    assert "uq_toolkit_configs_shared_workspace_slug" in restored_indexes
+    assert "uq_toolkit_configs_owner_agent_slug" in restored_indexes

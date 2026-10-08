@@ -5,28 +5,31 @@ from azcommon.result import Failure, Result, Success
 from azcommon.sqlalchemy.postgres import is_constrained_by
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.selectable import Subquery
 
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import ToolkitScopeType
+from azents.core.toolkit_errors import (
+    DuplicateAgentToolkit,
+    DuplicateScope,
+    NotFound,
+)
 from azents.rdb.models.toolkit import (
     RDBAgentToolkit,
+    RDBAgentToolkitNamespaceReservation,
     RDBToolkitConfig,
     RDBToolkitScope,
 )
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import (
     AgentToolkit,
     AgentToolkitCreate,
-    DuplicateAgentToolkit,
-    DuplicateScope,
-    DuplicateSlug,
     EffectiveToolkitConfig,
-    EffectiveToolkitSlugConflict,
+    EffectiveToolkitNamespaceMismatch,
+    EffectiveToolkitNamespaceMissing,
     EffectiveToolkitSource,
-    NotFound,
     ToolkitConfig,
     ToolkitCreate,
     ToolkitScope,
@@ -76,56 +79,38 @@ class ToolkitRepository:
         :param cipher: Credential encryption/decryption object. Required for
             credentials read/write.
         """
-        self._cipher = cipher
+        self.cipher = cipher
 
     async def create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: ToolkitCreate,
-    ) -> Result[ToolkitConfig, DuplicateSlug]:
+    ) -> ToolkitConfig:
         """Create Toolkit.
 
         :param session: Database session
         :param create: Create data
-        :return: Created Toolkit or error
+        :return: Created Toolkit
         """
-        try:
-            rdb_toolkit = RDBToolkitConfig(
-                workspace_id=create.workspace_id,
-                owner_agent_id=create.owner_agent_id,
-                toolkit_type=create.toolkit_type,
-                slug=create.slug,
-                name=create.name,
-                description=create.description,
-                config=create.config,
-                prompt=create.prompt,
-                encrypted_credentials=self._encrypt(create.credentials),
-                enabled=create.enabled,
-                always_expose_tools=create.always_expose_tools,
-            )
-            session.add(rdb_toolkit)
-            await session.flush()
-            return Success(self._build(rdb_toolkit))
-        except IntegrityError as e:
-            await session.rollback()
-            if is_constrained_by(
-                e,
-                RDBToolkitConfig.UQ_SHARED_WORKSPACE_SLUG.name or "",
-            ) or is_constrained_by(
-                e,
-                RDBToolkitConfig.UQ_OWNER_AGENT_SLUG.name or "",
-            ):
-                return Failure(
-                    DuplicateSlug(
-                        workspace_id=create.workspace_id,
-                        owner_agent_id=create.owner_agent_id,
-                        slug=create.slug,
-                    )
-                )
-            raise
+        rdb_toolkit = RDBToolkitConfig(
+            workspace_id=create.workspace_id,
+            owner_agent_id=create.owner_agent_id,
+            toolkit_type=create.toolkit_type,
+            slug=create.slug,
+            name=create.name,
+            description=create.description,
+            config=create.config,
+            prompt=create.prompt,
+            encrypted_credentials=self._encrypt(create.credentials),
+            enabled=create.enabled,
+            always_expose_tools=create.always_expose_tools,
+        )
+        session.write_session.add(rdb_toolkit)
+        await session.write_session.flush()
+        return self._build(rdb_toolkit)
 
     async def get_by_id(
-        self, session: AsyncSession, toolkit_id: str
+        self, session: ReadSession, toolkit_id: str
     ) -> ToolkitConfig | None:
         """Fetch Toolkit by ID.
 
@@ -133,32 +118,35 @@ class ToolkitRepository:
         :param toolkit_id: Toolkit ID
         :return: Toolkit or None
         """
-        rdb = await session.get(RDBToolkitConfig, toolkit_id)
+        rdb = await session.read_session.get(RDBToolkitConfig, toolkit_id)
         if rdb is None:
             return None
         return self._build(rdb)
 
-    async def get_by_id_for_update(
+    async def claim_shared_namespace_mutation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         toolkit_id: str,
     ) -> ToolkitConfig | None:
-        """Fetch and lock one ToolkitConfig."""
-        result = await session.execute(
+        """Fence actual shared attachment/slug namespace identity allocation (E1)."""
+        row = await session.write_session.scalar(
             sa.select(RDBToolkitConfig)
-            .where(RDBToolkitConfig.id == toolkit_id)
+            .where(
+                RDBToolkitConfig.id == toolkit_id,
+                RDBToolkitConfig.owner_agent_id.is_(None),
+            )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
-        rdb = result.scalar_one_or_none()
-        return self._build(rdb) if rdb is not None else None
+        return None if row is None else self._build(row)
 
     async def get_shared_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         toolkit_id: str,
     ) -> ToolkitConfig | None:
         """Fetch one Workspace-shared ToolkitConfig."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBToolkitConfig).where(
                 RDBToolkitConfig.id == toolkit_id,
                 RDBToolkitConfig.owner_agent_id.is_(None),
@@ -167,32 +155,15 @@ class ToolkitRepository:
         rdb = result.scalar_one_or_none()
         return self._build(rdb) if rdb is not None else None
 
-    async def get_shared_by_id_for_update(
-        self,
-        session: AsyncSession,
-        toolkit_id: str,
-    ) -> ToolkitConfig | None:
-        """Fetch and lock one Workspace-shared ToolkitConfig."""
-        result = await session.execute(
-            sa.select(RDBToolkitConfig)
-            .where(
-                RDBToolkitConfig.id == toolkit_id,
-                RDBToolkitConfig.owner_agent_id.is_(None),
-            )
-            .with_for_update()
-        )
-        rdb = result.scalar_one_or_none()
-        return self._build(rdb) if rdb is not None else None
-
     async def get_agent_owned_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         toolkit_id: str,
         *,
         agent_id: str,
     ) -> ToolkitConfig | None:
         """Fetch one ToolkitConfig owned by the exact Agent."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBToolkitConfig).where(
                 RDBToolkitConfig.id == toolkit_id,
                 RDBToolkitConfig.owner_agent_id == agent_id,
@@ -202,7 +173,7 @@ class ToolkitRepository:
         return self._build(rdb) if rdb is not None else None
 
     async def list_by_workspace(
-        self, session: AsyncSession, workspace_id: str
+        self, session: ReadSession, workspace_id: str
     ) -> list[ToolkitConfig]:
         """Fetch all Toolkits in workspace.
 
@@ -210,7 +181,7 @@ class ToolkitRepository:
         :param workspace_id: Workspace ID
         :return: Toolkit list
         """
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBToolkitConfig)
             .where(
                 RDBToolkitConfig.workspace_id == workspace_id,
@@ -222,13 +193,13 @@ class ToolkitRepository:
 
     async def list_by_owner_agent(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
         *,
         workspace_id: str,
     ) -> list[ToolkitConfig]:
         """Fetch every ToolkitConfig owned by one Agent."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBToolkitConfig)
             .where(
                 RDBToolkitConfig.owner_agent_id == agent_id,
@@ -240,20 +211,30 @@ class ToolkitRepository:
 
     async def list_effective_for_agent(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
         *,
         workspace_id: str,
     ) -> list[EffectiveToolkitConfig]:
         """Fetch enabled shared and Agent-owned ToolkitConfigs for one Agent."""
         relation = effective_agent_toolkit_relation(enabled_only=True)
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(
                 RDBToolkitConfig,
                 relation.c.source,
                 relation.c.agent_toolkit_id,
+                RDBAgentToolkitNamespaceReservation.base_slug,
+                RDBAgentToolkitNamespaceReservation.namespace,
             )
             .join(relation, relation.c.toolkit_id == RDBToolkitConfig.id)
+            .outerjoin(
+                RDBAgentToolkitNamespaceReservation,
+                sa.and_(
+                    RDBAgentToolkitNamespaceReservation.agent_id == relation.c.agent_id,
+                    RDBAgentToolkitNamespaceReservation.toolkit_id
+                    == relation.c.toolkit_id,
+                ),
+            )
             .where(
                 relation.c.agent_id == agent_id,
                 relation.c.workspace_id == workspace_id,
@@ -264,46 +245,53 @@ class ToolkitRepository:
                 RDBToolkitConfig.id,
             )
         )
-        effective = [
+        rows = result.all()
+        missing = next(
+            (
+                rdb.id
+                for rdb, _source, _agent_toolkit_id, _base_slug, namespace in rows
+                if namespace is None
+            ),
+            None,
+        )
+        if missing is not None:
+            raise EffectiveToolkitNamespaceMissing(
+                agent_id=agent_id,
+                toolkit_id=missing,
+            )
+        mismatch = next(
+            (
+                (rdb.id, rdb.slug, base_slug)
+                for rdb, _source, _agent_toolkit_id, base_slug, _namespace in rows
+                if base_slug != rdb.slug
+            ),
+            None,
+        )
+        if mismatch is not None:
+            toolkit_id, toolkit_slug, reservation_base_slug = mismatch
+            raise EffectiveToolkitNamespaceMismatch(
+                agent_id=agent_id,
+                toolkit_id=toolkit_id,
+                toolkit_slug=toolkit_slug,
+                reservation_base_slug=reservation_base_slug,
+            )
+        return [
             EffectiveToolkitConfig(
                 toolkit=self._build(rdb),
                 source=EffectiveToolkitSource(source),
                 agent_toolkit_id=agent_toolkit_id,
+                namespace=namespace,
             )
-            for rdb, source, agent_toolkit_id in result.all()
+            for rdb, source, agent_toolkit_id, _base_slug, namespace in rows
+            if namespace is not None
         ]
-        self._assert_unique_effective_slugs(agent_id, effective)
-        return effective
-
-    async def has_effective_slug_conflict(
-        self,
-        session: AsyncSession,
-        *,
-        agent_id: str,
-        workspace_id: str,
-        toolkit_id: str,
-        slug: str,
-        enabled: bool,
-    ) -> bool:
-        """Return whether a candidate conflicts with another effective Toolkit."""
-        if not enabled:
-            return False
-        effective = await self.list_effective_for_agent(
-            session,
-            agent_id,
-            workspace_id=workspace_id,
-        )
-        return any(
-            item.toolkit.id != toolkit_id and item.toolkit.slug == slug
-            for item in effective
-        )
 
     async def update_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         toolkit_id: str,
         update: ToolkitUpdate,
-    ) -> Result[ToolkitConfig, NotFound | DuplicateSlug]:
+    ) -> Result[ToolkitConfig, NotFound]:
         """Update Toolkit by ID.
 
         :param session: Database session
@@ -317,55 +305,36 @@ class ToolkitRepository:
                 return Failure(NotFound(toolkit_id=toolkit_id))
             return Success(toolkit)
 
-        try:
-            values: dict[str, object] = dict(update)
-            if "credentials" in update:
-                raw = update["credentials"]
-                values.pop("credentials")
-                values["encrypted_credentials"] = self._encrypt(raw)
-            values["revision"] = RDBToolkitConfig.revision + 1
-            result = await session.execute(
-                sa.update(RDBToolkitConfig)
-                .where(RDBToolkitConfig.id == toolkit_id)
-                .values(**values)
-                .returning(RDBToolkitConfig)
-            )
-            rdb = result.scalar_one_or_none()
-            if rdb is None:
-                return Failure(NotFound(toolkit_id=toolkit_id))
-            return Success(self._build(rdb))
-        except IntegrityError as e:
-            await session.rollback()
-            if is_constrained_by(
-                e,
-                RDBToolkitConfig.UQ_SHARED_WORKSPACE_SLUG.name or "",
-            ) or is_constrained_by(
-                e,
-                RDBToolkitConfig.UQ_OWNER_AGENT_SLUG.name or "",
-            ):
-                slug = update.get("slug", "")
-                return Failure(
-                    DuplicateSlug(
-                        workspace_id="",
-                        owner_agent_id=None,
-                        slug=slug or "",
-                    )
-                )
-            raise
+        values: dict[str, object] = dict(update)
+        if "credentials" in update:
+            raw = update["credentials"]
+            values.pop("credentials")
+            values["encrypted_credentials"] = self._encrypt(raw)
+        values["revision"] = RDBToolkitConfig.revision + 1
+        result = await session.write_session.execute(
+            sa.update(RDBToolkitConfig)
+            .where(RDBToolkitConfig.id == toolkit_id)
+            .values(**values)
+            .returning(RDBToolkitConfig)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return Failure(NotFound(toolkit_id=toolkit_id))
+        return Success(self._build(rdb))
 
-    async def delete_by_id(self, session: AsyncSession, toolkit_id: str) -> None:
+    async def delete_by_id(self, session: WriteSession, toolkit_id: str) -> None:
         """Delete Toolkit by ID.
 
         :param session: Database session
         :param toolkit_id: Toolkit ID
         """
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBToolkitConfig).where(RDBToolkitConfig.id == toolkit_id)
         )
 
     async def update_credentials(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         toolkit_id: str,
         credentials: BaseModel,
     ) -> None:
@@ -384,11 +353,11 @@ class ToolkitRepository:
                 revision=RDBToolkitConfig.revision + 1,
             )
         )
-        await session.execute(stmt)
+        await session.write_session.execute(stmt)
 
     async def list_available_for_workspace_user(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         workspace_id: str,
         user_id: str,
     ) -> list[ToolkitConfig]:
@@ -423,42 +392,25 @@ class ToolkitRepository:
             .distinct()
             .order_by(RDBToolkitConfig.created_at.desc())
         )
-        result = await session.execute(stmt)
+        result = await session.read_session.execute(stmt)
         return [self._build(rdb) for rdb in result.scalars().all()]
-
-    @staticmethod
-    def _assert_unique_effective_slugs(
-        agent_id: str,
-        effective: list[EffectiveToolkitConfig],
-    ) -> None:
-        """Fail when persisted effective Toolkit slugs are not unique."""
-        by_slug: dict[str, list[str]] = {}
-        for item in effective:
-            by_slug.setdefault(item.toolkit.slug, []).append(item.toolkit.id)
-        for slug, toolkit_ids in by_slug.items():
-            if len(toolkit_ids) > 1:
-                raise EffectiveToolkitSlugConflict(
-                    agent_id=agent_id,
-                    slug=slug,
-                    toolkit_ids=tuple(sorted(toolkit_ids)),
-                )
 
     def _encrypt(self, plaintext: str | None) -> str | None:
         """Encrypt plaintext. Return None when None."""
         if plaintext is None:
             return None
-        if self._cipher is None:
+        if self.cipher is None:
             msg = "cipher is required to encrypt credentials"
             raise RuntimeError(msg)
-        return self._cipher.encrypt(plaintext)
+        return self.cipher.encrypt(plaintext)
 
     def _decrypt(self, ciphertext: str | None) -> str | None:
         """Decrypt ciphertext. Return None when None."""
         if ciphertext is None:
             return None
-        if self._cipher is None:
+        if self.cipher is None:
             return None
-        return self._cipher.decrypt(ciphertext)
+        return self.cipher.decrypt(ciphertext)
 
     def _build(self, rdb: RDBToolkitConfig) -> ToolkitConfig:
         """Convert RDB model to domain model."""
@@ -486,7 +438,7 @@ class ToolkitScopeRepository:
 
     async def create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: ToolkitScopeCreate,
     ) -> Result[ToolkitScope, DuplicateScope]:
         """Create ToolkitScope.
@@ -501,11 +453,11 @@ class ToolkitScopeRepository:
                 scope_type=create.scope_type,
                 scope_id=create.scope_id,
             )
-            session.add(rdb_scope)
-            await session.flush()
+            session.write_session.add(rdb_scope)
+            await session.write_session.flush()
             return Success(self._build(rdb_scope))
         except IntegrityError as e:
-            await session.rollback()
+            await session.write_session.rollback()
             if is_constrained_by(e, RDBToolkitScope.UQ_TOOLKIT_SCOPE):
                 return Failure(
                     DuplicateScope(
@@ -517,7 +469,7 @@ class ToolkitScopeRepository:
             raise
 
     async def list_by_toolkit(
-        self, session: AsyncSession, toolkit_id: str
+        self, session: ReadSession, toolkit_id: str
     ) -> list[ToolkitScope]:
         """Fetch all Scopes of Toolkit.
 
@@ -525,7 +477,7 @@ class ToolkitScopeRepository:
         :param toolkit_id: Toolkit ID
         :return: ToolkitScope list
         """
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBToolkitScope)
             .where(RDBToolkitScope.toolkit_id == toolkit_id)
             .order_by(RDBToolkitScope.created_at.asc())
@@ -533,7 +485,7 @@ class ToolkitScopeRepository:
         return [self._build(rdb) for rdb in result.scalars().all()]
 
     async def get_by_id(
-        self, session: AsyncSession, scope_id: str
+        self, session: ReadSession, scope_id: str
     ) -> ToolkitScope | None:
         """Fetch ToolkitScope by ID.
 
@@ -541,18 +493,18 @@ class ToolkitScopeRepository:
         :param scope_id: Scope ID
         :return: ToolkitScope or None
         """
-        rdb = await session.get(RDBToolkitScope, scope_id)
+        rdb = await session.read_session.get(RDBToolkitScope, scope_id)
         if rdb is None:
             return None
         return self._build(rdb)
 
-    async def delete_by_id(self, session: AsyncSession, scope_id: str) -> None:
+    async def delete_by_id(self, session: WriteSession, scope_id: str) -> None:
         """Delete ToolkitScope by ID.
 
         :param session: Database session
         :param scope_id: Scope ID
         """
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBToolkitScope).where(RDBToolkitScope.id == scope_id)
         )
 
@@ -572,7 +524,7 @@ class AgentToolkitRepository:
 
     async def create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: AgentToolkitCreate,
     ) -> Result[AgentToolkit, DuplicateAgentToolkit]:
         """AgentCreate Toolkit.
@@ -587,11 +539,11 @@ class AgentToolkitRepository:
                 toolkit_id=create.toolkit_id,
                 toolkit_type=create.toolkit_type,
             )
-            session.add(rdb_agent_toolkit)
-            await session.flush()
+            session.write_session.add(rdb_agent_toolkit)
+            await session.write_session.flush()
             return Success(self._build(rdb_agent_toolkit))
         except IntegrityError as e:
-            await session.rollback()
+            await session.write_session.rollback()
             if is_constrained_by(e, RDBAgentToolkit.UQ_AGENT_TOOLKIT):
                 return Failure(
                     DuplicateAgentToolkit(
@@ -602,7 +554,7 @@ class AgentToolkitRepository:
             raise
 
     async def list_by_agent(
-        self, session: AsyncSession, agent_id: str
+        self, session: ReadSession, agent_id: str
     ) -> list[AgentToolkit]:
         """Fetch all AgentToolkits of agent.
 
@@ -610,7 +562,7 @@ class AgentToolkitRepository:
         :param agent_id: Agent ID
         :return: AgentToolkit list
         """
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgentToolkit)
             .join(
                 RDBToolkitConfig,
@@ -624,11 +576,11 @@ class AgentToolkitRepository:
 
     async def list_agent_ids_by_toolkit(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         toolkit_id: str,
     ) -> list[str]:
         """Fetch attached Agent IDs in deterministic lock order."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgentToolkit.agent_id)
             .where(RDBAgentToolkit.toolkit_id == toolkit_id)
             .order_by(RDBAgentToolkit.agent_id)
@@ -636,7 +588,7 @@ class AgentToolkitRepository:
         return list(result.scalars().all())
 
     async def get_by_id(
-        self, session: AsyncSession, agent_toolkit_id: str
+        self, session: ReadSession, agent_toolkit_id: str
     ) -> AgentToolkit | None:
         """Fetch AgentToolkit by ID.
 
@@ -644,7 +596,7 @@ class AgentToolkitRepository:
         :param agent_toolkit_id: AgentToolkit ID
         :return: AgentToolkit or None
         """
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgentToolkit)
             .join(
                 RDBToolkitConfig,
@@ -660,13 +612,13 @@ class AgentToolkitRepository:
             return None
         return self._build(rdb)
 
-    async def delete_by_id(self, session: AsyncSession, agent_toolkit_id: str) -> None:
+    async def delete_by_id(self, session: WriteSession, agent_toolkit_id: str) -> None:
         """Delete AgentToolkit by ID.
 
         :param session: Database session
         :param agent_toolkit_id: AgentToolkit ID
         """
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBAgentToolkit).where(RDBAgentToolkit.id == agent_toolkit_id)
         )
 

@@ -6,6 +6,36 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [external-channel, agent, conversation]
 code_paths:
+  - python/apps/azents/src/azents/repos/external_channel/admission_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/ingress_recovery_read.py
+  - python/apps/azents/src/azents/core/external_channel_interaction.py
+  - python/apps/azents/src/azents/core/external_channel_selection.py
+  - python/apps/azents/src/azents/core/external_channel_participation.py
+  - python/apps/azents/src/azents/core/external_channel_shortcut_source.py
+  - python/apps/azents/src/azents/repos/external_channel/interaction_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/selector_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/participation_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/shortcut_source_operations.py
+  - python/apps/azents/src/azents/core/agent_automatic_project.py
+  - python/apps/azents/src/azents/core/external_channel_access.py
+  - python/apps/azents/src/azents/core/external_channel_conversation_data.py
+  - python/apps/azents/src/azents/core/external_channel_conversation_preparation.py
+  - python/apps/azents/src/azents/core/external_channel_discord_selector_scope.py
+  - python/apps/azents/src/azents/core/external_channel_ingestion.py
+  - python/apps/azents/src/azents/core/external_channel_replay.py
+  - python/apps/azents/src/azents/core/external_channel_participation_state.py
+  - python/apps/azents/src/azents/core/external_channel_selector_state.py
+  - python/apps/azents/src/azents/core/mailbox_errors.py
+  - python/apps/azents/src/azents/repos/discord_connection_dependencies.py
+  - python/apps/azents/src/azents/repos/external_channel/access_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/conversation_provisioning.py
+  - python/apps/azents/src/azents/repos/external_channel/ingress_drain.py
+  - python/apps/azents/src/azents/repos/external_channel/http_admission_read.py
+  - python/apps/azents/src/azents/repos/external_channel/ingestion_history_read.py
+  - python/apps/azents/src/azents/repos/external_channel/transport_ingestion_read.py
+  - python/apps/azents/src/azents/repos/external_channel/ingestion_replay_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/ingress_admission_operations.py
+  - python/apps/azents/src/azents/repos/mailbox_runtime_operations.py
   - python/apps/azents/src/azents/api/public/external_channel/v1/route.py
   - python/apps/azents/src/azents/services/external_channel/admission.py
   - python/apps/azents/src/azents/services/external_channel/http_admission.py
@@ -42,7 +72,6 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/discord_selector.py
   - python/apps/azents/src/azents/services/external_channel/access.py
   - python/apps/azents/src/azents/core/external_channel_file.py
-  - python/apps/azents/src/azents/services/external_channel/conversation.py
   - python/apps/azents/src/azents/services/external_channel/ingestion.py
   - python/apps/azents/src/azents/services/external_channel/ingestion_history.py
   - python/apps/azents/src/azents/services/external_channel/ingress_admission.py
@@ -52,14 +81,15 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/ingress_recovery.py
   - python/apps/azents/src/azents/services/external_channel/ingress_metrics.py
   - python/apps/azents/src/azents/services/external_channel/ingress_observability.py
+  - python/apps/azents/src/azents/services/external_channel/ingress_release.py
   - python/apps/azents/src/azents/services/external_channel/ingestion_replay.py
-  - python/apps/azents/src/azents/services/external_channel/mailbox_ingestion_store.py
+  - python/apps/azents/src/azents/repos/external_channel/mailbox_ingestion.py
   - python/apps/azents/src/azents/services/external_channel/mailbox_wake.py
   - python/apps/azents/src/azents/repos/external_channel/ingress_queue.py
+  - python/apps/azents/src/azents/repos/external_channel/ingress_control_read.py
   - python/apps/azents/src/azents/rdb/models/external_channel_ingress.py
   - python/apps/azents/src/azents/api/testenv/external_channel_ingress/**
   - python/apps/azents/src/azents/cli/external_channel_ingress.py
-  - python/apps/azents/src/azents/services/external_channel/selector_state.py
   - python/apps/azents/src/azents/services/external_channel/transport_ingestion.py
   - python/apps/azents/src/azents/services/external_channel/connection_revocation.py
   - python/apps/azents/src/azents/services/external_channel/provider_control.py
@@ -67,7 +97,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/repository.py
   - python/apps/azents/src/azents/services/mailbox.py
   - python/apps/azents/src/azents/repos/agent_session/**
-  - python/apps/azents/src/azents/services/root_agent_session_creation/**
+  - python/apps/azents/src/azents/repos/root_agent_session_creation.py
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/services/external_channel/provider.py
   - python/apps/azents/src/azents/services/external_channel/slack_endpoint.py
@@ -84,8 +114,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-10-01
-spec_version: 63
+last_verified_at: 2026-10-05
+spec_version: 70
 ---
 
 # External Channel Provider Ingress
@@ -124,6 +154,16 @@ operation fixtures; it does not mutate SDK globals, emulate private SDK HTTP sta
 run a duplicate Discord Gateway protocol server.
 
 ## HTTP Admission
+
+Slack candidate configuration, provider-history configuration, Discord transport
+authority/resource snapshots, access/setup replay owners and bounded recovery IDs
+are captured by completed native read-only repository operations.
+Selected-interaction replay retains its row lock inside a completed write operation.
+Configured triggers enter one repository-owned atomic write operation preserving
+connection-to-route/resource/principal/position/queue order and deduplication.
+Every operation finishes before result-dependent credential/signature processing,
+provider history/ingestion, committed-outcome logging or Runtime submission.
+Services receive detached domain evidence rather than a live SQL session.
 
 Slack sends HTTP callbacks to the single fixed endpoint
 `POST /external-channel/v1/slack/events`.
@@ -203,7 +243,36 @@ identity, and unsupported interaction types fail before durable interaction stat
 interaction tokens, raw bodies, and signatures remain request-local and are neither
 persisted nor replayed.
 
+HTTP interaction/principal admission and durable processing/terminal claims are
+completed repository operations with the existing connection lock order and
+lease/status predicates. Discord callback configuration capture and bounded
+recoverable-owner scans use completed native read-only operations. Signature
+verification, provider callbacks and Local Job Runtime submissions occur only
+after these operations close.
+
 ## Interactive Admission and Selection
+
+Interaction processing reloads processing status, principal and exact
+selector/origin/connection/resource ownership through completed native
+PostgreSQL read-only operations before credential decoding or provider
+modal/control calls. These descriptive reads acquire no interaction row locks;
+later admission and mutation predicates remain authoritative. Signed metadata
+parsing and signature verification stay outside database transactions, while
+the repository joins the retained identities using detached typed metadata.
+Shortcut normalization likewise follows a completed connection read. Its
+final writable selector/setup materialization locks and revalidates the
+connection configuration generation, provider and bot identity before writing
+content-free position, resource, claim and interaction state. Duplicate retry
+compatibility, immutable selected routes and first-location selection are
+preserved. The four services expose no live read/write sessions or transaction
+callbacks; defining core contracts connect their completed operations, and
+provider effects and external coordination remain service-owned.
+
+Signed Slack selector and settings metadata preserves compact wire names,
+versions, HMAC authentication, scope bindings and target-generation fences.
+Runtime decoding rejects unknown fields and type coercion; settings variants
+accept only fields belonging to their setup, parent or thread target. Thread
+binding timestamps must be timezone-aware.
 
 Signed Slack interaction callbacks use the same fixed endpoint and App/Team candidate
 selection as Events API payloads. JSON events and form-encoded interactions are
@@ -337,9 +406,11 @@ session state.
 
 The same current Gateway owner runs one ephemeral typing registry on its existing
 `discord.Client`. A complete lease/App-claim/configuration fence projects exact
-delivery channels for connected ready active conversational Work; awaiting Work is
-excluded. Ready and Resume rebuild the registry from PostgreSQL; disconnect, lease
-loss, Client close, and shutdown cancel its tasks. Public SDK typing failures are
+delivery channels for connected ready active conversational Work whose bound Session
+is running with a running AgentRun and no stop request; awaiting Work and retained Work
+without running execution are excluded. Ready and Resume rebuild the registry from
+PostgreSQL; disconnect, lease loss, Client close, and shutdown cancel its tasks.
+Public SDK typing failures are
 isolated from event admission and durable connection health.
 
 Credential failures and Gateway outcomes that cannot reconnect terminalize the current
@@ -403,19 +474,23 @@ durable queue content.
    whose lease is absent or expired. Callbacks within one active owner lifecycle
    coalesce, while empty-owner deletion and recreation starts a distinct lifecycle.
    Submission and scans are wake mechanisms rather than durable job authority.
+   Inventory, owner presence and bounded diagnostics use ordinary reads even while
+   a winning drain holds its lease row; they never inherit a claim lock.
 4. A drain first conditionally claims the owner lease. If the owner is not ready, it
    prepares the provider conversation outside a database transaction. Discord
    per-thread mode reconciles or creates the actual delivery thread through the public
    SDK; Discord parent-channel mode and Slack use their existing provider conversation
    identity without an artificial mutation.
-5. One short ready transaction re-locks the owner, its first authoritative queued
-   item, and current routing authority, retains the prepared Discord delivery thread on
+5. One short ready transaction validates and locks the exact current owner lease
+   and routing authority, observes its oldest queued trigger without a separate
+   item claim, retains the prepared Discord delivery thread on
    the target Resource when needed, reuses a compatible connected Binding/active
    Session or creates one root Session, Binding, Channel Work, and initial controls,
    then records the Binding/Session on the same owner without moving its items. Slack
    derives initial Tracker visibility from that queued item's provider-native
    invocation flag. Discord always creates hidden conversational Work and relies on
-   the Gateway typing registry for automatic activity, whether the trigger was a
+   the Gateway typing registry for automatic activity during running execution,
+   whether the trigger was a
    mention or an ordinary all-messages item. A stopped Session, disconnected Binding,
    stale setting, or terminal provider result cannot become ready.
 6. A ready owner's first claim contains exactly one due item; later claims contain at
@@ -564,10 +639,21 @@ bounded-failure counts, cursor suppressions, mailbox rows committed, post-commit
 attempts/failures, active Runtime tasks, and shutdown drain time.
 
 The operator surface has no release, retry, delete, or other mutation command. The
-guarded credential-free Testenv API may submit one exact Session through the real Job
+guarded credential-free Testenv API may submit one exact active-owner lifecycle through the real Job
 Runtime and inject one exact one-shot wake failure. Neither surface exposes callback
 bodies, message text, participant data, credentials, tokens, signatures, private URLs,
 or raw provider errors.
+
+The sanitized queue snapshot is a completed repository-owned read with its explicit
+commit and session closure before process metrics, Runtime counts, or CLI formatting.
+Testenv release uses a separate completed owner-by-ID read, also committed and closed
+before either the existing not-found 404 or actual Job Runtime submission. Table
+presence remains the read predicate; no new active flag, lease, lock, or expiry gate
+is added. The request retains the exact owner-created-at lifecycle identity and
+existing application-now plus ten-minute deadline. Acceptance does not wait for drain;
+submission errors and cancellation propagate without accepted success or retained SQL.
+The operator CLI remains read-only and Testenv app guards, schemas, limits, redaction,
+wake control, and downstream drain/lease behavior are unchanged.
 
 ## File Metadata Projection
 
@@ -623,7 +709,33 @@ shared gateway unready. General Agent Workers own Session execution and do not o
 persistent provider connections.
 
 ## Changelog
+- **2026-10-05** (spec_version 70) — Completed residual interaction admission/claim ownership and native read-only Discord callback/recovery observations before authentication, provider mutation and job wake.
 
+
+- **2026-10-05** (spec_version 69) — Moved interaction/selector scope observations
+  and shortcut materialization into completed repository operations, with native
+  read-only descriptive reads and configuration-fenced atomic writes; kept signed
+  metadata authority and provider effects outside transaction lifetimes.
+
+- **2026-10-05** (spec_version 68) — Integrated completed admission/replay
+  repository ownership with the existing scoped owner fences and nonblocking
+  provenance observations.
+
+
+- **2026-10-05** (spec_version 68) — Reconciled code-path discovery with current
+  defining modules; system behavior is unchanged.
+
+- **2026-10-05** (spec_version 67) — Separated owner/diagnostic/first-trigger observations from exact ingress lease and batch claims, preserving generation/cursor-conditioned mailbox and queue finalization.
+- **2026-10-05** — v67. Completed provider ingress configuration/replay reads
+  and atomic configured-trigger admission in repositories, preserving authorization,
+  idempotency and postcommit provider/Runtime orchestration.
+
+- **2026-10-03** (spec_version 65) — Added Session and AgentRun execution authority
+  to the Gateway typing target projection.
+
+- **2026-10-02** (spec_version 64) — Completed bounded ingress observation and
+  owner-release read ownership before metrics, not-found responses, and Job Runtime
+  submission, without changing the guarded control or sanitizer policy.
 - **2026-09-13** (spec_version 63) — Replaced provider-native account-link
   code/modal controls with direct authenticated Web OAuth URLs and retained only
   actor-private model controls after verified provider ingress.

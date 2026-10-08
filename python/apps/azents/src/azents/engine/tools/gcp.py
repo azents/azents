@@ -10,16 +10,17 @@ import dataclasses
 import hashlib
 import json
 import logging
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from textwrap import dedent
 from typing import ClassVar
 
-import httpx
-import jwt
+import google.auth.transport.requests
 from azcommon.datetime import tznow
+from google.auth.exceptions import GoogleAuthError, RefreshError
+from google.oauth2 import service_account
 from mcp.types import Tool as McpBaseTool
 from pydantic import BaseModel, ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.engine_tool_state import (
     McpToolSnapshotItem,
@@ -33,6 +34,10 @@ from azents.core.mcp_transport import (
 )
 from azents.core.mcp_transport import (
     list_tools as mcp_list_tools,
+)
+from azents.core.session_resource_authority import (
+    SessionExecutionOwner,
+    accepts_execution_owner,
 )
 from azents.core.tools import (
     GcpService,
@@ -51,6 +56,11 @@ from azents.engine.run.types import (
     FunctionToolResult,
     FunctionToolSpec,
 )
+from azents.engine.tools.background_discovery import (
+    DISCOVERY_ERRORS,
+    observe_discovery_failure,
+    require_expected_discovery_failure,
+)
 from azents.engine.tools.mcp_base import (
     ArtifactSinkGetter,
     McpArtifactSink,
@@ -58,16 +68,12 @@ from azents.engine.tools.mcp_base import (
     _is_http_401,  # reuse common MCP 401 retry detection.
     build_mcp_artifact_sink,
 )
-from azents.rdb.session import SessionManager
+from azents.repos.engine_tool_repositories import EngineMcpSnapshotFactory
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
-from azents.repos.toolkit_state.engine import McpToolSnapshotStore
 from azents.services.artifact import ArtifactService
-from azents.services.session_resource_authority import (
-    SessionExecutionOwner,
-    accepts_execution_owner,
-)
+from azents.utils.logging import sanitized_exception_info
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +163,6 @@ GCP_SERVICE_CONFIG: dict[GcpService, GcpServiceMeta] = {
 # Refresh margin before token expiration
 _TOKEN_REFRESH_MARGIN = timedelta(minutes=5)
 # JWT validity period
-_JWT_LIFETIME = timedelta(hours=1)
 # Token endpoint
 _GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 
@@ -165,6 +170,64 @@ _GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 # ---------------------------------------------------------------------------
 # Access Token Provider
 # ---------------------------------------------------------------------------
+
+
+@dataclasses.dataclass(frozen=True)
+class _ServiceAccountToken:
+    """A validated token receipt returned by the public credential SDK."""
+
+    token: str
+    expires_at: datetime
+
+
+class GoogleAuthDispatchBudgetExceeded(RefreshError):
+    """A credential SDK attempted another dispatch after the one-call limit."""
+
+    def __init__(self, *, status_code: int | None) -> None:
+        """Retain safe status evidence without copying a provider token/body."""
+        self.status_code = status_code
+        suffix = f" after HTTP {status_code}" if status_code is not None else ""
+        super().__init__(
+            f"Google credential refresh cannot redispatch{suffix}.",
+            retryable=False,
+        )
+
+
+class _BoundedGoogleAuthRequest(google.auth.transport.Request):
+    """Public transport adapter imposing timeout and one physical dispatch."""
+
+    def __init__(self, request: google.auth.transport.Request) -> None:
+        """Keep SDK signing and protocol ownership unchanged."""
+        self.request = request
+        self.dispatched = False
+        self.status_code: int | None = None
+
+    def __call__(
+        self,
+        url: str,
+        method: str = "GET",
+        body: bytes | None = None,
+        headers: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+        **kwargs: object,
+    ) -> google.auth.transport.Response:
+        """Reject SDK redispatch before reaching the actual transport."""
+        del timeout
+        if self.dispatched:
+            raise GoogleAuthDispatchBudgetExceeded(status_code=self.status_code)
+        self.dispatched = True
+        response = self.request(
+            url=url,
+            method=method,
+            body=body,
+            headers=headers,
+            timeout=30.0,
+            # The previous HTTPX transport did not follow redirects. A second
+            # physical request must not hide inside the SDK's HTTP session.
+            **{**kwargs, "allow_redirects": False},
+        )
+        self.status_code = response.status
+        return response
 
 
 class GcpAccessTokenProvider:
@@ -210,32 +273,39 @@ class GcpAccessTokenProvider:
         return self._expires_at > tznow() + _TOKEN_REFRESH_MARGIN
 
     async def _refresh_token(self) -> str:
-        """Create JWT and obtain access_token."""
-        now = tznow()
-        payload = {
-            "iss": self._key["client_email"],
-            "scope": " ".join(self._scopes),
-            "aud": _GOOGLE_TOKEN_URL,
-            "iat": int(now.timestamp()),
-            "exp": int((now + _JWT_LIFETIME).timestamp()),
-        }
-        signed_jwt = jwt.encode(payload, self._key["private_key"], algorithm="RS256")
+        """Use the public service-account refresh without blocking the loop."""
+        receipt = await asyncio.to_thread(self._refresh_token_sync)
+        self._token = receipt.token
+        self._expires_at = receipt.expires_at
+        return receipt.token
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                _GOOGLE_TOKEN_URL,
-                data={
-                    "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
-                    "assertion": signed_jwt,
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-
-        token: str = data["access_token"]
-        self._token = token
-        self._expires_at = now + timedelta(seconds=data["expires_in"])
-        return token
+    def _refresh_token_sync(self) -> _ServiceAccountToken:
+        """Own one SDK refresh and HTTP session for this credential operation."""
+        credentials = service_account.Credentials.from_service_account_info(
+            {
+                "client_email": self._key["client_email"],
+                "private_key": self._key["private_key"],
+                "token_uri": _GOOGLE_TOKEN_URL,
+            },
+            scopes=self._scopes,
+            always_use_jwt_access=False,
+        )
+        request = google.auth.transport.requests.Request()
+        try:
+            credentials.refresh(_BoundedGoogleAuthRequest(request))
+        finally:
+            request.session.close()
+        token = credentials.token
+        if (
+            not isinstance(token, str)
+            or not token
+            or not isinstance(credentials.expiry, datetime)
+        ):
+            raise ValueError("Google service-account refresh returned no token expiry.")
+        expiry = credentials.expiry
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=UTC)
+        return _ServiceAccountToken(token=token, expires_at=expiry)
 
 
 # ---------------------------------------------------------------------------
@@ -265,7 +335,7 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
         writable_services: set[GcpService],
         proxy_url: str | None,
         artifact_service: ArtifactService | None,
-        session_manager: SessionManager[AsyncSession] | None,
+        snapshot_factory: EngineMcpSnapshotFactory | None,
         agent_id: str,
         session_id: str,
         state_name: str,
@@ -278,12 +348,15 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
         self._proxy_url = proxy_url
         self.artifact_service = artifact_service
         self._session_id = session_id
-        self.snapshot_store = McpToolSnapshotStore(
-            session_manager=session_manager,
-            agent_id=agent_id,
-            session_id=session_id,
-            toolkit_namespace=_GCP_TOOLKIT_STATE_NAMESPACE,
-            state_name=state_name,
+        self.snapshot_store = (
+            snapshot_factory.create(
+                agent_id=agent_id,
+                session_id=session_id,
+                toolkit_namespace=_GCP_TOOLKIT_STATE_NAMESPACE,
+                state_name=state_name,
+            )
+            if snapshot_factory is not None
+            else None
         )
         self._bg_task: asyncio.Task[None] | None = None
         self._artifact_sink: McpArtifactSink | None = None
@@ -298,7 +371,6 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
             owner,
             session_id=self._session_id,
         ):
-            self.snapshot_store = self.snapshot_store.for_execution(owner)
             self._execution_owner = owner
 
     def _current_artifact_sink(self) -> McpArtifactSink | None:
@@ -335,6 +407,9 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
         if self._bg_task is not None and not self._bg_task.done():
             return
         self._bg_task = asyncio.create_task(self._refresh_tool_snapshot())
+        self._bg_task.add_done_callback(
+            observe_discovery_failure(logger, toolkit="gcp")
+        )
 
     async def _refresh_tool_snapshot(self) -> None:
         """Refresh the GCP MCP tool snapshot in the background."""
@@ -347,13 +422,17 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
                 items = await self._refresh_service_items(server)
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except (*DISCOVERY_ERRORS, ExceptionGroup) as error:
+                require_expected_discovery_failure(error)
                 logger.exception(
                     "Failed to refresh GCP MCP service snapshot",
                     extra={
                         "service": server.service.value,
                         "endpoint": server.endpoint,
                     },
+                    exc_info=sanitized_exception_info(
+                        error, message="GCP MCP discovery failed"
+                    ),
                 )
                 continue
             refreshed_by_endpoint[server.endpoint] = items
@@ -396,7 +475,7 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
             "Authorization": f"Bearer {access_token}",
             "x-goog-user-project": self._project_id,
         }
-        mcp_tools, use_streamable_http = await mcp_list_tools(
+        discovery = await mcp_list_tools(
             server.endpoint,
             headers,
             server.timeout,
@@ -404,7 +483,7 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
         )
         writable = server.service in self._writable_services
         items: list[McpToolSnapshotItem] = []
-        for tool in sorted(mcp_tools, key=lambda item: item.name):
+        for tool in sorted(discovery.tools, key=lambda item: item.name):
             if not writable and not _is_read_only_tool(tool):
                 continue
             items.append(
@@ -414,7 +493,7 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
                     description=tool.description or "",
                     input_schema=tool.input_schema,
                     server_url=server.endpoint,
-                    use_streamable_http=use_streamable_http,
+                    use_streamable_http=discovery.use_streamable_http,
                 )
             )
         return items
@@ -435,7 +514,10 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
 
     async def _load_tool_snapshot(self) -> McpToolSnapshotState | None:
         """Load the latest successful GCP MCP tool snapshot."""
-        snapshot = await self.snapshot_store.load()
+        store = self.snapshot_store
+        if store is None:
+            return None
+        snapshot = await store.load()
         if snapshot is None:
             return None
         if not snapshot.tools or snapshot.server_url != self._project_id:
@@ -444,7 +526,8 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
 
     async def _save_tool_snapshot(self, snapshot: McpToolSnapshotState) -> None:
         """Atomically save a successful GCP MCP tool snapshot."""
-        await self.snapshot_store.replace(snapshot)
+        if self.snapshot_store is not None:
+            await self.snapshot_store.replace(snapshot)
 
     def _tools_from_snapshot(
         self, snapshot: McpToolSnapshotState
@@ -633,11 +716,11 @@ class GcpToolkitProvider(ToolkitProvider[GcpToolkitConfig]):
         self,
         *,
         artifact_service: ArtifactService | None = None,
-        session_manager: SessionManager[AsyncSession] | None = None,
+        snapshot_factory: EngineMcpSnapshotFactory | None = None,
     ) -> None:
         """Initialize GcpToolkitProvider."""
         self.artifact_service = artifact_service
-        self.session_manager = session_manager
+        self.snapshot_factory = snapshot_factory
 
     async def resolve(
         self,
@@ -678,7 +761,7 @@ class GcpToolkitProvider(ToolkitProvider[GcpToolkitConfig]):
             writable_services=set(config.writable_services),
             proxy_url=context.mcp_proxy_url,
             artifact_service=self.artifact_service,
-            session_manager=self.session_manager,
+            snapshot_factory=self.snapshot_factory,
             agent_id=context.agent_id,
             session_id=context.session_id,
             state_name=_gcp_snapshot_state_name(
@@ -748,6 +831,14 @@ class GcpToolkitProvider(ToolkitProvider[GcpToolkitConfig]):
         try:
             provider = GcpAccessTokenProvider(key, sorted(all_scopes))
             token = await provider.get_token()
+        except GoogleAuthError as exc:
+            return TestConnectionResult(
+                success=False,
+                message=f"Authentication failed: {type(exc).__name__}",
+                discovered_auth_url=None,
+                discovered_token_url=None,
+                supports_dcr=None,
+            )
         except Exception as exc:
             net_msg = extract_network_error(exc)
             if net_msg is not None:
@@ -770,10 +861,10 @@ class GcpToolkitProvider(ToolkitProvider[GcpToolkitConfig]):
         for svc in config.services:
             meta = GCP_SERVICE_CONFIG[svc]
             try:
-                tools, _ = await mcp_list_tools(
+                discovery = await mcp_list_tools(
                     meta.endpoint, headers, 10.0, proxy_url=proxy_url
                 )
-                results.append(f"{svc.value}: {len(tools)} tools")
+                results.append(f"{svc.value}: {len(discovery.tools)} tools")
             except Exception as exc:
                 net_msg = extract_network_error(exc)
                 if net_msg is None:

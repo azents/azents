@@ -831,6 +831,7 @@
     "retryUnavailable": "세션이 유휴 상태이고 최신 실패 실행일 때만 재시도할 수 있습니다."
   },
   "composerProfile": {
+    "applyError": "모델 설정을 적용하지 못했습니다. 다시 시도해 주세요.",
     "model": "모델",
     "effortLabel": "추론 수준",
     "done": "완료",

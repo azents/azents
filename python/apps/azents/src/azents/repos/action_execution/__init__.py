@@ -6,22 +6,21 @@ import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from pydantic import TypeAdapter
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import ActionExecutionStatus
-from azents.rdb.models.action_execution import (
-    RDBActionExecution,
-    RDBActionExecutionEvent,
-)
-from azents.rdb.models.event import JSONValue
-
-from .data import (
+from azents.core.action_execution_data import (
     ActionExecution,
     ActionExecutionCreate,
     ActionExecutionEvent,
     ActionExecutionEventCreate,
     ActionExecutionProjection,
 )
+from azents.core.enums import ActionExecutionStatus
+from azents.core.json_value import JSONValue
+from azents.rdb.models.action_execution import (
+    RDBActionExecution,
+    RDBActionExecutionEvent,
+)
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 _JSON_OBJECT_ADAPTER = TypeAdapter[dict[str, JSONValue]](dict[str, JSONValue])
 
@@ -31,12 +30,12 @@ class ActionExecutionRepository:
 
     async def create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: ActionExecutionCreate,
     ) -> ActionExecution:
         """Create execution state for one source input buffer."""
         action_execution_id = create.id or uuid7().hex
-        result = await session.execute(
+        result = await session.write_session.execute(
             pg_insert(RDBActionExecution)
             .values(
                 id=action_execution_id,
@@ -62,29 +61,29 @@ class ActionExecutionRepository:
             if existing is None:
                 raise RuntimeError("ActionExecution conflict target not found")
             return existing
-        await session.flush()
+        await session.write_session.flush()
         return self._build_execution(rdb)
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         action_execution_id: str,
     ) -> ActionExecution | None:
         """Fetch action execution by ID."""
-        rdb = await session.get(RDBActionExecution, action_execution_id)
+        rdb = await session.read_session.get(RDBActionExecution, action_execution_id)
         if rdb is None:
             return None
         return self._build_execution(rdb)
 
     async def get_by_mailbox_item_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         mailbox_item_id: str,
     ) -> ActionExecution | None:
         """Fetch action execution by durable source input buffer ID."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBActionExecution).where(
                 RDBActionExecution.mailbox_item_id == mailbox_item_id
             )
@@ -96,12 +95,12 @@ class ActionExecutionRepository:
 
     async def list_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
     ) -> list[ActionExecution]:
         """List action executions for a session in creation order."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBActionExecution)
             .where(RDBActionExecution.session_id == session_id)
             .order_by(RDBActionExecution.created_at, RDBActionExecution.id)
@@ -110,13 +109,13 @@ class ActionExecutionRepository:
 
     async def has_action_type_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         action_type: str,
     ) -> bool:
         """Return whether a live operation of the requested type exists."""
-        result = await session.scalar(
+        result = await session.read_session.scalar(
             sa.select(
                 sa.exists().where(
                     RDBActionExecution.session_id == session_id,
@@ -128,12 +127,12 @@ class ActionExecutionRepository:
 
     async def list_pending_or_running_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
     ) -> list[ActionExecution]:
         """List unfinished action executions that may block ordered processing."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBActionExecution)
             .where(
                 RDBActionExecution.session_id == session_id,
@@ -147,7 +146,7 @@ class ActionExecutionRepository:
 
     async def append_event(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: ActionExecutionEventCreate,
     ) -> ActionExecutionEvent:
         """Append a progress event with an execution-scoped monotonic sequence."""
@@ -156,7 +155,7 @@ class ActionExecutionRepository:
             action_execution_id=create.action_execution_id,
             session_id=create.session_id,
         )
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(
                 sa.func.coalesce(sa.func.max(RDBActionExecutionEvent.sequence), 0)
             ).where(
@@ -175,18 +174,18 @@ class ActionExecutionRepository:
             content=create.content,
             exit_code=create.exit_code,
         )
-        session.add(rdb)
-        await session.flush()
+        session.write_session.add(rdb)
+        await session.write_session.flush()
         return self._build_event(rdb)
 
     async def list_events(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         action_execution_id: str,
     ) -> list[ActionExecutionEvent]:
         """List execution progress events in append order."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBActionExecutionEvent)
             .where(RDBActionExecutionEvent.action_execution_id == action_execution_id)
             .order_by(RDBActionExecutionEvent.sequence)
@@ -195,7 +194,7 @@ class ActionExecutionRepository:
 
     async def get_projection_by_mailbox_item_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         mailbox_item_id: str,
     ) -> ActionExecutionProjection | None:
@@ -214,7 +213,7 @@ class ActionExecutionRepository:
 
     async def get_projection_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         action_execution_id: str,
     ) -> ActionExecutionProjection | None:
@@ -235,7 +234,7 @@ class ActionExecutionRepository:
 
     async def list_projections_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
     ) -> list[ActionExecutionProjection]:
@@ -257,13 +256,13 @@ class ActionExecutionRepository:
 
     async def lock_projection_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         action_execution_id: str,
         session_id: str,
     ) -> ActionExecutionProjection | None:
         """Lock and load one active execution projection for terminalization."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBActionExecution)
             .where(
                 RDBActionExecution.id == action_execution_id,
@@ -284,21 +283,21 @@ class ActionExecutionRepository:
 
     async def delete_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         action_execution_id: str,
     ) -> None:
         """Delete one live execution and its cascaded progress events."""
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBActionExecution).where(
                 RDBActionExecution.id == action_execution_id
             )
         )
-        await session.flush()
+        await session.write_session.flush()
 
     async def mark_running(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         action_execution_id: str,
         started_at: datetime.datetime,
@@ -312,13 +311,13 @@ class ActionExecutionRepository:
         rdb.cancelled_at = None
         rdb.failure_summary = None
         rdb.cancellation_summary = None
-        await session.flush()
-        await session.refresh(rdb)
+        await session.write_session.flush()
+        await session.write_session.refresh(rdb)
         return self._build_execution(rdb)
 
     async def update_result(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         action_execution_id: str,
         result: dict[str, JSONValue],
@@ -326,19 +325,19 @@ class ActionExecutionRepository:
         """Persist an action-specific structured result."""
         rdb = await self._get_required(session, action_execution_id)
         rdb.result = result
-        await session.flush()
-        await session.refresh(rdb)
+        await session.write_session.flush()
+        await session.write_session.refresh(rdb)
         return self._build_execution(rdb)
 
     async def _lock_action_execution(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         action_execution_id: str,
         session_id: str,
     ) -> None:
         """Lock action execution before calculating progress sequence."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBActionExecution.id)
             .where(
                 RDBActionExecution.id == action_execution_id,
@@ -351,11 +350,11 @@ class ActionExecutionRepository:
 
     async def _get_required(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         action_execution_id: str,
     ) -> RDBActionExecution:
         """Fetch an action execution row or raise."""
-        rdb = await session.get(RDBActionExecution, action_execution_id)
+        rdb = await session.read_session.get(RDBActionExecution, action_execution_id)
         if rdb is None:
             raise RuntimeError("ActionExecution row is missing")
         return rdb

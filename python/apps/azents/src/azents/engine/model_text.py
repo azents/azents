@@ -1,6 +1,8 @@
 """Single-dispatch text operations using the authorized public model boundary."""
 
+import dataclasses
 import uuid
+from typing import assert_never
 
 from openai.types.responses.response_text_config_param import ResponseTextConfigParam
 from pydantic import TypeAdapter
@@ -10,10 +12,20 @@ from pydantic_ai.output import OutputObjectDefinition
 from pydantic_ai.settings import ModelSettings
 
 from azents.core.enums import LLMProvider
+from azents.engine.events.effective_model_request import (
+    RequestDialect,
+    normalize_effective_model_request,
+    prepare_effective_model_parameters,
+)
+from azents.engine.events.model_support_contract import validate_saved_model_request
 from azents.engine.events.pydantic_ai_adapter import PydanticAIModelAdapter
 from azents.engine.events.pydantic_ai_output import PydanticAIOutputNormalizer
 from azents.engine.events.pydantic_ai_types import PydanticAIRequest
-from azents.engine.events.types import AssistantMessagePayload, OutputTextPart
+from azents.engine.events.types import (
+    AssistantMessagePayload,
+    OutputTextPart,
+    TokenUsagePayload,
+)
 from azents.engine.model_assembly import ModelAssemblyMetadata
 from azents.engine.model_factory_types import ModelSDKFactories
 from azents.engine.model_stream import (
@@ -21,11 +33,20 @@ from azents.engine.model_stream import (
     ModelStreamTimeoutPolicy,
     ModelStreamWatchdog,
 )
+from azents.engine.providers.bedrock_output import lower_bedrock_structured_parameters
 
 _OUTPUT_OBJECT_ADAPTER = TypeAdapter(OutputObjectDefinition)
 
 
-async def call_provider_text(
+@dataclasses.dataclass(frozen=True)
+class ProviderTextResult:
+    """Text and content-free usage returned by one provider text operation."""
+
+    text: str
+    usage: TokenUsagePayload | None
+
+
+async def call_provider_text_with_usage(
     *,
     sdk_factories: ModelSDKFactories,
     provider: LLMProvider,
@@ -40,8 +61,8 @@ async def call_provider_text(
     call_context: ModelStreamCallContext,
     text: ResponseTextConfigParam | None,
     extra_body: dict[str, object] | None,
-) -> str:
-    """Run one text operation with native terminal proof and owned cleanup."""
+) -> ProviderTextResult:
+    """Run one text operation with native terminal proof and normalized usage."""
     settings: ModelSettings = {}
     if max_output_tokens is not None and max_output_tokens > 0:
         settings["max_tokens"] = max_output_tokens
@@ -61,7 +82,41 @@ async def call_provider_text(
                 }
             ),
         )
+    parameters = prepare_effective_model_parameters(parameters)
+    factory = sdk_factories.provider_model(
+        provider=provider, credential_kwargs=credential_kwargs
+    )
+    dialect: RequestDialect
+    match factory.protocol(model=model):
+        case "responses":
+            dialect = "openai_responses"
+        case "chat_completions":
+            dialect = "openai_chat"
+        case "anthropic":
+            dialect = "anthropic"
+        case "google":
+            dialect = "google"
+        case "bedrock":
+            dialect = "bedrock"
+        case _ as unreachable:
+            assert_never(unreachable)
+    effective_parameters = (
+        prepare_effective_model_parameters(
+            lower_bedrock_structured_parameters(parameters)
+        )
+        if dialect == "bedrock"
+        else parameters
+    )
+    effective = normalize_effective_model_request(
+        dialect=dialect,
+        options=settings,
+        parameters=effective_parameters,
+        native_tools=None,
+    )
+    if assembly_metadata is not None:
+        validate_saved_model_request(assembly_metadata.capabilities, request=effective)
     request = PydanticAIRequest(
+        native_replay_context=None,
         provider=provider.value,
         model=model,
         messages=[
@@ -73,19 +128,18 @@ async def call_provider_text(
         parameters=parameters,
         assembly_metadata=assembly_metadata,
     )
-    adapter = PydanticAIModelAdapter(
-        factory=sdk_factories.provider_model(
-            provider=provider,
-            credential_kwargs=credential_kwargs,
+    adapter = PydanticAIModelAdapter(factory=factory)
+    output = (
+        PydanticAIOutputNormalizer(
+            provider=provider.value,
+            model=model,
+            pricing=None,
+            operation=call_context.call_kind,
+            integration=call_context.provider_integration_id,
         )
+        .for_native_replay(request.native_replay_schema_version())
+        .start(call_context.session_id or uuid.uuid4().hex)
     )
-    output = PydanticAIOutputNormalizer(
-        provider=provider.value,
-        model=model,
-        pricing=None,
-        operation=call_context.call_kind,
-        integration=call_context.provider_integration_id,
-    ).start(call_context.session_id or uuid.uuid4().hex)
     try:
         async for event in adapter.stream(
             request,
@@ -106,6 +160,44 @@ async def call_provider_text(
                 parts.extend(
                     part.text for part in content if isinstance(part, OutputTextPart)
                 )
-        return "\n".join(parts)
+        return ProviderTextResult(
+            text="\n".join(parts),
+            usage=completed.usage,
+        )
     finally:
         await adapter.close()
+
+
+async def call_provider_text(
+    *,
+    sdk_factories: ModelSDKFactories,
+    provider: LLMProvider,
+    model: str,
+    credential_kwargs: dict[str, object],
+    assembly_metadata: ModelAssemblyMetadata | None,
+    input_text: str,
+    instructions: str,
+    max_output_tokens: int | None,
+    watchdog: ModelStreamWatchdog,
+    timeout_policy: ModelStreamTimeoutPolicy,
+    call_context: ModelStreamCallContext,
+    text: ResponseTextConfigParam | None,
+    extra_body: dict[str, object] | None,
+) -> str:
+    """Run one text operation and return only completed assistant text."""
+    result = await call_provider_text_with_usage(
+        sdk_factories=sdk_factories,
+        provider=provider,
+        model=model,
+        credential_kwargs=credential_kwargs,
+        assembly_metadata=assembly_metadata,
+        input_text=input_text,
+        instructions=instructions,
+        max_output_tokens=max_output_tokens,
+        watchdog=watchdog,
+        timeout_policy=timeout_policy,
+        call_context=call_context,
+        text=text,
+        extra_body=extra_body,
+    )
+    return result.text

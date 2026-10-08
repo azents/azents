@@ -1,11 +1,14 @@
 """Completed Agent Workspace access reads."""
 
 import dataclasses
+from typing import Annotated
 
 from azcommon.result import Failure, Result, Success
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import Depends
 
+from azents.rdb.deps import get_read_only_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.workspace_user import WorkspaceUserRepository
@@ -25,9 +28,13 @@ class AgentWorkspaceMembershipNotFound:
 class AgentWorkspaceAccessRepository:
     """Own the completed Agent and Workspace membership snapshot read."""
 
-    session_manager: SessionManager[AsyncSession]
-    agent_repository: AgentRepository
-    workspace_user_repository: WorkspaceUserRepository
+    session_manager: Annotated[
+        SessionManager[ReadSession], Depends(get_read_only_session_manager)
+    ]
+    agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
+    workspace_user_repository: Annotated[
+        WorkspaceUserRepository, Depends(WorkspaceUserRepository)
+    ]
 
     async def get_agent_for_user(
         self,

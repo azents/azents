@@ -49,7 +49,7 @@ class TestAgentWorkspaceReadyAccessResponse(unittest.TestCase):
                             modified_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                             repository_type = 'git', )
                         ], 
-                    git = { }, )
+                    git = azentspublicclient.models.git.git(), )
             )
         else:
             return AgentWorkspaceReadyAccessResponse(
@@ -67,7 +67,7 @@ class TestAgentWorkspaceReadyAccessResponse(unittest.TestCase):
                             modified_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                             repository_type = 'git', )
                         ], 
-                    git = { }, ),
+                    git = azentspublicclient.models.git.git(), ),
         )
         """
 

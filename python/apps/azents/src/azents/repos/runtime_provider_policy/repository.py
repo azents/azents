@@ -3,7 +3,6 @@
 import datetime
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeProviderConfigRevisionState,
@@ -14,6 +13,7 @@ from azents.rdb.models.runtime_provider_policy import (
     RDBRuntimeProviderConfigRevision,
     RDBRuntimeProviderContractRevision,
 )
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import (
     RuntimeProviderConfigRevision,
@@ -26,45 +26,28 @@ from .data import (
 class RuntimeProviderPolicyRepository:
     """Persist Provider capability and operational configuration revisions."""
 
-    async def acquire_provider_lock(
-        self,
-        session: AsyncSession,
-        *,
-        provider_id: str,
-    ) -> bool:
-        """Lock a Provider aggregate before changing its policy revisions."""
-        result = await session.execute(
-            sa.select(RDBRuntimeProvider.id)
-            .where(RDBRuntimeProvider.id == provider_id)
-            .with_for_update()
-        )
-        return result.scalar_one_or_none() is not None
-
     async def get_contract_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         contract_revision_id: str,
-        for_update: bool,
     ) -> RuntimeProviderContractRevision | None:
         """Fetch one immutable Provider capability contract revision."""
         statement = sa.select(RDBRuntimeProviderContractRevision).where(
             RDBRuntimeProviderContractRevision.id == contract_revision_id
         )
-        if for_update:
-            statement = statement.with_for_update()
-        result = await session.execute(statement)
+        result = await session.read_session.execute(statement)
         rdb = result.scalar_one_or_none()
         return self._build_contract(rdb) if rdb is not None else None
 
     async def list_contracts(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         provider_id: str,
     ) -> list[RuntimeProviderContractRevision]:
         """List Provider contract revisions from newest to oldest."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBRuntimeProviderContractRevision)
             .where(RDBRuntimeProviderContractRevision.provider_id == provider_id)
             .order_by(
@@ -76,12 +59,12 @@ class RuntimeProviderPolicyRepository:
 
     async def create_contract(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         create: RuntimeProviderContractRevisionCreate,
     ) -> RuntimeProviderContractRevision:
         """Store and activate one authenticated Provider capability revision."""
-        provider_exists = await session.scalar(
+        provider_exists = await session.write_session.scalar(
             sa.select(RDBRuntimeProvider.id).where(
                 RDBRuntimeProvider.id == create.provider_id
             )
@@ -96,9 +79,9 @@ class RuntimeProviderPolicyRepository:
             contract=create.contract,
             compatibility=create.compatibility,
         )
-        session.add(rdb)
-        await session.flush()
-        await session.execute(
+        session.write_session.add(rdb)
+        await session.write_session.flush()
+        await session.write_session.execute(
             sa.update(RDBRuntimeProvider)
             .where(RDBRuntimeProvider.id == create.provider_id)
             .values(
@@ -110,29 +93,26 @@ class RuntimeProviderPolicyRepository:
 
     async def get_config_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         config_revision_id: str,
-        for_update: bool,
     ) -> RuntimeProviderConfigRevision | None:
         """Fetch one immutable Provider configuration revision."""
         statement = sa.select(RDBRuntimeProviderConfigRevision).where(
             RDBRuntimeProviderConfigRevision.id == config_revision_id
         )
-        if for_update:
-            statement = statement.with_for_update()
-        result = await session.execute(statement)
+        result = await session.read_session.execute(statement)
         rdb = result.scalar_one_or_none()
         return self._build_config(rdb) if rdb is not None else None
 
     async def get_active_config(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         provider_id: str,
     ) -> RuntimeProviderConfigRevision | None:
         """Fetch the configuration revision currently desired for one Provider."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBRuntimeProviderConfigRevision)
             .join(
                 RDBRuntimeProvider,
@@ -146,32 +126,34 @@ class RuntimeProviderPolicyRepository:
 
     async def create_config_candidate(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         create: RuntimeProviderConfigRevisionCreate,
     ) -> RuntimeProviderConfigRevision:
         """Append a candidate revision after the Provider aggregate lock is held."""
-        provider = await session.get(RDBRuntimeProvider, create.provider_id)
+        provider = await session.write_session.get(
+            RDBRuntimeProvider, create.provider_id
+        )
         if provider is None:
             raise ValueError("Provider does not exist.")
         if provider.current_contract_revision_id != create.contract_revision_id:
             raise ValueError(
                 "Configuration candidate must use the Provider's current contract."
             )
-        contract = await session.get(
+        contract = await session.write_session.get(
             RDBRuntimeProviderContractRevision,
             create.contract_revision_id,
         )
         if contract is None or contract.provider_id != create.provider_id:
             raise ValueError("Configuration contract does not belong to the Provider.")
         if create.base_revision_id is not None:
-            base = await session.get(
+            base = await session.write_session.get(
                 RDBRuntimeProviderConfigRevision,
                 create.base_revision_id,
             )
             if base is None or base.provider_id != create.provider_id:
                 raise ValueError("Configuration base revision is invalid.")
-        latest_result = await session.execute(
+        latest_result = await session.write_session.execute(
             sa.select(sa.func.max(RDBRuntimeProviderConfigRevision.revision)).where(
                 RDBRuntimeProviderConfigRevision.provider_id == create.provider_id
             )
@@ -190,13 +172,13 @@ class RuntimeProviderPolicyRepository:
             validation_request_id=create.validation_request_id,
             created_by_user_id=create.created_by_user_id,
         )
-        session.add(rdb)
-        await session.flush()
+        session.write_session.add(rdb)
+        await session.write_session.flush()
         return self._build_config(rdb)
 
     async def record_config_validation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         config_revision_id: str,
         status: RuntimeProviderConfigValidationStatus,
@@ -213,7 +195,7 @@ class RuntimeProviderPolicyRepository:
             if status == RuntimeProviderConfigValidationStatus.VALID
             else RuntimeProviderConfigRevisionState.REJECTED
         )
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBRuntimeProviderConfigRevision)
             .where(
                 RDBRuntimeProviderConfigRevision.id == config_revision_id,
@@ -232,12 +214,12 @@ class RuntimeProviderPolicyRepository:
             .returning(RDBRuntimeProviderConfigRevision)
         )
         rdb = result.scalar_one_or_none()
-        await session.flush()
+        await session.write_session.flush()
         return self._build_config(rdb) if rdb is not None else None
 
     async def activate_config(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         provider_id: str,
         config_revision_id: str,
@@ -254,7 +236,7 @@ class RuntimeProviderPolicyRepository:
             )
             .exists()
         )
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBRuntimeProviderConfigRevision)
             .where(
                 RDBRuntimeProviderConfigRevision.id == config_revision_id,
@@ -276,7 +258,7 @@ class RuntimeProviderPolicyRepository:
         activated = result.scalar_one_or_none()
         if activated is None:
             return None
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBRuntimeProviderConfigRevision)
             .where(
                 RDBRuntimeProviderConfigRevision.provider_id == provider_id,
@@ -289,7 +271,7 @@ class RuntimeProviderPolicyRepository:
                 updated_at=activated_at,
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBRuntimeProvider)
             .where(RDBRuntimeProvider.id == provider_id)
             .values(
@@ -297,7 +279,7 @@ class RuntimeProviderPolicyRepository:
                 admin_version=RDBRuntimeProvider.admin_version + 1,
             )
         )
-        await session.flush()
+        await session.write_session.flush()
         return self._build_config(activated)
 
     @staticmethod

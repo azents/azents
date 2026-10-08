@@ -9,6 +9,7 @@ from azents.engine.events.pydantic_ai_types import (
     PydanticAIStreamEvent,
 )
 from azents.engine.model_stream import (
+    ModelDispatchAdmissionError,
     ModelStreamCallContext,
     ModelStreamTimeoutPolicy,
     ModelStreamWatchdog,
@@ -192,6 +193,16 @@ class PydanticAIModelAdapter:
                 assembly_metadata=request.assembly_metadata,
                 state=state,
             )
+            if request.settings.get("top_k") is not None:
+                protocol = self.factory.protocol(model=request.model)
+                if protocol in {"responses", "chat_completions"} or (
+                    protocol == "bedrock"
+                    and binding.model.profile.get("bedrock_top_k_variant")
+                    not in {"anthropic", "nova"}
+                ):
+                    raise ValueError(
+                        "Selected top-k has no mapping in this model codec."
+                    )
             manager = binding.model.request_stream(
                 request.messages, request.settings, request.parameters
             )
@@ -208,15 +219,24 @@ class PydanticAIModelAdapter:
             )
             await state.emit(StreamFinished())
         except asyncio.CancelledError:
+            state.response_acquired.cancel()
             raise
-        except (ModelProviderFailure, UnclassifiedModelProviderError) as error:
+        except (
+            ModelProviderFailure,
+            UnclassifiedModelProviderError,
+            ModelDispatchAdmissionError,
+        ) as error:
             state.fail_acquisition(error)
             if not state.closing:
                 await state.emit(StreamFailure(error=error))
         except self.factory.sdk_error_types as error:
             if state.dispatch_blocked:
-                safe = state.original_failure or InternalModelExecutionError(
-                    origin_type="UnauthorizedModelDispatchError"
+                safe = (
+                    state.admission_failure
+                    or state.original_failure
+                    or InternalModelExecutionError(
+                        origin_type="UnauthorizedModelDispatchError"
+                    )
                 )
             else:
                 try:
@@ -231,7 +251,7 @@ class PydanticAIModelAdapter:
             if not state.closing:
                 await state.emit(StreamFailure(error=safe))
         except Exception as error:
-            safe = InternalModelExecutionError(
+            safe = state.admission_failure or InternalModelExecutionError(
                 origin_type=type(error).__name__
             ).with_traceback(error.__traceback__)
             state.fail_acquisition(safe)

@@ -5,24 +5,27 @@ import dataclasses
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import NamedTuple
 
 import sqlalchemy as sa
 from azcommon.datetime import tznow
 from azcommon.result import Failure, Result, Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from azents.core.system_user_role import LastSystemAdmin
 from azents.rdb.models.owner_lifecycle import RDBOwnerLifecycleJob
 from azents.rdb.models.session import RDBSession
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.owner_lifecycle import OwnerLifecycleRepository
 from azents.repos.password_login import PasswordLoginRepository
 from azents.repos.password_login.data import PasswordLoginCreate
 from azents.repos.session import SessionRepository
 from azents.repos.session.data import NotFound, Session, SessionCreate
-from azents.repos.system_user_role.data import LastSystemAdmin
 from azents.repos.system_user_role.repository import SystemUserRoleRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import User, UserCreate
+from azents.repos.user.operations import UserOperationRepository
 from azents.repos.user_email import UserEmailRepository
 from azents.services.runtime_terminal.invalidation import (
     NoopRuntimeTerminalInvalidationPublisher,
@@ -41,7 +44,7 @@ from .data import (
 
 
 def _make_repository(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     *,
     session_repository: SessionRepository | None = None,
 ) -> AuthOperationRepository:
@@ -57,25 +60,28 @@ def _make_repository(
 
 def _make_independent_session_manager(
     rdb_engine: AsyncEngine,
-) -> SessionManager[AsyncSession]:
+) -> SessionManager[WriteSession]:
     """Create a commit-on-exit manager with an independent connection."""
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
-        async with AsyncSession(bind=rdb_engine, expire_on_commit=False) as session:
+    async def session_manager() -> AsyncIterator[WriteSession]:
+        async with AsyncSession(
+            bind=rdb_engine, expire_on_commit=False
+        ) as _raw_session:
+            session = ReadWriteSession(_raw_session)
             try:
                 yield session
             except Exception:
-                await session.rollback()
+                await session.write_session.rollback()
                 raise
             else:
-                await session.commit()
+                await session.write_session.commit()
 
     return session_manager
 
 
 async def _create_user(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     *,
     email: str,
 ) -> str:
@@ -85,14 +91,21 @@ async def _create_user(
     return user.id
 
 
+class _AuthenticationFixture(NamedTuple):
+    """User and authentication Session identities created together."""
+
+    user_id: str
+    session_id: str
+
+
 async def _create_authentication_session(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     *,
     email: str,
     refresh_token: str,
     expires_at: datetime.datetime | None = None,
     max_expires_at: datetime.datetime | None = None,
-) -> tuple[str, str]:
+) -> _AuthenticationFixture:
     """Create a User and authentication Session."""
     user_id = await _create_user(session_manager, email=email)
     async with session_manager() as session:
@@ -105,7 +118,10 @@ async def _create_authentication_session(
                 max_expires_at=max_expires_at,
             ),
         )
-    return user_id, authentication_session.id
+    return _AuthenticationFixture(
+        user_id=user_id,
+        session_id=authentication_session.id,
+    )
 
 
 def _refresh_input(
@@ -128,7 +144,7 @@ class TestAuthIdentityOperations:
 
     async def test_registration_disabled_does_not_create_user(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Closed registration returns a typed result without creating a User."""
         repository = _make_repository(rdb_session_manager)
@@ -148,7 +164,7 @@ class TestAuthIdentityOperations:
 
     async def test_open_registration_creates_user(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Open registration creates the legacy email User atomically."""
         repository = _make_repository(rdb_session_manager)
@@ -169,7 +185,7 @@ class TestAuthIdentityOperations:
 
     async def test_password_snapshot_rejects_disabled_user(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Disabled User credentials cannot produce an authentication snapshot."""
         repository = _make_repository(rdb_session_manager)
@@ -200,7 +216,7 @@ class TestAuthIdentityOperations:
 
     async def test_session_issue_revalidates_active_user(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Session insertion fails after the User is disabled."""
         repository = _make_repository(rdb_session_manager)
@@ -232,7 +248,7 @@ class TestAuthRefreshOperations:
 
     async def test_invalid_refresh_token_is_rejected(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Unknown refresh token returns the typed rejected result."""
         repository = _make_repository(rdb_session_manager)
@@ -246,7 +262,7 @@ class TestAuthRefreshOperations:
 
     async def test_disabled_user_refresh_token_is_rejected(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """A token cannot refresh after its User loses access."""
         user_id, _ = await _create_authentication_session(
@@ -271,7 +287,7 @@ class TestAuthRefreshOperations:
 
     async def test_expired_refresh_token_is_rejected(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """An expired Session cannot authorize refresh."""
         await _create_authentication_session(
@@ -291,7 +307,7 @@ class TestAuthRefreshOperations:
 
     async def test_revoked_refresh_token_is_rejected(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """A revoked Session cannot authorize refresh."""
         _, session_id = await _create_authentication_session(
@@ -312,7 +328,7 @@ class TestAuthRefreshOperations:
 
     async def test_previous_token_outside_grace_is_rejected(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Previous token becomes invalid after the configured grace period."""
         _, session_id = await _create_authentication_session(
@@ -321,7 +337,7 @@ class TestAuthRefreshOperations:
             refresh_token="grace-current-token",
         )
         async with rdb_session_manager() as session:
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBSession)
                 .where(RDBSession.id == session_id)
                 .values(
@@ -341,7 +357,7 @@ class TestAuthRefreshOperations:
 
     async def test_previous_token_within_grace_returns_current_token(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Previous token within grace resolves to the current Session token."""
         _, session_id = await _create_authentication_session(
@@ -350,7 +366,7 @@ class TestAuthRefreshOperations:
             refresh_token="within-grace-previous-token",
         )
         async with rdb_session_manager() as session:
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBSession)
                 .where(RDBSession.id == session_id)
                 .values(
@@ -374,7 +390,7 @@ class TestAuthRefreshOperations:
 
     async def test_rotation_clamps_expiry_to_absolute_maximum(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Rotation preserves the Session absolute maximum expiration."""
         max_expires_at = tznow() + datetime.timedelta(hours=1)
@@ -385,7 +401,7 @@ class TestAuthRefreshOperations:
             max_expires_at=max_expires_at,
         )
         async with rdb_session_manager() as session:
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBSession)
                 .where(RDBSession.id == session_id)
                 .values(
@@ -417,7 +433,7 @@ class _RotateBarrierSessionRepository(SessionRepository):
 
     async def rotate_refresh_token(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
         current_refresh_token: str,
         new_refresh_token: str,
@@ -447,20 +463,21 @@ class _CommitGatedSessionManager:
         self.allow_commit = asyncio.Event()
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         async with AsyncSession(
             bind=self.rdb_engine,
             expire_on_commit=False,
-        ) as session:
+        ) as _raw_session:
+            session = ReadWriteSession(_raw_session)
             try:
                 yield session
             except Exception:
-                await session.rollback()
+                await session.write_session.rollback()
                 raise
             else:
                 self.database_work_completed.set()
                 await self.allow_commit.wait()
-                await session.commit()
+                await session.write_session.commit()
 
 
 class _DisableAttemptUserRepository(UserRepository):
@@ -473,13 +490,15 @@ class _DisableAttemptUserRepository(UserRepository):
 
     async def disable_access(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         user_id: str,
         *,
         disabled_at: datetime.datetime,
     ) -> User | None:
         """Capture the backend and gate immediately before the disable update."""
-        backend_pid = await session.scalar(sa.select(sa.func.pg_backend_pid()))
+        backend_pid = await session.read_session.scalar(
+            sa.select(sa.func.pg_backend_pid())
+        )
         assert isinstance(backend_pid, int)
         self.backend_pid = backend_pid
         self.disable_ready.set()
@@ -501,7 +520,7 @@ class _PostgresLockWaitEvidence:
 
 
 async def _wait_for_postgres_lock_wait(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     *,
     backend_pid: int,
 ) -> _PostgresLockWaitEvidence:
@@ -509,7 +528,7 @@ async def _wait_for_postgres_lock_wait(
     async with asyncio.timeout(5):
         while True:
             async with session_manager() as session:
-                result = await session.execute(
+                result = await session.write_session.execute(
                     sa.text(
                         """
                         SELECT
@@ -552,11 +571,13 @@ async def test_session_issue_share_lock_serializes_account_deletion(
     auth_repository = _make_repository(gated_session_manager)
     disable_user_repository = _DisableAttemptUserRepository()
     user_service = UserService(
-        user_repository=disable_user_repository,
-        system_role_repository=SystemUserRoleRepository(),
-        session_repository=SessionRepository(),
-        owner_lifecycle_repository=OwnerLifecycleRepository(),
-        session_manager=session_manager,
+        repository=UserOperationRepository(
+            user_repository=disable_user_repository,
+            system_role_repository=SystemUserRoleRepository(),
+            session_repository=SessionRepository(),
+            owner_lifecycle_repository=OwnerLifecycleRepository(),
+            session_manager=session_manager,
+        ),
         terminal_invalidation_publisher=NoopRuntimeTerminalInvalidationPublisher(),
     )
 
@@ -618,7 +639,7 @@ async def test_session_issue_share_lock_serializes_account_deletion(
                 return_exceptions=True,
             )
         async with session_manager() as session:
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBOwnerLifecycleJob).where(
                     RDBOwnerLifecycleJob.user_id == user_id
                 )
@@ -642,7 +663,7 @@ async def test_concurrent_refresh_returns_one_committed_rotation(
     )
     try:
         async with independent_session_manager() as session:
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBSession)
                 .where(RDBSession.id == session_id)
                 .values(

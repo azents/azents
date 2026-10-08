@@ -20,12 +20,18 @@ from azents.core.enums import (
     MailboxSchedulingMode,
     ScheduledTaskScheduleType,
 )
+from azents.core.mailbox_data import MailboxItem, MailboxItemCreate
 from azents.engine.events.types import ScheduledTaskTriggerPayload
 from azents.engine.run.emit import PublishedEvent
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
-from azents.repos.mailbox.data import MailboxItem, MailboxItemCreate
 from azents.repos.scheduled_task.data import ScheduledTask
+from azents.repos.scheduled_task.definition import (
+    RDBScheduledTaskAuthorityValidator,
+    ScheduledTaskDefinitionRepository,
+)
+from azents.repos.scheduled_task.dispatch import ScheduledTaskDispatchRepository
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task.schedule import InvalidScheduledTaskSchedule
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
@@ -35,11 +41,7 @@ from azents.repos.scheduled_task_cycle.data import (
 )
 from azents.services.chat.live_events import mailbox_item_to_live_event
 
-from .service import (
-    RDBScheduledTaskAuthorityValidator,
-    ScheduledTaskDispatcher,
-    ScheduledTaskService,
-)
+from .service import ScheduledTaskDispatcher
 
 _NOW = datetime.datetime(2026, 8, 16, 0, 0, tzinfo=datetime.UTC)
 
@@ -58,10 +60,10 @@ class _SessionManager:
         self.committed: list[str] = []
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         session = _TransactionSession()
         try:
-            yield session
+            yield ReadWriteSession(session)
         except Exception:
             raise
         else:
@@ -86,7 +88,7 @@ class _TaskRepository(ScheduledTaskRepository):
 
     async def claim_due(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         now: datetime.datetime,
         lease_owner: str,
@@ -99,7 +101,7 @@ class _TaskRepository(ScheduledTaskRepository):
 
     async def lock_claimed_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         task_id: str,
         lease_owner: str,
@@ -130,7 +132,7 @@ class _TaskRepository(ScheduledTaskRepository):
 
     async def complete_claim(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         **kwargs: object,
     ) -> bool:
         del session
@@ -143,14 +145,16 @@ class _TaskRepository(ScheduledTaskRepository):
 
     async def delete_by_session_and_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         task_id: str,
     ) -> bool:
-        if not isinstance(session, _TransactionSession):
+        if not isinstance(session, ReadWriteSession) or not isinstance(
+            session.write_session, _TransactionSession
+        ):
             raise AssertionError("Expected transaction session double")
-        tx = session
+        tx = session.write_session
         tx.staged.append("task_deleted")
         self.delete_calls.append(
             {
@@ -169,12 +173,14 @@ class _CycleRepository(ScheduledTaskCycleRepository):
 
     async def create_admitted(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         snapshot: ScheduledTaskCycleSnapshot,
     ) -> ScheduledTaskCycleRecord:
-        if not isinstance(session, _TransactionSession):
+        if not isinstance(session, ReadWriteSession) or not isinstance(
+            session.write_session, _TransactionSession
+        ):
             raise AssertionError("Expected transaction session double")
-        tx = session
+        tx = session.write_session
         tx.staged.append("cycle")
         self.snapshots.append(snapshot)
         return ScheduledTaskCycleRecord.model_construct()
@@ -188,14 +194,16 @@ class _MailboxRepository(MailboxRepository):
 
     async def create_idempotent(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         create: MailboxItemCreate,
         *,
         idempotency_key: str,
     ) -> MailboxItem:
-        if not isinstance(session, _TransactionSession):
+        if not isinstance(session, ReadWriteSession) or not isinstance(
+            session.write_session, _TransactionSession
+        ):
             raise AssertionError("Expected transaction session double")
-        tx = session
+        tx = session.write_session
         tx.staged.append("mailbox")
         assert create.idempotency_key == idempotency_key
         self.creates.append(create)
@@ -211,14 +219,16 @@ class _AgentSessionRepository(AgentSessionRepository):
 
     async def mark_running_for_input_wakeup(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> None:
         if self.reject:
             raise ValueError("Active AgentSession not found")
-        if not isinstance(session, _TransactionSession):
+        if not isinstance(session, ReadWriteSession) or not isinstance(
+            session.write_session, _TransactionSession
+        ):
             raise AssertionError("Expected transaction session double")
-        tx = session
+        tx = session.write_session
         tx.staged.append("running")
         self.running_session_ids.append(session_id)
 
@@ -231,7 +241,7 @@ class _AuthorityValidator(RDBScheduledTaskAuthorityValidator):
 
     async def validate(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         task: ScheduledTask,
     ) -> None:
         del session, task
@@ -247,7 +257,7 @@ class _SelectiveAuthorityValidator(RDBScheduledTaskAuthorityValidator):
 
     async def validate(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         task: ScheduledTask,
     ) -> None:
         del session
@@ -264,7 +274,7 @@ class _SequentialTaskRepository(_TaskRepository):
 
     async def claim_due(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         now: datetime.datetime,
         lease_owner: str,
@@ -279,7 +289,7 @@ class _SequentialTaskRepository(_TaskRepository):
 
     async def lock_claimed_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         task_id: str,
         lease_owner: str,
@@ -309,14 +319,16 @@ class _SequentialTaskRepository(_TaskRepository):
 
     async def delete_by_session_and_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         task_id: str,
     ) -> bool:
-        if not isinstance(session, _TransactionSession):
+        if not isinstance(session, ReadWriteSession) or not isinstance(
+            session.write_session, _TransactionSession
+        ):
             raise AssertionError("Expected transaction session double")
-        tx = session
+        tx = session.write_session
         tx.staged.append("task_deleted")
         self.delete_calls.append(
             {
@@ -462,7 +474,7 @@ class _ProviderMutationTaskRepository(ScheduledTaskRepository):
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         task_id: str,
     ) -> ScheduledTask | None:
         del session
@@ -471,7 +483,7 @@ class _ProviderMutationTaskRepository(ScheduledTaskRepository):
 
     async def get_by_session_and_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         task_id: str,
@@ -485,7 +497,7 @@ class _ProviderMutationTaskRepository(ScheduledTaskRepository):
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         task_id: str,
     ) -> ScheduledTask | None:
         del session, task_id
@@ -507,16 +519,20 @@ def _dispatcher(
 ) -> ScheduledTaskDispatcher:
     """Compose a dispatcher from deterministic fakes."""
     return ScheduledTaskDispatcher(
-        session_manager=manager,
-        agent_session_repository=agent_session_repository or _AgentSessionRepository(),
-        cycle_repository=cycle_repository,
-        mailbox_repository=mailbox_repository,
+        operations=ScheduledTaskDispatchRepository(
+            session_manager=manager,
+            agent_session_repository=agent_session_repository
+            or _AgentSessionRepository(),
+            cycle_repository=cycle_repository,
+            mailbox_repository=mailbox_repository,
+            authority_validator=authority_validator,
+            task_repository=repository,
+            clock=clock,
+            lease_duration=datetime.timedelta(minutes=1),
+        ),
         broker=broker,
-        authority_validator=authority_validator,
-        task_repository=repository,
         clock=clock,
         batch_size=batch_size,
-        lease_duration=datetime.timedelta(minutes=1),
     )
 
 
@@ -535,7 +551,7 @@ async def test_provider_mutation_uses_shared_lock_order_and_fences_binding() -> 
         candidate=candidate,
         locked=locked,
     )
-    service = ScheduledTaskService(
+    service = ScheduledTaskDefinitionRepository(
         repository=repository,
         cycle_repository=_CycleRepository(),
         mailbox_repository=_MailboxRepository(),
@@ -543,7 +559,7 @@ async def test_provider_mutation_uses_shared_lock_order_and_fences_binding() -> 
     )
 
     target = await service.lock_provider_mutation_target(
-        _TransactionSession(),
+        ReadWriteSession(_TransactionSession()),
         task_id=candidate.id,
         expected_binding_id="binding-before-lock",
     )
@@ -721,7 +737,7 @@ async def test_dispatch_commits_trigger_before_counting_wake_failure() -> None:
     assert summary.admitted == 1
     assert summary.wake_failed == 1
     assert manager.committed == ["cycle", "mailbox", "running"]
-    agent_session_repository = dispatcher.agent_session_repository
+    agent_session_repository = dispatcher.operations.agent_session_repository
     assert isinstance(agent_session_repository, _AgentSessionRepository)
     assert agent_session_repository.running_session_ids == [task.session_id]
     assert len(cycle_repository.snapshots) == 1

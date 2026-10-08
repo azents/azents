@@ -26,12 +26,14 @@ from azents.core.enums import (
     ExternalChannelTransport,
     LLMProvider,
 )
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.external_channel_ingress import (
     RDBExternalChannelIngressItem,
     RDBExternalChannelIngressOwner,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRouteCreate,
     ExternalChannelConnectionCreate,
@@ -48,7 +50,6 @@ from azents.repos.external_channel.ingress_queue_data import (
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
@@ -181,7 +182,7 @@ async def test_claim_due_batch_uses_one_then_ten_item_limits() -> None:
     first_session.scalars.return_value = [first_row]
 
     first = await repository.claim_due_batch(
-        first_session,
+        ReadWriteSession(first_session),
         owner_id="owner-1",
         lease_owner="owner-1",
         lease_generation=1,
@@ -203,7 +204,7 @@ async def test_claim_due_batch_uses_one_then_ten_item_limits() -> None:
     later_session.scalars.return_value = later_rows
 
     later = await repository.claim_due_batch(
-        later_session,
+        ReadWriteSession(later_session),
         owner_id="owner-1",
         lease_owner="owner-1",
         lease_generation=1,
@@ -241,7 +242,7 @@ async def test_claim_due_batch_refreshes_updated_at_before_dto_conversion() -> N
     session.refresh.side_effect = refresh_updated_at
 
     claimed = await repository.claim_due_batch(
-        session,
+        ReadWriteSession(session),
         owner_id="owner-1",
         lease_owner="owner-1",
         lease_generation=1,
@@ -253,8 +254,8 @@ async def test_claim_due_batch_refreshes_updated_at_before_dto_conversion() -> N
     session.refresh.assert_awaited_once_with(item, attribute_names=["updated_at"])
 
 
-async def test_lock_first_authoritative_item_returns_oldest_retained_trigger() -> None:
-    """Provisioning reads the first queued trigger while its owner remains locked."""
+async def test_get_first_authoritative_item_returns_oldest_retained_trigger() -> None:
+    """Provisioning observes the first queued trigger without a separate item gate."""
     repository = ExternalChannelIngressQueueRepository()
     session = _session()
     first = _item(1)
@@ -262,8 +263,8 @@ async def test_lock_first_authoritative_item_returns_oldest_retained_trigger() -
     first.invocation = False
     session.scalar.return_value = first
 
-    item = await repository.lock_first_authoritative_item(
-        session,
+    item = await repository.get_first_authoritative_item(
+        ReadWriteSession(session),
         owner_id="owner-1",
     )
 
@@ -273,7 +274,7 @@ async def test_lock_first_authoritative_item_returns_oldest_retained_trigger() -
     assert item.invocation is False
     statement = session.scalar.await_args.args[0]
     assert statement._limit_clause.value == 1  # noqa: SLF001
-    assert statement._for_update_arg is not None  # noqa: SLF001
+    assert statement._for_update_arg is None  # noqa: SLF001
 
 
 async def test_mark_owner_ready_preserves_creation_invocation_for_auto_title() -> None:
@@ -287,7 +288,7 @@ async def test_mark_owner_ready_preserves_creation_invocation_for_auto_title() -
     session.scalar.return_value = first_invocation
 
     await repository.mark_owner_ready(
-        session,
+        ReadWriteSession(session),
         owner=owner,
         binding_id="binding-created",
         session_id="session-created",
@@ -315,7 +316,7 @@ async def test_expired_lease_is_reclaimed_and_current_lease_is_released() -> Non
     claim_session.scalar.return_value = drain
 
     claim = await repository.claim_lease(
-        claim_session,
+        ReadWriteSession(claim_session),
         owner_id="owner-1",
         lease_owner="owner-2",
         now=_NOW,
@@ -341,7 +342,7 @@ async def test_expired_lease_is_reclaimed_and_current_lease_is_released() -> Non
     release_session.execute.return_value = release_result
 
     released = await repository.release_lease(
-        release_session,
+        ReadWriteSession(release_session),
         owner_id="owner-1",
         lease_owner="owner-2",
         lease_generation=5,
@@ -374,7 +375,7 @@ async def test_retry_moves_same_item_and_original_age_to_queue_tail() -> None:
     next_attempt_at = _NOW + datetime.timedelta(seconds=30)
 
     await repository.move_to_retry_tail(
-        session,
+        ReadWriteSession(session),
         item=item,
         next_attempt_at=next_attempt_at,
     )
@@ -398,7 +399,7 @@ async def test_recovery_query_includes_unowned_processing_rows() -> None:
     session.scalars.return_value = [_owner(first_batch_pending=False, lease_owner=None)]
 
     recovered = await repository.list_recoverable_owners(
-        session,
+        ReadWriteSession(session),
         now=_NOW,
         limit=100,
     )
@@ -496,7 +497,7 @@ async def test_active_diagnostics_are_bounded_and_content_free() -> None:
     session.execute.side_effect = [summary_result, rows_result]
 
     snapshot = await repository.inspect_active(
-        session,
+        ReadWriteSession(session),
         now=_NOW,
         limit=10,
     )
@@ -524,7 +525,7 @@ async def test_active_diagnostics_are_bounded_and_content_free() -> None:
 
 
 async def test_postgres_pre_session_callbacks_share_one_owner(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Two durable callbacks converge without requiring a Binding or Session."""
     workspace_result = await WorkspaceRepository().create(
@@ -547,8 +548,8 @@ async def test_postgres_pre_session_callbacks_share_one_owner(
         encrypted_credentials="encrypted",
         config=None,
     )
-    rdb_session.add(integration)
-    await rdb_session.flush()
+    rdb_session.write_session.add(integration)
+    await rdb_session.write_session.flush()
     selection = make_test_model_selection_dict(
         integration_id=integration.id,
         provider=LLMProvider.ANTHROPIC,
@@ -566,8 +567,8 @@ async def test_postgres_pre_session_callbacks_share_one_owner(
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    rdb_session.add(agent)
-    await rdb_session.flush()
+    rdb_session.write_session.add(agent)
+    await rdb_session.write_session.flush()
     external_repository = ExternalChannelRepository()
     connection = await external_repository.create_connection(
         rdb_session,
@@ -709,13 +710,13 @@ async def test_postgres_pre_session_callbacks_share_one_owner(
     assert first.item.expected_file_count == 1
     assert second.item.expected_file_count is None
     assert (
-        await rdb_session.scalar(
+        await rdb_session.read_session.scalar(
             sa.select(sa.func.count()).select_from(RDBExternalChannelIngressOwner)
         )
         == 1
     )
     assert (
-        await rdb_session.scalar(
+        await rdb_session.read_session.scalar(
             sa.select(sa.func.count()).select_from(RDBExternalChannelIngressItem)
         )
         == 2
@@ -729,14 +730,14 @@ async def test_postgres_pre_session_callbacks_share_one_owner(
     assert correlations["message-1"].invocation_id == "invocation-1"
     assert correlations["message-2"].invocation_id == "invocation-2"
     assert correlations["message-2"].principal_id == principal.id
-    owner_row = await rdb_session.get(
+    owner_row = await rdb_session.write_session.get(
         RDBExternalChannelIngressOwner,
         first.owner.id,
         with_for_update=True,
     )
     assert owner_row is not None
     owner_row.preparation_next_attempt_at = _NOW + datetime.timedelta(seconds=30)
-    await rdb_session.flush()
+    await rdb_session.write_session.flush()
     assert (
         await repository.claim_lease(
             rdb_session,

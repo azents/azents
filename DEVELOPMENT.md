@@ -40,6 +40,21 @@ $ cd python/apps/azents
 $ uv run python -m azents
 ```
 
+For Redis-free single-process operation, use the all-in-one backend without reload:
+
+```console
+$ cd python/apps/azents
+$ AZ_SESSION_BROKER_BACKEND=memory uv run python src/cli/devserver.py
+```
+
+This shares memory-backed Session routing, broadcast/live state and Runtime
+coordination across APIs, Worker, Scheduler and Runtime Control. Redis does not
+need to be running. PostgreSQL, object storage and the usual trusted Runtime
+Control/Transfer configuration are still required. Memory state is disposable on
+restart; durable recovery remains PostgreSQL-backed. `--reload` and standalone
+role processes reject this mode because they cannot share the memory owners.
+The default `AZ_SESSION_BROKER_BACKEND=redis` is unchanged for distributed runs.
+
 Run the web app:
 
 ```console

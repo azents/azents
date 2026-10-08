@@ -102,26 +102,10 @@ class RDBToolkitConfig(RDBModel):
         "ix_toolkit_configs_owner_agent_id",
         "owner_agent_id",
     )
-    UQ_SHARED_WORKSPACE_SLUG = sa.Index(
-        "uq_toolkit_configs_shared_workspace_slug",
-        "workspace_id",
-        "slug",
-        unique=True,
-        postgresql_where=sa.text("owner_agent_id IS NULL"),
-    )
-    UQ_OWNER_AGENT_SLUG = sa.Index(
-        "uq_toolkit_configs_owner_agent_slug",
-        "owner_agent_id",
-        "slug",
-        unique=True,
-        postgresql_where=sa.text("owner_agent_id IS NOT NULL"),
-    )
 
     __table_args__ = (
         IX_WORKSPACE_ID,
         IX_OWNER_AGENT_ID,
-        UQ_SHARED_WORKSPACE_SLUG,
-        UQ_OWNER_AGENT_SLUG,
     )
 
 
@@ -209,6 +193,120 @@ class RDBAgentToolkit(RDBModel):
     IX_AGENT_ID = sa.Index("ix_agent_toolkits_agent_id", "agent_id")
 
     __table_args__ = (UQ_AGENT_TOOLKIT, IX_AGENT_ID)
+
+
+class RDBAgentToolkitNamespaceReservation(RDBModel):
+    """Durable Agent-local namespace allocation for one ToolkitConfig."""
+
+    __tablename__ = "agent_toolkit_namespace_reservations"
+
+    id: Mapped[str] = mapped_column(
+        sa.String(32),
+        primary_key=True,
+        init=False,
+        default_factory=lambda: uuid7().hex,
+    )
+    agent_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("agents.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    toolkit_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("toolkit_configs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    base_slug: Mapped[str] = mapped_column(sa.String(100), nullable=False)
+    ordinal: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
+    namespace: Mapped[str] = mapped_column(sa.String(128), nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        server_default=sa.func.now(),
+    )
+
+    UQ_AGENT_NAMESPACE = sa.UniqueConstraint(
+        "agent_id",
+        "namespace",
+        name="uq_agent_toolkit_namespace_reservations_agent_namespace",
+    )
+    UQ_AGENT_BASE_ORDINAL = sa.UniqueConstraint(
+        "agent_id",
+        "base_slug",
+        "ordinal",
+        name="uq_agent_toolkit_namespace_reservations_agent_base_ordinal",
+    )
+    CK_ORDINAL_POSITIVE = sa.CheckConstraint(
+        "ordinal >= 1",
+        name="ck_agent_toolkit_namespace_reservations_ordinal_positive",
+    )
+    UQ_ACTIVE_AGENT_TOOLKIT = sa.Index(
+        "ix_agent_toolkit_namespace_reservations_agent_id_toolkit_id",
+        "agent_id",
+        "toolkit_id",
+        unique=True,
+        postgresql_where=sa.text("toolkit_id IS NOT NULL"),
+    )
+    IX_TOOLKIT_ID = sa.Index(
+        "ix_agent_toolkit_namespace_reservations_toolkit_id",
+        "toolkit_id",
+    )
+
+    __table_args__ = (
+        UQ_AGENT_NAMESPACE,
+        UQ_AGENT_BASE_ORDINAL,
+        CK_ORDINAL_POSITIVE,
+        UQ_ACTIVE_AGENT_TOOLKIT,
+        IX_TOOLKIT_ID,
+    )
+
+
+class RDBAgentToolkitNamespaceSequence(RDBModel):
+    """Highest consumed namespace ordinal for one Agent and base Slug."""
+
+    __tablename__ = "agent_toolkit_namespace_sequences"
+
+    id: Mapped[str] = mapped_column(
+        sa.String(32),
+        primary_key=True,
+        init=False,
+        default_factory=lambda: uuid7().hex,
+    )
+    agent_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("agents.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    base_slug: Mapped[str] = mapped_column(sa.String(100), nullable=False)
+    last_ordinal: Mapped[int] = mapped_column(
+        sa.BigInteger,
+        nullable=False,
+        default=0,
+        server_default=sa.text("0"),
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        server_default=sa.func.now(),
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        server_default=sa.func.now(),
+        onupdate=sa.func.now(),
+    )
+
+    UQ_AGENT_BASE = sa.UniqueConstraint(
+        "agent_id",
+        "base_slug",
+        name="uq_agent_toolkit_namespace_sequences_agent_base",
+    )
+    CK_LAST_ORDINAL_NONNEGATIVE = sa.CheckConstraint(
+        "last_ordinal >= 0",
+        name="ck_agent_toolkit_namespace_sequences_last_ordinal_nonnegative",
+    )
+
+    __table_args__ = (UQ_AGENT_BASE, CK_LAST_ORDINAL_NONNEGATIVE)
 
 
 class RDBMCPOAuthConnection(RDBModel):

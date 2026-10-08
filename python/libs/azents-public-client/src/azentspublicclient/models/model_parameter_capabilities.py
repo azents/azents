@@ -24,7 +24,7 @@ from typing_extensions import Self
 
 class ModelParameterCapabilities(BaseModel):
     """
-    Configurable generation parameters supported by the model.
+    Final supported generation controls.
     """ # noqa: E501
     temperature: Optional[StrictBool] = False
     max_output_tokens: Optional[StrictBool] = False
@@ -91,12 +91,15 @@ class ModelParameterCapabilities(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "temperature": obj.get("temperature") if obj.get("temperature") is not None else False,
             "max_output_tokens": obj.get("max_output_tokens") if obj.get("max_output_tokens") is not None else False,
             "top_p": obj.get("top_p") if obj.get("top_p") is not None else False,
             "top_k": obj.get("top_k") if obj.get("top_k") is not None else False,
             "stop_sequences": obj.get("stop_sequences") if obj.get("stop_sequences") is not None else False
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

@@ -34,6 +34,8 @@ from azents_runtime_control.transfer import (
     MULTIPART_PART_BYTES,
     STREAM_OWNER_RENEWAL_SECONDS,
 )
+from botocore.exceptions import ClientError, HTTPClientError
+from botocore.exceptions import ConnectionError as BotoConnectionError
 from google.protobuf import timestamp_pb2
 
 from azents.core.runtime_runner_credential import RuntimeRunnerCredential
@@ -432,17 +434,17 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             raise ValueError("maximum_chunk_bytes exceeds the protocol bound")
         if multipart_part_bytes < MULTIPART_PART_BYTES:
             raise ValueError("multipart_part_bytes must satisfy the S3 part minimum")
-        self._state_store = state_store
-        self._coordination_store = coordination_store
-        self._object_store = object_store
-        self._direct_object_store = direct_object_store
-        self._terminal_sink = terminal_sink
+        self.state_store = state_store
+        self.coordination_store = coordination_store
+        self.object_store = object_store
+        self.direct_object_store = direct_object_store
+        self.terminal_sink = terminal_sink
         self._bucket = bucket
         self._object_prefix = object_prefix
         self._owner_replica_id = owner_replica_id
-        self._runner_authenticator = runner_authenticator
+        self.runner_authenticator = runner_authenticator
         self._auth = RuntimeRunnerCredentialGrpcAuth(runner_authenticator)
-        self._clock = clock
+        self.clock = clock
         self._download_chunks = _RoundRobinChunkScheduler(max_concurrent_downloads)
         self._uploads = asyncio.Semaphore(max_concurrent_uploads)
         self._maximum_chunk_bytes = maximum_chunk_bytes
@@ -458,7 +460,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
     ) -> pb.DirectObjectDownloadClaimResponse:
         """Claim one exact direct-object attempt and return a transient GET ticket."""
         credential = await self._auth.authenticate(context)
-        if not await self._runner_authenticator.authorize_runner(credential):
+        if not await self.runner_authenticator.authorize_runner(credential):
             await context.abort(
                 grpc.StatusCode.UNAUTHENTICATED,
                 "Runner credential is no longer authorized",
@@ -482,7 +484,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 "Transfer identity is not authorized",
             )
             raise AssertionError("unreachable")
-        record = await self._state_store.get(identity.transfer_id)
+        record = await self.state_store.get(identity.transfer_id)
         if (
             record is None
             or record.admission.attempt_id != identity.attempt_id
@@ -505,7 +507,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 "Direct object transfer is unavailable",
             )
             raise AssertionError("unreachable")
-        connection = await self._coordination_store.get_connection(
+        connection = await self.coordination_store.get_connection(
             kind=RuntimeConnectionKind.RUNNER,
             subject_id=identity.runtime_id,
         )
@@ -520,7 +522,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         if (
             source_handle is not None
             and (
-                self._direct_object_store is None
+                self.direct_object_store is None
                 or record.admission.expected_sha256 is None
             )
         ) or (
@@ -536,7 +538,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 "Direct object manifest is unavailable",
             )
             raise AssertionError("unreachable")
-        claimed = await self._state_store.claim_direct_object(
+        claimed = await self.state_store.claim_direct_object(
             identity.transfer_id,
             attempt_id=identity.attempt_id,
             runtime_id=identity.runtime_id,
@@ -572,15 +574,15 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         )
         try:
             if source_handle is not None:
-                assert self._direct_object_store is not None
-                ticket = await self._direct_object_store.issue_download_ticket(
+                assert self.direct_object_store is not None
+                ticket = await self.direct_object_store.issue_download_ticket(
                     source_handle=source_handle,
                     deadline_at=deadline_at,
                 )
             else:
                 assert transfer_object is not None
                 object_identity = self._object_identity(transfer_object.key)
-                await self._object_store.verify_transfer_object(
+                await self.object_store.verify_transfer_object(
                     identity=object_identity,
                     expected_size=transfer_object.size,
                     expected_sha256=expected_sha256,
@@ -589,7 +591,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 expires_in = min(timedelta(minutes=5), deadline_at - now)
                 if expires_in <= timedelta():
                     raise ValueError("Direct object claim expired")
-                ticket = await self._object_store.get_download_request(
+                ticket = await self.object_store.get_download_request(
                     identity=object_identity,
                     expires_in=expires_in,
                     now=now,
@@ -609,14 +611,14 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 "Direct object verification failed",
             )
             raise AssertionError("unreachable")
-        except Exception:
+        except BotoConnectionError, ClientError, HTTPClientError:
             await context.abort(
                 grpc.StatusCode.FAILED_PRECONDITION,
                 "Direct object capability is unavailable",
             )
             raise AssertionError("unreachable")
-        current = await self._state_store.get(identity.transfer_id)
-        connection = await self._coordination_store.get_connection(
+        current = await self.state_store.get(identity.transfer_id)
+        connection = await self.coordination_store.get_connection(
             kind=RuntimeConnectionKind.RUNNER,
             subject_id=identity.runtime_id,
         )
@@ -636,7 +638,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             or _expired(current, self._now())
             or connection is None
             or connection.generation != identity.runner_generation
-            or not await self._runner_authenticator.authorize_runner(credential)
+            or not await self.runner_authenticator.authorize_runner(credential)
             or ticket.method != "GET"
             or ticket.expires_at <= self._now()
             or ticket.expires_at > deadline_at
@@ -690,7 +692,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
     ) -> pb.DirectObjectUploadClaimResponse:
         """Reserve the ingress durably before issuing an exact checksum-bound PUT."""
         credential = await self._auth.authenticate(context)
-        if not await self._runner_authenticator.authorize_runner(credential):
+        if not await self.runner_authenticator.authorize_runner(credential):
             await context.abort(grpc.StatusCode.UNAUTHENTICATED, "Runner unauthorized")
             raise AssertionError("unreachable")
         if (
@@ -713,7 +715,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 grpc.StatusCode.FAILED_PRECONDITION, "PUT manifest differs"
             )
             raise AssertionError("unreachable")
-        claimed = await self._state_store.claim_direct_object(
+        claimed = await self.state_store.claim_direct_object(
             request.identity.transfer_id,
             attempt_id=request.identity.attempt_id,
             runtime_id=request.identity.runtime_id,
@@ -740,7 +742,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             if lifetime <= 0:
                 await context.abort(grpc.StatusCode.DEADLINE_EXCEEDED, "PUT expired")
                 raise AssertionError("unreachable")
-            reserved = await self._state_store.reserve_direct_ingress(
+            reserved = await self.state_store.reserve_direct_ingress(
                 claimed.admission.transfer_id,
                 attempt_id=claimed.admission.attempt_id,
                 accepted_runner_generation=request.identity.runner_generation,
@@ -773,7 +775,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             raise AssertionError("unreachable")
         await self._check_direct_upload_stream(claimed, credential, context)
         try:
-            ticket = await self._object_store.get_upload_request(
+            ticket = await self.object_store.get_upload_request(
                 identity=self._object_identity(claimed.direct_ingress_handle),
                 content_type=None,
                 content_length=request.expected_size,
@@ -783,10 +785,10 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             )
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except BotoConnectionError, ClientError, HTTPClientError:
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "PUT unavailable")
             raise AssertionError("unreachable")
-        current = await self._state_store.get(claimed.admission.transfer_id)
+        current = await self.state_store.get(claimed.admission.transfer_id)
         if (
             current is None
             or current.phase.value != "streaming"
@@ -818,7 +820,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
     ) -> pb.DirectObjectUploadRenewResponse:
         """Renew an owned lease without issuing or extending a PUT capability."""
         credential = await self._auth.authenticate(context)
-        if not await self._runner_authenticator.authorize_runner(credential):
+        if not await self.runner_authenticator.authorize_runner(credential):
             await context.abort(grpc.StatusCode.UNAUTHENTICATED, "Runner unauthorized")
             raise AssertionError("unreachable")
         if (
@@ -839,7 +841,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         ):
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "PUT fenced")
             raise AssertionError("unreachable")
-        renewed = await self._state_store.renew_stream_lease(
+        renewed = await self.state_store.renew_stream_lease(
             record.admission.transfer_id,
             attempt_id=record.admission.attempt_id,
             accepted_runner_generation=request.identity.runner_generation,
@@ -861,7 +863,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
     ) -> pb.UploadTransferResult:
         """Verify native checksum evidence and publish a separate immutable copy."""
         credential = await self._auth.authenticate(context)
-        if not await self._runner_authenticator.authorize_runner(credential):
+        if not await self.runner_authenticator.authorize_runner(credential):
             await context.abort(grpc.StatusCode.UNAUTHENTICATED, "Runner unauthorized")
             raise AssertionError("unreachable")
         if (
@@ -914,12 +916,12 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         ):
             await context.abort(grpc.StatusCode.DATA_LOSS, "PUT copy integrity failed")
             raise AssertionError("unreachable")
-        current = await self._state_store.get(record.admission.transfer_id)
+        current = await self.state_store.get(record.admission.transfer_id)
         if current is None:
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "PUT fenced")
             raise AssertionError("unreachable")
         latest = await self._check_direct_upload_stream(current, credential, context)
-        verifying = await self._state_store.begin_verification(
+        verifying = await self.state_store.begin_verification(
             latest.admission.transfer_id,
             attempt_id=latest.admission.attempt_id,
             runtime_id=latest.admission.runtime_id,
@@ -931,7 +933,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         if verifying is None:
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "PUT fenced")
             raise AssertionError("unreachable")
-        available = await self._state_store.publish_available(
+        available = await self.state_store.publish_available(
             verifying.admission.transfer_id,
             attempt_id=verifying.admission.attempt_id,
             runtime_id=verifying.admission.runtime_id,
@@ -945,7 +947,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         if available is None:
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "PUT fenced")
             raise AssertionError("unreachable")
-        committed = await self._state_store.commit_upload_response(
+        committed = await self.state_store.commit_upload_response(
             available.admission.transfer_id,
             attempt_id=available.admission.attempt_id,
             runtime_id=available.admission.runtime_id,
@@ -977,10 +979,10 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
     ) -> S3VerifiedObject:
         """Keep the owner lease alive from HEAD through immutable copy."""
         try:
-            metadata = await self._object_store.head_with_checksum(ingress)
+            metadata = await self.object_store.head_with_checksum(ingress)
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except BotoConnectionError, ClientError, HTTPClientError:
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "PUT HEAD failed")
             raise AssertionError("unreachable")
         if (
@@ -991,12 +993,12 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         ):
             await context.abort(grpc.StatusCode.DATA_LOSS, "PUT integrity failed")
             raise AssertionError("unreachable")
-        current = await self._state_store.get(record.admission.transfer_id)
+        current = await self.state_store.get(record.admission.transfer_id)
         if current is None:
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "PUT fenced")
             raise AssertionError("unreachable")
         latest = await self._check_direct_upload_stream(current, credential, context)
-        pending = await self._state_store.record_completed_object_cleanup(
+        pending = await self.state_store.record_completed_object_cleanup(
             latest.admission.transfer_id,
             attempt_id=latest.admission.attempt_id,
             expected_revision=latest.revision,
@@ -1009,7 +1011,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "PUT fenced")
             raise AssertionError("unreachable")
         try:
-            return await self._object_store.copy_immutable(
+            return await self.object_store.copy_immutable(
                 source=ingress,
                 destination=final,
                 expected_size=request.actual_size,
@@ -1021,7 +1023,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             )
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except BotoConnectionError, ClientError, HTTPClientError:
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "PUT copy failed")
             raise AssertionError("unreachable")
 
@@ -1059,7 +1061,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
     ) -> AsyncIterator[pb.DownloadTransferFrame]:
         """Authenticate, fence, claim, and bounded-stream one download object."""
         credential = await self._auth.authenticate(context)
-        if not await self._runner_authenticator.authorize_runner(credential):
+        if not await self.runner_authenticator.authorize_runner(credential):
             await context.abort(
                 grpc.StatusCode.UNAUTHENTICATED,
                 "Runner credential is no longer authorized",
@@ -1072,7 +1074,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         keeper: _StreamLeaseKeeper | None = None
         chunk_turn_held = False
         try:
-            claimed = await self._state_store.claim_stream(
+            claimed = await self.state_store.claim_stream(
                 record.admission.transfer_id,
                 attempt_id=record.admission.attempt_id,
                 runtime_id=record.admission.runtime_id,
@@ -1107,7 +1109,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 raise AssertionError("unreachable")
             identity = self._object_identity(transfer_object.key)
             try:
-                await self._object_store.verify_transfer_object(
+                await self.object_store.verify_transfer_object(
                     identity=identity,
                     expected_size=transfer_object.size,
                     expected_sha256=transfer_object.sha256,
@@ -1120,7 +1122,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 raise AssertionError("unreachable")
             offset = 0
             digest = hashlib.sha256()
-            async with self._object_store.iter_chunks(
+            async with self.object_store.iter_chunks(
                 identity,
                 maximum_chunk_size=self._maximum_chunk_bytes,
             ) as chunks:
@@ -1181,7 +1183,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 raise AssertionError("unreachable")
             await keeper.stop()
             keeper = None
-            verifying = await self._state_store.begin_verification(
+            verifying = await self.state_store.begin_verification(
                 latest.admission.transfer_id,
                 attempt_id=latest.admission.attempt_id,
                 runtime_id=latest.admission.runtime_id,
@@ -1218,7 +1220,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             raise AssertionError("unreachable")
         except asyncio.CancelledError:
             if latest is not None:
-                current = await self._state_store.get(latest.admission.transfer_id)
+                current = await self.state_store.get(latest.admission.transfer_id)
                 latest = current or latest
                 if (
                     keeper is not None
@@ -1300,7 +1302,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 "Upload transfer must begin with an opening frame",
             )
             raise AssertionError("unreachable")
-        if not await self._runner_authenticator.authorize_runner(credential):
+        if not await self.runner_authenticator.authorize_runner(credential):
             await context.abort(
                 grpc.StatusCode.UNAUTHENTICATED,
                 "Runner credential is no longer authorized",
@@ -1330,7 +1332,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         identity: S3ObjectIdentity | None = None
         keeper: _StreamLeaseKeeper | None = None
         try:
-            latest = await self._state_store.claim_stream(
+            latest = await self.state_store.claim_stream(
                 record.admission.transfer_id,
                 attempt_id=record.admission.attempt_id,
                 runtime_id=record.admission.runtime_id,
@@ -1432,19 +1434,19 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                         raise AssertionError("unreachable")
                     if transfer_object.size > 0 and upload is None:
                         if transfer_object.sha256 is None:
-                            upload = await self._object_store.create_preparation_multipart_upload(
+                            upload = await self.object_store.create_preparation_multipart_upload(
                                 destination=identity,
                                 content_type=None,
                             )
                         else:
-                            upload = await self._object_store.create_multipart_upload(
+                            upload = await self.object_store.create_multipart_upload(
                                 destination=identity,
                                 transfer_metadata=S3TransferObjectMetadata(
                                     sha256=transfer_object.sha256,
                                     content_type=None,
                                 ),
                             )
-                        handled = await self._state_store.record_multipart_cleanup_handle(
+                        handled = await self.state_store.record_multipart_cleanup_handle(
                             latest.admission.transfer_id,
                             attempt_id=latest.admission.attempt_id,
                             accepted_runner_generation=latest.accepted_runner_generation
@@ -1455,7 +1457,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                             cleanup_handle=upload.upload_id,
                         )
                         if handled is None:
-                            await self._object_store.abort_multipart_upload(
+                            await self.object_store.abort_multipart_upload(
                                 upload=upload
                             )
                             upload = None
@@ -1466,7 +1468,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                             )
                             raise AssertionError("unreachable")
                         latest = handled
-                        pending = await self._state_store.record_cleanup(
+                        pending = await self.state_store.record_cleanup(
                             latest.admission.transfer_id,
                             attempt_id=latest.admission.attempt_id,
                             expected_revision=latest.revision,
@@ -1611,7 +1613,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                     exc.completed_object_cleanup_required
                 )
             if latest is not None:
-                current = await self._state_store.get(latest.admission.transfer_id)
+                current = await self.state_store.get(latest.admission.transfer_id)
                 latest = current or latest
                 if latest.upload_response_committed_at is not None:
                     raise
@@ -1730,7 +1732,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 grpc.StatusCode.PERMISSION_DENIED, "Transfer identity is not authorized"
             )
             raise AssertionError("unreachable")
-        record = await self._state_store.get(identity.transfer_id)
+        record = await self.state_store.get(identity.transfer_id)
         if (
             record is not None
             and record.admission.attempt_id == identity.attempt_id
@@ -1771,7 +1773,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 grpc.StatusCode.FAILED_PRECONDITION, "Transfer is unavailable"
             )
             raise AssertionError("unreachable")
-        connection = await self._coordination_store.get_connection(
+        connection = await self.coordination_store.get_connection(
             kind=RuntimeConnectionKind.RUNNER,
             subject_id=identity.runtime_id,
         )
@@ -1799,7 +1801,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 grpc.StatusCode.PERMISSION_DENIED, "Transfer identity is not authorized"
             )
             raise AssertionError("unreachable")
-        record = await self._state_store.get(identity.transfer_id)
+        record = await self.state_store.get(identity.transfer_id)
         if (
             record is not None
             and record.admission.attempt_id == identity.attempt_id
@@ -1838,7 +1840,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 grpc.StatusCode.FAILED_PRECONDITION, "Transfer is unavailable"
             )
             raise AssertionError("unreachable")
-        connection = await self._coordination_store.get_connection(
+        connection = await self.coordination_store.get_connection(
             kind=RuntimeConnectionKind.RUNNER,
             subject_id=identity.runtime_id,
         )
@@ -1856,15 +1858,15 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         context: _GrpcStreamContext,
     ) -> RuntimeTransferRecord:
         if context.cancelled():
-            current = await self._state_store.get(record.admission.transfer_id)
+            current = await self.state_store.get(record.admission.transfer_id)
             raise _TransferCancelled(current or record)
-        if not await self._runner_authenticator.authorize_runner(credential):
+        if not await self.runner_authenticator.authorize_runner(credential):
             await context.abort(
                 grpc.StatusCode.UNAUTHENTICATED, "Runner transfer authorization expired"
             )
             raise AssertionError("unreachable")
-        current = await self._state_store.get(record.admission.transfer_id)
-        connection = await self._coordination_store.get_connection(
+        current = await self.state_store.get(record.admission.transfer_id)
+        connection = await self.coordination_store.get_connection(
             kind=RuntimeConnectionKind.RUNNER,
             subject_id=record.admission.runtime_id,
         )
@@ -1919,7 +1921,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             and (now - previous_at).total_seconds() < _PROGRESS_INTERVAL_SECONDS
         ):
             return record
-        progressed = await self._state_store.record_progress(
+        progressed = await self.state_store.record_progress(
             record.admission.transfer_id,
             attempt_id=record.admission.attempt_id,
             runtime_id=record.admission.runtime_id,
@@ -1956,9 +1958,9 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         record: RuntimeTransferRecord,
         credential: RuntimeRunnerCredential,
     ) -> RuntimeTransferRecord:
-        if not await self._runner_authenticator.authorize_runner(credential):
+        if not await self.runner_authenticator.authorize_runner(credential):
             raise RuntimeError("Runner transfer authorization expired")
-        current = await self._state_store.get(record.admission.transfer_id)
+        current = await self.state_store.get(record.admission.transfer_id)
         if (
             current is not None
             and current.admission.attempt_id == record.admission.attempt_id
@@ -1972,7 +1974,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             raise _TransferCancelled(current)
         if current is not None and _expired(current, self._now()):
             raise _TransferExpired(current)
-        connection = await self._coordination_store.get_connection(
+        connection = await self.coordination_store.get_connection(
             kind=RuntimeConnectionKind.RUNNER,
             subject_id=record.admission.runtime_id,
         )
@@ -1987,7 +1989,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             or connection.generation != current.accepted_runner_generation
         ):
             raise RuntimeError("Transfer stream is fenced")
-        renewed = await self._state_store.renew_stream_lease(
+        renewed = await self.state_store.renew_stream_lease(
             current.admission.transfer_id,
             attempt_id=current.admission.attempt_id,
             accepted_runner_generation=current.accepted_runner_generation or 0,
@@ -2036,7 +2038,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                     final_buffer,
                 )
             latest = await self._check_stream(latest, credential, context)
-        responsibility = await self._state_store.record_completed_object_cleanup(
+        responsibility = await self.state_store.record_completed_object_cleanup(
             latest.admission.transfer_id,
             attempt_id=latest.admission.attempt_id,
             expected_revision=latest.revision,
@@ -2046,7 +2048,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             completed_object_cleanup_required=True,
         )
         if responsibility is None:
-            current = await self._state_store.get(latest.admission.transfer_id)
+            current = await self.state_store.get(latest.admission.transfer_id)
             cleaned = await self._cleanup_upload(
                 current or latest,
                 upload=upload,
@@ -2068,7 +2070,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                         latest,
                         verified_object_handle=verified_object_handle,
                     )
-                await self._object_store.create_empty_immutable(
+                await self.object_store.create_empty_immutable(
                     destination=verified_identity,
                     transfer_metadata=S3TransferObjectMetadata(
                         sha256=actual_sha256,
@@ -2078,20 +2080,20 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             else:
                 assert upload is not None
                 if transfer_object.sha256 is None:
-                    await self._object_store.complete_preparation_multipart_upload(
+                    await self.object_store.complete_preparation_multipart_upload(
                         upload=upload,
                         completed_parts=tuple(parts),
                         expected_size=actual_size,
                     )
                 else:
-                    await self._object_store.complete_multipart_upload(
+                    await self.object_store.complete_multipart_upload(
                         upload=upload,
                         completed_parts=tuple(parts),
                         expected_size=actual_size,
                         expected_sha256=actual_sha256,
                     )
         except (S3TransferCancelled, S3TransferCleanupRequired) as exc:
-            retained = await self._state_store.record_completed_object_cleanup(
+            retained = await self.state_store.record_completed_object_cleanup(
                 latest.admission.transfer_id,
                 attempt_id=latest.admission.attempt_id,
                 expected_revision=latest.revision,
@@ -2106,7 +2108,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 latest = retained
             raise
         if upload is not None:
-            completed_only = await self._state_store.record_completed_object_cleanup(
+            completed_only = await self.state_store.record_completed_object_cleanup(
                 latest.admission.transfer_id,
                 attempt_id=latest.admission.attempt_id,
                 expected_revision=latest.revision,
@@ -2116,7 +2118,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 completed_object_cleanup_required=True,
             )
             if completed_only is None:
-                current = await self._state_store.get(latest.admission.transfer_id)
+                current = await self.state_store.get(latest.admission.transfer_id)
                 cleaned = await self._cleanup_upload(
                     current or latest,
                     upload=upload,
@@ -2136,7 +2138,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 latest,
                 verified_object_handle=verified_object_handle,
             )
-            await self._object_store.copy_immutable(
+            await self.object_store.copy_immutable(
                 source=staging_identity,
                 destination=verified_identity,
                 expected_size=actual_size,
@@ -2147,12 +2149,12 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 multipart_copy_threshold=self._multipart_part_bytes,
                 multipart_part_size=self._multipart_part_bytes,
             )
-            await self._object_store.delete(
+            await self.object_store.delete(
                 bucket=staging_identity.bucket,
                 key=staging_identity.key,
             )
         await keeper.stop()
-        verifying = await self._state_store.begin_verification(
+        verifying = await self.state_store.begin_verification(
             latest.admission.transfer_id,
             attempt_id=latest.admission.attempt_id,
             runtime_id=latest.admission.runtime_id,
@@ -2167,7 +2169,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 "Transfer stream is fenced",
             )
             raise AssertionError("unreachable")
-        available = await self._state_store.publish_available(
+        available = await self.state_store.publish_available(
             verifying.admission.transfer_id,
             attempt_id=verifying.admission.attempt_id,
             runtime_id=verifying.admission.runtime_id,
@@ -2184,7 +2186,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 "Transfer availability is fenced",
             )
             raise AssertionError("unreachable")
-        committed = await self._state_store.commit_upload_response(
+        committed = await self.state_store.commit_upload_response(
             available.admission.transfer_id,
             attempt_id=available.admission.attempt_id,
             runtime_id=available.admission.runtime_id,
@@ -2197,7 +2199,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         )
         if committed is not None:
             return committed
-        current = await self._state_store.get(available.admission.transfer_id)
+        current = await self.state_store.get(available.admission.transfer_id)
         cleaned = await self._cleanup_upload(
             current or available,
             upload=upload,
@@ -2219,7 +2221,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         verified_object_handle: str,
     ) -> RuntimeTransferRecord:
         """Persist final-object cleanup authority before a native promotion copy."""
-        reserved = await self._state_store.record_pre_ready_object(
+        reserved = await self.state_store.record_pre_ready_object(
             record.admission.transfer_id,
             attempt_id=record.admission.attempt_id,
             accepted_runner_generation=record.accepted_runner_generation or 0,
@@ -2253,7 +2255,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             )
             raise AssertionError("unreachable")
         checked = await self._check_stream(record, credential, context)
-        completed = await self._object_store.upload_part(
+        completed = await self.object_store.upload_part(
             upload=upload,
             part_number=len(parts) + 1,
             body=body,
@@ -2266,7 +2268,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
     ) -> RuntimeTransferRecord:
         status = RuntimeTransferCleanupStatus.COMPLETE
         try:
-            await self._object_store.abort_multipart_upload(upload=upload)
+            await self.object_store.abort_multipart_upload(upload=upload)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -2283,13 +2285,13 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                     "cleanup_artifact": RuntimeTransferCleanupArtifact.MULTIPART_ABORT.value,
                 },
             )
-        current = await self._state_store.get(record.admission.transfer_id)
+        current = await self.state_store.get(record.admission.transfer_id)
         if (
             current is None
             or current.admission.attempt_id != record.admission.attempt_id
         ):
             return record
-        updated = await self._state_store.record_cleanup(
+        updated = await self.state_store.record_cleanup(
             current.admission.transfer_id,
             attempt_id=current.admission.attempt_id,
             expected_revision=current.revision,
@@ -2312,7 +2314,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         identity: S3ObjectIdentity,
     ) -> RuntimeTransferRecord:
         """Clean exact upload artifacts and retain only failed cleanup evidence."""
-        current = await self._state_store.get(record.admission.transfer_id)
+        current = await self.state_store.get(record.admission.transfer_id)
         if (
             current is not None
             and current.admission.attempt_id == record.admission.attempt_id
@@ -2331,7 +2333,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         cleanup_exception: Exception | None = None
         if multipart_cleanup_required and upload is not None:
             try:
-                await self._object_store.abort_multipart_upload(upload=upload)
+                await self.object_store.abort_multipart_upload(upload=upload)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -2344,12 +2346,12 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 if record.object is None:
                     raise ValueError("Completed object metadata is unavailable")
                 if record.object.sha256 is None:
-                    await self._object_store.delete(
+                    await self.object_store.delete(
                         bucket=identity.bucket,
                         key=identity.key,
                     )
                 else:
-                    await self._object_store.delete_verified_transfer_object(
+                    await self.object_store.delete_verified_transfer_object(
                         identity=identity,
                         expected_size=record.object.size,
                         expected_sha256=record.object.sha256,
@@ -2380,7 +2382,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                     "cleanup_artifact": cleanup_failure.value,
                 },
             )
-        current = await self._state_store.get(record.admission.transfer_id)
+        current = await self.state_store.get(record.admission.transfer_id)
         if (
             current is None
             or current.admission.attempt_id != record.admission.attempt_id
@@ -2389,7 +2391,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         if not completed_object_cleanup_required:
             if not multipart_cleanup_required:
                 return current
-            updated = await self._state_store.record_cleanup(
+            updated = await self.state_store.record_cleanup(
                 current.admission.transfer_id,
                 attempt_id=current.admission.attempt_id,
                 expected_revision=current.revision,
@@ -2400,7 +2402,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 cleanup_failure=cleanup_failure,
             )
             return updated or current
-        updated = await self._state_store.record_completed_object_cleanup(
+        updated = await self.state_store.record_completed_object_cleanup(
             current.admission.transfer_id,
             attempt_id=current.admission.attempt_id,
             expected_revision=current.revision,
@@ -2430,7 +2432,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             )
         if cancelled:
             failure = RuntimeTransferFailure.CANCELLED
-        return await self._terminal_sink.settle_terminal(
+        return await self.terminal_sink.settle_terminal(
             record,
             outcome=outcome,
             failure=failure,
@@ -2490,7 +2492,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         return await self._fail(record, failure=RuntimeTransferFailure.FENCED)
 
     def _now(self) -> datetime:
-        now = self._clock()
+        now = self.clock()
         if now.tzinfo is None or now.utcoffset() is None:
             raise ValueError("Runner transfer clock must be timezone-aware")
         return now

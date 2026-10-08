@@ -35,6 +35,7 @@ class TestModelCapabilities(unittest.TestCase):
         model = ModelCapabilities()
         if include_optional:
             return ModelCapabilities(
+                capability_schema_version = 3,
                 context_window = azentspublicclient.models.model_context_window.ModelContextWindow(
                     default_input_tokens = 1.0, 
                     max_input_tokens = 1.0, 
@@ -69,7 +70,18 @@ class TestModelCapabilities(unittest.TestCase):
                 compatibility = azentspublicclient.models.model_compatibility_capabilities.ModelCompatibilityCapabilities(
                     provider_family = '', 
                     responses_api = True, 
-                    unsupported_media_policy = 'text_substitution', )
+                    unsupported_media_policy = 'text_substitution', ),
+                structured_response = True,
+                request_constraints = azentspublicclient.models.model_request_constraints.ModelRequestConstraints(
+                    known_default = 'none', 
+                    feature_conditions = [
+                        azentspublicclient.models.model_feature_condition.ModelFeatureCondition(
+                            feature = 'function_calling', 
+                            reasoning_efforts = [
+                                'none'
+                                ], 
+                            function_tools = True, )
+                        ], )
             )
         else:
             return ModelCapabilities(

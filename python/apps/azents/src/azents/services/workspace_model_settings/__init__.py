@@ -5,8 +5,8 @@ from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.active_model_capabilities import ConfiguredModelIdentity
 from azents.core.agent import (
     AgentModelSelection,
     AgentModelSelectionInput,
@@ -14,12 +14,16 @@ from azents.core.agent import (
     SelectableModelOptionInput,
     SelectableModelSettings,
 )
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.workspace_model_settings import WorkspaceModelSettingsRepository
 from azents.repos.workspace_model_settings.data import (
     WorkspaceModelSettings,
     WorkspaceModelSettingsUpdate,
+)
+from azents.repos.workspace_model_settings.operations import (
+    WorkspaceModelSettingsOperationRepository,
+)
+from azents.services.active_model_capabilities import (
+    ActiveModelCapabilitiesService,
+    apply_to_workspace_read,
 )
 from azents.services.image_generation_catalog import ImageGenerationCatalogService
 from azents.services.llm_catalog import ModelCatalogReadService
@@ -43,21 +47,21 @@ class WorkspaceModelSettingsService:
     """Workspace default model settings service."""
 
     repository: Annotated[
-        WorkspaceModelSettingsRepository, Depends(WorkspaceModelSettingsRepository)
+        WorkspaceModelSettingsOperationRepository,
+        Depends(WorkspaceModelSettingsOperationRepository),
     ]
     model_catalog_read_service: Annotated[ModelCatalogReadService, Depends()]
     image_generation_catalog_service: Annotated[
         ImageGenerationCatalogService, Depends()
     ]
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+    active_model_capabilities_service: Annotated[
+        ActiveModelCapabilitiesService, Depends(ActiveModelCapabilitiesService)
     ]
 
     async def get(self, workspace_id: str) -> WorkspaceModelSettingsOutput:
         """Fetch Workspace default model settings."""
-        async with self.session_manager() as session:
-            settings = await self.repository.get_or_create(session, workspace_id)
-        return self._build_output_from_settings(settings)
+        settings = await self.repository.get_or_create(workspace_id)
+        return await self._build_active_output_from_settings(settings)
 
     async def update(
         self,
@@ -70,30 +74,43 @@ class WorkspaceModelSettingsService:
         | DefaultModelCannotBeCleared,
     ]:
         """Update Workspace default model settings."""
-        async with self.session_manager() as session:
-            current = await self.repository.get(session, workspace_id)
+        current = await self.repository.get(workspace_id)
 
         model_options: NormalizedSelectableModelOptions | None = None
-        if (
-            "default_selectable_model_options" in update.model_fields_set
-            and update.default_selectable_model_options is None
-        ):
+        option_inputs = update.get("default_selectable_model_options")
+        main_model_label = update.get("default_main_model_label")
+        lightweight_model_label = update.get("default_lightweight_model_label")
+        if "default_selectable_model_options" in update and option_inputs is None:
             if (
                 current is not None
                 and current.default_selectable_model_options is not None
             ):
                 return Failure(DefaultModelCannotBeCleared(workspace_id=workspace_id))
-            async with self.session_manager() as session:
-                current_or_empty = await self.repository.get_or_create(
-                    session, workspace_id
-                )
-            return Success(self._build_output_from_settings(current_or_empty))
-        if update.default_selectable_model_options is not None:
+            current_or_empty = await self.repository.get_or_create(workspace_id)
+            return Success(
+                await self._build_active_output_from_settings(current_or_empty)
+            )
+        configured_options = (
+            current.default_selectable_model_options if current is not None else None
+        )
+        if (configured_options is not None or option_inputs) and (
+            ("default_main_model_label" in update and main_model_label is None)
+            or (
+                "default_lightweight_model_label" in update
+                and lightweight_model_label is None
+            )
+        ):
+            return Failure(DefaultModelCannotBeCleared(workspace_id=workspace_id))
+        if "default_main_model_label" not in update and current is not None:
+            main_model_label = current.default_main_model_label
+        if "default_lightweight_model_label" not in update and current is not None:
+            lightweight_model_label = current.default_lightweight_model_label
+        if option_inputs is not None:
             options_result = await self._normalize_option_inputs(
                 workspace_id,
-                update.default_selectable_model_options,
-                main_model_label=update.default_main_model_label,
-                lightweight_model_label=update.default_lightweight_model_label,
+                option_inputs,
+                main_model_label=main_model_label,
+                lightweight_model_label=lightweight_model_label,
             )
             match options_result:
                 case Success(value):
@@ -102,25 +119,30 @@ class WorkspaceModelSettingsService:
                     return Failure(error)
                 case _:
                     assert_never(options_result)
-        elif "default_main_model_label" in update.model_fields_set or (
-            "default_lightweight_model_label" in update.model_fields_set
+        elif "default_main_model_label" in update or (
+            "default_lightweight_model_label" in update
         ):
             if current is None or current.default_selectable_model_options is None:
                 return Failure(DefaultModelCannotBeCleared(workspace_id=workspace_id))
             model_options = normalize_stored_selectable_model_options(
                 selectable_model_options=current.default_selectable_model_options,
-                main_model_label=update.default_main_model_label
-                or current.default_main_model_label,
-                lightweight_model_label=update.default_lightweight_model_label
-                or current.default_lightweight_model_label,
+                main_model_label=(
+                    current.default_main_model_label
+                    if main_model_label == ""
+                    else main_model_label
+                ),
+                lightweight_model_label=(
+                    current.default_lightweight_model_label
+                    if lightweight_model_label == ""
+                    else lightweight_model_label
+                ),
             )
 
         if model_options is None:
-            async with self.session_manager() as session:
-                current_or_empty = await self.repository.get_or_create(
-                    session, workspace_id
-                )
-            return Success(self._build_output_from_settings(current_or_empty))
+            current_or_empty = await self.repository.get_or_create(workspace_id)
+            return Success(
+                await self._build_active_output_from_settings(current_or_empty)
+            )
 
         repo_update = WorkspaceModelSettingsUpdate(
             default_model_selection=model_options.model_selection,
@@ -129,11 +151,10 @@ class WorkspaceModelSettingsService:
             default_main_model_label=model_options.main_model_label,
             default_lightweight_model_label=model_options.lightweight_model_label,
         )
-        async with self.session_manager() as session:
-            result = await self.repository.update(session, workspace_id, repo_update)
+        result = await self.repository.update(workspace_id, repo_update)
         match result:
             case Success(value):
-                return Success(self._build_output_from_settings(value))
+                return Success(await self._build_active_output_from_settings(value))
             case Failure(_):
                 return Failure(DefaultModelCannotBeCleared(workspace_id=workspace_id))
             case _:
@@ -211,6 +232,35 @@ class WorkspaceModelSettingsService:
                 )
             case _:
                 assert_never(result)
+
+    async def _build_active_output_from_settings(
+        self, settings: WorkspaceModelSettings
+    ) -> WorkspaceModelSettingsOutput:
+        """Compile detached response metadata after any raw settings write."""
+        selections: dict[ConfiguredModelIdentity, AgentModelSelection] = {}
+        choices = [
+            candidate.model_selection
+            for option in settings.default_selectable_model_options or []
+            for candidate in option.candidates
+        ]
+        for selection in (
+            *choices,
+            settings.default_model_selection,
+            settings.default_lightweight_model_selection,
+        ):
+            if selection is not None:
+                selections.setdefault(
+                    ConfiguredModelIdentity.from_selection(selection), selection
+                )
+        if not selections:
+            return self._build_output_from_settings(settings)
+        compiled = await self.active_model_capabilities_service.capture_and_compile(
+            workspace_id=settings.workspace_id,
+            selections=list(selections.values()),
+        )
+        return self._build_output_from_settings(
+            apply_to_workspace_read(settings, compiled)
+        )
 
     def _build_output_from_settings(
         self,

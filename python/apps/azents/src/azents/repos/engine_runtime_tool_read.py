@@ -2,9 +2,9 @@
 
 import dataclasses
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
+from azents.core.session_workspace_project import SessionWorkspaceProject
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.runtime_profile.data import RuntimeConfigurationState
@@ -12,7 +12,6 @@ from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.session_workspace_project import (
     SessionWorkspaceProjectRepository,
 )
-from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 
 
 @dataclasses.dataclass(frozen=True)
@@ -27,7 +26,7 @@ class RuntimeToolBehaviorState:
 class EngineRuntimeToolReadRepository:
     """Own completed Runtime Toolkit database reads."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[ReadSession]
     agent_runtime_repository: AgentRuntimeRepository
     runtime_profile_repository: RuntimeProfileRepository
     project_repository: SessionWorkspaceProjectRepository

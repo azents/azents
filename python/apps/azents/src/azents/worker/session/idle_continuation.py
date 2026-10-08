@@ -10,6 +10,11 @@ from azents.broker.types import SessionBroker, SessionWakeUp
 from azents.core.enums import (
     MailboxItemKind,
 )
+from azents.core.json_value import JSONValue
+from azents.core.mailbox_data import (
+    MailboxPresentationItem,
+    ScheduledTaskContinuationMailboxPayload,
+)
 from azents.engine.hooks.dispatcher import (
     RuntimeHookDispatcher,
     RuntimeHookProviderRef,
@@ -22,21 +27,16 @@ from azents.engine.hooks.types import (
     SessionIdleHookContext,
 )
 from azents.engine.run.contracts import ToolkitBinding
-from azents.rdb.models.event import JSONValue
 from azents.repos.idle_continuation import (
     IdleContinuationInput,
     IdleContinuationRepository,
 )
-from azents.repos.mailbox.data import (
-    MailboxPresentationItem,
-    ScheduledTaskContinuationMailboxPayload,
+from azents.repos.session_execution.data import (
+    CanonicalExecutionSnapshot,
 )
 from azents.services.chat.live_events import mailbox_item_to_live_event
 from azents.worker.deps import get_worker_broker
 from azents.worker.events.publisher import WorkerEventPublisher
-from azents.worker.session.execution_snapshot import (
-    CanonicalExecutionSnapshot,
-)
 
 
 @dataclasses.dataclass(frozen=True)

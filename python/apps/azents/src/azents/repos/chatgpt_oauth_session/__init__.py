@@ -4,11 +4,11 @@ import datetime
 
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.chatgpt_oauth import ChatGPTOAuthSessionStatus
 from azents.core.crypto import CredentialCipher
 from azents.rdb.models.chatgpt_oauth_session import RDBChatGPTOAuthSession
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import (
     ChatGPTOAuthSession,
@@ -25,11 +25,11 @@ class ChatGPTOAuthSessionRepository:
         """
         :param cipher: Credential encryption/decryption object
         """
-        self._cipher = cipher
+        self.cipher = cipher
 
     async def create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: ChatGPTOAuthSessionCreate,
     ) -> ChatGPTOAuthSession:
         """Create ChatGPT OAuth session.
@@ -44,10 +44,10 @@ class ChatGPTOAuthSessionRepository:
             integration_id=create.integration_id,
             method=create.method,
             state=create.state,
-            encrypted_code_verifier=self._cipher.encrypt(create.code_verifier),
+            encrypted_code_verifier=self.cipher.encrypt(create.code_verifier),
             redirect_uri=create.redirect_uri,
             encrypted_device_auth_id=(
-                self._cipher.encrypt(create.device_auth_id)
+                self.cipher.encrypt(create.device_auth_id)
                 if create.device_auth_id is not None
                 else None
             ),
@@ -56,13 +56,13 @@ class ChatGPTOAuthSessionRepository:
             interval_seconds=create.interval_seconds,
             expires_at=create.expires_at,
         )
-        session.add(rdb_session)
-        await session.flush()
+        session.write_session.add(rdb_session)
+        await session.write_session.flush()
         return self._build(rdb_session)
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> ChatGPTOAuthSession | None:
         """Fetch ChatGPT OAuth session by ID.
@@ -71,14 +71,14 @@ class ChatGPTOAuthSessionRepository:
         :param session_id: Session ID
         :return: Session or None
         """
-        rdb = await session.get(RDBChatGPTOAuthSession, session_id)
+        rdb = await session.read_session.get(RDBChatGPTOAuthSession, session_id)
         if rdb is None:
             return None
         return self._build(rdb)
 
     async def get_by_id_with_secrets(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> ChatGPTOAuthSessionWithSecrets | None:
         """Fetch ChatGPT OAuth session by ID including secret.
@@ -87,14 +87,14 @@ class ChatGPTOAuthSessionRepository:
         :param session_id: Session ID
         :return: Session including secret or None
         """
-        rdb = await session.get(RDBChatGPTOAuthSession, session_id)
+        rdb = await session.read_session.get(RDBChatGPTOAuthSession, session_id)
         if rdb is None:
             return None
         return self._build_with_secrets(rdb)
 
     async def get_pending_by_state(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         state: str,
     ) -> ChatGPTOAuthSessionWithSecrets | None:
         """Fetch pending ChatGPT OAuth session by State.
@@ -103,7 +103,7 @@ class ChatGPTOAuthSessionRepository:
         :param state: OAuth state
         :return: Pending session including secret or None
         """
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBChatGPTOAuthSession).where(
                 RDBChatGPTOAuthSession.state == state,
                 RDBChatGPTOAuthSession.status == ChatGPTOAuthSessionStatus.PENDING,
@@ -117,7 +117,7 @@ class ChatGPTOAuthSessionRepository:
 
     async def consume(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
     ) -> Result[ChatGPTOAuthSession, NotFound]:
         """Transition pending session to connected status.
@@ -134,7 +134,7 @@ class ChatGPTOAuthSessionRepository:
 
     async def cancel(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
     ) -> Result[ChatGPTOAuthSession, NotFound]:
         """Transition pending session to cancelled status.
@@ -151,12 +151,12 @@ class ChatGPTOAuthSessionRepository:
 
     async def _transition_pending(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
         status: ChatGPTOAuthSessionStatus,
     ) -> Result[ChatGPTOAuthSession, NotFound]:
         """Transition status of unexpired pending session."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBChatGPTOAuthSession)
             .where(
                 RDBChatGPTOAuthSession.id == session_id,
@@ -197,12 +197,12 @@ class ChatGPTOAuthSessionRepository:
         """Convert RDB model to domain model including secret."""
         base = self._build(rdb)
         device_auth_id = (
-            self._cipher.decrypt(rdb.encrypted_device_auth_id)
+            self.cipher.decrypt(rdb.encrypted_device_auth_id)
             if rdb.encrypted_device_auth_id is not None
             else None
         )
         return ChatGPTOAuthSessionWithSecrets(
             **base.model_dump(),
-            code_verifier=self._cipher.decrypt(rdb.encrypted_code_verifier),
+            code_verifier=self.cipher.decrypt(rdb.encrypted_code_verifier),
             device_auth_id=device_auth_id,
         )

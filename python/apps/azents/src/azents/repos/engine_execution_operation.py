@@ -5,11 +5,12 @@ import datetime
 from collections.abc import Sequence
 from typing import Protocol
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.enums import AgentRunPhase, AgentRunStatus
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.events.types import ActiveToolCall
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.repos.session_execution.ownership import fence_owned_session_mutation
 
 
 class ExecutionRunState(Protocol):
@@ -31,7 +32,7 @@ class ExecutionRunRepository(Protocol):
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
     ) -> ExecutionRunState | None:
         """Return one AgentRun state."""
@@ -39,7 +40,7 @@ class ExecutionRunRepository(Protocol):
 
     async def update_phase(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         run_id: str,
         phase: AgentRunPhase,
         *,
@@ -54,7 +55,7 @@ class ExecutionModelFilePinRepository(Protocol):
 
     async def pin_many(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         run_id: str,
@@ -76,9 +77,10 @@ class ConditionalPhaseUpdate:
 class EngineExecutionOperationRepository:
     """Own completed phase and ModelFile pin transactions."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     run_repository: ExecutionRunRepository
     model_file_pin_repository: ExecutionModelFilePinRepository | None
+    owner: SessionExecutionOwner | None
 
     async def update_phase(
         self,
@@ -89,6 +91,8 @@ class EngineExecutionOperationRepository:
     ) -> datetime.datetime | None:
         """Update one Run phase in a completed transaction."""
         async with self.session_manager() as session:
+            if active_tool_calls is not None and self.owner is not None:
+                await fence_owned_session_mutation(session, self.owner)
             run = await self.run_repository.update_phase(
                 session,
                 run_id,
@@ -106,6 +110,8 @@ class EngineExecutionOperationRepository:
     ) -> ConditionalPhaseUpdate:
         """Update phase only while the current Run remains running."""
         async with self.session_manager() as session:
+            if active_tool_calls is not None and self.owner is not None:
+                await fence_owned_session_mutation(session, self.owner)
             run = await self.run_repository.get_by_id(session, run_id)
             if run is None or run.status is not AgentRunStatus.RUNNING:
                 return ConditionalPhaseUpdate(

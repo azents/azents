@@ -5,7 +5,6 @@ from collections.abc import Callable
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentSessionRunState
 from azents.core.skill_projection import (
@@ -19,6 +18,7 @@ from azents.core.skill_projection import (
 from azents.core.toolkit_state import ToolkitStateIdentity
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.toolkit_state.store import ToolkitStateHandle, ToolkitStateStore
 
 
@@ -27,7 +27,7 @@ class SkillStateRepository:
     """Own completed and transaction-composed Skill state operations."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
     async def load(self, *, agent_id: str, session_id: str) -> SkillProjectionState:
@@ -41,7 +41,7 @@ class SkillStateRepository:
 
     async def load_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         session_id: str,
@@ -107,7 +107,7 @@ class SkillStateRepository:
 
     async def invalidate_project_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -133,7 +133,7 @@ class SkillStateRepository:
 
     async def _update_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -154,12 +154,12 @@ class SkillStateRepository:
         return saved_state or SkillProjectionState()
 
     @staticmethod
-    def _make_handle(
-        session: AsyncSession,
+    def _make_handle[S: ReadSession](
+        session: S,
         *,
         agent_id: str,
         session_id: str,
-    ) -> ToolkitStateHandle[SkillProjectionState] | None:
+    ) -> ToolkitStateHandle[SkillProjectionState, S] | None:
         """Create one DB-only typed Skill state handle."""
         if not agent_id or not session_id:
             return None

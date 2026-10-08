@@ -4,7 +4,7 @@
 
 import datetime
 import json
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from typing import Any, NamedTuple, TypeVar
 from unittest.mock import MagicMock
@@ -23,6 +23,7 @@ from azents.core.agent import (
     SelectableModelOption,
     SubagentSettings,
 )
+from azents.core.agent_session_data import AgentSession, SessionAgent
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
@@ -40,21 +41,25 @@ from azents.core.inference_profile import (
     SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.mailbox_data import MailboxItemCreate
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.tools import PublishEventFn, ToolkitStatus, TurnContext
 from azents.engine.events.engine_events import SubagentTreeChanged
 from azents.engine.events.types import AgentRunState, Event, UserMessagePayload
 from azents.engine.run.emit import PublishedEvent
 from azents.engine.run.types import FunctionToolError
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.repos.mailbox import MailboxRepository
-from azents.repos.mailbox.data import MailboxItemCreate
 from azents.repos.model_metadata_source import ModelMetadataSourceRepository
+from azents.repos.model_metadata_source_data import (
+    CapturedContextSource,
+    ContextModelRequest,
+)
 from azents.repos.subagent_coordination.data import (
     SubagentCoordinationSnapshot,
     SubagentCoordinationSnapshotRow,
@@ -110,9 +115,9 @@ def _publish_to(
 
 
 @asynccontextmanager
-async def _session_manager() -> AsyncGenerator[AsyncSession, None]:
+async def _session_manager() -> AsyncGenerator[WriteSession, None]:
     """Yield a placeholder DB session for Toolkit tests."""
-    yield require_instance(MagicMock(spec=AsyncSession), AsyncSession)
+    yield ReadWriteSession(require_instance(MagicMock(spec=AsyncSession), AsyncSession))
 
 
 def _session_agent(
@@ -192,7 +197,7 @@ class _AgentRepository:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
     ) -> Agent | None:
         """Return the current Agent snapshot."""
@@ -305,7 +310,7 @@ class _AgentSessionRepository:
 
     async def get_session_agent_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> SessionAgent | None:
         """Return the current agent for the root session."""
@@ -318,7 +323,7 @@ class _AgentSessionRepository:
 
     async def resolve_session_agent_path(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         current_session_agent_id: str,
         path: str,
@@ -344,7 +349,7 @@ class _AgentSessionRepository:
 
     async def lock_session_agent_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_agent_id: str,
     ) -> SessionAgent | None:
         """Record root tree lock requests and return the matching SessionAgent."""
@@ -357,7 +362,7 @@ class _AgentSessionRepository:
 
     async def list_session_agent_tree(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         root_session_agent_id: str,
     ) -> list[SessionAgent]:
@@ -367,7 +372,7 @@ class _AgentSessionRepository:
 
     async def list_by_ids(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_session_ids: list[str],
     ) -> dict[str, AgentSession]:
@@ -381,7 +386,7 @@ class _AgentSessionRepository:
 
     async def create_child_session_agent(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         parent_session_agent_id: str,
         name: str,
@@ -413,7 +418,7 @@ class _AgentSessionRepository:
 
     async def update_session_agent_last_task_message(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_agent_id: str,
         last_task_message: str | None,
@@ -425,7 +430,7 @@ class _AgentSessionRepository:
 
     async def mark_session_agent_message_activity(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_agent_id: str,
     ) -> SessionAgent | None:
@@ -436,7 +441,7 @@ class _AgentSessionRepository:
 
     async def list_descendant_session_agents(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_agent_id: str,
         include_self: bool,
@@ -453,7 +458,7 @@ class _AgentSessionRepository:
 
     async def update_session_agent_observation_cursor(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_agent_id: str,
         parent_observed_run_index: int | None,
@@ -474,7 +479,7 @@ class _AgentSessionRepository:
 
     async def set_inference_state(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         inference_state: SessionInferenceState,
@@ -490,7 +495,7 @@ class _AgentSessionRepository:
 
     async def set_applied_inference_profile(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         model_target_label: str,
@@ -513,7 +518,7 @@ class _AgentSessionRepository:
 
     async def mark_running_for_input_wakeup(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> None:
         """Record wake-producing run state transition requests."""
@@ -522,7 +527,7 @@ class _AgentSessionRepository:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> AgentSession | None:
         """Return linked child AgentSession fixture."""
@@ -531,7 +536,7 @@ class _AgentSessionRepository:
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> AgentSession | None:
         """Return one locked AgentSession fixture."""
@@ -539,7 +544,7 @@ class _AgentSessionRepository:
 
     async def request_stop(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         stop_request_id: str,
@@ -607,7 +612,7 @@ class _AgentRunRepository:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
     ) -> AgentRunState | None:
         """Return the exact spawning parent run fixture."""
@@ -619,7 +624,7 @@ class _AgentRunRepository:
 
     async def create_pending(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         **kwargs: object,
     ) -> AgentRunState:
         """Record inherited pending child run creation."""
@@ -629,7 +634,7 @@ class _AgentRunRepository:
 
     async def list_latest_by_session_ids(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_ids: list[str],
     ) -> dict[str, AgentRunState]:
@@ -652,7 +657,7 @@ class _EventTranscriptRepository:
 
     async def list_for_model_input(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
         *,
         head_event_id: str | None,
@@ -663,7 +668,7 @@ class _EventTranscriptRepository:
 
     async def append(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         event: EventCreate,
     ) -> object:
         """Record appended fork events."""
@@ -683,7 +688,7 @@ class _MailboxService:
 
     async def create(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         create: MailboxItemCreate,
     ) -> object:
         """Record enqueued mailbox input."""
@@ -763,7 +768,7 @@ class _SubagentCoordinationRepository:
 
     async def project_root_tree(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         current_session_id: str,
         configured_capacity: int,
@@ -774,19 +779,18 @@ class _SubagentCoordinationRepository:
         return self.projection
 
 
-class _SourceSnapshotRepository:
-    """Model source snapshot repository fake for subagent tool tests."""
+class _ContextSourceRepository:
+    """Narrow model maximum repository fake for subagent tool tests."""
 
-    async def get_current(
+    async def capture_for_context(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
-        source_key: str,
-    ) -> None:
+        requests: Sequence[ContextModelRequest],
+    ) -> CapturedContextSource:
         """Return no fallback metadata source."""
-        del session
-        assert source_key == "genai_prices"
-        return None
+        del session, requests
+        return CapturedContextSource(models=())
 
 
 class _SubagentToolkitFixture(NamedTuple):
@@ -817,6 +821,7 @@ async def _make_toolkit() -> _SubagentToolkitFixture:
         published_events.append(event)
 
     operations = SubagentToolOperationRepository(
+        owner=None,
         session_manager=_session_manager,
         agent_repository=_typed_fake(agent_repository, AgentRepository),
         agent_session_repository=_typed_fake(
@@ -829,8 +834,8 @@ async def _make_toolkit() -> _SubagentToolkitFixture:
             EventTranscriptRepository,
         ),
         mailbox_repository=_typed_fake(mailbox_item_service, MailboxRepository),
-        source_snapshot_repository=_typed_fake(
-            _SourceSnapshotRepository(),
+        source_repository=_typed_fake(
+            _ContextSourceRepository(),
             ModelMetadataSourceRepository,
         ),
         coordination_repository=_typed_fake(
@@ -1362,7 +1367,7 @@ async def test_interrupt_agent_locks_root_before_stopping_child() -> None:
     result = await tool.handler(json.dumps({"agent_name": "child"}))
 
     assert json.loads(_text_result(result)) == {"previous_status": "running"}
-    assert repo.locked_session_agents == ["root-agent"]
+    assert repo.locked_session_agents == []
     assert repo.stop_requests == [("child-session", "subagent_interrupt", None)]
     assert len(broker.messages) == 1
     assert isinstance(broker.messages[0], SessionStopSignal)

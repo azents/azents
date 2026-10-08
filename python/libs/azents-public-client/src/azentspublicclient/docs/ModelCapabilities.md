@@ -1,11 +1,12 @@
 # ModelCapabilities
 
-Normalized LLM model capability contract.
+One final boolean/list feature contract with separate request constraints.
 
 ## Properties
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
+**capability_schema_version** | **int** |  | [optional] [default to 3]
 **context_window** | [**ModelContextWindow**](ModelContextWindow.md) |  | [optional] 
 **modalities** | [**ModelModalities**](ModelModalities.md) |  | [optional] 
 **tool_calling** | [**ModelToolCallingCapabilities**](ModelToolCallingCapabilities.md) |  | [optional] 
@@ -13,6 +14,8 @@ Name | Type | Description | Notes
 **built_in_tools** | [**ModelBuiltInToolCapabilities**](ModelBuiltInToolCapabilities.md) |  | [optional] 
 **parameters** | [**ModelParameterCapabilities**](ModelParameterCapabilities.md) |  | [optional] 
 **compatibility** | [**ModelCompatibilityCapabilities**](ModelCompatibilityCapabilities.md) |  | [optional] 
+**structured_response** | **bool** |  | [optional] [default to False]
+**request_constraints** | [**ModelRequestConstraints**](ModelRequestConstraints.md) |  | [optional] 
 
 ## Example
 

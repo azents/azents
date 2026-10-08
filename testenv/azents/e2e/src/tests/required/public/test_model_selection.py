@@ -101,7 +101,7 @@ def _wait_for_initial_catalog_sync(
 ) -> requests.Response:
     """Wait for the create-triggered deterministic catalog sync to finish."""
 
-    def terminal_attempt() -> requests.Response | None:
+    def terminal_sync() -> requests.Response | None:
         response = requests.get(
             f"{server_url}/llm-provider-integration/v1/workspaces/"
             f"{handle}/llm-provider-integrations/{integration_id}/catalog-entries",
@@ -115,18 +115,18 @@ def _wait_for_initial_catalog_sync(
             return None
         if payload.get("catalog_scope") != "integration":
             return None
-        latest_attempt_payload = payload.get("latest_attempt")
-        if not isinstance(latest_attempt_payload, dict):
+        latest_sync_payload = payload.get("latest_sync")
+        if not isinstance(latest_sync_payload, dict):
             return None
-        latest_attempt = _json_object(latest_attempt_payload)
-        if latest_attempt is None:
+        latest_sync = _json_object(latest_sync_payload)
+        if latest_sync is None:
             return None
-        if latest_attempt.get("status") not in {"succeeded", "failed"}:
+        if latest_sync.get("status") not in {"succeeded", "failed"}:
             return None
         return response
 
     response = wait_until(
-        terminal_attempt,
+        terminal_sync,
         timeout=10,
         interval=0.2,
         message="Create-triggered catalog sync did not finish",
@@ -155,7 +155,7 @@ def _wait_for_image_catalog_sync(
         if response.status_code != 200:
             return None
         payload = _json_object(response.json())
-        if payload is None or payload.get("generation_current") is not True:
+        if payload is None or payload.get("usable") is not True:
             return None
         entries = payload.get("entries")
         if not isinstance(entries, list):
@@ -285,7 +285,10 @@ class TestModelSelectionReadiness:
             handle,
             integration_id,
         ).json()
-        initial_attempt_id = initial["latest_attempt"]["id"]
+        initial_sync = initial["latest_sync"]
+        initial_started_at = initial_sync["started_at"]
+        assert initial_started_at is not None
+        assert "id" not in initial_sync
         integration_url = (
             f"{azents_public_server_url}/llm-provider-integration/v1/workspaces/"
             f"{handle}/llm-provider-integrations/{integration_id}"
@@ -305,7 +308,7 @@ class TestModelSelectionReadiness:
             timeout=10,
         )
         after_rename.raise_for_status()
-        assert after_rename.json()["latest_attempt"]["id"] == initial_attempt_id
+        assert after_rename.json()["latest_sync"] == initial_sync
 
         updated = requests.patch(
             integration_url,
@@ -320,7 +323,7 @@ class TestModelSelectionReadiness:
         )
         updated.raise_for_status()
 
-        def refreshed_attempt() -> requests.Response | None:
+        def refreshed_sync() -> requests.Response | None:
             response = requests.get(
                 catalog_url,
                 headers=_headers(token),
@@ -328,15 +331,15 @@ class TestModelSelectionReadiness:
             )
             if response.status_code != 200:
                 return None
-            attempt = response.json().get("latest_attempt")
-            if attempt is None or attempt.get("id") == initial_attempt_id:
+            sync = response.json().get("latest_sync")
+            if sync is None or sync.get("started_at") == initial_started_at:
                 return None
-            if attempt.get("status") != "succeeded":
+            if sync.get("status") != "succeeded":
                 return None
             return response
 
         wait_until(
-            refreshed_attempt,
+            refreshed_sync,
             timeout=10,
             interval=0.2,
             message="Credential update did not trigger catalog sync",
@@ -376,8 +379,8 @@ class TestModelSelectionReadiness:
             "gpt-5.5",
             "gpt-5.5-mini",
         ]
-        assert body["latest_attempt"]["status"] == "succeeded"
-        assert body["latest_attempt"]["skipped_count"] == 1
+        assert body["latest_sync"]["status"] == "succeeded"
+        assert body["latest_sync"]["skipped_count"] == 1
 
     def test_openrouter_catalog_and_unknown_publisher_selection(
         self,
@@ -408,8 +411,8 @@ class TestModelSelectionReadiness:
         }
 
         assert body["catalog_scope"] == "integration"
-        assert body["latest_attempt"]["status"] == "succeeded"
-        assert body["latest_attempt"]["skipped_count"] == 1
+        assert body["latest_sync"]["status"] == "succeeded"
+        assert body["latest_sync"]["skipped_count"] == 1
         assert set(entries) == {
             "anthropic/claude-sonnet-4.6",
             "new-publisher/frontier-text",
@@ -511,10 +514,10 @@ class TestModelSelectionReadiness:
 
         assert response.status_code == 200
         body = response.json()
-        assert body["current_snapshot_id"] is None
+        assert body["last_success_at"] is None
         assert body["entries"] == []
-        assert body["latest_attempt"]["status"] == "failed"
-        assert body["latest_attempt"]["action_hint"]
+        assert body["latest_sync"]["status"] == "failed"
+        assert body["latest_sync"]["action_hint"]
 
     def test_workspace_model_settings_update_from_listing_candidate(
         self,

@@ -15,14 +15,16 @@ from datetime import timedelta
 from textwrap import dedent
 from typing import ClassVar
 
+import boto3
 import httpx2 as httpx
 from azcommon.datetime import tznow
 from botocore.auth import SigV4Auth as BotoSigV4Auth
 from botocore.awsrequest import AWSRequest
+from botocore.config import Config as BotoConfig
 from botocore.credentials import Credentials
+from botocore.exceptions import BotoCoreError, ClientError
 from mcp.types import Tool as McpBaseTool
-from pydantic import BaseModel, ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from azents.core.engine_tool_state import (
     McpToolSnapshotItem,
@@ -36,6 +38,10 @@ from azents.core.mcp_transport import (
 )
 from azents.core.mcp_transport import (
     list_tools as mcp_list_tools,
+)
+from azents.core.session_resource_authority import (
+    SessionExecutionOwner,
+    accepts_execution_owner,
 )
 from azents.core.tools import (
     AwsToolkitConfig,
@@ -53,21 +59,22 @@ from azents.engine.run.types import (
     FunctionToolResult,
     FunctionToolSpec,
 )
+from azents.engine.tools.background_discovery import (
+    DISCOVERY_ERRORS,
+    observe_discovery_failure,
+    require_expected_discovery_failure,
+)
 from azents.engine.tools.mcp_base import (
     McpArtifactSink,
     _extract_tool_result,  # reuse common MCP result extraction for AWS wrapper.
     build_mcp_artifact_sink,
 )
-from azents.rdb.session import SessionManager
+from azents.repos.engine_tool_repositories import EngineMcpSnapshotFactory
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
-from azents.repos.toolkit_state.engine import McpToolSnapshotStore
 from azents.services.artifact import ArtifactService
-from azents.services.session_resource_authority import (
-    SessionExecutionOwner,
-    accepts_execution_owner,
-)
+from azents.utils.logging import sanitized_exception_info
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +150,24 @@ class AwsSigV4Auth(httpx.Auth):
 # ---------------------------------------------------------------------------
 
 
+class _AssumedRoleCredentials(BaseModel):
+    """Validate recognized credential fields from an extensible SDK response."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    access_key_id: str = Field(alias="AccessKeyId", min_length=1)
+    secret_access_key: str = Field(alias="SecretAccessKey", min_length=1)
+    session_token: str = Field(alias="SessionToken", min_length=1)
+
+
+class _AssumeRoleResponse(BaseModel):
+    """Decode the credential receipt; other public STS metadata is diagnostic."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    credentials: _AssumedRoleCredentials = Field(alias="Credentials")
+
+
 class AwsCredentialProvider:
     """AWS credential management. Direct Access Key use or AssumeRole.
 
@@ -194,47 +219,54 @@ class AwsCredentialProvider:
         )
 
     async def _assume_role(self) -> Credentials:
-        """Call STS AssumeRole to obtain temporary credentials."""
+        """Obtain SDK-owned credentials without blocking the event loop."""
+        assumed = await asyncio.to_thread(self._assume_role_sync)
+        self._assumed = assumed
+        self._assumed_expiry = tznow().timestamp() + _ASSUME_DURATION_SECONDS
+        return assumed
+
+    def _assume_role_sync(self) -> Credentials:
+        """Own one public STS client for the existing bounded AssumeRole call."""
         assert self._role_arn is not None  # noqa: S101
 
-        sts_auth = AwsSigV4Auth(self._base_credentials, self._region, "sts")
-
-        params: dict[str, str] = {
-            "Action": "AssumeRole",
-            "Version": "2011-06-15",
-            "RoleArn": self._role_arn,
-            "RoleSessionName": "azents-aws-toolkit",
-            "DurationSeconds": str(_ASSUME_DURATION_SECONDS),
-        }
-        if self._external_id:
-            params["ExternalId"] = self._external_id
-
-        async with httpx.AsyncClient(auth=sts_auth, timeout=30.0) as client:
-            resp = await client.get(
-                f"https://sts.{self._region}.amazonaws.com/",
-                params=params,
+        session = boto3.Session(
+            aws_access_key_id=self._base_credentials.access_key,
+            aws_secret_access_key=self._base_credentials.secret_key,
+            aws_session_token=self._base_credentials.token,
+            region_name=self._region,
+        )
+        client = session.client(
+            "sts",
+            region_name=self._region,
+            endpoint_url=f"https://sts.{self._region}.amazonaws.com/",
+            config=BotoConfig(
+                connect_timeout=30,
+                read_timeout=30,
+                retries={"total_max_attempts": 1},
+            ),
+        )
+        try:
+            if self._external_id:
+                response = client.assume_role(
+                    RoleArn=self._role_arn,
+                    RoleSessionName="azents-aws-toolkit",
+                    DurationSeconds=_ASSUME_DURATION_SECONDS,
+                    ExternalId=self._external_id,
+                )
+            else:
+                response = client.assume_role(
+                    RoleArn=self._role_arn,
+                    RoleSessionName="azents-aws-toolkit",
+                    DurationSeconds=_ASSUME_DURATION_SECONDS,
+                )
+            receipt = _AssumeRoleResponse.model_validate(response).credentials
+            return Credentials(
+                receipt.access_key_id,
+                receipt.secret_access_key,
+                receipt.session_token,
             )
-            resp.raise_for_status()
-
-        # Parse XML response with simple tag extraction
-        text = resp.text
-        access_key = _extract_xml_tag(text, "AccessKeyId")
-        secret_key = _extract_xml_tag(text, "SecretAccessKey")
-        session_token = _extract_xml_tag(text, "SessionToken")
-
-        self._assumed = Credentials(access_key, secret_key, session_token)
-        self._assumed_expiry = tznow().timestamp() + _ASSUME_DURATION_SECONDS
-        return self._assumed
-
-
-def _extract_xml_tag(xml: str, tag: str) -> str:
-    """Extract simple tag value from XML."""
-    start = xml.find(f"<{tag}>")
-    end = xml.find(f"</{tag}>")
-    if start == -1 or end == -1:
-        msg = f"Tag <{tag}> not found in STS response"
-        raise ValueError(msg)
-    return xml[start + len(tag) + 2 : end]
+        finally:
+            client.close()
 
 
 # ---------------------------------------------------------------------------
@@ -254,7 +286,7 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
         timeout: float,
         proxy_url: str | None,
         artifact_service: ArtifactService | None,
-        session_manager: SessionManager[AsyncSession] | None,
+        snapshot_factory: EngineMcpSnapshotFactory | None,
         agent_id: str,
         session_id: str,
         state_name: str,
@@ -266,12 +298,15 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
         self._proxy_url = proxy_url
         self.artifact_service = artifact_service
         self._session_id = session_id
-        self.snapshot_store = McpToolSnapshotStore(
-            session_manager=session_manager,
-            agent_id=agent_id,
-            session_id=session_id,
-            toolkit_namespace=_AWS_TOOLKIT_STATE_NAMESPACE,
-            state_name=state_name,
+        self.snapshot_store = (
+            snapshot_factory.create(
+                agent_id=agent_id,
+                session_id=session_id,
+                toolkit_namespace=_AWS_TOOLKIT_STATE_NAMESPACE,
+                state_name=state_name,
+            )
+            if snapshot_factory is not None
+            else None
         )
         self._bg_task: asyncio.Task[None] | None = None
         self._artifact_sink: McpArtifactSink | None = None
@@ -286,7 +321,6 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
             owner,
             session_id=self._session_id,
         ):
-            self.snapshot_store = self.snapshot_store.for_execution(owner)
             self._execution_owner = owner
 
     def _current_artifact_sink(self) -> McpArtifactSink | None:
@@ -323,13 +357,16 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
         if self._bg_task is not None and not self._bg_task.done():
             return
         self._bg_task = asyncio.create_task(self._refresh_tool_snapshot())
+        self._bg_task.add_done_callback(
+            observe_discovery_failure(logger, toolkit="aws")
+        )
 
     async def _refresh_tool_snapshot(self) -> None:
         """Refresh the AWS MCP tool snapshot in the background."""
         try:
             credentials = await self.credential_provider.get_credentials()
             sigv4_auth = AwsSigV4Auth(credentials, _AWS_MCP_REGION, _AWS_MCP_SERVICE)
-            mcp_tools, use_streamable_http = await mcp_list_tools(
+            discovery = await mcp_list_tools(
                 _AWS_MCP_ENDPOINT,
                 {},
                 self._timeout,
@@ -338,13 +375,19 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
             )
         except asyncio.CancelledError:
             raise
-        except Exception:
-            logger.exception("Failed to refresh AWS MCP tool snapshot")
+        except (*DISCOVERY_ERRORS, ExceptionGroup) as error:
+            require_expected_discovery_failure(error)
+            logger.exception(
+                "Failed to refresh AWS MCP tool snapshot",
+                exc_info=sanitized_exception_info(
+                    error, message="AWS MCP discovery failed"
+                ),
+            )
             return
 
         snapshot = _build_aws_tool_snapshot(
-            mcp_tools=mcp_tools,
-            use_streamable_http=use_streamable_http,
+            mcp_tools=discovery.tools,
+            use_streamable_http=discovery.use_streamable_http,
         )
         try:
             await self._save_tool_snapshot(snapshot)
@@ -375,7 +418,10 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
 
     async def _load_tool_snapshot(self) -> McpToolSnapshotState | None:
         """Load the latest successful AWS MCP tool snapshot."""
-        snapshot = await self.snapshot_store.load()
+        store = self.snapshot_store
+        if store is None:
+            return None
+        snapshot = await store.load()
         if snapshot is None:
             return None
         if not snapshot.tools or snapshot.server_url != _AWS_MCP_ENDPOINT:
@@ -384,7 +430,8 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
 
     async def _save_tool_snapshot(self, snapshot: McpToolSnapshotState) -> None:
         """Atomically save a successful AWS MCP tool snapshot."""
-        await self.snapshot_store.replace(snapshot)
+        if self.snapshot_store is not None:
+            await self.snapshot_store.replace(snapshot)
 
     def _tools_from_snapshot(
         self, snapshot: McpToolSnapshotState
@@ -527,11 +574,11 @@ class AwsToolkitProvider(ToolkitProvider[AwsToolkitConfig]):
         self,
         *,
         artifact_service: ArtifactService | None = None,
-        session_manager: SessionManager[AsyncSession] | None = None,
+        snapshot_factory: EngineMcpSnapshotFactory | None = None,
     ) -> None:
         """Initialize AwsToolkitProvider."""
         self.artifact_service = artifact_service
-        self.session_manager = session_manager
+        self.snapshot_factory = snapshot_factory
 
     async def resolve(
         self,
@@ -560,7 +607,7 @@ class AwsToolkitProvider(ToolkitProvider[AwsToolkitConfig]):
             timeout=config.timeout,
             proxy_url=context.mcp_proxy_url,
             artifact_service=self.artifact_service,
-            session_manager=self.session_manager,
+            snapshot_factory=self.snapshot_factory,
             agent_id=context.agent_id,
             session_id=context.session_id,
             state_name=_aws_snapshot_state_name(
@@ -628,6 +675,14 @@ class AwsToolkitProvider(ToolkitProvider[AwsToolkitConfig]):
 
         try:
             credentials = await credential_provider.get_credentials()
+        except (BotoCoreError, ClientError) as exc:
+            return TestConnectionResult(
+                success=False,
+                message=f"Authentication failed: {type(exc).__name__}",
+                discovered_auth_url=None,
+                discovered_token_url=None,
+                supports_dcr=None,
+            )
         except Exception as exc:
             net_msg = extract_network_error(exc)
             if net_msg is None:
@@ -643,7 +698,7 @@ class AwsToolkitProvider(ToolkitProvider[AwsToolkitConfig]):
         sigv4_auth = AwsSigV4Auth(credentials, _AWS_MCP_REGION, _AWS_MCP_SERVICE)
 
         try:
-            tools, _ = await mcp_list_tools(
+            discovery = await mcp_list_tools(
                 _AWS_MCP_ENDPOINT,
                 {},
                 10.0,
@@ -666,7 +721,8 @@ class AwsToolkitProvider(ToolkitProvider[AwsToolkitConfig]):
         return TestConnectionResult(
             success=True,
             message=(
-                f"Connected to AWS MCP Server{role_info}. {len(tools)} tools available."
+                f"Connected to AWS MCP Server{role_info}. "
+                f"{len(discovery.tools)} tools available."
             ),
             discovered_auth_url=None,
             discovered_token_url=None,

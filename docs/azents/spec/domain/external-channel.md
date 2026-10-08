@@ -6,11 +6,35 @@ spec_type: domain
 domain: external-channel
 owner: "@Hardtack"
 code_paths:
+  - python/apps/azents/src/azents/core/external_channel_impact.py
+  - python/apps/azents/src/azents/core/external_channel_management.py
+  - python/apps/azents/src/azents/core/external_channel_management_errors.py
+  - python/apps/azents/src/azents/core/agent_automatic_project.py
+  - python/apps/azents/src/azents/core/exchange_file_errors.py
+  - python/apps/azents/src/azents/core/external_channel_access.py
+  - python/apps/azents/src/azents/core/external_channel_conversation_data.py
+  - python/apps/azents/src/azents/core/external_channel_conversation_preparation.py
+  - python/apps/azents/src/azents/core/external_channel_discord_selector_scope.py
+  - python/apps/azents/src/azents/core/external_channel_ingestion.py
+  - python/apps/azents/src/azents/core/external_channel_mailbox_payload.py
+  - python/apps/azents/src/azents/core/external_channel_participation_state.py
+  - python/apps/azents/src/azents/core/external_channel_selector_state.py
+  - python/apps/azents/src/azents/core/root_agent_session_creation.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/repos/discord_connection_dependencies.py
+  - python/apps/azents/src/azents/repos/engine_resolve.py
+  - python/apps/azents/src/azents/repos/root_agent_session_creation.py
+  - python/apps/azents/src/azents/repos/scheduled_task_terminal_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/slack_presence_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/slack_socket_operations.py
+  - python/apps/azents/src/azents/repos/session_lifecycle_operations.py
+  - python/apps/azents/src/azents/repos/user_stop.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/core/external_account_link.py
   - python/apps/azents/src/azents/core/external_account_oauth.py
   - python/apps/azents/src/azents/core/external_account_oauth_system_setting.py
   - python/apps/azents/src/azents/core/external_model_settings.py
+  - python/apps/azents/src/azents/core/active_model_capabilities.py
   - python/apps/azents/src/azents/core/external_channel.py
   - python/apps/azents/src/azents/core/discord_external_channel_presentation.py
   - python/apps/azents/src/azents/core/external_channel_file.py
@@ -32,6 +56,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_account_link/**
   - python/apps/azents/src/azents/repos/external_account_oauth/**
   - python/apps/azents/src/azents/repos/external_channel/**
+  - python/apps/azents/src/azents/repos/active_model_capabilities.py
   - python/apps/azents/src/azents/repos/external_channel/connection.py
   - python/apps/azents/src/azents/services/external_channel/**
   - python/apps/azents/src/azents/services/external_account_link.py
@@ -47,7 +72,6 @@ code_paths:
   - python/apps/azents/src/azents/repos/scheduled_task_cycle/progress_data.py
   - python/apps/azents/src/azents/broker/types.py
   - python/apps/azents/src/azents/worker/session/**
-  - python/apps/azents/src/azents/services/root_agent_session_creation/**
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/api/public/external_channel/**
   - python/apps/azents/specs/public/openapi.json
@@ -98,8 +122,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-09-30
-spec_version: 81
+last_verified_at: 2026-10-07
+spec_version: 86
 ---
 
 # External Channel
@@ -130,12 +154,12 @@ state, Session execution identity, or any existing guest capability.
 ## Ownership and Security Boundaries
 
 Direct Agent Channel Work transitions are also bound to the executing Session's
-PostgreSQL owner generation. Initial Work commit, effect admission, awaiting-input
-settlement, provider outcome settlement, and provisioned Discord thread recording
-all reject a superseded Worker. Provider and file I/O remain outside database
-transactions. An effect admitted before takeover may finish externally, but the old
-owner cannot settle that result or change the newer Work revision, and ambiguous
-effects are not replayed.
+PostgreSQL owner generation. Current effect admission observes that owner without
+holding a root-tree lock or extending a transaction across provider I/O. Canonical
+private Work updates and delayed outcomes use existing Toolkit State version,
+work-cycle and desired-progress-revision conditions. A replacement cycle or
+revision cannot be overwritten by an old outcome; ordinary snapshots do not
+inherit a Session mutation fence.
 
 - Connection and route records are Workspace/Agent administration state.
 - Provider resources, principals, conversation positions, access requests, and
@@ -222,6 +246,17 @@ effects are not replayed.
 
 ## State Invariants
 
+Slack Work presence discovery and owned target projection finish in completed
+read-only repository operations. Claim, configuration-fenced renewal and
+owner-conditional release finish in completed read-write operations. Slack presence
+mutation uses detached evidence after those scopes end.
+
+Slack Socket discovery and owned-active lookup likewise use completed read-only
+operations. Claim, renewal, active/gap bookkeeping and recoverable release or
+reconnect-required invalidation finish in read-write operations, retaining the
+existing eligibility, owner and expiry predicates. SDK connection management,
+provider effects and durable-ingestion orchestration run after completion.
+
 - Connection status owns provider ingress and credential health: it may be `configuring`, `active`, `degraded`, `reconnect_required`, `disconnecting`, or `disconnected`; disconnect is terminal and does not silently fall back to another transport.
 - App mode is immutable. Existing dedicated connections are Single Apps. Single Apps
   have exactly one route and association removal disconnects the App. Multi Apps may
@@ -256,7 +291,9 @@ effects are not replayed.
   connection and provider parent channel. A later eligible explicit mention replaces
   the pending claim's source and increments its revision. The first valid location
   selection freezes the latest revision and releases exactly one canonical continuation.
-- Durable execution mutations are fenced by the current Session owner generation.
+- Critical durable execution output uses the exact current Session owner mutation
+  fence. Private Channel Work/progress payloads use their existing cycle/revision
+  CAS rather than a generic execution transaction manager.
   Provider principals, Slack callback actors, Workspace requesters, and approvers
   remain provenance or authorization identities and never become the execution User.
 - Account-link completion requires an authenticated OAuth attempt, the same live
@@ -266,7 +303,9 @@ effects are not replayed.
   are nondisclosing and never overwrite another owner.
 - Account linking and private drafts are PostgreSQL correctness state. OAuth attempt
   expiry is enforced synchronously; hourly bounded cleanup removes only attempts
-  older than the 24-hour retention window. Redis, cleanup timing, provider delivery,
+  older than the 24-hour retention window through bounded conditional deletion,
+  without a cleanup read lock. Actual callback consumption and link finalization
+  keep their exact security fences. Redis, cleanup timing, provider delivery,
   and public message state are not correctness authority.
 - A resource is `active`, `unavailable`, or `deleted`. Provider history is read on
   demand by a leased Session drain after durable callback admission and has no durable
@@ -295,14 +334,15 @@ effects are not replayed.
   never moves back to hidden within that cycle. Existing Work rows retain their current
   visibility through schema migration, and Scheduled Task-owned Trackers keep their
   separate unconditional lifecycle.
-- Discord compares each explicitly supplied ordered task snapshot with the canonical
-  pre-transition tasks. A changed snapshot accompanied by a conversational message
-  removes or detaches the current Tracker, creates the complete latest Tracker as a
-  notification-suppressed standalone message, and then sends the reply. A changed
-  snapshot without a message updates the current standalone or reply host in place,
-  or creates a missing standalone host. An identical task replacement or title-only
-  change also updates the current host in place; a message-only Action leaves it
-  unchanged.
+- Discord compares the ordered titles of explicitly supplied tasks with the canonical
+  pre-transition task titles. Renaming, adding, removing, or reordering titles
+  removes or detaches the current Tracker and creates the complete latest Tracker as
+  a notification-suppressed standalone message, whether or not a conversational
+  message is supplied. Any reply follows the relocation attempt. Completion,
+  reopening, IDs, details, output, and sources do not affect this comparison.
+  An unchanged task-title list or work-title-only change updates the current
+  standalone or reply host in place, or creates a missing standalone host;
+  a message-only Action leaves the Tracker unchanged.
 - Every model input boundary exposes `request_input` and `ignore` beside `finish` and
   `continue`. `request_input` requires an ordinary participant-visible message,
   preserves active Work, and stores nullable requesting Run identity in version-4
@@ -350,10 +390,12 @@ effects are not replayed.
   Resume checkpoint. Durable provider-event idempotency and the current
   lease/configuration/App-claim fence protect canonical admission.
 - The same fenced Discord Gateway connection owner reconciles ephemeral typing targets
-  from connected active Bindings and schema-valid ready active Channel Work. Hidden
-  and visible ready Work both request typing on the Resource's exact parent or
-  delivery-thread channel; awaiting Work does not. One public-SDK task per Bot/channel
-  renews typing while any contributing Work remains ready. `finish`, `ignore`, binding
+  from connected active Bindings and schema-valid ready active Channel Work whose bound
+  Session is running with a running AgentRun and no stop request. Hidden and visible
+  ready Work both request typing on the Resource's exact parent or delivery-thread
+  channel while execution is running; awaiting Work does not. One public-SDK task per
+  Bot/channel renews typing while any contributing Work has running execution.
+  Run termination, Session idle state, `finish`, `ignore`, binding
   termination, lease loss, disconnect, Client shutdown, and process shutdown remove
   or cancel targets.
   Gateway ready/resume and worker restart rebuild targets from PostgreSQL. Typing
@@ -607,6 +649,17 @@ ephemeral interaction responses for model controls. A provider or delivery path 
 cannot guarantee privacy omits personalization and never falls back to a public
 message, DM, or separate web conversation-settings page.
 
+Authorized private model editors compile current exact local model declarations
+before exposing or validating reasoning and execution controls. Opening or reopening
+an editor, paging, updating a draft and fresh Apply use a detached option view from
+the shared capability capture/compiler. Authorization precedes metadata capture.
+The operation uses local database inputs and deterministic compilation, without
+provider requests or writes to the stored Agent configuration. Existing mutation
+replay and already-applied draft exits return before metadata recapture; their
+immutable effects and captured audit state remain unchanged. Draft refresh and
+generation/fingerprint checks retain the existing explicit Apply boundary for
+Session intent changes.
+
 Existing private model controls consume the public code-owned execution-option
 `exclusive_group` metadata. Discord uses a single-choice select and Slack uses a
 single-choice `static_select` for grouped options, including a control-local Normal
@@ -658,6 +711,21 @@ already admitted for immediate one-attempt delivery. No cross-I/O lock, provider
 history, queue, retry, or fallback target is part of this boundary.
 
 ## Changelog
+
+- **2026-10-07** (spec_version 86) — Base Discord Tracker relocation on ordered task
+  titles independently of reply presence, retaining hosts for status and metadata edits.
+
+- **2026-10-05** (spec_version 85) — Completed Slack presence/Socket lease
+  repository operations, preserving lease fencing, CAS and health bookkeeping
+  before SDK and ingestion effects.
+
+- **2026-10-05** (spec_version 85) — Reconciled code-path discovery with current
+  defining modules; system behavior is unchanged.
+
+- **2026-10-05** (spec_version 84) — Separated plain Work descriptions/private CAS and short effect-owner admission from critical finalization; made bounded OAuth cleanup and interaction projection/mode metadata writes independent of read gates.
+
+- **2026-10-03** (spec_version 82) — Required running execution for Discord typing,
+  separating retained Channel Work from actual Run activity.
 
 - **2026-09-30** (spec_version 81) — Aligned provider ingress with shared 128 MiB
   eligibility and direct Runner GET/PUT, retaining trusted staging and outbound policy.

@@ -1,82 +1,65 @@
-"""Operation-local reads of the validated generic model metadata authority."""
+"""Exact, operation-local reads for missing saved context maximums."""
 
 import dataclasses
 from collections.abc import Sequence
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent import AgentModelSelection
 from azents.core.enums import LLMProvider
-from azents.core.model_metadata_source import SourceModelMatch, lookup_source_model
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.model_metadata_source import ModelMetadataSourceRepository
-from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
-from azents.services.model_metadata_source import GENAI_PRICES_SOURCE_KEY
-
-
-@dataclasses.dataclass(frozen=True)
-class CapturedContextSource:
-    """One captured context authority, including an explicitly absent source."""
-
-    snapshot: ModelMetadataSourceSnapshot | None
+from azents.repos.model_metadata_read import ModelMetadataReadRepository
+from azents.repos.model_metadata_source_data import (
+    CapturedContextSource,
+    ContextModelRequest,
+)
 
 
 @dataclasses.dataclass(frozen=True)
 class ModelMetadataService:
-    """Capture local validated metadata without source or provider fetches."""
+    """Read only exact current maxima without restoring a source dataset."""
 
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+    repository: Annotated[
+        ModelMetadataReadRepository, Depends(ModelMetadataReadRepository)
     ]
-    source_snapshot_repository: Annotated[
-        ModelMetadataSourceRepository, Depends(ModelMetadataSourceRepository)
-    ]
-
-    async def capture(self) -> ModelMetadataSourceSnapshot | None:
-        """Capture the explicitly selected generic source snapshot."""
-        async with self.session_manager() as session:
-            return await self.source_snapshot_repository.get_current(
-                session,
-                source_key=GENAI_PRICES_SOURCE_KEY,
-            )
 
     async def capture_for_context(
-        self, *, capability_maximums: Sequence[int | None]
-    ) -> ModelMetadataSourceSnapshot | None:
-        """Read fallback metadata only when a saved maximum needs supplementation."""
-        if all(maximum is not None for maximum in capability_maximums):
-            return None
-        return await self.capture()
+        self, *, requests: Sequence[ContextModelRequest]
+    ) -> CapturedContextSource:
+        """Capture the requested exact models, sharing one completed read."""
+        if not requests:
+            return CapturedContextSource(models=())
+        return await self.repository.capture_for_context(requests=requests)
 
     @staticmethod
-    def lookup(
-        snapshot: ModelMetadataSourceSnapshot | None,
-        *,
-        provider: LLMProvider,
-        model_identifier: str,
-    ) -> SourceModelMatch | None:
-        """Resolve one semantic model from a captured generic source snapshot."""
-        if snapshot is None:
-            return None
-        return lookup_source_model(
-            snapshot.payload,
-            provider=provider,
-            model_identifier=model_identifier,
+    def context_requests(
+        selections: Sequence[AgentModelSelection],
+    ) -> tuple[ContextModelRequest, ...]:
+        """Request only models whose saved hard maximum is missing."""
+        return tuple(
+            ContextModelRequest(
+                provider=selection.provider,
+                model_identifier=selection.model_identifier,
+            )
+            for selection in selections
+            if selection.normalized_capabilities.context_window.max_input_tokens is None
         )
 
     @staticmethod
     def maximum_input_tokens(
-        snapshot: ModelMetadataSourceSnapshot | None,
+        source: CapturedContextSource | None,
         *,
         provider: LLMProvider,
         model_identifier: str,
     ) -> int | None:
-        """Read one positive source maximum from a captured local snapshot."""
-        match = ModelMetadataService.lookup(
-            snapshot,
-            provider=provider,
-            model_identifier=model_identifier,
-        )
-        return match.model.context_window if match is not None else None
+        """Read a requested positive maximum from one narrow immutable capture."""
+        if source is None:
+            return None
+        for model in source.models:
+            if (
+                model.provider == provider
+                and model.model_identifier == model_identifier
+            ):
+                maximum = model.max_input_tokens
+                return maximum if maximum is not None and maximum > 0 else None
+        return None

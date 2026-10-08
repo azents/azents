@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, ClassVar, Dict, Optional
 from typing_extensions import Annotated
 from typing import Optional, Set
 from typing_extensions import Self
@@ -31,7 +31,6 @@ class KubernetesContainerResources(BaseModel):
     cpu_limit_millicores: Optional[Annotated[int, Field(strict=True, ge=1)]]
     memory_request_bytes: Optional[Annotated[int, Field(strict=True, ge=1)]]
     memory_limit_bytes: Optional[Annotated[int, Field(strict=True, ge=1)]]
-    additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["cpu_request_millicores", "cpu_limit_millicores", "memory_request_bytes", "memory_limit_bytes"]
 
     model_config = ConfigDict(
@@ -64,10 +63,8 @@ class KubernetesContainerResources(BaseModel):
         * `None` is only added to the output dict for nullable fields that
           were set at model initialization. Other fields with value `None`
           are ignored.
-        * Fields in `self.additional_properties` are added to the output dict.
         """
         excluded_fields: Set[str] = set([
-            "additional_properties",
         ])
 
         _dict = self.model_dump(
@@ -75,11 +72,6 @@ class KubernetesContainerResources(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # puts key-value pairs in additional_properties in the top level
-        if self.additional_properties is not None:
-            for _key, _value in self.additional_properties.items():
-                _dict[_key] = _value
-
         # set to None if cpu_request_millicores (nullable) is None
         # and model_fields_set contains the field
         if self.cpu_request_millicores is None and "cpu_request_millicores" in self.model_fields_set:
@@ -111,17 +103,15 @@ class KubernetesContainerResources(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "cpu_request_millicores": obj.get("cpu_request_millicores"),
             "cpu_limit_millicores": obj.get("cpu_limit_millicores"),
             "memory_request_bytes": obj.get("memory_request_bytes"),
             "memory_limit_bytes": obj.get("memory_limit_bytes")
+            }.items() if _key in obj
         })
-        # store additional fields in additional_properties
-        for _key in obj.keys():
-            if _key not in cls.__properties:
-                _obj.additional_properties[_key] = obj.get(_key)
-
         return _obj
 
 

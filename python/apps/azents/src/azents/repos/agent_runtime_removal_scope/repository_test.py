@@ -6,7 +6,6 @@ from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ActionExecutionStatus,
@@ -41,6 +40,7 @@ from azents.rdb.models.agent_project_preset import RDBAgentProjectPreset
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.git_worktree_cleanup_claim import RDBGitWorktreePathClaim
 from azents.rdb.models.memory import RDBAgentMemory
 from azents.rdb.models.runtime_web import RDBRuntimeWebService
@@ -51,6 +51,7 @@ from azents.rdb.models.session_agent_context import (
 )
 from azents.rdb.models.toolkit_state import RDBToolkitState
 from azents.rdb.models.workspace import RDBWorkspace
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_runtime_removal import AgentRuntimeRemovalRepository
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
@@ -69,15 +70,15 @@ class _AgentRuntimeFixture(NamedTuple):
 
 
 async def _seed_agent(
-    session: AsyncSession,
+    session: WriteSession,
 ) -> _AgentRuntimeFixture:
     """Create one Agent and empty logical Runtime."""
     workspace = RDBWorkspace(
         name="Runtime removal scope",
         handle=f"removal-scope-{uuid4().hex[:8]}",
     )
-    session.add(workspace)
-    await session.flush()
+    session.write_session.add(workspace)
+    await session.write_session.flush()
     selection = make_test_model_selection_dict()
     agent = RDBAgent(
         workspace_id=workspace.id,
@@ -93,8 +94,8 @@ async def _seed_agent(
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     runtime = RDBAgentRuntime(
         workspace_id=workspace.id,
         agent_id=agent.id,
@@ -103,8 +104,8 @@ async def _seed_agent(
         provider_binding_origin=None,
         provider_binding_evidence=None,
     )
-    session.add(runtime)
-    await session.flush()
+    session.write_session.add(runtime)
+    await session.write_session.flush()
     return _AgentRuntimeFixture(
         workspace=workspace,
         agent=agent,
@@ -113,7 +114,7 @@ async def _seed_agent(
 
 
 async def _create_operation(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     workspace: RDBWorkspace,
     agent: RDBAgent,
@@ -140,7 +141,7 @@ async def _create_operation(
 
 
 async def _insert_session(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     workspace_id: str,
     agent_id: str,
@@ -149,29 +150,36 @@ async def _insert_session(
 ) -> str:
     """Insert one Session without exposing it through a public projection."""
     session_id = uuid4().hex
-    await session.execute(
+    await session.write_session.execute(
         sa.insert(RDBAgentSession).values(
             id=session_id,
             workspace_id=workspace_id,
             agent_id=agent_id,
+            status=AgentSessionStatus.ACTIVE,
+            start_reason=AgentSessionStartReason.INITIAL,
+            run_state=run_state,
+        )
+    )
+    await session.write_session.execute(
+        sa.insert(RDBConversation).values(
+            session_id=session_id,
+            agent_id=agent_id,
+            session_status=AgentSessionStatus.ACTIVE,
             handle=f"session-{uuid4().hex[:8]}",
             session_kind=session_kind,
-            status=AgentSessionStatus.ACTIVE,
             product_mode=(
                 AgentSessionProductMode.TEAM
                 if session_kind is AgentSessionKind.ROOT
                 else None
             ),
             associated_user_id=None,
-            start_reason=AgentSessionStartReason.INITIAL,
-            run_state=run_state,
         )
     )
     return session_id
 
 
 async def test_interruption_stops_all_trees_and_cancels_only_runtime_actions(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Durable stop fences cover Agent trees while remote work is retained."""
     workspace, agent, _ = await _seed_agent(rdb_session)
@@ -198,7 +206,7 @@ async def test_interruption_stops_all_trees_and_cancels_only_runtime_actions(
     )
     running_run_id = uuid4().hex
     lagged_run_id = uuid4().hex
-    await rdb_session.execute(
+    await rdb_session.write_session.execute(
         sa.insert(RDBAgentRun),
         [
             {
@@ -221,7 +229,7 @@ async def test_interruption_stops_all_trees_and_cancels_only_runtime_actions(
     )
     runtime_action_id = uuid4().hex
     remote_action_id = uuid4().hex
-    await rdb_session.execute(
+    await rdb_session.write_session.execute(
         sa.insert(RDBActionExecution),
         [
             {
@@ -263,19 +271,23 @@ async def test_interruption_stops_all_trees_and_cancels_only_runtime_actions(
     }
     assert interrupted.cancelled_runtime_action_count == 1
     assert interrupted.active_work_remaining is True
-    runtime_action = await rdb_session.get(RDBActionExecution, runtime_action_id)
-    remote_action = await rdb_session.get(RDBActionExecution, remote_action_id)
+    runtime_action = await rdb_session.read_session.get(
+        RDBActionExecution, runtime_action_id
+    )
+    remote_action = await rdb_session.read_session.get(
+        RDBActionExecution, remote_action_id
+    )
     assert runtime_action is not None
     assert remote_action is not None
     assert runtime_action.status is ActionExecutionStatus.CANCELLED
     assert remote_action.status is ActionExecutionStatus.PENDING
 
-    await rdb_session.execute(
+    await rdb_session.write_session.execute(
         sa.update(RDBAgentSession)
         .where(RDBAgentSession.id.in_((root_id, subagent_id, lagged_session_id)))
         .values(run_state=AgentSessionRunState.IDLE)
     )
-    await rdb_session.execute(
+    await rdb_session.write_session.execute(
         sa.update(RDBAgentRun)
         .where(RDBAgentRun.id.in_((running_run_id, lagged_run_id)))
         .values(
@@ -288,7 +300,7 @@ async def test_interruption_stops_all_trees_and_cancels_only_runtime_actions(
 
 
 async def test_bounded_cleanup_invalidates_bindings_and_preserves_retained_state(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Cleanup removes Runtime-owned metadata without deleting retained roots."""
     workspace, agent, runtime = await _seed_agent(rdb_session)
@@ -344,15 +356,15 @@ async def test_bounded_cleanup_invalidates_bindings_and_preserves_retained_state
         working_folder_invalidated_by_removal_id=None,
         working_folder_invalidated_at=None,
     )
-    rdb_session.add_all((none_context, pending_context, bound_context))
-    await rdb_session.flush()
+    rdb_session.write_session.add_all((none_context, pending_context, bound_context))
+    await rdb_session.write_session.flush()
 
     project = RDBSessionAgentContextProject(
         session_agent_context_id=bound_context.id,
         path="/workspace/project",
     )
-    rdb_session.add(project)
-    await rdb_session.flush()
+    rdb_session.write_session.add(project)
+    await rdb_session.write_session.flush()
     worktree = RDBSessionAgentContextGitWorktree(
         session_agent_context_id=bound_context.id,
         source_project_path="/workspace/project",
@@ -372,8 +384,8 @@ async def test_bounded_cleanup_invalidates_bindings_and_preserves_retained_state
         failed_at=None,
         cleaned_at=None,
     )
-    rdb_session.add(worktree)
-    rdb_session.add(
+    rdb_session.write_session.add(worktree)
+    rdb_session.write_session.add(
         RDBGitWorktreePathClaim(
             agent_runtime_id=runtime.id,
             worktree_path="/workspace/worktree",
@@ -389,15 +401,15 @@ async def test_bounded_cleanup_invalidates_bindings_and_preserves_retained_state
             summary=None,
         )
     )
-    rdb_session.add(
+    rdb_session.write_session.add(
         RDBAgentAutomaticProjectSetting(
             agent_id=agent.id,
             revision=1,
             updated_by_workspace_user_id=None,
         )
     )
-    await rdb_session.flush()
-    rdb_session.add_all(
+    await rdb_session.write_session.flush()
+    rdb_session.write_session.add_all(
         (
             RDBAgentAutomaticProjectItem(
                 agent_id=agent.id,
@@ -468,7 +480,7 @@ async def test_bounded_cleanup_invalidates_bindings_and_preserves_retained_state
             ),
         )
     )
-    await rdb_session.flush()
+    await rdb_session.write_session.flush()
 
     repository = AgentRuntimeRemovalScopeRepository()
     cursor: str | None = None
@@ -508,9 +520,9 @@ async def test_bounded_cleanup_invalidates_bindings_and_preserves_retained_state
         agent_id=agent.id,
         agent_runtime_id=runtime.id,
     )
-    await rdb_session.refresh(none_context)
-    await rdb_session.refresh(pending_context)
-    await rdb_session.refresh(bound_context)
+    await rdb_session.write_session.refresh(none_context)
+    await rdb_session.write_session.refresh(pending_context)
+    await rdb_session.write_session.refresh(bound_context)
     assert none_context.working_folder_binding_state is (
         SessionWorkingFolderBindingState.NONE
     )
@@ -526,15 +538,15 @@ async def test_bounded_cleanup_invalidates_bindings_and_preserves_retained_state
     assert bound_context.working_folder_path is not None
     assert pending_context.working_folder_invalidated_by_removal_id == operation_id
     assert bound_context.working_folder_invalidated_by_removal_id == operation_id
-    assert await rdb_session.get(RDBAgent, agent.id) is not None
-    assert await rdb_session.get(RDBAgentSession, session_id) is not None
-    automatic_project_setting = await rdb_session.get(
+    assert await rdb_session.read_session.get(RDBAgent, agent.id) is not None
+    assert await rdb_session.read_session.get(RDBAgentSession, session_id) is not None
+    automatic_project_setting = await rdb_session.read_session.get(
         RDBAgentAutomaticProjectSetting,
         agent.id,
     )
     assert automatic_project_setting is not None
     assert automatic_project_setting.revision == 2
-    assert not await rdb_session.scalar(
+    assert not await rdb_session.read_session.scalar(
         sa.select(
             sa.exists().where(
                 RDBAgentAutomaticProjectItem.agent_id == agent.id,
@@ -542,7 +554,7 @@ async def test_bounded_cleanup_invalidates_bindings_and_preserves_retained_state
         )
     )
     assert (
-        await rdb_session.scalar(
+        await rdb_session.read_session.scalar(
             sa.select(sa.func.count(RDBAgentMemory.id)).where(
                 RDBAgentMemory.agent_id == agent.id
             )
@@ -550,19 +562,19 @@ async def test_bounded_cleanup_invalidates_bindings_and_preserves_retained_state
         == 1
     )
     assert (
-        await rdb_session.scalar(
+        await rdb_session.read_session.scalar(
             sa.select(sa.func.count(RDBToolkitState.id)).where(
                 RDBToolkitState.agent_id == agent.id
             )
         )
         == 1
     )
-    retained_toolkit_state = await rdb_session.scalar(
+    retained_toolkit_state = await rdb_session.read_session.scalar(
         sa.select(RDBToolkitState).where(RDBToolkitState.agent_id == agent.id)
     )
     assert retained_toolkit_state is not None
     assert retained_toolkit_state.toolkit_namespace == "remote_toolkit"
-    assert not await rdb_session.scalar(
+    assert not await rdb_session.read_session.scalar(
         sa.select(
             sa.exists().where(
                 RDBRuntimeWebService.agent_id == agent.id,
@@ -572,18 +584,18 @@ async def test_bounded_cleanup_invalidates_bindings_and_preserves_retained_state
 
 
 async def test_cleanup_completion_rejects_remaining_runtime_web_service(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Finalization remains fenced until every Agent service is deleted."""
     workspace, agent, runtime = await _seed_agent(rdb_session)
-    rdb_session.add(
+    rdb_session.write_session.add(
         RDBAgentAutomaticProjectSetting(
             agent_id=agent.id,
             revision=1,
             updated_by_workspace_user_id=None,
         )
     )
-    rdb_session.add(
+    rdb_session.write_session.add(
         RDBRuntimeWebService(
             workspace_id=workspace.id,
             agent_id=agent.id,
@@ -592,7 +604,7 @@ async def test_cleanup_completion_rejects_remaining_runtime_web_service(
             label=None,
         )
     )
-    await rdb_session.flush()
+    await rdb_session.write_session.flush()
 
     with pytest.raises(
         RuntimeError,
@@ -603,3 +615,32 @@ async def test_cleanup_completion_rejects_remaining_runtime_web_service(
             agent_id=agent.id,
             agent_runtime_id=runtime.id,
         )
+
+
+async def test_public_session_impact_requires_conversation_profile(
+    rdb_session: WriteSession,
+) -> None:
+    """Root/subagent counts exclude private execution without hiding active work."""
+    workspace, agent, _ = await _seed_agent(rdb_session)
+    await _insert_session(
+        rdb_session,
+        workspace_id=workspace.id,
+        agent_id=agent.id,
+        session_kind=AgentSessionKind.ROOT,
+        run_state=AgentSessionRunState.IDLE,
+    )
+    await rdb_session.write_session.execute(
+        sa.insert(RDBAgentSession).values(
+            id=uuid4().hex,
+            workspace_id=workspace.id,
+            agent_id=agent.id,
+            lifecycle_root_session_id=None,
+            status=AgentSessionStatus.ACTIVE,
+            run_state=AgentSessionRunState.RUNNING,
+        )
+    )
+    repository = AgentRuntimeRemovalScopeRepository()
+    impact = await repository.get_impact(rdb_session, agent_id=agent.id)
+    assert impact.active_root_session_count == 1
+    assert impact.active_subagent_count == 0
+    assert await repository.has_active_work(rdb_session, agent_id=agent.id)

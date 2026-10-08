@@ -1,40 +1,49 @@
 """Platform GitHub OAuth operation-boundary tests."""
 
-from typing import Any, cast
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, create_autospec
 
 import pytest
 from fastapi import HTTPException
 
-import azents.api.public.toolkit.v1.oauth as oauth_module
+import azents.services.toolkit_oauth.service as service_module
 from azents.api.public.toolkit.v1.oauth import (
     GitHubPlatformInstallationsRequest,
     get_github_platform_installations,
 )
 from azents.core.auth.deps import WorkspaceMember
-from azents.core.config import Config
+from azents.core.auth.roles import get_permissions_for_role
+from azents.core.config import Config, CredentialEncryptionConfig
+from azents.core.enums import WorkspaceUserRole
 from azents.core.oauth2 import create_platform_oauth_state
 from azents.core.system_setting import SystemSettingFieldSource
-from azents.rdb.session import SessionManager
+from azents.repos.toolkit_oauth_operations import ToolkitOAuthOperationRepository
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
     ResolvedPlatformGitHubApp,
 )
+from azents.services.toolkit_oauth.service import ToolkitOAuthService
 
 
 async def test_changed_generation_rejects_callback_before_code_exchange(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A changed effective setting stops OAuth before any GitHub token call."""
-    member = cast(Any, Mock())
-    member.has_permission.return_value = True
-    config = cast(Any, Mock())
-    config.credential_encryption.key = "oauth-state-key"
+    member = WorkspaceMember(
+        user_id="user-1",
+        session_id="session-1",
+        workspace_id="workspace-1",
+        workspace_user_id="workspace-user-1",
+        role=WorkspaceUserRole.OWNER,
+        permissions=get_permissions_for_role(WorkspaceUserRole.OWNER),
+    )
+    config = Config.model_construct(
+        credential_encryption=CredentialEncryptionConfig(key="oauth-state-key")
+    )
     state = create_platform_oauth_state(
         config.credential_encryption.key,
         effective_generation="generation-before",
     )
-    runtime = cast(Any, Mock())
+    runtime = create_autospec(PlatformGitHubAppRuntimeService, instance=True)
     runtime.resolve = AsyncMock(
         return_value=ResolvedPlatformGitHubApp(
             app_id="123",
@@ -46,14 +55,19 @@ async def test_changed_generation_rejects_callback_before_code_exchange(
         )
     )
     exchange = AsyncMock()
-    monkeypatch.setattr(oauth_module, "exchange_oauth_code", exchange)
+    monkeypatch.setattr(service_module, "exchange_oauth_code", exchange)
+    repository = create_autospec(ToolkitOAuthOperationRepository, instance=True)
+    service = ToolkitOAuthService(
+        repository=repository,
+        config=config,
+        registry={},
+        platform_runtime=runtime,
+    )
 
     with pytest.raises(HTTPException) as raised:
         await get_github_platform_installations(
-            cast(WorkspaceMember, member),
-            cast(Config, config),
-            cast(PlatformGitHubAppRuntimeService, runtime),
-            cast(SessionManager[Any], object()),
+            member,
+            service,
             GitHubPlatformInstallationsRequest(code="code", state=state),
             handle="workspace",
         )
@@ -64,3 +78,4 @@ async def test_changed_generation_rejects_callback_before_code_exchange(
         "message": "Platform GitHub App settings changed. Restart OAuth.",
     }
     exchange.assert_not_awaited()
+    repository.sync_installations.assert_not_awaited()

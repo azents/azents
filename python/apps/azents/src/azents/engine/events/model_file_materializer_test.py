@@ -6,6 +6,7 @@ import pytest
 from azcommon.result import Failure, Result, Success
 
 from azents.core.enums import EventKind, ModelFileStatus
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.events.file_parts import RequestLocalModelFileResolver
 from azents.engine.events.model_file_materializer import ModelFileMaterializer
 from azents.engine.events.types import (
@@ -19,7 +20,6 @@ from azents.services.model_file import (
     ModelFileNotFound,
     ModelFileResolveError,
 )
-from azents.services.session_resource_authority import SessionResourceAuthority
 
 _NOW = datetime.datetime.now(datetime.UTC)
 

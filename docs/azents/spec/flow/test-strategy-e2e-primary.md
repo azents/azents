@@ -6,6 +6,23 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: []
 code_paths:
+  - typescript/apps/azents-web/src/shared/model-options/model-option-editor.ts
+  - typescript/apps/azents-web/src/shared/model-options/image-generation-config.ts
+  - typescript/apps/azents-web/src/features/toolkits/toolkit-config-projection.ts
+  - python/apps/azents/src/azents/api/public/chat/v1/validation_audit_test.py
+  - python/apps/azents/src/azents/api/public/toolkit/v1/validation_audit_test.py
+  - python/apps/azents/src/azents/repos/toolkit/validation_audit_test.py
+  - testenv/azents/fixtures/mock_mcp_server.py
+  - typescript/apps/azents-web/src/features/agents/components/AgentForm.stories.tsx
+  - typescript/apps/azents-web/src/features/agents/components/AgentMemorySettings.stories.tsx
+  - typescript/apps/azents-web/src/features/agents/components/AgentToolkitManagementSection.stories.tsx
+  - typescript/apps/azents-web/src/shared/model-options/components/ModelCatalogPicker.stories.tsx
+  - typescript/apps/azents-web/src/shared/model-options/components/SelectableModelOptionsEditor.stories.tsx
+  - typescript/apps/azents-web/src/features/llm-settings/components/WorkspaceModelSettingsCard.stories.tsx
+  - typescript/apps/azents-web/src/features/toolkits/components/ToolkitForm.stories.tsx
+  - typescript/apps/azents-web/src/shared/model-options/image-generation-config.test.mts
+  - typescript/apps/azents-web/src/shared/model-options/model-selection.test.mts
+  - typescript/apps/azents-web/src/features/toolkits/toolkit-config-projection.test.mts
   - .claude/skills/e2e-ci-optimization/**
   - .claude/skills/technical-feature-design/SKILL.md
   - .claude/skills/ship-feature/SKILL.md
@@ -29,11 +46,24 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-10-02
-spec_version: 78
+last_verified_at: 2026-10-04
+spec_version: 84
 ---
 
 # E2E Primary Test Strategy
+
+## Typed Runtime Hook and Live Observations
+
+Runtime Hook E2E helpers validate mock journal/request evidence at ingress and
+consume immutable text/tool projections while retaining provider-owned opaque
+extensions for diagnostics. Malformed consumed fields and HTTP failures remain
+failures, not empty readiness observations. Session and Chat-write responses use
+the generated SDK's native wire factory.
+
+External Channel live observations likewise use the native live-response factory
+after primitive wire serialization, preserving nested `JSONValue` conversion,
+explicit nulls and opaque extension fields. Focused deterministic helper tests
+cover these decoding boundaries; they do not replace assembled product E2E.
 
 ## Overview
 
@@ -51,6 +81,16 @@ This spec defines boundaries connecting azents feature design, E2E location, fix
 | `testenv/azents/support/`   | Promote only helpers confirmed to be repeatedly used in E2E/fixture/prerequisite.                            | Do not preemptively commonize.                                                                      |
 
 Manual-only runbook, blocked placeholder, removed-feature residue check, legacy TC markdown, `run-tc`, verifier, and markdown bash fallback are not part of event azents verification path. Primary evidence for product behavior QA is E2E result, and it is not separated into long-term catalog files.
+
+Representative product journeys remain primary end-to-end evidence. Status-only,
+identifier/default, duplicate-constraint, and pure projection/parser matrices use
+focused API, repository, or unit contracts. Real component/container stories own
+form editing, Cancel, dialog copy, and responsive geometry instead of repeating
+those presentation permutations in server-backed browser journeys. Toolkit
+lifecycle/scope/attachment and owner/member persistence flows remain in E2E,
+along with Runtime Web navigation and service lifecycle evidence. Component
+interaction passes do not establish accessibility conformance; accessibility
+diagnostics remain separate evidence.
 
 ## Direct File Transfer Evidence
 
@@ -132,6 +172,40 @@ Reached, queued input, explicit release, and durable turn markers establish
 ordering. Teardown removes the replacement and restores the same original Worker,
 its readiness, and log capture. Public/Admin services, database, bootstrap state,
 and the default fast-watchdog policy remain unchanged.
+
+### Historical Memory Deterministic Journey
+
+The required Historical Memory public journey creates a Runtime-free Agent,
+integration and source Sessions through product APIs. Its
+credential-free provider fixture returns strict `{"summary": ...}` output
+through the ordinary Lightweight summary SDK path, separately from foreground
+model behavior. A second representative journey runs independent Team and two
+personal consolidation chains through real inventory/source reads, draft write/
+edit error recovery, exact coverage and host publication. Captured model inputs
+and tool results prove scope isolation and Runtime absence. It verifies preparation, boundary context, live generic VFS
+inspection, retained human settings, and source archive/restore/Memory-disable
+effects without live provider credentials or direct product DB writes.
+
+The isolated testenv `POST /scheduler/v1/historical-memory/sample`
+endpoint accepts an aware sampling instant and exact Agent ID, then invokes
+the real bounded discovery admission/due-source, preparation and consolidation
+services. Sampling changes Stage 1 eligibility time only; consolidation retains
+real database leases and absolute deadlines. It does not rewrite source activity, replace production real-time
+semantics, bypass source authorization, or add a production configuration mode.
+An outer bounded timeout, preparation's 110-second real deadline and ordinary
+consolidation attempt limits bound fixture work. Unexpected errors propagate
+instead of becoming successful fixture responses.
+
+This product journey proves service admission, provider summary execution,
+publication, and visible consumption; it does not claim Scheduler dispatch,
+Job Runtime supervision/coalescing, or precise concurrent interleavings.
+Focused backend integration tests own those boundaries, plus retry/capacity,
+scope/access loss, source purge, and snapshot no-reselection cases. Settings
+presentation is covered by component/container tests and Storybook; the current
+Historical Storybook interaction asserts loaded read-only presentation while
+Memory is disabled. Switching and pagination belong to component/container
+coverage, not that interaction. Report-style scale/query-plan evidence remains
+a one-time validation artifact rather than a permanent load suite.
 
 ## Local Bootstrap and Fixture Flow
 
@@ -473,6 +547,15 @@ Always-on required CI does not depend on external credentials.
   in deterministic backend, protocol, component, and story coverage rather than
   independent full-stack journeys.
 - Web Surface E2E runs from `src/tests/web/` in its own suite lane.
+- Required Brave Search journeys admit the five independent success Sessions before
+  waiting for their persisted terminal run markers and idle projections. Every
+  created Session is registered for draining before input admission; definite
+  validation/auth rejection preserves the original error without awaiting a run
+  that was never admitted. Cleanup continues through every admitted or ambiguous
+  Session after a submission or drain failure.
+  Tool Search routing, five endpoint results, Runtime capability, correlation,
+  attachment bytes, vision continuation, credential failures, and text-only fallback
+  assertions remain unchanged. Credential mutation and failure journeys remain serial.
 - Web Surface journeys use a pinned remote Chromium container. Web images are built from the tested worktree, and TLS gateways reproduce production secure-cookie and path-routing behavior without external credentials.
 - Workspace Upload API E2E collects three public-API journeys against the real
   Docker Runtime Provider, Runtime Control, and HTTPS S3-compatible gateway:
@@ -534,9 +617,21 @@ Always-on required CI does not depend on external credentials.
   exact-base CI workflow publishes a pending status and linked run, while an absent or
   completed base without compatible artifacts publishes a neutral successful status
   with an unavailable comparison. Candidate CI never waits for base completion.
-  Exact-base CI completion triggers evidence-only reevaluation of affected open pull
-  requests. Candidate CI completion performs the same reevaluation so ordering between
-  base completion and initial sticky-comment publication cannot leave stale state.
+  The CI aggregate evaluates and records the local duration verdict without posting
+  a commit status. The existing independent reevaluation workflow owns external
+  `ci-python-e2e` status publication. Publication failures remain visible in that
+  workflow and cannot change a completed local duration verdict or its CI gate result;
+  exact-base pending, terminal unavailable, regression, and invalid-evidence status
+  meanings are unchanged.
+  Every CI completion selects all open same-repository pull requests whose current
+  head or base SHA matches the completed workflow head SHA. This includes dependent
+  stacked pull requests with non-main bases and does not depend on run-associated PR
+  metadata. Candidate completion and exact-base completion use the same evidence-only
+  reevaluation path so ordering with initial sticky-comment publication converges.
+  Candidate reevaluation excludes completed-but-cancelled workflow runs: their
+  incomplete diagnostic artifacts cannot supersede valid same-head evidence.
+  Genuine failed runs remain eligible for the existing fail-closed evidence checks;
+  selection does not require a successful conclusion.
   Reevaluation workflows are serialized before evidence is read and publication
   begins. The helper checks current PR head/base identity before publishing status
   and again before replacing the duration block in the sticky observability comment.
@@ -610,6 +705,19 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-10-04** (spec_version 82) — Added isolated multi-turn consolidation
+  product verification and production-service sampling with ordinary leases and
+  deadlines; retained narrow backend ownership of exhaustive races/capacity.
+
+- **2026-10-02** (spec_version 81) — Excluded cancelled candidate workflow
+  artifacts from duration reevaluation without filtering genuine failed runs
+  or changing validation thresholds and head/base publication guards.
+
+- **2026-10-02** (spec_version 80) — Added credential-free Historical
+  product-path evidence and explicit-time service sampling, distinguishing
+  preparation/publication from separately tested Scheduler/Job Runtime dispatch.
+- **2026-10-02** (spec_version 79) — Selected all same-repository PRs whose head
+  or base matches a completed CI SHA, including dependents of non-main stacked bases.
 - **2026-10-02** (spec_version 78) — Made missing base duration evidence
   non-failing, reserved pending for active exact-base CI, and synchronized guarded
   status plus sticky-comment reevaluation when either base or candidate CI completes.

@@ -3,7 +3,6 @@
 import datetime
 
 from azcommon.datetime import tznow
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeProviderAuthMethod,
@@ -16,6 +15,7 @@ from azents.core.enums import (
     RuntimeProviderRegistrationMethod,
     RuntimeProviderScope,
 )
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 
@@ -27,7 +27,7 @@ from .data import (
 from .repository import RuntimeProviderAuthBindingRepository
 
 
-async def _provider_id(session: AsyncSession) -> str:
+async def _provider_id(session: WriteSession) -> str:
     """Create one Provider aggregate for binding tests."""
     provider = await RuntimeProviderRepository().create(
         session,
@@ -54,7 +54,7 @@ class TestRuntimeProviderAuthBindingRepository:
 
     async def test_revoke_allows_subject_replacement_without_health_version_bump(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         repository = RuntimeProviderAuthBindingRepository()
         provider_id = await _provider_id(rdb_session)
@@ -83,7 +83,6 @@ class TestRuntimeProviderAuthBindingRepository:
         healthy = await repository.get_by_id(
             rdb_session,
             binding_id=binding.id,
-            for_update=False,
         )
         assert healthy is not None
         assert healthy.admin_version == 1
@@ -111,7 +110,7 @@ class TestRuntimeProviderAuthBindingRepository:
 
     async def test_audit_events_are_metadata_only_and_newest_first(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         repository = RuntimeProviderAuthBindingRepository()
         provider_id = await _provider_id(rdb_session)

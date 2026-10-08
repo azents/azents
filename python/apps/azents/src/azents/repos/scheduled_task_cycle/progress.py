@@ -5,7 +5,6 @@ from collections.abc import Sequence
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.discord_external_channel_presentation import (
     render_scheduled_task_discord_progress,
@@ -26,6 +25,7 @@ from azents.core.slack_external_channel_progress import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.scheduled_task.presentation import render_scheduled_task_schedule
@@ -36,8 +36,6 @@ from azents.repos.scheduled_task_cycle.progress_data import (
     ScheduledTaskProgressPreparation,
     ScheduledTaskTrackerEffect,
 )
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
-from azents.services.session_resource_authority import SessionExecutionOwner
 
 
 @dataclasses.dataclass(frozen=True)
@@ -53,7 +51,7 @@ class ScheduledTaskProgressRepository:
     """Own database-only Scheduled Task progress operations."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
     cycle_repository: Annotated[
@@ -63,20 +61,6 @@ class ScheduledTaskProgressRepository:
         ExternalChannelWorkRepository,
         Depends(ExternalChannelWorkRepository.create),
     ]
-
-    def for_execution(
-        self,
-        owner: SessionExecutionOwner,
-    ) -> "ScheduledTaskProgressRepository":
-        """Bind progress persistence to one durable Session owner."""
-        return dataclasses.replace(
-            self,
-            session_manager=OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            ),
-        )
 
     async def prepare_initial_tracker(
         self,
@@ -262,7 +246,7 @@ class ScheduledTaskProgressRepository:
 
     async def _resolve_run_cycle(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -291,7 +275,7 @@ class ScheduledTaskProgressRepository:
 
     async def _claim_tracker_effect(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         record: ScheduledTaskCycleRecord,
         progress: ExternalChannelDesiredProgress,

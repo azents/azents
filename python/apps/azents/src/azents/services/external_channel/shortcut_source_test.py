@@ -18,7 +18,13 @@ from azents.core.enums import (
     ExternalChannelSetupClaimStatus,
     ExternalChannelTransport,
 )
+from azents.core.external_channel_selector_state import (
+    projection_with_selector_state,
+    selector_state_from_interaction,
+)
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.external_channel.data import (
+    ExternalChannelConnection,
     ExternalChannelConversationPositionCreate,
     ExternalChannelInteraction,
     ExternalChannelInteractionCreate,
@@ -28,9 +34,8 @@ from azents.repos.external_channel.data import (
     ExternalChannelTrigger,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.services.external_channel.selector_state import (
-    projection_with_selector_state,
-    selector_state_from_interaction,
+from azents.repos.external_channel.shortcut_source_operations import (
+    ExternalChannelShortcutSourceOperations,
 )
 from azents.services.external_channel.shortcut_source import (
     ExternalChannelShortcutSourceService,
@@ -71,9 +76,7 @@ class _Repository:
         )
 
     async def create_conversation_position_idempotent(
-        self,
-        session: object,
-        create: ExternalChannelConversationPositionCreate,
+        self, session: object, create: ExternalChannelConversationPositionCreate
     ) -> object:
         del session
         self.calls.append("position")
@@ -81,20 +84,14 @@ class _Repository:
         return SimpleNamespace(id="position-1", read_through_position=None)
 
     async def lock_interaction(
-        self,
-        session: object,
-        *,
-        interaction_id: str,
+        self, session: object, *, interaction_id: str
     ) -> ExternalChannelInteraction | None:
         del session
         self.calls.append("interaction")
         return self.interaction if interaction_id == self.interaction.id else None
 
     async def lock_connection_for_routing(
-        self,
-        session: object,
-        *,
-        connection_id: str,
+        self, session: object, *, connection_id: str
     ) -> object | None:
         del session
         self.calls.append("connection")
@@ -106,12 +103,11 @@ class _Repository:
             provider=self.provider,
             provider_bot_user_id="UBOT",
             transport=ExternalChannelTransport.HTTP,
+            configuration_generation=1,
         )
 
     async def create_resource_idempotent(
-        self,
-        session: object,
-        create: ExternalChannelResourceCreate,
+        self, session: object, create: ExternalChannelResourceCreate
     ) -> object:
         del session
         self.calls.append("resource_create")
@@ -119,10 +115,7 @@ class _Repository:
         return SimpleNamespace(id="resource-1")
 
     async def lock_resource(
-        self,
-        session: object,
-        *,
-        resource_id: str,
+        self, session: object, *, resource_id: str
     ) -> object | None:
         del session
         self.calls.append("resource_lock")
@@ -131,10 +124,7 @@ class _Repository:
         return SimpleNamespace(id=resource_id, status=self.resource_status)
 
     async def lock_connected_binding_by_resource(
-        self,
-        session: object,
-        *,
-        resource_id: str,
+        self, session: object, *, resource_id: str
     ) -> None:
         del session
         self.calls.append("binding")
@@ -142,11 +132,7 @@ class _Repository:
         return None
 
     async def replace_interaction_projection(
-        self,
-        session: object,
-        *,
-        interaction_id: str,
-        projection: dict[str, object],
+        self, session: object, *, interaction_id: str, projection: dict[str, object]
     ) -> ExternalChannelInteraction | None:
         del session
         self.calls.append("projection_replace")
@@ -158,80 +144,69 @@ class _Repository:
         return self.interaction
 
     async def get_active_participation_setting(
-        self,
-        session: object,
-        *,
-        connection_id: str,
-        provider_parent_channel_id: str,
+        self, session: object, *, connection_id: str, provider_parent_channel_id: str
     ) -> None:
         del session, connection_id, provider_parent_channel_id
         self.calls.append("participation_setting")
         return None
 
     async def lock_routable_channel_default(
-        self,
-        session: object,
-        *,
-        connection_id: str,
-        provider_channel_id: str,
+        self, session: object, *, connection_id: str, provider_channel_id: str
     ) -> None:
         del session, connection_id, provider_channel_id
         self.calls.append("channel_default")
         return None
 
     async def lock_nonterminal_setup_claim(
-        self,
-        session: object,
-        *,
-        connection_id: str,
-        provider_parent_channel_id: str,
+        self, session: object, *, connection_id: str, provider_parent_channel_id: str
     ) -> ExternalChannelSetupClaim | None:
         del session, connection_id, provider_parent_channel_id
         self.calls.append("setup_claim_lock")
         return self.setup_claim
 
     async def create_setup_claim(
-        self,
-        session: object,
-        create: ExternalChannelSetupClaimCreate,
+        self, session: object, create: ExternalChannelSetupClaimCreate
     ) -> ExternalChannelSetupClaim:
         del session
         self.calls.append("setup_claim_create")
         self.setup_claim = ExternalChannelSetupClaim.model_construct(
-            id="claim-1",
-            **create.model_dump(),
-            created_at=_NOW,
-            updated_at=_NOW,
+            id="claim-1", **create.model_dump(), created_at=_NOW, updated_at=_NOW
         )
         return self.setup_claim
 
     async def get_interaction_by_provider_key(
-        self,
-        session: object,
-        *,
-        connection_id: str,
-        provider_interaction_key: str,
+        self, session: object, *, connection_id: str, provider_interaction_key: str
     ) -> ExternalChannelInteraction | None:
         del session, connection_id, provider_interaction_key
         self.calls.append("selector_lookup")
         return self.selector_interaction
 
     async def admit_interaction(
-        self,
-        session: object,
-        create: ExternalChannelInteractionCreate,
+        self, session: object, create: ExternalChannelInteractionCreate
     ) -> object:
         del session
         self.calls.append("selector_create")
         self.admitted_interactions.append(create)
         selector = ExternalChannelInteraction.model_construct(
-            id="selector-1",
-            **create.model_dump(),
-            created_at=_NOW,
-            updated_at=_NOW,
+            id="selector-1", **create.model_dump(), created_at=_NOW, updated_at=_NOW
         )
         self.selector_interaction = selector
         return SimpleNamespace(interaction=selector, created=True)
+
+    async def get_connection(
+        self, session: object, *, connection_id: str
+    ) -> ExternalChannelConnection | None:
+        del session
+        if connection_id != "connection-1":
+            return None
+        return ExternalChannelConnection.model_construct(
+            id="connection-1",
+            app_mode=ExternalChannelAppMode.MULTI,
+            provider=self.provider,
+            provider_bot_user_id="UBOT",
+            transport=ExternalChannelTransport.HTTP,
+            configuration_generation=1,
+        )
 
 
 def _source_event() -> ExternalChannelTrigger:
@@ -284,16 +259,19 @@ def _discord_source_event() -> ExternalChannelTrigger:
 
 
 def _service(
-    session: _Session,
-    repository: _Repository,
+    session: _Session, repository: _Repository
 ) -> ExternalChannelShortcutSourceService:
+
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        yield MagicMock(spec=AsyncSession, wraps=session)
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
+        yield ReadWriteSession(MagicMock(spec=AsyncSession, wraps=session))
 
     return ExternalChannelShortcutSourceService(
-        session_manager=session_manager,
-        repository=MagicMock(spec=ExternalChannelRepository, wraps=repository),
+        operations=ExternalChannelShortcutSourceOperations(
+            session_manager=session_manager,
+            repository=MagicMock(spec=ExternalChannelRepository, wraps=repository),
+            read_session_manager=session_manager,
+        )
     )
 
 
@@ -301,13 +279,9 @@ def _service(
 async def test_shortcut_source_commits_content_free_selector_state() -> None:
     session = _Session()
     repository = _Repository()
-
     result = await _service(session, repository).ensure(
-        shortcut_source_event=_source_event(),
-        interaction_id="interaction-1",
-        now=_NOW,
+        shortcut_source_event=_source_event(), interaction_id="interaction-1", now=_NOW
     )
-
     assert result.selector_interaction is not None
     state = selector_state_from_interaction(result.selector_interaction)
     assert state.connection_id == "connection-1"
@@ -347,34 +321,30 @@ async def test_shortcut_source_retry_reuses_the_same_interaction() -> None:
     session = _Session()
     repository = _Repository()
     service = _service(session, repository)
-
     first = await service.ensure(
-        shortcut_source_event=_source_event(),
-        interaction_id="interaction-1",
-        now=_NOW,
+        shortcut_source_event=_source_event(), interaction_id="interaction-1", now=_NOW
     )
     second = await service.ensure(
-        shortcut_source_event=_source_event(),
-        interaction_id="interaction-1",
-        now=_NOW,
+        shortcut_source_event=_source_event(), interaction_id="interaction-1", now=_NOW
     )
-
     assert first.selector_interaction is not None
     assert second.selector_interaction is not None
     assert first.selector_interaction.id == second.selector_interaction.id
     assert repository.calls.count("selector_create") == 1
     assert session.commit_count == 2
     assert not any(
-        forbidden in " ".join(repository.calls)
-        for forbidden in (
-            "message",
-            "revision",
-            "admission",
-            "access_request",
-            "binding_create",
-            "session",
-            "mailbox_item",
-            "wake",
+        (
+            forbidden in " ".join(repository.calls)
+            for forbidden in (
+                "message",
+                "revision",
+                "admission",
+                "access_request",
+                "binding_create",
+                "session",
+                "mailbox_item",
+                "wake",
+            )
         )
     )
 
@@ -384,11 +354,8 @@ async def test_shortcut_source_retry_preserves_selected_route() -> None:
     session = _Session()
     repository = _Repository()
     service = _service(session, repository)
-
     first = await service.ensure(
-        shortcut_source_event=_source_event(),
-        interaction_id="interaction-1",
-        now=_NOW,
+        shortcut_source_event=_source_event(), interaction_id="interaction-1", now=_NOW
     )
     assert first.selector_interaction is not None
     selected_state = selector_state_from_interaction(
@@ -397,18 +364,13 @@ async def test_shortcut_source_retry_preserves_selected_route() -> None:
     repository.selector_interaction = first.selector_interaction.model_copy(
         update={
             "projection": projection_with_selector_state(
-                first.selector_interaction.projection,
-                selected_state,
+                first.selector_interaction.projection, selected_state
             )
         }
     )
-
     repeated = await service.ensure(
-        shortcut_source_event=_source_event(),
-        interaction_id="interaction-1",
-        now=_NOW,
+        shortcut_source_event=_source_event(), interaction_id="interaction-1", now=_NOW
     )
-
     assert repeated.selector_interaction is not None
     assert (
         selector_state_from_interaction(repeated.selector_interaction).selected_route_id
@@ -421,14 +383,12 @@ async def test_shortcut_source_retry_preserves_selected_route() -> None:
 async def test_shortcut_source_rejects_inactive_resource() -> None:
     repository = _Repository()
     repository.resource_status = ExternalChannelResourceStatus.DELETED
-
     with pytest.raises(SlackEventExcluded, match="unavailable"):
         await _service(_Session(), repository).ensure(
             shortcut_source_event=_source_event(),
             interaction_id="interaction-1",
             now=_NOW,
         )
-
     assert "binding" not in repository.calls
     assert "projection_replace" not in repository.calls
 
@@ -438,13 +398,11 @@ async def test_discord_message_command_source_preserves_thread_identity() -> Non
     session = _Session()
     repository = _Repository()
     repository.provider = ExternalChannelProvider.DISCORD
-
     result = await _service(session, repository).ensure(
         shortcut_source_event=_discord_source_event(),
         interaction_id="interaction-1",
         now=_NOW,
     )
-
     assert result.selector_interaction is not None
     create = repository.resource_creates[0]
     assert create.provider_resource_key == "discord:guild-1:100"
@@ -472,13 +430,11 @@ async def test_discord_parent_message_command_creates_setup_linked_selector() ->
     session = _Session()
     repository = _Repository()
     repository.provider = ExternalChannelProvider.DISCORD
-
     result = await _service(session, repository).ensure(
         shortcut_source_event=_discord_source_event(),
         interaction_id="interaction-1",
         now=_NOW,
     )
-
     assert result.selector_interaction is not None
     assert result.selector_interaction.id == "selector-1"
     assert result.selector_interaction.setup_claim_id == "claim-1"

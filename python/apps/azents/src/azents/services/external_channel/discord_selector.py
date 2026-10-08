@@ -9,13 +9,12 @@ from fastapi import Depends
 
 from azents.core.config import Config
 from azents.core.deps import get_config
-from azents.core.external_channel_provider_effect import ProviderEffectPlan
-from azents.services.external_channel.discord_selector_scope import (
+from azents.core.external_channel_discord_selector_scope import (
     build_discord_selector_custom_id,
 )
-from azents.services.external_channel.ingestion import (
-    ExternalChannelIngestionOutcomeKind,
-)
+from azents.core.external_channel_ingestion import ExternalChannelIngestionOutcomeKind
+from azents.core.external_channel_provider_effect import ProviderEffectPlan
+from azents.core.external_channel_selection import ExternalChannelSelectorCatalog
 from azents.services.external_channel.ingestion_replay import (
     ExternalChannelIngestionReplayService,
     external_channel_replay_deadline,
@@ -24,10 +23,7 @@ from azents.services.external_channel.provider_control import (
     ExternalChannelProviderControlService,
     get_external_channel_provider_control_service,
 )
-from azents.services.external_channel.selector import (
-    ExternalChannelSelectorCatalog,
-    ExternalChannelSelectorService,
-)
+from azents.services.external_channel.selector import ExternalChannelSelectorService
 
 _DISCORD_SELECTOR_PREFIX = "azents-selector"
 _DISCORD_SELECTOR_ACTION_OPEN = "open"

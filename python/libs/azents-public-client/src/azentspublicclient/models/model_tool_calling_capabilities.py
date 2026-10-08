@@ -24,11 +24,11 @@ from typing_extensions import Self
 
 class ModelToolCallingCapabilities(BaseModel):
     """
-    Represents tool calling capability.
+    Final function and function-schema capabilities.
     """ # noqa: E501
     supported: Optional[StrictBool] = False
-    parallel_tool_calls: Optional[StrictBool] = None
-    strict_json_schema: Optional[StrictBool] = None
+    parallel_tool_calls: Optional[StrictBool] = False
+    strict_json_schema: Optional[StrictBool] = False
     additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["supported", "parallel_tool_calls", "strict_json_schema"]
 
@@ -78,16 +78,6 @@ class ModelToolCallingCapabilities(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
-        # set to None if parallel_tool_calls (nullable) is None
-        # and model_fields_set contains the field
-        if self.parallel_tool_calls is None and "parallel_tool_calls" in self.model_fields_set:
-            _dict['parallel_tool_calls'] = None
-
-        # set to None if strict_json_schema (nullable) is None
-        # and model_fields_set contains the field
-        if self.strict_json_schema is None and "strict_json_schema" in self.model_fields_set:
-            _dict['strict_json_schema'] = None
-
         return _dict
 
     @classmethod
@@ -99,10 +89,13 @@ class ModelToolCallingCapabilities(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "supported": obj.get("supported") if obj.get("supported") is not None else False,
-            "parallel_tool_calls": obj.get("parallel_tool_calls"),
-            "strict_json_schema": obj.get("strict_json_schema")
+            "parallel_tool_calls": obj.get("parallel_tool_calls") if obj.get("parallel_tool_calls") is not None else False,
+            "strict_json_schema": obj.get("strict_json_schema") if obj.get("strict_json_schema") is not None else False
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

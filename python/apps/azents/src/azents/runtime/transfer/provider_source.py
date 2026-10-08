@@ -53,6 +53,15 @@ class ProviderByteStreamResponse:
             raise ValueError("Provider response content length must not be negative")
 
 
+@dataclass(frozen=True)
+class ProviderStreamParts:
+    """Size, digest, and uploaded parts from one bounded provider stream."""
+
+    actual_size: int
+    actual_sha256: str
+    parts: tuple[S3CompletedPart, ...]
+
+
 class ProviderStagingStore(Protocol):
     """Trusted S3 operations for digest-unknown provider source staging."""
 
@@ -173,7 +182,9 @@ class DeferredProviderServerToRuntimeSource:
 
         completed = False
         try:
-            actual_size, actual_sha256, parts = await self._stream_parts(upload)
+            streamed = await self._stream_parts(upload)
+            actual_size = streamed.actual_size
+            actual_sha256 = streamed.actual_sha256
             if actual_size != self.metadata.size:
                 raise ValueError("Provider stream size does not match the manifest")
             if (
@@ -184,7 +195,7 @@ class DeferredProviderServerToRuntimeSource:
             completed_metadata = (
                 await self.s3_service.complete_preparation_multipart_upload(
                     upload=upload,
-                    completed_parts=parts,
+                    completed_parts=streamed.parts,
                     expected_size=actual_size,
                 )
             )
@@ -242,7 +253,7 @@ class DeferredProviderServerToRuntimeSource:
     async def _stream_parts(
         self,
         upload: S3MultipartUpload,
-    ) -> tuple[int, str, tuple[S3CompletedPart, ...]]:
+    ) -> ProviderStreamParts:
         """Read bounded chunks into bounded multipart parts and a digest."""
         digest = hashlib.sha256()
         actual_size = 0
@@ -285,7 +296,11 @@ class DeferredProviderServerToRuntimeSource:
                     body=bytes(pending),
                 )
             )
-        return actual_size, digest.hexdigest(), tuple(parts)
+        return ProviderStreamParts(
+            actual_size=actual_size,
+            actual_sha256=digest.hexdigest(),
+            parts=tuple(parts),
+        )
 
     async def _prepare_empty(
         self,

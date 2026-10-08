@@ -2,7 +2,7 @@
 
 import dataclasses
 
-from azents.repos.session_workspace_project.data import SessionWorkspaceProject
+from azents.core.session_workspace_project import SessionWorkspaceProject
 
 
 @dataclasses.dataclass(frozen=True)

@@ -3,13 +3,26 @@
 import dataclasses
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import cast
+from typing import NamedTuple
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.broker.types import SessionBroker, SessionWakeUp
-from azents.core.enums import AgentRunStatus, AgentSessionKind, AgentSessionRunState
+from azents.broker.types import (
+    BrokerMessage,
+    SessionActivity,
+    SessionBroker,
+    SessionWakeUp,
+    WorkerSignal,
+)
+from azents.core.enums import (
+    AgentRunPhase,
+    AgentRunStatus,
+    AgentSessionKind,
+    AgentSessionRunState,
+)
+from azents.engine.run.emit import PublishedEvent
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
     SessionExecutionRepository,
@@ -19,11 +32,16 @@ from azents.repos.session_execution.cutover_replay import (
     CutoverReplayCandidateBatch,
     SessionCutoverReplayRepository,
 )
+from azents.repos.session_execution.cutover_replay_data import (
+    TeamSessionCutoverReplayInvariantFailure,
+)
+from azents.repos.session_execution.cutover_replay_operations import (
+    TeamSessionCutoverReplayOperationsRepository,
+)
 from azents.repos.session_execution.data import CanonicalExecutionSnapshot
 
 from .team_session_cutover_replay import (
     TeamSessionCutoverReplayBarrierLostError,
-    TeamSessionCutoverReplayInvariantFailure,
     TeamSessionCutoverReplayService,
 )
 
@@ -37,7 +55,7 @@ class _ReplayRepository(SessionCutoverReplayRepository):
 
     async def read_candidate_batch(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         batch_size: int,
         after_session_id: str | None,
@@ -49,7 +67,7 @@ class _ReplayRepository(SessionCutoverReplayRepository):
 
     async def fence_owner_generation(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         expected_owner_generation: int,
@@ -60,7 +78,7 @@ class _ReplayRepository(SessionCutoverReplayRepository):
 
     async def read_candidate(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
     ) -> CutoverReplayCandidate | None:
@@ -91,7 +109,7 @@ class _CanonicalRepository(SessionExecutionRepository):
 
     async def load_canonical_snapshot(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         owner_generation: int,
@@ -146,28 +164,68 @@ class _Broker:
         """Record broker/ownership state discard."""
         self.calls.append(("purge", session_id))
 
-    async def send_message(self, message: SessionWakeUp) -> None:
+    async def send_message(self, message: BrokerMessage) -> None:
         """Record one pure Session routing signal."""
+        assert isinstance(message, SessionWakeUp)
         if message.session_id == self.fail_wake_session_id:
             self.fail_wake_session_id = None
             raise RuntimeError("simulated broker interruption")
         self.calls.append(("wake", message))
 
+    async def receive_messages(self) -> list[WorkerSignal]:
+        """Reject worker consumption outside the replay contract."""
+        raise AssertionError("Replay must not receive worker signals")
 
-class _Session:
-    """Transaction-capable AsyncSession double."""
+    async def notify_mailbox_activity(self, session_id: str) -> None:
+        """Reject mailbox notifications outside the replay contract."""
+        raise AssertionError("Replay must not notify mailbox activity")
 
-    async def commit(self) -> None:
-        """Commit the deterministic replay fence."""
+    async def publish_event(self, session_id: str, event: PublishedEvent) -> None:
+        """Reject event publication outside the replay contract."""
+        raise AssertionError("Replay must not publish events")
 
-    async def rollback(self) -> None:
-        """Rollback a rejected replay fence."""
+    async def renew_session_ttl(self, session_id: str) -> None:
+        """Reject live-owner TTL changes outside the replay contract."""
+        raise AssertionError("Replay must not renew live-owner TTLs")
+
+    async def renew_session_owner_heartbeat(self, session_id: str) -> None:
+        """Reject live-owner heartbeat changes outside the replay contract."""
+        raise AssertionError("Replay must not renew owner heartbeats")
+
+    async def release_session_lock(self, session_id: str) -> None:
+        """Reject live-owner lock changes outside the replay contract."""
+        raise AssertionError("Replay must not release owner locks")
+
+    async def set_session_activity(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+        run_id: str,
+        phase: AgentRunPhase | None = None,
+    ) -> bool:
+        """Reject activity mutation outside the replay contract."""
+        raise AssertionError("Replay must not set session activity")
+
+    async def clear_session_activity(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> bool:
+        """Reject activity mutation outside the replay contract."""
+        raise AssertionError("Replay must not clear session activity")
+
+    async def get_session_activity(self, session_id: str) -> SessionActivity | None:
+        """Reject transient activity reads outside the replay contract."""
+        raise AssertionError("Replay must not read transient session activity")
 
 
 @asynccontextmanager
-async def _session_manager() -> AsyncGenerator[AsyncSession, None]:
-    """Yield a fake database session for deterministic service tests."""
-    yield cast(AsyncSession, _Session())
+async def _session_manager() -> AsyncGenerator[WriteSession, None]:
+    """Own an unbound native session for deterministic repository doubles."""
+    async with AsyncSession() as session:
+        yield ReadWriteSession(session)
 
 
 def _candidate(
@@ -229,10 +287,19 @@ def _snapshot(
     )
 
 
+class _ServiceFixture(NamedTuple):
+    """Named collaborators retained by one replay test fixture."""
+
+    service: TeamSessionCutoverReplayService
+    repository: _ReplayRepository
+    broker: _Broker
+    broker_provider_calls: list[None]
+
+
 def _service(
     candidate: CutoverReplayCandidate,
     snapshot: CanonicalExecutionSnapshot | CanonicalExecutionOwnerGenerationStaleError,
-) -> tuple[TeamSessionCutoverReplayService, _ReplayRepository, _Broker, list[None]]:
+) -> _ServiceFixture:
     """Create one service wired only to deterministic durable test doubles."""
     replay_repository = _ReplayRepository(
         CutoverReplayCandidateBatch(
@@ -245,17 +312,19 @@ def _service(
 
     async def provide_broker() -> SessionBroker:
         broker_provider_calls.append(None)
-        return cast(SessionBroker, broker)
+        return broker
 
     service = TeamSessionCutoverReplayService(
-        replay_repository=replay_repository,
-        canonical_execution_repository=_CanonicalRepository(
-            {candidate.session_id: snapshot}
+        operations=TeamSessionCutoverReplayOperationsRepository(
+            replay_repository=replay_repository,
+            canonical_execution_repository=_CanonicalRepository(
+                {candidate.session_id: snapshot}
+            ),
+            session_manager=_session_manager,
         ),
-        session_manager=_session_manager,
         broker_provider=provide_broker,
     )
-    return service, replay_repository, broker, broker_provider_calls
+    return _ServiceFixture(service, replay_repository, broker, broker_provider_calls)
 
 
 @pytest.mark.asyncio
@@ -379,17 +448,19 @@ async def test_mid_batch_broker_interruption_releases_barrier_and_retries() -> N
     broker = _Broker(fail_wake_session_id="session-2")
 
     async def provide_broker() -> SessionBroker:
-        return cast(SessionBroker, broker)
+        return broker
 
     service = TeamSessionCutoverReplayService(
-        replay_repository=replay_repository,
-        canonical_execution_repository=_CanonicalRepository(
-            {
-                "session-1": _snapshot("session-1"),
-                "session-2": _snapshot("session-2"),
-            }
+        operations=TeamSessionCutoverReplayOperationsRepository(
+            replay_repository=replay_repository,
+            canonical_execution_repository=_CanonicalRepository(
+                {
+                    "session-1": _snapshot("session-1"),
+                    "session-2": _snapshot("session-2"),
+                }
+            ),
+            session_manager=_session_manager,
         ),
-        session_manager=_session_manager,
         broker_provider=provide_broker,
     )
 
@@ -434,12 +505,16 @@ async def test_lost_barrier_aborts_before_broker_mutation() -> None:
     broker = _Broker(renew_result=False)
 
     async def provide_broker() -> SessionBroker:
-        return cast(SessionBroker, broker)
+        return broker
 
     service = TeamSessionCutoverReplayService(
-        replay_repository=replay_repository,
-        canonical_execution_repository=_CanonicalRepository({"session-1": _snapshot()}),
-        session_manager=_session_manager,
+        operations=TeamSessionCutoverReplayOperationsRepository(
+            replay_repository=replay_repository,
+            canonical_execution_repository=_CanonicalRepository(
+                {"session-1": _snapshot()}
+            ),
+            session_manager=_session_manager,
+        ),
         broker_provider=provide_broker,
     )
 
@@ -461,9 +536,10 @@ async def test_candidate_repository_rejects_unbounded_batch_size(
     """Repository rejects batch sizes outside the fixed operator bound."""
     repository = SessionCutoverReplayRepository()
 
-    with pytest.raises(ValueError, match="batch_size"):
-        await repository.read_candidate_batch(
-            cast(AsyncSession, object()),
-            batch_size=batch_size,
-            after_session_id=None,
-        )
+    async with AsyncSession() as session:
+        with pytest.raises(ValueError, match="batch_size"):
+            await repository.read_candidate_batch(
+                ReadWriteSession(session),
+                batch_size=batch_size,
+                after_session_id=None,
+            )

@@ -122,38 +122,43 @@ class EffectiveToolkitConfig(BaseModel):
     toolkit: ToolkitConfig
     source: EffectiveToolkitSource
     agent_toolkit_id: str | None
+    namespace: str = Field(description="Durable Agent-local effective namespace")
 
 
-class EffectiveToolkitSlugConflict(RuntimeError):
-    """Persisted effective Toolkit slugs are not unique for one Agent."""
+class EffectiveToolkitNamespaceMissing(RuntimeError):
+    """An effective persisted Toolkit has no active namespace authority."""
 
     def __init__(
         self,
         *,
         agent_id: str,
-        slug: str,
-        toolkit_ids: tuple[str, ...],
+        toolkit_id: str,
     ) -> None:
         super().__init__(
-            f"Duplicate effective Toolkit slug for Agent {agent_id}: {slug}"
+            f"Missing effective Toolkit namespace for Agent {agent_id}: {toolkit_id}"
         )
         self.agent_id = agent_id
-        self.slug = slug
-        self.toolkit_ids = toolkit_ids
+        self.toolkit_id = toolkit_id
 
 
-@dataclasses.dataclass(frozen=True)
-class NotFound:
-    """Toolkit not found."""
+class EffectiveToolkitNamespaceMismatch(RuntimeError):
+    """An effective persisted Toolkit namespace was allocated from a stale Slug."""
 
-    toolkit_id: str
-
-
-@dataclasses.dataclass(frozen=True)
-class ScopeNotFound:
-    """ToolkitScope not found."""
-
-    scope_id: str
+    def __init__(
+        self,
+        *,
+        agent_id: str,
+        toolkit_id: str,
+        toolkit_slug: str,
+        reservation_base_slug: str,
+    ) -> None:
+        super().__init__(
+            f"Mismatched effective Toolkit namespace for Agent {agent_id}: {toolkit_id}"
+        )
+        self.agent_id = agent_id
+        self.toolkit_id = toolkit_id
+        self.toolkit_slug = toolkit_slug
+        self.reservation_base_slug = reservation_base_slug
 
 
 @dataclasses.dataclass(frozen=True)
@@ -161,29 +166,3 @@ class AgentToolkitNotFound:
     """AgentToolkit not found."""
 
     agent_toolkit_id: str
-
-
-@dataclasses.dataclass(frozen=True)
-class DuplicateScope:
-    """Same scope already exists."""
-
-    toolkit_id: str
-    scope_type: ToolkitScopeType
-    scope_id: str
-
-
-@dataclasses.dataclass(frozen=True)
-class DuplicateSlug:
-    """Toolkit with the same slug already exists in its ownership scope."""
-
-    workspace_id: str
-    owner_agent_id: str | None
-    slug: str
-
-
-@dataclasses.dataclass(frozen=True)
-class DuplicateAgentToolkit:
-    """Same Toolkit is already mounted on agent."""
-
-    agent_id: str
-    toolkit_id: str

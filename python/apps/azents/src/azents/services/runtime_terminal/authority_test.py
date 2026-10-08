@@ -4,12 +4,13 @@ import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, NamedTuple
 from unittest.mock import AsyncMock
 
 import pytest
 from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
 
+from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentRuntimeCapability,
@@ -30,7 +31,6 @@ from azents.core.runtime_profile import (
 )
 from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime.data import AgentRuntime
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.runtime_profile.data import (
     RuntimeConfigurationAppliedSlot,
     RuntimeConfigurationSlot,
@@ -38,6 +38,10 @@ from azents.repos.runtime_profile.data import (
     RuntimeInfrastructureProfile,
     WorkspaceRuntimeProfile,
 )
+from azents.repos.runtime_terminal_authority_read import (
+    RuntimeTerminalAuthorityReadRepository,
+)
+from azents.repos.workspace.data import Workspace, WorkspaceSnapshot
 from azents.runtime.control_protocol.data import (
     RuntimeProtocolCapabilities,
     RuntimeRunnerRegistration,
@@ -169,6 +173,12 @@ async def test_private_agent_requires_owner_or_agent_admin() -> None:
     working_folder.resolve_bound_authority_for_target.assert_not_awaited()
 
 
+class _TerminalAuthorityFixture(NamedTuple):
+    resolver: DatabaseRuntimeTerminalAuthorityResolver
+    coordination: InMemoryRuntimeCoordinationStore
+    working_folder: AsyncMock
+
+
 def _resolver(
     *,
     runtime: AgentRuntime | None = None,
@@ -177,11 +187,7 @@ def _resolver(
     agent: Agent | None = None,
     workspace_role: WorkspaceUserRole = WorkspaceUserRole.OWNER,
     agent_admin: bool = False,
-) -> tuple[
-    DatabaseRuntimeTerminalAuthorityResolver,
-    InMemoryRuntimeCoordinationStore,
-    AsyncMock,
-]:
+) -> _TerminalAuthorityFixture:
     runtime = runtime or _runtime()
     applied = applied or _applied()
     workspace_profile = workspace_profile or _workspace_profile()
@@ -203,9 +209,16 @@ def _resolver(
         revoked_at=None,
         expires_at=_NOW + datetime.timedelta(hours=1),
     )
-    workspace_repository.get_with_id_by_handle.return_value = (
-        "workspace-1",
-        SimpleNamespace(handle="workspace"),
+    workspace_repository.get_with_id_by_handle.return_value = WorkspaceSnapshot(
+        workspace_id="workspace-1",
+        workspace=Workspace(
+            name="Workspace",
+            handle="workspace",
+            default_runtime_profile_id=None,
+            default_runtime_profile_version=1,
+            created_at=_NOW,
+            updated_at=_NOW,
+        ),
     )
     workspace_user_repository.get_by_workspace_and_user.return_value = SimpleNamespace(
         id="workspace-user-1",
@@ -252,21 +265,27 @@ def _resolver(
         yield SimpleNamespace()
 
     resolver = DatabaseRuntimeTerminalAuthorityResolver(
-        session_manager=session_manager,
-        user_repository=user_repository,
-        authentication_session_repository=authentication_session_repository,
-        workspace_repository=workspace_repository,
-        workspace_user_repository=workspace_user_repository,
-        agent_repository=agent_repository,
-        agent_admin_repository=agent_admin_repository,
-        agent_session_repository=agent_session_repository,
-        runtime_repository=runtime_repository,
-        profile_repository=profile_repository,
+        authority_repository=RuntimeTerminalAuthorityReadRepository(
+            session_manager=session_manager,
+            user_repository=user_repository,
+            authentication_session_repository=authentication_session_repository,
+            workspace_repository=workspace_repository,
+            workspace_user_repository=workspace_user_repository,
+            agent_repository=agent_repository,
+            agent_admin_repository=agent_admin_repository,
+            agent_session_repository=agent_session_repository,
+            runtime_repository=runtime_repository,
+            profile_repository=profile_repository,
+        ),
         runtime_coordination=runtime_coordination,
         working_folder_service=working_folder,
         policy_resolver=TerminalPolicyResolver(),
     )
-    return resolver, runtime_coordination, working_folder
+    return _TerminalAuthorityFixture(
+        resolver=resolver,
+        coordination=runtime_coordination,
+        working_folder=working_folder,
+    )
 
 
 async def _register_runner(

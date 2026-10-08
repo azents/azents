@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Protocol
+from typing import Annotated, ClassVar, Protocol
 
 import boto3
 import google.auth.transport.requests
@@ -29,7 +31,20 @@ from google.auth.exceptions import (
 )
 from google.oauth2 import service_account
 from openai import APIStatusError, AsyncOpenAI, OpenAIError
-from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
+from openrouter import OpenRouter
+from openrouter.errors.openroutererror import OpenRouterError
+from openrouter.errors.responsevalidationerror import ResponseValidationError
+from openrouter.utils.logger import NoOpLogger
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from azents.core.builtin_tools import supported_builtin_capabilities
 from azents.core.chatgpt_oauth import (
@@ -67,9 +82,14 @@ from azents.core.llm_catalog import (
     ModelReasoningEffort,
     ModelToolCallingCapabilities,
 )
+from azents.core.model_capability_evidence import ProviderCapabilityEvidence
 from azents.core.model_execution_options import (
     ModelExecutionOptionId,
     validate_supported_execution_options,
+)
+from azents.core.model_provider_declarations import (
+    MalformedProviderDeclarations,
+    decode_stored_provider_evidence,
 )
 from azents.core.openai_client_config import openai_responses_client_config
 from azents.core.openrouter import OPENROUTER_API_BASE_URL
@@ -147,20 +167,10 @@ def _openai_supported_execution_options(
 
 
 def _chatgpt_supported_execution_options(
-    model: dict[str, object],
+    model: _ChatGPTModelPayload,
 ) -> list[ModelExecutionOptionId]:
     """Return options from authoritative ChatGPT service-tier metadata only."""
-    service_tiers = model.get("service_tiers")
-    if not isinstance(service_tiers, list) or not service_tiers:
-        return []
-    tiers: set[str] = set()
-    for value in service_tiers:
-        if isinstance(value, str):
-            tiers.add(value)
-        elif isinstance(value, dict):
-            tier_id = value.get("id")
-            if isinstance(tier_id, str):
-                tiers.add(tier_id)
+    tiers = set(model.service_tiers or [])
     supported: list[ModelExecutionOptionId] = []
     if {"priority", "fast"} & tiers:
         supported.append(ModelExecutionOptionId.FAST)
@@ -172,17 +182,10 @@ def _chatgpt_supported_execution_options(
     )
 
 
-_BEDROCK_MODEL_SUMMARY_ADAPTER = TypeAdapter[dict[str, object]](dict[str, object])
-_CHATGPT_MODEL_ADAPTER = TypeAdapter[dict[str, object]](dict[str, object])
-_KIMI_MODEL_ADAPTER = TypeAdapter[dict[str, object]](dict[str, object])
-_OPENROUTER_MODEL_ADAPTER = TypeAdapter[dict[str, object]](dict[str, object])
-_VERTEX_MODEL_ADAPTER = TypeAdapter[dict[str, object]](dict[str, object])
-
-
 class _XaiOAuthReasoningEffortPayload(BaseModel):
     """Validated xAI OAuth reasoning-effort metadata."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="allow", strict=True)
 
     id: str | None = None
     value: str | None = None
@@ -192,14 +195,18 @@ class _XaiOAuthReasoningEffortPayload(BaseModel):
 class _XaiOAuthModelPayload(BaseModel):
     """Validated xAI OAuth model-list entry."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="allow", strict=True)
 
     id: str
     model: str | None = None
     name: str | None = None
     context_window: int | None = None
+    context_windows: list[Annotated[int, Field(ge=0, le=2**63 - 1)]] | None = None
+    input_modalities: list[str] | None = None
+    output_modalities: list[str] | None = None
     api_backend: str | None = None
     supports_reasoning_effort: bool | None = None
+    reasoning_effort: str | None = None
     reasoning_efforts: list[_XaiOAuthReasoningEffortPayload] | None = None
     supports_backend_search: bool | None = None
     auto_compact_threshold_percent: int | None = None
@@ -210,9 +217,474 @@ class _XaiOAuthModelPayload(BaseModel):
 class _XaiOAuthModelsPayload(BaseModel):
     """Validated xAI OAuth model-list response."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="allow", strict=True)
 
     data: list[_XaiOAuthModelPayload]
+
+
+class _ListingEvidencePayload(BaseModel):
+    """Decode consumed fields while retaining opaque provider extensions."""
+
+    model_config = ConfigDict(extra="allow", strict=True)
+
+
+class _ChatGPTReasoningLevel(_ListingEvidencePayload):
+    effort: str
+
+
+class _ChatGPTEvidencePayload(_ListingEvidencePayload):
+    context_window: int | None = None
+    max_context_window: int | None = None
+    input_modalities: list[str] | None = None
+    supported_reasoning_levels: list[_ChatGPTReasoningLevel] | None = None
+    default_reasoning_level: str | None = None
+    supports_parallel_tool_calls: bool | None = None
+    supports_reasoning_summaries: bool | None = None
+    supports_reasoning_summary_parameter: bool | None = None
+    experimental_supported_tools: list[str] | None = None
+
+
+class _KimiEvidencePayload(_ListingEvidencePayload):
+    context_length: int | None = None
+    supports_reasoning: bool | None = None
+    supports_image_in: bool | None = None
+    supports_video_in: bool | None = None
+
+
+class _BedrockEvidencePayload(_ListingEvidencePayload):
+    inputModalities: list[str] | None = None
+    outputModalities: list[str] | None = None
+
+
+class _VertexEvidencePayload(_ListingEvidencePayload):
+    inputTokenLimit: int | None = None
+    outputTokenLimit: int | None = None
+
+
+class _OpenRouterArchitectureEvidence(_ListingEvidencePayload):
+    input_modalities: list[str] | None = None
+    output_modalities: list[str] | None = None
+
+
+class _OpenRouterTopProviderEvidence(_ListingEvidencePayload):
+    max_completion_tokens: int | None = None
+
+
+class _OpenRouterEvidencePayload(_ListingEvidencePayload):
+    context_length: int | None = None
+    architecture: _OpenRouterArchitectureEvidence | None = None
+    top_provider: _OpenRouterTopProviderEvidence | None = None
+    supported_parameters: list[str] | None = None
+
+
+class _XaiApiCapabilitiesEvidence(_ListingEvidencePayload):
+    reasoning: bool | None = None
+    reasoning_effort: bool | list[str] | None = None
+    default_reasoning_effort: str | None = None
+
+
+class _XaiApiEvidencePayload(_ListingEvidencePayload):
+    context_length: int | None = None
+    input_modalities: list[str] | None = None
+    output_modalities: list[str] | None = None
+    capabilities: _XaiApiCapabilitiesEvidence | None = None
+
+
+def _identity(value: object) -> str | None:
+    """Preserve the listing's best-effort, non-coercing identity contract."""
+    return value if isinstance(value, str) and value else None
+
+
+_OptionalIdentity = Annotated[str | None, BeforeValidator(_identity)]
+
+
+class _ModelMetadataPayload(_ListingEvidencePayload):
+    """Retain opaque metadata at ingress, separate from consumed typed fields."""
+
+    metadata_keys: ClassVar[frozenset[str] | None] = None
+    normalization_fields: ClassVar[frozenset[str]]
+    eligible: bool = Field(exclude=True)
+    source_metadata: dict[str, object] = Field(exclude=True)
+
+    @classmethod
+    def accepts_entry(cls, value: dict[str, object]) -> bool:
+        """Validate eligibility before capability fields, as the legacy decoder did."""
+        raise NotImplementedError
+
+    @model_validator(mode="before")
+    @classmethod
+    def retain_metadata(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        metadata = {
+            key: item
+            for key, item in value.items()
+            if isinstance(key, str)
+            and (cls.metadata_keys is None or key in cls.metadata_keys)
+        }
+        eligible = cls.accepts_entry(value)
+        fields = (
+            value
+            if eligible
+            else {
+                key: item
+                for key, item in value.items()
+                if key not in cls.normalization_fields
+            }
+        )
+        return {**fields, "eligible": eligible, "source_metadata": metadata}
+
+
+class _ChatGPTModelPayload(_ChatGPTEvidencePayload, _ModelMetadataPayload):
+    """Account model fields and exact raw metadata used by catalog replay."""
+
+    normalization_fields = frozenset(_ChatGPTEvidencePayload.model_fields)
+    metadata_keys = frozenset(
+        {
+            "auto_compact_token_limit",
+            "context_window",
+            "default_reasoning_level",
+            "default_reasoning_summary",
+            "effective_context_window_percent",
+            "experimental_supported_tools",
+            "input_modalities",
+            "max_context_window",
+            "minimal_client_version",
+            "priority",
+            "service_tiers",
+            "supported_in_api",
+            "supported_reasoning_levels",
+            "supports_parallel_tool_calls",
+            "supports_reasoning_summaries",
+            "supports_reasoning_summary_parameter",
+            "supports_search_tool",
+            "tool_mode",
+            "visibility",
+            "web_search_tool_type",
+        }
+    )
+    slug: _OptionalIdentity = None
+    display_name: _OptionalIdentity = None
+    visibility: _OptionalIdentity = None
+    supported_in_api: bool | None = None
+    service_tiers: list[str] | None = None
+    builtin_capabilities: list[str] = Field(exclude=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def decode_builtin_capabilities(cls, value: object) -> object:
+        """Project the shared policy once, including compatible extension fields."""
+        if not isinstance(value, dict):
+            return value
+        slug = _identity(value.get("slug"))
+        supported = (
+            supported_builtin_capabilities(
+                provider=LLMProvider.CHATGPT_OAUTH,
+                model_identifier=slug,
+                metadata={
+                    **value,
+                    "mode": value.get("mode")
+                    if value.get("mode") is not None
+                    else "responses",
+                    "supports_function_calling": value.get("supports_function_calling")
+                    if value.get("supports_function_calling") is not None
+                    else True,
+                },
+            )
+            if slug is not None and cls.accepts_entry(value)
+            else []
+        )
+        return {**value, "builtin_capabilities": supported}
+
+    @classmethod
+    def accepts_entry(cls, value: dict[str, object]) -> bool:
+        return (
+            _identity(value.get("slug")) is not None
+            and value.get("supported_in_api") is True
+            and value.get("visibility") == "list"
+        )
+
+    @field_validator("supported_in_api", mode="before")
+    @classmethod
+    def exact_api_support(cls, value: object) -> bool | None:
+        return value if isinstance(value, bool) else None
+
+    @field_validator("service_tiers", mode="before")
+    @classmethod
+    def tier_ids(cls, value: object) -> list[str] | None:
+        if not isinstance(value, list):
+            return None
+        identifiers: list[str] = []
+        for tier in value:
+            if isinstance(tier, str):
+                identifiers.append(tier)
+            elif isinstance(tier, dict):
+                identifier = tier.get("id")
+                if isinstance(identifier, str):
+                    identifiers.append(identifier)
+        return identifiers
+
+
+class _KimiModelPayload(_KimiEvidencePayload, _ModelMetadataPayload):
+    normalization_fields = frozenset(_KimiEvidencePayload.model_fields)
+    metadata_keys = frozenset(
+        {
+            "context_length",
+            "supports_reasoning",
+            "supports_image_in",
+            "supports_video_in",
+        }
+    )
+    id: _OptionalIdentity = None
+    display_name: _OptionalIdentity = None
+
+    @classmethod
+    def accepts_entry(cls, value: dict[str, object]) -> bool:
+        return _identity(value.get("id")) is not None
+
+
+class _BedrockLifecyclePayload(_ListingEvidencePayload):
+    status: _OptionalIdentity = None
+
+
+class _BedrockModelPayload(_BedrockEvidencePayload, _ModelMetadataPayload):
+    normalization_fields = frozenset(_BedrockEvidencePayload.model_fields)
+    modelId: _OptionalIdentity = None
+    modelName: _OptionalIdentity = None
+    providerName: _OptionalIdentity = None
+    modelLifecycle: _BedrockLifecyclePayload | None = None
+
+    @classmethod
+    def accepts_entry(cls, value: dict[str, object]) -> bool:
+        lifecycle = value.get("modelLifecycle")
+        return (
+            _identity(value.get("modelId")) is not None
+            and _developer_from_bedrock_provider(_identity(value.get("providerName")))
+            is not None
+            and not (
+                isinstance(lifecycle, dict) and lifecycle.get("status") == "LEGACY"
+            )
+        )
+
+    @field_validator("modelLifecycle", mode="before")
+    @classmethod
+    def optional_lifecycle(cls, value: object) -> object:
+        return value if isinstance(value, dict) else None
+
+
+class _VertexModelPayload(_VertexEvidencePayload, _ModelMetadataPayload):
+    normalization_fields = frozenset(_VertexEvidencePayload.model_fields)
+    name: _OptionalIdentity = None
+    modelId: _OptionalIdentity = None
+    displayName: _OptionalIdentity = None
+
+    @classmethod
+    def accepts_entry(cls, value: dict[str, object]) -> bool:
+        return (
+            _identity(value.get("modelId")) is not None
+            or _identity(value.get("name")) is not None
+        )
+
+
+class _OpenRouterModelPayload(_OpenRouterEvidencePayload, _ModelMetadataPayload):
+    normalization_fields = frozenset(_OpenRouterEvidencePayload.model_fields)
+    metadata_keys = frozenset(
+        {
+            "architecture",
+            "canonical_slug",
+            "context_length",
+            "created",
+            "expiration_date",
+            "pricing",
+            "reasoning",
+            "supported_parameters",
+            "top_provider",
+        }
+    )
+    id: _OptionalIdentity = None
+    name: _OptionalIdentity = None
+
+    @classmethod
+    def accepts_entry(cls, value: dict[str, object]) -> bool:
+        if _identity(value.get("id")) is None:
+            return False
+        architecture = value.get("architecture")
+        if not isinstance(architecture, dict):
+            return True
+        output = architecture.get("output_modalities")
+        if output is None:
+            return True
+        return (
+            isinstance(output, Sequence)
+            and not isinstance(output, (str, bytes))
+            and "text" in output
+        )
+
+
+class _ChatGPTModelsPayload(_ListingEvidencePayload):
+    models: list[object]
+
+
+class _AccountModelsPayload(_ListingEvidencePayload):
+    data: list[object]
+
+
+class _VertexModelsPayload(_ListingEvidencePayload):
+    publisherModels: list[object] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def optional_envelope(cls, value: object) -> object:
+        return value if isinstance(value, dict) else {}
+
+    @field_validator("publisherModels", mode="before")
+    @classmethod
+    def optional_models(cls, value: object) -> list[object] | None:
+        return value if isinstance(value, list) else None
+
+
+class _BedrockModelsPayload(_ListingEvidencePayload):
+    modelSummaries: list[object] = Field(default_factory=list)
+
+
+_BEDROCK_MODEL_SUMMARY_ADAPTER = TypeAdapter(_BedrockModelPayload)
+_CHATGPT_MODEL_ADAPTER = TypeAdapter(_ChatGPTModelPayload)
+_KIMI_MODEL_ADAPTER = TypeAdapter(_KimiModelPayload)
+_OPENROUTER_MODEL_ADAPTER = TypeAdapter(_OpenRouterModelPayload)
+_VERTEX_MODEL_ADAPTER = TypeAdapter(_VertexModelPayload)
+
+
+@dataclass(frozen=True)
+class ListingClientFactories:
+    """Explicit composition-owned provider client and credential boundaries."""
+
+    http: Callable[..., AbstractAsyncContextManager[httpx.AsyncClient]]
+    openai: Callable[..., AbstractAsyncContextManager[AsyncOpenAI]]
+    openrouter: Callable[..., AbstractAsyncContextManager[OpenRouter]]
+    aws_session: Callable[..., boto3.Session]
+    vertex_token: Callable[[GcpSecrets], str]
+
+
+def create_listing_client_factories() -> ListingClientFactories:
+    """Compose SDK/HTTP factories outside provider listing orchestration."""
+    return ListingClientFactories(
+        http=httpx.AsyncClient,
+        openai=AsyncOpenAI,
+        openrouter=create_openrouter_listing_client,
+        aws_session=boto3.Session,
+        vertex_token=_vertex_access_token,
+    )
+
+
+@asynccontextmanager
+async def create_openrouter_listing_client(
+    *,
+    client: httpx.AsyncClient,
+) -> AsyncIterator[OpenRouter]:
+    """Own sync SDK resources while the caller owns the async transport."""
+    with OpenRouter(
+        async_client=client,
+        retry_config=None,
+        timeout_ms=20_000,
+        debug_logger=NoOpLogger(),
+    ) as sdk:
+        yield sdk
+
+
+def _canonical_effort(value: str | None) -> ModelReasoningEffort | None:
+    """Keep unsupported provider defaults unknown rather than choosing another level."""
+    return next(
+        (effort for effort in ModelReasoningEffort if effort.value == value), None
+    )
+
+
+def _effort_diagnostics(values: list[str]) -> dict[str, object]:
+    """Explain filtering of unsupported wire labels while retaining raw metadata."""
+    unsupported = [value for value in values if _canonical_effort(value) is None]
+    return (
+        {
+            "capability_evidence_diagnostics": {
+                "unsupported_reasoning_effort_labels": unsupported,
+            }
+        }
+        if unsupported
+        else {}
+    )
+
+
+def _chatgpt_capability_evidence(
+    payload: _ChatGPTModelPayload,
+) -> ProviderCapabilityEvidence:
+    """Decode own-provider declarations through the shared pure core boundary."""
+    return decode_stored_provider_evidence(
+        provider=LLMProvider.CHATGPT_OAUTH,
+        provider_metadata=payload.model_dump(exclude_unset=True),
+        capability_evidence=None,
+    )
+
+
+def _kimi_capability_evidence(payload: _KimiModelPayload) -> ProviderCapabilityEvidence:
+    """Decode own-provider declarations through the shared pure core boundary."""
+    return decode_stored_provider_evidence(
+        provider=LLMProvider.KIMI_OAUTH,
+        provider_metadata=payload.model_dump(exclude_unset=True),
+        capability_evidence=None,
+    )
+
+
+def _bedrock_capability_evidence(
+    payload: _BedrockModelPayload,
+) -> ProviderCapabilityEvidence:
+    """Decode own-provider declarations through the shared pure core boundary."""
+    return decode_stored_provider_evidence(
+        provider=LLMProvider.AWS_BEDROCK,
+        provider_metadata=payload.model_dump(exclude_unset=True),
+        capability_evidence=None,
+    )
+
+
+def _vertex_capability_evidence(
+    payload: _VertexModelPayload,
+) -> ProviderCapabilityEvidence:
+    """Decode own-provider declarations through the shared pure core boundary."""
+    return decode_stored_provider_evidence(
+        provider=LLMProvider.GOOGLE_VERTEX_AI,
+        provider_metadata=payload.model_dump(exclude_unset=True),
+        capability_evidence=None,
+    )
+
+
+def _openrouter_capability_evidence(
+    payload: _OpenRouterModelPayload,
+) -> ProviderCapabilityEvidence:
+    """Decode own-provider declarations through the shared pure core boundary."""
+    return decode_stored_provider_evidence(
+        provider=LLMProvider.OPENROUTER,
+        provider_metadata=payload.model_dump(exclude_unset=True),
+        capability_evidence=None,
+    )
+
+
+def _xai_api_capability_evidence(
+    extra: dict[str, object] | None,
+) -> ProviderCapabilityEvidence:
+    """Decode own-provider declarations through the shared pure core boundary."""
+    return decode_stored_provider_evidence(
+        provider=LLMProvider.XAI,
+        provider_metadata=extra,
+        capability_evidence=None,
+    )
+
+
+def _xai_oauth_capability_evidence(
+    payload: _XaiOAuthModelPayload,
+) -> ProviderCapabilityEvidence:
+    """Decode own-provider declarations through the shared pure core boundary."""
+    return decode_stored_provider_evidence(
+        provider=LLMProvider.XAI_OAUTH,
+        provider_metadata=payload.model_dump(exclude_unset=True),
+        capability_evidence=None,
+    )
 
 
 class ListingProviderError(Exception):
@@ -267,10 +739,12 @@ class XaiListingProviderError(ListingProviderError):
 
 async def list_bedrock_models_for_integration(
     integration: LLMProviderIntegrationWithSecrets,
+    *,
+    clients: ListingClientFactories,
 ) -> ModelListingOutput:
     """Fetch provider listing of AWS Bedrock integration."""
     try:
-        return await _list_bedrock_models(integration)
+        return await _list_bedrock_models(integration, clients=clients)
     except (BotoCoreError, ClientError, ValueError) as exc:
         raise ListingProviderError(
             "AWS Bedrock model listing failed.",
@@ -280,10 +754,12 @@ async def list_bedrock_models_for_integration(
 
 async def list_vertex_models_for_integration(
     integration: LLMProviderIntegrationWithSecrets,
+    *,
+    clients: ListingClientFactories,
 ) -> ModelListingOutput:
     """Fetch provider listing of Google Vertex AI integration."""
     try:
-        return await _list_vertex_models(integration)
+        return await _list_vertex_models(integration, clients=clients)
     except (GoogleAuthError, httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
         raise ListingProviderError(
             "Google Vertex AI model listing failed.",
@@ -293,10 +769,12 @@ async def list_vertex_models_for_integration(
 
 async def list_chatgpt_models_for_integration(
     integration: LLMProviderIntegrationWithSecrets,
+    *,
+    clients: ListingClientFactories,
 ) -> ModelListingOutput:
     """Fetch account-visible models from the ChatGPT Codex backend."""
     try:
-        return await _list_chatgpt_models(integration)
+        return await _list_chatgpt_models(integration, clients=clients)
     except (httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
         raise ListingProviderError(
             "ChatGPT model listing failed.",
@@ -306,10 +784,12 @@ async def list_chatgpt_models_for_integration(
 
 async def list_kimi_models_for_integration(
     integration: LLMProviderIntegrationWithSecrets,
+    *,
+    clients: ListingClientFactories,
 ) -> ModelListingOutput:
     """Fetch account-visible models from the Kimi Code API."""
     try:
-        return await _list_kimi_models(integration)
+        return await _list_kimi_models(integration, clients=clients)
     except (httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
         raise ListingProviderError(
             "Kimi model listing failed.",
@@ -319,11 +799,13 @@ async def list_kimi_models_for_integration(
 
 async def list_openrouter_models_for_integration(
     integration: LLMProviderIntegrationWithSecrets,
+    *,
+    clients: ListingClientFactories,
 ) -> ModelListingOutput:
     """Fetch account-visible text-output models from OpenRouter."""
     try:
-        return await _list_openrouter_models(integration)
-    except (httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
+        return await _list_openrouter_models(integration, clients=clients)
+    except (httpx.HTTPError, OpenRouterError, json.JSONDecodeError, ValueError) as exc:
         raise ListingProviderError(
             "OpenRouter model listing failed.",
             automatic_retry_blocked=automatic_retry_blocked_for_listing_error(exc),
@@ -332,13 +814,15 @@ async def list_openrouter_models_for_integration(
 
 async def list_xai_models_for_integration(
     integration: LLMProviderIntegrationWithSecrets,
+    *,
+    clients: ListingClientFactories,
 ) -> ModelListingOutput:
     """Fetch credential-visible models from the matching xAI product."""
     try:
         if integration.provider == LLMProvider.XAI:
-            return await _list_xai_api_key_models(integration)
+            return await _list_xai_api_key_models(integration, clients=clients)
         if integration.provider == LLMProvider.XAI_OAUTH:
-            return await _list_xai_oauth_models(integration)
+            return await _list_xai_oauth_models(integration, clients=clients)
         raise ValueError("xAI integration provider is required.")
     except (
         OpenAIError,
@@ -353,10 +837,12 @@ async def list_xai_models_for_integration(
 
 async def list_openai_image_generation_models_for_integration(
     integration: LLMProviderIntegrationWithSecrets,
+    *,
+    clients: ListingClientFactories,
 ) -> ImageGenerationModelListingOutput:
     """List every exact model identifier visible to an OpenAI API-key integration."""
     try:
-        return await _list_openai_image_generation_models(integration)
+        return await _list_openai_image_generation_models(integration, clients=clients)
     except (OpenAIError, ValueError) as exc:
         raise ListingProviderError(
             "OpenAI image model listing failed.",
@@ -390,6 +876,8 @@ def automatic_retry_blocked_for_listing_error(exc: Exception) -> bool:
         return status_code not in {408, 409, 425, 429} and status_code < 500
     if isinstance(exc, APIStatusError):
         return exc.status_code not in {408, 409, 425, 429} and exc.status_code < 500
+    if isinstance(exc, OpenRouterError):
+        return exc.status_code not in {408, 409, 425, 429} and exc.status_code < 500
     if isinstance(exc, (BotoConnectionError, HTTPClientError)):
         return False
     if isinstance(
@@ -400,6 +888,7 @@ def automatic_retry_blocked_for_listing_error(exc: Exception) -> bool:
             UnicodeDecodeError,
             ValidationError,
             InvalidProviderResponseError,
+            MalformedProviderDeclarations,
         ),
     ):
         return False
@@ -435,6 +924,7 @@ def _xai_listing_provider_error(exc: Exception) -> XaiListingProviderError:
             UnicodeDecodeError,
             ValidationError,
             InvalidProviderResponseError,
+            MalformedProviderDeclarations,
         ),
     ):
         failure_code = "XaiInvalidProviderResponse"
@@ -450,6 +940,8 @@ def _xai_listing_provider_error(exc: Exception) -> XaiListingProviderError:
 
 async def _list_bedrock_models(
     integration: LLMProviderIntegrationWithSecrets,
+    *,
+    clients: ListingClientFactories,
 ) -> ModelListingOutput:
     """Fetch candidates with AWS Bedrock ListFoundationModels API."""
     config = _require_aws_config(integration.config)
@@ -460,6 +952,7 @@ async def _list_bedrock_models(
         config,
         secrets,
         integration.workspace_id,
+        clients=clients,
     )
     models: list[NormalizedModelCandidate] = []
     skipped = 0
@@ -482,9 +975,11 @@ def _list_bedrock_models_sync(
     config: AwsConfig,
     secrets: AwsSecrets,
     workspace_id: str,
-) -> list[dict[str, object]]:
+    *,
+    clients: ListingClientFactories,
+) -> list[object]:
     """Perform synchronous boto3 Bedrock call."""
-    session = boto3.Session(
+    session = clients.aws_session(
         aws_access_key_id=config.access_key_id,
         aws_secret_access_key=secrets.secret_access_key,
         region_name=config.region,
@@ -496,40 +991,40 @@ def _list_bedrock_models_sync(
             RoleSessionName=f"azents-{workspace_id[:8]}",
         )
         credentials = assumed["Credentials"]
-        session = boto3.Session(
+        session = clients.aws_session(
             aws_access_key_id=credentials["AccessKeyId"],
             aws_secret_access_key=credentials["SecretAccessKey"],
             aws_session_token=credentials["SessionToken"],
             region_name=config.region,
         )
     bedrock = session.client("bedrock", region_name=config.region)
-    response = bedrock.list_foundation_models()
-    summaries = response.get("modelSummaries", [])
-    return [summary for summary in summaries if isinstance(summary, dict)]
+    payload = _BedrockModelsPayload.model_validate(bedrock.list_foundation_models())
+    return [summary for summary in payload.modelSummaries if isinstance(summary, dict)]
 
 
 def _candidate_from_bedrock_summary(
-    summary: dict[str, object],
+    summary: _BedrockModelPayload,
     *,
     fetched_at: datetime,
 ) -> NormalizedModelCandidate | None:
     """Normalize Bedrock summary."""
-    model_id = _str_value(summary, "modelId")
-    if model_id is None:
+    model_id = summary.modelId
+    if model_id is None or not summary.eligible:
         return None
-    lifecycle = summary.get("modelLifecycle")
-    if isinstance(lifecycle, dict) and lifecycle.get("status") == "LEGACY":
+    lifecycle = summary.modelLifecycle
+    if lifecycle is not None and lifecycle.status == "LEGACY":
         return None
-    developer = _developer_from_bedrock_provider(_str_value(summary, "providerName"))
+    developer = _developer_from_bedrock_provider(summary.providerName)
     if developer is None:
         return None
     modalities = _modalities_from_bedrock(summary)
     return NormalizedModelCandidate(
         provider=LLMProvider.AWS_BEDROCK,
         model_identifier=model_id,
-        model_display_name=_str_value(summary, "modelName") or model_id,
+        model_display_name=summary.modelName or model_id,
         model_developer=developer,
         model_family=_bedrock_family(model_id),
+        capability_evidence=_bedrock_capability_evidence(summary),
         normalized_capabilities=ModelCapabilities(
             modalities=modalities,
             tool_calling=ModelToolCallingCapabilities(supported=True),
@@ -540,16 +1035,18 @@ def _candidate_from_bedrock_summary(
             "source": "aws_bedrock:list_foundation_models",
             "provider": LLMProvider.AWS_BEDROCK.value,
             "model_identifier": model_id,
-            "model_display_name": _str_value(summary, "modelName") or model_id,
+            "model_display_name": summary.modelName or model_id,
             "model_developer": developer.value,
         },
-        source_metadata=summary,
+        source_metadata=summary.source_metadata,
         last_refreshed_at=fetched_at,
     )
 
 
 async def _list_chatgpt_models(
     integration: LLMProviderIntegrationWithSecrets,
+    *,
+    clients: ListingClientFactories,
 ) -> ModelListingOutput:
     """Fetch candidates from the ChatGPT Codex models endpoint."""
     config = _require_chatgpt_config(integration.config)
@@ -557,22 +1054,17 @@ async def _list_chatgpt_models(
     fetched_at = datetime.now(timezone.utc)
     headers = build_chatgpt_oauth_headers(account_id=config.account_id)
     headers["Authorization"] = f"Bearer {secrets.access_token}"
-    async with httpx.AsyncClient(timeout=20.0) as client:
+    async with clients.http(timeout=20.0) as client:
         response = await client.get(
             f"{CHATGPT_OAUTH_BACKEND_BASE_URL}/models",
             params={"client_version": CHATGPT_MODEL_CATALOG_CLIENT_VERSION},
             headers=headers,
         )
         response.raise_for_status()
-        payload = response.json()
-    raw_models = payload.get("models") if isinstance(payload, dict) else None
-    if not isinstance(raw_models, list):
-        raise InvalidProviderResponseError(
-            "ChatGPT model listing response must contain models."
-        )
+        payload = _ChatGPTModelsPayload.model_validate(response.json())
     models: list[NormalizedModelCandidate] = []
     skipped = 0
-    for raw_model in raw_models:
+    for raw_model in payload.models:
         model = _CHATGPT_MODEL_ADAPTER.validate_python(raw_model)
         candidate = _candidate_from_chatgpt_model(model, fetched_at=fetched_at)
         if candidate is None:
@@ -588,36 +1080,19 @@ async def _list_chatgpt_models(
 
 
 def _candidate_from_chatgpt_model(
-    model: dict[str, object],
+    model: _ChatGPTModelPayload,
     *,
     fetched_at: datetime,
 ) -> NormalizedModelCandidate | None:
     """Normalize ChatGPT Codex model metadata."""
-    model_id = _str_value(model, "slug")
-    if (
-        model_id is None
-        or model.get("supported_in_api") is not True
-        or model.get("visibility") != "list"
-    ):
+    model_id = model.slug
+    if model_id is None or not model.eligible:
         return None
-    display_name = _str_value(model, "display_name") or model_id
-    reasoning_efforts = _chatgpt_reasoning_efforts(
-        model.get("supported_reasoning_levels")
-    )
+    display_name = model.display_name or model_id
+    evidence = _chatgpt_capability_evidence(model)
+    reasoning_efforts = _chatgpt_reasoning_efforts(model.supported_reasoning_levels)
     input_modalities = _chatgpt_modalities(model)
     context_window = _chatgpt_context_window(model)
-    parallel_tool_calls_value = model.get("supports_parallel_tool_calls")
-    parallel_tool_calls = (
-        parallel_tool_calls_value
-        if isinstance(parallel_tool_calls_value, bool)
-        else None
-    )
-    reasoning_summaries_value = model.get("supports_reasoning_summaries")
-    reasoning_summaries = (
-        reasoning_summaries_value
-        if isinstance(reasoning_summaries_value, bool)
-        else None
-    )
     capabilities = ModelCapabilities(
         context_window=context_window,
         modalities=ModelModalities(
@@ -626,19 +1101,15 @@ def _candidate_from_chatgpt_model(
         ),
         tool_calling=ModelToolCallingCapabilities(
             supported=True,
-            parallel_tool_calls=parallel_tool_calls,
+            parallel_tool_calls=model.supports_parallel_tool_calls,
         ),
         reasoning=ModelReasoningCapabilities(
             supported=bool(reasoning_efforts),
             effort_levels=reasoning_efforts,
-            summaries=reasoning_summaries,
+            summaries=evidence.reasoning_summaries.value is True,
         ),
         built_in_tools=ModelBuiltInToolCapabilities(
-            supported=supported_builtin_capabilities(
-                provider=LLMProvider.CHATGPT_OAUTH,
-                model_identifier=model_id,
-                metadata=model,
-            )
+            supported=model.builtin_capabilities
         ),
         compatibility=ModelCompatibilityCapabilities(
             provider_family="chatgpt",
@@ -651,6 +1122,7 @@ def _candidate_from_chatgpt_model(
         model_display_name=display_name,
         model_developer=LLMModelDeveloper.OPENAI,
         model_family=_chatgpt_family(model_id),
+        capability_evidence=evidence,
         normalized_capabilities=capabilities,
         supported_execution_options=_chatgpt_supported_execution_options(model),
         model_snapshot={
@@ -665,31 +1137,20 @@ def _candidate_from_chatgpt_model(
     )
 
 
-def _chatgpt_source_metadata(model: dict[str, object]) -> dict[str, object]:
+def _chatgpt_source_metadata(model: _ChatGPTModelPayload) -> dict[str, object]:
     """Keep catalog-relevant ChatGPT metadata without storing model instructions."""
-    keys = (
-        "auto_compact_token_limit",
-        "context_window",
-        "default_reasoning_level",
-        "effective_context_window_percent",
-        "experimental_supported_tools",
-        "input_modalities",
-        "max_context_window",
-        "minimal_client_version",
-        "priority",
-        "service_tiers",
-        "supported_in_api",
-        "supported_reasoning_levels",
-        "supports_parallel_tool_calls",
-        "supports_reasoning_summaries",
-        "tool_mode",
-        "visibility",
-    )
-    return {key: model[key] for key in keys if key in model}
+    return {
+        **model.source_metadata,
+        **_effort_diagnostics(
+            [preset.effort for preset in model.supported_reasoning_levels or []],
+        ),
+    }
 
 
 async def _list_kimi_models(
     integration: LLMProviderIntegrationWithSecrets,
+    *,
+    clients: ListingClientFactories,
 ) -> ModelListingOutput:
     """Fetch candidates from the authenticated Kimi Code models endpoint."""
     _require_kimi_config(integration.config)
@@ -700,24 +1161,21 @@ async def _list_kimi_models(
         "Authorization": f"Bearer {secrets.access_token}",
         "Accept": "application/json",
     }
-    async with httpx.AsyncClient(timeout=20.0) as client:
+    async with clients.http(timeout=20.0) as client:
         response = await client.get(
             f"{resolve_kimi_code_api_base_url()}/models",
             headers=headers,
         )
         response.raise_for_status()
-        payload = response.json()
-    raw_models = payload.get("data") if isinstance(payload, dict) else None
-    if not isinstance(raw_models, list):
-        raise InvalidProviderResponseError(
-            "Kimi model listing response must contain data."
-        )
+        payload = _AccountModelsPayload.model_validate(response.json())
     models: list[NormalizedModelCandidate] = []
     skipped = 0
-    for raw_model in raw_models:
+    for raw_model in payload.data:
         try:
             model = _KIMI_MODEL_ADAPTER.validate_python(raw_model)
         except ValidationError:
+            if isinstance(raw_model, dict):
+                raise
             skipped += 1
             continue
         candidate = _candidate_from_kimi_model(model, fetched_at=fetched_at)
@@ -734,24 +1192,24 @@ async def _list_kimi_models(
 
 
 def _candidate_from_kimi_model(
-    model: dict[str, object],
+    model: _KimiModelPayload,
     *,
     fetched_at: datetime,
 ) -> NormalizedModelCandidate | None:
     """Normalize one Kimi Code model entry."""
-    model_id = _str_value(model, "id")
-    if model_id is None:
+    model_id = model.id
+    if model_id is None or not model.eligible:
         return None
-    display_name = _str_value(model, "display_name") or model_id
-    supports_reasoning = model.get("supports_reasoning") is True
+    display_name = model.display_name or model_id
+    supports_reasoning = model.supports_reasoning is True
     input_modalities = [ModelModality.TEXT]
-    if model.get("supports_image_in") is True:
+    if model.supports_image_in is True:
         input_modalities.append(ModelModality.IMAGE)
-    if model.get("supports_video_in") is True:
+    if model.supports_video_in is True:
         input_modalities.append(ModelModality.VIDEO)
     capabilities = ModelCapabilities(
         context_window=ModelContextWindow(
-            max_input_tokens=_positive_int(model.get("context_length"))
+            max_input_tokens=_positive_int(model.context_length)
         ),
         modalities=ModelModalities(
             input=input_modalities,
@@ -767,22 +1225,13 @@ def _candidate_from_kimi_model(
             responses_api=True,
         ),
     )
-    source_metadata = {
-        key: model[key]
-        for key in (
-            "context_length",
-            "supports_reasoning",
-            "supports_image_in",
-            "supports_video_in",
-        )
-        if key in model
-    }
     return NormalizedModelCandidate(
         provider=LLMProvider.KIMI_OAUTH,
         model_identifier=model_id,
         model_display_name=display_name,
         model_developer=LLMModelDeveloper.MOONSHOT,
         model_family=_kimi_family(model_id),
+        capability_evidence=_kimi_capability_evidence(model),
         normalized_capabilities=capabilities,
         supported_execution_options=[],
         model_snapshot={
@@ -792,7 +1241,7 @@ def _candidate_from_kimi_model(
             "model_display_name": display_name,
             "model_developer": LLMModelDeveloper.MOONSHOT.value,
         },
-        source_metadata=source_metadata,
+        source_metadata=model.source_metadata,
         last_refreshed_at=fetched_at,
     )
 
@@ -807,11 +1256,13 @@ def _kimi_family(model_id: str) -> str:
 
 async def _list_xai_api_key_models(
     integration: LLMProviderIntegrationWithSecrets,
+    *,
+    clients: ListingClientFactories,
 ) -> ModelListingOutput:
     """Fetch xAI developer models through the OpenAI-compatible SDK."""
     secrets = _require_api_key_secrets(integration.secrets)
     fetched_at = datetime.now(timezone.utc)
-    async with AsyncOpenAI(
+    async with clients.openai(
         api_key=secrets.api_key,
         base_url=resolve_xai_api_base_url(),
         timeout=20.0,
@@ -821,6 +1272,7 @@ async def _list_xai_api_key_models(
         _candidate_from_xai_api_key_model(
             model_id=model.id,
             created=model.created,
+            extra=model.model_extra,
             fetched_at=fetched_at,
         )
         for model in page.data
@@ -836,6 +1288,8 @@ async def _list_xai_api_key_models(
 
 async def _list_openai_image_generation_models(
     integration: LLMProviderIntegrationWithSecrets,
+    *,
+    clients: ListingClientFactories,
 ) -> ImageGenerationModelListingOutput:
     """Fetch every visible OpenAI model through the official SDK paginator."""
     if integration.provider != LLMProvider.OPENAI:
@@ -846,7 +1300,7 @@ async def _list_openai_image_generation_models(
         credential_kwargs={"api_key": secrets.api_key},
     )
     fetched_at = datetime.now(timezone.utc)
-    async with AsyncOpenAI(
+    async with clients.openai(
         api_key=secrets.api_key,
         base_url=client_config.base_url,
         organization=client_config.organization,
@@ -894,6 +1348,7 @@ def _candidate_from_xai_api_key_model(
     *,
     model_id: str,
     created: int,
+    extra: dict[str, object] | None,
     fetched_at: datetime,
 ) -> NormalizedModelCandidate:
     """Normalize one xAI developer API model."""
@@ -903,6 +1358,7 @@ def _candidate_from_xai_api_key_model(
         model_display_name=model_id,
         model_developer=LLMModelDeveloper.XAI,
         model_family=_xai_family(model_id),
+        capability_evidence=_xai_api_capability_evidence(extra),
         normalized_capabilities=_conservative_xai_capabilities(),
         supported_execution_options=[],
         model_snapshot={
@@ -912,13 +1368,47 @@ def _candidate_from_xai_api_key_model(
             "model_display_name": model_id,
             "model_developer": LLMModelDeveloper.XAI.value,
         },
-        source_metadata={"created": created},
+        source_metadata=_xai_api_source_metadata(created=created, extra=extra),
         last_refreshed_at=fetched_at,
     )
 
 
+def _xai_api_source_metadata(
+    *, created: int, extra: dict[str, object] | None
+) -> dict[str, object]:
+    """Persist only consumed model facts, not arbitrary SDK provider extensions."""
+    payload = _XaiApiEvidencePayload.model_validate(extra if extra is not None else {})
+    metadata: dict[str, object] = {"created": created}
+    if "context_length" in payload.model_fields_set:
+        metadata["context_length"] = payload.context_length
+    for field in ("input_modalities", "output_modalities"):
+        if field in payload.model_fields_set:
+            metadata[field] = (
+                payload.input_modalities
+                if field == "input_modalities"
+                else payload.output_modalities
+            )
+    if "capabilities" in payload.model_fields_set:
+        metadata["capabilities"] = (
+            payload.capabilities.model_dump(
+                mode="json",
+                exclude_unset=True,
+                include={"reasoning", "reasoning_effort", "default_reasoning_effort"},
+            )
+            if payload.capabilities is not None
+            else None
+        )
+    if payload.capabilities is not None and isinstance(
+        payload.capabilities.reasoning_effort, list
+    ):
+        metadata.update(_effort_diagnostics(payload.capabilities.reasoning_effort))
+    return metadata
+
+
 async def _list_xai_oauth_models(
     integration: LLMProviderIntegrationWithSecrets,
+    *,
+    clients: ListingClientFactories,
 ) -> ModelListingOutput:
     """Fetch Grok OAuth account models from the CLI proxy."""
     config = _require_xai_oauth_config(integration.config)
@@ -935,7 +1425,7 @@ async def _list_xai_oauth_models(
         "x-grok-client-identifier": "grok-shell",
         "x-grok-client-mode": "interactive",
     }
-    async with httpx.AsyncClient(timeout=20.0) as client:
+    async with clients.http(timeout=20.0) as client:
         response = await client.get(
             f"{resolve_xai_usage_base_url()}/models",
             headers=headers,
@@ -960,21 +1450,27 @@ def _candidate_from_xai_oauth_model(
     fetched_at: datetime,
 ) -> NormalizedModelCandidate:
     """Normalize one account-visible Grok model."""
-    efforts = _xai_reasoning_efforts(model.reasoning_efforts)
+    evidence = _xai_oauth_capability_evidence(model)
+    efforts = [
+        level
+        for level in ModelReasoningEffort
+        if level in (evidence.reasoning_efforts.value or ())
+    ]
     built_in_tools = ["web_search"] if model.supports_backend_search is True else []
     responses_api = (
         model.api_backend == "responses" if model.api_backend is not None else None
     )
     capabilities = ModelCapabilities(
         context_window=ModelContextWindow(
-            max_input_tokens=_positive_int(model.context_window)
+            default_input_tokens=_positive_int(evidence.default_input_tokens.value),
+            max_input_tokens=_positive_int(evidence.max_input_tokens.value),
         ),
         modalities=ModelModalities(
-            input=[ModelModality.TEXT],
-            output=[ModelModality.TEXT],
+            input=_xai_modality_snapshot(model.input_modalities),
+            output=_xai_modality_snapshot(model.output_modalities),
         ),
         reasoning=ModelReasoningCapabilities(
-            supported=model.supports_reasoning_effort is True,
+            supported=evidence.reasoning.value is True,
             effort_levels=efforts,
         ),
         built_in_tools=ModelBuiltInToolCapabilities(supported=built_in_tools),
@@ -985,9 +1481,40 @@ def _candidate_from_xai_oauth_model(
     )
     source_metadata = model.model_dump(
         mode="json",
-        exclude_none=True,
-        exclude={"id", "model", "name"},
+        exclude_unset=True,
+        include={
+            **{
+                field: True
+                for field in _XaiOAuthModelPayload.model_fields
+                if field not in {"id", "model", "name", "reasoning_efforts"}
+            },
+            "reasoning_efforts": {
+                "__all__": set(_XaiOAuthReasoningEffortPayload.model_fields)
+            },
+        },
     )
+    raw_efforts = [
+        preset.id if preset.id is not None else preset.value
+        for preset in model.reasoning_efforts or []
+    ]
+    source_metadata.update(
+        _effort_diagnostics(
+            [value for value in raw_efforts if value is not None]
+            + ([model.reasoning_effort] if model.reasoning_effort is not None else []),
+        )
+    )
+    if model.supports_reasoning_effort is False and model.reasoning_efforts:
+        source_metadata["capability_conflicts"] = [
+            "reasoning_effort_controls_disabled_with_presets"
+        ]
+    elif (
+        _canonical_effort(model.reasoning_effort) is not None
+        and model.reasoning_efforts is not None
+        and evidence.default_reasoning_effort.state == "null"
+    ):
+        source_metadata["capability_conflicts"] = [
+            "reasoning_effort_default_conflicts_with_presets"
+        ]
     display_name = model.name or model.model or model.id
     return NormalizedModelCandidate(
         provider=LLMProvider.XAI_OAUTH,
@@ -995,6 +1522,7 @@ def _candidate_from_xai_oauth_model(
         model_display_name=display_name,
         model_developer=LLMModelDeveloper.XAI,
         model_family=_xai_family(model.id),
+        capability_evidence=evidence,
         normalized_capabilities=capabilities,
         supported_execution_options=[],
         model_snapshot={
@@ -1007,6 +1535,14 @@ def _candidate_from_xai_oauth_model(
         source_metadata=source_metadata,
         last_refreshed_at=fetched_at,
     )
+
+
+def _xai_modality_snapshot(value: list[str] | None) -> list[ModelModality]:
+    """Keep recognized declarations separate from missing listing metadata."""
+    if value is None:
+        return [ModelModality.TEXT]
+    declared = {item.lower() for item in value}
+    return [modality for modality in ModelModality if modality.value in declared]
 
 
 def _conservative_xai_capabilities() -> ModelCapabilities:
@@ -1023,24 +1559,6 @@ def _conservative_xai_capabilities() -> ModelCapabilities:
     )
 
 
-def _xai_reasoning_efforts(
-    payloads: list[_XaiOAuthReasoningEffortPayload] | None,
-) -> list[ModelReasoningEffort]:
-    """Normalize xAI reasoning levels into canonical order."""
-    if payloads is None:
-        return []
-    available: set[ModelReasoningEffort] = set()
-    for payload in payloads:
-        raw = payload.value or payload.id
-        if raw is None:
-            continue
-        try:
-            available.add(ModelReasoningEffort(raw))
-        except ValueError:
-            continue
-    return [effort for effort in ModelReasoningEffort if effort in available]
-
-
 def _xai_family(model_id: str) -> str:
     """Extract the stable Grok model family prefix."""
     parts = model_id.split("-")
@@ -1051,29 +1569,48 @@ def _xai_family(model_id: str) -> str:
 
 async def _list_openrouter_models(
     integration: LLMProviderIntegrationWithSecrets,
+    *,
+    clients: ListingClientFactories,
 ) -> ModelListingOutput:
     """Fetch candidates from the OpenRouter account model endpoint."""
     secrets = _require_api_key_secrets(integration.secrets)
     fetched_at = datetime.now(timezone.utc)
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        response = await client.get(
-            f"{OPENROUTER_API_BASE_URL}/models/user",
-            params={"output_modalities": "text"},
-            headers={"Authorization": f"Bearer {secrets.api_key}"},
-        )
-        response.raise_for_status()
-        payload = response.json()
-    raw_models = payload.get("data") if isinstance(payload, dict) else None
-    if not isinstance(raw_models, list):
+    payload: _AccountModelsPayload | None = None
+
+    async def decode_account_response(response: httpx.Response) -> None:
+        """Preserve application evidence presence at the SDK response boundary."""
+        nonlocal payload
+        if response.status_code == 200:
+            await response.aread()
+            payload = _AccountModelsPayload.model_validate(response.json())
+
+    async with clients.http(timeout=20.0) as client:
+        client.params = client.params.merge({"output_modalities": "text"})
+        client.event_hooks["response"].append(decode_account_response)
+        async with clients.openrouter(client=client) as sdk:
+            try:
+                await sdk.models.list_for_user_async(
+                    security={"bearer": secrets.api_key},
+                    server_url=OPENROUTER_API_BASE_URL,
+                    timeout_ms=20_000,
+                    retries=None,
+                )
+            except ResponseValidationError as exc:
+                # SDK display fields are not Azents' catalog evidence contract.
+                if exc.status_code != 200 or payload is None:
+                    raise
+    if payload is None:
         raise InvalidProviderResponseError(
-            "OpenRouter model listing response must contain data."
+            "OpenRouter did not return an account model response."
         )
     models: list[NormalizedModelCandidate] = []
     skipped = 0
-    for raw_model in raw_models:
+    for raw_model in payload.data:
         try:
             model = _OPENROUTER_MODEL_ADAPTER.validate_python(raw_model)
         except ValidationError:
+            if isinstance(raw_model, dict):
+                raise
             skipped += 1
             continue
         candidate = _candidate_from_openrouter_model(model, fetched_at=fetched_at)
@@ -1090,22 +1627,22 @@ async def _list_openrouter_models(
 
 
 def _candidate_from_openrouter_model(
-    model: dict[str, object],
+    model: _OpenRouterModelPayload,
     *,
     fetched_at: datetime,
 ) -> NormalizedModelCandidate | None:
     """Normalize one OpenRouter account-visible model."""
-    model_id = _str_value(model, "id")
-    if model_id is None or not _openrouter_supports_text_output(model):
+    model_id = model.id
+    if model_id is None or not model.eligible:
         return None
-    display_name = _str_value(model, "name") or model_id
+    display_name = model.name or model_id
     developer = _openrouter_developer(model_id)
-    supported_parameters = _string_values(model.get("supported_parameters"))
-    context_length = _positive_int(model.get("context_length"))
-    top_provider = model.get("top_provider")
+    supported_parameters = set(model.supported_parameters or [])
+    context_length = _positive_int(model.context_length)
+    top_provider = model.top_provider
     max_completion_tokens = (
-        _positive_int(top_provider.get("max_completion_tokens"))
-        if isinstance(top_provider, dict)
+        _positive_int(top_provider.max_completion_tokens)
+        if top_provider is not None
         else None
     )
     reasoning_supported = bool(
@@ -1128,15 +1665,7 @@ def _candidate_from_openrouter_model(
         ),
         reasoning=ModelReasoningCapabilities(
             supported=reasoning_supported,
-            effort_levels=(
-                [
-                    ModelReasoningEffort.LOW,
-                    ModelReasoningEffort.MEDIUM,
-                    ModelReasoningEffort.HIGH,
-                ]
-                if "reasoning_effort" in supported_parameters
-                else []
-            ),
+            effort_levels=[],
         ),
         built_in_tools=ModelBuiltInToolCapabilities(supported=["web_search"]),
         parameters=ModelParameterCapabilities(
@@ -1159,6 +1688,7 @@ def _candidate_from_openrouter_model(
         model_display_name=display_name,
         model_developer=developer,
         model_family=_openrouter_family(model_id),
+        capability_evidence=_openrouter_capability_evidence(model),
         normalized_capabilities=capabilities,
         supported_execution_options=[],
         model_snapshot={
@@ -1168,28 +1698,17 @@ def _candidate_from_openrouter_model(
             "model_display_name": display_name,
             "model_developer": developer.value,
         },
-        source_metadata=_openrouter_source_metadata(model),
+        source_metadata=model.source_metadata,
         last_refreshed_at=fetched_at,
     )
 
 
-def _openrouter_supports_text_output(model: dict[str, object]) -> bool:
-    """Return whether OpenRouter metadata permits text output."""
-    architecture = model.get("architecture")
-    if not isinstance(architecture, dict):
-        return True
-    output_modalities = architecture.get("output_modalities")
-    if output_modalities is None:
-        return True
-    return "text" in _string_values(output_modalities)
-
-
-def _openrouter_input_modalities(model: dict[str, object]) -> list[ModelModality]:
+def _openrouter_input_modalities(model: _OpenRouterModelPayload) -> list[ModelModality]:
     """Project only verified OpenRouter input modalities."""
-    architecture = model.get("architecture")
-    if not isinstance(architecture, dict) or "input_modalities" not in architecture:
+    architecture = model.architecture
+    if architecture is None or "input_modalities" not in architecture.model_fields_set:
         return [ModelModality.TEXT]
-    raw_modalities = _string_values(architecture.get("input_modalities"))
+    raw_modalities = set(architecture.input_modalities or [])
     modalities: list[ModelModality] = []
     for modality in (ModelModality.TEXT, ModelModality.IMAGE):
         if modality.value in raw_modalities:
@@ -1210,33 +1729,19 @@ def _openrouter_family(model_id: str) -> str | None:
     return family or None
 
 
-def _openrouter_source_metadata(model: dict[str, object]) -> dict[str, object]:
-    """Keep bounded catalog-relevant OpenRouter metadata."""
-    keys = (
-        "architecture",
-        "canonical_slug",
-        "context_length",
-        "created",
-        "expiration_date",
-        "pricing",
-        "reasoning",
-        "supported_parameters",
-        "top_provider",
-    )
-    return {key: model[key] for key in keys if key in model}
-
-
 async def _list_vertex_models(
     integration: LLMProviderIntegrationWithSecrets,
+    *,
+    clients: ListingClientFactories,
 ) -> ModelListingOutput:
     """Fetch candidates with Vertex AI publisher model API."""
     config = _require_gcp_config(integration.config)
     secrets = _require_gcp_secrets(integration.secrets)
     fetched_at = datetime.now(timezone.utc)
-    token = await asyncio.to_thread(_vertex_access_token, secrets)
+    token = await asyncio.to_thread(clients.vertex_token, secrets)
     models: list[NormalizedModelCandidate] = []
     skipped = 0
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with clients.http(timeout=10.0) as client:
         for publisher, developer in VERTEX_PUBLISHERS.items():
             url = (
                 f"https://{config.region}-aiplatform.googleapis.com/v1/"
@@ -1248,13 +1753,8 @@ async def _list_vertex_models(
                 headers={"Authorization": f"Bearer {token}"},
             )
             response.raise_for_status()
-            payload = response.json()
-            raw_models = (
-                payload.get("publisherModels") if isinstance(payload, dict) else None
-            )
-            if not isinstance(raw_models, list):
-                raw_models = []
-            for raw_model in raw_models:
+            payload = _VertexModelsPayload.model_validate(response.json())
+            for raw_model in payload.publisherModels or []:
                 model = _VERTEX_MODEL_ADAPTER.validate_python(raw_model)
                 candidate = _candidate_from_vertex_model(
                     model,
@@ -1287,24 +1787,24 @@ def _vertex_access_token(secrets: GcpSecrets) -> str:
 
 
 def _candidate_from_vertex_model(
-    model: dict[str, object],
+    model: _VertexModelPayload,
     *,
     publisher: str,
     developer: LLMModelDeveloper,
     fetched_at: datetime,
 ) -> NormalizedModelCandidate | None:
     """Normalize Vertex publisher model."""
-    name = _str_value(model, "name")
-    model_id = _str_value(model, "modelId") or _last_path_part(name)
-    if model_id is None:
+    model_id = model.modelId or _last_path_part(model.name)
+    if model_id is None or not model.eligible:
         return None
-    display_name = _str_value(model, "displayName") or model_id
+    display_name = model.displayName or model_id
     return NormalizedModelCandidate(
         provider=LLMProvider.GOOGLE_VERTEX_AI,
         model_identifier=model_id,
         model_display_name=display_name,
         model_developer=developer,
         model_family=_vertex_family(model_id),
+        capability_evidence=_vertex_capability_evidence(model),
         normalized_capabilities=ModelCapabilities(
             context_window=_vertex_context_window(model),
             modalities=ModelModalities(
@@ -1323,7 +1823,7 @@ def _candidate_from_vertex_model(
             "model_display_name": display_name,
             "model_developer": developer.value,
         },
-        source_metadata=model,
+        source_metadata=model.source_metadata,
         last_refreshed_at=fetched_at,
     )
 
@@ -1443,21 +1943,6 @@ def _positive_int(value: object) -> int | None:
     return None
 
 
-def _string_values(value: object) -> set[str]:
-    """Return string members from a provider sequence."""
-    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
-        return set()
-    return {item for item in value if isinstance(item, str)}
-
-
-def _str_value(mapping: dict[str, object], key: str) -> str | None:
-    """Extract only string values."""
-    value = mapping.get(key)
-    if isinstance(value, str) and value:
-        return value
-    return None
-
-
 def _last_path_part(value: str | None) -> str | None:
     """Return last segment of Resource name."""
     if value is None:
@@ -1479,19 +1964,16 @@ def _developer_from_bedrock_provider(
     return None
 
 
-def _chatgpt_reasoning_efforts(value: object) -> list[ModelReasoningEffort]:
+def _chatgpt_reasoning_efforts(
+    value: list[_ChatGPTReasoningLevel] | None,
+) -> list[ModelReasoningEffort]:
     """Normalize ChatGPT reasoning effort presets in provider order."""
-    if not isinstance(value, list):
+    if value is None:
         return []
     efforts: list[ModelReasoningEffort] = []
     for preset in value:
-        if not isinstance(preset, dict):
-            continue
-        effort = preset.get("effort")
-        if not isinstance(effort, str):
-            continue
         try:
-            normalized = ModelReasoningEffort(effort)
+            normalized = ModelReasoningEffort(preset.effort)
         except ValueError:
             continue
         if normalized not in efforts:
@@ -1499,27 +1981,22 @@ def _chatgpt_reasoning_efforts(value: object) -> list[ModelReasoningEffort]:
     return efforts
 
 
-def _chatgpt_context_window(model: dict[str, object]) -> ModelContextWindow:
+def _chatgpt_context_window(model: _ChatGPTModelPayload) -> ModelContextWindow:
     """Preserve ChatGPT default and maximum context-window metadata."""
-    default_input_tokens = _positive_int(model.get("context_window"))
-    max_input_tokens = _positive_int(model.get("max_context_window"))
+    default_input_tokens = _positive_int(model.context_window)
+    max_input_tokens = _positive_int(model.max_context_window)
     return ModelContextWindow(
         default_input_tokens=default_input_tokens,
         max_input_tokens=max_input_tokens or default_input_tokens,
     )
 
 
-def _chatgpt_modalities(model: dict[str, object]) -> list[ModelModality]:
+def _chatgpt_modalities(model: _ChatGPTModelPayload) -> list[ModelModality]:
     """Normalize ChatGPT input modalities with the backend legacy default."""
-    if "input_modalities" not in model:
+    if "input_modalities" not in model.model_fields_set:
         return [ModelModality.TEXT, ModelModality.IMAGE]
-    value = model.get("input_modalities")
-    if not isinstance(value, list):
-        return []
     modalities: list[ModelModality] = []
-    for raw in value:
-        if not isinstance(raw, str):
-            continue
+    for raw in model.input_modalities or []:
         try:
             modality = ModelModality(raw)
         except ValueError:
@@ -1547,22 +2024,20 @@ def _vertex_family(model_id: str) -> str:
     return model_id.rsplit("@", maxsplit=1)[0]
 
 
-def _modalities_from_bedrock(summary: dict[str, object]) -> ModelModalities:
+def _modalities_from_bedrock(summary: _BedrockModelPayload) -> ModelModalities:
     """Normalize Bedrock modality string."""
     return ModelModalities(
-        input=_modalities(summary.get("inputModalities")),
-        output=_modalities(summary.get("outputModalities")),
+        input=_modalities(summary.inputModalities),
+        output=_modalities(summary.outputModalities),
     )
 
 
-def _modalities(value: object) -> list[ModelModality]:
+def _modalities(value: list[str] | None) -> list[ModelModality]:
     """Convert Provider modality list to internal enum."""
-    if not isinstance(value, Sequence) or isinstance(value, str):
+    if value is None:
         return [ModelModality.TEXT]
     result: list[ModelModality] = []
     for raw in value:
-        if not isinstance(raw, str):
-            continue
         match raw.lower():
             case "text":
                 result.append(ModelModality.TEXT)
@@ -1573,21 +2048,9 @@ def _modalities(value: object) -> list[ModelModality]:
     return result or [ModelModality.TEXT]
 
 
-def _vertex_context_window(model: dict[str, object]) -> ModelContextWindow:
+def _vertex_context_window(model: _VertexModelPayload) -> ModelContextWindow:
     """Read context window from Vertex metadata best-effort."""
-    input_token_limit = model.get("inputTokenLimit")
-    output_token_limit = model.get("outputTokenLimit")
     return ModelContextWindow(
-        max_input_tokens=(
-            input_token_limit
-            if isinstance(input_token_limit, int)
-            and not isinstance(input_token_limit, bool)
-            else None
-        ),
-        max_output_tokens=(
-            output_token_limit
-            if isinstance(output_token_limit, int)
-            and not isinstance(output_token_limit, bool)
-            else None
-        ),
+        max_input_tokens=model.inputTokenLimit,
+        max_output_tokens=model.outputTokenLimit,
     )

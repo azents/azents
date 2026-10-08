@@ -10,12 +10,28 @@ from fastapi import Depends
 from pydantic import TypeAdapter
 from redis.asyncio import Redis
 
+from azents.core.chat_data import (
+    PendingMailboxActionPresentation,
+    PendingMailboxAgentMessagePresentation,
+    PendingMailboxEnvelope,
+    PendingMailboxExternalChannelContinuationPresentation,
+    PendingMailboxExternalChannelPresentation,
+    PendingMailboxGoalContinuationPresentation,
+    PendingMailboxItem,
+    PendingMailboxScheduledTaskPresentation,
+    PendingMailboxUserMessagePresentation,
+)
 from azents.core.config import Config
 from azents.core.deps import get_appctx
 from azents.core.enums import EventKind, MailboxItemKind
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
     RequestedInferenceProfile,
+)
+from azents.core.mailbox_data import (
+    MailboxItem,
+    ScheduledTaskContinuationMailboxPayload,
+    ScheduledTaskTriggerMailboxPayload,
 )
 from azents.core.redis import create_redis_client
 from azents.engine.events.action_messages import (
@@ -42,22 +58,6 @@ from azents.engine.events.types import (
     ToolkitSourceSnapshot,
     UserContentPart,
     UserMessagePayload,
-)
-from azents.repos.mailbox.data import (
-    MailboxItem,
-    ScheduledTaskContinuationMailboxPayload,
-    ScheduledTaskTriggerMailboxPayload,
-)
-from azents.services.chat.data import (
-    PendingMailboxActionPresentation,
-    PendingMailboxAgentMessagePresentation,
-    PendingMailboxEnvelope,
-    PendingMailboxExternalChannelContinuationPresentation,
-    PendingMailboxExternalChannelPresentation,
-    PendingMailboxGoalContinuationPresentation,
-    PendingMailboxItem,
-    PendingMailboxScheduledTaskPresentation,
-    PendingMailboxUserMessagePresentation,
 )
 from azents.utils.appctx import AppContext
 
@@ -679,8 +679,10 @@ def _event_kind_for_mailbox_item(kind: MailboxItemKind) -> EventKind:
             return EventKind.AGENT_MESSAGE
         case MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE:
             return EventKind.EXTERNAL_CHANNEL_MESSAGE
-        case _:
+        case MailboxItemKind.TURN_ACTION_CONTINUATION:
             raise ValueError(f"Unsupported MailboxItem kind: {kind}")
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 class LiveEventStore(Protocol):
@@ -820,7 +822,7 @@ class BaseLiveEventStore:
         self,
         session_id: str,
         owner_generation: int,
-    ) -> "_OwnerBoundLiveEventStore":
+    ) -> "BaseLiveEventStore":
         """Bind live mutations to one validated PostgreSQL owner generation."""
         return _OwnerBoundLiveEventStore(
             store=self,
@@ -1226,6 +1228,10 @@ class InMemoryLiveEventStore(BaseLiveEventStore):
             removed_events=removed_events,
         )
 
+    def owns_generation(self, session_id: str, owner_generation: int) -> bool:
+        """Check the actual local live fence without yielding to another writer."""
+        return self._owner_generations.get(session_id) == owner_generation
+
     async def _list_for_owner(
         self,
         session_id: str,
@@ -1373,7 +1379,13 @@ async def get_live_event_store(
 ) -> LiveEventStore:
     """API-side event live event store dependency."""
 
-    async def create_store() -> AsyncIterator[RedisLiveEventStore]:
+    async def create_store() -> AsyncIterator[BaseLiveEventStore]:
+        if (
+            appctx.config.session_broker_backend == "memory"
+            or appctx.config.broadcast_backend == "memory"
+        ):
+            yield InMemoryLiveEventStore()
+            return
         redis = create_redis_client(appctx.config.redis.url)
         store = RedisLiveEventStore(redis)
         try:

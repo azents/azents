@@ -3,9 +3,9 @@
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.models.toolkit_state import RDBToolkitState
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import ToolkitStateRecord, ToolkitStateUpsert
 
@@ -19,7 +19,7 @@ class ToolkitStateRepository:
 
     async def get(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         session_id: str,
@@ -37,7 +37,7 @@ class ToolkitStateRepository:
             )
             .execution_options(populate_existing=True)
         )
-        result = await session.execute(stmt)
+        result = await session.read_session.execute(stmt)
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
@@ -45,7 +45,7 @@ class ToolkitStateRepository:
 
     async def save(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         state: ToolkitStateUpsert,
     ) -> ToolkitStateRecord:
         """Store Toolkit State based on optimistic lock."""
@@ -65,8 +65,8 @@ class ToolkitStateRepository:
                 .on_conflict_do_nothing(constraint="uq_toolkit_states_identity")
                 .returning(RDBToolkitState)
             )
-            result = await session.execute(stmt)
-            await session.flush()
+            result = await session.write_session.execute(stmt)
+            await session.write_session.flush()
             rdb = result.scalar_one_or_none()
             if rdb is None:
                 raise ToolkitStateConflictError(
@@ -92,8 +92,8 @@ class ToolkitStateRepository:
             .returning(RDBToolkitState)
         )
 
-        result = await session.execute(stmt)
-        await session.flush()
+        result = await session.write_session.execute(stmt)
+        await session.write_session.flush()
         rdb = result.scalar_one_or_none()
         if rdb is None:
             raise ToolkitStateConflictError("Toolkit State version conflict")

@@ -3,13 +3,16 @@
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import cast
+from typing import NamedTuple
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
+import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.enums import (
     ExternalChannelAppMode,
+    ExternalChannelConnectionStatus,
     ExternalChannelDeliveryOperation,
     ExternalChannelProvider,
 )
@@ -18,8 +21,21 @@ from azents.core.external_channel_provider_effect import (
     ProviderOperationKey,
     ProviderTarget,
 )
-from azents.rdb.session import SessionManager
+from azents.rdb.models.external_channel import RDBExternalChannelConnection
+from azents.rdb.models.workspace import RDBWorkspace
+from azents.rdb.session_capabilities import (
+    ReadWriteSession,
+    WriteSession,
+    create_read_write_session_manager,
+)
+from azents.repos.external_channel.connection_revocation_operations import (
+    ExternalChannelConnectionRevocationOperations,
+)
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.repository_test import (
+    _connection_create,
+    _create_workspace,
+)
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
 )
@@ -27,6 +43,7 @@ from azents.services.external_channel.connection_revocation import (
     ExternalChannelConnectionRevocationService,
 )
 from azents.services.external_channel.slack_events import SlackConnectionRevocation
+from azents.testing.types import require_instance
 
 _NOW = datetime.datetime(2026, 7, 29, 1, tzinfo=datetime.UTC)
 
@@ -60,6 +77,7 @@ class _Session:
 
     def __init__(self) -> None:
         self.committed = False
+        self.closed = False
 
     async def commit(self) -> None:
         self.committed = True
@@ -75,7 +93,7 @@ class _Repository:
 
     async def terminate_connection_for_provider_event(
         self,
-        _session: AsyncSession,
+        _session: WriteSession,
         **kwargs: object,
     ) -> tuple[ProviderEffectPlan, ...]:
         self.terminated.append(kwargs)
@@ -83,7 +101,7 @@ class _Repository:
 
     async def purge_disconnected_connection_provider_state(
         self,
-        _session: AsyncSession,
+        _session: WriteSession,
         *,
         connection_id: str,
     ) -> bool:
@@ -93,7 +111,7 @@ class _Repository:
 
     async def mark_connection_reconnect_required(
         self,
-        _session: AsyncSession,
+        _session: WriteSession,
         **kwargs: object,
     ) -> bool:
         self.reconnect_required.append(kwargs)
@@ -112,28 +130,44 @@ class _ActionService:
         plan: ProviderEffectPlan,
     ) -> None:
         assert self.session.committed
+        assert self.session.closed
         self.attempted.append(plan)
 
 
-def _service() -> tuple[
-    ExternalChannelConnectionRevocationService,
-    _Session,
-    _Repository,
-    _ActionService,
-]:
+class _RevocationFixture(NamedTuple):
+    """Coordinator and boundary-observing collaborators."""
+
+    service: ExternalChannelConnectionRevocationService
+    session: _Session
+    repository: _Repository
+    action_service: _ActionService
+
+
+def _service() -> _RevocationFixture:
     session = _Session()
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
-        yield cast(AsyncSession, session)
+    async def session_manager() -> AsyncIterator[WriteSession]:
+        try:
+            yield ReadWriteSession(AsyncMock(spec=AsyncSession, wraps=session))
+        finally:
+            session.closed = True
 
     repository = _Repository()
     action_service = _ActionService(session)
-    return (
+    return _RevocationFixture(
         ExternalChannelConnectionRevocationService(
-            session_manager=cast(SessionManager[AsyncSession], session_manager),
-            repository=cast(ExternalChannelRepository, repository),
-            action_service=cast(ExternalChannelActionService, action_service),
+            operations=ExternalChannelConnectionRevocationOperations(
+                session_manager=session_manager,
+                repository=require_instance(
+                    MagicMock(spec=ExternalChannelRepository, wraps=repository),
+                    ExternalChannelRepository,
+                ),
+            ),
+            action_service=require_instance(
+                MagicMock(spec=ExternalChannelActionService, wraps=action_service),
+                ExternalChannelActionService,
+            ),
         ),
         session,
         repository,
@@ -185,3 +219,131 @@ async def test_tokens_revoked_uses_current_socket_owner_fence() -> None:
         }
     ]
     assert action_service.attempted == []
+
+
+async def test_native_revocation_rolls_back_terminal_transition_when_purge_fails(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+) -> None:
+    """Purge failure rolls back terminal state and prevents cleanup publication."""
+    del latest_db_schema
+    manager = create_read_write_session_manager(rdb_engine)
+    repository = ExternalChannelRepository()
+    async with manager() as session:
+        workspace_id = await _create_workspace(session, "revocation-atomic-rollback")
+        connection = await repository.create_connection(
+            session, _connection_create(workspace_id)
+        )
+    action_service = AsyncMock(spec=ExternalChannelActionService)
+    failing_repository = MagicMock(spec=ExternalChannelRepository)
+    failing_repository.terminate_connection_for_provider_event = (
+        repository.terminate_connection_for_provider_event
+    )
+    failing_repository.purge_disconnected_connection_provider_state = AsyncMock(
+        return_value=False
+    )
+    service = ExternalChannelConnectionRevocationService(
+        operations=ExternalChannelConnectionRevocationOperations(
+            session_manager=manager,
+            repository=require_instance(failing_repository, ExternalChannelRepository),
+        ),
+        action_service=require_instance(action_service, ExternalChannelActionService),
+    )
+    try:
+        with pytest.raises(RuntimeError, match="provider state disappeared"):
+            await service.apply(
+                connection_id=connection.id,
+                revocation=SlackConnectionRevocation(kind="app_uninstalled"),
+                required_configuration_generation=1,
+                required_socket_lease_owner=None,
+                now=_NOW,
+            )
+        async with manager() as session:
+            current = await repository.get_connection_configuration(
+                session, connection_id=connection.id
+            )
+        assert current is not None
+        assert current.status is ExternalChannelConnectionStatus.ACTIVE
+        assert current.encrypted_credentials == "ciphertext-only"
+        action_service.execute_terminal_control.assert_not_awaited()
+    finally:
+        async with manager() as session:
+            await session.write_session.execute(
+                sa.delete(RDBExternalChannelConnection).where(
+                    RDBExternalChannelConnection.id == connection.id
+                )
+            )
+            await session.write_session.execute(
+                sa.delete(RDBWorkspace).where(RDBWorkspace.id == workspace_id)
+            )
+
+
+async def test_native_revocation_rejects_stale_configuration_then_commits_purge(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+) -> None:
+    """Stale generation leaves state intact; matched uninstall commits its purge."""
+    del latest_db_schema
+    manager = create_read_write_session_manager(rdb_engine)
+    repository = ExternalChannelRepository()
+    async with manager() as session:
+        workspace_id = await _create_workspace(
+            session, "revocation-generation-admission"
+        )
+        connection = await repository.create_connection(
+            session, _connection_create(workspace_id)
+        )
+    action_service = AsyncMock(spec=ExternalChannelActionService)
+    service = ExternalChannelConnectionRevocationService(
+        operations=ExternalChannelConnectionRevocationOperations(
+            session_manager=manager, repository=repository
+        ),
+        action_service=require_instance(action_service, ExternalChannelActionService),
+    )
+    try:
+        assert not await service.apply(
+            connection_id=connection.id,
+            revocation=SlackConnectionRevocation(kind="app_uninstalled"),
+            required_configuration_generation=2,
+            required_socket_lease_owner=None,
+            now=_NOW,
+        )
+        assert not await service.apply(
+            connection_id=connection.id,
+            revocation=SlackConnectionRevocation(kind="tokens_revoked"),
+            required_configuration_generation=1,
+            required_socket_lease_owner="stale-socket-manager",
+            now=_NOW,
+        )
+        async with manager() as session:
+            current = await repository.get_connection_configuration(
+                session, connection_id=connection.id
+            )
+        assert current is not None
+        assert current.status is ExternalChannelConnectionStatus.ACTIVE
+        assert current.encrypted_credentials == "ciphertext-only"
+        assert await service.apply(
+            connection_id=connection.id,
+            revocation=SlackConnectionRevocation(kind="app_uninstalled"),
+            required_configuration_generation=1,
+            required_socket_lease_owner=None,
+            now=_NOW,
+        )
+        async with manager() as session:
+            current = await repository.get_connection_configuration(
+                session, connection_id=connection.id
+            )
+        assert current is not None
+        assert current.status is ExternalChannelConnectionStatus.DISCONNECTED
+        assert current.encrypted_credentials is None
+        assert current.provider_tenant_id is None
+    finally:
+        async with manager() as session:
+            await session.write_session.execute(
+                sa.delete(RDBExternalChannelConnection).where(
+                    RDBExternalChannelConnection.id == connection.id
+                )
+            )
+            await session.write_session.execute(
+                sa.delete(RDBWorkspace).where(RDBWorkspace.id == workspace_id)
+            )

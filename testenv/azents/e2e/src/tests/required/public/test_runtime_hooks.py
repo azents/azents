@@ -2,6 +2,7 @@
 
 import json
 import time
+from dataclasses import dataclass
 
 import azentsadminclient
 import azentspublicclient
@@ -17,11 +18,13 @@ from azentspublicclient.models.agent_create_request import AgentCreateRequest
 from azentspublicclient.models.agent_model_selection_input import (
     AgentModelSelectionInput,
 )
+from azentspublicclient.models.agent_session_response import AgentSessionResponse
 from azentspublicclient.models.agent_toolkit_attach_request import (
     AgentToolkitAttachRequest,
 )
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
+from azentspublicclient.models.chat_write_response import ChatWriteResponse
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest
 from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
@@ -31,7 +34,7 @@ from azentspublicclient.models.secrets import Secrets
 from azentspublicclient.models.toolkit_config_create_request import (
     ToolkitConfigCreateRequest,
 )
-from pydantic import TypeAdapter
+from pydantic import BaseModel, ConfigDict, JsonValue, StrictStr, TypeAdapter
 from testcontainers.core.container import DockerContainer
 
 from support.runtime_profiles import (
@@ -51,8 +54,47 @@ _HIDDEN_PROMPT = "RUNTIME_HOOK_QA_HIDDEN_PROMPT_3754"
 _DENY_MESSAGE = "Runtime hook QA denied this tool call."
 _REPLACEMENT_OUTPUT = "Runtime hook QA replaced the tool output."
 _SENSITIVE_MARKER = "RUNTIME_HOOK_QA_SECRET_SHOULD_NOT_APPEAR"
-_OBJECT_DICT_ADAPTER: TypeAdapter[dict[str, object]] = TypeAdapter(dict[str, object])
-_OBJECT_LIST_ADAPTER: TypeAdapter[list[object]] = TypeAdapter(list[object])
+_HTTP_OBJECT = TypeAdapter(dict[str, object])
+
+
+class _HookWireObservation(BaseModel):
+    """Validate consumed fields while retaining provider-owned wire extensions."""
+
+    model_config = ConfigDict(extra="allow", frozen=True)
+
+
+class _HookFunctionObservation(_HookWireObservation):
+    name: StrictStr | None = None
+
+
+class _HookToolObservation(_HookWireObservation):
+    name: StrictStr | None = None
+    function: _HookFunctionObservation | None = None
+
+
+class _HookRequestObservation(_HookWireObservation):
+    """Support both Responses and Chat fields, with explicit optional absence."""
+
+    instructions: StrictStr | None = None
+    messages: list[JsonValue] | None = None
+    input: JsonValue = None
+    tools: list[_HookToolObservation] | None = None
+
+
+class _HookJournalEntry(_HookWireObservation):
+    body: _HookRequestObservation | None = None
+
+
+@dataclass(frozen=True)
+class _HookJournalObservation:
+    """Immutable matching fields plus an opaque independently retained snapshot."""
+
+    message_texts: tuple[str, ...]
+    tool_names: tuple[str, ...]
+    wire_json: str
+
+
+_HOOK_JOURNAL = TypeAdapter(list[_HookJournalEntry])
 
 
 def _api_host(public_api_client: azentspublicclient.ApiClient) -> str:
@@ -66,73 +108,76 @@ def _api_host(public_api_client: azentspublicclient.ApiClient) -> str:
     return host
 
 
-def _message_texts(item: dict[str, object]) -> list[str]:
-    """AIMock journal item t request message stringt t t."""
-    body = _object_dict(item.get("body"))
-    if body is None:
-        return []
-
-    texts: list[str] = []
-    instructions = body.get("instructions")
-    if isinstance(instructions, str):
-        texts.append(instructions)
-
-    message_items = _object_list(body.get("messages"))
-    if message_items is not None:
-        for message in message_items:
-            texts.extend(_content_texts(message))
-
-    request_input = body.get("input")
-    if isinstance(request_input, str):
-        texts.append(request_input)
-    else:
-        input_items = _object_list(request_input)
-        if input_items is None:
-            return texts
-        for input_item in input_items:
-            texts.extend(_content_texts(input_item))
-    return texts
-
-
-def _object_dict(value: object) -> dict[str, object] | None:
-    """external JSON object t typed dict t verifyt."""
-    if not isinstance(value, dict):
-        return None
-    return _OBJECT_DICT_ADAPTER.validate_python(value)
-
-
-def _object_list(value: object) -> list[object] | None:
-    """external JSON array t typed list t verifyt."""
-    if not isinstance(value, list):
-        return None
-    return _OBJECT_LIST_ADAPTER.validate_python(value)
-
-
-def _content_texts(value: object) -> list[str]:
-    """Responses/Chat content shape t model t text t t."""
+def _decode_content_texts(value: JsonValue) -> tuple[str, ...]:
+    """Compile the fixture's existing content selector at the JSON boundary."""
     if isinstance(value, str):
-        return [value]
-    values = _object_list(value)
-    if values is not None:
-        texts: list[str] = []
-        for item in values:
-            texts.extend(_content_texts(item))
-        return texts
-    value_dict = _object_dict(value)
-    if value_dict is None:
-        return []
+        return (value,)
+    if isinstance(value, list):
+        return tuple(text for item in value for text in _decode_content_texts(item))
+    if not isinstance(value, dict):
+        return ()
 
     texts: list[str] = []
     for key in ("content", "input", "output", "text"):
-        child = value_dict.get(key)
+        child = value.get(key)
         if isinstance(child, str):
             texts.append(child)
-        else:
-            child_items = _object_list(child)
-            if child_items is None:
-                continue
-            texts.extend(_content_texts(child_items))
-    return texts
+        elif isinstance(child, list):
+            texts.extend(_decode_content_texts(child))
+    return tuple(texts)
+
+
+def _decode_hook_journal(value: object) -> list[_HookJournalObservation]:
+    """Decode matching fields once; malformed consumed shapes are not readiness."""
+    observations: list[_HookJournalObservation] = []
+    for entry in _HOOK_JOURNAL.validate_python(value):
+        texts: list[str] = []
+        names: list[str] = []
+        body = entry.body
+        if body is not None:
+            if body.instructions is not None:
+                texts.append(body.instructions)
+            for message in body.messages or ():
+                texts.extend(_decode_content_texts(message))
+            if isinstance(body.input, str | list):
+                texts.extend(_decode_content_texts(body.input))
+            for tool in body.tools or ():
+                if tool.name is not None:
+                    names.append(tool.name)
+                elif tool.function is not None and tool.function.name is not None:
+                    names.append(tool.function.name)
+        observations.append(
+            _HookJournalObservation(
+                message_texts=tuple(texts),
+                tool_names=tuple(names),
+                wire_json=json.dumps(
+                    entry.model_dump(mode="json", exclude_unset=True),
+                    ensure_ascii=False,
+                ),
+            )
+        )
+    return observations
+
+
+def _decode_hook_session(value: object) -> AgentSessionResponse:
+    """Use the generated Session wire contract without erasing extensions."""
+    session = AgentSessionResponse.from_dict(_HTTP_OBJECT.validate_python(value))
+    if session is None:
+        raise AssertionError("Expected a non-null Session response.")
+    return session
+
+
+def _decode_hook_write(value: object) -> ChatWriteResponse:
+    """Decode the accepted write and native nested snapshot at HTTP ingress."""
+    write = ChatWriteResponse.from_dict(_HTTP_OBJECT.validate_python(value))
+    if write is None:
+        raise AssertionError("Expected a non-null Chat write response.")
+    return write
+
+
+def _message_texts(item: _HookJournalObservation) -> list[str]:
+    """Return the already-decoded provider content correlation projection."""
+    return list(item.message_texts)
 
 
 def _shorten(text: str, *, max_chars: int = 4000) -> str:
@@ -153,44 +198,16 @@ def _log_debug(text: str) -> str:
     return _shorten(text)
 
 
-def _journal_items(mock_openai_url: str) -> list[dict[str, object]]:
+def _journal_items(mock_openai_url: str) -> list[_HookJournalObservation]:
     """Return typed AIMock request journal items."""
-    raw_payload: object = requests.get(
-        f"{mock_openai_url}/v1/_requests", timeout=10
-    ).json()
-    payload = _object_list(raw_payload)
-    if payload is None:
-        raise AssertionError(f"AIMock journal is not a list: {raw_payload!r}")
-    return [
-        item
-        for raw_item in payload
-        if isinstance(raw_item, dict)
-        for item in [_object_dict(raw_item)]
-        if item is not None
-    ]
+    response = requests.get(f"{mock_openai_url}/v1/_requests", timeout=10)
+    response.raise_for_status()
+    return _decode_hook_journal(response.json())
 
 
-def _request_tool_names(item: dict[str, object]) -> list[str]:
+def _request_tool_names(item: _HookJournalObservation) -> list[str]:
     """Extract declared client function names from one AIMock request."""
-    body = _object_dict(item.get("body"))
-    if body is None:
-        return []
-    tools = _object_list(body.get("tools"))
-    if tools is None:
-        return []
-    names: list[str] = []
-    for raw_tool in tools:
-        tool = _object_dict(raw_tool)
-        if tool is None:
-            continue
-        name = tool.get("name")
-        if isinstance(name, str):
-            names.append(name)
-            continue
-        function = _object_dict(tool.get("function"))
-        if function is not None and isinstance(function.get("name"), str):
-            names.append(str(function["name"]))
-    return names
+    return list(item.tool_names)
 
 
 def _tool_request_snapshots(
@@ -307,12 +324,7 @@ def _run_message(
             timeout=10,
         )
         session_response.raise_for_status()
-        session_payload = session_response.json()
-        session_id_value = session_payload.get("id")
-        if not isinstance(session_id_value, str):
-            raise AssertionError(
-                f"Team primary response did not include id: {session_payload!r}"
-            )
+        session_id_value = _decode_hook_session(session_response.json()).id
     else:
         session_id_value = session_id
     path = f"/chat/v1/sessions/{session_id_value}/inputs"
@@ -357,18 +369,7 @@ def _run_message(
             f"response={response.text!r}\npublic_logs={public_logs}\n"
             f"worker_logs={worker_logs}\njournal={journal}"
         ) from exc
-    raw_payload: object = response.json()
-    if not isinstance(raw_payload, dict):
-        raise AssertionError(f"REST write response is not an object: {raw_payload!r}")
-    payload = _object_dict(raw_payload)
-    if payload is None:
-        raise AssertionError(f"REST write response is not an object: {raw_payload!r}")
-    observed_session_id = payload.get("session_id")
-    if not isinstance(observed_session_id, str):
-        raise AssertionError(
-            f"REST write response did not include session_id: {payload!r}"
-        )
-    return observed_session_id
+    return _decode_hook_write(response.json()).session_id
 
 
 def _wait_for_session_idle(
@@ -389,11 +390,7 @@ def _wait_for_session_idle(
             timeout=10,
         )
         response.raise_for_status()
-        raw_payload: object = response.json()
-        payload = _object_dict(raw_payload)
-        if payload is None:
-            raise AssertionError(f"Session response is not an object: {raw_payload!r}")
-        last_state = payload.get("run_state")
+        last_state = _decode_hook_session(response.json()).run_state
         if last_state == "idle":
             return
         time.sleep(0.5)
@@ -626,13 +623,13 @@ class TestRuntimeHooks:
             )
 
         for marker in [
-            "Runtime hook QA lifecycle event: on_session_start",
-            "Runtime hook QA lifecycle event: on_run_start",
-            "Runtime hook QA lifecycle event: on_turn_start",
-            "Runtime hook QA lifecycle event: on_before_tool_call",
-            "Runtime hook QA lifecycle event: on_after_tool_call",
-            "Runtime hook QA lifecycle event: on_turn_end",
-            "Runtime hook QA lifecycle event: on_run_end",
+            '"runtime_hook_qa_lifecycle": "on_session_start"',
+            '"runtime_hook_qa_lifecycle": "on_run_start"',
+            '"runtime_hook_qa_lifecycle": "on_turn_start"',
+            '"runtime_hook_qa_lifecycle": "on_before_tool_call"',
+            '"runtime_hook_qa_lifecycle": "on_after_tool_call"',
+            '"runtime_hook_qa_lifecycle": "on_turn_end"',
+            '"runtime_hook_qa_lifecycle": "on_run_end"',
         ]:
             _wait_for_container_log(azents_engine_worker_container, marker)
 

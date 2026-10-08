@@ -9,6 +9,10 @@ from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from pydantic import ValidationError
 
+from azents.core.active_model_capabilities import (
+    ConfiguredModelIdentity,
+    apply_to_options,
+)
 from azents.core.agent import (
     AgentModelSelection,
     AgentModelSelectionInput,
@@ -17,6 +21,7 @@ from azents.core.agent import (
     SelectableModelOptionInput,
     SelectableModelSettings,
 )
+from azents.core.agent_errors import NotFound
 from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.core.enums import (
@@ -26,13 +31,21 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.runtime_profile_workspace import RuntimeProfileWorkspaceUnavailable
 from azents.core.s3.deps import get_s3_service
+from azents.core.upload_images import (
+    ImageFile,
+    ImageThumbnails,
+    StoredImage,
+    StoredImageFile,
+    UploadedImage,
+)
 from azents.engine.context.window import (
     EffectiveContextWindow,
     compute_effective_context_window_tokens,
     resolve_model_input_tokens,
 )
-from azents.repos.agent.data import Agent, AgentCreate, AgentUpdate, NotFound
+from azents.repos.agent.data import Agent, AgentCreate, AgentUpdate
 from azents.repos.agent_operations import (
     AgentOperationAdminNotFound,
     AgentOperationLastAdmin,
@@ -46,7 +59,11 @@ from azents.repos.agent_operations import (
     AgentOperationWorkspaceMismatch,
     AgentRuntimeProfileSelectionChange,
 )
-from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
+from azents.repos.model_metadata_source_data import CapturedContextSource
+from azents.services.active_model_capabilities import (
+    ActiveModelCapabilitiesService,
+    apply_to_agent_read,
+)
 from azents.services.image_generation_catalog import ImageGenerationCatalogService
 from azents.services.llm_catalog import ModelCatalogReadService
 from azents.services.model_metadata import ModelMetadataService
@@ -57,23 +74,17 @@ from azents.services.model_options import (
 )
 from azents.services.runtime_profile_workspace.service import (
     RuntimeProfileWorkspaceService,
-    RuntimeProfileWorkspaceUnavailable,
 )
 from azents.services.terminal_policy.invalidation import (
     TerminalPolicyInvalidationPublisherDependency,
+)
+from azents.services.terminal_policy.invalidation_contracts import (
     TerminalPolicySourceInvalidation,
     TerminalPolicySourceScope,
 )
 from azents.services.uploads import UploadService, UploadValidationError
 from azents.services.uploads.deps import get_upload_service
 from azents.services.uploads.handlers.avatar import AvatarUploadHandler
-from azents.services.uploads.schema import (
-    ImageFile,
-    ImageThumbnails,
-    StoredImage,
-    StoredImageFile,
-    UploadedImage,
-)
 
 from .data import (
     AdminNotFound,
@@ -112,7 +123,7 @@ def _get_avatar_cdn_base_url(
 
 def _get_workspace_s3_bucket(
     config: Annotated[Config, Depends(get_config)],
-) -> str:
+) -> str | None:
     """Workspace S3 bucket name DI."""
     return config.workspace_s3.bucket
 
@@ -162,10 +173,11 @@ def _default_session_reasoning_effort(
     """Keep the Agent default effort only when the fallback model supports it."""
     if model_parameters is None or model_parameters.reasoning_effort is None:
         return None
-    reasoning = model_selection.normalized_capabilities.reasoning
+    capabilities = model_selection.normalized_capabilities
     if (
-        not reasoning.supported
-        or model_parameters.reasoning_effort not in reasoning.effort_levels
+        not capabilities.reasoning.supported
+        or model_parameters.reasoning_effort
+        not in capabilities.configurable_reasoning_efforts()
     ):
         return None
     return model_parameters.reasoning_effort
@@ -183,6 +195,9 @@ class AgentService:
     model_metadata_service: Annotated[
         ModelMetadataService, Depends(ModelMetadataService)
     ]
+    active_model_capabilities_service: Annotated[
+        ActiveModelCapabilitiesService, Depends(ActiveModelCapabilitiesService)
+    ]
     image_generation_catalog_service: Annotated[
         ImageGenerationCatalogService, Depends()
     ]
@@ -192,7 +207,7 @@ class AgentService:
     ]
     upload_service: Annotated[UploadService, Depends(get_upload_service)]
     s3_service: Annotated[S3Service, Depends(get_s3_service)]
-    workspace_s3_bucket: Annotated[str, Depends(_get_workspace_s3_bucket)]
+    workspace_s3_bucket: Annotated[str | None, Depends(_get_workspace_s3_bucket)]
     avatar_cdn_base_url: Annotated[str | None, Depends(_get_avatar_cdn_base_url)]
     terminal_policy_invalidation_publisher: (
         TerminalPolicyInvalidationPublisherDependency
@@ -315,9 +330,19 @@ class AgentService:
                     assert_never(options_result)
 
         if settings.default_selectable_model_options is not None:
+            compiled = await self.active_model_capabilities_service.capture_and_compile(
+                workspace_id=create.workspace_id,
+                selections=[
+                    candidate.model_selection
+                    for option in settings.default_selectable_model_options
+                    for candidate in option.candidates
+                ],
+            )
             return Success(
                 normalize_stored_selectable_model_options(
-                    selectable_model_options=settings.default_selectable_model_options,
+                    selectable_model_options=apply_to_options(
+                        settings.default_selectable_model_options, compiled
+                    ),
                     main_model_label=settings.default_main_model_label,
                     lightweight_model_label=settings.default_lightweight_model_label,
                 )
@@ -402,10 +427,9 @@ class AgentService:
             case _:
                 assert_never(create_result)
         return Success(
-            await self._build_output(
+            await self._build_active_output(
                 agent,
                 can_manage=True,
-                source_snapshot=await self._capture_context_source([agent]),
             )
         )
 
@@ -429,14 +453,15 @@ class AgentService:
                 workspace_user_id=workspace_user_id,
                 agent_ids=[agent.id for agent in result.items],
             )
-        source_snapshot = await self._capture_context_source(result.items)
+        agents = await self._project_active_agents(workspace_id, result.items)
+        source_snapshot = await self._capture_context_source(agents)
         items = [
             await self._build_output(
                 agent,
                 can_manage=agent.id in managed_agent_ids,
                 source_snapshot=source_snapshot,
             )
-            for agent in result.items
+            for agent in agents
         ]
         return AgentListOutput(items=items)
 
@@ -466,10 +491,9 @@ class AgentService:
         if agent.type == AgentType.PRIVATE and not can_manage:
             return Failure(PrivateAgentAccessDenied(agent_id=agent_id))
         return Success(
-            await self._build_output(
+            await self._build_active_output(
                 agent,
                 can_manage=can_manage,
-                source_snapshot=await self._capture_context_source([agent]),
             )
         )
 
@@ -650,10 +674,9 @@ class AgentService:
                         )
                     )
                 return Success(
-                    await self._build_output(
+                    await self._build_active_output(
                         value,
                         can_manage=True,
-                        source_snapshot=await self._capture_context_source([value]),
                     )
                 )
             case Failure(error):
@@ -965,10 +988,9 @@ class AgentService:
                     case _:
                         assert_never(error)
         return Success(
-            await self._build_output(
+            await self._build_active_output(
                 updated_agent,
                 can_manage=True,
-                source_snapshot=await self._capture_context_source([updated_agent]),
             )
         )
 
@@ -1011,30 +1033,63 @@ class AgentService:
                     case _:
                         assert_never(error)
         return Success(
-            await self._build_output(
+            await self._build_active_output(
                 updated_agent,
                 can_manage=True,
-                source_snapshot=await self._capture_context_source([updated_agent]),
             )
+        )
+
+    async def _project_active_agents(
+        self, workspace_id: str, agents: list[Agent]
+    ) -> list[Agent]:
+        """Batch local metadata reads while leaving stored mutation models intact."""
+        if not agents:
+            return []
+        selections: dict[ConfiguredModelIdentity, AgentModelSelection] = {}
+        for agent in agents:
+            choices = [
+                candidate.model_selection
+                for option in agent.selectable_model_options
+                for candidate in option.candidates
+            ]
+            for selection in (
+                *choices,
+                agent.model_selection,
+                agent.lightweight_model_selection,
+            ):
+                if selection is not None:
+                    selections.setdefault(
+                        ConfiguredModelIdentity.from_selection(selection), selection
+                    )
+        compiled = await self.active_model_capabilities_service.capture_and_compile(
+            workspace_id=workspace_id,
+            selections=list(selections.values()),
+        )
+        return [apply_to_agent_read(agent, compiled) for agent in agents]
+
+    async def _build_active_output(
+        self, agent: Agent, *, can_manage: bool
+    ) -> AgentOutput:
+        """Resolve current capabilities at the detached product read boundary."""
+        projected = (await self._project_active_agents(agent.workspace_id, [agent]))[0]
+        return await self._build_output(
+            projected,
+            can_manage=can_manage,
+            source_snapshot=await self._capture_context_source([projected]),
         )
 
     async def _capture_context_source(
         self, agents: list[Agent]
-    ) -> ModelMetadataSourceSnapshot | None:
-        """Share one local source read across models and Agents needing fallback."""
-        capability_maximums: list[int | None] = []
+    ) -> CapturedContextSource | None:
+        """Share one narrow read across selected models needing a maximum."""
+        selections: list[AgentModelSelection] = []
         for agent in agents:
             selected_labels = {agent.main_model_label, agent.lightweight_model_label}
             for option in agent.selectable_model_options:
                 if option.label in selected_labels:
-                    capabilities = option.candidates[
-                        0
-                    ].model_selection.normalized_capabilities
-                    capability_maximums.append(
-                        capabilities.context_window.max_input_tokens
-                    )
+                    selections.append(option.candidates[0].model_selection)
         return await self.model_metadata_service.capture_for_context(
-            capability_maximums=capability_maximums
+            requests=self.model_metadata_service.context_requests(selections)
         )
 
     async def _build_output(
@@ -1042,7 +1097,7 @@ class AgentService:
         agent: Agent,
         *,
         can_manage: bool,
-        source_snapshot: ModelMetadataSourceSnapshot | None,
+        source_snapshot: CapturedContextSource | None,
     ) -> AgentOutput:
         """Convert `Agent` domain model to output."""
         avatar = await self._resolve_avatar(agent.avatar)
@@ -1113,7 +1168,7 @@ class AgentService:
         self,
         agent: Agent,
         *,
-        source_snapshot: ModelMetadataSourceSnapshot | None,
+        source_snapshot: CapturedContextSource | None,
     ) -> EffectiveContextWindow | None:
         """Calculate effective context window using same criteria as Runtime."""
         option_by_label = {
@@ -1185,6 +1240,8 @@ class AgentService:
         if self.avatar_cdn_base_url is not None:
             url = f"{self.avatar_cdn_base_url}/{stored.key}"
         else:
+            if not self.workspace_s3_bucket:
+                raise ValueError("Workspace S3 bucket is not configured")
             url = await self.s3_service.get_download_url(
                 bucket=self.workspace_s3_bucket,
                 key=stored.key,

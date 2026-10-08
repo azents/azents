@@ -8,6 +8,7 @@ import pytest
 import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config as AlembicConfig
+from alembic.script import ScriptDirectory
 from sqlalchemy import event
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import ProgrammingError
@@ -17,6 +18,13 @@ from azents.consts import PROJECT_ROOT
 
 _SHADOW_REVISION = "91dd4bb71ef6"
 _CLEANUP_REVISION = "d29225579621"
+_NAMESPACE_REVISION = "af654664e6b6"
+_RECONCILIATION_REVISION = "a0dac2fe3ca2"
+_TOOLKIT_REVISION = "cda14157c46c"
+_HISTORICAL_MEMORY_REVISION = "459a4285993c"
+_DATA_SOURCE_CUTOVER_REVISION = "c8bc0a5dcab0"
+_SCHEMA_ALIGNMENT_REVISION = "1c42cc5ce89f"
+_CURRENT_DATA_REVISION = "d9bff320245f"
 
 
 @dataclass(frozen=True)
@@ -187,9 +195,57 @@ def _seed_ready_cutover(engine: Engine) -> None:
 def test_fresh_upgrade_has_only_generic_source_schema(
     migration_database: _MigrationDatabase,
 ) -> None:
-    """A fresh database reaches the cleanup head without legacy objects."""
-    command.upgrade(migration_database.config, "head")
+    """A fresh database reaches the current linear head without legacy objects."""
+    scripts = ScriptDirectory.from_config(migration_database.config)
+    current = scripts.get_revision(_CURRENT_DATA_REVISION)
+    assert current is not None
+    assert current.down_revision == _SCHEMA_ALIGNMENT_REVISION
+    current_revision = (PROJECT_ROOT / "db-schemas/rdb/revision").read_text().strip()
+    assert scripts.get_heads() == [current_revision]
+    head = scripts.get_revision(_SCHEMA_ALIGNMENT_REVISION)
+    assert head is not None
+    assert head.down_revision == _DATA_SOURCE_CUTOVER_REVISION
+    cutover = scripts.get_revision(_DATA_SOURCE_CUTOVER_REVISION)
+    assert cutover is not None
+    assert cutover.down_revision == _HISTORICAL_MEMORY_REVISION
+    historical_memory = scripts.get_revision(_HISTORICAL_MEMORY_REVISION)
+    assert historical_memory is not None
+    assert historical_memory.down_revision == _TOOLKIT_REVISION
+    toolkit = scripts.get_revision(_TOOLKIT_REVISION)
+    assert toolkit is not None
+    assert toolkit.down_revision == _RECONCILIATION_REVISION
+    reconciliation = scripts.get_revision(_RECONCILIATION_REVISION)
+    assert reconciliation is not None
+    assert reconciliation.down_revision == _NAMESPACE_REVISION
+    namespace = scripts.get_revision(_NAMESPACE_REVISION)
+    assert namespace is not None
+    assert namespace.down_revision == _CLEANUP_REVISION
+    command.upgrade(migration_database.config, _SCHEMA_ALIGNMENT_REVISION)
+    _assert_revision(migration_database.engine, _SCHEMA_ALIGNMENT_REVISION)
     _assert_cleanup_schema(migration_database.engine)
+
+
+def test_historical_memory_revision_extends_toolkit_head(
+    migration_database: _MigrationDatabase,
+) -> None:
+    """Historical Memory preserves the complete canonical Toolkit chain."""
+    scripts = ScriptDirectory.from_config(migration_database.config)
+    current = scripts.get_revision(_CURRENT_DATA_REVISION)
+    assert current is not None
+    assert current.down_revision == _SCHEMA_ALIGNMENT_REVISION
+    current_revision = (
+        (PROJECT_ROOT / "db-schemas" / "rdb" / "revision").read_text().strip()
+    )
+    assert scripts.get_heads() == [current_revision]
+    head = scripts.get_revision(_SCHEMA_ALIGNMENT_REVISION)
+    assert head is not None
+    assert head.down_revision == _DATA_SOURCE_CUTOVER_REVISION
+    cutover = scripts.get_revision(_DATA_SOURCE_CUTOVER_REVISION)
+    assert cutover is not None
+    assert cutover.down_revision == _HISTORICAL_MEMORY_REVISION
+    historical_memory = scripts.get_revision(_HISTORICAL_MEMORY_REVISION)
+    assert historical_memory is not None
+    assert historical_memory.down_revision == _TOOLKIT_REVISION
 
 
 def test_ready_cutover_upgrade_removes_legacy_state_and_preserves_current(

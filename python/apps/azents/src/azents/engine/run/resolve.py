@@ -16,15 +16,16 @@ from typing import Any, Literal, assert_never
 from azcommon.result import Failure, Result, Success
 from azcommon.uuid import uuid7
 from pydantic import BaseModel, ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import (
     AgentModelSelection,
     ModelParameters,
+    SelectableModelCandidate,
     SelectableModelSettings,
 )
 from azents.core.builtin_tools import (
     BuiltinToolValidationContext,
+    builtin_tool_configurable,
     validate_builtin_tools,
 )
 from azents.core.enums import ExchangeFileStatus, LLMProvider
@@ -39,6 +40,7 @@ from azents.core.runtime_capabilities import (
     RuntimeCapability,
     RuntimeCapabilityResolver,
 )
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.core.tools import (
     ResolveContext,
     Toolkit,
@@ -46,8 +48,17 @@ from azents.core.tools import (
     ToolkitExecutionMode,
     ToolkitProvider,
 )
+from azents.core.worker_model_profile import (
+    ExecutionOptionUnsupported,
+    ModelTargetNotFound,
+    ReasoningEffortUnsupported,
+)
 from azents.engine.context.window import resolve_model_input_tokens
 from azents.engine.events.model_file_parts import file_output_part_from_model_file
+from azents.engine.events.model_support_contract import (
+    ModelSupportRequest,
+    validate_saved_model_request,
+)
 from azents.engine.events.types import FileOutputPart
 from azents.engine.events.user_messages import make_run_user_message
 from azents.engine.io.attachments import RuntimeAttachment
@@ -59,8 +70,9 @@ from azents.engine.run.types import (
 )
 from azents.engine.tools.builtin import (
     BuiltinToolkitProvider,
-    MemoryReadToolkit,
+    MemoryContextToolkit,
     MemoryWriteToolkit,
+    ReadableStorageToolkit,
     RuntimeToolkit,
 )
 from azents.engine.tools.claude_rules import (
@@ -80,48 +92,28 @@ from azents.engine.tools.runtime_web import RuntimeWebToolkitProvider
 from azents.engine.tools.scheduled import ScheduledToolkit, ScheduledToolkitProvider
 from azents.engine.tools.skill import SkillToolkit, SkillToolkitProvider
 from azents.engine.tools.todo import TodoToolkit, TodoToolkitProvider
-from azents.rdb.session import SessionManager
-from azents.repos.agent import AgentRepository
-from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.engine_read import (
     EngineAgentDisabled,
     EngineAgentNotFound,
     EngineIntegrationDisabled,
     EngineIntegrationNotFound,
-    EngineInvokeReadRepository,
     EngineModelReadRepository,
     EngineModelTargetNotFound,
     EngineReasoningEffortUnsupported,
-    EngineToolkitReadRepository,
 )
+from azents.repos.engine_resolve import EngineResolveRepositories
 from azents.repos.exchange_file.data import ExchangeFile
-from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
-from azents.repos.toolkit import ToolkitRepository
-from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
+from azents.repos.model_metadata_source_data import CapturedContextSource
 from azents.runtime.types import RuntimeDomainConfig
-from azents.services.chatgpt_oauth.data import (
-    ProviderRejected as ChatGPTOAuthProviderRejected,
-)
-from azents.services.chatgpt_oauth.data import (
-    ProviderUnavailable as ChatGPTOAuthProviderUnavailable,
-)
-from azents.services.chatgpt_oauth.runtime import (
-    ensure_runtime_tokens as ensure_chatgpt_oauth_runtime_tokens,
+from azents.services.engine_runtime_tokens import (
+    EngineRuntimeTokenResolver,
+    RuntimeTokenRefreshError,
 )
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.image_generation_catalog import (
     ImageGenerationCatalogService,
     ImageGenerationRuntimeConfigurationError,
-)
-from azents.services.kimi_oauth.data import (
-    ProviderRejected as KimiOAuthProviderRejected,
-)
-from azents.services.kimi_oauth.data import (
-    ProviderUnavailable as KimiOAuthProviderUnavailable,
-)
-from azents.services.kimi_oauth.runtime import (
-    ensure_runtime_tokens as ensure_kimi_oauth_runtime_tokens,
 )
 from azents.services.model_file import (
     ModelFileAccessDenied,
@@ -133,20 +125,8 @@ from azents.services.model_file import (
     model_file_size_limit_message,
     model_file_source_size_error,
 )
-from azents.services.model_metadata import CapturedContextSource, ModelMetadataService
-from azents.services.session_resource_authority import SessionResourceAuthority
-from azents.services.xai_oauth.data import (
-    ProviderEntitlementDenied as XaiOAuthProviderEntitlementDenied,
-)
-from azents.services.xai_oauth.data import (
-    ProviderRejected as XaiOAuthProviderRejected,
-)
-from azents.services.xai_oauth.data import (
-    ProviderUnavailable as XaiOAuthProviderUnavailable,
-)
-from azents.services.xai_oauth.runtime import (
-    ensure_runtime_tokens as ensure_xai_oauth_runtime_tokens,
-)
+from azents.services.model_metadata import ModelMetadataService
+from azents.services.oauth_runtime_clients import RuntimeOAuthClientFactories
 
 from .input import (
     AgentDisabled,
@@ -280,29 +260,6 @@ class _ResolvedInvokeInputModelSource:
     model_settings: SelectableModelSettings
 
 
-@dataclasses.dataclass(frozen=True)
-class ModelTargetNotFound:
-    """Requested Agent-owned model target label no longer exists."""
-
-    model_target_label: str
-
-
-@dataclasses.dataclass(frozen=True)
-class ReasoningEffortUnsupported:
-    """Requested effort is unsupported by the selected model target."""
-
-    model_target_label: str
-    reasoning_effort: ModelReasoningEffort
-
-
-@dataclasses.dataclass(frozen=True)
-class ExecutionOptionUnsupported:
-    """Requested execution option is unsupported by the selected model target."""
-
-    model_target_label: str
-    enabled_execution_options: tuple[ModelExecutionOptionId, ...]
-
-
 ResolveError = (
     AgentNotFound
     | AgentDisabled
@@ -314,15 +271,6 @@ ResolveError = (
     | ExecutionOptionUnsupported
     | ImageGenerationRuntimeConfigurationError
 )
-RuntimeTokenRefreshError = (
-    ChatGPTOAuthProviderRejected
-    | ChatGPTOAuthProviderUnavailable
-    | XaiOAuthProviderRejected
-    | XaiOAuthProviderEntitlementDenied
-    | XaiOAuthProviderUnavailable
-    | KimiOAuthProviderRejected
-    | KimiOAuthProviderUnavailable
-)
 
 
 async def resolve_model_candidate_runtime(
@@ -332,18 +280,17 @@ async def resolve_model_candidate_runtime(
     selection: AgentModelSelection,
     settings: SelectableModelSettings,
     context_source: CapturedContextSource | None,
-    integration_repository: LLMProviderIntegrationRepository,
-    session_manager: SessionManager[AsyncSession],
+    model_read_repository: EngineModelReadRepository,
+    runtime_token_resolver: EngineRuntimeTokenResolver,
     model_metadata_service: ModelMetadataService,
 ) -> Result[
     ResolvedModelCandidateRuntime,
     IntegrationNotFound | IntegrationDisabled | InvalidModelParameters,
 ]:
     """Load credentials and materialize one frozen model candidate."""
-    integration = await EngineModelReadRepository(
-        session_manager=session_manager,
-        integration_repository=integration_repository,
-    ).get_integration(selection.llm_provider_integration_id)
+    integration = await model_read_repository.get_integration(
+        selection.llm_provider_integration_id
+    )
     if integration is None or integration.workspace_id != workspace_id:
         return Failure(
             IntegrationNotFound(
@@ -363,11 +310,7 @@ async def resolve_model_candidate_runtime(
     )
     if settings_result.failure:
         return Failure(settings_result.error)
-    refreshed = await _ensure_provider_runtime_tokens(
-        integration=integration,
-        integration_repository=integration_repository,
-        session_manager=session_manager,
-    )
+    refreshed = await runtime_token_resolver.ensure(integration)
     if refreshed.failure:
         return Failure(
             IntegrationDisabled(
@@ -376,12 +319,10 @@ async def resolve_model_candidate_runtime(
         )
     runtime_model = selection.model_identifier
     source_snapshot = (
-        context_source.snapshot
+        context_source
         if context_source is not None
         else await model_metadata_service.capture_for_context(
-            capability_maximums=[
-                selection.normalized_capabilities.context_window.max_input_tokens
-            ]
+            requests=model_metadata_service.context_requests([selection])
         )
     )
     input_tokens = resolve_model_input_tokens(
@@ -408,39 +349,17 @@ async def resolve_model_candidate_runtime(
 async def _ensure_provider_runtime_tokens(
     *,
     integration: LLMProviderIntegrationWithSecrets,
-    integration_repository: LLMProviderIntegrationRepository,
-    session_manager: SessionManager[AsyncSession],
+    repositories: EngineResolveRepositories,
+    oauth_clients: RuntimeOAuthClientFactories,
 ) -> Result[LLMProviderIntegrationWithSecrets, RuntimeTokenRefreshError]:
     """Refresh provider OAuth credentials before Runtime execution."""
-    if integration.provider == LLMProvider.XAI_OAUTH:
-        result = await ensure_xai_oauth_runtime_tokens(
-            integration=integration,
-            persistence_repository=XaiOAuthRuntimeRepository(
-                integration_repository=integration_repository,
-                session_manager=session_manager,
-            ),
-        )
-    elif integration.provider == LLMProvider.KIMI_OAUTH:
-        result = await ensure_kimi_oauth_runtime_tokens(
-            integration=integration,
-            integration_repository=integration_repository,
-            session_manager=session_manager,
-        )
-    else:
-        result = await ensure_chatgpt_oauth_runtime_tokens(
-            integration=integration,
-            persistence_repository=ChatGPTOAuthRuntimeRepository(
-                integration_repository=integration_repository,
-                session_manager=session_manager,
-            ),
-        )
-    match result:
-        case Success(value):
-            return Success(value)
-        case Failure(error):
-            return Failure(error)
-        case _:
-            assert_never(result)
+    resolver = EngineRuntimeTokenResolver(
+        chatgpt_repository=repositories.chatgpt_oauth,
+        xai_repository=repositories.xai_oauth,
+        kimi_repository=repositories.kimi_oauth,
+        oauth_clients=oauth_clients,
+    )
+    return await resolver.ensure(integration)
 
 
 def _resolve_reasoning_effort(
@@ -450,15 +369,10 @@ def _resolve_reasoning_effort(
     """Return reasoning effort based on model selection capability contract."""
     if params is None or params.reasoning_effort is None:
         return None
-    reasoning = selection.normalized_capabilities.reasoning
-    if not reasoning.supported:
-        return None
-    if params.reasoning_effort not in reasoning.effort_levels:
-        return None
     return params.reasoning_effort
 
 
-def _effective_max_output_tokens(
+def effective_model_output_tokens(
     selection: AgentModelSelection,
     settings: SelectableModelSettings,
 ) -> int | None:
@@ -521,9 +435,8 @@ def _validate_model_parameters(
 async def resolve_invoke_input(
     invoke_input: InvokeInput,
     *,
-    agent_repository: AgentRepository,
-    integration_repository: LLMProviderIntegrationRepository,
-    session_manager: SessionManager[AsyncSession],
+    repositories: EngineResolveRepositories,
+    oauth_clients: RuntimeOAuthClientFactories,
     exchange_file_service: ExchangeFileService,
     model_file_service: ModelFileService,
     image_generation_catalog_service: ImageGenerationCatalogService,
@@ -537,10 +450,10 @@ async def resolve_invoke_input(
         resolved_model_selection=None,
         context_source=None,
         resolved_model_settings=None,
+        resolved_reasoning_effort=None,
         resolved_enabled_execution_options=None,
-        agent_repository=agent_repository,
-        integration_repository=integration_repository,
-        session_manager=session_manager,
+        repositories=repositories,
+        oauth_clients=oauth_clients,
         exchange_file_service=exchange_file_service,
         model_file_service=model_file_service,
         image_generation_catalog_service=image_generation_catalog_service,
@@ -560,9 +473,8 @@ async def resolve_invoke_input_with_profile(
     *,
     requested_profile: RequestedInferenceProfile,
     context_source: CapturedContextSource | None,
-    agent_repository: AgentRepository,
-    integration_repository: LLMProviderIntegrationRepository,
-    session_manager: SessionManager[AsyncSession],
+    repositories: EngineResolveRepositories,
+    oauth_clients: RuntimeOAuthClientFactories,
     exchange_file_service: ExchangeFileService,
     model_file_service: ModelFileService,
     image_generation_catalog_service: ImageGenerationCatalogService,
@@ -576,10 +488,10 @@ async def resolve_invoke_input_with_profile(
         context_source=context_source,
         resolved_model_selection=None,
         resolved_model_settings=None,
+        resolved_reasoning_effort=None,
         resolved_enabled_execution_options=None,
-        agent_repository=agent_repository,
-        integration_repository=integration_repository,
-        session_manager=session_manager,
+        repositories=repositories,
+        oauth_clients=oauth_clients,
         exchange_file_service=exchange_file_service,
         model_file_service=model_file_service,
         image_generation_catalog_service=image_generation_catalog_service,
@@ -609,9 +521,8 @@ async def resolve_invoke_input_with_resolved_profile(
     context_source: CapturedContextSource | None,
     resolved_reasoning_effort: ModelReasoningEffort | None,
     resolved_enabled_execution_options: list[ModelExecutionOptionId],
-    agent_repository: AgentRepository,
-    integration_repository: LLMProviderIntegrationRepository,
-    session_manager: SessionManager[AsyncSession],
+    repositories: EngineResolveRepositories,
+    oauth_clients: RuntimeOAuthClientFactories,
     exchange_file_service: ExchangeFileService,
     model_file_service: ModelFileService,
     image_generation_catalog_service: ImageGenerationCatalogService,
@@ -626,9 +537,9 @@ async def resolve_invoke_input_with_resolved_profile(
         context_source=context_source,
         resolved_model_settings=resolved_model_settings,
         resolved_enabled_execution_options=resolved_enabled_execution_options,
-        agent_repository=agent_repository,
-        integration_repository=integration_repository,
-        session_manager=session_manager,
+        resolved_reasoning_effort=resolved_reasoning_effort,
+        repositories=repositories,
+        oauth_clients=oauth_clients,
         exchange_file_service=exchange_file_service,
         model_file_service=model_file_service,
         image_generation_catalog_service=image_generation_catalog_service,
@@ -656,21 +567,17 @@ async def resolve_invoke_input_with_model_source(
     requested_profile: RequestedInferenceProfile | None,
     resolved_model_selection: AgentModelSelection | None,
     resolved_model_settings: SelectableModelSettings | None,
+    resolved_reasoning_effort: ModelReasoningEffort | None,
     resolved_enabled_execution_options: list[ModelExecutionOptionId] | None,
-    agent_repository: AgentRepository,
-    integration_repository: LLMProviderIntegrationRepository,
-    session_manager: SessionManager[AsyncSession],
+    repositories: EngineResolveRepositories,
+    oauth_clients: RuntimeOAuthClientFactories,
     exchange_file_service: ExchangeFileService,
     model_file_service: ModelFileService,
     image_generation_catalog_service: ImageGenerationCatalogService,
     model_metadata_service: ModelMetadataService,
 ) -> Result[_ResolvedInvokeInputModelSource, ResolveError]:
     """Resolve a run request and main selection from one Agent snapshot."""
-    snapshot_result = await EngineInvokeReadRepository(
-        session_manager=session_manager,
-        agent_repository=agent_repository,
-        integration_repository=integration_repository,
-    ).load_model_source(
+    snapshot_result = await repositories.invoke_read.load_model_source(
         agent_id=invoke_input.agent_id,
         model_source_agent_id=model_source_agent_id,
         requested_profile=requested_profile,
@@ -719,9 +626,8 @@ async def resolve_invoke_input_with_model_source(
         workspace_id=integration.workspace_id,
         provider=integration.provider,
         integration_enabled=integration.enabled,
-        image_generation_supported=(
-            "image_generation"
-            in main_selection.normalized_capabilities.built_in_tools.supported
+        image_generation_supported=builtin_tool_configurable(
+            main_selection.normalized_capabilities, tool="image_generation"
         ),
         settings=main_settings,
     )
@@ -736,8 +642,8 @@ async def resolve_invoke_input_with_model_source(
 
     refreshed_integration = await _ensure_provider_runtime_tokens(
         integration=integration,
-        integration_repository=integration_repository,
-        session_manager=session_manager,
+        repositories=repositories,
+        oauth_clients=oauth_clients,
     )
     match refreshed_integration:
         case Success(value):
@@ -748,13 +654,15 @@ async def resolve_invoke_input_with_model_source(
                     integration_id=main_selection.llm_provider_integration_id,
                 )
             )
+        case _ as unreachable:
+            assert_never(unreachable)
 
     lightweight_integration = integration
     if loaded_lightweight_integration.id != integration.id:
         refreshed_lightweight_integration = await _ensure_provider_runtime_tokens(
             integration=loaded_lightweight_integration,
-            integration_repository=integration_repository,
-            session_manager=session_manager,
+            repositories=repositories,
+            oauth_clients=oauth_clients,
         )
         match refreshed_lightweight_integration:
             case Success(value):
@@ -767,6 +675,8 @@ async def resolve_invoke_input_with_model_source(
                         ),
                     )
                 )
+            case _ as unreachable:
+                assert_never(unreachable)
 
     model = main_selection.model_identifier
     credential_kwargs = build_credential_kwargs(integration)
@@ -794,6 +704,51 @@ async def resolve_invoke_input_with_model_source(
             return Failure(error)
         case _:
             assert_never(settings_result)
+
+    reasoning_effort = (
+        resolved_reasoning_effort
+        if resolved_model_selection is not None
+        else (
+            requested_profile.reasoning_effort
+            if requested_profile is not None
+            else _resolve_reasoning_effort(main_selection, params)
+        )
+    )
+    if (
+        requested_profile is None
+        and resolved_model_selection is None
+        and params is not None
+        and params.reasoning_effort is not None
+        and params.reasoning_effort
+        not in main_selection.normalized_capabilities.configurable_reasoning_efforts()
+    ):
+        return Failure(
+            ReasoningEffortUnsupported(
+                model_target_label=main_model_target_label,
+                reasoning_effort=params.reasoning_effort,
+            )
+        )
+    try:
+        validate_saved_model_request(
+            main_selection.normalized_capabilities,
+            request=ModelSupportRequest(
+                reasoning_effort=reasoning_effort,
+                function_tools=None,
+                temperature=params is not None and params.temperature is not None,
+                max_output_tokens=main_settings.max_output_tokens is not None,
+                top_p=params is not None and params.top_p is not None,
+                top_k=params is not None and params.top_k is not None,
+                stop_sequences=params is not None and params.stop_sequences is not None,
+                parallel_function_calls=False,
+                strict_function_schema=False,
+                structured_response=False,
+                reasoning_summary=False,
+            ),
+        )
+    except ValueError as exc:
+        return Failure(
+            InvalidModelParameters(agent_id=invoke_input.agent_id, errors=[str(exc)])
+        )
 
     requested_enabled_execution_options = (
         requested_profile.enabled_execution_options
@@ -836,19 +791,13 @@ async def resolve_invoke_input_with_model_source(
         )
 
     source_snapshot = (
-        context_source.snapshot
+        context_source
         if context_source is not None
         else await model_metadata_service.capture_for_context(
-            capability_maximums=[
-                main_selection.normalized_capabilities.context_window.max_input_tokens,
-                lightweight_selection.normalized_capabilities.context_window.max_input_tokens,
-            ]
+            requests=model_metadata_service.context_requests(
+                [main_selection, lightweight_selection]
+            )
         )
-    )
-    reasoning_effort = (
-        requested_profile.reasoning_effort
-        if requested_profile is not None
-        else _resolve_reasoning_effort(main_selection, params)
     )
     main_input_tokens = resolve_model_input_tokens(
         main_selection.normalized_capabilities.context_window.default_input_tokens,
@@ -895,8 +844,9 @@ async def resolve_invoke_input_with_model_source(
                 model_assembly_metadata=ModelAssemblyMetadata.from_selection(
                     main_selection
                 ),
-                compaction_assembly_metadata=ModelAssemblyMetadata.from_selection(
-                    lightweight_selection
+                compaction_candidate=SelectableModelCandidate(
+                    model_selection=lightweight_selection,
+                    settings=lightweight_settings,
                 ),
                 credential_kwargs=credential_kwargs,
                 workspace_id=agent.workspace_id,
@@ -909,11 +859,12 @@ async def resolve_invoke_input_with_model_source(
                     lightweight_selection.llm_provider_integration_id
                 ),
                 temperature=params.temperature if params else None,
-                max_output_tokens=_effective_max_output_tokens(
+                max_output_tokens=effective_model_output_tokens(
                     main_selection,
                     main_settings,
                 ),
                 top_p=params.top_p if params else None,
+                top_k=params.top_k if params else None,
                 stop=params.stop_sequences if params else None,
                 reasoning_effort=reasoning_effort,
                 builtin_tools=builtin_tools,
@@ -1427,13 +1378,12 @@ async def resolve_agent_tools(
     *,
     execution_mode: ToolkitExecutionMode,
     toolkit_registry: dict[str, ToolkitProvider[Any]],
-    toolkit_repository: ToolkitRepository,
-    session_manager: SessionManager[AsyncSession],
-    web_url: str,
-    oauth_secret_key: str,
+    repositories: EngineResolveRepositories,
+    web_url: str | None,
+    oauth_secret_key: str | None,
     mcp_proxy_url: str | None,
     runtime_domain_config: RuntimeDomainConfig,
-    workspace_handle: str = "",
+    workspace_handle: str | None,
     builtin_toolkit_provider: BuiltinToolkitProvider | None = None,
     claude_rules_toolkit_provider: ClaudeRulesToolkitProvider | None = None,
     todo_toolkit_provider: TodoToolkitProvider | None = None,
@@ -1453,8 +1403,7 @@ async def resolve_agent_tools(
     :param context: Toolkit runtime context
     :param execution_mode: Toolkit resolution mode for root or future subagent runs
     :param toolkit_registry: toolkit_type to ToolkitProvider instance mapping
-    :param toolkit_repository: Toolkit repository
-    :param session_manager: DB session factory used only for Toolkit snapshot reads
+    :param repositories: Completed request-resolution database operations
     :param web_url: Frontend URL for OAuth redirect_uri construction
     :param oauth_secret_key: OAuth HMAC signing key
     :param runtime_domain_config: Runtime domain allow/deny policy. Parent
@@ -1473,10 +1422,7 @@ async def resolve_agent_tools(
     :param runtime_capability_resolver: Agent Runtime capability resolver.
     :return: List of (Toolkit, slug) tuples
     """
-    registered_toolkits = await EngineToolkitReadRepository(
-        session_manager=session_manager,
-        toolkit_repository=toolkit_repository,
-    ).list_effective_for_agent(
+    registered_toolkits = await repositories.toolkit_read.list_effective_for_agent(
         agent_id,
         workspace_id=context.workspace_id,
     )
@@ -1485,6 +1431,7 @@ async def resolve_agent_tools(
     registered_toolkit_config_ids: dict[int, str] = {}
     registered_toolkit_revisions: dict[int, str] = {}
     registered_toolkit_always_expose_tools: dict[int, bool] = {}
+    registered_toolkit_base_slugs: dict[int, str] = {}
     pending: list[
         tuple[
             ToolkitProvider[Any],
@@ -1518,7 +1465,6 @@ async def resolve_agent_tools(
             credentials_json=toolkit.credentials,
             agent_id=context.agent_id,
             session_id=context.session_id,
-            session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
@@ -1538,9 +1484,11 @@ async def resolve_agent_tools(
                 toolkit_name=toolkit.name,
                 resolve=provider.resolve(validated_config, resolve_ctx),
             )
-            resolved.display_name = provider.name
+            resolved.display_name = toolkit.name
+            resolved.source_identity = provider.source_identity(validated_config)
             registered_toolkit_config_ids[id(resolved)] = toolkit.id
             registered_toolkit_revisions[id(resolved)] = str(toolkit.revision)
+            registered_toolkit_base_slugs[id(resolved)] = toolkit.slug
             registered_toolkit_always_expose_tools[id(resolved)] = (
                 toolkit.always_expose_tools
             )
@@ -1562,7 +1510,7 @@ async def resolve_agent_tools(
                 provider,
                 resolved,
                 validated_config,
-                toolkit.slug,
+                effective.namespace,
                 toolkit.prompt,
                 True,
                 toolkit.toolkit_type,
@@ -1585,46 +1533,46 @@ async def resolve_agent_tools(
                 "denied_domains": list(runtime_domain_config.denied_domains),
             }
         )
+        readable_storage_resolved: ReadableStorageToolkit | None = None
         if memory_enabled:
-            memory_read_modes = _ROOT_AND_SUBAGENT_EXECUTION_MODES
-            if _allows_execution_mode(memory_read_modes, execution_mode):
-                memory_read_context = ResolveContext(
+            memory_context_modes = _ROOT_AND_SUBAGENT_EXECUTION_MODES
+            if _allows_execution_mode(memory_context_modes, execution_mode):
+                memory_context = ResolveContext(
                     toolkit_id="",
-                    toolkit_name="memory_read",
+                    toolkit_name="memory_context",
                     credentials_json=None,
                     agent_id=context.agent_id,
                     session_id=context.session_id,
-                    session=None,
                     web_url=web_url,
                     oauth_secret_key=oauth_secret_key,
                     workspace_id=context.workspace_id,
                     workspace_handle=workspace_handle,
                 )
-                memory_read_resolved = await _resolve_toolkit_with_logging(
+                memory_context_resolved = await _resolve_toolkit_with_logging(
                     agent_id=agent_id,
                     context=context,
                     source="auto",
-                    slug="memory_read",
+                    slug="memory_context",
                     provider=builtin_toolkit_provider,
-                    toolkit_name="memory_read",
-                    resolve=builtin_toolkit_provider.resolve_memory_read(
+                    toolkit_name="memory_context",
+                    resolve=builtin_toolkit_provider.resolve_memory_context(
                         builtin_config,
-                        memory_read_context,
+                        memory_context,
                     ),
                 )
-                if isinstance(memory_read_resolved, MemoryReadToolkit):
-                    memory_read_resolved.set_agent_id(agent_id)
-                    memory_read_resolved.set_session_id(context.session_id)
+                if isinstance(memory_context_resolved, MemoryContextToolkit):
+                    memory_context_resolved.set_agent_id(agent_id)
+                    memory_context_resolved.set_session_id(context.session_id)
                 pending.append(
                     (
                         builtin_toolkit_provider,
-                        memory_read_resolved,
+                        memory_context_resolved,
                         builtin_config,
-                        "memory_read",
+                        "memory_context",
                         None,
                         False,
                         None,
-                        memory_read_modes,
+                        memory_context_modes,
                     )
                 )
 
@@ -1636,7 +1584,6 @@ async def resolve_agent_tools(
                     credentials_json=None,
                     agent_id=context.agent_id,
                     session_id=context.session_id,
-                    session=None,
                     web_url=web_url,
                     oauth_secret_key=oauth_secret_key,
                     workspace_id=context.workspace_id,
@@ -1670,6 +1617,49 @@ async def resolve_agent_tools(
                     )
                 )
 
+        readable_storage_modes = _ROOT_AND_SUBAGENT_EXECUTION_MODES
+        if _allows_execution_mode(readable_storage_modes, execution_mode):
+            readable_storage_context = ResolveContext(
+                toolkit_id="",
+                toolkit_name="readable_storage",
+                credentials_json=None,
+                agent_id=context.agent_id,
+                session_id=context.session_id,
+                web_url=web_url,
+                oauth_secret_key=oauth_secret_key,
+                workspace_id=context.workspace_id,
+                workspace_handle=workspace_handle,
+            )
+            resolved_readable_storage = await _resolve_toolkit_with_logging(
+                agent_id=agent_id,
+                context=context,
+                source="auto",
+                slug="readable_storage",
+                provider=builtin_toolkit_provider,
+                toolkit_name="readable_storage",
+                resolve=builtin_toolkit_provider.resolve_readable_storage(
+                    builtin_config,
+                    readable_storage_context,
+                ),
+            )
+            if isinstance(resolved_readable_storage, ReadableStorageToolkit):
+                resolved_readable_storage.set_runtime_capability_resolver(
+                    capability_resolver
+                )
+                readable_storage_resolved = resolved_readable_storage
+            pending.append(
+                (
+                    builtin_toolkit_provider,
+                    resolved_readable_storage,
+                    builtin_config,
+                    "readable_storage",
+                    None,
+                    False,
+                    None,
+                    readable_storage_modes,
+                )
+            )
+
         if capability_resolver.project(
             (
                 RuntimeCapability.WORKSPACE,
@@ -1686,7 +1676,6 @@ async def resolve_agent_tools(
                     credentials_json=None,
                     agent_id=context.agent_id,
                     session_id=context.session_id,
-                    session=None,
                     web_url=web_url,
                     oauth_secret_key=oauth_secret_key,
                     workspace_id=context.workspace_id,
@@ -1723,6 +1712,10 @@ async def resolve_agent_tools(
                         resolved for _, resolved, _, _, _, _, _, _ in pending
                     ]
                     runtime_resolved.set_peer_toolkits(peer_toolkits)
+                    if readable_storage_resolved is not None:
+                        readable_storage_resolved.set_runtime_storage_provider(
+                            runtime_resolved
+                        )
 
                     pending.append(
                         (
@@ -1747,7 +1740,6 @@ async def resolve_agent_tools(
                         credentials_json=None,
                         agent_id=context.agent_id,
                         session_id=context.session_id,
-                        session=None,
                         web_url=web_url,
                         oauth_secret_key=oauth_secret_key,
                         workspace_id=context.workspace_id,
@@ -1800,7 +1792,6 @@ async def resolve_agent_tools(
             credentials_json=None,
             agent_id=context.agent_id,
             session_id=context.session_id,
-            session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
@@ -1844,7 +1835,6 @@ async def resolve_agent_tools(
             credentials_json=None,
             agent_id=context.agent_id,
             session_id=context.session_id,
-            session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
@@ -1888,7 +1878,6 @@ async def resolve_agent_tools(
             credentials_json=None,
             agent_id=context.agent_id,
             session_id=context.session_id,
-            session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
@@ -1932,7 +1921,6 @@ async def resolve_agent_tools(
             credentials_json=None,
             agent_id=context.agent_id,
             session_id=context.session_id,
-            session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
@@ -1979,7 +1967,6 @@ async def resolve_agent_tools(
             credentials_json=None,
             agent_id=context.agent_id,
             session_id=context.session_id,
-            session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
@@ -2028,7 +2015,6 @@ async def resolve_agent_tools(
             credentials_json=None,
             agent_id=context.agent_id,
             session_id=context.session_id,
-            session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
@@ -2078,7 +2064,6 @@ async def resolve_agent_tools(
             credentials_json=None,
             agent_id=context.agent_id,
             session_id=context.session_id,
-            session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
@@ -2126,7 +2111,6 @@ async def resolve_agent_tools(
             credentials_json=None,
             agent_id=context.agent_id,
             session_id=context.session_id,
-            session=None,
             web_url=web_url,
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
@@ -2164,6 +2148,7 @@ async def resolve_agent_tools(
         ToolkitBinding(
             toolkit=_resolved,
             slug=_slug,
+            base_slug=registered_toolkit_base_slugs.get(id(_resolved), _slug),
             use_prefix=_pfx,
             toolkit_type=_ttype,
             toolkit_config_id=registered_toolkit_config_ids.get(id(_resolved)),

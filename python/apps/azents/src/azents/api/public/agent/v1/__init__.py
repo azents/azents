@@ -8,9 +8,15 @@ from typing import Annotated, NoReturn, assert_never
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from azents.core.agent_errors import NotFound
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
-from azents.repos.agent.data import NotFound
-from azents.repos.memory.data import MemoryScope
+from azents.core.historical_memory_settings import (
+    HistoricalMemorySettingsScope,
+)
+from azents.core.memory_scope import MemoryScope
+from azents.core.session_workspace_paths import (
+    InvalidProjectPath,
+)
 from azents.services.agent import AgentService
 from azents.services.agent.data import (
     AdminNotFound,
@@ -38,14 +44,21 @@ from azents.services.agent_automatic_project.data import (
     AutomaticSessionProjectsRevisionConflict,
     AutomaticSessionProjectsRuntimeUnavailable,
 )
+from azents.services.historical_memory.settings import (
+    HistoricalMemorySettingsService,
+)
+from azents.services.historical_memory.settings_data import (
+    HistoricalMemorySettingsCursorInvalid,
+    HistoricalMemorySettingsNotFound,
+)
 from azents.services.memory import MemoryService
 from azents.services.memory.data import (
     DuplicateMemory,
     MemoryCreateInput,
+    MemoryCursorInvalid,
     MemoryNotFound,
     MemoryUpdateInput,
 )
-from azents.services.session_workspace_project import InvalidProjectPath
 from azents.utils.fastapi.route import RouteMounter
 
 from .data import (
@@ -65,6 +78,9 @@ from .data import (
     AvatarFinalizeRequest,
     AvatarUploadRequest,
     AvatarUploadTicketResponse,
+    ConsolidatedMemoryResponse,
+    HistoricalMemoryListResponse,
+    HistoricalMemoryResponse,
     MemoryCreateRequest,
     MemoryListResponse,
     MemoryResponse,
@@ -571,6 +587,137 @@ def _build_memory_update_input(
     return result
 
 
+@router.get("/workspaces/{handle}/agents/{agent_id}/historical-memories")
+async def list_agent_historical_memories(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[HistoricalMemorySettingsService, Depends()],
+    *,
+    handle: str,
+    agent_id: str,
+    scope: Annotated[
+        HistoricalMemorySettingsScope,
+        Query(description="Exact Historical Memory source scope"),
+    ],
+    query: Annotated[
+        str | None,
+        Query(description="Optional source title or summary search"),
+    ] = None,
+    cursor: Annotated[
+        str | None,
+        Query(description="Opaque continuation cursor"),
+    ] = None,
+    limit: Annotated[
+        int,
+        Query(ge=1, le=100, description="Maximum records to return"),
+    ] = 20,
+) -> HistoricalMemoryListResponse:
+    """List currently visible Historical Memory for settings inspection."""
+    result = await service.list(
+        agent_id,
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        user_id=member.user_id,
+        role=member.role,
+        scope=scope,
+        query=query,
+        cursor=cursor,
+        limit=limit,
+    )
+    if result.success:
+        value = result.value
+        return HistoricalMemoryListResponse(
+            items=[
+                HistoricalMemoryResponse.convert_from(
+                    item,
+                    handle=handle,
+                    agent_id=agent_id,
+                )
+                for item in value.items
+            ],
+            next_cursor=value.next_cursor,
+        )
+    error = result.error
+    match error:
+        case NotFound() | NotBelongToWorkspace() | PrivateAgentAccessDenied():
+            _raise_memory_agent_not_found()
+        case HistoricalMemorySettingsCursorInvalid():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Historical Memory cursor is invalid.",
+            )
+        case _:
+            assert_never(error)
+
+
+@router.get(
+    "/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id}"
+)
+async def get_agent_historical_memory(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[HistoricalMemorySettingsService, Depends()],
+    *,
+    handle: str,
+    agent_id: str,
+    source_session_id: str,
+) -> HistoricalMemoryResponse:
+    """Return one currently visible Historical Memory source."""
+    result = await service.get(
+        agent_id,
+        source_session_id,
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        user_id=member.user_id,
+        role=member.role,
+    )
+    if result.success:
+        return HistoricalMemoryResponse.convert_from(
+            result.value,
+            handle=handle,
+            agent_id=agent_id,
+        )
+    error = result.error
+    match error:
+        case NotFound() | NotBelongToWorkspace() | PrivateAgentAccessDenied():
+            _raise_memory_agent_not_found()
+        case HistoricalMemorySettingsNotFound():
+            _raise_memory_not_found()
+        case _:
+            assert_never(error)
+
+
+@router.get("/workspaces/{handle}/agents/{agent_id}/consolidated-memory")
+async def get_agent_consolidated_memory(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[HistoricalMemorySettingsService, Depends()],
+    *,
+    agent_id: str,
+    scope: Annotated[
+        HistoricalMemorySettingsScope, Query(description="Integrated Memory scope")
+    ],
+) -> ConsolidatedMemoryResponse:
+    """Inspect the current integrated Memory without starting consolidation."""
+    result = await service.get_consolidated(
+        agent_id,
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        user_id=member.user_id,
+        role=member.role,
+        scope=scope,
+    )
+    if result.success:
+        value = result.value
+        return ConsolidatedMemoryResponse(
+            scope=value.scope,
+            markdown=value.markdown,
+            published_at=value.published_at,
+        )
+    match result.error:
+        case NotFound() | NotBelongToWorkspace() | PrivateAgentAccessDenied():
+            _raise_memory_agent_not_found()
+        case _:
+            assert_never(result.error)
+
+
 @router.get("/workspaces/{handle}/agents/{agent_id}/memories")
 async def list_agent_memories(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
@@ -580,6 +727,8 @@ async def list_agent_memories(
     scope: Annotated[MemoryScope, Query(description="Memory scope")],
     type: Annotated[str | None, Query(description="Memory type filter")] = None,
     query: Annotated[str | None, Query(description="Search query")] = None,
+    cursor: Annotated[str | None, Query(description="Opaque page cursor")] = None,
+    limit: Annotated[int, Query(ge=1, le=100, description="Page size")] = 20,
 ) -> MemoryListResponse:
     """List memories for one Agent and scope.
 
@@ -595,17 +744,25 @@ async def list_agent_memories(
         scope=scope,
         type=type,
         query=query,
+        cursor=cursor,
+        limit=limit,
     )
     if result.success:
         value = result.value
         return MemoryListResponse(
-            items=[MemoryResponse.convert_from(a) for a in value.items]
+            items=[MemoryResponse.convert_from(a) for a in value.items],
+            next_cursor=value.next_cursor,
         )
     else:
         error = result.error
         match error:
             case NotFound() | NotBelongToWorkspace() | PrivateAgentAccessDenied():
                 _raise_memory_agent_not_found()
+            case MemoryCursorInvalid():
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="Memory cursor is invalid.",
+                )
             case _:
                 assert_never(error)
 

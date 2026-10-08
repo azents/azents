@@ -1,6 +1,7 @@
 """Native proof, canonical events, opaque data and billing integration tests."""
 
 import base64
+import datetime
 import json
 from io import BytesIO
 
@@ -27,7 +28,12 @@ from pydantic_ai.messages import (
 from pydantic_ai.usage import RequestUsage
 
 from azents.core.enums import LLMProvider
-from azents.core.model_pricing import GenAIModelPricing
+from azents.core.model_catalog_source import decode_catalog_source
+from azents.core.model_pricing import (
+    CapturedModelPricing,
+    capture_model_pricing,
+    normalize_model_pricing,
+)
 from azents.engine.events.protocols import (
     ContentDeltaProjection,
     FunctionCallDeltaProjection,
@@ -50,6 +56,7 @@ from azents.engine.events.types import (
     ReasoningPayload,
     UnknownAdapterOutputPayload,
 )
+from azents.engine.providers.native_observation import observe_native_payload
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
     ModelProviderFailureCategory,
@@ -99,7 +106,7 @@ def _normalizer(
     *,
     provider: str = "anthropic",
     model: str = "selected-model",
-    pricing: GenAIModelPricing | None = None,
+    pricing: CapturedModelPricing | None = None,
 ) -> PydanticAIOutputNormalizer:
     return PydanticAIOutputNormalizer(
         provider=provider,
@@ -110,11 +117,98 @@ def _normalizer(
     )
 
 
-def _pricing() -> GenAIModelPricing:
+def _pricing() -> CapturedModelPricing:
     return make_test_model_pricing(
         provider=LLMProvider.ANTHROPIC,
         model_identifier="selected-model",
     )
+
+
+@pytest.mark.parametrize(
+    "protocol,prompt_key,completion_key",
+    [
+        ("anthropic", "input_tokens", "output_tokens"),
+        ("google", "promptTokenCount", "candidatesTokenCount"),
+        ("bedrock", "inputTokens", "outputTokens"),
+        ("chat_completions", "prompt_tokens", "completion_tokens"),
+        ("responses", "input_tokens", "output_tokens"),
+    ],
+)
+@pytest.mark.parametrize("missing_side", ["input", "output"])
+def test_partial_native_usage_cannot_release_missing_counter_as_sdk_default_zero(
+    protocol: NativeModelProtocol,
+    prompt_key: str,
+    completion_key: str,
+    missing_side: str,
+) -> None:
+    stream = _normalizer().start_transient()
+    stream.process_event(
+        _event(
+            response=ModelResponse(
+                parts=[TextPart("Completed")],
+                usage=RequestUsage(
+                    input_tokens=0 if missing_side == "input" else 20,
+                    output_tokens=5 if missing_side == "input" else 0,
+                ),
+            ),
+            observation=_observation(
+                protocol=protocol,
+                terminal="success",
+                usage={completion_key: 5}
+                if missing_side == "input"
+                else {prompt_key: 20},
+            ),
+        )
+    )
+    assert stream.complete().usage is None
+
+
+@pytest.mark.parametrize(
+    "protocol,prompt_key,completion_key",
+    [
+        ("anthropic", "input_tokens", "output_tokens"),
+        ("google", "promptTokenCount", "candidatesTokenCount"),
+        ("bedrock", "inputTokens", "outputTokens"),
+        ("chat_completions", "prompt_tokens", "completion_tokens"),
+        ("responses", "input_tokens", "output_tokens"),
+    ],
+)
+def test_native_explicit_zero_output_remains_known_usage(
+    protocol: NativeModelProtocol,
+    prompt_key: str,
+    completion_key: str,
+) -> None:
+    stream = _normalizer().start_transient()
+    stream.process_event(
+        _event(
+            response=ModelResponse(
+                parts=[TextPart("Completed")],
+                usage=RequestUsage(input_tokens=20, output_tokens=0),
+            ),
+            observation=_observation(
+                protocol=protocol,
+                terminal="success",
+                usage={prompt_key: 20, completion_key: 0},
+            ),
+        )
+    )
+    usage = stream.complete().usage
+    assert usage is not None
+    assert usage.prompt_tokens == 20 and usage.completion_tokens == 0
+
+
+def test_sdk_non_token_details_do_not_prove_missing_zero_usage() -> None:
+    stream = _normalizer().start_transient()
+    stream.process_event(
+        _event(
+            response=ModelResponse(
+                parts=[TextPart("Completed")],
+                usage=RequestUsage(details={"reasoning_tokens": 0}),
+            ),
+            observation=_observation(terminal="success"),
+        )
+    )
+    assert stream.complete().usage is None
 
 
 def test_common_complete_or_content_eof_is_not_native_success() -> None:
@@ -254,7 +348,22 @@ def test_partial_stop_preserves_text_without_tool_execution_claim() -> None:
 
 
 def test_opaque_signatures_never_become_visible_reasoning_delta() -> None:
-    stream = _normalizer().start("session-1")
+    lowerer = PydanticAILowerer(
+        top_k=None,
+        provider="anthropic",
+        provider_id=LLMProvider.ANTHROPIC,
+        model="selected-model",
+        tools=None,
+        model_capabilities=None,
+        supported_execution_options=[],
+        enabled_execution_options=[],
+    )
+    origin = lowerer.lower([], native_replay_context=None, model="selected-model")
+    stream = (
+        _normalizer()
+        .for_native_replay(origin.native_replay_schema_version())
+        .start("session-1")
+    )
     initial = ThinkingPart(
         "",
         id="redacted_thinking",
@@ -290,16 +399,9 @@ def test_opaque_signatures_never_become_visible_reasoning_delta() -> None:
     assert isinstance(payload, ReasoningPayload)
     assert payload.text is None
     assert "opaque-new" in json.dumps(payload.native_artifact.item)
-    lowerer = PydanticAILowerer(
-        provider="anthropic",
-        provider_id=LLMProvider.ANTHROPIC,
-        model="selected-model",
-        tools=None,
-        model_capabilities=None,
-        supported_execution_options=[],
-        enabled_execution_options=[],
+    request = lowerer.lower(
+        result.events, native_replay_context=None, model="selected-model"
     )
-    request = lowerer.lower(result.events, model="selected-model")
     replayed = request.messages[1]
     assert isinstance(replayed, ModelResponse)
     assert isinstance(replayed.parts[0], ThinkingPart)
@@ -459,7 +561,7 @@ def test_native_final_usage_cache_partition_and_snapshot_are_fixed() -> None:
     assert result.usage.cache_creation_tokens == 3
     assert result.usage.cost_usd == pytest.approx(1.97)
     assert result.usage.cost_provenance is not None
-    assert result.usage.cost_provenance.source_snapshot_id == "source-snapshot-1"
+    assert result.usage.cost_provenance.source_key == "litellm_catalog"
 
 
 def test_google_thought_tokens_are_not_double_counted() -> None:
@@ -730,3 +832,65 @@ def test_common_hosted_output_excludes_opaque_content_from_visible_semantics() -
     artifact = json.dumps(payload.native_artifact.item)
     assert "opaque-signature-canary" in artifact
     assert "opaque-encrypted-canary" in artifact
+
+
+def test_google_native_modality_receipt_reaches_captured_directed_pricing() -> None:
+    source = decode_catalog_source(
+        b'{"gemini/selected-model":{"litellm_provider":"gemini",'
+        b'"input_cost_per_token":0.1,"output_cost_per_token":0.2,'
+        b'"input_cost_per_image_token":0.7}}'
+    ).models[0]
+    pricing = capture_model_pricing(
+        provider=LLMProvider.GOOGLE_GEMINI,
+        model_identifier="selected-model",
+        definition=normalize_model_pricing(
+            source_key="litellm_catalog",
+            source_model=source,
+            collected_at=datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC),
+        ),
+        request_timestamp=datetime.datetime(2026, 10, 3, tzinfo=datetime.UTC),
+    )
+    raw = {
+        "promptTokenCount": 7,
+        "candidatesTokenCount": 2,
+        "thoughtsTokenCount": 3,
+        "totalTokenCount": 12,
+        "promptTokensDetails": [
+            {"modality": "TEXT", "tokenCount": 3},
+            {"modality": "IMAGE", "tokenCount": 4},
+        ],
+        "candidatesTokensDetails": [{"modality": "TEXT", "tokenCount": 2}],
+    }
+    stream = _normalizer(provider="google_gemini", pricing=pricing).start("synthetic")
+    stream.process_event(
+        _event(
+            response=ModelResponse(
+                parts=[TextPart("answer")],
+                usage=RequestUsage(input_tokens=7, output_tokens=5),
+            ),
+            observation=observe_native_payload(
+                protocol="google",
+                payload={
+                    "candidates": [
+                        {
+                            "content": {"role": "model", "parts": [{"text": "answer"}]},
+                            "finishReason": "STOP",
+                        }
+                    ],
+                    "modelVersion": "selected-model",
+                    "responseId": "receipt-proof",
+                    "usageMetadata": raw,
+                },
+            ),
+        )
+    )
+    usage = stream.complete().usage
+    assert usage is not None
+    assert usage.prompt_tokens == 7
+    assert usage.completion_tokens == 5
+    assert usage.reasoning_tokens == 3
+    assert "raw" not in usage.model_dump()
+    assert "raw_hidden_params" not in usage.model_dump()
+    assert usage.cost_usd == pytest.approx(4.1)
+    assert usage.cost_provenance is not None
+    assert usage.cost_provenance.source_model_key == "gemini/selected-model"

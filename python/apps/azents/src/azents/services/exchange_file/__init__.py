@@ -11,7 +11,10 @@ import tempfile
 import unicodedata
 from codecs import getincrementaldecoder
 from io import BytesIO
-from typing import Annotated, NamedTuple, assert_never
+from typing import (
+    Annotated,
+    NamedTuple,
+)
 
 from azcommon.infra.s3.service import (
     S3ObjectIdentity,
@@ -25,28 +28,30 @@ from azcommon.result import Failure, Result, Success
 from azcommon.uuid import uuid7
 from fastapi import Depends
 from PIL import Image, ImageOps, UnidentifiedImageError
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.config import Config
+from azents.core.config import Config, require_workspace_s3_bucket
 from azents.core.deps import get_config
 from azents.core.enums import (
     ExchangeFileOrigin,
     ExchangeFileProvenanceKind,
     ExchangeFileStatus,
 )
+from azents.core.exchange_file_errors import (
+    FileAccessDenied,
+    FileExpired,
+    FileNotFound,
+    FileUnavailable,
+    SessionNotFound,
+    exchange_object_key_from_uri,
+)
 from azents.core.exchange_upload import ExchangeUploadError, ExchangeUploadState
 from azents.core.file_transfer import GENERAL_FILE_MAXIMUM_BYTES
 from azents.core.s3.deps import get_s3_service
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file import ExchangeFileRepository, exchange_file_object_key
 from azents.repos.exchange_file.data import (
     ExchangeFile,
-    ExchangeFileClaimExpired,
-    ExchangeFileClaimNotFound,
-    ExchangeFileClaimOwnerConflict,
-    ExchangeFileClaimUnavailable,
-    ExchangeFileClaimWrongScope,
     ExchangeFileCreate,
 )
 from azents.repos.exchange_file.operations import (
@@ -54,6 +59,7 @@ from azents.repos.exchange_file.operations import (
     ExchangeFileMetadataFailure,
     ExchangeFileOperationRepository,
     ExchangeFilePreviewCreate,
+    ExchangeFilePublicationRecoveryError,
 )
 from azents.repos.exchange_file.upload_data import ExchangeUploadOperation
 from azents.repos.file_metadata_authority import FileResourceAuthority
@@ -64,49 +70,9 @@ from azents.services.browser_file_download import (
     BrowserFileDownloadTicket,
 )
 from azents.services.file_lifecycle_policy import exchange_file_expires_at
-from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.utils.logging import sanitized_exception_info
 
 logger = logging.getLogger(__name__)
-
-
-@dataclasses.dataclass(frozen=True)
-class SessionNotFound:
-    """Session not found."""
-
-
-@dataclasses.dataclass(frozen=True)
-class FileNotFound:
-    """Exchange file not found."""
-
-
-@dataclasses.dataclass(frozen=True)
-class FileAccessDenied:
-    """No Exchange file access permission."""
-
-
-@dataclasses.dataclass(frozen=True)
-class FileExpired:
-    """Exchange file expired."""
-
-
-@dataclasses.dataclass(frozen=True)
-class FileUnavailable:
-    """Cannot access original file in object storage."""
-
-
-@dataclasses.dataclass(frozen=True)
-class FileRetentionOwnerConflict:
-    """Exchange file is already bound to another root session."""
-
-
-ExchangeFileInputClaimError = (
-    FileNotFound
-    | FileAccessDenied
-    | FileExpired
-    | FileUnavailable
-    | FileRetentionOwnerConflict
-)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -311,17 +277,6 @@ class _PreparedExchangeFile:
     preview_width: int | None = None
     preview_height: int | None = None
     preview_generated_at: datetime.datetime | None = None
-
-
-def exchange_object_key_from_uri(uri: str) -> str | None:
-    """Return object key from Exchange file-location URI."""
-    prefix = "exchange://"
-    if not uri.startswith(prefix):
-        return None
-    object_key = uri.removeprefix(prefix)
-    if not object_key:
-        return None
-    return object_key
 
 
 def sanitize_exchange_filename(filename: str | None) -> str:
@@ -604,7 +559,7 @@ class ExchangeFileService:
     ) -> S3ObjectIdentity:
         """Derive private temporary keys exclusively from persisted ownership."""
         return S3ObjectIdentity(
-            bucket=self.config.workspace_s3.bucket,
+            bucket=require_workspace_s3_bucket(self.config.workspace_s3),
             key=f"exchange-uploads/{operation.workspace_id}/{operation.upload_id}/{kind}",
         )
 
@@ -710,7 +665,7 @@ class ExchangeFileService:
             if operation.state is ExchangeUploadState.PENDING:
                 identities.extend(
                     S3ObjectIdentity(
-                        bucket=self.config.workspace_s3.bucket,
+                        bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                         key=exchange_file_object_key(
                             workspace_id=operation.workspace_id, file_id=file_id
                         ),
@@ -982,70 +937,6 @@ class ExchangeFileService:
         return await self.operation_repository.validate_authority(
             _repository_authority(authority)
         )
-
-    async def claim_input_attachments(
-        self,
-        session: AsyncSession,
-        *,
-        agent_id: str,
-        session_id: str,
-        user_id: str,
-        attachment_uris: list[str],
-    ) -> Result[None, ExchangeFileInputClaimError]:
-        """Claim input ExchangeFiles inside the caller's acceptance transaction."""
-        if not attachment_uris:
-            return Success(None)
-        object_keys: list[str] = []
-        for uri in attachment_uris:
-            object_key = exchange_object_key_from_uri(uri)
-            if object_key is None:
-                return Failure(FileNotFound())
-            object_keys.append(object_key)
-
-        agent_session = await self.agent_session_repository.get_by_id(
-            session,
-            session_id,
-        )
-        if agent_session is None or agent_session.agent_id != agent_id:
-            return Failure(FileAccessDenied())
-        if not await self._has_workspace_access(
-            session,
-            workspace_id=agent_session.workspace_id,
-            user_id=user_id,
-        ):
-            return Failure(FileAccessDenied())
-        root = await self.agent_session_repository.get_root_session_agent_by_session_id(
-            session,
-            session_id,
-        )
-        if root is None:
-            return Failure(FileAccessDenied())
-
-        claim = await self.exchange_file_repository.claim_for_retention_root(
-            session,
-            object_keys=object_keys,
-            workspace_id=agent_session.workspace_id,
-            agent_id=agent_id,
-            retention_root_session_id=root.agent_session_id,
-            bound_at=datetime.datetime.now(datetime.UTC),
-        )
-        if claim.success:
-            return Success(None)
-        else:
-            error = claim.error
-            match error:
-                case ExchangeFileClaimNotFound():
-                    return Failure(FileNotFound())
-                case ExchangeFileClaimWrongScope():
-                    return Failure(FileAccessDenied())
-                case ExchangeFileClaimExpired():
-                    return Failure(FileExpired())
-                case ExchangeFileClaimUnavailable():
-                    return Failure(FileUnavailable())
-                case ExchangeFileClaimOwnerConflict():
-                    return Failure(FileRetentionOwnerConflict())
-                case _:
-                    assert_never(error)
 
     async def _create_agent_file(
         self,
@@ -1436,7 +1327,9 @@ class ExchangeFileService:
                     await self.s3_service.copy_verified_transfer_object_to_product(
                         source=file.source,
                         destination=S3ObjectIdentity(
-                            bucket=self.config.workspace_s3.bucket,
+                            bucket=require_workspace_s3_bucket(
+                                self.config.workspace_s3
+                            ),
                             key=file.object_key,
                         ),
                         expected_size=file.create.size_bytes,
@@ -1449,7 +1342,7 @@ class ExchangeFileService:
             elif file.body is not None:
                 completed.append(file)
                 await self.s3_service.upload(
-                    bucket=self.config.workspace_s3.bucket,
+                    bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                     key=file.object_key,
                     body=file.body,
                     content_type=file.create.media_type,
@@ -1543,7 +1436,7 @@ class ExchangeFileService:
         for file in prepared:
             if file.publication_metadata is None:
                 await self.s3_service.delete(
-                    bucket=self.config.workspace_s3.bucket,
+                    bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                     key=file.object_key,
                 )
 
@@ -1595,7 +1488,7 @@ class ExchangeFileService:
             )
         except asyncio.CancelledError:
             raise
-        except SQLAlchemyError as error:
+        except ExchangeFilePublicationRecoveryError as error:
             logger.warning(
                 (
                     "Unable to verify persisted Exchange publication; "
@@ -1663,7 +1556,7 @@ class ExchangeFileService:
         if file.value.status == ExchangeFileStatus.EXPIRED:
             return Failure(FileExpired())
         body = await self.s3_service.download_bytes(
-            bucket=self.config.workspace_s3.bucket,
+            bucket=require_workspace_s3_bucket(self.config.workspace_s3),
             key=file.value.object_key,
         )
         if body is None:
@@ -1687,7 +1580,7 @@ class ExchangeFileService:
             return Failure(FileTooLarge())
 
         identity = S3ObjectIdentity(
-            bucket=self.config.workspace_s3.bucket,
+            bucket=require_workspace_s3_bucket(self.config.workspace_s3),
             key=file.value.object_key,
         )
         metadata = await self.s3_service.head_with_checksum(identity)
@@ -1751,7 +1644,7 @@ class ExchangeFileService:
         ]
         for file in files_to_delete:
             await self.s3_service.delete(
-                bucket=self.config.workspace_s3.bucket,
+                bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                 key=file.object_key,
             )
         deleted = await self.operation_repository.delete_family_for_user(
@@ -1920,7 +1813,7 @@ class ExchangeFileService:
         if file.value.status == ExchangeFileStatus.EXPIRED:
             return Failure(FileExpired())
         body = await self.s3_service.download_bytes(
-            bucket=self.config.workspace_s3.bucket,
+            bucket=require_workspace_s3_bucket(self.config.workspace_s3),
             key=file.value.object_key,
         )
         if body is None:
@@ -2012,26 +1905,11 @@ class ExchangeFileService:
             )
         )
 
-    async def _has_workspace_access(
-        self,
-        session: AsyncSession,
-        *,
-        workspace_id: str,
-        user_id: str,
-    ) -> bool:
-        """Check whether user is workspace member."""
-        workspace_user = await self.workspace_user_repository.get_by_workspace_and_user(
-            session,
-            workspace_id=workspace_id,
-            user_id=user_id,
-        )
-        return workspace_user is not None
-
     async def _cleanup_uploaded_objects(self, object_keys: list[str]) -> None:
         """Delete already uploaded object when metadata commit fails."""
         for object_key in reversed(object_keys):
             await self.s3_service.delete(
-                bucket=self.config.workspace_s3.bucket,
+                bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                 key=object_key,
             )
 

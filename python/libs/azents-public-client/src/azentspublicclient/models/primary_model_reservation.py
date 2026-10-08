@@ -19,7 +19,7 @@ import json
 
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, ClassVar, Dict, Optional
 from typing_extensions import Annotated
 from azentspublicclient.models.model_candidate_identity import ModelCandidateIdentity
 from typing import Optional, Set
@@ -37,7 +37,6 @@ class PrimaryModelReservation(BaseModel):
     claim_token: Annotated[str, Field(min_length=1, strict=True)]
     created_at: datetime
     expires_at: datetime
-    additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["schema_version", "semantic_label", "candidate", "health_generation", "reservation_generation", "claim_token", "created_at", "expires_at"]
 
     @field_validator('schema_version')
@@ -80,10 +79,8 @@ class PrimaryModelReservation(BaseModel):
         * `None` is only added to the output dict for nullable fields that
           were set at model initialization. Other fields with value `None`
           are ignored.
-        * Fields in `self.additional_properties` are added to the output dict.
         """
         excluded_fields: Set[str] = set([
-            "additional_properties",
         ])
 
         _dict = self.model_dump(
@@ -94,11 +91,6 @@ class PrimaryModelReservation(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of candidate
         if self.candidate:
             _dict['candidate'] = self.candidate.to_dict()
-        # puts key-value pairs in additional_properties in the top level
-        if self.additional_properties is not None:
-            for _key, _value in self.additional_properties.items():
-                _dict[_key] = _value
-
         return _dict
 
     @classmethod
@@ -110,7 +102,9 @@ class PrimaryModelReservation(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "schema_version": obj.get("schema_version") if obj.get("schema_version") is not None else 1,
             "semantic_label": obj.get("semantic_label"),
             "candidate": ModelCandidateIdentity.from_dict(obj["candidate"]) if obj.get("candidate") is not None else None,
@@ -119,12 +113,8 @@ class PrimaryModelReservation(BaseModel):
             "claim_token": obj.get("claim_token"),
             "created_at": obj.get("created_at"),
             "expires_at": obj.get("expires_at")
+            }.items() if _key in obj
         })
-        # store additional fields in additional_properties
-        for _key in obj.keys():
-            if _key not in cls.__properties:
-                _obj.additional_properties[_key] = obj.get(_key)
-
         return _obj
 
 

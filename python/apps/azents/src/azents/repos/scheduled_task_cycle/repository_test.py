@@ -1,5 +1,6 @@
 """Scheduled Task cycle repository tests."""
 
+import dataclasses
 import datetime
 from typing import Any, Literal
 
@@ -13,6 +14,7 @@ from azents.core.enums import (
     ScheduledTaskScheduleType,
 )
 from azents.rdb.models.toolkit_state import RDBToolkitState
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.scheduled_task_cycle.data import (
     ScheduledTaskCycleRecord,
@@ -61,7 +63,7 @@ class _ToolkitStateRepository(ToolkitStateRepository):
 
     async def get(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         session_id: str,
@@ -84,7 +86,7 @@ class _ToolkitStateRepository(ToolkitStateRepository):
 
     async def save(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         state: ToolkitStateUpsert,
     ) -> ToolkitStateRecord:
         """Record one create-or-CAS save and return its next version."""
@@ -110,12 +112,22 @@ class _ToolkitStateRepository(ToolkitStateRepository):
         return self.record
 
 
-def _repository() -> tuple[ScheduledTaskCycleRepository, _ToolkitStateRepository]:
+@dataclasses.dataclass(frozen=True)
+class _RepositoryFixture:
+    """Cycle repository and its named recording state collaborator."""
+
+    repository: ScheduledTaskCycleRepository
+    state_repository: _ToolkitStateRepository
+
+
+def _repository() -> _RepositoryFixture:
     """Create the cycle repository with its recording state collaborator."""
     state_repository = _ToolkitStateRepository()
-    return (
-        ScheduledTaskCycleRepository(toolkit_state_repository=state_repository),
-        state_repository,
+    return _RepositoryFixture(
+        repository=ScheduledTaskCycleRepository(
+            toolkit_state_repository=state_repository
+        ),
+        state_repository=state_repository,
     )
 
 
@@ -214,9 +226,9 @@ class _QuerySession(AsyncSession):
         return self.result
 
 
-def _session() -> AsyncSession:
+def _session() -> WriteSession:
     """Return an unbound async session for collaborators that ignore it."""
-    return AsyncSession()
+    return ReadWriteSession(AsyncSession())
 
 
 def _sql(statement: sa.ClauseElement) -> str:
@@ -231,7 +243,9 @@ def _sql(statement: sa.ClauseElement) -> str:
 
 async def test_create_admitted_persists_complete_snapshot() -> None:
     """Create stores the immutable occurrence and admitted runtime defaults."""
-    repository, state_repository = _repository()
+    fixture = _repository()
+    repository = fixture.repository
+    state_repository = fixture.state_repository
 
     record = await repository.create_admitted(
         _session(),
@@ -258,7 +272,9 @@ async def test_create_admitted_persists_complete_snapshot() -> None:
 
 async def test_start_uses_exact_version_and_records_first_run() -> None:
     """Start performs one CAS transition from admitted to started."""
-    repository, state_repository = _repository()
+    fixture = _repository()
+    repository = fixture.repository
+    state_repository = fixture.state_repository
     admitted = await repository.create_admitted(
         _session(),
         _snapshot(),
@@ -283,7 +299,7 @@ async def test_start_uses_exact_version_and_records_first_run() -> None:
 
 async def test_bind_run_preserves_started_snapshot() -> None:
     """Continuation binding changes only the current Run identity."""
-    repository, _ = _repository()
+    repository = _repository().repository
     admitted = await repository.create_admitted(
         _session(),
         _snapshot(),
@@ -310,7 +326,9 @@ async def test_bind_run_preserves_started_snapshot() -> None:
 
 async def test_update_progress_advances_only_scheduled_tracker_revision() -> None:
     """Progress replacement uses the exact cycle version and independent revision."""
-    repository, state_repository = _repository()
+    fixture = _repository()
+    repository = fixture.repository
+    state_repository = fixture.state_repository
     admitted = await repository.create_admitted(
         _session(),
         _snapshot(),
@@ -338,7 +356,9 @@ async def test_update_progress_advances_only_scheduled_tracker_revision() -> Non
 
 async def test_tracker_claim_and_settlement_retry_cas_in_canonical_order() -> None:
     """Tracker effects remain cycle/revision fenced and ordinal ordered."""
-    repository, state_repository = _repository()
+    fixture = _repository()
+    repository = fixture.repository
+    state_repository = fixture.state_repository
     admitted = await repository.create_admitted(
         _session(),
         _snapshot(),
@@ -411,7 +431,9 @@ async def test_tracker_claim_and_settlement_retry_cas_in_canonical_order() -> No
 
 async def test_tracker_settlement_rejects_stale_desired_revision() -> None:
     """An old provider result cannot overwrite a newer Scheduled desired state."""
-    repository, state_repository = _repository()
+    fixture = _repository()
+    repository = fixture.repository
+    state_repository = fixture.state_repository
     admitted = await repository.create_admitted(
         _session(),
         _snapshot(),
@@ -466,7 +488,7 @@ def test_cycle_state_rejects_noncanonical_tracker_projection_parts() -> None:
 
 async def test_invalid_phase_transitions_are_rejected() -> None:
     """Start and continuation binding reject the opposite lifecycle phase."""
-    repository, _ = _repository()
+    repository = _repository().repository
     admitted = await repository.create_admitted(
         _session(),
         _snapshot(),
@@ -495,7 +517,7 @@ async def test_invalid_phase_transitions_are_rejected() -> None:
 
 async def test_get_started_filters_admitted_state() -> None:
     """Started lookup hides admitted or missing cycle state."""
-    repository, _ = _repository()
+    repository = _repository().repository
     admitted = await repository.create_admitted(
         _session(),
         _snapshot(),
@@ -587,7 +609,7 @@ async def test_list_started_filters_and_orders_current_cycle_rows() -> None:
     )
 
     records = await repository.list_started(
-        session,
+        ReadWriteSession(session),
         agent_id="a" * 32,
         session_id="s" * 32,
     )
@@ -620,7 +642,7 @@ async def test_delete_started_uses_exact_row_version_fence() -> None:
     )
 
     assert await repository.delete_started(
-        session,
+        ReadWriteSession(session),
         record=record,
     )
 

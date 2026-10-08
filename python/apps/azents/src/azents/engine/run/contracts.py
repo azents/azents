@@ -10,13 +10,13 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, NamedTuple, Protocol, TypeVar
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
+from azents.core.agent import SelectableModelCandidate
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelCapabilities
+from azents.core.mailbox_activity import MailboxActivityObserverProtocol
 from azents.core.model_execution_options import ModelExecutionOptionId
-from azents.core.model_operation import ModelOperationKind
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.core.tools import PublishEventFn, Toolkit
 from azents.engine.context.window import compute_effective_context_window_tokens
 from azents.engine.events.types import Event
@@ -30,7 +30,7 @@ from azents.engine.run.types import (
     CheckStop,
     PollMessages,
 )
-from azents.services.session_resource_authority import SessionResourceAuthority
+from azents.repos.model_operation_completion import ModelOperationCompletion
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,9 @@ class ToolkitBinding(NamedTuple):
     """Toolkit binding injected into Engine.
 
     :param toolkit: Toolkit instance
-    :param slug: Logging/toolkit_prompts label identifier; may be empty
+    :param slug: Effective namespace used for final registered tool names
+    :param base_slug: Persisted ToolkitConfig Slug; equal to slug for auto-bound
+        Toolkits
     :param use_prefix: When True, apply ``{slug}__`` prefix to tool names.
         Single-instance builtin toolkits use False;
         DB-registered MCP toolkits where the same user can connect multiple
@@ -64,6 +66,7 @@ class ToolkitBinding(NamedTuple):
 
     toolkit: Toolkit[Any]
     slug: str
+    base_slug: str
     use_prefix: bool
     toolkit_type: str | None = None
     toolkit_config_id: str | None = None
@@ -98,7 +101,10 @@ class RunRequest:
     compaction_provider_integration_id: str | None
     """Provider integration used by the compaction model, when configured."""
     model_assembly_metadata: ModelAssemblyMetadata | None
-    compaction_assembly_metadata: ModelAssemblyMetadata | None
+    compaction_candidate: SelectableModelCandidate
+    """Exact selected summary model and settings frozen for this request."""
+    top_k: int | None
+    """Exact Agent-local top-k intent, without an inferred provider default."""
     model_capabilities: ModelCapabilities = dataclasses.field(
         default_factory=ModelCapabilities,
     )
@@ -211,11 +217,9 @@ class RunContext:
     turn_action_bridge_boundary: TurnActionBridgeBoundary
     model_transport_state: ModelTransportState
     publish_event: PublishEventFn
+    model_operation_completion: ModelOperationCompletion | None
     resource_authority: SessionResourceAuthority | None = None
-    mailbox_activity_observer: object | None = None
-    complete_model_operation_in_session: (
-        Callable[[AsyncSession, ModelOperationKind], Awaitable[None]] | None
-    ) = None
+    mailbox_activity_observer: MailboxActivityObserverProtocol | None = None
     prepare_compaction_request: Callable[[RunRequest], Awaitable[RunRequest]] | None = (
         None
     )

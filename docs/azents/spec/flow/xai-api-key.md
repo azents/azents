@@ -6,6 +6,12 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, workspace, model-catalog]
 code_paths:
+  - python/apps/azents/src/azents/core/route_capability_constraints.py
+  - python/apps/azents/src/azents/core/active_model_capabilities.py
+  - python/apps/azents/src/azents/core/model_provider_declarations.py
+  - python/apps/azents/src/azents/engine/events/effective_model_request.py
+  - python/apps/azents/src/azents/repos/engine_resolve.py
+  - python/apps/azents/src/azents/repos/llm_catalog_operations.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/core/credentials.py
   - python/apps/azents/src/azents/core/enums.py
@@ -25,8 +31,8 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/resolve.py
   - typescript/apps/azents-web/src/features/llm-settings/**
   - testenv/azents/e2e/src/tests/required/public/test_llm_provider_integration.py
-last_verified_at: 2026-09-30
-spec_version: 5
+last_verified_at: 2026-10-04
+spec_version: 7
 ---
 
 # xAI API Key Provider Flow
@@ -69,21 +75,37 @@ The consolidated PostgreSQL baseline includes the `xai` value in the `llm_provid
 
 Each `xai` integration has its own stored integration catalog. Enabled creation, API-key replacement, re-enable, stale picker reads, and explicit sync use the shared integration-catalog lifecycle. Synchronization calls xAI's configured developer model endpoint through the installed OpenAI-compatible SDK using that integration's decrypted key.
 
-xAI's response is authoritative for model existence. An exact or expanded-alias retained-source
-`xai/<model>` entry may fill capabilities and bounded pricing metadata omitted by xAI, but a
-missing entry never hides the model. Unknown capabilities remain disabled. Picker reads use only
-the stored integration snapshot and do not call xAI. Runtime uses the same exact raw provider ID;
+xAI's response is authoritative for model existence. An exact current source-model
+`xai/<model>` entry may fill capabilities omitted by xAI and provide normalized pricing, but a
+missing entry never hides the model. Final schema-3 boolean/list fields express
+support after exact listing/source declarations and reviewed route bounds are
+compiled. Source absence stays diagnostic rather than a final unknown state.
+Picker reads use only current stored integration entries and latest sync state and do not call xAI. Runtime uses the same exact raw provider ID;
 `xai/` belongs only to the metadata source's lookup vocabulary.
+
+The exact `grok-4.7` identity has a reviewed hosted web-search supplement on the
+xAI API inference route. An omitted discovery flag does not suppress that web
+contract. Own-provider null with matching-source false still denies web search
+without rewriting the null declaration; explicit own false denies it, while own
+true retains support over matching generic false. This web supplement and its
+guard do not apply to other model IDs or other feature fields.
+
+Selection copies its exact-scope normalized available or unavailable price definition.
+Each physical call captures the saved candidate and aware call time without a pricing DB
+read, complete source restoration, or native/OAuth cross-host borrowing.
 
 ## Runtime Resolution and Request Lowering
 
-Run resolution maps an xAI API-key integration to:
+Run resolution supplies the decrypted API key and configured xAI endpoint to the
+official OpenAI-compatible SDK and public Pydantic Responses model. The model ID
+remains the exact configured provider ID; the source's `xai/` prefix is metadata
+addressing rather than an execution-library model prefix.
 
-- `api_key=<decrypted API key>`;
-- `custom_llm_provider="xai"`;
-- `base_url="https://api.x.ai/v1"`;
-- `api_base="https://api.x.ai/v1"`;
-- runtime model identifier prefixed with `xai/`.
+Active same-identity reads and NEW operations compile current authorized LOCAL
+metadata. Existing operations retain captured capability/condition snapshots.
+Request admission evaluates final support against the actual encoded scalar,
+reasoning, tools and output envelope. The canonical seven-level effort domain
+excludes raw provider `ultra` declarations without remapping them.
 
 API-key integrations never enter the OAuth token refresh path. Refresh and entitlement-state transitions remain exclusive to `provider=xai_oauth`.
 
@@ -126,6 +148,7 @@ of common model assembly; SDK/model recovery cannot issue a hidden second genera
 
 | Date | Version | Change | Rationale |
 |---|---:|---|---|
+| 2026-10-03 | 6 | Adopted current catalog/latest sync state and exact saved pricing | Preserve API-key discovery and separate native/OAuth source namespaces |
 | 2026-09-30 | 5 | Documented public Pydantic AI/official SDK HTTP Responses execution with raw model IDs | Preserve developer API-key identity and account discovery while removing executable package routing |
 | 2026-08-18 | 4 | Moved API-key model visibility to credential-specific integration catalogs with provider-authoritative discovery | [xai-260818/ADR](../../adr/xai-260818-integration-model-discovery.md) |
 | 2026-07-18 | 3 | Routed unclassified provider outcomes to internal-error handling without provider retry state | Preserve actionable incident tracebacks instead of generic unknown-provider logs |

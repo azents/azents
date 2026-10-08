@@ -7,7 +7,6 @@ import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from pydantic import TypeAdapter
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentRunParentResultDeliveryState,
@@ -18,6 +17,7 @@ from azents.core.enums import (
     EventKind,
     SessionAgentKind,
 )
+from azents.core.json_value import JSONValue
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.model_operation import ModelOperationState
@@ -39,9 +39,10 @@ from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_run_input_event import RDBAgentRunInputEvent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.agent_session_unread_run import RDBAgentSessionUnreadRun
-from azents.rdb.models.event import JSONValue, RDBEvent
+from azents.rdb.models.conversation import RDBConversation
+from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.session_agent import RDBSessionAgent
-from azents.repos.agent_session import AgentSessionRepository
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import (
     AgentRunCreate,
@@ -123,7 +124,7 @@ class EventTranscriptRepository:
 
     async def append(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: EventCreate,
     ) -> Event:
         """Append event.
@@ -151,8 +152,8 @@ class EventTranscriptRepository:
             native_format=create.native_format,
             schema_version=create.schema_version,
         )
-        session.add(rdb)
-        await session.flush()
+        session.write_session.add(rdb)
+        await session.write_session.flush()
         event = self._build(rdb)
         await self.advance_session_projections(
             session,
@@ -163,7 +164,7 @@ class EventTranscriptRepository:
 
     async def append_with_deferred_session_projections(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: EventCreate,
     ) -> Event:
         """Append an idempotent event while deferring Session projections."""
@@ -177,7 +178,7 @@ class EventTranscriptRepository:
 
     async def _append_with_external_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: EventCreate,
         *,
         update_session_projections: bool,
@@ -209,10 +210,10 @@ class EventTranscriptRepository:
             )
             .returning(RDBEvent)
         )
-        result = await session.execute(stmt)
+        result = await session.write_session.execute(stmt)
         inserted = result.scalar_one_or_none()
         if inserted is not None:
-            await session.flush()
+            await session.write_session.flush()
             event = self._build(inserted)
             if update_session_projections:
                 await self.advance_session_projections(
@@ -233,32 +234,32 @@ class EventTranscriptRepository:
 
     async def advance_session_last_user_input_at(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         created_at: datetime.datetime,
     ) -> None:
         """Advance the Session user-input projection monotonically."""
-        if not await AgentSessionRepository().lock_agent_parent_for_session(
-            session,
-            session_id,
-        ):
-            return
-        await session.execute(
-            sa.update(RDBAgentSession)
-            .where(RDBAgentSession.id == session_id)
+        await session.write_session.execute(
+            sa.update(RDBConversation)
+            .where(RDBConversation.session_id == session_id)
             .values(
                 last_user_input_at=sa.func.greatest(
-                    RDBAgentSession.last_user_input_at,
+                    RDBConversation.last_user_input_at,
                     created_at,
                 )
             )
         )
-        await session.flush()
+        await session.write_session.execute(
+            sa.update(RDBAgentSession)
+            .where(RDBAgentSession.id == session_id)
+            .values(updated_at=sa.func.now())
+        )
+        await session.write_session.flush()
 
     async def advance_session_projections(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         events: Sequence[Event],
@@ -284,34 +285,37 @@ class EventTranscriptRepository:
             ),
             default=None,
         )
-        values: dict[str, object] = {}
         if latest_user_input_at is not None:
-            values["last_user_input_at"] = sa.func.greatest(
-                RDBAgentSession.last_user_input_at,
-                latest_user_input_at,
+            await session.write_session.execute(
+                sa.update(RDBConversation)
+                .where(RDBConversation.session_id == session_id)
+                .values(
+                    last_user_input_at=sa.func.greatest(
+                        RDBConversation.last_user_input_at, latest_user_input_at
+                    )
+                )
             )
         if latest_activity_at is not None:
-            values["last_activity_at"] = sa.func.greatest(
-                RDBAgentSession.last_activity_at,
-                latest_activity_at,
+            await session.write_session.execute(
+                sa.update(RDBAgentSession)
+                .where(RDBAgentSession.id == session_id)
+                .values(
+                    last_activity_at=sa.func.greatest(
+                        RDBAgentSession.last_activity_at, latest_activity_at
+                    )
+                )
             )
-        if not values:
-            return
-        if not await AgentSessionRepository().lock_agent_parent_for_session(
-            session,
-            session_id,
-        ):
-            return
-        await session.execute(
-            sa.update(RDBAgentSession)
-            .where(RDBAgentSession.id == session_id)
-            .values(**values)
-        )
-        await session.flush()
+        elif latest_user_input_at is not None:
+            await session.write_session.execute(
+                sa.update(RDBAgentSession)
+                .where(RDBAgentSession.id == session_id)
+                .values(updated_at=sa.func.now())
+            )
+        await session.write_session.flush()
 
     async def list_for_model_input(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
         *,
         head_event_id: str | None = None,
@@ -332,12 +336,12 @@ class EventTranscriptRepository:
                 .scalar_subquery()
             )
             stmt = stmt.where(RDBEvent.id >= head_id)
-        result = await session.execute(stmt)
+        result = await session.read_session.execute(stmt)
         return [self._build(rdb) for rdb in result.scalars()]
 
     async def list_model_file_gc_range(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
         *,
         after_event_id: str | None,
@@ -352,7 +356,7 @@ class EventTranscriptRepository:
         ]
         if after_event_id is not None:
             predicates.append(RDBEvent.id > after_event_id)
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBEvent)
             .where(*predicates)
             .order_by(RDBEvent.id.asc())
@@ -362,7 +366,7 @@ class EventTranscriptRepository:
 
     async def list_recent_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
         *,
         limit: int,
@@ -377,7 +381,7 @@ class EventTranscriptRepository:
             .limit(bounded_limit)
             .subquery()
         )
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBEvent)
             .where(RDBEvent.id.in_(sa.select(subquery.c.id)))
             .order_by(RDBEvent.id.asc())
@@ -386,24 +390,24 @@ class EventTranscriptRepository:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         event_id: str,
     ) -> Event | None:
         """Fetch one event by ID."""
-        rdb = await session.get(RDBEvent, event_id)
+        rdb = await session.read_session.get(RDBEvent, event_id)
         if rdb is None:
             return None
         return self._build(rdb)
 
     async def exists_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
         event_id: str,
     ) -> bool:
         """Check whether Event exists in that session transcript."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBEvent.id).where(
                 RDBEvent.session_id == session_id,
                 RDBEvent.id == event_id,
@@ -413,13 +417,13 @@ class EventTranscriptRepository:
 
     async def has_action_execution_result_with_type(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         action_type: str,
     ) -> bool:
         """Return whether a terminal action result has the requested type."""
-        result = await session.scalar(
+        result = await session.read_session.scalar(
             sa.select(
                 sa.exists().where(
                     RDBEvent.session_id == session_id,
@@ -436,12 +440,12 @@ class EventTranscriptRepository:
 
     async def get_by_external_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
         external_id: str,
     ) -> Event | None:
         """Fetch event by dedup key."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBEvent).where(
                 RDBEvent.session_id == session_id,
                 RDBEvent.external_id == external_id,
@@ -454,18 +458,18 @@ class EventTranscriptRepository:
 
     async def update_payload(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         event_id: str,
         payload: EventPayload,
     ) -> Event:
         """Update Event payload within same kind shape."""
-        rdb = await session.get(RDBEvent, event_id)
+        rdb = await session.write_session.get(RDBEvent, event_id)
         if rdb is None:
             raise ValueError("Event not found")
         validated = _validate_payload(rdb.kind, _serialize_payload(payload))
         rdb.payload = _serialize_payload(validated)
-        await session.flush()
-        await session.refresh(rdb)
+        await session.write_session.flush()
+        await session.write_session.refresh(rdb)
         return self._build(rdb)
 
     def _build(self, rdb: RDBEvent) -> Event:
@@ -491,14 +495,14 @@ class AgentRunRepository:
 
     async def create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: AgentRunCreate,
         *,
-        terminal_finalization: Callable[[AsyncSession, list[str]], Awaitable[object]]
+        terminal_finalization: Callable[[WriteSession, list[str]], Awaitable[object]]
         | None = None,
     ) -> AgentRunState:
         """Create Agent run row and finalize replaced runs when requested."""
-        existing_running = await session.scalar(
+        existing_running = await session.write_session.scalar(
             sa.select(RDBAgentRun.id)
             .where(
                 RDBAgentRun.session_id == create.session_id,
@@ -532,7 +536,7 @@ class AgentRunRepository:
                 )
         run_index = create.run_index
         if run_index is None:
-            max_run_index = await session.scalar(
+            max_run_index = await session.write_session.scalar(
                 sa.select(sa.func.max(RDBAgentRun.run_index)).where(
                     RDBAgentRun.session_id == create.session_id
                 )
@@ -556,8 +560,8 @@ class AgentRunRepository:
             rdb.id = create.id
         if create.status == AgentRunStatus.RUNNING:
             rdb.started_at = datetime.datetime.now(datetime.UTC)
-        session.add(rdb)
-        await session.flush()
+        session.write_session.add(rdb)
+        await session.write_session.flush()
         if create.status == AgentRunStatus.RUNNING:
             await self._clear_pending_idle_continuation(
                 session,
@@ -567,14 +571,14 @@ class AgentRunRepository:
 
     async def create_pending(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         parent_agent_run_id: str | None,
         scheduled_task_cycle_id: str | None,
     ) -> AgentRunState:
         """Create a model-independent pending run without cancelling an active run."""
-        locked_session_id = await session.scalar(
+        locked_session_id = await session.write_session.scalar(
             sa.select(RDBAgentSession.id)
             .where(RDBAgentSession.id == session_id)
             .with_for_update()
@@ -593,18 +597,18 @@ class AgentRunRepository:
             phase=AgentRunPhase.IDLE,
             status=AgentRunStatus.PENDING,
         )
-        session.add(rdb)
-        await session.flush()
+        session.write_session.add(rdb)
+        await session.write_session.flush()
         return self._build(rdb)
 
     async def get_pending_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
     ) -> AgentRunState | None:
         """Fetch the session's pending run when present."""
-        rdb = await session.scalar(
+        rdb = await session.read_session.scalar(
             sa.select(RDBAgentRun)
             .where(
                 RDBAgentRun.session_id == session_id,
@@ -619,12 +623,12 @@ class AgentRunRepository:
 
     async def claim_pending_by_session_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
     ) -> AgentRunState | None:
         """Lock and return the session's pending run for one worker."""
-        rdb = await session.scalar(
+        rdb = await session.write_session.scalar(
             sa.select(RDBAgentRun)
             .where(
                 RDBAgentRun.session_id == session_id,
@@ -640,7 +644,7 @@ class AgentRunRepository:
 
     async def activate_pending(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         run_id: str,
         activated_at: datetime.datetime,
@@ -649,7 +653,7 @@ class AgentRunRepository:
         requested_enabled_execution_options: list[ModelExecutionOptionId],
     ) -> AgentRunState:
         """Persist its selected profile and activate one pending run."""
-        rdb = await session.scalar(
+        rdb = await session.write_session.scalar(
             sa.select(RDBAgentRun)
             .where(
                 RDBAgentRun.id == run_id,
@@ -670,28 +674,28 @@ class AgentRunRepository:
         ]
         rdb.status = AgentRunStatus.RUNNING
         rdb.started_at = activated_at
-        await session.flush()
+        await session.write_session.flush()
         await self._clear_pending_idle_continuation(
             session,
             session_id=rdb.session_id,
         )
-        await session.refresh(rdb)
+        await session.write_session.refresh(rdb)
         return self._build(rdb)
 
     async def copy_requested_inference_profile(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         source_run_id: str,
         target_run_id: str,
     ) -> AgentRunState:
         """Copy the original requested profile to a retry pending run."""
-        source = await session.scalar(
+        source = await session.write_session.scalar(
             sa.select(RDBAgentRun)
             .where(RDBAgentRun.id == source_run_id)
             .with_for_update()
         )
-        target = await session.scalar(
+        target = await session.write_session.scalar(
             sa.select(RDBAgentRun)
             .where(RDBAgentRun.id == target_run_id)
             .with_for_update()
@@ -705,13 +709,13 @@ class AgentRunRepository:
         target.requested_enabled_execution_options = (
             source.requested_enabled_execution_options
         )
-        await session.flush()
-        await session.refresh(target)
+        await session.write_session.flush()
+        await session.write_session.refresh(target)
         return self._build(target)
 
     async def associate_input_events(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         run_id: str,
         event_ids: Sequence[str],
@@ -719,7 +723,7 @@ class AgentRunRepository:
         """Associate ordered input events with one run idempotently."""
         if not event_ids:
             return
-        run_session_id = await session.scalar(
+        run_session_id = await session.write_session.scalar(
             sa.select(RDBAgentRun.session_id)
             .where(RDBAgentRun.id == run_id)
             .with_for_update()
@@ -728,7 +732,7 @@ class AgentRunRepository:
             raise ValueError("AgentRun not found")
         existing_ids = set(
             (
-                await session.execute(
+                await session.write_session.execute(
                     sa.select(RDBAgentRunInputEvent.event_id).where(
                         RDBAgentRunInputEvent.agent_run_id == run_id
                     )
@@ -743,7 +747,7 @@ class AgentRunRepository:
         if not new_event_ids:
             return
         event_rows = (
-            await session.execute(
+            await session.write_session.execute(
                 sa.select(RDBEvent.id, RDBEvent.session_id).where(
                     RDBEvent.id.in_(new_event_ids)
                 )
@@ -753,13 +757,13 @@ class AgentRunRepository:
             event_session_id != run_session_id for _, event_session_id in event_rows
         ):
             raise ValueError("Input events must belong to the AgentRun session")
-        max_input_order = await session.scalar(
+        max_input_order = await session.write_session.scalar(
             sa.select(sa.func.max(RDBAgentRunInputEvent.input_order)).where(
                 RDBAgentRunInputEvent.agent_run_id == run_id
             )
         )
         first_order = (max_input_order if max_input_order is not None else -1) + 1
-        await session.execute(
+        await session.write_session.execute(
             insert(RDBAgentRunInputEvent).values(
                 [
                     {
@@ -771,16 +775,16 @@ class AgentRunRepository:
                 ]
             )
         )
-        await session.flush()
+        await session.write_session.flush()
 
     async def list_input_event_ids(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         run_id: str,
     ) -> list[str]:
         """List a run's associated input events in stable order."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgentRunInputEvent.event_id)
             .where(RDBAgentRunInputEvent.agent_run_id == run_id)
             .order_by(RDBAgentRunInputEvent.input_order.asc())
@@ -789,12 +793,12 @@ class AgentRunRepository:
 
     async def list_by_input_event_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         event_id: str,
     ) -> list[AgentRunState]:
         """List runs associated with one input event in run order."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgentRun)
             .join(
                 RDBAgentRunInputEvent,
@@ -807,7 +811,7 @@ class AgentRunRepository:
 
     async def mark_session_running_terminal(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         status: AgentRunStatus,
@@ -816,7 +820,7 @@ class AgentRunRepository:
         """Close remaining running Run projections and return every transition."""
         if status not in _TERMINAL_RUN_STATUSES:
             raise ValueError("AgentRun terminal status is required")
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBAgentRun)
             .where(
                 RDBAgentRun.session_id == session_id,
@@ -837,20 +841,20 @@ class AgentRunRepository:
             )
             await self._upsert_unread_terminal_run(session, rdb)
             transitioned_rdbs.append(rdb)
-        await session.flush()
+        await session.write_session.flush()
         for rdb in transitioned_rdbs:
-            await session.refresh(rdb)
+            await session.write_session.refresh(rdb)
         transitioned_runs = [self._build(rdb) for rdb in transitioned_rdbs]
         return transitioned_runs
 
     async def next_run_index(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
     ) -> int:
         """Return next run_index for session."""
-        max_run_index = await session.scalar(
+        max_run_index = await session.read_session.scalar(
             sa.select(sa.func.max(RDBAgentRun.run_index)).where(
                 RDBAgentRun.session_id == session_id
             )
@@ -859,24 +863,24 @@ class AgentRunRepository:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
     ) -> AgentRunState | None:
         """Fetch agent run by ID."""
-        rdb = await session.get(RDBAgentRun, run_id)
+        rdb = await session.read_session.get(RDBAgentRun, run_id)
         if rdb is None:
             return None
         return self._build(rdb)
 
     async def get_failed_by_terminal_result_event_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         terminal_result_event_id: str,
     ) -> AgentRunState | None:
         """Fetch the failed run finalized by a specific session event."""
-        rdb = await session.scalar(
+        rdb = await session.read_session.scalar(
             sa.select(RDBAgentRun)
             .where(
                 RDBAgentRun.session_id == session_id,
@@ -892,14 +896,14 @@ class AgentRunRepository:
 
     async def list_latest_by_session_ids(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_ids: Sequence[str],
     ) -> dict[str, AgentRunState]:
         """Fetch the latest run for each session ID."""
         latest: dict[str, AgentRunState] = {}
         for session_id in dict.fromkeys(session_ids):
-            rdb = await session.scalar(
+            rdb = await session.read_session.scalar(
                 sa.select(RDBAgentRun)
                 .where(RDBAgentRun.session_id == session_id)
                 .order_by(RDBAgentRun.run_index.desc())
@@ -911,12 +915,12 @@ class AgentRunRepository:
 
     async def get_active_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
     ) -> AgentRunState | None:
         """Fetch the newest pending or running run for a session."""
-        rdb = await session.scalar(
+        rdb = await session.read_session.scalar(
             sa.select(RDBAgentRun)
             .where(
                 RDBAgentRun.session_id == session_id,
@@ -933,25 +937,25 @@ class AgentRunRepository:
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         run_id: str,
     ) -> AgentRunState | None:
         """Fetch one AgentRun with a row lock."""
-        rdb = await session.scalar(
+        rdb = await session.write_session.scalar(
             sa.select(RDBAgentRun).where(RDBAgentRun.id == run_id).with_for_update()
         )
         return self._build(rdb) if rdb is not None else None
 
     async def has_active_for_session_ids(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_ids: Sequence[str],
     ) -> bool:
         """Return whether any session has a pending or running AgentRun."""
         if not session_ids:
             return False
-        run_id = await session.scalar(
+        run_id = await session.read_session.scalar(
             sa.select(RDBAgentRun.id)
             .where(
                 RDBAgentRun.session_id.in_(session_ids),
@@ -965,12 +969,12 @@ class AgentRunRepository:
 
     async def list_parent_result_delivery_candidate_ids_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
     ) -> list[str]:
         """List eligible terminal subagent Runs in source Run order."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgentRun.id)
             .join(
                 RDBSessionAgent,
@@ -996,14 +1000,14 @@ class AgentRunRepository:
 
     async def mark_parent_result_enqueued(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         run_id: str,
         mailbox_item_id: str,
         enqueued_at: datetime.datetime,
     ) -> AgentRunState:
         """Finalize a locked Run's parent mailbox delivery marker."""
-        rdb = await session.get(RDBAgentRun, run_id)
+        rdb = await session.write_session.get(RDBAgentRun, run_id)
         if rdb is None:
             raise ValueError("AgentRun not found")
         if rdb.parent_result_delivery_state is not None:
@@ -1019,19 +1023,19 @@ class AgentRunRepository:
         rdb.parent_result_delivery_state = AgentRunParentResultDeliveryState.ENQUEUED
         rdb.parent_result_mailbox_item_id = mailbox_item_id
         rdb.parent_result_enqueued_at = enqueued_at
-        await session.flush()
-        await session.refresh(rdb)
+        await session.write_session.flush()
+        await session.write_session.refresh(rdb)
         return self._build(rdb)
 
     async def mark_parent_result_suppressed(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         run_id: str,
         finalized_at: datetime.datetime,
     ) -> AgentRunState:
         """Finalize an ineligible terminal Run without a parent mailbox item."""
-        rdb = await session.get(RDBAgentRun, run_id)
+        rdb = await session.write_session.get(RDBAgentRun, run_id)
         if rdb is None:
             raise ValueError("AgentRun not found")
         if rdb.parent_result_delivery_state is not None:
@@ -1040,18 +1044,18 @@ class AgentRunRepository:
             raise ValueError("AgentRun is not terminal")
         rdb.parent_result_delivery_state = AgentRunParentResultDeliveryState.SUPPRESSED
         rdb.parent_result_enqueued_at = finalized_at
-        await session.flush()
-        await session.refresh(rdb)
+        await session.write_session.flush()
+        await session.write_session.refresh(rdb)
         return self._build(rdb)
 
     async def get_running_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
     ) -> AgentRunState | None:
         """Fetch currently running run for session."""
-        rdb = await session.scalar(
+        rdb = await session.read_session.scalar(
             sa.select(RDBAgentRun)
             .where(
                 RDBAgentRun.session_id == session_id,
@@ -1066,14 +1070,14 @@ class AgentRunRepository:
 
     async def set_vfs_projection_if_unset(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         run_id: str,
         session_id: str,
         projection: VfsProjection,
     ) -> VfsProjection:
         """Atomically persist one immutable run VFS projection."""
-        rdb = await session.scalar(
+        rdb = await session.write_session.scalar(
             sa.select(RDBAgentRun).where(RDBAgentRun.id == run_id).with_for_update()
         )
         if rdb is None or rdb.session_id != session_id:
@@ -1082,47 +1086,47 @@ class AgentRunRepository:
             rdb.vfs_projection = _JSON_OBJECT_ADAPTER.validate_python(
                 projection.model_dump(mode="json")
             )
-            await session.flush()
+            await session.write_session.flush()
         return VfsProjection.model_validate(rdb.vfs_projection)
 
     async def update(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         run_id: str,
         patch: AgentRunPatch,
     ) -> AgentRunState:
         """Update Agent run state."""
-        rdb = await session.get(RDBAgentRun, run_id)
+        rdb = await session.write_session.get(RDBAgentRun, run_id)
         if rdb is None:
             raise ValueError("Agent run not found")
 
-        values = patch.model_dump(exclude_unset=True)
-        if "active_tool_calls" in values:
+        values = dict(patch)
+        if "active_tool_calls" in patch:
             values["active_tool_calls"] = [
                 call.model_dump(mode="json", exclude_none=True)
-                for call in patch.active_tool_calls or []
+                for call in patch["active_tool_calls"] or []
             ]
-        if "retry_state" in values:
+        if "retry_state" in patch:
             values["retry_state"] = (
-                patch.retry_state.model_dump(mode="json", exclude_none=True)
-                if patch.retry_state is not None
+                patch["retry_state"].model_dump(mode="json", exclude_none=True)
+                if patch["retry_state"] is not None
                 else None
             )
-        if "model_operation_state" in values:
+        if "model_operation_state" in patch:
             values["model_operation_state"] = _serialize_model_operation_state(
-                patch.model_operation_state
+                patch["model_operation_state"]
             )
         if values:
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBAgentRun).where(RDBAgentRun.id == run_id).values(**values)
             )
-        await session.flush()
-        await session.refresh(rdb)
+        await session.write_session.flush()
+        await session.write_session.refresh(rdb)
         return self._build(rdb)
 
     async def update_phase(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         run_id: str,
         phase: AgentRunPhase,
         *,
@@ -1154,7 +1158,7 @@ class AgentRunRepository:
 
     async def update_retry_state(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         run_id: str,
         retry_state: FailedRunRetryState | None,
     ) -> AgentRunState:
@@ -1170,7 +1174,7 @@ class AgentRunRepository:
 
     async def mark_terminal(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         run_id: str,
         status: AgentRunStatus,
         *,
@@ -1182,7 +1186,7 @@ class AgentRunRepository:
         """Transition a nonterminal Run and atomically record unread state."""
         if status not in _TERMINAL_RUN_STATUSES:
             raise ValueError("AgentRun terminal status is required")
-        rdb = await session.scalar(
+        rdb = await session.write_session.scalar(
             sa.select(RDBAgentRun).where(RDBAgentRun.id == run_id).with_for_update()
         )
         if rdb is None:
@@ -1197,16 +1201,16 @@ class AgentRunRepository:
             terminal_result_event_id=terminal_result_event_id,
             terminal_result_message=terminal_result_message,
         )
-        await session.flush()
+        await session.write_session.flush()
         if status == AgentRunStatus.COMPLETED:
             await self._record_pending_idle_continuation(session, rdb)
         await self._upsert_unread_terminal_run(session, rdb)
-        await session.refresh(rdb)
+        await session.write_session.refresh(rdb)
         return self._build(rdb)
 
     async def mark_terminal_if_running(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         run_id: str,
         status: AgentRunStatus,
         *,
@@ -1218,7 +1222,7 @@ class AgentRunRepository:
         """Close a running Run and atomically record unread state."""
         if status not in _TERMINAL_RUN_STATUSES:
             raise ValueError("AgentRun terminal status is required")
-        rdb = await session.scalar(
+        rdb = await session.write_session.scalar(
             sa.select(RDBAgentRun).where(RDBAgentRun.id == run_id).with_for_update()
         )
         if rdb is None:
@@ -1233,22 +1237,22 @@ class AgentRunRepository:
             terminal_result_event_id=terminal_result_event_id,
             terminal_result_message=terminal_result_message,
         )
-        await session.flush()
+        await session.write_session.flush()
         if status == AgentRunStatus.COMPLETED:
             await self._record_pending_idle_continuation(session, rdb)
         await self._upsert_unread_terminal_run(session, rdb)
-        await session.refresh(rdb)
+        await session.write_session.refresh(rdb)
         return self._build(rdb)
 
     async def mark_stopped_for_user_stop(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         run_id: str,
         *,
         ended_at: datetime.datetime,
     ) -> AgentRunState | None:
         """Converge a running or engine-interrupted Run to User Stop."""
-        rdb = await session.scalar(
+        rdb = await session.write_session.scalar(
             sa.select(RDBAgentRun).where(RDBAgentRun.id == run_id).with_for_update()
         )
         if rdb is None:
@@ -1266,20 +1270,20 @@ class AgentRunRepository:
             terminal_result_event_id=None,
             terminal_result_message=None,
         )
-        await session.flush()
+        await session.write_session.flush()
         await self._upsert_unread_terminal_run(session, rdb)
-        await session.refresh(rdb)
+        await session.write_session.refresh(rdb)
         return self._build(rdb)
 
     async def acknowledge_unread_terminal_run(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         run_id: str,
     ) -> AgentRunState | None:
         """Acknowledge a terminal Run through its observed session Run index."""
-        rdb = await session.scalar(
+        rdb = await session.write_session.scalar(
             sa.select(RDBAgentRun).where(
                 RDBAgentRun.id == run_id,
                 RDBAgentRun.session_id == session_id,
@@ -1289,37 +1293,37 @@ class AgentRunRepository:
             return None
         if rdb.status not in _TERMINAL_RUN_STATUSES:
             return self._build(rdb)
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBAgentSessionUnreadRun).where(
                 RDBAgentSessionUnreadRun.session_id == session_id,
                 RDBAgentSessionUnreadRun.run_index <= rdb.run_index,
             )
         )
-        await session.flush()
+        await session.write_session.flush()
         return self._build(rdb)
 
     async def _clear_pending_idle_continuation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
     ) -> None:
         """Discard an older idle boundary when new Run work starts."""
-        await session.execute(
-            sa.update(RDBAgentSession)
-            .where(RDBAgentSession.id == session_id)
+        await session.write_session.execute(
+            sa.update(RDBConversation)
+            .where(RDBConversation.session_id == session_id)
             .values(pending_idle_continuation_run_id=None)
         )
-        await session.flush()
+        await session.write_session.flush()
 
     async def _lock_session_for_run_activation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
     ) -> None:
         """Serialize Run activation with pending idle-boundary consumption."""
-        locked_session_id = await session.scalar(
+        locked_session_id = await session.write_session.scalar(
             sa.select(RDBAgentSession.id)
             .where(RDBAgentSession.id == session_id)
             .with_for_update()
@@ -1329,16 +1333,16 @@ class AgentRunRepository:
 
     async def _record_pending_idle_continuation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         run: RDBAgentRun,
     ) -> None:
         """Record the completed Run that must close the next idle boundary."""
-        await session.execute(
-            sa.update(RDBAgentSession)
-            .where(RDBAgentSession.id == run.session_id)
+        await session.write_session.execute(
+            sa.update(RDBConversation)
+            .where(RDBConversation.session_id == run.session_id)
             .values(pending_idle_continuation_run_id=run.id)
         )
-        await session.flush()
+        await session.write_session.flush()
 
     @staticmethod
     def _apply_terminal_values(
@@ -1364,14 +1368,16 @@ class AgentRunRepository:
 
     async def _upsert_unread_terminal_run(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run: RDBAgentRun,
     ) -> None:
         """Record the latest unread boundary for an eligible root Session."""
-        eligible_session_id = await session.scalar(
-            sa.select(RDBAgentSession.id).where(
+        eligible_session_id = await session.read_session.scalar(
+            sa.select(RDBAgentSession.id)
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
+            .where(
                 RDBAgentSession.id == run.session_id,
-                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBConversation.session_kind == AgentSessionKind.ROOT,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
             )
         )
@@ -1391,7 +1397,7 @@ class AgentRunRepository:
             },
             where=(RDBAgentSessionUnreadRun.run_index < insert_stmt.excluded.run_index),
         )
-        await session.execute(stmt)
+        await session.read_session.execute(stmt)
 
     def _build(self, rdb: RDBAgentRun) -> AgentRunState:
         """Convert RDB row to domain model."""

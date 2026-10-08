@@ -1,17 +1,18 @@
 """Memory repository."""
 
+from collections.abc import Sequence
 from typing import List
 
 import sqlalchemy as sa
 from sqlalchemy.engine import CursorResult
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.memory_scope import MemoryScope
 from azents.rdb.models.memory import RDBAgentMemory
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import (
     Memory,
     MemoryCreate,
-    MemoryScope,
     MemorySearchMatch,
     MemorySummary,
     MemoryUpdate,
@@ -72,7 +73,7 @@ class MemoryRepository:
 
     async def create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         user_id: str | None,
@@ -95,13 +96,13 @@ class MemoryRepository:
             description=create.description,
             content=create.content,
         )
-        session.add(rdb)
-        await session.flush()
+        session.write_session.add(rdb)
+        await session.write_session.flush()
         return self._build(rdb)
 
     async def upsert(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         user_id: str | None,
@@ -127,7 +128,7 @@ class MemoryRepository:
         else:
             stmt = stmt.where(RDBAgentMemory.user_id == user_id)
 
-        result = await session.execute(stmt)
+        result = await session.write_session.execute(stmt)
         existing = result.scalar_one_or_none()
 
         if existing is not None:
@@ -136,8 +137,8 @@ class MemoryRepository:
             existing.content = create.content
             existing.type = create.type
             existing.scope = create.scope.value
-            await session.flush()
-            await session.refresh(existing)
+            await session.write_session.flush()
+            await session.write_session.refresh(existing)
             return self._build(existing)
 
         # INSERT
@@ -151,13 +152,13 @@ class MemoryRepository:
             description=create.description,
             content=create.content,
         )
-        session.add(rdb)
-        await session.flush()
+        session.write_session.add(rdb)
+        await session.write_session.flush()
         return self._build(rdb)
 
     async def get_by_name(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         user_id: str | None,
@@ -180,7 +181,7 @@ class MemoryRepository:
         else:
             stmt = stmt.where(RDBAgentMemory.user_id == user_id)
 
-        result = await session.execute(stmt)
+        result = await session.read_session.execute(stmt)
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
@@ -188,7 +189,7 @@ class MemoryRepository:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         memory_id: str,
     ) -> Memory | None:
         """Fetch memory by ID.
@@ -197,14 +198,34 @@ class MemoryRepository:
         :param memory_id: Memory ID
         :return: Memory or None
         """
-        rdb = await session.get(RDBAgentMemory, memory_id)
+        rdb = await session.read_session.get(RDBAgentMemory, memory_id)
         if rdb is None:
             return None
         return self._build(rdb)
 
+    async def list_by_ids(
+        self,
+        session: ReadSession,
+        *,
+        agent_id: str,
+        memory_ids: Sequence[str],
+    ) -> List[Memory]:
+        """Fetch current rows for a bounded set of snapshot Memory IDs."""
+        if not memory_ids:
+            return []
+        result = await session.read_session.execute(
+            sa.select(RDBAgentMemory)
+            .where(
+                RDBAgentMemory.agent_id == agent_id,
+                RDBAgentMemory.id.in_(memory_ids),
+            )
+            .order_by(RDBAgentMemory.id)
+        )
+        return [self._build(row) for row in result.scalars()]
+
     async def list(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         user_id: str | None,
@@ -229,13 +250,13 @@ class MemoryRepository:
 
         stmt = stmt.order_by(RDBAgentMemory.type, RDBAgentMemory.name).limit(100)
 
-        result = await session.execute(stmt)
+        result = await session.read_session.execute(stmt)
         rows = result.scalars().all()
         return [self._build(r) for r in rows]
 
     async def search_full(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         user_id: str | None,
@@ -266,13 +287,13 @@ class MemoryRepository:
 
         stmt = stmt.order_by(RDBAgentMemory.type, RDBAgentMemory.name).limit(100)
 
-        result = await session.execute(stmt)
+        result = await session.read_session.execute(stmt)
         rows = result.scalars().all()
         return [self._build(r) for r in rows]
 
     async def update_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         memory_id: str,
         update: MemoryUpdate,
     ) -> Memory | None:
@@ -283,7 +304,7 @@ class MemoryRepository:
         :param update: Partial update data
         :return: Updated Memory or None when absent
         """
-        rdb = await session.get(RDBAgentMemory, memory_id)
+        rdb = await session.write_session.get(RDBAgentMemory, memory_id)
         if rdb is None:
             return None
 
@@ -296,13 +317,13 @@ class MemoryRepository:
         if "content" in update:
             rdb.content = update["content"]
 
-        await session.flush()
-        await session.refresh(rdb)
+        await session.write_session.flush()
+        await session.write_session.refresh(rdb)
         return self._build(rdb)
 
     async def delete_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         memory_id: str,
     ) -> bool:
         """Delete memory by ID.
@@ -311,7 +332,7 @@ class MemoryRepository:
         :param memory_id: Memory ID
         :return: Deletion flag (True=existed, False=absent)
         """
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.delete(RDBAgentMemory).where(RDBAgentMemory.id == memory_id)
         )
         if not isinstance(result, CursorResult):
@@ -320,7 +341,7 @@ class MemoryRepository:
 
     async def list_summaries(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         user_id: str | None,
@@ -347,13 +368,13 @@ class MemoryRepository:
 
         stmt = stmt.order_by(RDBAgentMemory.type, RDBAgentMemory.name).limit(100)
 
-        result = await session.execute(stmt)
+        result = await session.read_session.execute(stmt)
         rows = result.scalars().all()
         return [self._build_summary(r) for r in rows]
 
     async def search(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         user_id: str | None,
@@ -386,13 +407,13 @@ class MemoryRepository:
             .limit(50)
         )
 
-        result = await session.execute(stmt)
+        result = await session.read_session.execute(stmt)
         rows = result.scalars().all()
         return [self._build_summary(r) for r in rows]
 
     async def search_partial(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         user_id: str | None,
@@ -438,7 +459,7 @@ class MemoryRepository:
             .limit(_PARTIAL_SEARCH_LIMIT)
         )
 
-        result = await session.execute(stmt)
+        result = await session.read_session.execute(stmt)
         rows = result.all()
         return [
             MemorySearchMatch(
@@ -453,7 +474,7 @@ class MemoryRepository:
 
     async def delete_by_name(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         user_id: str | None,
@@ -476,14 +497,14 @@ class MemoryRepository:
         else:
             stmt = stmt.where(RDBAgentMemory.user_id == user_id)
 
-        result = await session.execute(stmt)
+        result = await session.write_session.execute(stmt)
         if not isinstance(result, CursorResult):
             raise RuntimeError("SQLAlchemy deletion did not return CursorResult")
         return result.rowcount > 0
 
     async def count(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         user_id: str | None = None,
@@ -507,12 +528,12 @@ class MemoryRepository:
         else:
             stmt = stmt.where(RDBAgentMemory.user_id == user_id)
 
-        result = await session.execute(stmt)
+        result = await session.read_session.execute(stmt)
         return result.scalar_one()
 
     async def delete_all_for_user(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         user_id: str,
     ) -> int:
@@ -522,7 +543,7 @@ class MemoryRepository:
         :param user_id: Associated User ID
         :return: Deleted row count
         """
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.delete(RDBAgentMemory).where(RDBAgentMemory.user_id == user_id)
         )
         if not isinstance(result, CursorResult):

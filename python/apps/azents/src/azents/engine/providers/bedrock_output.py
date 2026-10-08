@@ -21,7 +21,35 @@ from pydantic_ai.settings import ModelSettings
 from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.usage import RequestUsage
 
+from azents.engine.events.effective_model_request import (
+    prepare_effective_model_parameters,
+)
+
 _OUTPUT_TOOL_NAME = "json_tool_call"
+
+
+def lower_bedrock_structured_parameters(
+    parameters: ModelRequestParameters,
+) -> ModelRequestParameters:
+    """Expose the complete tool-schema request before admission or dispatch."""
+    output = parameters.output_object
+    if parameters.output_mode != "native" or output is None:
+        return parameters
+    return dataclasses.replace(
+        parameters,
+        output_mode="tool",
+        output_object=None,
+        output_tools=[
+            ToolDefinition(
+                name=_OUTPUT_TOOL_NAME,
+                description=output.description,
+                parameters_json_schema=output.json_schema,
+                kind="output",
+                strict=None,
+            )
+        ],
+        allow_text_output=False,
+    )
 
 
 class _StructuredTextStream(StreamedResponse):
@@ -131,20 +159,8 @@ class BedrockOutputCompatibilityModel(Model):
         # The current SDK lacks Converse outputConfig. The existing integration
         # emulates response_format using this synthetic output tool; it is not a
         # client tool and is never admitted for execution by the engine.
-        parameters = dataclasses.replace(
-            model_request_parameters,
-            output_mode="tool",
-            output_object=None,
-            output_tools=[
-                ToolDefinition(
-                    name=_OUTPUT_TOOL_NAME,
-                    description=output.description,
-                    parameters_json_schema=output.json_schema,
-                    kind="output",
-                    strict=None,
-                )
-            ],
-            allow_text_output=False,
+        parameters = prepare_effective_model_parameters(
+            lower_bedrock_structured_parameters(model_request_parameters)
         )
         async with self.stock.request_stream(
             messages, model_settings, parameters, run_context

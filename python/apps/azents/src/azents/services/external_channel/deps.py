@@ -8,11 +8,11 @@ from fastapi import Depends
 from azents.core.config import Config
 from azents.core.deps import get_appctx, get_config
 from azents.core.enums import ExternalChannelConversationLockBackend
-from azents.core.redis import create_redis_client
-from azents.services.external_channel.conversation import (
+from azents.core.external_channel_conversation_data import (
     ExternalChannelConversationLock,
     ExternalChannelParticipationLock,
 )
+from azents.core.redis import create_redis_client
 from azents.services.external_channel.conversation_lock import (
     InMemoryExternalChannelConversationLock,
     RedisExternalChannelConversationLock,
@@ -31,6 +31,9 @@ async def get_external_channel_conversation_lock(
     lock_config = config.external_channel_conversation.lock
 
     async def create() -> AsyncIterator[ExternalChannelConversationLock]:
+        if config.session_broker_backend == "memory":
+            yield InMemoryExternalChannelConversationLock()
+            return
         match lock_config.backend:
             case ExternalChannelConversationLockBackend.MEMORY:
                 yield InMemoryExternalChannelConversationLock()

@@ -6,9 +6,52 @@ spec_type: domain
 domain: conversation
 owner: "@Hardtack"
 code_paths:
+  - python/apps/azents/src/azents/repos/subagent_tool_operations.py
+  - python/apps/azents/src/azents/repos/hierarchy_contention.py
+  - python/apps/azents/src/azents/repos/idle_continuation.py
+  - python/apps/azents/src/azents/repos/hierarchy_operation_fences_test.py
+  - python/apps/azents/src/azents/worker/session/idle_continuation_lock_test.py
+  - python/apps/azents/src/azents/core/active_model_capabilities.py
+  - python/apps/azents/src/azents/repos/active_model_capabilities.py
+  - python/apps/azents/src/azents/repos/active_model_capabilities_data.py
+  - python/apps/azents/src/azents/repos/active_profile_admission.py
+  - python/apps/azents/src/azents/engine/events/effective_model_request.py
+  - python/apps/azents/src/azents/core/action_execution_data.py
+  - python/apps/azents/src/azents/core/agent_session_data.py
+  - python/apps/azents/src/azents/core/mailbox_data.py
+  - python/apps/azents/src/azents/core/session_workspace_project.py
+  - python/apps/azents/src/azents/core/json_value.py
+  - python/apps/azents/src/azents/core/agent_automatic_project.py
+  - python/apps/azents/src/azents/core/agent_session_input_data.py
+  - python/apps/azents/src/azents/core/chat_data.py
+  - python/apps/azents/src/azents/core/chat_operation_data.py
+  - python/apps/azents/src/azents/core/chat_projection.py
+  - python/apps/azents/src/azents/core/chat_write_data.py
+  - python/apps/azents/src/azents/core/exchange_file_errors.py
+  - python/apps/azents/src/azents/core/mailbox_errors.py
+  - python/apps/azents/src/azents/core/root_agent_session_creation.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/core/session_workspace_items.py
+  - python/apps/azents/src/azents/core/session_workspace_paths.py
+  - python/apps/azents/src/azents/core/session_lifecycle_registry.py
+  - python/apps/azents/src/azents/repos/agent_session_input_operations.py
+  - python/apps/azents/src/azents/repos/chat_operations.py
+  - python/apps/azents/src/azents/repos/chat_write_operations.py
+  - python/apps/azents/src/azents/repos/input_attachment_claim.py
+  - python/apps/azents/src/azents/repos/root_agent_session_creation.py
+  - python/apps/azents/src/azents/repos/session_lifecycle_operations.py
+  - python/apps/azents/src/azents/repos/engine_event_repositories.py
+  - python/apps/azents/src/azents/repos/engine_resolve.py
+  - python/apps/azents/src/azents/repos/engine_tool_repositories.py
+  - python/apps/azents/src/azents/repos/mailbox_runtime_operations.py
+  - python/apps/azents/src/azents/repos/skill_state_store.py
+  - python/apps/azents/src/azents/repos/worker_toolkit_repositories.py
+  - python/apps/azents/src/azents/repos/user_stop.py
   - python/apps/azents/src/azents/services/chat/**
   - python/apps/azents/src/azents/core/config.py
   - python/apps/azents/src/azents/core/model_availability.py
+  - python/apps/azents/src/azents/core/model_availability_operations.py
+  - python/apps/azents/src/azents/repos/session_model_availability.py
   - python/apps/azents/src/azents/core/engine_tool_state.py
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/engine/run/contracts.py
@@ -23,6 +66,17 @@ code_paths:
   - python/apps/azents/src/azents/broker/types.py
   - python/apps/azents/src/azents/broker/redis.py
   - python/apps/azents/src/azents/rdb/models/agent_session.py
+  - python/apps/azents/src/azents/rdb/models/conversation.py
+  - python/apps/azents/src/azents/rdb/models/session_execution_file.py
+  - python/apps/azents/src/azents/core/session_execution_data.py
+  - python/apps/azents/src/azents/core/session_diagnostics.py
+  - python/apps/azents/src/azents/repos/session_execution_record.py
+  - python/apps/azents/src/azents/repos/lifecycle_target.py
+  - python/apps/azents/src/azents/repos/session_archive_operations.py
+  - python/apps/azents/src/azents/repos/session_diagnostics.py
+  - python/apps/azents/src/azents/services/session_diagnostics.py
+  - python/apps/azents/src/azents/api/admin/debug/v1/**
+  - python/apps/azents/db-schemas/rdb/migrations/versions/6a05f4a01f6f_extract_common_execution_sessions_and_.py
   - python/apps/azents/src/azents/rdb/models/agent_session_unread_run.py
   - python/apps/azents/src/azents/rdb/models/session_agent.py
   - python/apps/azents/src/azents/rdb/models/session_agent_context.py
@@ -65,22 +119,24 @@ code_paths:
   - python/apps/azents/src/azents/services/turn_action.py
   - python/apps/azents/src/azents/services/session_title.py
   - python/apps/azents/src/azents/services/model_availability.py
-  - python/apps/azents/src/azents/services/session_resource_authority.py
+  - python/apps/azents/src/azents/repos/session_resource_authority.py
   - python/apps/azents/src/azents/services/runtime_terminal/**
   - python/apps/azents/src/azents/services/runtime_web/**
   - python/apps/azents/src/azents/rdb/models/runtime_web.py
   - python/apps/azents/src/azents/repos/runtime_web/**
   - python/apps/azents/src/azents/runtime/terminal_coordination/**
   - python/apps/azents/src/azents/services/session_working_folder_binding*
-  - python/apps/azents/src/azents/services/agent_mailbox.py
+  - python/apps/azents/src/azents/repos/agent_mailbox.py
+  - python/apps/azents/src/azents/repos/terminal_finalization.py
+  - python/apps/azents/src/azents/repos/terminal_finalization_data.py
+  - python/apps/azents/src/azents/repos/subagent_terminal_result.py
+  - python/apps/azents/src/azents/core/terminal_result.py
   - python/apps/azents/src/azents/services/subagent_terminal_result.py
   - python/apps/azents/src/azents/services/subagent_coordination.py
   - python/apps/azents/src/azents/services/session_workspace_project/**
-  - python/apps/azents/src/azents/services/root_agent_session_creation/**
   - python/apps/azents/src/azents/services/session_git_worktree/**
   - python/apps/azents/src/azents/services/archived_session_retention.py
   - python/apps/azents/src/azents/services/archived_session_purge.py
-  - python/apps/azents/src/azents/services/action_execution.py
   - python/apps/azents/src/azents/services/file_storage.py
   - python/apps/azents/src/azents/api/public/chat/**
   - python/apps/azents/src/azents/api/public/terminal/**
@@ -104,7 +160,6 @@ code_paths:
   - python/apps/azents/src/azents/transport/chat.py
   - python/apps/azents/src/azents/worker/deps.py
   - python/apps/azents/src/azents/worker/session/**
-  - python/apps/azents/src/azents/repos/toolkit_state/**
 api_routes:
   - /chat/v1
   - /chat/v1/sessions/{session_id}/inputs
@@ -141,18 +196,20 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
 last_verified_at: 2026-10-08
-spec_version: 176
+spec_version: 187
 ---
 
 # Conversation & Events
 
-The `conversation` domain owns `AgentSession`, event transcript events, durable
-`agent_runs`, mailbox items, and exchange files.
+The `conversation` domain owns the public Conversation profile and participant
+tree over the common `AgentSession` execution identity. Event transcripts,
+durable `agent_runs`, mailbox items, and execution lifecycle remain keyed to
+that common Session identity.
 
 Production agent execution now uses the event runtime. OpenAI Agents SDK `RunState` and legacy
 raw `runtime/llm.py` are not production conversation state.
 
-Root `AgentSession` rows have an explicit product mode of Team or User. Team roots keep shared
+Root Conversation profiles have an explicit product mode of Team or User. Team roots keep shared
 Workspace-member visibility and Team primary behavior. User roots are private to one associated User,
 never carry a primary role, and authorize only that owner while the owner remains a Workspace member.
 Subagent sessions derive product identity from their root and do not store an independent product mode
@@ -169,7 +226,9 @@ erDiagram
     Agent ||--o| AgentRuntime : "may have runtime"
     Agent ||--o{ AgentSession : "has sessions"
     AgentRuntime }o--|| Workspace : "scoped to"
-    AgentSession ||--|| SessionAgent : "linked participant"
+    AgentSession ||--o| Conversation : "optional public profile"
+    AgentSession ||--o| SessionAgent : "conversation participant"
+    AgentSession ||--o{ SessionExecutionFile : "current retained files"
     SessionAgent ||--o{ SessionAgent : "child participants"
     SessionAgent }o--|| SessionAgentContext : "shares"
     SessionAgentContext ||--o{ SessionWorkspaceProject : "owns working projects"
@@ -182,10 +241,49 @@ erDiagram
     AgentRuntime ||--o{ ExchangeFile : "owns sandbox artifacts"
 ```
 
-`AgentSession` is the conversation boundary. Direct session write routes target the requested session.
+`AgentSession` is the common execution boundary; its optional `Conversation`
+profile is the public conversation boundary. Direct session write routes target the requested session.
 The default team conversation is the agent's team primary session, represented by
-`agent_sessions.primary_kind = 'team_primary'`. Runtime current/active session lookup must not
+`conversations.primary_kind = 'team_primary'`. Runtime current/active session lookup must not
 redirect direct session writes or default team session lookup to another session.
+
+### Common execution and public profile
+
+`agent_sessions` retains Agent/Workspace identity, owner generation, inference and
+model-input state, activity, run/stop control, and archive/retention metadata.
+`conversations` owns the handle, root/subagent kind, primary/product/user identity,
+title and title-model metadata, pin, last user input, primary model reservation,
+and pending public command/idle-continuation fields. Public DTOs and discovery,
+History, and Historical Memory source reads require a Conversation relation.
+An internal Session has no fabricated handle, title, public profile or
+`SessionAgent`; it is excluded even from exact-ID public source discovery.
+
+Creation and conditional profile mutations are atomic with their common Session
+row. Profile compare-and-set predicates are rechecked by the actual profile
+UPDATE after the common row gate, including reservation, title and command
+conditions. A composite cascading FK materializes common Agent/status in the
+Conversation's active Team-primary index; this projection is not a second
+status authority. Archive preserves the primary role, while restore remains
+subject to the same active-primary uniqueness constraint.
+
+The nullable `lifecycle_root_session_id` identifies common lifecycle membership:
+null denotes the root itself, while conversation descendants reference their
+actual root Session. The indexed group lookup validates one exact root and all
+members under the same Agent/Workspace before archive or purge. Internal
+executions are singleton targets without public tree prerequisites. Archive
+policy interpretation and shared purge-job registration occur once in the common
+lifecycle transaction. Existing account-removal immediate purge uses that same
+pipeline; it adds no Session-kind retention option.
+
+Current private working files use one `(session_id, path)` row with content and
+writability, without file history. Canonical events and these files survive
+archive for the configured retention period and cascade only at final purge.
+Public Conversation visibility is not extended to internal execution. Existing
+system-admin diagnostics can inspect exact Workspace/Session metadata, bounded
+safe event pages, and retained current file pages. Hidden reasoning, native model
+artifacts and arbitrary tool arguments are excluded. File redaction precedes
+paging, whose offsets address the safe projection rather than raw credential
+fragments.
 
 `AgentRuntime` is an optional long-lived shared managed-execution identity and lifecycle owner.
 Runtime-free Agents execute model and compatible server/remote work without creating this row.
@@ -302,6 +400,13 @@ item changes the active Session to `running` in the same transaction, including 
 `queue_only` admission leaves the current state unchanged. After acquiring the Session lease, a
 Worker reads the Session without a row lock and refuses to inspect mailbox or recoverable execution
 work unless that durable state is `running`.
+
+Mailbox admission inputs and results have canonical detached definitions in
+`repos/mailbox/admission_data.py`. Database-only admission composes through
+`MailboxAdmissionRepository`; normal batch admission applies distinct wakes in
+Session-ID order, whereas idle-continuation composition retains its no-wake
+semantics. Larger input-acceptance atomic groups retain the shared in-session
+primitive until their complete owning compositions are migrated.
 
 Only one team primary session may exist per agent in the current product state. Additional active
 non-primary team sessions may exist under the same agent with `primary_kind = null`.
@@ -432,13 +537,15 @@ External Channel root Session may instead use only the creation-marked human
 results are ineligible. Its title text is limited to the authorized body and bounded safe attachment
 names and media types without reading attachment contents. The worker then immediately schedules
 best-effort lightweight model title generation from that exact initial prompt without waiting for the
-first run to complete. The title operation freezes the Agent's saved Lightweight label candidates and
-owns an independent cursor and candidate-local retry counter. Each candidate's saved
-`strict_json_schema` snapshot selects its response envelope: `true` uses only a strict one-field
-Structured Output contract, `false` uses only title-only plain text, and `null` starts with Structured
-Output. The unknown branch changes once to plain text only when a typed provider parameter or code
-identifies that output contract as unsupported or unroutable, or when a successful response cannot be
-decoded as the required title object. A normalized `quota_or_billing` failure shares Workspace
+first run to complete. A NEW title operation compiles local metadata for the same
+configured Lightweight candidates, then freezes an independent cursor and
+candidate-local retry counter. Captured final `structured_response` support and
+its actual request conditions select either the strict one-field Structured
+Output contract or title-only plain text. Omitted effort can use a known captured
+default for evaluation; actual output-tool shape is validated by the shared
+effective-request gate. Strict function schemas remain independent of native
+structured output. Invalid structured title output fails the operation rather
+than entering an unknown-support compatibility branch. A normalized `quota_or_billing` failure shares Workspace
 cooldown and advances to the next candidate; authentication, ordinary rate limiting, timeout,
 transport, provider availability, and other operational failures retain the active candidate and its
 existing retry policy. Shared instructions preserve request-named products, tools, filenames, and
@@ -590,6 +697,27 @@ Subagent Tree. The model-facing `list_agents` result is a separate bounded,
 read-only coordination projection: omission from that result neither removes a
 participant nor prevents path-based targeting of its existing Session.
 
+Tree/path/coordination descriptions are ordinary reads, including validation of
+captured owner identity. Spawn and follow-up capacity are actual root-hierarchy
+claims; send and interrupt admit only the exact source/target Session rows.
+Mutation admission acquires the required Session rows in stable order with
+ordinary waiting locks, then fences the captured source owner generation through
+the dependent write commit. A database-confirmed deadlock or serialization abort
+releases the complete owning DB operation before reopening and revalidating its
+original owner and inputs. The finite recovery closure covers both a parent
+mutation and child terminal delivery as possible victims, retaining one atomic
+terminal disposition/mailbox winner without replaying execution or notification.
+Cancellation, stale authority and uncertain commit propagate without replay.
+
+Actual Stop/archive/restore/purge admission shares the hierarchy boundary with
+child creation and admits the complete current tree before applying the
+transition. Owner handover advances only the exact claimed Session generation;
+ordinary Session reads do not lock root, parent or Agent rows. Idle eligibility
+is an independent pre-hook view, while final continuation admission and matching
+idle-boundary consumption remain one exact owner-fenced transaction. Pending
+Run activation, terminal state and one disposition plus idempotent parent
+mailbox admission retain their existing atomic winning-claim semantics.
+
 ### SessionWorkspaceProject
 
 `rdb/models/session_workspace_project.py` stores the project registry used as session working
@@ -682,6 +810,19 @@ not reserved-root membership or `session_agent_context_projects`, is required
 before destructive cleanup can remove a path or branch.
 
 ## 3. AgentRun
+
+NEW foreground and compaction model operations compile current exact authorized
+local declarations for the configured identities before effective-profile
+normalization. Owner-locked preparation revalidates those local inputs.
+Configured IDs, candidate order and settings remain user configuration. Active
+Agent responses may carry newly compiled metadata, but reads and unrelated saves
+do not rewrite that configuration.
+
+Existing operations freeze final capabilities with their candidates. Automatic
+retry, quota cursor progression, takeover and replay retain those snapshots and
+historical fingerprints instead of consulting current metadata. Missing required
+metadata at NEW preparation retains the assigned identity and yields a typed
+failure; it is not a quota skip or permission to select another model.
 
 `agent_runs` is the durable execution-state table for the event loop.
 
@@ -781,7 +922,11 @@ Event kinds:
 - `system_error`
 - `unknown_adapter_output`
 
-Turn-marker token usage keeps nullable `cost_usd` and optional typed `cost_provenance`.
+Turn-marker token usage stores normalized input/output/total/cache/reasoning counters,
+nullable `cost_usd` and optional typed `cost_provenance`. Native raw usage and hidden
+parameters are transient normalization/pricing inputs, not durable usage fields.
+Typed projections omit those extras from existing records without rewriting their physical
+JSONB storage; historical receipt cleanup requires a separate approved operation.
 Known estimates identify the selected provider/model, applicable tier and captured source
 snapshot/hash/key/estimator version. Native reported charges use a separate
 `provider_reported` method and do not acquire price-source provenance. Old amounts without
@@ -932,9 +1077,25 @@ event-list APIs:
 - `GET /chat/v1/agents/{agent_id}/sessions/{session_id}/model-availability` returns the
   PostgreSQL-derived projection for the Session's applied semantic label: exact Primary public
   identity/display, `available | cooldown | probing | primary_next`, deadline, server time, first
-  compatible usable fallback display, and current reservation. Reserve and cancel routes use exact
+  health-available fallback display in configured order, and current reservation. Raw reasoning and
+  execution options do not exclude a fallback from this projection: dispatch normalizes reasoning
+  and drops unsupported execution options for the assigned model. Reserve and cancel routes use exact
   identity plus generation fencing and return the same projection, including user-safe `409`
   convergence state on a stale request.
+
+Session model availability is a completed repository-owned operation. Native
+PostgreSQL read-only scopes perform exact active-root/User/Workspace admission
+and health/fallback projection; application services receive only detached
+results. Reserve and cancel retain one database-only write transaction for
+existing Session/Agent locks, health claim CAS and Session reservation generation
+updates. Related changes roll back together on failure or cancellation. A stale
+Session cancellation cannot settle a newer candidate-health generation. The
+existing public identity, state, deadline, server time and configured-order first
+healthy fallback projection are unchanged; reasoning/execution option
+compatibility remains a dispatch concern rather than filtering this projection.
+
+Neutral model availability errors have one defining core module. API routes import
+those definitions and the service itself from their defining modules.
 
 Durable human `user_message` events preserve their immutable requested profile intent. They do not
 embed an associated AgentRun summary and do not change when later run provenance changes. Pending mailbox items likewise expose only requested intent and source-safe presentation data. The dedicated live Run projection carries the current
@@ -1154,7 +1315,10 @@ Mailbox items are session-bound. The `mailbox_items` table stores `session_id`, 
 reasoning effort. If the head has no explicit profile, preparation uses the current Session requested
 profile, then the Agent default when the Session has no snapshot.
 
-`MailboxService` owns mailbox reads and writes. Enqueue commits only the pending row;
+Mailbox repositories own durable reads, writes, and promotion transactions;
+`MailboxService` sequences completed operations with external preparation and delivery.
+INPUT and Chat writes compose attachment claims, admission, and Session transitions
+inside their repository-owned atomic operation. Enqueue commits only the pending row;
 producers own wake-up and run-state transitions. User, Goal, action, spawn, and follow-up inputs use
 `wake_session`; ordinary `send_message` and terminal `agent_result` inputs use `queue_only` and do not
 mark or wake the target session. Queue-only rows remain in FIFO order and are promoted with a later
@@ -1200,17 +1364,21 @@ denied all return 404. The response includes the root `product_mode` (`team` or 
 subagent rows) so clients can resolve Team/My navigation scope from an authorized detail response.
 Child subagent sessions are directly readable through this route and through history/live routes, but
 they are read-only for human chat writes. Before returning an authorized active Session detail or
-list/sidebar projection, the service reconciles any applied model label absent from the current
-Agent option list to the Agent main option and clears fallback-incompatible intent; this repair is
-idempotent and does not alter a prepared current-turn snapshot.
+list/sidebar projection, the service compiles a detached fallback for any applied
+model label absent from the current Agent option list, selecting the Agent main
+option and clearing fallback-incompatible intent in the response. The read does
+not replace stored applied intent, increment `applied_profile_generation`, or
+alter a prepared current-turn snapshot. Mutation admission remains the authority
+for a persisted profile replacement and its real generation.
 `POST /chat/v1/sessions/{session_id}/inputs` accepts one composer input for an existing root
 Session. An input without an action appends a user message, a command action creates an idle-only
 pending command, and other typed actions enter the turn-action flow. The route rejects
 `session_kind = subagent` before creating a chat write request, mailbox item, pending command, live
 projection, or broker wake-up.
 `PUT /chat/v1/sessions/{session_id}/model-profile` is the transcript-free full replacement for the
-applied Session profile. It validates the label, effort, and enabled execution-option IDs against the
-current Agent option snapshot and implemented option registry while holding the Session write lock,
+applied Session profile. It validates the label, effort, and enabled execution-option IDs against
+exact current compiled capabilities for the configured Agent choices and the implemented option
+registry while holding the Session write lock,
 records the required client idempotency key, and returns the accepted `session_id`, label, effort,
 and enabled execution-option list. A matching replay returns the original accepted result
 before revalidating mutable Agent options; reusing the key with a different payload is a conflict.
@@ -1222,6 +1390,17 @@ repository-owned replacement operation preserves this web contract and the match
 Every newly accepted replacement through web, input preparation, edited input, or subagent setup
 increments `applied_profile_generation`, including an equal-value replacement. A matching web
 idempotency replay does not invoke the setter and does not increment the generation.
+
+New Human input, Team/User root creation, message edit, and web profile replacement
+share the exact-current capability admission boundary. The first repository phase
+authorizes and checks idempotent replay before capturing local declarations; pure
+compilation completes outside the database transaction. The write phase repeats
+authorization and replay checks, fences the captured option identity/order/settings,
+requested profile and local metadata, then validates the compiled profile before any
+input, idempotency record, Session or history mutation. Changed inputs reject the
+new write rather than silently adopting another choice. Saved Agent configuration
+and captured prices are unchanged; accepted replays and failed-run retries do not
+recompile their frozen work.
 
 Composer execution-option controls are separate from static model capabilities and built-in tools.
 Fast and Ultrafast share the registry-owned `processing_speed` exclusive group. Supported saved
@@ -1248,8 +1427,10 @@ and reload. Input admission rejects a label that is already absent from the curr
 an accepted label becomes unavailable before preparation because the Agent options changed, the
 worker falls back to the current Agent main label, replaces the active Session intent, and clears
 fallback-incompatible effort and execution-option intent. Authorized active Session detail, list,
-and sidebar reads perform the same idempotent applied-intent repair before returning a projection,
-so an idle Session does not retain stale UI state until its next worker execution. Read repair never
+and sidebar reads project the same fallback without a hidden setter or ownership
+gate. Directory, unread and Workspace views use the same detached compilation;
+the stored profile and its persisted generation remain unchanged. A read
+projection is not a new accepted profile or compaction authority and never
 changes `current_*` inference state or an active Run's prepared snapshot. A failed model-call attempt
 retains its original selection, while its next automatic retry attempt freshly resolves the latest
 Session-applied model, effort, and execution-option intent after backoff. Historical missing option
@@ -1374,7 +1555,7 @@ remain as an unbounded raw tail or storage JSON dump.
 - A broker wake-up and stop signal are routing-only `session_id` notifications. They do not carry or
   override requester, sender, User, Agent, Workspace, prompt, interface, capability, or resource
   authority.
-- A canonical Postgres snapshot is loaded only after the Session owner-generation claim. It validates
+- A Conversation's canonical Postgres snapshot is loaded only after the Session owner-generation claim. It validates
   the active Session, Agent, Workspace, current/root `SessionAgent` tree and context, exact owner
   generation, and expected FIFO mailbox item, pending command, recoverable Run, or idle continuation.
   Mutable promotion and control paths re-lock their exact durable rows before commit.
@@ -1441,6 +1622,27 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-10-07** — v186. Extracted public Conversation profiles from common
+  execution Sessions, preserved primary uniqueness and conditional profile
+  mutation fences, generalized retained lifecycle targets, and added protected
+  canonical audit reads without exposing internal Sessions publicly.
+
+- **2026-10-06** (spec_version 185) — Replaced partial NOWAIT hierarchy admission
+  with complete waiting/recovery operations and both-victim terminal closure;
+  original ownership, atomic mailbox disposition and external effects remain.
+
+- **2026-10-05** — v183. Reconciled code-path discovery with current defining
+  modules; system behavior is unchanged.
+
+- **2026-10-05** — v182. Removed hidden GET profile replacement while preserving
+  detached fallback responses and persisted generation identity; separated
+  descriptions from exact owner, hierarchy and idle-admission mutation fences.
+- **2026-10-03** — v178. Made new title decisions consume separate saved
+  structured-response support and conditions while retaining historical strict
+  interpretation and existing typed fallback/retry behavior.
+- **2026-10-02** — v177. Canonicalized Mailbox admission and terminal database
+  compositions in repositories and completed best-effort terminal-result repair
+  operations without changing wake, parent-result, or rollback semantics.
 - **2026-10-01** — v176. Moved Todo persisted payloads and completed state
   transactions to core/repository ownership while preserving Chat snapshots and
   `todo_state_changed` publication behavior.

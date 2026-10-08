@@ -12,6 +12,11 @@ from azents.core.auth.deps import CurrentUser, get_current_user
 from azents.core.config import AuthConfig
 from azents.core.deps import get_auth_config
 from azents.core.email.service import EmailService
+from azents.core.signup_token_operations import (
+    InvalidSignupToken,
+    SignupTokenEmailAlreadyRegistered,
+    SignupTokenEmailMismatch,
+)
 from azents.services.auth import AuthService
 from azents.services.auth.data import (
     InvalidCredentials,
@@ -34,12 +39,8 @@ from azents.services.password_reset_token.data import (
 )
 from azents.services.signup_token import SignupTokenService
 from azents.services.signup_token.data import (
-    InvalidSignupToken,
     PreviewSignupTokenInput,
     RedeemSignupTokenInput,
-    SignupEmailDeliveryUnavailable,
-    SignupTokenEmailAlreadyRegistered,
-    SignupTokenEmailMismatch,
     WeakSignupPassword,
 )
 from azents.utils.fastapi.route import RouteMounter
@@ -134,19 +135,8 @@ async def request_signup_email(
     request_body: RequestSignupEmailRequest,
 ) -> RequestSignupEmailResponse:
     """Send a signup link by email."""
-    result = await signup_token_service.create_email_delivery_token(request_body.email)
-    if result.success:
-        return RequestSignupEmailResponse(sent=True)
-    else:
-        error = result.error
-        match error:
-            case SignupEmailDeliveryUnavailable():
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Signup email delivery is not configured.",
-                )
-            case _:
-                assert_never(error)
+    await signup_token_service.create_email_delivery_token(request_body.email)
+    return RequestSignupEmailResponse(sent=True)
 
 
 @router.post("/signup-tokens/preview")
@@ -320,9 +310,9 @@ async def login_with_password(
 @router.get("/login/methods")
 async def get_login_methods(
     auth_service: Annotated[AuthService, Depends()],
-    email: str,
+    email: str | None = None,
 ) -> LoginMethodsResponse:
-    """Get available login methods for an email."""
+    """Get login availability, optionally including an email's password status."""
     output = await auth_service.get_login_methods(LoginMethodsInput(email=email))
     return LoginMethodsResponse(
         has_password=output.has_password,

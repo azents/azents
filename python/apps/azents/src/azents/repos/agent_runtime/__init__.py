@@ -6,7 +6,6 @@ from typing import NamedTuple
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeDesiredState,
@@ -29,6 +28,7 @@ from azents.rdb.models.runtime_profile import (
     RDBWorkspaceRuntimeProfile,
 )
 from azents.rdb.models.runtime_provider import RDBRuntimeProvider
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.runtime_profile.data import (
     RuntimeConfigurationAppliedSlot,
     RuntimeConfigurationDesiredStateWrite,
@@ -57,7 +57,7 @@ class AgentRuntimeRepository:
 
     async def create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: AgentRuntimeCreate,
     ) -> AgentRuntime:
         """Create AgentRuntime.
@@ -74,40 +74,40 @@ class AgentRuntimeRepository:
             provider_binding_origin=create.provider_binding_origin,
             provider_binding_evidence=create.provider_binding_evidence,
         )
-        session.add(rdb)
-        await session.flush()
+        session.write_session.add(rdb)
+        await session.write_session.flush()
         return self._build(rdb)
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         runtime_id: str,
     ) -> AgentRuntime | None:
         """Fetch AgentRuntime by ID."""
-        rdb = await session.get(RDBAgentRuntime, runtime_id)
+        rdb = await session.read_session.get(RDBAgentRuntime, runtime_id)
         if rdb is None:
             return None
         return self._build(rdb)
 
     async def _get_by_id_populated(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         runtime_id: str,
     ) -> AgentRuntime | None:
         """Reload one Runtime after ORM DML updated an identity-mapped row."""
-        rdb = await session.get(RDBAgentRuntime, runtime_id)
+        rdb = await session.read_session.get(RDBAgentRuntime, runtime_id)
         if rdb is None:
             return None
-        await session.refresh(rdb)
+        await session.read_session.refresh(rdb)
         return self._build(rdb)
 
     async def get_by_id_for_update(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         runtime_id: str,
     ) -> AgentRuntime | None:
         """Fetch and serialize one Agent Runtime state reconciliation."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime_id)
             # Runtime state reconciliation never changes Runtime key columns, so
@@ -119,7 +119,7 @@ class AgentRuntimeRepository:
 
     async def list_policy_convergence_candidates(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         after_runtime_id: str | None,
         limit: int,
@@ -136,16 +136,16 @@ class AgentRuntimeRepository:
         )
         if after_runtime_id is not None:
             statement = statement.where(RDBAgentRuntime.id > after_runtime_id)
-        result = await session.execute(statement)
+        result = await session.read_session.execute(statement)
         return [self._build(rdb) for rdb in result.scalars().all()]
 
     async def get_by_agent_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
     ) -> AgentRuntime | None:
         """Agent Fetch AgentRuntime by ID."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgentRuntime).where(RDBAgentRuntime.agent_id == agent_id)
         )
         rdb = result.scalar_one_or_none()
@@ -155,11 +155,11 @@ class AgentRuntimeRepository:
 
     async def get_by_agent_id_for_update(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_id: str,
     ) -> AgentRuntime | None:
         """Fetch one Agent Runtime while serializing its binding transaction."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBAgentRuntime)
             .where(RDBAgentRuntime.agent_id == agent_id)
             # This lock serializes Runtime binding updates without blocking the
@@ -174,7 +174,7 @@ class AgentRuntimeRepository:
 
     async def attach_provider_binding(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         provider_logical_id: str,
@@ -183,7 +183,7 @@ class AgentRuntimeRepository:
         binding_evidence: dict[str, object],
     ) -> AgentRuntime | None:
         """Attach or confirm one exact durable Provider binding."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(
                 RDBAgentRuntime.id == runtime_id,
@@ -206,12 +206,12 @@ class AgentRuntimeRepository:
             .returning(RDBAgentRuntime)
         )
         rdb = result.scalar_one_or_none()
-        await session.flush()
+        await session.write_session.flush()
         return self._build(rdb) if rdb is not None else None
 
     async def attach_desired_configuration_state(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         expected_configuration_sequence: int,
@@ -232,7 +232,7 @@ class AgentRuntimeRepository:
         write: RuntimeConfigurationDesiredStateWrite,
     ) -> AgentRuntimeConfigurationAttachment | None:
         """Attach current desired state only while every source snapshot is current."""
-        runtime = await session.scalar(
+        runtime = await session.write_session.scalar(
             sa.select(RDBAgentRuntime)
             .where(
                 RDBAgentRuntime.id == runtime_id,
@@ -259,7 +259,7 @@ class AgentRuntimeRepository:
             else RDBRuntimeProvider.current_contract_revision_id
             == provider_capability_revision_id
         )
-        snapshots_current = await session.scalar(
+        snapshots_current = await session.write_session.scalar(
             sa.select(
                 sa.and_(
                     sa.exists(
@@ -307,7 +307,7 @@ class AgentRuntimeRepository:
         )
         if not snapshots_current:
             return None
-        state_row = await session.scalar(
+        state_row = await session.write_session.scalar(
             sa.select(RDBRuntimeConfigurationState)
             .where(RDBRuntimeConfigurationState.runtime_id == runtime_id)
             .with_for_update()
@@ -351,7 +351,7 @@ class AgentRuntimeRepository:
                 applied_document=None,
                 applied_at=None,
             )
-            session.add(state_row)
+            session.write_session.add(state_row)
         else:
             state_row.desired_sequence = next_sequence
             state_row.desired_status = write.status
@@ -364,7 +364,7 @@ class AgentRuntimeRepository:
             state_row.provider_acknowledged_at = None
             state_row.runner_observed_at = None
             state_row.updated_at = now
-        await session.flush()
+        await session.write_session.flush()
         return AgentRuntimeConfigurationAttachment(
             runtime=self._build(runtime),
             state=_build_configuration_state(state_row),
@@ -372,13 +372,13 @@ class AgentRuntimeRepository:
 
     async def provider_report_matches_binding(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         runtime_id: str,
         provider_logical_id: str,
     ) -> bool:
         """Validate a Provider report against the Runtime's durable binding."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(
                 RDBAgentRuntime.runtime_provider_id,
                 RDBRuntimeProvider.provider_id,
@@ -402,12 +402,12 @@ class AgentRuntimeRepository:
 
     async def ensure_with_create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         create: AgentRuntimeCreate,
     ) -> AgentRuntimeEnsureResult:
         """Create a Runtime once or return the winner of a creation race."""
-        existing = await self.get_by_agent_id_for_update(session, create.agent_id)
+        existing = await self.get_by_agent_id(session, create.agent_id)
         if existing is not None:
             return AgentRuntimeEnsureResult(runtime=existing, created=False)
 
@@ -425,20 +425,20 @@ class AgentRuntimeRepository:
             .on_conflict_do_nothing(index_elements=["agent_id"])
             .returning(RDBAgentRuntime)
         )
-        result = await session.execute(insert_stmt)
+        result = await session.write_session.execute(insert_stmt)
         rdb = result.scalar_one_or_none()
         if rdb is not None:
-            await session.flush()
+            await session.write_session.flush()
             return AgentRuntimeEnsureResult(runtime=self._build(rdb), created=True)
 
-        raced = await self.get_by_agent_id_for_update(session, create.agent_id)
+        raced = await self.get_by_agent_id(session, create.agent_id)
         if raced is None:
             raise RuntimeError("AgentRuntime ensure failed")
         return AgentRuntimeEnsureResult(runtime=raced, created=False)
 
     async def ensure_for_agent(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_id: str,
     ) -> AgentRuntime:
         """Ensure an unbound logical AgentRuntime row for one Agent.
@@ -451,7 +451,7 @@ class AgentRuntimeRepository:
         if existing is not None:
             return existing
 
-        agent = await session.get(RDBAgent, agent_id)
+        agent = await session.write_session.get(RDBAgent, agent_id)
         if agent is None:
             raise ValueError("Agent not found")
 
@@ -465,10 +465,10 @@ class AgentRuntimeRepository:
             .on_conflict_do_nothing(index_elements=["agent_id"])
             .returning(RDBAgentRuntime)
         )
-        result = await session.execute(insert_stmt)
+        result = await session.write_session.execute(insert_stmt)
         rdb = result.scalar_one_or_none()
         if rdb is not None:
-            await session.flush()
+            await session.write_session.flush()
             return self._build(rdb)
 
         raced = await self.get_by_agent_id(session, agent_id)
@@ -478,7 +478,7 @@ class AgentRuntimeRepository:
 
     async def set_desired_state(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         runtime_id: str,
         command_type: RuntimeLifecycleCommandType,
         desired_state: RuntimeDesiredState,
@@ -490,7 +490,7 @@ class AgentRuntimeRepository:
             RDBAgentRuntime.desired_state == RuntimeDesiredState.STOPPED,
             RDBAgentRuntime.last_lifecycle_command == RuntimeLifecycleCommandType.STOP,
         )
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(
                 RDBAgentRuntime.id == runtime_id,
@@ -527,7 +527,7 @@ class AgentRuntimeRepository:
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
+        await session.write_session.flush()
         runtime = self._build(rdb)
         return AgentRuntimeLifecycleCommand(
             runtime=runtime,
@@ -537,7 +537,7 @@ class AgentRuntimeRepository:
 
     async def set_desired_state_if_configuration_current(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         runtime_id: str,
         command_type: RuntimeLifecycleCommandType,
         desired_state: RuntimeDesiredState,
@@ -548,7 +548,7 @@ class AgentRuntimeRepository:
         reset_final_desired_state: RuntimeDesiredState | None = None,
     ) -> AgentRuntimeLifecycleCommand | None:
         """Advance lifecycle and retarget the exact ready current-state tuple."""
-        runtime = await session.scalar(
+        runtime = await session.write_session.scalar(
             sa.select(RDBAgentRuntime)
             .where(
                 RDBAgentRuntime.id == runtime_id,
@@ -557,7 +557,7 @@ class AgentRuntimeRepository:
             )
             .with_for_update()
         )
-        state = await session.scalar(
+        state = await session.write_session.scalar(
             sa.select(RDBRuntimeConfigurationState)
             .where(RDBRuntimeConfigurationState.runtime_id == runtime_id)
             .with_for_update()
@@ -590,7 +590,7 @@ class AgentRuntimeRepository:
         state.provider_acknowledged_at = None
         state.runner_observed_at = None
         state.updated_at = now
-        await session.flush()
+        await session.write_session.flush()
         return AgentRuntimeLifecycleCommand(
             runtime=self._build(runtime),
             command_type=command_type,
@@ -599,14 +599,14 @@ class AgentRuntimeRepository:
 
     async def complete_restart_handoff(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         runtime_id: str,
         *,
         provider_generation: int,
         desired_generation: int,
     ) -> AgentRuntime | None:
         """Rearm one completed Restart generation for ordinary Start convergence."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(
                 RDBAgentRuntime.id == runtime_id,
@@ -648,16 +648,16 @@ class AgentRuntimeRepository:
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
+        await session.write_session.flush()
         return self._build(rdb)
 
     async def request_terminal_delete(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         runtime_id: str,
     ) -> AgentRuntime | None:
         """Request idempotent terminal Provider deletion for the Runtime."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(
                 RDBAgentRuntime.id == runtime_id,
@@ -682,20 +682,20 @@ class AgentRuntimeRepository:
         )
         row = result.mappings().one_or_none()
         if row is not None:
-            await session.flush()
+            await session.write_session.flush()
             return AgentRuntime.model_validate(dict(row))
         return await self._get_by_id_populated(session, runtime_id)
 
     async def record_terminal_delete_acknowledgement(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         runtime_id: str,
         *,
         provider_generation: int,
         acknowledged_generation: int,
     ) -> AgentRuntime | None:
         """Persist a fenced Provider acknowledgement of terminal deletion."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(
                 RDBAgentRuntime.id == runtime_id,
@@ -731,16 +731,16 @@ class AgentRuntimeRepository:
         row = result.mappings().one_or_none()
         if row is None:
             return None
-        await session.flush()
+        await session.write_session.flush()
         return AgentRuntime.model_validate(dict(row))
 
     async def request_terminal_delete_without_physical_binding(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         runtime_id: str,
     ) -> AgentRuntime | None:
         """Request and acknowledge deletion after proof of no physical binding."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(
                 RDBAgentRuntime.id == runtime_id,
@@ -814,12 +814,12 @@ class AgentRuntimeRepository:
             ):
                 return current
             return None
-        await session.flush()
+        await session.write_session.flush()
         return AgentRuntime.model_validate(dict(row))
 
     async def rearm_terminally_deleted(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         expected_terminal_generation: int,
@@ -828,7 +828,7 @@ class AgentRuntimeRepository:
     ) -> AgentRuntime | None:
         """Start one stopped higher-generation incarnation after exact deletion."""
         next_generation = RDBAgentRuntime.desired_generation + 1
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(
                 RDBAgentRuntime.id == runtime_id,
@@ -876,16 +876,16 @@ class AgentRuntimeRepository:
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
+        await session.write_session.flush()
         return self._build(rdb)
 
     async def get_terminal_delete_acknowledged(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         runtime_id: str,
     ) -> AgentRuntime | None:
         """Return Runtime only after its current terminal deletion is acknowledged."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgentRuntime)
             .where(
                 RDBAgentRuntime.id == runtime_id,
@@ -903,7 +903,7 @@ class AgentRuntimeRepository:
 
     async def record_provider_observed_state(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         runtime_id: str,
         observed_state: RuntimeProviderObservedState,
         provider_generation: int,
@@ -957,7 +957,7 @@ class AgentRuntimeRepository:
             values["failure_generation"] = None
             values["failure_code"] = None
             values["failure_message"] = None
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(
                 RDBAgentRuntime.id == runtime_id,
@@ -974,16 +974,16 @@ class AgentRuntimeRepository:
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
+        await session.write_session.flush()
         return self._build(rdb)
 
     async def mark_provider_observe_requested(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         runtime_id: str,
     ) -> AgentRuntime | None:
         """Record Provider observe request time."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime_id)
             .values(provider_observe_requested_at=sa.func.now())
@@ -992,17 +992,17 @@ class AgentRuntimeRepository:
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
+        await session.write_session.flush()
         return self._build(rdb)
 
     async def record_provider_connection_state(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         runtime_id: str,
         connection_state: RuntimeProviderConnectionState,
     ) -> AgentRuntime | None:
         """Store Provider connection state."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime_id)
             .values(
@@ -1020,17 +1020,17 @@ class AgentRuntimeRepository:
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
+        await session.write_session.flush()
         return self._build(rdb)
 
     async def record_runtime_failure(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         runtime_id: str,
         failure: AgentRuntimeFailurePatch,
     ) -> AgentRuntime | None:
         """Store Runtime current-generation failure."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(
                 RDBAgentRuntime.id == runtime_id,
@@ -1047,12 +1047,12 @@ class AgentRuntimeRepository:
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
+        await session.write_session.flush()
         return self._build(rdb)
 
     async def mark_start_timeouts(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         stale_threshold: datetime.timedelta,
         limit: int,
@@ -1088,7 +1088,7 @@ class AgentRuntimeRepository:
             .limit(limit)
             .subquery()
         )
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id.in_(sa.select(timeout_candidates.c.id)))
             .values(
@@ -1104,17 +1104,17 @@ class AgentRuntimeRepository:
             .returning(RDBAgentRuntime)
         )
         rows = list(result.scalars())
-        await session.flush()
+        await session.write_session.flush()
         return [self._build(rdb) for rdb in rows]
 
     async def mark_lifecycle_dispatched(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         runtime_id: str,
         desired_generation: int,
     ) -> AgentRuntime | None:
         """Record desired generation dispatched as Provider command."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(
                 RDBAgentRuntime.id == runtime_id,
@@ -1129,12 +1129,12 @@ class AgentRuntimeRepository:
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
+        await session.write_session.flush()
         return self._build(rdb)
 
     async def claim_lifecycle_dispatch(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         runtime_id: str,
         desired_generation: int,
         *,
@@ -1194,7 +1194,7 @@ class AgentRuntimeRepository:
                 RDBAgentRuntime.last_state_change_at < retry_cutoff,
             ),
         )
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(
                 RDBAgentRuntime.id == runtime_id,
@@ -1222,12 +1222,12 @@ class AgentRuntimeRepository:
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
+        await session.write_session.flush()
         return self._build(rdb)
 
     async def record_runner_state(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         runtime_id: str,
         runner_state: RuntimeRunnerState,
         runner_generation: int,
@@ -1262,7 +1262,7 @@ class AgentRuntimeRepository:
             values["failure_generation"] = failure.generation
             values["failure_code"] = failure.code
             values["failure_message"] = failure.message
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(
                 RDBAgentRuntime.id == runtime_id,
@@ -1278,16 +1278,16 @@ class AgentRuntimeRepository:
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        await session.flush()
+        await session.write_session.flush()
         return self._build(rdb)
 
     async def clear_current_generation_failure(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         runtime_id: str,
     ) -> AgentRuntime | None:
         """Remove failure for current desired generation."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(
                 RDBAgentRuntime.id == runtime_id,
@@ -1304,12 +1304,12 @@ class AgentRuntimeRepository:
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return await self.get_by_id(session, runtime_id)
-        await session.flush()
+        await session.write_session.flush()
         return self._build(rdb)
 
     async def find_lifecycle_dispatch_candidates(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         limit: int,
         retry_delay: datetime.timedelta = datetime.timedelta(seconds=60),
@@ -1368,7 +1368,7 @@ class AgentRuntimeRepository:
                 RDBAgentRuntime.last_state_change_at < retry_cutoff,
             ),
         )
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgentRuntime)
             .where(
                 RDBAgentRuntime.last_lifecycle_command.is_not(None),
@@ -1386,7 +1386,7 @@ class AgentRuntimeRepository:
 
     async def find_provider_observe_candidates(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         limit: int,
         observe_interval: datetime.timedelta,
@@ -1403,7 +1403,7 @@ class AgentRuntimeRepository:
                 RDBAgentRuntime.created_at,
             ),
         )
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgentRuntime)
             .where(
                 RDBAgentRuntime.runtime_provider_id.is_not(None),
@@ -1426,12 +1426,12 @@ class AgentRuntimeRepository:
 
     async def find_configuration_adoption_candidates(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         limit: int,
     ) -> list[AgentRuntime]:
         """List running Runtimes whose exact desired state is not applied."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgentRuntime)
             .join(
                 RDBRuntimeConfigurationState,

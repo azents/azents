@@ -6,13 +6,18 @@ Connect to MCP server, fetch tool list, and wrap each as azents Tool.
 
 import datetime
 import hashlib
-import json
 import logging
 from collections.abc import Awaitable, Callable
+from urllib.parse import urlsplit
 
 import httpx
-from pydantic import TypeAdapter, ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+)
 
 from azents.core.enums import MCPOAuthConnectionStatus
 from azents.core.mcp_credentials import (
@@ -33,9 +38,11 @@ from azents.core.tools import (
     Toolkit,
     ToolkitProvider,
 )
-from azents.engine.tools.mcp_base import McpBasedToolkit
-from azents.rdb.session import SessionManager
-from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
+from azents.engine.tools.mcp_base import McpBasedToolkit, _build_auth_headers
+from azents.repos.engine_tool_repositories import (
+    EngineMcpSnapshotFactory,
+    EngineToolRepositories,
+)
 from azents.repos.mcp_oauth_connection.data import MCPOAuthConnection
 from azents.repos.mcp_oauth_connection.operations import (
     MCPOAuthRuntimeOperationRepository,
@@ -70,9 +77,9 @@ class McpToolkit(McpBasedToolkit[McpToolkitConfig]):
         on_auth_failure: (Callable[[], Awaitable[str | None]] | None) = None,
         proxy_url: str | None = None,
         artifact_service: ArtifactService | None = None,
-        session_manager: SessionManager[AsyncSession] | None = None,
-        agent_id: str = "",
-        session_id: str = "",
+        snapshot_factory: EngineMcpSnapshotFactory | None,
+        agent_id: str | None,
+        session_id: str | None,
         state_name: str = "tool_snapshot",
     ) -> None:
         """Initialize McpToolkit.
@@ -83,12 +90,14 @@ class McpToolkit(McpBasedToolkit[McpToolkitConfig]):
         :param proxy_url: MCP egress proxy URL; direct connection when None
         :param artifact_service: MCP binary output storage service
         """
+        if agent_id == "" or session_id == "":
+            raise ValueError("MCP identities must be nonempty or absent.")
         self._config = config or McpToolkitConfig(server_url="", auth_type="none")
         self._secret = secret
         self.on_auth_failure = on_auth_failure
         self._proxy_url = proxy_url
         self.artifact_service = artifact_service
-        self.session_manager = session_manager
+        self.snapshot_factory = snapshot_factory
         self._agent_id = agent_id
         self._session_id = session_id
         self._state_namespace = "mcp"
@@ -113,21 +122,34 @@ class McpToolkitProvider(ToolkitProvider[McpToolkitConfig]):
     )
     config_model = McpToolkitConfig
 
+    @classmethod
+    def source_identity(
+        cls,
+        config: McpToolkitConfig,
+    ) -> tuple[tuple[str, str], ...]:
+        """Return a credential-free MCP server origin."""
+        parsed = urlsplit(config.server_url)
+        if not parsed.scheme or parsed.hostname is None:
+            return ()
+        try:
+            parsed_port = parsed.port
+        except ValueError:
+            return ()
+        port = f":{parsed_port}" if parsed_port is not None else ""
+        return (("server", f"{parsed.scheme}://{parsed.hostname}{port}"),)
+
     def __init__(
         self,
         *,
-        connection_repo: MCPOAuthConnectionRepository | None = None,
-        session_manager: SessionManager[AsyncSession] | None = None,
+        repositories: EngineToolRepositories | None = None,
         artifact_service: ArtifactService | None = None,
     ) -> None:
         """Initialize McpToolkitProvider.
 
-        :param connection_repo: MCP OAuth connection repository
-        :param session_manager: DB session manager
-        :param artifact_service: MCP binary output storage service
+        :param repositories: Completed MCP OAuth and snapshot repositories
+            :param artifact_service: MCP binary output storage service
         """
-        self.connection_repo = connection_repo
-        self.session_manager = session_manager
+        self.repositories = repositories
         self.artifact_service = artifact_service
 
     async def test_connection(
@@ -171,12 +193,9 @@ class McpToolkitProvider(ToolkitProvider[McpToolkitConfig]):
         secret: str | None = None
         on_auth_failure: Callable[[], Awaitable[str | None]] | None = None
 
-        if config.auth_type == "oauth2" and self.connection_repo is not None:
-            if self.session_manager is None:
-                raise RuntimeError("MCP OAuth requires a DB session manager")
+        if config.auth_type == "oauth2" and self.repositories is not None:
             connection = await _ensure_oauth_connection_token(
-                connection_repo=self.connection_repo,
-                session_manager=self.session_manager,
+                operations=self.repositories.mcp_oauth,
                 toolkit_id=context.toolkit_id,
                 proxy_url=context.mcp_proxy_url,
             )
@@ -187,8 +206,7 @@ class McpToolkitProvider(ToolkitProvider[McpToolkitConfig]):
                 secret = connection.access_token
             on_auth_failure = _make_oauth_refresh_callback(
                 toolkit_id=context.toolkit_id,
-                connection_repo=self.connection_repo,
-                session_manager=self.session_manager,
+                operations=self.repositories.mcp_oauth,
                 proxy_url=context.mcp_proxy_url,
             )
         else:
@@ -200,7 +218,9 @@ class McpToolkitProvider(ToolkitProvider[McpToolkitConfig]):
             on_auth_failure=on_auth_failure,
             proxy_url=context.mcp_proxy_url,
             artifact_service=self.artifact_service,
-            session_manager=self.session_manager,
+            snapshot_factory=(
+                self.repositories.snapshots if self.repositories is not None else None
+            ),
             agent_id=context.agent_id,
             session_id=context.session_id,
             state_name=_mcp_snapshot_state_name(
@@ -218,23 +238,20 @@ class McpToolkitProvider(ToolkitProvider[McpToolkitConfig]):
 def _make_oauth_refresh_callback(
     *,
     toolkit_id: str,
-    connection_repo: MCPOAuthConnectionRepository,
-    session_manager: SessionManager[AsyncSession],
+    operations: MCPOAuthRuntimeOperationRepository,
     proxy_url: str | None = None,
 ) -> Callable[[], Awaitable[str | None]]:
     """Create callback that attempts toolkit OAuth refresh on 401.
 
     :param toolkit_id: Toolkit ID
-    :param connection_repo: OAuth connection repository
-    :param session_manager: DB session manager
+    :param operations: Completed OAuth connection operations
     :param proxy_url: egress proxy URL
     :return: Callback called on 401; new access_token or None
     """
 
     async def _refresh() -> str | None:
         connection = await _refresh_oauth_connection(
-            connection_repo=connection_repo,
-            session_manager=session_manager,
+            operations=operations,
             toolkit_id=toolkit_id,
             proxy_url=proxy_url,
             force=True,
@@ -293,31 +310,24 @@ def _token_needs_refresh(connection: MCPOAuthConnection) -> bool:
 
 async def _ensure_oauth_connection_token(
     *,
-    connection_repo: MCPOAuthConnectionRepository,
-    session_manager: SessionManager[AsyncSession],
+    operations: MCPOAuthRuntimeOperationRepository,
     toolkit_id: str,
     proxy_url: str | None,
 ) -> MCPOAuthConnection | None:
     """Load OAuth connection and refresh it when needed.
 
-    :param connection_repo: OAuth connection repository
-    :param session_manager: Database session factory
+    :param operations: Completed OAuth connection operations
     :param toolkit_id: Toolkit ID
     :param proxy_url: egress proxy URL
     :return: OAuth connection or None
     """
-    operations = MCPOAuthRuntimeOperationRepository(
-        session_manager=session_manager,
-        connection_repository=connection_repo,
-    )
     connection = await operations.load(toolkit_id=toolkit_id)
     if connection is None or connection.status != MCPOAuthConnectionStatus.CONNECTED:
         return connection
     if not _token_needs_refresh(connection):
         return connection
     return await _refresh_oauth_connection(
-        connection_repo=connection_repo,
-        session_manager=session_manager,
+        operations=operations,
         toolkit_id=toolkit_id,
         proxy_url=proxy_url,
         force=False,
@@ -327,8 +337,7 @@ async def _ensure_oauth_connection_token(
 
 async def _refresh_oauth_connection(
     *,
-    connection_repo: MCPOAuthConnectionRepository,
-    session_manager: SessionManager[AsyncSession],
+    operations: MCPOAuthRuntimeOperationRepository,
     toolkit_id: str,
     proxy_url: str | None,
     force: bool,
@@ -336,17 +345,12 @@ async def _refresh_oauth_connection(
 ) -> MCPOAuthConnection | None:
     """Refresh OAuth outside DB and conditionally persist the result.
 
-    :param connection_repo: OAuth connection repository
-    :param session_manager: Database session factory
+    :param operations: Completed OAuth connection operations
     :param toolkit_id: Toolkit ID
     :param proxy_url: egress proxy URL
     :param force: Refresh even when token is not near expiry
     :return: Refreshed or existing OAuth connection
     """
-    operations = MCPOAuthRuntimeOperationRepository(
-        session_manager=session_manager,
-        connection_repository=connection_repo,
-    )
     if connection is None:
         connection = await operations.load(toolkit_id=toolkit_id)
     if connection is None or connection.status != MCPOAuthConnectionStatus.CONNECTED:
@@ -355,8 +359,7 @@ async def _refresh_oauth_connection(
         return connection
     if connection.refresh_token is None:
         return await _persist_refresh_failure(
-            connection_repo=connection_repo,
-            session_manager=session_manager,
+            operations=operations,
             connection=connection,
             toolkit_id=toolkit_id,
             reconnect_required=True,
@@ -382,8 +385,7 @@ async def _refresh_oauth_connection(
                 exc_info=True,
             )
         return await _persist_refresh_failure(
-            connection_repo=connection_repo,
-            session_manager=session_manager,
+            operations=operations,
             connection=connection,
             toolkit_id=toolkit_id,
             reconnect_required=reconnect_required,
@@ -397,8 +399,7 @@ async def _refresh_oauth_connection(
                 exc_info=True,
             )
         return await _persist_refresh_failure(
-            connection_repo=connection_repo,
-            session_manager=session_manager,
+            operations=operations,
             connection=connection,
             toolkit_id=toolkit_id,
             reconnect_required=reconnect_required,
@@ -410,8 +411,7 @@ async def _refresh_oauth_connection(
             exc_info=True,
         )
         return await _persist_refresh_failure(
-            connection_repo=connection_repo,
-            session_manager=session_manager,
+            operations=operations,
             connection=connection,
             toolkit_id=toolkit_id,
             reconnect_required=False,
@@ -428,17 +428,12 @@ async def _refresh_oauth_connection(
 
 async def _persist_refresh_failure(
     *,
-    connection_repo: MCPOAuthConnectionRepository,
-    session_manager: SessionManager[AsyncSession],
+    operations: MCPOAuthRuntimeOperationRepository,
     connection: MCPOAuthConnection,
     toolkit_id: str,
     reconnect_required: bool,
 ) -> MCPOAuthConnection | None:
     """Keep a concurrent refresh or persist this refresh failure."""
-    operations = MCPOAuthRuntimeOperationRepository(
-        session_manager=session_manager,
-        connection_repository=connection_repo,
-    )
     return await operations.finalize_failure(
         before=connection,
         toolkit_id=toolkit_id,
@@ -446,17 +441,27 @@ async def _persist_refresh_failure(
     )
 
 
+class _OAuthRefreshFailurePayload(BaseModel):
+    """Decode an extensible provider error without coercing its error code."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    error: str | None = None
+
+    @field_validator("error", mode="before")
+    @classmethod
+    def decode_error(cls, value: object) -> str | None:
+        return value if isinstance(value, str) else None
+
+
 def _refresh_failure_requires_reconnect(exc: httpx.HTTPStatusError) -> bool:
     """Return whether an HTTP refresh failure requires reconnect."""
-    should_reconnect = exc.response.status_code in {400, 401}
-    if should_reconnect:
-        try:
-            payload = exc.response.json()
-            if isinstance(payload, dict):
-                should_reconnect = payload.get("error") == "invalid_grant"
-        except ValueError:
-            pass
-    return should_reconnect
+    if exc.response.status_code not in {400, 401}:
+        return False
+    try:
+        payload = _OAuthRefreshFailurePayload.model_validate_json(exc.response.content)
+    except ValidationError:
+        return True
+    return payload.error == "invalid_grant"
 
 
 async def _test_oauth2_discovery(
@@ -543,24 +548,10 @@ def _build_test_auth_headers(
         return {}
 
     try:
-        cred_data: object = json.loads(credentials_json)
-    except json.JSONDecodeError:
+        secret = _extract_static_secret(config, credentials_json)
+    except ValidationError:
         return {}
-    if not isinstance(cred_data, dict):
-        return {}
-
-    if config.auth_type == "api_key":
-        api_key = cred_data.get("api_key")
-        if isinstance(api_key, str):
-            header_name = config.header_name or "X-API-Key"
-            return {header_name: api_key}
-
-    if config.auth_type == "bearer":
-        token = cred_data.get("token")
-        if isinstance(token, str):
-            return {"Authorization": f"Bearer {token}"}
-
-    return {}
+    return _build_auth_headers(config, secret)
 
 
 __all__ = ["McpToolkit", "McpToolkitProvider"]

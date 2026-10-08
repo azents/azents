@@ -1,17 +1,16 @@
 """Signup token repository."""
 
 import datetime
-from typing import Any, cast
 
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
-from sqlalchemy.engine import CursorResult
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.models.signup_token import (
     RDBSignupToken,
     RDBSignupTokenRedemption,
 )
+from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.repos.mutation_result import mutation_result
 
 from .data import (
     SignupToken,
@@ -28,7 +27,7 @@ class SignupTokenRepository:
 
     async def create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: SignupTokenCreate,
     ) -> SignupToken:
         """Create Signup token.
@@ -45,13 +44,13 @@ class SignupTokenRepository:
             expires_at=create.expires_at,
             max_uses=create.max_uses,
         )
-        session.add(rdb_token)
-        await session.flush()
+        session.write_session.add(rdb_token)
+        await session.write_session.flush()
         return self._build(rdb_token)
 
     async def get_by_token_hash(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         token_hash: str,
     ) -> SignupToken | None:
         """Fetch signup token by token hash.
@@ -67,7 +66,7 @@ class SignupTokenRepository:
 
     async def list_all(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         offset: int = 0,
         limit: int = 50,
@@ -79,12 +78,12 @@ class SignupTokenRepository:
         :param limit: Maximum return count
         :return: signup token list
         """
-        count_result = await session.execute(
+        count_result = await session.read_session.execute(
             sa.select(sa.func.count()).select_from(RDBSignupToken)
         )
         total = count_result.scalar() or 0
 
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBSignupToken)
             .order_by(RDBSignupToken.created_at.desc())
             .offset(offset)
@@ -97,7 +96,7 @@ class SignupTokenRepository:
 
     async def revoke(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         token_id: str,
         *,
         revoked_at: datetime.datetime,
@@ -109,19 +108,18 @@ class SignupTokenRepository:
         :param revoked_at: Revocation time
         :return: True when token exists
         """
-        result = cast(
-            CursorResult[Any],
-            await session.execute(
+        result = mutation_result(
+            await session.write_session.execute(
                 sa.update(RDBSignupToken)
                 .where(RDBSignupToken.id == token_id)
                 .values(revoked_at=revoked_at)
-            ),
+            )
         )
         return (result.rowcount or 0) > 0
 
     async def get_available_by_token_hash(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         token_hash: str,
         *,
         now: datetime.datetime,
@@ -133,7 +131,7 @@ class SignupTokenRepository:
         :param now: Current time
         :return: Usable signup token or unusable error
         """
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBSignupToken).where(
                 RDBSignupToken.token_hash == token_hash,
                 RDBSignupToken.revoked_at.is_(None),
@@ -148,7 +146,7 @@ class SignupTokenRepository:
 
     async def claim_for_redemption(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         token_hash: str,
         *,
         now: datetime.datetime,
@@ -160,7 +158,7 @@ class SignupTokenRepository:
         :param now: Current time
         :return: Claimed signup token or unusable error
         """
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBSignupToken)
             .where(
                 RDBSignupToken.token_hash == token_hash,
@@ -178,7 +176,7 @@ class SignupTokenRepository:
 
     async def list_redemptions_by_token_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         signup_token_id: str,
     ) -> list[SignupTokenRedemption]:
         """Fetch usage records for Signup token.
@@ -187,7 +185,7 @@ class SignupTokenRepository:
         :param signup_token_id: signup token ID
         :return: Usage record list
         """
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBSignupTokenRedemption)
             .where(RDBSignupTokenRedemption.signup_token_id == signup_token_id)
             .order_by(RDBSignupTokenRedemption.redeemed_at.asc())
@@ -196,7 +194,7 @@ class SignupTokenRepository:
 
     async def create_redemption(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: SignupTokenRedemptionCreate,
     ) -> SignupTokenRedemption:
         """Create Signup token usage record.
@@ -213,17 +211,17 @@ class SignupTokenRepository:
             user_agent=create.user_agent,
             redeemed_at=create.redeemed_at,
         )
-        session.add(rdb_redemption)
-        await session.flush()
+        session.write_session.add(rdb_redemption)
+        await session.write_session.flush()
         return self._build_redemption(rdb_redemption)
 
     async def _get_rdb_by_token_hash(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         token_hash: str,
     ) -> RDBSignupToken | None:
         """Fetch RDBSignupToken by token hash."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBSignupToken).where(RDBSignupToken.token_hash == token_hash)
         )
         return result.scalar_one_or_none()

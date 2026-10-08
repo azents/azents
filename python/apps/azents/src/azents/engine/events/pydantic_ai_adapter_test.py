@@ -55,6 +55,7 @@ class GatedSDKBody(httpx2.AsyncByteStream):
 
 def request_for_test() -> PydanticAIRequest:
     return PydanticAIRequest(
+        native_replay_context=None,
         assembly_metadata=None,
         provider="xai",
         model="grok-test",

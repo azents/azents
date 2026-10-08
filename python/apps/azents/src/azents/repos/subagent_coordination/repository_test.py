@@ -5,8 +5,8 @@ from typing import NamedTuple
 
 import sqlalchemy as sa
 from azcommon.result import Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSessionCreate, SessionAgent
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
@@ -16,6 +16,7 @@ from azents.core.enums import (
     MailboxItemKind,
     MailboxSchedulingMode,
 )
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
@@ -23,10 +24,9 @@ from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.mailbox_item import RDBMailboxItem
 from azents.rdb.models.session_agent import RDBSessionAgent
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate, SessionAgent
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
@@ -44,7 +44,7 @@ class _RootFixture(NamedTuple):
 
 
 async def _create_agent(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     workspace_id: str,
     slug: str,
@@ -57,8 +57,8 @@ async def _create_agent(
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
     agent = RDBAgent(
         workspace_id=workspace_id,
         name=f"{slug} agent",
@@ -91,17 +91,17 @@ async def _create_agent(
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     runtime = RDBAgentRuntime(workspace_id=workspace_id, agent_id=agent.id)
     runtime.workspace_path = "/workspace/agent"
-    session.add(runtime)
-    await session.flush()
+    session.write_session.add(runtime)
+    await session.write_session.flush()
     return agent.id
 
 
 async def _create_root(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     slug: str,
 ) -> _RootFixture:
@@ -141,7 +141,7 @@ async def _create_root(
 
 
 async def _create_child(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     repository: AgentSessionRepository,
     parent: SessionAgent,
@@ -159,14 +159,14 @@ async def _create_child(
 
 
 def _add_run(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     session_id: str,
     run_index: int,
     status: AgentRunStatus,
 ) -> None:
     """Add one durable AgentRun row with an explicit status."""
-    session.add(
+    session.write_session.add(
         RDBAgentRun(
             session_id=session_id,
             scheduled_task_cycle_id=None,
@@ -182,7 +182,7 @@ def _add_run(
 
 
 async def test_project_root_tree_bounds_inactive_rows_and_keeps_required_rows(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Project one scoped tree with active overflow and deterministic recent fill."""
     session = rdb_session
@@ -233,7 +233,7 @@ async def test_project_root_tree_bounds_inactive_rows_and_keeps_required_rows(
         name="equal-b",
     )
 
-    await session.execute(
+    await session.write_session.execute(
         sa.update(RDBAgentSession)
         .where(RDBAgentSession.id == active.agent_session_id)
         .values(run_state=AgentSessionRunState.RUNNING)
@@ -263,7 +263,7 @@ async def test_project_root_tree_bounds_inactive_rows_and_keeps_required_rows(
     )
     mailbox_item.order_group = mailbox_item.id
     mailbox_item.order_sequence = 0
-    session.add(mailbox_item)
+    session.write_session.add(mailbox_item)
 
     now = datetime.datetime.now(datetime.UTC)
     equal_created = now - datetime.timedelta(days=1)
@@ -274,17 +274,17 @@ async def test_project_root_tree_bounds_inactive_rows_and_keeps_required_rows(
         equal_b.id: None,
     }
     for session_agent_id, last_message_at in activity.items():
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBSessionAgent)
             .where(RDBSessionAgent.id == session_agent_id)
             .values(last_message_at=last_message_at)
         )
-    await session.execute(
+    await session.write_session.execute(
         sa.update(RDBSessionAgent)
         .where(RDBSessionAgent.id.in_([equal_a.id, equal_b.id]))
         .values(created_at=equal_created)
     )
-    await session.execute(
+    await session.write_session.execute(
         sa.update(RDBSessionAgent)
         .where(RDBSessionAgent.id == old.id)
         .values(created_at=now - datetime.timedelta(days=3))
@@ -300,12 +300,12 @@ async def test_project_root_tree_bounds_inactive_rows_and_keeps_required_rows(
         parent=other_root,
         name="outside",
     )
-    await session.execute(
+    await session.write_session.execute(
         sa.update(RDBAgentSession)
         .where(RDBAgentSession.id == other_child.agent_session_id)
         .values(run_state=AgentSessionRunState.RUNNING)
     )
-    await session.flush()
+    await session.write_session.flush()
 
     projection_repository = SubagentCoordinationRepository()
     overflow = await projection_repository.project_root_tree(
@@ -357,7 +357,7 @@ async def test_project_root_tree_bounds_inactive_rows_and_keeps_required_rows(
 
 
 async def test_project_root_tree_returns_none_for_unknown_session(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Return no projection when the caller has no SessionAgent identity."""
     projection = await SubagentCoordinationRepository().project_root_tree(

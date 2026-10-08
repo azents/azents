@@ -4,11 +4,8 @@ import dataclasses
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.user import UserRepository
+from azents.repos.credential_read_operations import CredentialReadOperationRepository
 from azents.services.credential.data import (
     CredentialProjection,
     CredentialRemoveCheck,
@@ -28,11 +25,10 @@ from azents.services.credential.providers import (
 class CredentialService:
     """Service that combines Credential provider results."""
 
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+    repository: Annotated[
+        CredentialReadOperationRepository, Depends(CredentialReadOperationRepository)
     ]
     providers: Annotated[list[CredentialProvider], Depends(get_credential_providers)]
-    user_repo: Annotated[UserRepository, Depends()]
 
     async def get_user_credentials(
         self,
@@ -40,23 +36,30 @@ class CredentialService:
         user_id: str,
     ) -> list[CredentialSummary] | None:
         """Return User credential summary list."""
-        async with self.session_manager() as session:
-            user = await self.user_repo.get(session, user_id)
-            if user is None:
-                return None
-            summaries = [
-                await provider.get_user_summary(session, user_id=user_id)
-                for provider in self.providers
-            ]
+        providers = tuple(self.providers)
+        snapshot = await self.repository.read_user_snapshot(
+            user_id=user_id, kinds=tuple(provider.read_kind for provider in providers)
+        )
+        if snapshot is None:
+            return None
+        summaries: list[CredentialSummary] = []
+        for provider, fact in zip(providers, snapshot.facts, strict=True):
+            if fact.kind is not provider.read_kind:
+                raise ValueError("Credential read fact kind does not match provider.")
+            summaries.append(await provider.get_user_summary(fact=fact))
         return self._apply_remove_invariants(summaries)
 
     async def get_login_projection(self, *, email: str) -> LoginCredentialProjection:
         """Return Public login methods projection."""
-        async with self.session_manager() as session:
-            summaries = [
-                await provider.get_login_summary(session, email=email)
-                for provider in self.providers
-            ]
+        providers = tuple(self.providers)
+        snapshot = await self.repository.read_login_snapshot(
+            email=email, kinds=tuple(provider.read_kind for provider in providers)
+        )
+        summaries: list[CredentialSummary] = []
+        for provider, fact in zip(providers, snapshot.facts, strict=True):
+            if fact.kind is not provider.read_kind:
+                raise ValueError("Credential read fact kind does not match provider.")
+            summaries.append(await provider.get_login_summary(fact=fact))
         by_type = {summary.type: summary for summary in summaries}
         password = by_type.get(CredentialType.PASSWORD)
         return LoginCredentialProjection(

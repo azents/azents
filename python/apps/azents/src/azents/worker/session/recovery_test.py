@@ -1,224 +1,191 @@
-"""StuckSessionRecovery tests."""
+"""Recovery orchestration over typed completed database operations."""
 
+import asyncio
 import datetime
-from contextlib import AbstractAsyncContextManager
-from typing import Any, cast
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.broker.types import SessionBroker, SessionWakeUp
-from azents.core.enums import (
-    AgentSessionKind,
-    AgentSessionProductMode,
-    AgentSessionRunState,
-    AgentSessionStartReason,
-    AgentSessionStatus,
+from azents.broker.types import BrokerMessage, SessionBroker, SessionWakeUp
+from azents.repos.worker_session_data import StuckWorkerSession
+from azents.repos.worker_session_recovery import (
+    WorkerSessionRecoveryOperationRepository,
 )
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
 from azents.worker.session.lifecycle import SessionLifecycleService
 from azents.worker.session.recovery import StuckSessionRecovery
 
 
-class _SessionScope(AbstractAsyncContextManager[AsyncSession]):
-    """DB session context for tests."""
+class _RecoveryRepository(WorkerSessionRecoveryOperationRepository):
+    """Return completed routing data without exposing a SQL session to callers."""
 
-    async def __aenter__(self) -> AsyncSession:
-        """Return test session."""
-        return cast(AsyncSession, object())
-
-    async def __aexit__(self, *exc_info: object) -> None:
-        """No resources to clean up."""
-
-
-class _SessionManager:
-    """session manager for tests."""
-
-    def __call__(self) -> _SessionScope:
-        """Return new session scope."""
-        return _SessionScope()
-
-
-class _AgentSessionRepository(AgentSessionRepository):
-    """AgentSessionRepository test double."""
-
-    def __init__(self, sessions: list[AgentSession]) -> None:
-        self.sessions = sessions
+    def __init__(self, records: list[StuckWorkerSession], trace: list[str]) -> None:
+        self.records = records
+        self.trace = trace
         self.find_calls: list[tuple[datetime.timedelta, int]] = []
 
     async def find_stuck_running(
-        self,
-        session: AsyncSession,
-        *,
-        stale_threshold: datetime.timedelta,
-        limit: int,
-    ) -> list[AgentSession]:
-        """Record stuck session fetch request and return specified result."""
-        del session
+        self, *, stale_threshold: datetime.timedelta, limit: int
+    ) -> list[StuckWorkerSession]:
         self.find_calls.append((stale_threshold, limit))
-        return self.sessions
+        self.trace.append("scan-complete")
+        return list(self.records)
 
 
-class _Broker:
-    """SessionBroker test double."""
+class _Broker(SessionBroker):
+    """Record the routing-only wake-up after the matching completed mutation."""
 
-    def __init__(self) -> None:
+    def __init__(self, trace: list[str]) -> None:
+        self.trace = trace
         self.sent_messages: list[SessionWakeUp] = []
 
-    async def send_message(self, message: SessionWakeUp) -> None:
-        """Record sent wake-up message."""
+    async def send_message(self, message: BrokerMessage) -> None:
+        assert isinstance(message, SessionWakeUp)
+        assert self.trace[-1] == f"mark:{message.session_id}"
         self.sent_messages.append(message)
+        self.trace.append(f"send:{message.session_id}")
 
 
-class _SessionLifecycle:
-    """SessionLifecycleService test double."""
+class _SessionLifecycle(SessionLifecycleService):
+    """Record the completed durable transition without a Session adapter."""
 
-    def __init__(self, *, fail_for: str | None = None) -> None:
+    def __init__(self, trace: list[str], fail_for: str | None) -> None:
+        self.trace = trace
         self.fail_for = fail_for
         self.running_session_ids: list[str] = []
 
     async def mark_session_running(self, session_id: str) -> None:
-        """Record session id for RUNNING transition request."""
+        assert "scan-complete" in self.trace
         if session_id == self.fail_for:
+            self.trace.append(f"failed:{session_id}")
             raise RuntimeError("mark failed")
         self.running_session_ids.append(session_id)
-
-
-def _agent_session(
-    *,
-    session_id: str = "session-001",
-    agent_id: str = "agent-001",
-    workspace_id: str = "workspace-001",
-    session_kind: AgentSessionKind = AgentSessionKind.ROOT,
-) -> AgentSession:
-    """Create AgentSession for tests."""
-    now = datetime.datetime.now(datetime.UTC)
-    return AgentSession(
-        owner_generation=0,
-        applied_profile_generation=0,
-        inference_state=None,
-        id=session_id,
-        workspace_id=workspace_id,
-        agent_id=agent_id,
-        handle="test-session-handle",
-        session_kind=session_kind,
-        product_mode=AgentSessionProductMode.TEAM,
-        associated_user_id=None,
-        status=AgentSessionStatus.ACTIVE,
-        start_reason=AgentSessionStartReason.INITIAL,
-        title=None,
-        title_source=None,
-        title_generated_at=None,
-        title_generation_event_id=None,
-        last_user_input_at=now,
-        last_activity_at=now,
-        pinned=False,
-        end_reason=None,
-        started_at=now,
-        lifecycle_started_at=None,
-        run_state=AgentSessionRunState.RUNNING,
-        run_heartbeat_at=now - datetime.timedelta(minutes=10),
-        pending_command_id=None,
-        pending_command_name=None,
-        pending_command_payload=None,
-        pending_command_requester_user_id=None,
-        pending_command_created_at=None,
-        stop_requested_at=None,
-        stop_requester_user_id=None,
-        stop_request_id=None,
-        ended_at=None,
-        created_at=now,
-        updated_at=now,
-    )
+        self.trace.append(f"mark:{session_id}")
 
 
 def _recovery(
-    *,
-    repository: _AgentSessionRepository,
+    repository: _RecoveryRepository,
     broker: _Broker,
     lifecycle: _SessionLifecycle,
-    stale_threshold: datetime.timedelta = datetime.timedelta(seconds=5),
-    limit: int = 7,
 ) -> StuckSessionRecovery:
-    """Create StuckSessionRecovery under test."""
     return StuckSessionRecovery(
-        broker=cast(SessionBroker, broker),
-        session_manager=cast(Any, _SessionManager()),
-        agent_session_repository=repository,
-        session_lifecycle=cast(SessionLifecycleService, lifecycle),
-        stale_threshold=stale_threshold,
-        limit=limit,
+        broker=broker,
+        repository=repository,
+        session_lifecycle=lifecycle,
+        stale_threshold=datetime.timedelta(seconds=5),
+        limit=7,
         interval=datetime.timedelta(seconds=60),
     )
 
 
+class _FailedRecoveryRepository(_RecoveryRepository):
+    """Expose a completed scan failure without invoking downstream effects."""
+
+    def __init__(self, error: BaseException, trace: list[str]) -> None:
+        super().__init__([], trace)
+        self.error = error
+
+    async def find_stuck_running(
+        self, *, stale_threshold: datetime.timedelta, limit: int
+    ) -> list[StuckWorkerSession]:
+        self.find_calls.append((stale_threshold, limit))
+        self.trace.append("scan-failed")
+        raise self.error
+
+
+@pytest.mark.asyncio
+async def test_read_failure_propagates_before_any_recovery_effect() -> None:
+    """A failed completed scan remains an error instead of empty recovery."""
+    trace: list[str] = []
+    repository = _FailedRecoveryRepository(RuntimeError("scan unavailable"), trace)
+    broker = _Broker(trace)
+    lifecycle = _SessionLifecycle(trace, None)
+
+    with pytest.raises(RuntimeError, match="scan unavailable"):
+        await _recovery(repository, broker, lifecycle).recover_once()
+
+    assert trace == ["scan-failed"]
+    assert broker.sent_messages == []
+    assert lifecycle.running_session_ids == []
+
+
+@pytest.mark.asyncio
+async def test_run_reraises_scan_cancellation() -> None:
+    """Worker shutdown cancellation escapes the scan supervisor unchanged."""
+    trace: list[str] = []
+    repository = _FailedRecoveryRepository(asyncio.CancelledError(), trace)
+    broker = _Broker(trace)
+    lifecycle = _SessionLifecycle(trace, None)
+
+    with pytest.raises(asyncio.CancelledError):
+        await _recovery(repository, broker, lifecycle).run(asyncio.Event())
+
+    assert trace == ["scan-failed"]
+    assert broker.sent_messages == []
+    assert lifecycle.running_session_ids == []
+
+
 @pytest.mark.asyncio
 async def test_recover_once_enqueues_resume_for_stuck_sessions() -> None:
-    """stuck RUNNING session is marked running again, then re-enqueued as RESUME."""
-    repository = _AgentSessionRepository(
-        [_agent_session(session_id="session-001", agent_id="agent-001")]
+    """A completed scan precedes mark-running and then routing-only wake-up."""
+    trace: list[str] = []
+    repository = _RecoveryRepository(
+        [StuckWorkerSession(id="session-001", agent_id="agent-001")], trace
     )
-    broker = _Broker()
-    lifecycle = _SessionLifecycle()
-
-    await _recovery(
-        repository=repository,
-        broker=broker,
-        lifecycle=lifecycle,
-    ).recover_once()
-
+    broker = _Broker(trace)
+    lifecycle = _SessionLifecycle(trace, None)
+    await _recovery(repository, broker, lifecycle).recover_once()
     assert repository.find_calls == [(datetime.timedelta(seconds=5), 7)]
     assert lifecycle.running_session_ids == ["session-001"]
     assert broker.sent_messages == [SessionWakeUp(session_id="session-001")]
+    assert trace == ["scan-complete", "mark:session-001", "send:session-001"]
 
 
 @pytest.mark.asyncio
 async def test_recover_once_continues_after_record_failure() -> None:
-    """One stuck record recovery failure does not block next record recovery."""
-    repository = _AgentSessionRepository(
+    """One failed durable mutation skips that send but not the next record."""
+    trace: list[str] = []
+    repository = _RecoveryRepository(
         [
-            _agent_session(session_id="session-bad", agent_id="agent-bad"),
-            _agent_session(session_id="session-002", agent_id="agent-002"),
-        ]
+            StuckWorkerSession(id="session-bad", agent_id="agent-bad"),
+            StuckWorkerSession(id="session-002", agent_id="agent-002"),
+        ],
+        trace,
     )
-    broker = _Broker()
-    lifecycle = _SessionLifecycle(fail_for="session-bad")
-
-    await _recovery(
-        repository=repository,
-        broker=broker,
-        lifecycle=lifecycle,
-    ).recover_once()
-
+    broker = _Broker(trace)
+    lifecycle = _SessionLifecycle(trace, "session-bad")
+    await _recovery(repository, broker, lifecycle).recover_once()
     assert lifecycle.running_session_ids == ["session-002"]
     assert [message.session_id for message in broker.sent_messages] == ["session-002"]
+    assert trace == [
+        "scan-complete",
+        "failed:session-bad",
+        "mark:session-002",
+        "send:session-002",
+    ]
 
 
 @pytest.mark.asyncio
 async def test_recover_once_treats_root_and_subagent_sessions_independently() -> None:
-    """Root and subagent stuck sessions are recovered as independent sessions."""
-    repository = _AgentSessionRepository(
+    """Root and child retain separate routing IDs even when their Agent matches."""
+    trace: list[str] = []
+    repository = _RecoveryRepository(
         [
-            _agent_session(session_id="root-session", agent_id="agent-001"),
-            _agent_session(
-                session_id="child-session",
-                agent_id="agent-001",
-                session_kind=AgentSessionKind.SUBAGENT,
-            ),
-        ]
+            StuckWorkerSession(id="root-session", agent_id="agent-001"),
+            StuckWorkerSession(id="child-session", agent_id="agent-001"),
+        ],
+        trace,
     )
-    broker = _Broker()
-    lifecycle = _SessionLifecycle()
-
-    await _recovery(
-        repository=repository,
-        broker=broker,
-        lifecycle=lifecycle,
-    ).recover_once()
-
+    broker = _Broker(trace)
+    lifecycle = _SessionLifecycle(trace, None)
+    await _recovery(repository, broker, lifecycle).recover_once()
     assert lifecycle.running_session_ids == ["root-session", "child-session"]
     assert [message.session_id for message in broker.sent_messages] == [
         "root-session",
         "child-session",
+    ]
+    assert trace == [
+        "scan-complete",
+        "mark:root-session",
+        "send:root-session",
+        "mark:child-session",
+        "send:child-session",
     ]

@@ -6,14 +6,11 @@ from typing import Annotated
 
 from azcommon.datetime import tznow
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import RuntimeProviderBootstrapDeclarationState
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.runtime_provider.repository import RuntimeProviderRepository
-from azents.services.runtime_provider_control.data import (
-    RuntimeProviderCredentialUnavailable,
+from azents.core.runtime_provider_bootstrap import RuntimeProviderBootstrapSnapshot
+from azents.core.runtime_provider_control import RuntimeProviderCredentialUnavailable
+from azents.repos.runtime_provider.bootstrap_enrollment_read import (
+    RuntimeProviderBootstrapEnrollmentReadRepository,
 )
 from azents.services.runtime_provider_control.deps import (
     get_runtime_provider_enrollment_service,
@@ -22,7 +19,6 @@ from azents.services.runtime_provider_control.service import (
     RuntimeProviderEnrollmentService,
 )
 
-from .data import RuntimeProviderBootstrapSnapshot
 from .service import RuntimeProviderBootstrapService
 
 
@@ -38,11 +34,9 @@ class RuntimeProviderBootstrapCredential:
 class RuntimeProviderBootstrapEnrollmentService:
     """Reconcile a declaration and ensure its Provider credential."""
 
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ]
-    provider_repository: Annotated[
-        RuntimeProviderRepository, Depends(RuntimeProviderRepository)
+    repository: Annotated[
+        RuntimeProviderBootstrapEnrollmentReadRepository,
+        Depends(RuntimeProviderBootstrapEnrollmentReadRepository),
     ]
     bootstrap_service: Annotated[RuntimeProviderBootstrapService, Depends()]
     enrollment_service: Annotated[
@@ -68,31 +62,12 @@ class RuntimeProviderBootstrapEnrollmentService:
                 "Bootstrap credential target must match exactly one declaration."
             )
         reconcile_result = await self.bootstrap_service.reconcile(snapshot)
-        async with self.session_manager() as session:
-            provider = await self.provider_repository.get_by_provider_id(
-                session,
-                provider_logical_id=provider_logical_id,
-                for_update=False,
-            )
-            if provider is None:
-                raise RuntimeError("Bootstrap Provider was not created.")
-            declaration = (
-                await self.provider_repository.get_bootstrap_declaration_by_provider_id(
-                    session,
-                    provider_id=provider.id,
-                    for_update=False,
-                )
-            )
-            if (
-                declaration is None
-                or declaration.source_id != reconcile_result.source_id
-                or declaration.state != RuntimeProviderBootstrapDeclarationState.PRESENT
-            ):
-                raise RuntimeError(
-                    "Bootstrap source does not own the credential target Provider."
-                )
-            provider_id = provider.id
-            source_id = declaration.source_id
+        target = await self.repository.resolve(
+            provider_logical_id=provider_logical_id,
+            source_id=reconcile_result.source_id,
+        )
+        provider_id = target.provider_id
+        source_id = target.source_id
 
         if existing_secret is not None:
             try:

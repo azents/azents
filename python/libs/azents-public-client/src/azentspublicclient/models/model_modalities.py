@@ -25,7 +25,7 @@ from typing_extensions import Self
 
 class ModelModalities(BaseModel):
     """
-    Input/output modalities supported by the model.
+    Supported input/output forms; absent entries mean unsupported.
     """ # noqa: E501
     input: Optional[List[ModelModality]] = None
     output: Optional[List[ModelModality]] = None
@@ -89,9 +89,12 @@ class ModelModalities(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "input": obj.get("input"),
             "output": obj.get("output")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

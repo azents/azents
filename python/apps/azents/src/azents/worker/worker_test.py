@@ -2,25 +2,32 @@
 
 import asyncio
 import contextlib
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from datetime import datetime, timezone
 
 import pytest
 from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.worker.session.supervisor as session_runner_supervisor_module
 import azents.worker.session.waiter as session_runner_waiter_module
+from azents.broker.broadcast import BaseWebSocketBroadcast
 from azents.broker.types import (
+    BrokerMessage,
+    SessionActivity,
+    SessionBroker,
     SessionStopSignal,
     SessionWakeUp,
+    WorkerSignal,
 )
+from azents.core.agent_session_data import PendingSessionCommand
 from azents.core.enums import (
+    AgentRunPhase,
     AgentRunStatus,
     AgentSessionKind,
     EventKind,
 )
+from azents.core.historical_memory_consolidation import MemoryExecutionBinding
 from azents.core.inference_profile import (
     RequestedInferenceProfile,
     SessionInferenceState,
@@ -47,13 +54,23 @@ from azents.engine.run.types import (
     CheckStop,
     PollMessages,
 )
-from azents.repos.agent_session.data import PendingSessionCommand
+from azents.repos.historical_memory_consolidation.execution import (
+    MemoryExecutionRepository,
+)
+from azents.repos.live_projection_authority import LiveProjectionAuthorityRepository
+from azents.repos.session_execution import (
+    CanonicalExecutionOwnerGenerationStaleError,
+    CanonicalExecutionSnapshotError,
+)
 from azents.repos.session_execution.data import (
     CanonicalExecutionSnapshot,
     PendingCommandSnapshot,
 )
-from azents.services.chat.live_events import LiveOwnerAdvance
+from azents.repos.worker_session import WorkerSessionOperationRepository
+from azents.repos.worker_session_data import CanonicalExecutionWorkDriftError
+from azents.services.chat.live_events import BaseLiveEventStore, LiveOwnerAdvance
 from azents.services.mailbox import (
+    MailboxService,
     PendingInputInferenceProfile,
     PromotedMailboxItems,
     TurnEffect,
@@ -69,46 +86,49 @@ from azents.worker.run.helpers import (
     apply_active_tool_call_event,
     observed_terminal_run_event,
 )
+from azents.worker.run.memory_execution import MemoryRunExecutor
 from azents.worker.run.results import RunExecutionResult
 from azents.worker.session.contracts import PrepareToolkits
-from azents.worker.session.execution_snapshot import (
-    CanonicalExecutionOwnerGenerationStaleError,
-    CanonicalExecutionSnapshotError,
-    CanonicalExecutionWorkDriftError,
-)
+from azents.worker.session.execution_snapshot import CanonicalExecutionSnapshotLoader
+from azents.worker.session.idle_continuation import IdleContinuationService
+from azents.worker.session.lifecycle import SessionLifecycleService
 from azents.worker.session.runner import SessionRunner
 from azents.worker.session.supervisor import RunStopController, ToolAdmissionBarrier
+from azents.worker.session.user_stop_finalizer import UserStopFinalizer
 from azents.worker.session.waiter import (
     HeartbeatResult,
     IdleTimeoutResult,
     MessageResult,
     RunnerWaitResult,
+    SessionRunnerWaiter,
     ShutdownResult,
 )
 from azents.worker.worker import AgentWorker
 
 
-class _Broadcast:
+class _Broadcast(BaseWebSocketBroadcast):
     """WebSocketBroadcast test double."""
 
     def __init__(self) -> None:
         self.events: list[tuple[str, dict[str, object]]] = []
 
-    async def publish(self, session_id: str, event: dict[str, object]) -> None:
+    async def publish(self, session_id: str, event_json: dict[str, object]) -> None:
         """Record delivered broadcast payloads in order."""
-        self.events.append((session_id, event))
+        self.events.append((session_id, event_json))
 
     async def publish_live_projection(
-        self,
-        session_id: str,
-        event: dict[str, object],
-        *,
-        owner_generation: int,
+        self, session_id: str, event_json: dict[str, object], *, owner_generation: int
     ) -> bool:
         """Record an owner-gated projection payload."""
         del owner_generation
-        self.events.append((session_id, event))
+        self.events.append((session_id, event_json))
         return True
+
+    def subscribe(
+        self, session_id: str
+    ) -> AbstractAsyncContextManager[AsyncIterator[dict[str, object]]]:
+        """Subscriptions are outside this focused broadcast fixture."""
+        raise AssertionError("Unexpected broadcast subscription")
 
 
 def _event_payload(value: object) -> dict[str, object]:
@@ -118,7 +138,7 @@ def _event_payload(value: object) -> dict[str, object]:
     return value
 
 
-class _SessionRunnerEventPublisher:
+class _SessionRunnerEventPublisher(WorkerEventPublisher):
     """Event publisher for SessionRunner tests."""
 
     def __init__(self, host: "_Host") -> None:
@@ -136,7 +156,7 @@ class _SessionRunnerEventPublisher:
         await self.host.dispatch_event(session_id, event)
 
 
-class _MailboxService:
+class _MailboxService(MailboxService):
     """MailboxService test double."""
 
     def __init__(self, promoted: PromotedMailboxItems) -> None:
@@ -205,26 +225,80 @@ class _MailboxService:
         return self.promoted
 
 
-class _SessionScope(AbstractAsyncContextManager[AsyncSession]):
-    """DB session context for tests."""
+class _StrictSessionBroker(SessionBroker):
+    """All broker signatures are explicit; unconfigured operations fail."""
 
-    async def __aenter__(self) -> AsyncSession:
-        """Return test session."""
-        return AsyncSession()
+    async def send_message(self, message: BrokerMessage) -> None:
+        """Reject an operation not configured by this test."""
+        raise AssertionError("Unexpected broker call: send_message")
 
-    async def __aexit__(self, *exc_info: object) -> None:
-        """No resources to clean up."""
+    async def receive_messages(self) -> list[WorkerSignal]:
+        """Reject an operation not configured by this test."""
+        raise AssertionError("Unexpected broker call: receive_messages")
+
+    async def notify_mailbox_activity(self, session_id: str) -> None:
+        """Reject an operation not configured by this test."""
+        raise AssertionError("Unexpected broker call: notify_mailbox_activity")
+
+    async def publish_event(self, session_id: str, event: PublishedEvent) -> None:
+        """Reject an operation not configured by this test."""
+        raise AssertionError("Unexpected broker call: publish_event")
+
+    async def renew_session_ttl(self, session_id: str) -> None:
+        """Reject an operation not configured by this test."""
+        raise AssertionError("Unexpected broker call: renew_session_ttl")
+
+    async def renew_session_owner_heartbeat(self, session_id: str) -> None:
+        """Reject an operation not configured by this test."""
+        raise AssertionError("Unexpected broker call: renew_session_owner_heartbeat")
+
+    async def release_session_lock(self, session_id: str) -> None:
+        """Reject an operation not configured by this test."""
+        raise AssertionError("Unexpected broker call: release_session_lock")
+
+    async def set_session_activity(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+        run_id: str,
+        phase: AgentRunPhase | None = None,
+    ) -> bool:
+        """Reject an operation not configured by this test."""
+        raise AssertionError("Unexpected broker call: set_session_activity")
+
+    async def clear_session_activity(
+        self, session_id: str, *, owner_generation: int
+    ) -> bool:
+        """Reject an operation not configured by this test."""
+        raise AssertionError("Unexpected broker call: clear_session_activity")
+
+    async def get_session_activity(self, session_id: str) -> SessionActivity | None:
+        """Reject an operation not configured by this test."""
+        raise AssertionError("Unexpected broker call: get_session_activity")
+
+    async def purge_session_state(self, session_id: str) -> None:
+        """Reject an operation not configured by this test."""
+        raise AssertionError("Unexpected broker call: purge_session_state")
+
+    async def acquire_cutover_replay_barrier(self, session_ids: tuple[str, ...]) -> str:
+        """Reject an operation not configured by this test."""
+        raise AssertionError("Unexpected broker call: acquire_cutover_replay_barrier")
+
+    async def release_cutover_replay_barrier(
+        self, session_ids: tuple[str, ...], token: str
+    ) -> None:
+        """Reject an operation not configured by this test."""
+        raise AssertionError("Unexpected broker call: release_cutover_replay_barrier")
+
+    async def renew_cutover_replay_barrier(
+        self, session_ids: tuple[str, ...], token: str
+    ) -> bool:
+        """Reject an operation not configured by this test."""
+        raise AssertionError("Unexpected broker call: renew_cutover_replay_barrier")
 
 
-class _SessionManager:
-    """session manager for tests."""
-
-    def __call__(self) -> _SessionScope:
-        """Return new session scope."""
-        return _SessionScope()
-
-
-class _Broker:
+class _Broker(_StrictSessionBroker):
     """SessionBroker test double."""
 
     def __init__(self) -> None:
@@ -245,7 +319,7 @@ class _Broker:
         self.published_events.append((session_id, event))
 
 
-class _LiveEventStore:
+class _LiveEventStore(BaseLiveEventStore):
     """LiveEventStore test double."""
 
     def __init__(
@@ -253,6 +327,7 @@ class _LiveEventStore:
         before: list[Event],
         after: list[Event],
     ) -> None:
+        super().__init__()
         self._before = before
         self._after = after
         self._listed = 0
@@ -300,6 +375,7 @@ class _LiveEventStore:
         *,
         delta: str,
         content_index: int,
+        now: datetime | None = None,
     ) -> Event:
         """Record Assistant delta append and return live event."""
         self.assistant_deltas.append((session_id, delta, content_index))
@@ -320,7 +396,7 @@ class _LiveEventStore:
                     item={"live_projection": "assistant_message"},
                 ),
             ),
-            created_at=datetime.now(timezone.utc),
+            created_at=now or datetime.now(timezone.utc),
         )
 
     async def append_reasoning_delta(
@@ -331,6 +407,7 @@ class _LiveEventStore:
         item_id: str | None,
         output_index: int | None,
         summary_index: int | None,
+        now: datetime | None = None,
     ) -> Event:
         """Record Reasoning delta append and return live event."""
         self.reasoning_deltas.append(
@@ -353,54 +430,54 @@ class _LiveEventStore:
                     item={"live_projection": "reasoning"},
                 ),
             ),
-            created_at=datetime.now(timezone.utc),
+            created_at=now or datetime.now(timezone.utc),
         )
 
 
-class _CurrentOwnerRepository:
-    """Return the current owner for live projection tests."""
+class _LiveProjectionAuthorityRepository(LiveProjectionAuthorityRepository):
+    """Provide completed authority reads for focused live projection tests."""
 
-    async def get_by_id(
+    def __init__(self) -> None:
+        """Use the configured test authority without database collaborators."""
+
+    async def owns_generation(
         self,
-        session: AsyncSession,
-        agent_session_id: str,
-    ) -> object:
-        """Return a minimal current-owner snapshot."""
-        del session, agent_session_id
+        *,
+        session_id: str,
+        owner_generation: int,
+    ) -> bool:
+        """Accept the current test owner generation."""
+        del session_id
+        return owner_generation == 1
 
-        class Owner:
-            owner_generation = 1
+    async def terminal_matches_current_run(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+    ) -> bool:
+        """Accept cleanup with no durable running Run in this fixture."""
+        del session_id, run_id
+        return True
 
-        return Owner()
 
-
-class _AgentSessionRepository:
-    """AgentSessionRepository test double."""
+class _WorkerSessionRepository(WorkerSessionOperationRepository):
+    """Provide completed Worker operations without empty database contexts."""
 
     def __init__(self, host: "_Host") -> None:
         self.host = host
         self.queried_session_ids: list[str] = []
 
-    async def get_pending_command_by_session_id(
+    async def has_pending_command(
         self,
-        session: AsyncSession,
         session_id: str,
-    ) -> PendingSessionCommand | None:
-        """Return pending command specified by test."""
-        del session
+    ) -> bool:
+        """Return the existing pending-command presence predicate."""
         self.queried_session_ids.append(session_id)
-        if not self.host.pending_command_result:
-            return None
-        return PendingSessionCommand(
-            id="command-001",
-            name="compact",
-            payload={},
-            requester_user_id="user-001",
-            created_at=datetime.now(timezone.utc),
-        )
+        return self.host.pending_command_result
 
 
-class _RunExecutor:
+class _RunExecutor(RunExecutor):
     """RunExecutor test double."""
 
     def __init__(self, host: "_Host") -> None:
@@ -485,7 +562,7 @@ class _RunExecutor:
         )
 
 
-class _PendingMailboxService:
+class _PendingMailboxService(MailboxService):
     """MailboxService test double."""
 
     def __init__(self, host: "_Host") -> None:
@@ -503,7 +580,7 @@ class _PendingMailboxService:
         return session_id in self.host.pending_input_session_ids
 
 
-class _IdleContinuationService:
+class _IdleContinuationService(IdleContinuationService):
     """IdleContinuationService test double."""
 
     def __init__(self, host: "_Host") -> None:
@@ -535,7 +612,7 @@ class _IdleContinuationService:
         return True
 
 
-class _UserStopFinalizer:
+class _UserStopFinalizer(UserStopFinalizer):
     """UserStopFinalizer test double."""
 
     def __init__(self, host: "_Host") -> None:
@@ -684,15 +761,11 @@ class _Host:
         self.event_dispatched.set()
 
     async def save_error_message(
-        self,
-        session_id: str,
-        error: str,
-        *,
-        owner_generation: int,
+        self, session_id: str, content: str, *, owner_generation: int
     ) -> Event:
         """This test does not store error messages."""
         del owner_generation
-        return make_system_error_event(session_id=session_id, content=error)
+        return make_system_error_event(session_id=session_id, content=content)
 
     async def assert_current_owner_generation(
         self,
@@ -812,6 +885,93 @@ class _Host:
         return session_id in self.stop_request_session_ids
 
 
+class _LifecycleService(SessionLifecycleService):
+    """Exact lifecycle operations backed by the existing scripted host."""
+
+    def __init__(self, host: _Host) -> None:
+        self.host = host
+
+    async def claim_owner_generation(self, session_id: str) -> int:
+        """Forward the observed lifecycle operation."""
+        return await self.host.claim_owner_generation(session_id)
+
+    async def release_session_lock(self, session_id: str) -> None:
+        """Forward the observed lifecycle operation."""
+        return await self.host.release_session_lock(session_id)
+
+    async def assert_current_owner_generation(
+        self, session_id: str, *, owner_generation: int
+    ) -> None:
+        """Forward the observed lifecycle operation."""
+        return await self.host.assert_current_owner_generation(
+            session_id, owner_generation=owner_generation
+        )
+
+    async def release_owned_session_lock(
+        self, session_id: str, *, owner_generation: int
+    ) -> None:
+        """Forward the observed lifecycle operation."""
+        return await self.host.release_owned_session_lock(
+            session_id, owner_generation=owner_generation
+        )
+
+    async def clear_owned_session_activity(
+        self, session_id: str, *, owner_generation: int
+    ) -> None:
+        """Forward the observed lifecycle operation."""
+        return await self.host.clear_owned_session_activity(
+            session_id, owner_generation=owner_generation
+        )
+
+    async def send_session_wake_up(self, message: SessionWakeUp) -> None:
+        """Forward the observed lifecycle operation."""
+        return await self.host.send_session_wake_up(message)
+
+    async def notify_parent_result_activity(self, run_id: str) -> None:
+        """Forward the observed lifecycle operation."""
+        return await self.host.notify_parent_result_activity(run_id)
+
+    async def renew_session_owner_heartbeat(self, session_id: str) -> None:
+        """Forward the observed lifecycle operation."""
+        return await self.host.renew_session_owner_heartbeat(session_id)
+
+    async def mark_session_running(self, session_id: str) -> None:
+        """Forward the observed lifecycle operation."""
+        return await self.host.mark_session_running(session_id)
+
+    async def mark_session_idle(
+        self, session_id: str, *, owner_generation: int
+    ) -> bool:
+        """Forward the observed lifecycle operation."""
+        return await self.host.mark_session_idle(
+            session_id, owner_generation=owner_generation
+        )
+
+    async def has_active_agent_run(self, session_id: str) -> bool:
+        """Forward the observed lifecycle operation."""
+        return await self.host.has_active_agent_run(session_id)
+
+    async def get_pending_idle_continuation_run_id(self, session_id: str) -> str | None:
+        """Forward the observed lifecycle operation."""
+        return await self.host.get_pending_idle_continuation_run_id(session_id)
+
+    async def has_pending_idle_continuation(self, session_id: str) -> bool:
+        """Forward the observed lifecycle operation."""
+        return await self.host.has_pending_idle_continuation(session_id)
+
+    async def heartbeat_session(
+        self, session_id: str, *, owner_generation: int
+    ) -> None:
+        """Forward the observed lifecycle operation."""
+        return await self.host.heartbeat_session(
+            session_id, owner_generation=owner_generation
+        )
+
+    async def has_stop_request(self, session_id: str) -> bool:
+        """Forward the observed lifecycle operation."""
+        return await self.host.has_stop_request(session_id)
+
+
 def _execution_snapshot(
     *,
     session_id: str = "session-001",
@@ -839,7 +999,7 @@ def _execution_snapshot(
     )
 
 
-class _ExecutionSnapshotLoader:
+class _ExecutionSnapshotLoader(CanonicalExecutionSnapshotLoader):
     """Canonical execution snapshot loader test double."""
 
     def __init__(self, host: _Host) -> None:
@@ -882,7 +1042,7 @@ async def _wait_for_owner_heartbeat(host: _Host) -> None:
     await host.owner_heartbeat_recorded.wait()
 
 
-class _ScriptedSessionRunnerWaiter:
+class _ScriptedSessionRunnerWaiter(SessionRunnerWaiter):
     """Return deterministic wait results and record idle baselines."""
 
     def __init__(self, results: Sequence[RunnerWaitResult]) -> None:
@@ -905,20 +1065,39 @@ class _ScriptedSessionRunnerWaiter:
         return self.results.pop(0)
 
 
+class _ConversationMemoryRepository(MemoryExecutionRepository):
+    """Public Worker fixtures have no internal Memory execution association."""
+
+    def __init__(self) -> None:
+        """Use only the read projection supplied by this fixture."""
+
+    async def load_binding(self, session_id: str) -> MemoryExecutionBinding | None:
+        del session_id
+        return None
+
+
+class _UnusedMemoryRunExecutor(MemoryRunExecutor):
+    """The public execution lane must not prepare a private Memory host."""
+
+    def __init__(self) -> None:
+        """Bypass unrelated production collaborators for public fixture coverage."""
+
+
 def _make_session_runner(host: _Host) -> SessionRunner:
     """Create session runner with event publisher injected for tests."""
     return SessionRunner(
         shutdown_event=host.shutdown_event,
-        event_publisher=_SessionRunnerEventPublisher(host),  # ty: ignore[invalid-argument-type] # Focused publisher implements only dispatch_event().
-        session_lifecycle=host,  # ty: ignore[invalid-argument-type] # Host implements only exercised lifecycle operations.
-        execution_snapshot_loader=_ExecutionSnapshotLoader(host),  # ty: ignore[invalid-argument-type] # Focused loader implements only load().
-        session_manager=_SessionManager(),
-        agent_session_repository=_AgentSessionRepository(host),  # ty: ignore[invalid-argument-type] # Focused repository implements only exercised operations.
-        mailbox_item_service=_PendingMailboxService(host),  # ty: ignore[invalid-argument-type] # Focused mailbox service implements only exercised operations.
-        idle_continuation_service=_IdleContinuationService(host),  # ty: ignore[invalid-argument-type] # Focused continuation service implements only exercised operations.
-        user_stop_finalizer=_UserStopFinalizer(host),  # ty: ignore[invalid-argument-type] # Focused finalizer implements only exercised operations.
-        run_executor=_RunExecutor(host),  # ty: ignore[invalid-argument-type] # Focused executor implements only execute().
-        engine=host,  # ty: ignore[invalid-argument-type] # Host implements exercised AgentEngine operations.
+        event_publisher=_SessionRunnerEventPublisher(host),
+        session_lifecycle=_LifecycleService(host),
+        execution_snapshot_loader=_ExecutionSnapshotLoader(host),
+        worker_session_repository=_WorkerSessionRepository(host),
+        mailbox_item_service=_PendingMailboxService(host),
+        idle_continuation_service=_IdleContinuationService(host),
+        user_stop_finalizer=_UserStopFinalizer(host),
+        run_executor=_RunExecutor(host),
+        memory_execution_repository=_ConversationMemoryRepository(),
+        memory_run_executor=_UnusedMemoryRunExecutor(),
+        engine=host,
         model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
     )
 
@@ -946,15 +1125,13 @@ def _make_worker_event_publisher(
 ) -> WorkerEventPublisher:
     """Create event publisher for tests."""
     projector = LiveEventProjector(
-        live_event_store=live_event_store,  # ty: ignore[invalid-argument-type] # Focused store implements only exercised live-event operations.
-        broadcast=broadcast,  # ty: ignore[invalid-argument-type] # Focused broadcast implements only publish operations.
-        session_manager=_SessionManager(),
-        agent_run_repository=object(),  # ty: ignore[invalid-argument-type] # These tests never access the run repository.
-        agent_session_repository=_CurrentOwnerRepository(),  # ty: ignore[invalid-argument-type] # Focused repository implements only owner lookup.
+        live_event_store=live_event_store,
+        broadcast=broadcast,
+        authority_repository=_LiveProjectionAuthorityRepository(),
     )
     return WorkerEventPublisher(
-        broker=broker,  # ty: ignore[invalid-argument-type] # Focused broker implements only exercised operations.
-        broadcast=broadcast,  # ty: ignore[invalid-argument-type] # Focused broadcast implements only publish operations.
+        broker=broker,
+        broadcast=broadcast,
         live_event_projector=projector,
     )
 
@@ -994,22 +1171,22 @@ async def _noop_publish_event(event: PublishedEvent) -> None:
     _ = event
 
 
-class _ReceiveBroker:
+class _ReceiveBroker(_StrictSessionBroker):
     """Return one prepared Worker signal batch."""
 
     def __init__(self, messages: list[SessionWakeUp]) -> None:
         self.messages = messages
 
-    async def receive_messages(self) -> list[SessionWakeUp]:
+    async def receive_messages(self) -> list[WorkerSignal]:
         """Return the prepared messages immediately."""
-        return self.messages
+        return list(self.messages)
 
 
 @pytest.mark.asyncio
 async def test_receive_returns_broker_messages() -> None:
     """Normal broker activity returns the received Worker signals."""
     worker = AgentWorker.__new__(AgentWorker)
-    worker.broker = _ReceiveBroker([_wake_up()])  # ty: ignore[invalid-assignment] # Focused broker implements receive_messages().
+    worker.broker = _ReceiveBroker([_wake_up()])
     messages = await worker._receive_or_shutdown(
         asyncio.Event(),
     )
@@ -1348,7 +1525,7 @@ async def test_session_runner_carries_idle_baseline_across_explicit_transitions(
             ShutdownResult(),
         ]
     )
-    runner.waiter = waiter  # ty: ignore[invalid-assignment] # Scripted waiter implements wait_next().
+    runner.waiter = waiter
     now = 0.0
     completion_times = iter([1801.0, 5402.0])
 
@@ -1392,7 +1569,7 @@ async def test_session_runner_idle_timeout_releases_lock_once() -> None:
     waiter = _ScriptedSessionRunnerWaiter(
         [MessageResult(_wake_up()), IdleTimeoutResult()]
     )
-    runner.waiter = waiter  # ty: ignore[invalid-assignment] # Scripted waiter implements wait_next().
+    runner.waiter = waiter
 
     await runner.run()
 
@@ -1572,11 +1749,9 @@ async def test_replace_live_active_tool_calls_broadcasts_without_redis() -> None
     live_store = _LiveEventStore(before=[], after=[])
     broadcast = _Broadcast()
     projector = LiveEventProjector(
-        live_event_store=live_store,  # ty: ignore[invalid-argument-type] # Focused store implements only exercised live-event operations.
-        broadcast=broadcast,  # ty: ignore[invalid-argument-type] # Focused broadcast implements only publish operations.
-        session_manager=_SessionManager(),
-        agent_run_repository=object(),  # ty: ignore[invalid-argument-type] # This test never accesses the run repository.
-        agent_session_repository=_CurrentOwnerRepository(),  # ty: ignore[invalid-argument-type] # Focused repository implements only owner lookup.
+        live_event_store=live_store,
+        broadcast=broadcast,
+        authority_repository=_LiveProjectionAuthorityRepository(),
     )
     active_tool_call = ActiveToolCall(
         call_id="call-1",
@@ -1668,7 +1843,7 @@ async def test_boundary_poll_broadcasts_mailbox_item_taxonomy_actions(
     """MailboxItem flush broadcasts history append and live removal actions."""
     broadcast = _Broadcast()
     executor = object.__new__(RunExecutor)
-    executor.broadcast = broadcast  # ty: ignore[invalid-assignment] # Focused broadcast implements only publish operations.
+    executor.broadcast = broadcast
     scheduled_title_events: list[str] = []
 
     def schedule_title(session_id: str, event: Event) -> None:
@@ -1717,7 +1892,7 @@ async def test_boundary_poll_broadcasts_mailbox_item_taxonomy_actions(
             suppress_parent_result=False,
         )
     )
-    executor.mailbox_item_service = promotion  # ty: ignore[invalid-assignment] # Focused mailbox service implements only exercised operations.
+    executor.mailbox_item_service = promotion
 
     async def has_actionable_model_input(session_id: str) -> bool:
         del session_id
@@ -1912,6 +2087,7 @@ async def test_prepare_toolkits_enters_before_update_context() -> None:
                 ToolkitBinding(
                     toolkit=toolkit,
                     slug="dummy",
+                    base_slug="dummy",
                     use_prefix=False,
                     toolkit_type=None,
                 )
@@ -1946,6 +2122,7 @@ async def test_prepare_toolkits_reuses_same_session_key() -> None:
                 ToolkitBinding(
                     toolkit=first,
                     slug="same",
+                    base_slug="same",
                     use_prefix=False,
                     toolkit_type="mcp",
                 )
@@ -1956,6 +2133,7 @@ async def test_prepare_toolkits_reuses_same_session_key() -> None:
                 ToolkitBinding(
                     toolkit=second,
                     slug="same",
+                    base_slug="same",
                     use_prefix=True,
                     toolkit_type="mcp",
                 )
@@ -1985,6 +2163,7 @@ async def test_prepare_toolkits_replaces_auto_toolkit_on_context_change() -> Non
                 ToolkitBinding(
                     toolkit=stale,
                     slug="skill",
+                    base_slug="skill",
                     use_prefix=False,
                     toolkit_type=None,
                     source_revision="idle-workspace",
@@ -1996,6 +2175,7 @@ async def test_prepare_toolkits_replaces_auto_toolkit_on_context_change() -> Non
                 ToolkitBinding(
                     toolkit=current,
                     slug="skill",
+                    base_slug="skill",
                     use_prefix=False,
                     toolkit_type=None,
                     source_revision="run-workspace",
@@ -2030,6 +2210,7 @@ async def test_prepare_toolkits_reuses_registered_toolkit_across_senders() -> No
                 ToolkitBinding(
                     toolkit=first,
                     slug="github",
+                    base_slug="github",
                     use_prefix=True,
                     toolkit_type="github",
                 )
@@ -2040,6 +2221,7 @@ async def test_prepare_toolkits_reuses_registered_toolkit_across_senders() -> No
                 ToolkitBinding(
                     toolkit=second,
                     slug="github",
+                    base_slug="github",
                     use_prefix=True,
                     toolkit_type="github",
                 )
@@ -2145,7 +2327,7 @@ async def test_durable_stop_request_cancels_blocked_engine_task(
     """durable stop intent cancels execution task even without Broker signal."""
     monkeypatch.setattr(
         session_runner_supervisor_module,
-        "_EXPLICIT_STOP_POLL_INTERVAL",
+        "EXPLICIT_STOP_POLL_INTERVAL",
         0.01,
     )
     host = _Host()

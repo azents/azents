@@ -4,8 +4,7 @@ import dataclasses
 import datetime
 from typing import Protocol
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
+from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     AgentSessionKind,
     AgentSessionProductMode,
@@ -13,8 +12,8 @@ from azents.core.enums import (
     EventKind,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.message import MessageRepository
 from azents.repos.session_history.repository import (
     VISIBLE_KINDS,
@@ -100,7 +99,7 @@ class _ActiveSessionRoot:
 class SessionHistoryOperationRepository:
     """Own completed Session History authority and read operations."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     agent_session_repository: AgentSessionRepository
     workspace_user_repository: WorkspaceUserRepository
     history_repository: SessionHistoryRepository
@@ -242,7 +241,7 @@ class SessionHistoryOperationRepository:
 
     async def _source_scope(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         current_session_id: str,
         agent_id: str,
@@ -275,7 +274,7 @@ class SessionHistoryOperationRepository:
 
     async def _target(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         scope: SessionHistoryScope,
@@ -297,7 +296,7 @@ class SessionHistoryOperationRepository:
 
     async def _active_root(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> _ActiveSessionRoot:
         """Resolve one concrete active Session and its privacy root."""

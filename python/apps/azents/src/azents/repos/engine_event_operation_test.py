@@ -8,24 +8,26 @@ from unittest.mock import AsyncMock
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentRunStatus, EventKind
-from azents.engine.events.protocols import (
+from azents.engine.events.types import Event
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
+from azents.repos.agent_execution.data import EventCreate
+from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.engine_event_contracts import (
     AgentRunCreateRepository,
     SessionHeadRepository,
     TranscriptRepository,
 )
-from azents.engine.events.types import Event
-from azents.repos.agent_execution.data import EventCreate
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.engine_event_operation import EngineEventOperationRepository
 
 
 async def test_event_operations_complete_their_sessions_before_returning() -> None:
     """Event Engine results return only after their repository transactions close."""
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
     transaction_active = False
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         nonlocal transaction_active
         transaction_active = True
         try:
@@ -41,7 +43,7 @@ async def test_event_operations_complete_their_sessions_before_returning() -> No
     run_state = SimpleNamespace(status=AgentRunStatus.RUNNING)
 
     async def get_agent_session(
-        current_session: AsyncSession,
+        current_session: WriteSession,
         session_id: str,
     ) -> object:
         assert transaction_active
@@ -50,7 +52,7 @@ async def test_event_operations_complete_their_sessions_before_returning() -> No
         return object()
 
     async def append_event(
-        current_session: AsyncSession,
+        current_session: WriteSession,
         create: EventCreate,
     ) -> Event:
         assert transaction_active
@@ -59,7 +61,7 @@ async def test_event_operations_complete_their_sessions_before_returning() -> No
         return event
 
     async def get_session_head(
-        current_session: AsyncSession,
+        current_session: WriteSession,
         session_id: str,
     ) -> object:
         assert transaction_active
@@ -68,7 +70,7 @@ async def test_event_operations_complete_their_sessions_before_returning() -> No
         return SimpleNamespace(model_input_head_event_id="event-head")
 
     async def list_transcript(
-        current_session: AsyncSession,
+        current_session: WriteSession,
         session_id: str,
         *,
         head_event_id: str | None,
@@ -80,7 +82,7 @@ async def test_event_operations_complete_their_sessions_before_returning() -> No
         return []
 
     async def get_run(
-        current_session: AsyncSession,
+        current_session: WriteSession,
         run_id: str,
     ) -> object:
         assert transaction_active
@@ -99,6 +101,7 @@ async def test_event_operations_complete_their_sessions_before_returning() -> No
         agent_session_repository=agent_session_repository,
         session_head_repository=session_head_repository,
         transcript_repository=transcript_repository,
+        owner=None,
     )
 
     assert (

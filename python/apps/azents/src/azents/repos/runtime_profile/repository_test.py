@@ -1,13 +1,16 @@
 """Runtime Profile persistence and durable claim tests."""
 
+import asyncio
 import dataclasses
 import datetime
+from unittest.mock import patch
+from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
 from azcommon.result import Success
 from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from azents.core.enums import (
     AgentRuntimeCapability,
@@ -32,16 +35,25 @@ from azents.core.runtime_profile import (
     RuntimeRecreationOperationStatus,
     RuntimeRecreationTargetKind,
 )
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.runtime_profile import (
     RDBRuntimeConfigurationReconcileTask,
     RDBRuntimeConfigurationState,
+    RDBRuntimeInfrastructureProfile,
     RDBRuntimeRecreationOperation,
     RDBRuntimeRecreationOperationItem,
+    RDBWorkspaceRuntimeProfile,
 )
+from azents.rdb.models.runtime_provider import RDBRuntimeProvider
+from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import (
+    WriteSession,
+    create_read_write_session_manager,
+)
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
@@ -52,10 +64,7 @@ from azents.repos.runtime_provider_policy.repository import (
     RuntimeProviderPolicyRepository,
 )
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import (
-    WorkspaceCreate,
-    WorkspaceRuntimeProfileDefaultReplace,
-)
+from azents.repos.workspace.data import WorkspaceRuntimeProfileDefaultReplace
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
@@ -72,7 +81,7 @@ from .repository import RuntimeProfileRepository
 
 
 async def _create_provider(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     logical_id: str,
 ) -> str:
@@ -117,7 +126,7 @@ def _infrastructure_create(
 
 
 async def test_profile_ownership_and_optimistic_replacement(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Provider and Workspace ownership remain exact across mutations."""
     repository = RuntimeProfileRepository()
@@ -221,7 +230,7 @@ async def test_profile_ownership_and_optimistic_replacement(
 
 
 async def test_configuration_evidence_promotes_after_provider_and_runner_ack(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Current desired state promotes only after exact Provider and Runner evidence."""
     repository = RuntimeProfileRepository()
@@ -267,8 +276,8 @@ async def test_configuration_evidence_promotes_after_provider_and_runner_ack(
             encrypted_credentials="encrypted",
             config=None,
         )
-        session.add(integration)
-        await session.flush()
+        session.write_session.add(integration)
+        await session.write_session.flush()
         selection = make_test_model_selection_dict(
             integration_id=integration.id,
             provider=LLMProvider.ANTHROPIC,
@@ -286,10 +295,10 @@ async def test_configuration_evidence_promotes_after_provider_and_runner_ack(
             main_model_label="default",
             lightweight_model_label="lightweight",
         )
-        session.add(agent)
-        await session.flush()
+        session.write_session.add(agent)
+        await session.write_session.flush()
         runtime = await runtime_repository.ensure_for_agent(session, agent.id)
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime.id)
             .values(runtime_provider_resource_id=provider_id)
@@ -370,7 +379,7 @@ async def test_configuration_evidence_promotes_after_provider_and_runner_ack(
 
 
 async def test_reconcile_enqueue_is_idempotent_and_claimed_once(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """One source version produces one durable claimable task."""
     repository = RuntimeProfileRepository()
@@ -409,7 +418,7 @@ async def test_reconcile_enqueue_is_idempotent_and_claimed_once(
         assert claimed[0].status is RuntimeReconcileTaskStatus.RUNNING
         assert claimed[0].attempt == 1
         assert second_claim == []
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBRuntimeConfigurationReconcileTask)
             .where(RDBRuntimeConfigurationReconcileTask.id == claimed[0].id)
             .values(updated_at=now - datetime.timedelta(minutes=10))
@@ -438,7 +447,7 @@ async def test_reconcile_enqueue_is_idempotent_and_claimed_once(
 
 
 async def test_affected_agent_queries_follow_exact_profile_bindings(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Every source fan-out reaches only Agents with the exact stored path."""
     repository = RuntimeProfileRepository()
@@ -487,8 +496,8 @@ async def test_affected_agent_queries_follow_exact_profile_bindings(
             encrypted_credentials="encrypted-test-value",
             config=None,
         )
-        session.add(integration)
-        await session.flush()
+        session.write_session.add(integration)
+        await session.write_session.flush()
         selected_agent_ids: set[str] = set()
         for index in range(2):
             selection = make_test_model_selection_dict(
@@ -509,8 +518,8 @@ async def test_affected_agent_queries_follow_exact_profile_bindings(
                 main_model_label="default",
                 lightweight_model_label="lightweight",
             )
-            session.add(agent)
-            await session.flush()
+            session.write_session.add(agent)
+            await session.write_session.flush()
             selected_agent_ids.add(agent.id)
         unconfigured_selection = make_test_model_selection_dict(
             integration_id=integration.id,
@@ -530,8 +539,8 @@ async def test_affected_agent_queries_follow_exact_profile_bindings(
             main_model_label="default",
             lightweight_model_label="lightweight",
         )
-        session.add(unconfigured)
-        await session.flush()
+        session.write_session.add(unconfigured)
+        await session.write_session.flush()
 
         for source_type, source_id in (
             (RuntimeReconcileSourceKind.PROVIDER, provider_id),
@@ -566,7 +575,7 @@ async def test_affected_agent_queries_follow_exact_profile_bindings(
 
 
 async def test_delete_workspace_profile_clears_live_authority_and_retains_applied(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Hard delete is atomic and preserves the running Runtime snapshot."""
     repository = RuntimeProfileRepository()
@@ -624,8 +633,8 @@ async def test_delete_workspace_profile_clears_live_authority_and_retains_applie
             encrypted_credentials="encrypted-test-value",
             config=None,
         )
-        session.add(integration)
-        await session.flush()
+        session.write_session.add(integration)
+        await session.write_session.flush()
         agent_ids: list[str] = []
         for index in range(2):
             selection = make_test_model_selection_dict(
@@ -647,8 +656,8 @@ async def test_delete_workspace_profile_clears_live_authority_and_retains_applie
                 main_model_label="default",
                 lightweight_model_label="lightweight",
             )
-            session.add(agent)
-            await session.flush()
+            session.write_session.add(agent)
+            await session.write_session.flush()
             agent_ids.append(agent.id)
         runtime = RDBAgentRuntime(
             workspace_id=workspace_id,
@@ -656,8 +665,8 @@ async def test_delete_workspace_profile_clears_live_authority_and_retains_applie
             runtime_provider_id="profile-hard-delete-provider",
             runtime_provider_resource_id=provider_id,
         )
-        session.add(runtime)
-        await session.flush()
+        session.write_session.add(runtime)
+        await session.write_session.flush()
         runtime.provider_observed_state = RuntimeProviderObservedState.RUNNING
         runtime.configuration_sequence = 1
         document = RuntimeConfigurationDocument(
@@ -675,7 +684,7 @@ async def test_delete_workspace_profile_clears_live_authority_and_retains_applie
             resolved_configuration={"workspace": "preserved"},
         ).model_dump(mode="json")
         now = datetime.datetime.now(datetime.UTC)
-        session.add(
+        session.write_session.add(
             RDBRuntimeConfigurationState(
                 runtime_id=runtime.id,
                 desired_sequence=1,
@@ -719,7 +728,7 @@ async def test_delete_workspace_profile_clears_live_authority_and_retains_applie
 
         workspace = await workspace_repository.get_by_id(session, workspace_id)
         selected_agents = [
-            await session.get(RDBAgent, agent_id) for agent_id in agent_ids
+            await session.read_session.get(RDBAgent, agent_id) for agent_id in agent_ids
         ]
         retained_runtime = await AgentRuntimeRepository().get_by_id(
             session,
@@ -733,7 +742,6 @@ async def test_delete_workspace_profile_clears_live_authority_and_retains_applie
             session,
             workspace_id=workspace_id,
             profile_id=profile.id,
-            for_update=False,
         )
         completed_operation = await repository.get_recreation_operation(
             session,
@@ -783,7 +791,7 @@ async def test_delete_workspace_profile_clears_live_authority_and_retains_applie
 
 
 async def test_clear_agent_selection_replaces_desired_configuration_atomically(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Explicit selection clear preserves applied Runtime evidence."""
     repository = RuntimeProfileRepository()
@@ -832,8 +840,8 @@ async def test_clear_agent_selection_replaces_desired_configuration_atomically(
             encrypted_credentials="encrypted-test-value",
             config=None,
         )
-        session.add(integration)
-        await session.flush()
+        session.write_session.add(integration)
+        await session.write_session.flush()
         selection = make_test_model_selection_dict(
             integration_id=integration.id,
             provider=LLMProvider.ANTHROPIC,
@@ -853,16 +861,16 @@ async def test_clear_agent_selection_replaces_desired_configuration_atomically(
             main_model_label="default",
             lightweight_model_label="lightweight",
         )
-        session.add(agent)
-        await session.flush()
+        session.write_session.add(agent)
+        await session.write_session.flush()
         runtime = RDBAgentRuntime(
             workspace_id=workspace_id,
             agent_id=agent.id,
             runtime_provider_id="profile-selection-clear-provider",
             runtime_provider_resource_id=provider_id,
         )
-        session.add(runtime)
-        await session.flush()
+        session.write_session.add(runtime)
+        await session.write_session.flush()
         runtime.configuration_sequence = 4
         runtime.desired_generation = 3
         runtime.workspace_path = "/workspace/agent"
@@ -881,7 +889,7 @@ async def test_clear_agent_selection_replaces_desired_configuration_atomically(
             resolved_configuration={"workspace": "preserved"},
         ).model_dump(mode="json")
         now = datetime.datetime.now(datetime.UTC)
-        session.add(
+        session.write_session.add(
             RDBRuntimeConfigurationState(
                 runtime_id=runtime.id,
                 desired_sequence=4,
@@ -901,7 +909,7 @@ async def test_clear_agent_selection_replaces_desired_configuration_atomically(
                 applied_at=now,
             )
         )
-        await session.flush()
+        await session.write_session.flush()
 
         assert not await repository.clear_agent_runtime_profile_selection(
             session,
@@ -914,7 +922,7 @@ async def test_clear_agent_selection_replaces_desired_configuration_atomically(
             expected_selection_version=1,
         )
 
-        retained_agent = await session.get(RDBAgent, agent.id)
+        retained_agent = await session.read_session.get(RDBAgent, agent.id)
         retained_runtime = await AgentRuntimeRepository().get_by_id(session, runtime.id)
         state = await repository.get_configuration_state(
             session,
@@ -945,7 +953,7 @@ async def test_clear_agent_selection_replaces_desired_configuration_atomically(
 
 
 async def test_infrastructure_profile_impact_and_hard_delete_preserve_runtime(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Only current Workspace references block infrastructure Profile deletion."""
     repository = RuntimeProfileRepository()
@@ -1002,8 +1010,8 @@ async def test_infrastructure_profile_impact_and_hard_delete_preserve_runtime(
             encrypted_credentials="encrypted-test-value",
             config=None,
         )
-        session.add(integration)
-        await session.flush()
+        session.write_session.add(integration)
+        await session.write_session.flush()
         selection = make_test_model_selection_dict(
             integration_id=integration.id,
             provider=LLMProvider.ANTHROPIC,
@@ -1023,16 +1031,16 @@ async def test_infrastructure_profile_impact_and_hard_delete_preserve_runtime(
             main_model_label="default",
             lightweight_model_label="lightweight",
         )
-        session.add(agent)
-        await session.flush()
+        session.write_session.add(agent)
+        await session.write_session.flush()
         runtime = RDBAgentRuntime(
             workspace_id=workspace_id,
             agent_id=agent.id,
             runtime_provider_id="infrastructure-hard-delete-provider",
             runtime_provider_resource_id=provider_id,
         )
-        session.add(runtime)
-        await session.flush()
+        session.write_session.add(runtime)
+        await session.write_session.flush()
         runtime.provider_observed_state = RuntimeProviderObservedState.RUNNING
         runtime.workspace_path = "/workspace/agent"
         runtime.configuration_sequence = 1
@@ -1051,7 +1059,7 @@ async def test_infrastructure_profile_impact_and_hard_delete_preserve_runtime(
             resolved_configuration={"workspace": "preserved"},
         ).model_dump(mode="json")
         now = datetime.datetime.now(datetime.UTC)
-        session.add(
+        session.write_session.add(
             RDBRuntimeConfigurationState(
                 runtime_id=runtime.id,
                 desired_sequence=1,
@@ -1071,7 +1079,7 @@ async def test_infrastructure_profile_impact_and_hard_delete_preserve_runtime(
                 applied_at=now,
             )
         )
-        await session.flush()
+        await session.write_session.flush()
 
         blocked_impact = await repository.get_infrastructure_profile_deletion_impact(
             session,
@@ -1152,7 +1160,7 @@ async def test_infrastructure_profile_impact_and_hard_delete_preserve_runtime(
             expected_version=deleted_infrastructure.version,
         )
         retained_runtime = (
-            await session.execute(
+            await session.write_session.execute(
                 sa.select(
                     RDBAgentRuntime.provider_observed_state,
                     RDBAgentRuntime.workspace_path,
@@ -1164,12 +1172,11 @@ async def test_infrastructure_profile_impact_and_hard_delete_preserve_runtime(
             session,
             runtime_id=runtime.id,
         )
-        retained_agent = await session.get(RDBAgent, agent.id)
+        retained_agent = await session.read_session.get(RDBAgent, agent.id)
         retained_workspace_profile = await repository.get_workspace_runtime_profile(
             session,
             workspace_id=workspace_id,
             profile_id=workspace_profile.id,
-            for_update=False,
         )
         completed_operation = await repository.get_recreation_operation(
             session,
@@ -1227,7 +1234,7 @@ async def test_infrastructure_profile_impact_and_hard_delete_preserve_runtime(
 
 
 async def test_recreation_target_items_match_exact_document_profile_fields(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Profile targets ignore matching IDs in unrelated document fields."""
     repository = RuntimeProfileRepository()
@@ -1275,8 +1282,8 @@ async def test_recreation_target_items_match_exact_document_profile_fields(
             encrypted_credentials="encrypted-test-value",
             config=None,
         )
-        session.add(integration)
-        await session.flush()
+        session.write_session.add(integration)
+        await session.write_session.flush()
         runtime_ids: list[str] = []
         for index, (infrastructure_id, workspace_profile_id, source_trace) in enumerate(
             (
@@ -1305,15 +1312,15 @@ async def test_recreation_target_items_match_exact_document_profile_fields(
                 main_model_label="default",
                 lightweight_model_label="lightweight",
             )
-            session.add(agent)
-            await session.flush()
+            session.write_session.add(agent)
+            await session.write_session.flush()
             runtime = RDBAgentRuntime(
                 workspace_id=workspace_id,
                 agent_id=agent.id,
                 runtime_provider_resource_id=provider_id,
             )
-            session.add(runtime)
-            await session.flush()
+            session.write_session.add(runtime)
+            await session.write_session.flush()
             runtime.configuration_sequence = 1
             document = RuntimeConfigurationDocument(
                 schema_version=1,
@@ -1331,7 +1338,7 @@ async def test_recreation_target_items_match_exact_document_profile_fields(
             ).model_dump(mode="json")
             now = datetime.datetime.now(datetime.UTC)
             digest = str(index + 1) * 64
-            session.add(
+            session.write_session.add(
                 RDBRuntimeConfigurationState(
                     runtime_id=runtime.id,
                     desired_sequence=1,
@@ -1352,7 +1359,7 @@ async def test_recreation_target_items_match_exact_document_profile_fields(
                 )
             )
             runtime_ids.append(runtime.id)
-        await session.flush()
+        await session.write_session.flush()
 
         infrastructure_items = await repository.list_recreation_target_items(
             session,
@@ -1370,7 +1377,7 @@ async def test_recreation_target_items_match_exact_document_profile_fields(
 
 
 async def test_recreation_claim_respects_existing_global_concurrency(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A claim fills only the operation slots not already running."""
     repository = RuntimeProfileRepository()
@@ -1423,23 +1430,21 @@ async def test_recreation_claim_respects_existing_global_concurrency(
                 actor_workspace_user_id=None,
             ),
         )
-        provider_target_version = await repository.get_recreation_target_version(
+        provider_target_version = await repository.lock_recreation_target_for_dispatch(
             session,
             target_kind=RuntimeRecreationTargetKind.PROVIDER,
             target_id=provider_id,
-            for_share=True,
         )
-        infrastructure_target_version = await repository.get_recreation_target_version(
+        lock_target = repository.lock_recreation_target_for_dispatch
+        infrastructure_target_version = await lock_target(
             session,
             target_kind=RuntimeRecreationTargetKind.INFRASTRUCTURE_PROFILE,
             target_id=infrastructure.id,
-            for_share=True,
         )
-        workspace_target_version = await repository.get_recreation_target_version(
+        workspace_target_version = await repository.lock_recreation_target_for_dispatch(
             session,
             target_kind=RuntimeRecreationTargetKind.WORKSPACE_RUNTIME_PROFILE,
             target_id=workspace_profile.id,
-            for_share=True,
         )
         assert provider_target_version is not None
         assert provider_target_version.endswith(f":{contract.id}")
@@ -1452,8 +1457,8 @@ async def test_recreation_claim_respects_existing_global_concurrency(
             encrypted_credentials="encrypted-test-value",
             config=None,
         )
-        session.add(integration)
-        await session.flush()
+        session.write_session.add(integration)
+        await session.write_session.flush()
         operation_items: list[tuple[str, int, str, int]] = []
         for index in range(3):
             selection = make_test_model_selection_dict(
@@ -1473,15 +1478,15 @@ async def test_recreation_claim_respects_existing_global_concurrency(
                 main_model_label="default",
                 lightweight_model_label="lightweight",
             )
-            session.add(agent)
-            await session.flush()
+            session.write_session.add(agent)
+            await session.write_session.flush()
             runtime = RDBAgentRuntime(
                 workspace_id=workspace_id,
                 agent_id=agent.id,
                 runtime_provider_resource_id=provider_id,
             )
-            session.add(runtime)
-            await session.flush()
+            session.write_session.add(runtime)
+            await session.write_session.flush()
             document = RuntimeConfigurationDocument(
                 schema_version=1,
                 source_trace={},
@@ -1525,12 +1530,12 @@ async def test_recreation_claim_respects_existing_global_concurrency(
             operation_id=operation.id,
             items=operation_items,
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBRuntimeRecreationOperationItem)
             .where(RDBRuntimeRecreationOperationItem.id == created_items[0].id)
             .values(status=RuntimeRecreationItemStatus.RUNNING)
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBRuntimeRecreationOperation)
             .where(RDBRuntimeRecreationOperation.id == operation.id)
             .values(
@@ -1554,7 +1559,9 @@ async def test_recreation_claim_respects_existing_global_concurrency(
             expected_attempt=claimed[0].attempt,
         )
         assert locked == claimed[0]
-        rdb_operation = await session.get(RDBRuntimeRecreationOperation, operation.id)
+        rdb_operation = await session.read_session.get(
+            RDBRuntimeRecreationOperation, operation.id
+        )
         assert rdb_operation is not None
         assert rdb_operation.pending_count == 1
         assert rdb_operation.running_count == 2
@@ -1611,3 +1618,112 @@ async def test_recreation_claim_respects_existing_global_concurrency(
         assert completed.succeeded_count == 1
         assert completed.skipped_count == 1
         assert completed.failed_count == 1
+
+
+@pytest.mark.parametrize("workspace_profile", [False, True])
+async def test_profile_delete_cas_loss_reports_committed_state(
+    rdb_engine: AsyncEngine, latest_db_schema: None, workspace_profile: bool
+) -> None:
+    """A losing delete refreshes the committed version and replacement fields."""
+    writes = create_read_write_session_manager(rdb_engine)
+    repository = RuntimeProfileRepository()
+    slug = f"profile-conflict-{uuid4().hex}"
+    async with writes() as session:
+        provider_id = await _create_provider(session, logical_id=slug)
+        infrastructure = await repository.create_infrastructure_profile(
+            session, create=_infrastructure_create(provider_id)
+        )
+        workspace = RDBWorkspace(name="Profile conflicts", handle=slug)
+        session.write_session.add(workspace)
+        await session.write_session.flush()
+        workspace_id = workspace.id
+        profile_id = infrastructure.id
+        if workspace_profile:
+            profile = await repository.create_workspace_runtime_profile(
+                session,
+                create=WorkspaceRuntimeProfileCreate(
+                    workspace_id=workspace_id,
+                    provider_id=provider_id,
+                    infrastructure_profile_id=infrastructure.id,
+                    display_name="Initial",
+                    description="Initial",
+                    lifecycle=RuntimeProfileLifecycle.ACTIVE,
+                    policy={"schema_version": 1, "network_restriction": None},
+                    terminal_enabled=True,
+                    digest="c" * 64,
+                    actor_workspace_user_id=None,
+                ),
+            )
+            profile_id = profile.id
+    reached, proceed = asyncio.Event(), asyncio.Event()
+
+    async def delete() -> None:
+        async with writes() as session:
+            scalar = session.write_session.scalar
+
+            async def pause_claim(statement: sa.Executable) -> object:
+                if (workspace_profile and isinstance(statement, sa.Update)) or (
+                    not workspace_profile and isinstance(statement, sa.Delete)
+                ):
+                    reached.set()
+                    await proceed.wait()
+                return await scalar(statement)
+
+            with patch.object(session.write_session, "scalar", side_effect=pause_claim):
+                if workspace_profile:
+                    outcome = await repository.delete_workspace_runtime_profile(
+                        session,
+                        workspace_id=workspace_id,
+                        profile_id=profile_id,
+                        expected_version=1,
+                    )
+                else:
+                    outcome = await repository.delete_infrastructure_profile(
+                        session,
+                        provider_id=provider_id,
+                        profile_id=profile_id,
+                        expected_version=1,
+                    )
+            assert outcome.deletion is None
+            assert outcome.current_profile is not None
+            assert outcome.current_profile.version == 3
+            assert outcome.current_profile.display_name == "Committed replacement"
+
+    task = asyncio.create_task(delete())
+    try:
+        await asyncio.wait_for(reached.wait(), timeout=5)
+        async with writes() as session:
+            model = (
+                RDBWorkspaceRuntimeProfile
+                if workspace_profile
+                else RDBRuntimeInfrastructureProfile
+            )
+            # Two competing revisions committed after the deleting ORM read.
+            for _ in range(2):
+                await session.write_session.execute(
+                    sa.update(model)
+                    .where(model.id == profile_id)
+                    .values(
+                        version=model.version + 1,
+                        display_name="Committed replacement",
+                    )
+                )
+        proceed.set()
+        await asyncio.wait_for(task, timeout=5)
+    finally:
+        proceed.set()
+        await task
+        async with writes() as session:
+            for model, predicate in (
+                (
+                    RDBWorkspaceRuntimeProfile,
+                    RDBWorkspaceRuntimeProfile.workspace_id == workspace_id,
+                ),
+                (
+                    RDBRuntimeInfrastructureProfile,
+                    RDBRuntimeInfrastructureProfile.id == infrastructure.id,
+                ),
+                (RDBRuntimeProvider, RDBRuntimeProvider.id == provider_id),
+                (RDBWorkspace, RDBWorkspace.id == workspace_id),
+            ):
+                await session.write_session.execute(sa.delete(model).where(predicate))

@@ -1,23 +1,22 @@
-"""Shared failed-run finalization helpers."""
+"""Shared failed-run finalization and post-commit publication."""
 
 import dataclasses
 from collections.abc import Awaitable, Callable
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.broker.types import PublishedEvent
 from azents.engine.events.engine_events import RunComplete
-from azents.engine.events.finalization import FailedRunEventStore
 from azents.engine.events.types import Event
+from azents.engine.run.emit import PublishedEvent
 from azents.engine.run.failure import (
     FailedRunFinalizationReason,
     FailedRunRetryState,
 )
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.worker.session.lifecycle import SessionLifecycleService
+from azents.repos.failed_run_finalization_operation import (
+    FailedRunFinalization,
+    FailedRunFinalizationOperationRepository,
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -43,14 +42,11 @@ class FailedRunFinalizationResult:
 
 @dataclasses.dataclass(frozen=True)
 class FailedRunErrorFinalizer:
-    """Promote the latest failed attempt to terminal durable failed-run output."""
+    """Publish completed failed-run output unless a serialized Stop intent won."""
 
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ]
-    event_store: Annotated[FailedRunEventStore, Depends(FailedRunEventStore)]
-    session_lifecycle: Annotated[
-        SessionLifecycleService, Depends(SessionLifecycleService)
+    repository: Annotated[
+        FailedRunFinalizationOperationRepository,
+        Depends(FailedRunFinalizationOperationRepository),
     ]
 
     async def finalize(
@@ -59,30 +55,24 @@ class FailedRunErrorFinalizer:
         *,
         dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
     ) -> FailedRunFinalizationResult | None:
-        """Close the run as failed unless a serialized Stop intent wins."""
-        async with self.session_manager() as session:
-            claimed = await self.session_lifecycle.claim_failed_run_finalization(
-                session,
+        """Close the run through one repository operation, then dispatch in order."""
+        finalized = await self.repository.finalize(
+            FailedRunFinalization(
                 session_id=input.session_id,
                 owner_generation=input.owner_generation,
-            )
-            if not claimed:
-                return None
-            finalized = await self.event_store.append_terminal_failed_run(
-                session,
-                session_id=input.session_id,
                 run_id=input.run_id,
                 user_message=input.user_message,
                 retry_state=input.retry_state,
                 reason=input.reason,
                 action_hint=input.action_hint,
-            )
-            error_event = finalized.error_event
-            run_marker = finalized.run_marker
-        await dispatch_event(input.session_id, error_event)
-        await dispatch_event(input.session_id, run_marker)
+            ),
+        )
+        if finalized is None:
+            return None
+        await dispatch_event(input.session_id, finalized.error_event)
+        await dispatch_event(input.session_id, finalized.run_marker)
         await dispatch_event(input.session_id, RunComplete(run_id=input.run_id))
         return FailedRunFinalizationResult(
-            error_event=error_event,
-            run_marker=run_marker,
+            error_event=finalized.error_event,
+            run_marker=finalized.run_marker,
         )

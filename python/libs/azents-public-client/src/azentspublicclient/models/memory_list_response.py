@@ -17,8 +17,8 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict
-from typing import Any, ClassVar, Dict, List
+from pydantic import BaseModel, ConfigDict, StrictStr
+from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.memory_response import MemoryResponse
 from typing import Optional, Set
 from typing_extensions import Self
@@ -28,8 +28,9 @@ class MemoryListResponse(BaseModel):
     Memory list response.
     """ # noqa: E501
     items: List[MemoryResponse]
+    next_cursor: Optional[StrictStr]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["items"]
+    __properties: ClassVar[List[str]] = ["items", "next_cursor"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -84,6 +85,11 @@ class MemoryListResponse(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
+        # set to None if next_cursor (nullable) is None
+        # and model_fields_set contains the field
+        if self.next_cursor is None and "next_cursor" in self.model_fields_set:
+            _dict['next_cursor'] = None
+
         return _dict
 
     @classmethod
@@ -95,8 +101,12 @@ class MemoryListResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
-            "items": [MemoryResponse.from_dict(_item) for _item in obj["items"]] if obj.get("items") is not None else None
+            _key: _value for _key, _value in {
+            "items": [MemoryResponse.from_dict(_item) for _item in obj["items"]] if obj.get("items") is not None else None,
+            "next_cursor": obj.get("next_cursor")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

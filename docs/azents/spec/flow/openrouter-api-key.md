@@ -6,6 +6,11 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, workspace, model-catalog]
 code_paths:
+  - python/apps/azents/src/azents/core/active_model_capabilities.py
+  - python/apps/azents/src/azents/core/model_provider_declarations.py
+  - python/apps/azents/src/azents/services/active_model_capabilities.py
+  - python/apps/azents/src/azents/engine/events/effective_model_request.py
+  - python/apps/azents/src/azents/repos/llm_catalog_operations.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/core/credentials.py
   - python/apps/azents/src/azents/core/enums.py
@@ -15,6 +20,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/llm_provider_integration/**
   - python/apps/azents/src/azents/services/llm_provider_integration/**
   - python/apps/azents/src/azents/services/model_listing/**
+  - python/apps/azents/src/azents/services/subscription_usage/**
+  - python/apps/azents/src/azents/repos/subscription_usage_read.py
   - python/apps/azents/src/azents/services/llm_catalog/**
   - python/apps/azents/src/azents/engine/events/pydantic_ai_lowering.py
   - python/apps/azents/src/azents/engine/events/pydantic_ai_adapter.py
@@ -22,12 +29,12 @@ code_paths:
   - python/apps/azents/src/azents/engine/providers/**
   - python/apps/azents/src/azents/engine/model_stream.py
   - typescript/apps/azents-web/src/features/llm-settings/**
-  - typescript/apps/azents-web/src/features/agents/components/ModelCatalogPicker.tsx
+  - typescript/apps/azents-web/src/shared/model-options/components/ModelCatalogPicker.tsx
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - testenv/azents/e2e/src/tests/required/public/test_llm_provider_integration.py
   - testenv/azents/e2e/src/tests/required/public/test_model_selection.py
-last_verified_at: 2026-10-01
-spec_version: 6
+last_verified_at: 2026-10-05
+spec_version: 9
 ---
 
 # OpenRouter API Key Provider Flow
@@ -66,6 +73,13 @@ Rules:
 
 ## API-Key Credit Usage
 
+The integration and decrypted typed API-key secrets are loaded by one completed
+native PostgreSQL read-only repository operation. Missing integration is
+classified before foreign-Workspace access, preserving the existing error and
+privacy contract. The usage-client call runs only after that read closes. Usage
+remains read-through; financial-field authorization, provider transport and
+provider/secrets redaction retain their existing contracts.
+
 For an enabled OpenRouter integration, the shared subscription-usage route reads the current key at the fixed provider endpoint:
 
 ```text
@@ -86,6 +100,21 @@ GET https://openrouter.ai/api/v1/models/user?output_modalities=text
 Authorization: Bearer <integration API key>
 ```
 
+The official OpenRouter SDK public `models.list_for_user_async` operation owns
+account-catalog routing, Bearer authentication, and dispatch. The application pins
+the Pydantic-compatible official SDK release `0.10.8` through normal dependency
+resolution. The injected HTTPX client supplies the text-output query filter and
+observes the same response at a typed application-codec boundary. Each listing
+uses a 20-second timeout and disables SDK retries; the catalog synchronization
+lifecycle owns subsequent retry decisions.
+
+The application codec preserves consumed field presence and sparse records before
+SDK display-model validation. A successful HTTP 200 response rejected only by the
+SDK response schema still uses the validated application payload. Invalid consumed
+catalog evidence and non-200 SDK failures remain errors. This boundary performs
+one SDK-owned request and releases both transport and SDK resources, including on
+cancellation. SDK debug logging is disabled to protect credentials and payloads.
+
 The provider response is normalized under these rules:
 
 - Every valid account-visible model with text output is eligible for selection.
@@ -94,23 +123,28 @@ The provider response is normalized under these rules:
 - Unknown publishers map to `model_developer=other`; they never fall back to Anthropic.
 - Invalid records are skipped with bounded aggregate diagnostics instead of exposing raw provider payloads.
 - Catalog reads use the stored projection and never call OpenRouter on the picker read path.
-- Failed refreshes use the common catalog-attempt status, retry, backoff, and stale-snapshot behavior.
+- Failed refreshes use the common current sync status, retry, backoff, and stale-current-data
+  behavior, preserving entries, embedded prices, and last-success time.
 
 Runtime dispatch uses the exact saved provider identifier, for example
 `anthropic/claude-sonnet-4.6`, without an execution-library prefix or publisher-path stripping.
 
 ## Capability Projection
 
-Model visibility is broader than capability claims. OpenRouter entries conservatively project only capabilities that Azents can safely normalize from the account listing:
+The account listing preserves architecture modality lists and complete supported
+parameter declarations, including absence, null and explicit empty values. The
+compiler combines those exact declarations with applicable local source facts and
+reviewed implemented-route bounds to produce final schema-3 support fields.
+Original evidence gaps and route exclusions remain diagnostic rather than final
+unknown states.
 
-- text and verified image input;
-- text output;
-- function-tool support;
-- reasoning support and available effort levels;
-- supported standard generation parameters;
-- semantic `web_search` as an effective OpenRouter provider-level capability.
-
-The initial projection does not advertise PDF, audio, video, image output, image generation, prompt caching, or strict structured output. Missing or unverified metadata disables the individual capability without hiding an otherwise valid text-output model.
+Function calling, parallel calls, strict function schemas and structured responses
+remain independent. `structured_outputs` is the explicit account response-schema
+declaration; a generic format flag or strict function support is not equivalent.
+Input/output forms and built-ins are limited to actual implemented product routes.
+Conditional final features stay configurable and are constrained by the actual
+encoded request at dispatch. Literal publisher paths remain identity, not a
+cross-host capability match.
 
 ## Runtime Resolution and Request Lowering
 
@@ -125,7 +159,7 @@ Azents does not send `HTTP-Referer` by default and does not add request-level up
 
 OpenRouter execution uses the Pydantic AI public Responses model boundary with an official
 OpenAI-compatible SDK client. It retains the Responses API envelope rather than switching to a
-Chat Completions wrapper. Canonical transcript, provider-safe failures, usage and captured-source
+Chat Completions wrapper. Canonical transcript, provider-safe failures, usage and saved-candidate
 cost normalization remain Azents-owned. Response-handle acquisition has a provider-specific
 60-second deadline; parsed-native-event idle and absolute-attempt deadlines remain on the common
 policy. Provider-first lowering applies these dialect rules:
@@ -147,9 +181,14 @@ policy. Provider-first lowering applies these dialect rules:
 
 ## Snapshot Semantics
 
-Workspace defaults and Agent model choices resolve through the stored OpenRouter catalog. The resulting snapshot preserves the hosting provider, exact provider model identifier, display name, recognized or neutral developer, family, normalized capabilities, source metadata, and refresh time.
+Workspace defaults and Agent model choices resolve through the stored OpenRouter catalog. The resulting snapshot preserves the hosting provider, exact provider model identifier, display name, recognized or neutral developer, family, normalized capabilities, server-owned normalized pricing, source metadata, and refresh time.
 
-Later OpenRouter catalog changes do not mutate existing Agent or Workspace snapshots. Execution can fail when the referenced integration is disabled, deleted, or rejected by OpenRouter; this remains an integration/provider availability failure rather than automatic snapshot replacement.
+Active Agent/Workspace reads and NEW operation preparation compile current exact
+authorized LOCAL declarations for the same configured IDs. Reads and unrelated
+saves preserve user identities, order, settings and independently saved pricing.
+Once an operation exists, retries, quota progression and historical replay retain
+its captured capabilities and cursor. Disabled/deleted integration or provider
+rejection remains an availability failure rather than a model substitution.
 
 ## Security and Verification
 
@@ -165,6 +204,7 @@ Later OpenRouter catalog changes do not mutate existing Agent or Workspace snaps
 
 | Date | Version | Change | Rationale |
 |---|---:|---|---|
+| 2026-10-03 | 7 | Adopted current catalog/latest sync state and embedded normalized selection prices | Preserve exact publisher identity, account visibility and reported charge priority |
 | 2026-10-01 | 6 | Removed the former metadata-source compatibility path while retaining direct account catalog projection | Keep every valid account-visible text model independent of optional generic metadata |
 | 2026-09-30 | 5 | Replaced executable transport with the public Pydantic AI Responses/SDK boundary and exact raw model identity | Preserve the existing account, envelope and execution-control contracts |
 | 2026-09-04 | 4 | Mapped the shared subscription-usage state and container modules | Keep bounded-key usage eligibility, retained-success refresh state, summary, and threshold presentation linked after the frontend boundary relocation |

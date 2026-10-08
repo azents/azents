@@ -5,12 +5,14 @@ created: 2026-05-30
 spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
-last_verified_at: 2026-10-01
-spec_version: 25
+last_verified_at: 2026-10-05
+spec_version: 29
 code_paths:
+  - python/apps/azents/src/azents/core/chat_data.py
   - python/apps/azents/src/azents/services/agent/**
   - python/apps/azents/src/azents/api/public/agent/**
   - python/apps/azents/src/azents/services/chat/context.py
+  - python/apps/azents/src/azents/repos/chat_context_snapshot.py
   - python/apps/azents/src/azents/api/public/chat/v1/__init__.py
   - python/apps/azents/src/azents/api/public/chat/v1/data.py
   - python/apps/azents/src/azents/repos/agent_execution/__init__.py
@@ -63,13 +65,20 @@ Behavior:
 
 `limit` minimum is 1, maximum is 500. Default is 300.
 
+The snapshot repository completes one read-only database operation for the exact active
+AgentSession, Workspace membership, recent non-reverted events and current prompt snapshot.
+It preserves the existing missing-session and non-member failures and returns detached domain
+evidence with events ordered by ascending physical ID. The service renders usage, breakdown,
+statistics and raw events only after the database scope has closed. This descriptive read
+does not lock rows or claim globally latest multi-read authority.
+
 ## Empty Transcript
 
 Context query is read-only and requires an existing `session_id`. It does not create or fall back to a team-primary session. When the selected session has no context events, response `session.id` remains the selected session id, `usage` is `null`, and stats/breakdown/raw events are empty.
 
 ## Usage Summary
 
-Latest usage comes from event `TurnMarkerPayload.usage`. Usage is value returned by provider/adapter and can include:
+Latest usage comes from event `TurnMarkerPayload.usage`. Durable usage contains normalized accounting:
 
 - `prompt_tokens`
 - `completion_tokens`
@@ -78,17 +87,27 @@ Latest usage comes from event `TurnMarkerPayload.usage`. Usage is value returned
 - `cache_creation_tokens`
 - `reasoning_tokens`
 - `cost_usd`
-- raw provider usage payload
+- optional typed `cost_provenance`
 
-For OpenAI API-key and ChatGPT OAuth turns, token fields and raw usage come directly from the official
-OpenAI SDK completed `ResponseUsage`; raw usage does not contain synthetic adapter-private hidden parameters.
-Their `cost_usd` is a content-free Azents estimate from the operation's captured generic
-`genai_prices` pricing view, with optional typed method/source/tier provenance.
+For OpenAI API-key and ChatGPT OAuth turns, token fields are normalized from the official
+OpenAI SDK completed `ResponseUsage`. Native receipts, including attribution and adapter-private
+hidden parameters, are transient normalization/pricing inputs and are not retained in new usage
+records or exposed through usage projections. Existing records are projected through the same
+normalized contract; this change does not physically rewrite their stored JSONB receipts.
+Their `cost_usd` is a content-free Azents estimate from the physical candidate's
+saved normalized pricing definition captured with its actual call time, with optional
+typed method/source-model/collection-time/tier/estimator provenance. Capture does not
+read the current catalog or source. New estimates carry no snapshot/hash authority;
+old opaque cost provenance remains readable without resolving removed history.
+Historical selections without embedded prices leave local estimation unavailable.
 Actual Ultrafast and unknown premium tiers leave cost unavailable; an Ultrafast request with
 missing, empty, or `auto` actual tier also cannot be priced as Standard. This does not fail
 successful output or remove provider token usage. REST history omits unavailable cost fields,
-while live transport may retain an explicit null. Unsupported pricing or a
-pricing-calculator `ValueError` leaves cost absent while preserving provider token usage. Unexpected
+while live transport may retain an explicit null. Missing, invalid or unsupported
+required price/quantity evidence leaves the whole cost absent while preserving
+provider token usage. Google native IMAGE/AUDIO receipts are directed billing
+quantities, not ordinary-token subtotals; uncertain or unadopted cache/media/tool
+partitions remain unavailable. Unexpected
 calculator defects remain visible through the ordinary internal-error path. ChatGPT OAuth cost is an
 API-pricing estimate rather than subscription billing. Usage details show Normal, Fast, or
 Ultrafast from the immutable applied profile as processing-speed intent, not a verified served
@@ -166,6 +185,12 @@ cd typescript && corepack pnpm --filter @azents/web typecheck
 
 ## Changelog
 
+- **2026-10-05** — v28. Moved the authorized Context snapshot read into a
+  completed read-only repository operation before service rendering.
+- **2026-10-03** — v27. Switched local estimate capture to saved candidate prices
+  and physical call time, preserving historical costs without current-source lookup.
+- **2026-10-03** — v26. Reflected captured data-only pricing authority and
+  complete directed Google usage accounting without recalculating historical costs.
 - **2026-10-01** — v25. Made the captured generic `genai_prices` snapshot the
   sole local estimate authority after removal of the former source schema.
 - **2026-09-30** — v24. Documented captured-source cost estimation and truthful usage provenance

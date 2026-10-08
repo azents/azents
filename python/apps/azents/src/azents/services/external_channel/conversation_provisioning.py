@@ -6,20 +6,22 @@ from typing import Annotated
 from cryptography.fernet import InvalidToken
 from fastapi import Depends
 from pydantic import ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelResourceType,
 )
+from azents.core.external_channel_conversation_preparation import (
+    ExternalChannelConversationPreparation,
+    ExternalChannelConversationProvisioningError,
+)
 from azents.core.external_channel_provider import (
     DiscordConnectionCredentials,
     decode_discord_connection_configuration,
 )
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.repos.external_channel.work import ExternalChannelWorkRepository
+from azents.repos.external_channel.conversation_provisioning import (
+    ExternalChannelConversationProvisioningRepository,
+)
 from azents.services.external_channel.channel_action import get_discord_delivery_client
 from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
@@ -28,38 +30,13 @@ from azents.services.external_channel.credentials import ExternalChannelCredenti
 from azents.services.external_channel.discord_delivery import DiscordDeliveryClient
 
 
-@dataclasses.dataclass(frozen=True)
-class ExternalChannelConversationProvisioningError(Exception):
-    """Sanitized provider conversation preparation failure."""
-
-    category: str
-    retryable: bool
-
-
-@dataclasses.dataclass(frozen=True)
-class ExternalChannelConversationPreparation:
-    """Content-free provider result awaiting one atomic database transition."""
-
-    target_resource_id: str
-    delivery_channel_id: str | None
-    initial_thread_title: str | None
-
-
 @dataclasses.dataclass
 class ExternalChannelConversationProvisioningService:
     """Prepare and retain one provider conversation before Session creation."""
 
-    session_manager: Annotated[
-        SessionManager[AsyncSession],
-        Depends(get_session_manager),
-    ]
-    repository: Annotated[
-        ExternalChannelRepository,
-        Depends(ExternalChannelRepository.create),
-    ]
-    work_repository: Annotated[
-        ExternalChannelWorkRepository,
-        Depends(ExternalChannelWorkRepository.create),
+    operations: Annotated[
+        ExternalChannelConversationProvisioningRepository,
+        Depends(ExternalChannelConversationProvisioningRepository),
     ]
     credentials_codec: Annotated[
         ExternalChannelCredentialsCodec,
@@ -77,19 +54,12 @@ class ExternalChannelConversationProvisioningService:
         target_resource_id: str,
     ) -> ExternalChannelConversationPreparation:
         """Perform provider I/O without creating any Azents Session state."""
-        async with self.session_manager() as session:
-            resource = await self.repository.get_resource(
-                session,
-                resource_id=target_resource_id,
-            )
-            configuration = await self.repository.get_connection_configuration(
-                session,
-                connection_id=connection_id,
-            )
-            binding = await self.repository.get_connected_binding_by_resource(
-                session,
-                resource_id=target_resource_id,
-            )
+        snapshot = await self.operations.prepare_snapshot(
+            connection_id=connection_id, target_resource_id=target_resource_id
+        )
+        resource = snapshot.resource
+        configuration = snapshot.configuration
+        binding = snapshot.binding
         if resource is None or configuration is None or binding is not None:
             if resource is None or configuration is None:
                 raise ExternalChannelConversationProvisioningError(
@@ -193,33 +163,6 @@ class ExternalChannelConversationProvisioningService:
             delivery_channel_id=None,
             initial_thread_title=None,
         )
-
-    async def apply(
-        self,
-        session: AsyncSession,
-        *,
-        target_resource_id: str,
-        preparation: ExternalChannelConversationPreparation,
-    ) -> None:
-        """Retain a prepared provider identity in the caller-owned transaction."""
-        if preparation.target_resource_id != target_resource_id:
-            raise ExternalChannelConversationProvisioningError(
-                category="ownership_stale",
-                retryable=False,
-            )
-        if preparation.delivery_channel_id is None:
-            return
-        retained = await self.work_repository.record_discord_delivery_channel(
-            session,
-            resource_id=target_resource_id,
-            delivery_channel_id=preparation.delivery_channel_id,
-            initial_thread_title=preparation.initial_thread_title,
-        )
-        if retained is None:
-            raise ExternalChannelConversationProvisioningError(
-                category="ownership_stale",
-                retryable=False,
-            )
 
 
 def _label(labels: dict[str, object], key: str) -> str | None:

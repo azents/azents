@@ -6,15 +6,21 @@ from contextlib import asynccontextmanager
 from typing import NamedTuple
 
 import pytest
+from azcommon.di import Container
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.engine_tool_state import ToolWorkingSetState
 from azents.core.enums import EventKind
+from azents.core.session_resource_authority import SessionExecutionOwner
+from azents.engine.events.filters import EventCompactor
 from azents.engine.events.types import Event, validate_event_payload
+from azents.rdb.deps import get_session_manager
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.compaction_operation import (
     CompactionCommitContext,
     CompactionOperationRepository,
+    get_compaction_operation_repository,
 )
 from azents.repos.model_operation_completion import ModelOperationCompletion
 from azents.repos.toolkit_state.engine import ToolWorkingSetStore
@@ -40,14 +46,14 @@ class _SessionManager:
         self.active = False
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[_Session]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         """Yield one session and commit only on successful exit."""
         assert not self.active
         session = _Session()
         self.sessions.append(session)
         self.active = True
         try:
-            yield session
+            yield ReadWriteSession(session)
         except BaseException:
             raise
         else:
@@ -63,10 +69,10 @@ class _TranscriptRepository:
         self.manager = manager
         self.events: list[Event] = []
 
-    async def append(self, session: AsyncSession, create: EventCreate) -> Event:
+    async def append(self, session: ReadSession, create: EventCreate) -> Event:
         """Append while the operation transaction is active."""
         assert self.manager.active
-        assert session is self.manager.sessions[-1]
+        assert session.read_session is self.manager.sessions[-1]
         event = Event(
             id=f"{len(self.events) + 1:032d}",
             session_id=create.session_id,
@@ -89,18 +95,18 @@ class _AgentSessionRepository:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> "_AgentSessionRepository":
         """Return the detached planning state."""
         del agent_session_id
         assert self.manager.active
-        assert session is self.manager.sessions[-1]
+        assert session.read_session is self.manager.sessions[-1]
         return self
 
     async def lock_compaction_plan_if_current(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         expected_head_event_id: str | None,
@@ -109,20 +115,20 @@ class _AgentSessionRepository:
         """Return the configured stale-plan result."""
         del session_id, expected_tail_event_id
         assert self.manager.active
-        assert session is self.manager.sessions[-1]
+        assert session.read_session is self.manager.sessions[-1]
         assert expected_head_event_id == self.model_input_head_event_id
         return self.current
 
     async def move_model_input_head(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
         event_id: str,
     ) -> object:
         """Record movement after marker and summary append."""
         del session_id
         assert self.manager.active
-        assert session is self.manager.sessions[-1]
+        assert session.read_session is self.manager.sessions[-1]
         self.moved_head_event_id = event_id
         self.model_input_head_event_id = event_id
         return object()
@@ -147,12 +153,12 @@ class _ModelOperationCompletionRepository:
 
     async def complete_success_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         completion: ModelOperationCompletion,
     ) -> None:
         """Settle after summary append and head movement."""
         assert self.manager.active
-        assert session is self.manager.sessions[-1]
+        assert session.read_session is self.manager.sessions[-1]
         assert [event.kind for event in self.transcript.events] == [
             EventKind.COMPACTION_MARKER,
             EventKind.COMPACTION_SUMMARY,
@@ -183,13 +189,13 @@ class _ToolWorkingSetStore(ToolWorkingSetStore):
 
     async def clear_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
         session_id: str,
     ) -> ToolWorkingSetState:
         """Clear only after model-operation completion."""
         assert self.manager.active
-        assert session is self.manager.sessions[-1]
+        assert session.read_session is self.manager.sessions[-1]
         self.cleared.append((agent_id, session_id))
         return ToolWorkingSetState()
 
@@ -223,6 +229,7 @@ def _repository(
     working_set = _ToolWorkingSetStore(manager, completions)
     return _RepositoryFixture(
         repository=CompactionOperationRepository(
+            owner=None,
             session_manager=manager,
             transcript_repository=transcript,
             agent_session_repository=sessions,
@@ -354,3 +361,21 @@ async def test_compaction_commit_state_failure_aborts_final_transaction() -> Non
 
     assert [session.commit_count for session in manager.sessions] == [1, 0]
     assert working_set.cleared == []
+
+
+async def test_compaction_dependency_graph_binds_execution_owner_explicitly() -> None:
+    """Offline production DI requires no caller-supplied owner body or query."""
+    manager = _SessionManager()
+    async with Container(
+        dependency_overrides={get_session_manager: lambda: manager}
+    ) as container:
+        operation = await container.solve(get_compaction_operation_repository)
+        compactor = await container.solve(EventCompactor)
+        assert operation.owner is None
+        assert operation.session_manager is manager
+        assert compactor.operation_repository.owner is None
+        owner = SessionExecutionOwner("captured-session", 7)
+        bound = operation.for_execution(owner)
+        assert bound.owner == owner
+        assert bound.session_manager is manager
+        assert operation.owner is None

@@ -19,9 +19,9 @@ from azcommon.infra.s3.service import (
 )
 from azcommon.result import Failure, Result, Success
 from PIL import Image
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSession, SessionAgent
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentRuntimeCapability,
@@ -36,8 +36,18 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     WorkspaceUserRole,
 )
+from azents.core.exchange_file_errors import (
+    FileAccessDenied,
+    FileExpired,
+    FileNotFound,
+    FileRetentionOwnerConflict,
+    FileUnavailable,
+    SessionNotFound,
+    exchange_object_key_from_uri,
+)
+from azents.core.session_resource_authority import SessionResourceAuthority
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent.data import Agent
-from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.exchange_file.data import (
     ExchangeFile,
@@ -53,25 +63,18 @@ from azents.repos.exchange_file.operations import (
     ExchangeFileCreateBatch,
     ExchangeFileMetadataFailure,
     ExchangeFileOperationRepository,
+    ExchangeFilePublicationRecoveryError,
 )
+from azents.repos.input_attachment_claim import InputAttachmentClaimRepository
 from azents.repos.workspace_user.data import WorkspaceUser
-from azents.services.exchange_file import make_exchange_preview_thumbnail
-from azents.services.session_resource_authority import SessionResourceAuthority
+from azents.services.exchange_file import (
+    ExchangeFileService,
+    FileTooLarge,
+    make_exchange_preview_thumbnail,
+)
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_selectable_model_options,
-)
-
-from . import (
-    ExchangeFileService,
-    FileAccessDenied,
-    FileExpired,
-    FileNotFound,
-    FileRetentionOwnerConflict,
-    FileTooLarge,
-    FileUnavailable,
-    SessionNotFound,
-    exchange_object_key_from_uri,
 )
 
 _NOW = datetime.datetime.now(datetime.timezone.utc)
@@ -85,7 +88,7 @@ class _FakeExchangeFileRepository(ExchangeFileRepository):
 
     async def create(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         create: ExchangeFileCreate,
     ) -> ExchangeFile:
         """Store create input as domain model as-is."""
@@ -130,7 +133,7 @@ class _FakeExchangeFileRepository(ExchangeFileRepository):
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         file_id: str,
     ) -> ExchangeFile | None:
         """Fetch file by ID."""
@@ -139,7 +142,7 @@ class _FakeExchangeFileRepository(ExchangeFileRepository):
 
     async def get_by_object_key(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         object_key: str,
     ) -> ExchangeFile | None:
         """Fetch file by object key."""
@@ -151,7 +154,7 @@ class _FakeExchangeFileRepository(ExchangeFileRepository):
 
     async def get_by_object_key_for_agent(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         object_key: str,
         agent_id: str,
@@ -164,7 +167,7 @@ class _FakeExchangeFileRepository(ExchangeFileRepository):
 
     async def delete_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         file_id: str,
     ) -> None:
         """Delete file metadata."""
@@ -173,7 +176,7 @@ class _FakeExchangeFileRepository(ExchangeFileRepository):
 
     async def set_preview_thumbnail_file_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         file_id: str,
         preview_thumbnail_file_id: str,
@@ -200,7 +203,7 @@ class _FakeExchangeFileRepository(ExchangeFileRepository):
 
     async def claim_for_retention_root(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         object_keys: Sequence[str],
         workspace_id: str,
@@ -250,7 +253,7 @@ class _FakeExchangeFileRepository(ExchangeFileRepository):
 
     async def expire_due(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         now: datetime.datetime,
         limit: int,
@@ -274,7 +277,7 @@ class _FakeExchangeFileRepository(ExchangeFileRepository):
 
     async def expire_file_family(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         file_id: str,
         expired_at: datetime.datetime,
@@ -506,11 +509,11 @@ class _SessionBoundary:
             """Avoid opening a real database session."""
 
     @asynccontextmanager
-    async def session_manager(self) -> AsyncGenerator[AsyncSession, None]:
+    async def session_manager(self) -> AsyncGenerator[WriteSession, None]:
         """Yield a test DB session while tracking its lifetime."""
         self.active += 1
         try:
-            yield self._DBSession()
+            yield ReadWriteSession(self._DBSession())
         finally:
             self.active -= 1
 
@@ -523,7 +526,7 @@ class _AuthorityExchangeFileService(ExchangeFileService):
 
     async def _has_valid_resource_authority(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         authority: SessionResourceAuthority,
         *,
         lock: bool = False,
@@ -656,6 +659,7 @@ def _make_service(
         agent_run_repository=AsyncMock(),
         workspace_user_repository=workspace_user_repository,
         session_manager=session_boundary.session_manager,
+        read_session_manager=session_boundary.session_manager,
     )
     service = _make_exchange_file_service(
         operation_repository=operation_repository,
@@ -1006,7 +1010,9 @@ async def test_uncertain_recovery_read_retains_verified_preview() -> None:
     service, repository, s3_service = _make_authority_service(
         authority_results=[True, False]
     )
-    service.recovery_read.side_effect = SQLAlchemyError("recovery read failed")
+    service.recovery_read.side_effect = ExchangeFilePublicationRecoveryError(
+        "recovery read failed"
+    )
     source = S3ObjectIdentity(bucket="transfer-bucket", key="verified-image")
     body = _jpeg_bytes()
     s3_service.objects[source.key] = body
@@ -1283,8 +1289,13 @@ async def test_claim_input_attachment_binds_preview_and_rejects_another_root() -
     source = created.value
     assert source.preview_thumbnail_file_id is not None
 
-    claim = await service.claim_input_attachments(
-        _SessionBoundary._DBSession(),
+    claim_repository = InputAttachmentClaimRepository(
+        exchange_file_repository=service.exchange_file_repository,
+        agent_session_repository=service.agent_session_repository,
+        workspace_user_repository=service.workspace_user_repository,
+    )
+    claim = await claim_repository.claim_input_attachments(
+        ReadWriteSession(_SessionBoundary._DBSession()),
         agent_id="agent-1",
         session_id="session-1",
         user_id="user-1",
@@ -1298,8 +1309,8 @@ async def test_claim_input_attachment_binds_preview_and_rejects_another_root() -
     assert claimed_source.retention_bound_at is not None
     assert claimed_preview.retention_bound_at == claimed_source.retention_bound_at
 
-    retry = await service.claim_input_attachments(
-        _SessionBoundary._DBSession(),
+    retry = await claim_repository.claim_input_attachments(
+        ReadWriteSession(_SessionBoundary._DBSession()),
         agent_id="agent-1",
         session_id="session-1",
         user_id="user-1",
@@ -1313,8 +1324,8 @@ async def test_claim_input_attachment_binds_preview_and_rejects_another_root() -
     root_lookup.return_value = SessionAgent.model_construct(
         agent_session_id="another-root-session"
     )
-    conflict = await service.claim_input_attachments(
-        _SessionBoundary._DBSession(),
+    conflict = await claim_repository.claim_input_attachments(
+        ReadWriteSession(_SessionBoundary._DBSession()),
         agent_id="agent-1",
         session_id="session-1",
         user_id="user-1",

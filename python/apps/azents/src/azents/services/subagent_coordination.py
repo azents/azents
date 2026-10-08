@@ -2,14 +2,12 @@
 
 import dataclasses
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.enums import (
     AgentRunStatus,
     AgentSessionRunState,
 )
-from azents.repos.subagent_coordination.repository import (
-    SubagentCoordinationRepository,
+from azents.repos.subagent_coordination.operations import (
+    SubagentCoordinationReadRepository,
 )
 
 
@@ -36,18 +34,16 @@ class SubagentListProjection:
 class SubagentCoordinationService:
     """Build bounded model-facing lists from durable coordination state."""
 
-    repository: SubagentCoordinationRepository
+    repository: SubagentCoordinationReadRepository
 
     async def list_agents(
         self,
-        session: AsyncSession,
         *,
         current_session_id: str,
         configured_capacity: int,
     ) -> SubagentListProjection | None:
         """Return one bounded coordination list for the current root tree."""
         snapshot = await self.repository.project_root_tree(
-            session,
             current_session_id=current_session_id,
             configured_capacity=configured_capacity,
         )

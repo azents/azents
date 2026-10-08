@@ -26,13 +26,22 @@ from azents.core.enums import (
     ExternalChannelWorkStatus,
     ExternalChannelWorkTaskStatus,
 )
+from azents.core.external_channel_limits import (
+    SLACK_MARKDOWN_TEXT_MAX_LENGTH,
+)
 from azents.core.external_channel_progress import (
     ExternalChannelDesiredProgress,
+    ExternalChannelWorkSource,
     checking_progress,
+)
+from azents.core.external_channel_progress import (
+    ExternalChannelWorkTask as ChannelWorkTask,
 )
 from azents.core.external_channel_provider_effect import ProviderMutationOutcome
 from azents.core.external_channel_title import DISCORD_INITIAL_THREAD_TITLE_LABEL
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.external_channel import RDBExternalChannelConnection
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.data import ExternalChannelConnectionCreate
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.external_channel.work import (
@@ -42,7 +51,6 @@ from azents.repos.external_channel.work import (
 from azents.repos.external_channel.work_data import (
     ChannelActionEffectPlan,
     ChannelActionTransition,
-    ChannelWorkTask,
 )
 from azents.repos.external_channel.work_state import (
     ChannelWorkProjectionPartState,
@@ -51,11 +59,34 @@ from azents.repos.external_channel.work_state import (
     ExternalChannelWorkStateStore,
 )
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
-from azents.services.external_channel.slack_events import (
-    SLACK_MARKDOWN_TEXT_MAX_LENGTH,
-)
 from azents.testing.external_channel import make_provider_effect_plan
+
+
+def _session_mock() -> MagicMock:
+    """Build an AsyncSession mock exposing repository capabilities."""
+    session = MagicMock(spec=AsyncSession)
+    session.read_session = session
+    session.write_session = session
+    return session
+
+
+async def test_access_control_delete_capture_does_not_claim_request() -> None:
+    """A cleanup plan captures retained identity without claiming provider execution."""
+
+    class CapturedQuery(Exception):
+        pass
+
+    session = _session_mock()
+    session.scalar = AsyncMock(side_effect=CapturedQuery)
+    with pytest.raises(CapturedQuery):
+        await ExternalChannelWorkRepository().prepare_access_control_delete(
+            session, access_request_id="request-1"
+        )
+    captured = session.scalar.await_args
+    assert captured is not None
+    query = captured.args[0]
+    assert "FOR UPDATE" not in str(query.compile(dialect=postgresql.dialect()))
+    assert "external_channel_access_requests.status" in _where_sql(query)
 
 
 class _CommitActionResult(NamedTuple):
@@ -209,7 +240,7 @@ async def test_direct_control_ignores_connection_health_status() -> None:
             "thread_auto_archive_duration_minutes": 1440,
         },
     )
-    session = MagicMock(spec=AsyncSession)
+    session = _session_mock()
     session.scalar = AsyncMock(return_value=connection)
     repository = ExternalChannelWorkRepository()
 
@@ -269,7 +300,7 @@ async def test_binding_reply_effects_preserve_exact_thread_surfacing(
     connection = SimpleNamespace(id="connection-1", provider=provider)
     result = MagicMock()
     result.one_or_none.return_value = (binding, resource, route, connection)
-    session = MagicMock(spec=AsyncSession)
+    session = _session_mock()
     session.execute = AsyncMock(return_value=result)
     repository = ExternalChannelWorkRepository()
     prepared = make_provider_effect_plan("scheduled-terminal")
@@ -313,7 +344,7 @@ async def test_binding_effect_revalidation_rejects_changed_agent_authority() -> 
     repository.revalidate_direct_control = AsyncMock(return_value=changed)
 
     current = await repository.revalidate_binding_effect(
-        MagicMock(spec=AsyncSession),
+        _session_mock(),
         plan=plan,
     )
 
@@ -338,7 +369,7 @@ async def test_slack_binding_reply_effects_split_oversized_terminal_text() -> No
     )
     result = MagicMock()
     result.one_or_none.return_value = (binding, resource, route, connection)
-    session = MagicMock(spec=AsyncSession)
+    session = _session_mock()
     session.execute = AsyncMock(return_value=result)
     repository = ExternalChannelWorkRepository()
     repository.prepare_direct_control = AsyncMock(
@@ -430,7 +461,7 @@ async def test_initial_progress_is_claimed_once_per_active_work(
         return current_work
 
     async def update_existing(
-        _session: AsyncSession,
+        _session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -449,7 +480,7 @@ async def test_initial_progress_is_claimed_once_per_active_work(
 
     state_store.load = AsyncMock(side_effect=load_state)
     state_store.update_existing = AsyncMock(side_effect=update_existing)
-    session = MagicMock(spec=AsyncSession)
+    session = _session_mock()
     session.execute = AsyncMock(return_value=result)
     repository = ExternalChannelWorkRepository(work_state_store=state_store)
     plan = make_provider_effect_plan("initial-progress")
@@ -494,7 +525,7 @@ async def test_ensure_active_work_promotes_hidden_work_monotonically() -> None:
     current: ChannelWorkState | None = None
 
     async def update(
-        _session: AsyncSession,
+        _session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -517,7 +548,7 @@ async def test_ensure_active_work_promotes_hidden_work_monotonically() -> None:
     progress = checking_progress()
 
     hidden = await repository.ensure_active_work(
-        MagicMock(spec=AsyncSession),
+        _session_mock(),
         agent_id="agent-1",
         session_id="session-1",
         binding_id="binding-1",
@@ -531,7 +562,7 @@ async def test_ensure_active_work_promotes_hidden_work_monotonically() -> None:
     assert hidden.tracker_visibility == "hidden"
 
     repeated_hidden = await repository.ensure_active_work(
-        MagicMock(spec=AsyncSession),
+        _session_mock(),
         agent_id="agent-1",
         session_id="session-1",
         binding_id="binding-1",
@@ -543,7 +574,7 @@ async def test_ensure_active_work_promotes_hidden_work_monotonically() -> None:
     assert repeated_hidden == hidden
 
     promoted = await repository.ensure_active_work(
-        MagicMock(spec=AsyncSession),
+        _session_mock(),
         agent_id="agent-1",
         session_id="session-1",
         binding_id="binding-1",
@@ -559,7 +590,7 @@ async def test_ensure_active_work_promotes_hidden_work_monotonically() -> None:
     assert promoted.desired_progress_revision == hidden.desired_progress_revision
 
     repeated_visible = await repository.ensure_active_work(
-        MagicMock(spec=AsyncSession),
+        _session_mock(),
         agent_id="agent-1",
         session_id="session-1",
         binding_id="binding-1",
@@ -581,7 +612,7 @@ async def test_ensure_active_work_uses_requested_visibility_for_new_cycle() -> N
     current = finished
 
     async def update(
-        _session: AsyncSession,
+        _session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -603,7 +634,7 @@ async def test_ensure_active_work_uses_requested_visibility_for_new_cycle() -> N
     repository = ExternalChannelWorkRepository(work_state_store=state_store)
 
     replacement = await repository.ensure_active_work(
-        MagicMock(spec=AsyncSession),
+        _session_mock(),
         agent_id="agent-1",
         session_id="session-1",
         binding_id="binding-1",
@@ -633,7 +664,7 @@ async def test_initial_progress_hidden_work_plans_no_tracker() -> None:
     result.one_or_none.return_value = (binding, resource, route, connection)
     state_store = MagicMock(spec=ExternalChannelWorkStateStore)
     state_store.load = AsyncMock(return_value=work)
-    session = MagicMock(spec=AsyncSession)
+    session = _session_mock()
     session.execute = AsyncMock(return_value=result)
     repository = ExternalChannelWorkRepository(work_state_store=state_store)
     repository.prepare_direct_control = AsyncMock()
@@ -699,7 +730,7 @@ async def test_initial_progress_rerenders_latest_progress_after_claim_race() -> 
         return current
 
     async def update_existing(
-        _session: AsyncSession,
+        _session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -721,7 +752,7 @@ async def test_initial_progress_rerenders_latest_progress_after_claim_race() -> 
 
     state_store.load = AsyncMock(side_effect=load_state)
     state_store.update_existing = AsyncMock(side_effect=update_existing)
-    session = MagicMock(spec=AsyncSession)
+    session = _session_mock()
     session.execute = AsyncMock(return_value=result)
     repository = ExternalChannelWorkRepository(work_state_store=state_store)
     initial_plan = make_provider_effect_plan("initial-progress:initial")
@@ -761,7 +792,7 @@ async def test_initial_progress_rerenders_latest_progress_after_claim_race() -> 
 
 
 async def test_direct_control_rejects_terminal_connection_before_credential_purge(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """A terminal disconnect fences unbound controls before credential purge."""
     workspace_repository = WorkspaceRepository()
@@ -803,7 +834,7 @@ async def test_direct_control_rejects_terminal_connection_before_credential_purg
             socket_gap_reason=None,
         ),
     )
-    connection_row = await rdb_session.get(
+    connection_row = await rdb_session.read_session.get(
         RDBExternalChannelConnection,
         connection.id,
     )
@@ -815,7 +846,7 @@ async def test_direct_control_rejects_terminal_connection_before_credential_purg
         3,
         tzinfo=datetime.UTC,
     )
-    await rdb_session.flush()
+    await rdb_session.write_session.flush()
 
     plan = await ExternalChannelWorkRepository().prepare_direct_control(
         rdb_session,
@@ -848,7 +879,7 @@ async def test_channel_action_ignores_connection_health_status() -> None:
         id="connection-1",
         provider=ExternalChannelProvider.DISCORD,
     )
-    session = MagicMock(spec=AsyncSession)
+    session = _session_mock()
     session.scalar = AsyncMock(
         side_effect=[
             SimpleNamespace(id="session-1"),
@@ -887,7 +918,7 @@ async def test_request_input_requires_participant_visible_message() -> None:
 
     with pytest.raises(ValueError, match="Request input requires"):
         await repository.commit_direct_action(
-            MagicMock(spec=AsyncSession),
+            _session_mock(),
             session_id="session-1",
             agent_id="agent-1",
             run_id="run-1",
@@ -908,7 +939,7 @@ async def test_awaiting_settlement_uses_exact_cycle_and_state_revision() -> None
     current = _work(desired=False)
 
     async def update_existing(
-        _session: AsyncSession,
+        _session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -926,7 +957,7 @@ async def test_awaiting_settlement_uses_exact_cycle_and_state_revision() -> None
     repository = ExternalChannelWorkRepository(work_state_store=state_store)
 
     settled = await repository.settle_awaiting_input(
-        MagicMock(spec=AsyncSession),
+        _session_mock(),
         session_id="session-1",
         agent_id="agent-1",
         binding_id="binding-1",
@@ -948,7 +979,7 @@ async def test_newer_transition_rejects_stale_awaiting_settlement() -> None:
     current.state_revision = 4
 
     async def update_existing(
-        _session: AsyncSession,
+        _session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -963,7 +994,7 @@ async def test_newer_transition_rejects_stale_awaiting_settlement() -> None:
     repository = ExternalChannelWorkRepository(work_state_store=state_store)
 
     settled = await repository.settle_awaiting_input(
-        MagicMock(spec=AsyncSession),
+        _session_mock(),
         session_id="session-1",
         agent_id="agent-1",
         binding_id="binding-1",
@@ -987,7 +1018,7 @@ async def test_created_human_input_always_invalidates_older_settlement(
     current.awaiting_input_run_id = awaiting_run_id
 
     async def update_existing(
-        _session: AsyncSession,
+        _session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -1005,7 +1036,7 @@ async def test_created_human_input_always_invalidates_older_settlement(
     repository = ExternalChannelWorkRepository(work_state_store=state_store)
 
     resumed = await repository.resume_from_human_input(
-        MagicMock(spec=AsyncSession),
+        _session_mock(),
         session_id="session-1",
         agent_id="agent-1",
         binding_id="binding-1",
@@ -1054,7 +1085,7 @@ async def test_hidden_continue_with_unfinished_tasks_creates_tracker() -> None:
             "conversation_scope": "parent_channel",
         },
     )
-    session = MagicMock(spec=AsyncSession)
+    session = _session_mock()
     session.scalar = AsyncMock(
         side_effect=[
             SimpleNamespace(id="session-1"),
@@ -1070,7 +1101,7 @@ async def test_hidden_continue_with_unfinished_tasks_creates_tracker() -> None:
     current = work
 
     async def update(
-        _session: AsyncSession,
+        _session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -1187,7 +1218,7 @@ async def test_continue_after_finished_work_with_tasks_is_visible(
             "thread_ts": "1.000001",
         },
     )
-    session = MagicMock(spec=AsyncSession)
+    session = _session_mock()
     session.scalar = AsyncMock(
         side_effect=[
             SimpleNamespace(id="session-1"),
@@ -1203,7 +1234,7 @@ async def test_continue_after_finished_work_with_tasks_is_visible(
     current = finished
 
     async def update(
-        _session: AsyncSession,
+        _session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -1321,7 +1352,7 @@ async def _commit_action(
             }
         ),
     )
-    session = MagicMock(spec=AsyncSession)
+    session = _session_mock()
     session.scalar = AsyncMock(
         side_effect=[
             SimpleNamespace(id="session-1"),
@@ -1337,7 +1368,7 @@ async def _commit_action(
     current = work
 
     async def update(
-        _session: AsyncSession,
+        _session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -1565,67 +1596,134 @@ async def test_discord_identical_tasks_preserve_reply_tracker_host() -> None:
     assert effect.provider.target.request_payload["tracker_host_kind"] == "reply"
 
 
-async def test_discord_task_only_change_preserves_reply_tracker_host() -> None:
-    """A message-free task change edits the current reply host in place."""
+@pytest.mark.parametrize("host_kind", ["standalone", "reply"])
+@pytest.mark.parametrize(
+    ("mode", "message"),
+    [
+        (ExternalChannelActionMode.CONTINUE, None),
+        (ExternalChannelActionMode.CONTINUE, "Progress."),
+        (ExternalChannelActionMode.REQUEST_INPUT, "Which next step?"),
+    ],
+)
+@pytest.mark.parametrize(
+    "change",
+    [
+        "identical",
+        "complete",
+        "reopen",
+        "comments",
+        "sources",
+        "id",
+        "work_title",
+        "rename",
+        "add",
+        "remove",
+        "reorder",
+    ],
+)
+async def test_discord_tracker_relocation_compares_only_ordered_task_titles(
+    host_kind: Literal["standalone", "reply"],
+    mode: ExternalChannelActionMode,
+    message: str | None,
+    change: str,
+) -> None:
+    """Only title-list changes recreate; status and metadata edits retain the host."""
     projection = _part(
         status=ExternalChannelWorkProjectionStatus.PRESENT,
         provider_message_key="discord:111:555",
-        host_kind="reply",
+        host_kind=host_kind,
     )
     work = _work(desired=True, projection_parts=[projection])
+    first = _moving_tasks()[0]
+    second = first.model_copy(update={"id": "task-2", "title": "Verify the result"})
+    if change == "reopen":
+        first = first.model_copy(
+            update={"status": ExternalChannelWorkTaskStatus.COMPLETED}
+        )
+    work.tasks = [first, second]
+    next_tasks = list(work.tasks)
+    if change == "complete":
+        next_tasks[0] = first.model_copy(
+            update={"status": ExternalChannelWorkTaskStatus.COMPLETED}
+        )
+    elif change == "reopen":
+        next_tasks[0] = first.model_copy(
+            update={"status": ExternalChannelWorkTaskStatus.IN_PROGRESS}
+        )
+    elif change == "comments":
+        next_tasks[0] = first.model_copy(
+            update={"details": "A new comment.", "output": "An observed result."}
+        )
+    elif change == "id":
+        next_tasks[0] = first.model_copy(update={"id": "replacement-id"})
+    elif change == "sources":
+        next_tasks[0] = first.model_copy(
+            update={
+                "sources": [
+                    ExternalChannelWorkSource(
+                        url="https://example.com/result",
+                        label="Result evidence",
+                    )
+                ]
+            }
+        )
+    elif change == "rename":
+        next_tasks[0] = first.model_copy(update={"title": "Inspect the Tracker"})
+    elif change == "add":
+        next_tasks.append(
+            first.model_copy(update={"id": "task-3", "title": "Publish the result"})
+        )
+    elif change == "remove":
+        next_tasks.pop()
+    elif change == "reorder":
+        next_tasks.reverse()
 
-    transition, _, _ = await _commit_action(
+    transition, updated, _ = await _commit_action(
         work,
         provider=ExternalChannelProvider.DISCORD,
-        mode=ExternalChannelActionMode.CONTINUE,
-        message=None,
+        mode=mode,
+        message=message,
         title="Refreshing the plan…",
-        tasks=_moving_tasks(),
+        tasks=None if change == "work_title" else next_tasks,
     )
 
-    assert len(transition.effects) == 1
-    update = transition.effects[0]
-    assert (
-        update.provider.target.operation
-        is ExternalChannelDeliveryOperation.PROGRESS_UPDATE
+    title_list_changed = change in {"rename", "add", "remove", "reorder"}
+    expected_operations = (
+        [
+            ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+            ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+        ]
+        if title_list_changed
+        else [ExternalChannelDeliveryOperation.PROGRESS_UPDATE]
     )
-    assert update.dependencies == ()
-    assert update.projection_host_kind == "reply"
-    assert update.provider.target.request_payload["provider_message_key"] == (
-        "discord:111:555"
+    if message is not None:
+        if title_list_changed:
+            expected_operations.append(ExternalChannelDeliveryOperation.REPLY)
+        else:
+            expected_operations.insert(0, ExternalChannelDeliveryOperation.REPLY)
+    assert [effect.provider.target.operation for effect in transition.effects] == (
+        expected_operations
     )
-    assert update.provider.target.request_payload["tracker_host_kind"] == "reply"
-
-
-async def test_discord_task_only_change_preserves_standalone_tracker_host() -> None:
-    """A message-free task change edits the current standalone host in place."""
-    projection = _part(
-        status=ExternalChannelWorkProjectionStatus.PRESENT,
-        provider_message_key="discord:111:555",
-    )
-    work = _work(desired=True, projection_parts=[projection])
-
-    transition, _, _ = await _commit_action(
-        work,
-        provider=ExternalChannelProvider.DISCORD,
-        mode=ExternalChannelActionMode.CONTINUE,
-        message=None,
-        title="Refreshing the plan…",
-        tasks=_moving_tasks(),
-    )
-
-    assert len(transition.effects) == 1
-    update = transition.effects[0]
-    assert (
-        update.provider.target.operation
-        is ExternalChannelDeliveryOperation.PROGRESS_UPDATE
-    )
-    assert update.dependencies == ()
-    assert update.projection_host_kind == "standalone"
-    assert update.provider.target.request_payload["provider_message_key"] == (
-        "discord:111:555"
-    )
-    assert update.provider.target.request_payload["tracker_host_kind"] == "standalone"
+    progress_effects = [
+        effect
+        for effect in transition.effects
+        if effect.provider.target.operation
+        is not ExternalChannelDeliveryOperation.REPLY
+    ]
+    if title_list_changed:
+        remove, create = progress_effects
+        assert remove.projection_host_kind == host_kind
+        assert create.dependencies == (0,)
+        assert create.projection_host_kind == "standalone"
+        assert "provider_message_key" not in create.provider.target.request_payload
+    else:
+        update = progress_effects[0]
+        assert update.dependencies == ()
+        assert update.projection_host_kind == host_kind
+        assert update.provider.target.request_payload["provider_message_key"] == (
+            "discord:111:555"
+        )
+    assert updated.tasks == next_tasks
 
 
 async def test_discord_task_only_change_creates_when_tracker_is_missing() -> None:
@@ -1796,7 +1894,7 @@ async def test_reply_tracker_attachment_settles_known_host_identity() -> None:
     state_store = MagicMock(spec=ExternalChannelWorkStateStore)
 
     async def update_existing(
-        _session: AsyncSession,
+        _session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -1834,7 +1932,7 @@ async def test_reply_tracker_attachment_settles_known_host_identity() -> None:
     )
 
     applied = await repository.apply_direct_effect_outcome(
-        MagicMock(spec=AsyncSession),
+        _session_mock(),
         effect=effect,
         outcome=ProviderMutationOutcome(
             status="failed",
@@ -1896,7 +1994,7 @@ async def test_confirmed_missing_update_retires_only_current_tracker_identity(
     state_store = MagicMock(spec=ExternalChannelWorkStateStore)
 
     async def update_existing(
-        _session: AsyncSession,
+        _session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -1938,7 +2036,7 @@ async def test_confirmed_missing_update_retires_only_current_tracker_identity(
     )
 
     applied = await repository.apply_direct_effect_outcome(
-        MagicMock(spec=AsyncSession),
+        _session_mock(),
         effect=effect,
         outcome=ProviderMutationOutcome(
             status=status,
@@ -1996,7 +2094,7 @@ async def test_reply_tracker_cleanup_preserves_host_kind_after_detach() -> None:
     state_store = MagicMock(spec=ExternalChannelWorkStateStore)
 
     async def update_existing(
-        _session: AsyncSession,
+        _session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -2034,7 +2132,7 @@ async def test_reply_tracker_cleanup_preserves_host_kind_after_detach() -> None:
     )
 
     applied = await repository.apply_direct_effect_outcome(
-        MagicMock(spec=AsyncSession),
+        _session_mock(),
         effect=effect,
         outcome=ProviderMutationOutcome(
             status="delivered",
@@ -2058,7 +2156,7 @@ async def test_direct_effect_revalidation_ignores_connection_health_status() -> 
     class QueryCaptured(Exception):
         pass
 
-    session = MagicMock(spec=AsyncSession)
+    session = _session_mock()
     session.execute = AsyncMock(side_effect=QueryCaptured())
     repository = ExternalChannelWorkRepository()
     effect = ChannelActionEffectPlan(
@@ -2114,7 +2212,7 @@ async def test_direct_effect_revalidation_rejects_stale_progress_revision() -> N
             workspace,
         )
     )
-    session = MagicMock(spec=AsyncSession)
+    session = _session_mock()
     session.execute = AsyncMock(return_value=query_result)
     state_store = MagicMock(spec=ExternalChannelWorkStateStore)
     state_store.load = AsyncMock(return_value=_work(desired=True))
@@ -2146,7 +2244,7 @@ async def test_access_control_create_is_claimed_once_before_provider_io() -> Non
         control_provider_message_key=None,
         control_projection_status=None,
     )
-    session = MagicMock(spec=AsyncSession)
+    session = _session_mock()
     session.scalar = AsyncMock(return_value=request)
     session.flush = AsyncMock()
     repository = ExternalChannelWorkRepository()
@@ -2188,7 +2286,7 @@ async def test_discord_delivery_channel_records_direct_create_title_once() -> No
     resource = SimpleNamespace(
         labels={"provider": "discord", "guild_id": "111"},
     )
-    session = MagicMock(spec=AsyncSession)
+    session = _session_mock()
     session.get = AsyncMock(return_value=resource)
     session.flush = AsyncMock()
     repository = ExternalChannelWorkRepository()

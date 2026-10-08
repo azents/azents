@@ -4,7 +4,6 @@ import dataclasses
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentRuntimeCapability
 from azents.core.runtime_capabilities import RuntimeCapabilitySnapshot
@@ -27,6 +26,16 @@ class SessionWorkingFolderBindingService:
         SessionWorkingFolderBindingRepository,
         Depends(SessionWorkingFolderBindingRepository),
     ]
+
+    async def project_bound_authority_for_target(
+        self, *, agent_id: str, session_id: str, runtime_target: RuntimeOperationTarget
+    ) -> SessionWorkingFolderAuthority | None:
+        """Describe a retained BOUND context; never grant execution admission."""
+        return await self.repository.project_bound_authority(
+            agent_id=agent_id,
+            session_id=session_id,
+            target=self.target_evidence(runtime_target),
+        )
 
     async def require_bindable_context(
         self,
@@ -120,40 +129,6 @@ class SessionWorkingFolderBindingService:
             session_id=session_id,
             capability_snapshot=self._capability_snapshot(runtime_target),
             runtime_target=runtime_target,
-        )
-
-    async def resolve_authority_in_transaction(
-        self,
-        session: AsyncSession,
-        *,
-        agent_id: str,
-        session_id: str,
-        runtime_target: RuntimeOperationTarget,
-    ) -> SessionWorkingFolderAuthority:
-        """Delegate DB-only composition for domains not migrated in this slice."""
-        return await self.repository.resolve_authority_in_session(
-            session,
-            agent_id=agent_id,
-            session_id=session_id,
-            target=self.target_evidence(runtime_target),
-            bind_pending=True,
-        )
-
-    async def resolve_bound_authority_in_transaction(
-        self,
-        session: AsyncSession,
-        *,
-        agent_id: str,
-        session_id: str,
-        runtime_target: RuntimeOperationTarget,
-    ) -> SessionWorkingFolderAuthority:
-        """Delegate DB-only composition for domains not migrated in this slice."""
-        return await self.repository.resolve_authority_in_session(
-            session,
-            agent_id=agent_id,
-            session_id=session_id,
-            target=self.target_evidence(runtime_target),
-            bind_pending=False,
         )
 
     @staticmethod

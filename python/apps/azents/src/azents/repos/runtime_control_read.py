@@ -2,9 +2,8 @@
 
 import dataclasses
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.runtime_connection_generation.data import (
@@ -19,7 +18,7 @@ from azents.repos.runtime_connection_generation.repository import (
 class RuntimeControlReadRepository:
     """Own completed Runtime Control startup and offer reads."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[ReadSession]
     runtime_repository: AgentRuntimeRepository
     generation_repository: RuntimeConnectionGenerationRepository
 

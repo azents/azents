@@ -3,9 +3,9 @@
 import asyncio
 import datetime
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
-from typing import cast
+from types import TracebackType
 
 import pytest
 from azcommon import di
@@ -169,7 +169,8 @@ async def test_runtime_enforces_concurrency_bound() -> None:
     second_started = asyncio.Event()
 
     async def handler(context: JobExecutionContext) -> JobPayload:
-        execution_key = cast(str, context.request.payload["execution_key"])
+        execution_key = context.request.payload["execution_key"]
+        assert isinstance(execution_key, str)
         started.append(execution_key)
         if execution_key == "first":
             first_started.set()
@@ -202,7 +203,8 @@ async def test_deadline_expires_while_waiting_for_concurrency_slot() -> None:
     started: list[str] = []
 
     async def handler(context: JobExecutionContext) -> JobPayload:
-        execution_key = cast(str, context.request.payload["execution_key"])
+        execution_key = context.request.payload["execution_key"]
+        assert isinstance(execution_key, str)
         started.append(execution_key)
         if execution_key == "first":
             first_started.set()
@@ -247,6 +249,17 @@ async def test_deadline_cancels_cooperative_handler(
     assert outcome.error_code == "TimeoutError"
     assert cancelled.is_set()
     assert runtime.active_count == 0
+    terminal_records = [
+        record
+        for record in caplog.records
+        if record.name == "azents.job_runtime.local" and record.levelno == logging.ERROR
+    ]
+    assert len(terminal_records) == 1
+    assert terminal_records[0].exc_info is not None
+    formatted = logging.Formatter().format(terminal_records[0])
+    assert "Traceback (most recent call last)" in formatted
+    assert "in handler" in formatted
+    assert "Registered job handler exceeded its absolute deadline" in formatted
     assert not [
         record
         for record in caplog.records
@@ -298,12 +311,24 @@ async def test_deadline_logs_handler_failure_during_cancellation_grace(
         in formatted
     )
     assert untrusted not in formatted
+    assert (
+        len(
+            [
+                record
+                for record in caplog.records
+                if record.name == "azents.job_runtime.local"
+                and record.levelno == logging.ERROR
+            ]
+        )
+        == 1
+    )
 
 
-class _TrackedContainer:
+class _TrackedContainer(di.Container):
     """Task-local container double with observable lifecycle."""
 
     def __init__(self) -> None:
+        super().__init__()
         self.closed = asyncio.Event()
 
     async def __aenter__(self) -> "_TrackedContainer":
@@ -311,10 +336,11 @@ class _TrackedContainer:
 
     async def __aexit__(
         self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: object,
+        exc_type: type[BaseException] | None = None,
+        exc: BaseException | None = None,
+        tb: TracebackType | None = None,
     ) -> None:
+        await super().__aexit__(exc_type, exc, tb)
         self.closed.set()
 
 
@@ -345,10 +371,7 @@ async def test_deadline_cancels_task_local_container_startup() -> None:
 
     runtime = _runtime(
         handler,
-        container_factory=cast(
-            Callable[[], di.Container],
-            lambda: container,
-        ),
+        container_factory=lambda: container,
     )
     handle = await runtime.submit(_request("container-start", timeout=0.01))
 
@@ -381,10 +404,7 @@ async def test_cancellation_grace_overrun_returns_terminal_outcome() -> None:
         handler,
         max_concurrency=1,
         cancellation_grace_seconds=0.01,
-        container_factory=cast(
-            Callable[[], di.Container],
-            lambda: container,
-        ),
+        container_factory=lambda: container,
     )
     handle = await runtime.submit(_request("overrun", timeout=0.01))
     close_task: asyncio.Task[None] | None = None
@@ -441,10 +461,7 @@ async def test_close_cancellation_preserves_quarantined_ownership() -> None:
         handler,
         max_concurrency=1,
         cancellation_grace_seconds=0.01,
-        container_factory=cast(
-            Callable[[], di.Container],
-            lambda: container,
-        ),
+        container_factory=lambda: container,
     )
     handle = await runtime.submit(_request("close-cancel", timeout=0.01))
     assert (await asyncio.wait_for(handle.wait(), timeout=0.2)).status is (
@@ -492,10 +509,7 @@ async def test_close_cancellation_tracks_quarantine_created_during_close(
         handler,
         max_concurrency=1,
         cancellation_grace_seconds=0.01,
-        container_factory=cast(
-            Callable[[], di.Container],
-            lambda: container,
-        ),
+        container_factory=lambda: container,
     )
     await runtime.submit(_request("dynamic-quarantine", timeout=1.0))
     await started.wait()
@@ -510,11 +524,13 @@ async def test_close_cancellation_tracks_quarantine_created_during_close(
         container_stack: AsyncExitStack,
         *,
         request: JobRequest,
+        handler_semaphore: asyncio.Semaphore | None,
     ) -> None:
         await adopt_detached_cleanup(
             handler_task,
             container_stack,
             request=request,
+            handler_semaphore=handler_semaphore,
         )
         cleanup_adopted.set()
 
@@ -586,3 +602,268 @@ async def test_submit_rejects_unknown_registered_handler() -> None:
 
     with pytest.raises(ValueError, match="Unknown registered job handler"):
         await runtime.submit(request)
+
+
+@pytest.mark.asyncio
+async def test_handler_failure_logs_one_sanitized_origin_traceback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Terminal ERROR retains origin frames without provider text or context."""
+    sensitive = "token=provider-secret response-body-marker"
+    context_sensitive = "password=context-secret"
+    note_sensitive = "provider-note-marker"
+
+    async def provider_origin() -> None:
+        try:
+            raise ValueError(context_sensitive)
+        except ValueError as cause:
+            error = RuntimeError(sensitive)
+            error.add_note(note_sensitive)
+            raise error from cause
+
+    async def handler(_context: JobExecutionContext) -> None:
+        await provider_origin()
+
+    caplog.set_level(logging.WARNING, logger="azents.job_runtime.local")
+    runtime = _runtime(handler)
+    outcome = await (await runtime.submit(_request("provider-failure"))).wait()
+
+    assert outcome.status is JobOutcomeStatus.FAILED
+    records = [
+        record
+        for record in caplog.records
+        if record.name == "azents.job_runtime.local" and record.levelno == logging.ERROR
+    ]
+    assert len(records) == 1
+    record = records[0]
+    assert record.exc_info is not None
+    assert vars(record)["job_execution_key"] == "provider-failure"
+    formatted = logging.Formatter().format(record)
+    assert "in provider_origin" in formatted
+    assert "RuntimeError: Registered job handler failed" in formatted
+    assert sensitive not in formatted
+    assert context_sensitive not in formatted
+    assert note_sensitive not in formatted
+
+
+@pytest.mark.asyncio
+async def test_runtime_timeout_wins_supervisor_deadline_and_logs_origin(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Runtime-first cancellation still emits one terminal ERROR with origin."""
+    supervisor_cutoff = asyncio.Event()
+    sensitive = "token=supervisor-provider-marker"
+
+    async def handler(context: JobExecutionContext) -> None:
+        remaining = (
+            context.request.deadline - datetime.datetime.now(datetime.UTC)
+        ).total_seconds()
+        try:
+            async with asyncio.timeout(remaining):
+                await asyncio.Event().wait()
+        except TimeoutError:
+            supervisor_cutoff.set()
+            try:
+                raise RuntimeError(sensitive)
+            except RuntimeError:
+                # Runtime must own the terminal while supervisor cleanup is pending.
+                await asyncio.Event().wait()
+
+    caplog.set_level(logging.WARNING, logger="azents.job_runtime.local")
+    runtime = _runtime(handler)
+    handle = await runtime.submit(_request("deadline-race", timeout=0.02))
+    outcome = await handle.wait()
+
+    assert outcome.status is JobOutcomeStatus.TIMED_OUT
+    records = [
+        record
+        for record in caplog.records
+        if record.name == "azents.job_runtime.local" and record.levelno == logging.ERROR
+    ]
+    assert len(records) == 1
+    formatted = logging.Formatter().format(records[0])
+    assert "in handler" in formatted
+    assert "Registered job handler exceeded its absolute deadline" in formatted
+    assert sensitive not in formatted
+
+
+class _FailingLifecycleContainer(_TrackedContainer):
+    """Raise untrusted lifecycle errors from observable container origin frames."""
+
+    def __init__(self, *, fail_enter: bool) -> None:
+        super().__init__()
+        self.fail_enter = fail_enter
+        self.sensitive = "token=container-provider-marker"
+
+    async def __aenter__(self) -> "_FailingLifecycleContainer":
+        if self.fail_enter:
+            raise RuntimeError(self.sensitive)
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None = None,
+        exc: BaseException | None = None,
+        tb: TracebackType | None = None,
+    ) -> None:
+        await super().__aexit__(exc_type, exc, tb)
+        raise RuntimeError(self.sensitive)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_enter", [True, False])
+async def test_container_failure_logs_one_sanitized_terminal_error(
+    caplog: pytest.LogCaptureFixture,
+    fail_enter: bool,
+) -> None:
+    """Container startup and cleanup escapes have one content-safe ERROR."""
+    container = _FailingLifecycleContainer(fail_enter=fail_enter)
+
+    async def handler(_context: JobExecutionContext) -> None:
+        return None
+
+    caplog.set_level(logging.WARNING, logger="azents.job_runtime.local")
+    runtime = _runtime(handler, container_factory=lambda: container)
+    outcome = await (await runtime.submit(_request("container-failure"))).wait()
+
+    assert outcome.status is JobOutcomeStatus.FAILED
+    assert runtime.active_count == 0
+    records = [
+        record
+        for record in caplog.records
+        if record.name == "azents.job_runtime.local" and record.levelno == logging.ERROR
+    ]
+    assert len(records) == 1
+    formatted = logging.Formatter().format(records[0])
+    assert ("in __aenter__" if fail_enter else "in __aexit__") in formatted
+    assert container.sensitive not in formatted
+
+
+@pytest.mark.asyncio
+async def test_terminal_failure_cleanup_is_sanitized_without_duplicate_error(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A primary failure owns ERROR even when subsequent cleanup also fails."""
+    container = _FailingLifecycleContainer(fail_enter=False)
+    sensitive = "password=primary-provider-marker"
+
+    async def handler(_context: JobExecutionContext) -> None:
+        raise ValueError(sensitive)
+
+    caplog.set_level(logging.WARNING, logger="azents.job_runtime.local")
+    runtime = _runtime(handler, container_factory=lambda: container)
+    outcome = await (await runtime.submit(_request("cleanup-after-failure"))).wait()
+
+    assert outcome.status is JobOutcomeStatus.FAILED
+    assert outcome.error_code == "ValueError"
+    records = [
+        record for record in caplog.records if record.name == "azents.job_runtime.local"
+    ]
+    assert sum(record.levelno == logging.ERROR for record in records) == 1
+    assert any(record.levelno == logging.WARNING for record in records)
+    formatted = "\n".join(logging.Formatter().format(record) for record in records)
+    assert sensitive not in formatted
+    assert container.sensitive not in formatted
+
+
+@pytest.mark.asyncio
+async def test_detached_failures_do_not_duplicate_terminal_timeout_error(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Late handler and cleanup faults are sanitized warnings after one cutoff."""
+    release = asyncio.Event()
+    container = _FailingLifecycleContainer(fail_enter=False)
+    sensitive = "authorization=detached-provider-marker"
+
+    async def handler(_context: JobExecutionContext) -> None:
+        while not release.is_set():
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                continue
+        raise RuntimeError(sensitive)
+
+    caplog.set_level(logging.WARNING, logger="azents.job_runtime.local")
+    runtime = _runtime(
+        handler,
+        container_factory=lambda: container,
+        cancellation_grace_seconds=0.01,
+    )
+    handle = await runtime.submit(_request("detached-failure", timeout=0.01))
+    try:
+        assert (await handle.wait()).status is JobOutcomeStatus.TIMED_OUT
+    finally:
+        release.set()
+        await runtime.close()
+
+    records = [
+        record for record in caplog.records if record.name == "azents.job_runtime.local"
+    ]
+    assert sum(record.levelno == logging.ERROR for record in records) == 1
+    assert any(
+        record.getMessage() == "Detached registered job cleanup failed"
+        for record in records
+    )
+    formatted = "\n".join(logging.Formatter().format(record) for record in records)
+    assert "in timeout" in formatted
+    assert sensitive not in formatted
+    assert container.sensitive not in formatted
+    assert runtime.active_count == 0
+
+
+@pytest.mark.asyncio
+async def test_synchronous_handler_startup_error_survives_cleanup_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The handler factory's primary origin wins a failing container teardown."""
+    container = _FailingLifecycleContainer(fail_enter=False)
+    sensitive = "password=synchronous-startup-marker"
+
+    def handler(_context: JobExecutionContext) -> Awaitable[JobPayload | None]:
+        raise ValueError(sensitive)
+
+    caplog.set_level(logging.WARNING, logger="azents.job_runtime.local")
+    runtime = _runtime(handler, container_factory=lambda: container)
+    outcome = await (await runtime.submit(_request("sync-startup"))).wait()
+    assert outcome.status is JobOutcomeStatus.FAILED
+    assert outcome.error_code == "ValueError" and runtime.active_count == 0
+    records = [
+        record for record in caplog.records if record.name == "azents.job_runtime.local"
+    ]
+    errors = [record for record in records if record.levelno == logging.ERROR]
+    assert len(errors) == 1
+    primary = logging.Formatter().format(errors[0])
+    assert "in handler" in primary and "in __aexit__" not in primary
+    formatted = "\n".join(logging.Formatter().format(record) for record in records)
+    assert sensitive not in formatted and container.sensitive not in formatted
+
+
+@pytest.mark.asyncio
+async def test_external_cancellation_survives_cleanup_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Cleanup diagnostics preserve external cancellation instead of failing a job."""
+    started = asyncio.Event()
+    container = _FailingLifecycleContainer(fail_enter=False)
+
+    async def handler(_context: JobExecutionContext) -> None:
+        started.set()
+        await asyncio.Event().wait()
+
+    caplog.set_level(logging.WARNING, logger="azents.job_runtime.local")
+    runtime = _runtime(handler, container_factory=lambda: container)
+    handle = await runtime.submit(_request("cancel-cleanup"))
+    assert isinstance(handle, LocalJobHandle)
+    await started.wait()
+    handle.task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await handle.wait()
+
+    records = [
+        record for record in caplog.records if record.name == "azents.job_runtime.local"
+    ]
+    assert not any(record.levelno == logging.ERROR for record in records)
+    assert len(records) == 1
+    assert records[0].levelno == logging.WARNING
+    assert container.sensitive not in logging.Formatter().format(records[0])
+    assert runtime.active_count == 0

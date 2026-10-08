@@ -1,18 +1,15 @@
-"""grep tool.
-
-Search regex patterns in text files under an absolute path.
-"""
+"""Generic regex search tool for Runtime paths and registered VFS mounts."""
 
 import logging
 import re
 from typing import ClassVar
 
 import httpx
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
-from azents.services.file_storage import FileStorage
+from azents.services.file_storage import GrepReadableStorage
 from azents.services.runtime_storage_error import RuntimeStorageError
 
 logger = logging.getLogger(__name__)
@@ -49,6 +46,8 @@ _DEFAULT_EXCLUDE_PATTERNS = (
 class GrepInput(BaseModel):
     """grep tool input."""
 
+    model_config = ConfigDict(extra="forbid")
+
     default_exclude_patterns: ClassVar[tuple[str, ...]] = _DEFAULT_EXCLUDE_PATTERNS
 
     pattern: str = Field(
@@ -56,8 +55,8 @@ class GrepInput(BaseModel):
     )
     path: str = Field(
         description=(
-            "Absolute file or directory path to search in "
-            "inside the Agent Workspace or /tmp"
+            "Absolute Runtime file/directory path or canonical azents:// "
+            "file/directory URI to search"
         ),
     )
     recursive: bool = Field(
@@ -80,7 +79,7 @@ class GrepInput(BaseModel):
 
 def make_grep_tool(
     *,
-    session_storage: FileStorage,
+    session_storage: GrepReadableStorage,
     agent_id: str,
 ) -> FunctionTool:
     """Create grep tool.
@@ -129,6 +128,13 @@ def make_grep_tool(
             raise FunctionToolError(f"Failed to grep files in: {abs_path}.") from None
 
         if grep_result.searched_file_count == 0:
+            if grep_result.truncated:
+                return "\n".join(
+                    [
+                        f"No files completed search in: {abs_path}",
+                        _truncation_message(grep_result.stopped_reason),
+                    ]
+                )
             return f"No files found in: {abs_path}"
 
         results: list[str] = []
@@ -157,7 +163,8 @@ def make_grep_tool(
             "directories such as .git and node_modules are excluded by default. "
             "Use exclude to add patterns, or disable_default_excludes "
             "to scan them. "
-            "Provide a regex pattern and an absolute runtime file or directory path. "
+            "Provide a regex pattern and an absolute Runtime path or canonical "
+            "azents:// file/directory URI. "
         ),
     )
 
@@ -173,11 +180,20 @@ def _grep_exclude_patterns(input: GrepInput) -> list[str]:
 
 
 def _truncation_message(stopped_reason: str | None) -> str:
-    """Convert a truncation reason into a user-facing message."""
-    if stopped_reason == "searched_file_limit":
-        detail = f"{_MAX_SEARCHED_FILES} searched-file limit reached"
-    elif stopped_reason == "scanned_byte_limit":
-        detail = f"{_MAX_SCANNED_BYTES // (1024 * 1024)} MiB scanned-byte limit reached"
-    else:
-        detail = f"{_MAX_MATCHING_FILES} matching-file limit reached"
+    """Convert an exact backend truncation reason into a user-facing message."""
+    match stopped_reason:
+        case "searched_file_limit":
+            detail = f"{_MAX_SEARCHED_FILES} searched-file limit reached"
+        case "scanned_byte_limit":
+            detail = (
+                f"{_MAX_SCANNED_BYTES // (1024 * 1024)} MiB scanned-byte limit reached"
+            )
+        case "matching_file_limit":
+            detail = f"{_MAX_MATCHING_FILES} matching-file limit reached"
+        case "deadline":
+            detail = "backend deadline reached"
+        case None:
+            detail = "backend limit reached"
+        case reason:
+            detail = f"backend stopped: {reason}"
     return f"\n... (truncated, {detail})"

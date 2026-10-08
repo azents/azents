@@ -13,9 +13,10 @@ from typing import Literal, NamedTuple
 from azcommon.result import Failure
 from azcommon.types import JSONValue
 from PIL import Image, UnidentifiedImageError
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.config import require_workspace_s3_bucket
 from azents.core.enums import ExchangeFileOrigin, ExchangeFileProvenanceKind
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.events.generated_files import (
     GeneratedFileOutput,
     PendingGeneratedFileOutput,
@@ -37,6 +38,7 @@ from azents.repos.model_file import model_file_storage_key
 from azents.repos.model_file.data import ModelFileCreate
 from azents.repos.provider_output_operation import (
     ProviderOutputFileMetadata,
+    ProviderOutputMetadataAdmission,
     ProviderOutputOperationError,
     ProviderOutputOperationRepository,
 )
@@ -50,7 +52,6 @@ from azents.services.model_file import (
     ModelFileService,
     normalize_model_file_body,
 )
-from azents.services.session_resource_authority import SessionResourceAuthority
 
 _MAX_DECODED_IMAGE_BYTES = 20 * 1024 * 1024
 _MAX_CLIENT_IMAGES_PER_RESULT = 8
@@ -118,11 +119,12 @@ class PreparedProviderOutput:
     uploaded_keys: set[str] = dataclasses.field(default_factory=set)
     admitted: bool = False
 
-    async def persist(self, session: AsyncSession) -> None:
-        """Persist file metadata in the caller's model-output transaction."""
-        await self.materializer.persist(
-            session,
-            self.generated_images,
+    @property
+    def metadata_admission(self) -> ProviderOutputMetadataAdmission:
+        """Return typed database metadata without exposing transient uploads."""
+        return ProviderOutputMetadataAdmission(
+            authority=self.materializer._repository_authority(),
+            generated_images=_metadata(self.generated_images),
         )
 
     async def cleanup(self) -> None:
@@ -146,11 +148,12 @@ class PreparedClientToolOutput:
     uploaded_keys: set[str] = dataclasses.field(default_factory=set)
     admitted: bool = False
 
-    async def persist(self, session: AsyncSession) -> None:
-        """Persist file metadata in the caller's tool-result transaction."""
-        await self.materializer.persist(
-            session,
-            self.generated_images,
+    @property
+    def metadata_admission(self) -> ProviderOutputMetadataAdmission:
+        """Return typed database metadata for atomic Tool-result admission."""
+        return ProviderOutputMetadataAdmission(
+            authority=self.materializer._repository_authority(),
+            generated_images=_metadata(self.generated_images),
         )
 
     async def cleanup(self) -> None:
@@ -307,21 +310,6 @@ class ProviderOutputMaterializer:
             uploaded_keys=uploaded_keys,
         )
 
-    async def persist(
-        self,
-        session: AsyncSession,
-        generated_images: tuple[_PreparedGeneratedImage, ...],
-    ) -> None:
-        """Revalidate authority and admit file metadata with database work only."""
-        try:
-            await self.operation_repository.persist_in_session(
-                session,
-                authority=self._repository_authority(),
-                generated_images=_metadata(generated_images),
-            )
-        except ProviderOutputOperationError as exc:
-            raise ModelCallError(str(exc)) from None
-
     async def cleanup(
         self,
         generated_images: tuple[_PreparedGeneratedImage, ...],
@@ -340,7 +328,9 @@ class ProviderOutputMaterializer:
             raise ModelCallError(str(exc)) from None
         for key in sorted(uploaded_keys - protected_keys):
             await self.model_file_service.s3_service.delete(
-                bucket=self.model_file_service.config.workspace_s3.bucket,
+                bucket=require_workspace_s3_bucket(
+                    self.model_file_service.config.workspace_s3
+                ),
                 key=key,
             )
 
@@ -621,7 +611,9 @@ class ProviderOutputMaterializer:
                 # Its generation-scoped key belongs to this compensation.
                 uploaded_keys.add(upload.key)
                 await self.model_file_service.s3_service.upload(
-                    bucket=self.model_file_service.config.workspace_s3.bucket,
+                    bucket=require_workspace_s3_bucket(
+                        self.model_file_service.config.workspace_s3
+                    ),
                     key=upload.key,
                     body=upload.body,
                     content_type=upload.media_type,

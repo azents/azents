@@ -5,16 +5,12 @@ from typing import Literal, NamedTuple, assert_never
 
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import (
-    ModelBuiltInToolCapabilities,
-    ModelCapabilities,
-    ModelCompatibilityCapabilities,
-    ModelContextWindow,
-    ModelModalities,
     ModelModality,
-    ModelReasoningCapabilities,
     ModelReasoningEffort,
-    ModelToolCallingCapabilities,
 )
+from azents.core.model_capability_evidence import ProviderCapabilityEvidence
+from azents.core.model_capability_projection import project_capabilities
+from azents.core.model_catalog_source import CatalogFact
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.services.model_listing.data import (
     ModelListingOutput,
@@ -35,6 +31,7 @@ DeterministicFixtureVariant = Literal[
     "deterministic-failure",
     "deterministic-brave-text-only",
     "deterministic-provider-core",
+    "deterministic-title-plain",
 ]
 DETERMINISTIC_FIXTURE_VARIANTS: tuple[DeterministicFixtureVariant, ...] = (
     "deterministic-success",
@@ -47,6 +44,7 @@ DETERMINISTIC_FIXTURE_VARIANTS: tuple[DeterministicFixtureVariant, ...] = (
     "deterministic-failure",
     "deterministic-brave-text-only",
     "deterministic-provider-core",
+    "deterministic-title-plain",
 )
 
 
@@ -72,6 +70,22 @@ def build_deterministic_listing(
     fetched_at = datetime.now(timezone.utc)
     source = f"testenv_fixture:{variant}"
     match variant:
+        case "deterministic-title-plain":
+            if provider != LLMProvider.OPENAI:
+                raise ValueError("The plain-title fixture requires provider=openai.")
+            models = [
+                _candidate(
+                    provider=provider,
+                    identifier="gpt-5.5-title-plain",
+                    display_name="Plain Title Deterministic",
+                    family="gpt-5.5",
+                    integration_id=integration_id,
+                    source=source,
+                    fetched_at=fetched_at,
+                    lightweight=True,
+                )
+            ]
+            skips = []
         case "deterministic-provider-core":
             models = _provider_core_candidates(
                 provider=provider,
@@ -293,51 +307,61 @@ def _provider_core_candidates(
             identities = [_CoreModel("kimi-k2.5", LLMModelDeveloper.MOONSHOT, "kimi")]
         case _:
             assert_never(provider)
-    return [
-        NormalizedModelCandidate(
-            provider=provider,
-            model_identifier=identity.identifier,
-            model_display_name=f"Core {identity.identifier}",
-            model_developer=identity.developer,
-            model_family=identity.family,
-            normalized_capabilities=ModelCapabilities(
-                context_window=ModelContextWindow(
-                    max_input_tokens=64_000,
-                    max_output_tokens=4_096,
-                ),
-                modalities=ModelModalities(
-                    input=[ModelModality.TEXT],
-                    output=(
-                        [ModelModality.TEXT, ModelModality.IMAGE]
-                        if identity.identifier == "gemini-3.1-flash-image-preview"
-                        else [ModelModality.TEXT]
-                    ),
-                ),
-                tool_calling=ModelToolCallingCapabilities(
-                    supported=identity.identifier != "gemini-3.1-flash-image-preview"
-                ),
-                reasoning=ModelReasoningCapabilities(supported=False),
-                built_in_tools=ModelBuiltInToolCapabilities(supported=[]),
-                compatibility=ModelCompatibilityCapabilities(
-                    provider_family=provider.value,
-                ),
+    candidates: list[NormalizedModelCandidate] = []
+    for identity in identities:
+        image_output = identity.identifier == "gemini-3.1-flash-image-preview"
+        evidence = ProviderCapabilityEvidence(
+            max_input_tokens=_declared(64_000),
+            max_output_tokens=_declared(4_096),
+            input_modalities=_declared(("text",)),
+            output_modalities=_declared(
+                ("text", "image") if image_output else ("text",)
             ),
-            supported_execution_options=[],
-            model_snapshot={
-                "source": source,
-                "provider": provider.value,
-                "model_identifier": identity.identifier,
-                "fixture_variant": "deterministic-provider-core",
-            },
-            source_metadata={
-                "source": source,
-                "integration_marker": integration_id,
-                "fixture_family": identity.family,
-            },
-            last_refreshed_at=fetched_at,
+            function_calling=_declared(not image_output),
+            parallel_function_calling=_declared(False),
+            reasoning=_declared(False),
+            reasoning_efforts=_declared(()),
+            reasoning_summaries=_declared(False),
+            web_search=_declared(False),
+            client_image_generation=_declared(False),
+            hosted_image_generation=_declared(image_output),
         )
-        for identity in identities
-    ]
+        candidates.append(
+            NormalizedModelCandidate(
+                provider=provider,
+                model_identifier=identity.identifier,
+                model_display_name=f"Core {identity.identifier}",
+                model_developer=identity.developer,
+                model_family=identity.family,
+                capability_evidence=evidence,
+                normalized_capabilities=project_capabilities(
+                    provider=provider,
+                    exact_model=identity.identifier,
+                    source_model=None,
+                    evidence=evidence,
+                    model_developer=identity.developer,
+                ),
+                supported_execution_options=[],
+                model_snapshot={
+                    "source": source,
+                    "provider": provider.value,
+                    "model_identifier": identity.identifier,
+                    "fixture_variant": "deterministic-provider-core",
+                },
+                source_metadata={
+                    "source": source,
+                    "integration_marker": integration_id,
+                    "fixture_family": identity.family,
+                },
+                last_refreshed_at=fetched_at,
+            )
+        )
+    return candidates
+
+
+def _declared[T](value: T | None) -> CatalogFact[T]:
+    """Author current synthetic provider facts, never infer from saved booleans."""
+    return CatalogFact(state="null" if value is None else "value", value=value)
 
 
 def _candidate(
@@ -380,51 +404,57 @@ def _candidate(
     )
     if source == "testenv_fixture:deterministic-brave-text-only":
         input_modalities = [ModelModality.TEXT]
+    efforts = (
+        (
+            ModelReasoningEffort.NONE,
+            ModelReasoningEffort.MINIMAL,
+            ModelReasoningEffort.LOW,
+            ModelReasoningEffort.HIGH,
+            ModelReasoningEffort.XHIGH,
+            ModelReasoningEffort.MAX,
+        )
+        if not lightweight
+        else ()
+    )
+    hosted_tools = (
+        ["web_search"]
+        if provider == LLMProvider.OPENROUTER
+        else (
+            ["web_search", "image_generation"]
+            if source == "testenv_fixture:deterministic-model-settings"
+            and not lightweight
+            else []
+        )
+    )
+    evidence = ProviderCapabilityEvidence(
+        default_input_tokens=_declared(default_input_tokens),
+        max_input_tokens=_declared(max_input_tokens),
+        max_output_tokens=_declared(16_000),
+        input_modalities=_declared(
+            tuple(modality.value for modality in input_modalities)
+        ),
+        output_modalities=_declared(("text",)),
+        function_calling=_declared(True),
+        reasoning=_declared(not lightweight),
+        reasoning_efforts=_declared(efforts),
+        reasoning_summaries=_declared(not lightweight),
+        web_search=_declared("web_search" in hosted_tools),
+        client_image_generation=_declared("image_generation" in hosted_tools),
+        hosted_image_generation=_declared(False),
+    )
     return NormalizedModelCandidate(
         provider=provider,
         model_identifier=identifier,
         model_display_name=display_name,
         model_developer=developer,
         model_family=family,
-        normalized_capabilities=ModelCapabilities(
-            context_window=ModelContextWindow(
-                default_input_tokens=default_input_tokens,
-                max_input_tokens=max_input_tokens,
-                max_output_tokens=16_000,
-            ),
-            modalities=ModelModalities(
-                input=input_modalities,
-                output=[ModelModality.TEXT],
-            ),
-            tool_calling=ModelToolCallingCapabilities(supported=True),
-            reasoning=ModelReasoningCapabilities(
-                supported=not lightweight,
-                effort_levels=(
-                    [
-                        ModelReasoningEffort.NONE,
-                        ModelReasoningEffort.MINIMAL,
-                        ModelReasoningEffort.LOW,
-                        ModelReasoningEffort.HIGH,
-                        ModelReasoningEffort.XHIGH,
-                        ModelReasoningEffort.MAX,
-                    ]
-                    if not lightweight
-                    else []
-                ),
-                summaries=not lightweight,
-            ),
-            built_in_tools=ModelBuiltInToolCapabilities(
-                supported=(
-                    ["web_search"]
-                    if provider == LLMProvider.OPENROUTER
-                    else (
-                        ["web_search", "image_generation"]
-                        if source == "testenv_fixture:deterministic-model-settings"
-                        and not lightweight
-                        else []
-                    )
-                )
-            ),
+        capability_evidence=evidence,
+        normalized_capabilities=project_capabilities(
+            provider=provider,
+            exact_model=identifier,
+            source_model=None,
+            evidence=evidence,
+            model_developer=developer,
         ),
         supported_execution_options=(
             (

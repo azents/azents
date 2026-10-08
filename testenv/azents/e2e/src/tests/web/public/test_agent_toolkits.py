@@ -1,7 +1,10 @@
-"""Agent-owned Toolkit management Web Surface E2E journey."""
+"""Agent-owned Toolkit persistence and owner/member Web Surface E2E journey.
+
+Form, Cancel, dialog-copy and responsive geometry contracts belong to the
+ToolkitForm and AgentToolkitManagementSection component stories.
+"""
 
 from dataclasses import dataclass
-from typing import TypedDict
 from urllib.parse import urlsplit
 
 import azentsadminclient
@@ -16,6 +19,9 @@ from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
 from azentspublicclient.models.agent_model_selection_input import (
     AgentModelSelectionInput,
+)
+from azentspublicclient.models.agent_toolkit_config_create_request import (
+    AgentToolkitConfigCreateRequest,
 )
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
@@ -58,40 +64,6 @@ class _AgentToolkitWebContext:
     model_selection: AgentModelSelectionInput
 
 
-class _ToolkitLayout(TypedDict):
-    overflow: bool
-    toolkitTop: float
-    ownershipTop: float
-    readinessTop: float
-    actionTop: float
-
-
-def _toolkit_layout(value: object) -> _ToolkitLayout:
-    """Validate the browser layout measurement payload."""
-    if not isinstance(value, dict):
-        raise AssertionError("Expected a Toolkit layout object")
-    overflow = value.get("overflow")
-    toolkit_top = value.get("toolkitTop")
-    ownership_top = value.get("ownershipTop")
-    readiness_top = value.get("readinessTop")
-    action_top = value.get("actionTop")
-    if (
-        not isinstance(overflow, bool)
-        or not isinstance(toolkit_top, (int, float))
-        or not isinstance(ownership_top, (int, float))
-        or not isinstance(readiness_top, (int, float))
-        or not isinstance(action_top, (int, float))
-    ):
-        raise AssertionError("Expected numeric Toolkit layout measurements")
-    return {
-        "overflow": overflow,
-        "toolkitTop": float(toolkit_top),
-        "ownershipTop": float(ownership_top),
-        "readinessTop": float(readiness_top),
-        "actionTop": float(action_top),
-    }
-
-
 def _headers(token: str) -> dict[str, str]:
     """Return bearer authentication headers."""
     return {"Authorization": f"Bearer {token}"}
@@ -112,8 +84,10 @@ def _login_main_web(
     driver.delete_all_cookies()
     driver.get(f"{base_url}/login")
     email_input = _wait(driver).until(ec.element_to_be_clickable((By.NAME, "email")))
-    email_input.send_keys(email, Keys.ENTER)
-    _wait(driver).until(ec.url_contains("/login/password"))
+    email_input.send_keys(email)
+    if not driver.find_elements(By.NAME, "password"):
+        email_input.send_keys(Keys.ENTER)
+        _wait(driver).until(ec.url_contains("/login/password"))
     password_input = _wait(driver).until(
         ec.element_to_be_clickable((By.NAME, "password"))
     )
@@ -158,6 +132,20 @@ def _fill_text_input(driver: WebDriver, label: str, value: str) -> None:
     )
     field.send_keys(Keys.CONTROL, "a")
     field.send_keys(value)
+
+
+def _open_toolkit_details(driver: WebDriver, name: str) -> None:
+    """Open details for the exact persisted connection, not another same-type card."""
+    card = _wait(driver).until(
+        ec.presence_of_element_located(
+            (
+                By.XPATH,
+                f"//*[normalize-space()={name!r}]"
+                "/ancestor::div[contains(@class, 'mantine-Card-root')][1]",
+            )
+        )
+    )
+    card.find_element(By.XPATH, ".//button[normalize-space()='View details']").click()
 
 
 def _create_workspace_context(
@@ -272,6 +260,23 @@ def test_agent_owned_toolkit_owner_management_and_member_legacy_view(
     )
     toolkit_name = f"Agent-only MCP {unique()}"
     toolkit_slug = f"agent_mcp_{unique()}"
+    existing_name = f"Existing duplicate MCP {unique()}"
+    ToolkitV1Api(public_api_client).toolkit_v1_create_agent_toolkit_config(
+        handle=context.handle,
+        agent_id=agent.id,
+        agent_toolkit_config_create_request=AgentToolkitConfigCreateRequest(
+            toolkit_type="mcp",
+            slug=toolkit_slug,
+            name=existing_name,
+            config={
+                "server_url": "https://example.com/mcp/existing",
+                "auth_type": "none",
+                "timeout": 30.0,
+            },
+            enabled=True,
+        ),
+        _headers=_headers(context.owner_token),
+    )
 
     _login_main_web(
         browser_driver,
@@ -282,8 +287,16 @@ def test_agent_owned_toolkit_owner_management_and_member_legacy_view(
     _assert_visible_text(browser_driver, "Toolkits")
     _assert_visible_text(
         browser_driver,
-        "Attach a workspace-shared toolkit or configure one only for this agent.",
+        "Toolkit additions are saved immediately.",
     )
+    search_label = browser_driver.find_element(
+        By.XPATH, "//span[normalize-space()='Enable Tool Search']/ancestor::label[1]"
+    )
+    search_id = search_label.get_attribute("for")
+    assert search_id is not None
+    search_label.click()
+    dirty_search_value = browser_driver.find_element(By.ID, search_id).is_selected()
+    assert dirty_search_value is not agent.tool_search_enabled
     add_button = _wait(browser_driver).until(
         ec.element_to_be_clickable(
             (By.XPATH, "//button[normalize-space()='Add Toolkit']")
@@ -291,44 +304,28 @@ def test_agent_owned_toolkit_owner_management_and_member_legacy_view(
     )
     add_button.send_keys(Keys.ENTER)
     _assert_visible_text(browser_driver, "Add Toolkit")
-    tool_input = _wait(browser_driver).until(
-        ec.element_to_be_clickable(
-            (
-                By.XPATH,
-                "//label[normalize-space(text())='Tool']/following::input[1]",
-            )
-        )
-    )
-    tool_input.click()
     _wait(browser_driver).until(
         ec.element_to_be_clickable(
-            (By.XPATH, "//*[@role='option' and normalize-space()='MCP']")
+            (By.XPATH, "//*[@role='tab' and normalize-space()='Workspace Toolkit']")
         )
     ).click()
-    _assert_visible_text(browser_driver, "Workspace shared")
-    _assert_visible_text(browser_driver, "This agent only")
-    shared_input = _wait(browser_driver).until(
-        ec.element_to_be_clickable(
-            (
-                By.XPATH,
-                "//input[@aria-label='Select a toolkit to attach']",
-            )
-        )
-    )
-    shared_input.click()
     _wait(browser_driver).until(
         ec.element_to_be_clickable(
-            (
-                By.XPATH,
-                f"//*[@role='option' and normalize-space()='{shared_name} (mcp)']",
-            )
+            (By.XPATH, f"//button[.//*[normalize-space()={shared_name!r}]]")
         )
     ).click()
-    attach_button = _wait(browser_driver).until(
-        ec.element_to_be_clickable((By.XPATH, "//button[normalize-space()='Attach']"))
-    )
-    attach_button.send_keys(Keys.ENTER)
     _assert_visible_text(browser_driver, shared_name)
+    current_search_value = browser_driver.find_element(By.ID, search_id).is_selected()
+    assert current_search_value is dirty_search_value
+    unchanged_agent = AgentV1Api(public_api_client).agent_v1_get_agent(
+        handle=context.handle,
+        agent_id=agent.id,
+        _headers=_headers(context.owner_token),
+    )
+    assert unchanged_agent.tool_search_enabled is agent.tool_search_enabled
+    browser_driver.refresh()
+    _assert_visible_text(browser_driver, shared_name)
+    _open_toolkit_details(browser_driver, shared_name)
     _assert_visible_text(
         browser_driver,
         "Edit and deletion remain in Workspace Toolkit management.",
@@ -342,52 +339,12 @@ def test_agent_owned_toolkit_owner_management_and_member_legacy_view(
             (By.XPATH, f"//*[normalize-space()={shared_name!r}]")
         )
     )
+    browser_driver.find_element(
+        By.XPATH, "//button[contains(@class, 'mantine-Modal-close')]"
+    ).click()
 
     _click_button(browser_driver, "Add Toolkit")
-    tool_input = _wait(browser_driver).until(
-        ec.element_to_be_clickable(
-            (
-                By.XPATH,
-                "//label[normalize-space(text())='Tool']/following::input[1]",
-            )
-        )
-    )
-    tool_input.click()
-    _wait(browser_driver).until(
-        ec.element_to_be_clickable(
-            (By.XPATH, "//*[@role='option' and normalize-space()='MCP']")
-        )
-    ).click()
-    configure_button = _wait(browser_driver).until(
-        ec.element_to_be_clickable(
-            (By.XPATH, "//button[normalize-space()='Configure for this agent']")
-        )
-    )
-    configure_button.send_keys(Keys.ENTER)
-    unsaved_name = f"Unsaved MCP {unique()}"
-    _fill_text_input(browser_driver, "Name", unsaved_name)
-    _click_button(browser_driver, "Cancel")
-    assert not browser_driver.find_elements(
-        By.XPATH,
-        f"//*[normalize-space()={unsaved_name!r}]",
-    )
-
-    _click_button(browser_driver, "Add Toolkit")
-    tool_input = _wait(browser_driver).until(
-        ec.element_to_be_clickable(
-            (
-                By.XPATH,
-                "//label[normalize-space(text())='Tool']/following::input[1]",
-            )
-        )
-    )
-    tool_input.click()
-    _wait(browser_driver).until(
-        ec.element_to_be_clickable(
-            (By.XPATH, "//*[@role='option' and normalize-space()='MCP']")
-        )
-    ).click()
-    _click_button(browser_driver, "Configure for this agent")
+    _click_button(browser_driver, "MCP")
 
     _fill_text_input(browser_driver, "Slug", toolkit_slug)
     _fill_text_input(browser_driver, "Name", toolkit_name)
@@ -405,47 +362,11 @@ def test_agent_owned_toolkit_owner_management_and_member_legacy_view(
     _click_button(browser_driver, "Add")
 
     _assert_visible_text(browser_driver, toolkit_name)
+    browser_driver.refresh()
+    _assert_visible_text(browser_driver, toolkit_name)
     _assert_visible_text(browser_driver, "This agent only")
     _assert_visible_text(browser_driver, "Ready")
-
-    browser_driver.set_window_size(390, 844)
-    toolkit_name_element = browser_driver.find_element(
-        By.XPATH,
-        f"//*[normalize-space()={toolkit_name!r}]",
-    )
-    ownership_element = browser_driver.find_element(
-        By.XPATH,
-        "//*[normalize-space()='This agent only']",
-    )
-    readiness_element = browser_driver.find_element(
-        By.XPATH,
-        "//*[normalize-space()='Ready']",
-    )
-    primary_action_element = browser_driver.find_element(
-        By.XPATH,
-        "//button[normalize-space()='Disable']",
-    )
-    layout = _toolkit_layout(
-        browser_driver.execute_script(
-            "return {"
-            "overflow: document.documentElement.scrollWidth > "
-            "document.documentElement.clientWidth,"
-            "toolkitTop: arguments[0].getBoundingClientRect().top,"
-            "ownershipTop: arguments[1].getBoundingClientRect().top,"
-            "readinessTop: arguments[2].getBoundingClientRect().top,"
-            "actionTop: arguments[3].getBoundingClientRect().top"
-            "};",
-            toolkit_name_element,
-            ownership_element,
-            readiness_element,
-            primary_action_element,
-        )
-    )
-    assert layout["overflow"] is False
-    assert layout["toolkitTop"] <= layout["ownershipTop"]
-    assert layout["ownershipTop"] <= layout["readinessTop"]
-    assert layout["readinessTop"] <= layout["actionTop"]
-    browser_driver.set_window_size(1280, 844)
+    _open_toolkit_details(browser_driver, toolkit_name)
 
     disable_button = _wait(browser_driver).until(
         ec.element_to_be_clickable((By.XPATH, "//button[normalize-space()='Disable']"))
@@ -455,24 +376,16 @@ def test_agent_owned_toolkit_owner_management_and_member_legacy_view(
     _click_button(browser_driver, "Enable")
     _assert_visible_text(browser_driver, "Ready")
 
-    _wait(browser_driver).until(
-        ec.element_to_be_clickable((By.XPATH, "//button[@aria-label='Delete']"))
-    ).click()
-    _assert_visible_text(browser_driver, "Delete agent-only toolkit")
+    _click_button(browser_driver, "Delete")
+    _click_button(browser_driver, "Delete toolkit")
     _assert_visible_text(
         browser_driver,
-        (
-            f"Delete {toolkit_name} from this agent and permanently remove its "
-            "stored credentials?"
-        ),
+        "This toolkit is no longer available. Close details and refresh the list.",
     )
-    _click_button(browser_driver, "Delete toolkit")
-    _wait(browser_driver).until(
-        ec.invisibility_of_element_located(
-            (By.XPATH, f"//*[normalize-space()={toolkit_name!r}]")
-        )
-    )
-    _assert_visible_text(browser_driver, "No toolkits attached")
+    browser_driver.find_element(
+        By.XPATH, "//button[contains(@class, 'mantine-Modal-close')]"
+    ).click()
+    _assert_visible_text(browser_driver, existing_name)
 
     _login_main_web(
         browser_driver,

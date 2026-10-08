@@ -831,6 +831,7 @@
     "retryUnavailable": "Retry is available only for the latest failed run while the session is idle."
   },
   "composerProfile": {
+    "applyError": "Model settings could not be applied. Try again.",
     "model": "Model",
     "effortLabel": "Reasoning effort",
     "done": "Done",

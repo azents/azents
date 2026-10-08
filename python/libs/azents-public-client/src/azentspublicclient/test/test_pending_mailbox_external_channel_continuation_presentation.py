@@ -37,7 +37,12 @@ class TestPendingMailboxExternalChannelContinuationPresentation(unittest.TestCas
             return PendingMailboxExternalChannelContinuationPresentation(
                 type = 'external_channel_continuation',
                 content = '',
-                requested_inference_profile = { }
+                requested_inference_profile = azentspublicclient.models.requested_inference_profile.RequestedInferenceProfile(
+                    model_target_label = '0', 
+                    reasoning_effort = '', 
+                    enabled_execution_options = [
+                        'fast'
+                        ], )
             )
         else:
             return PendingMailboxExternalChannelContinuationPresentation(

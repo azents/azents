@@ -5,6 +5,13 @@ tags: [backend, engine, scheduler, toolkit, external-channel, api, frontend]
 spec_type: domain
 domain: scheduled-task
 code_paths:
+  - python/apps/azents/src/azents/repos/session_execution/ownership.py
+  - python/apps/azents/src/azents/repos/hierarchy_operation_fences_test.py
+  - python/apps/azents/src/azents/core/scheduled_task.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/repos/scheduled_task_terminal_operations.py
+  - python/apps/azents/src/azents/repos/mailbox/promotion.py
+  - python/apps/azents/src/azents/services/mailbox.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/api/public/scheduled_task/**
   - python/apps/azents/src/azents/api/testenv/scheduler/**
@@ -32,8 +39,8 @@ api_routes:
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}/cycle
-last_verified_at: 2026-10-01
-spec_version: 14
+last_verified_at: 2026-10-07
+spec_version: 16
 ---
 
 # Scheduled Task Domain Spec
@@ -137,8 +144,14 @@ non-empty result. A Scheduled-bound `channel_action` may report progress only wi
 
 The Toolkit's active-cycle and continuity reads, Task creation, Task listing with
 derived execution state, and Task deletion are completed repository operations.
-Creation and deletion retain exact Session, Agent, and optional Binding
-authority. Deletion preserves the Mailbox → cycle → Task lock order and removes
+Active-cycle, continuity and inventory descriptions validate captured owner
+identity without root, Agent or execution-owner row gates. Creation and deletion
+retain exact Session, Agent, and optional Binding authority. They fence the
+actual target Session mutation through commit, including owner-generation
+equality when bound to an execution. An unbound management mutation still
+excludes the target's concurrent archive transition; an MVCC-only active-status
+read cannot admit a Task after archive has won. Deletion preserves the
+Mailbox → cycle → Task lock order and removes
 an admitted trigger/cycle atomically with the Task. External Channel
 registration and deletion notification execute only after the database
 transaction closes.
@@ -182,11 +195,19 @@ An already-active recurring Task coalesces later due work into at most one
 scheduling work rather than choosing another target.
 
 Mailbox promotion is the exact start boundary. Promotion changes the cycle from
-`admitted` to `started`, binds the new AgentRun to that cycle, and appends a typed
+`admitted` to `started`, binds the consuming AgentRun to that cycle, and appends a typed
 `scheduled_task_trigger` Event. Deleting a Task or removing its owner before this
 boundary removes the trigger and admitted cycle. After this boundary, Task
 deletion does not interrupt the already-started AgentRun or its canonical Session
 result.
+
+Scheduled triggers and continuations participate in every model-boundary Mailbox
+poll through the common FIFO promotion transaction. The existing Run consumes
+Scheduled input before its next model inference, without being completed or
+replaced to admit the input. Cycle validation, start or continuation binding,
+Run binding, event append, and mailbox deletion commit together. Stale Scheduled
+input is consumed without starting its cycle or delivering it to the model.
+Later FIFO inputs remain ordered and can be consumed in the same bulk poll.
 
 ## Continuation and Compaction
 
@@ -196,9 +217,10 @@ normal Session idle-hook boundary. `ScheduledToolkit` returns one typed
 order. The worker atomically consumes the pending idle-continuation pointer,
 enqueues the continuation Mailbox items, and keeps the Session running.
 
-The continuation promotes to a dedicated Event and begins a fresh AgentRun still
-bound to the same cycle. The Session and cycle identity remain stable across any
-number of Runs.
+The continuation promotes to a dedicated Event and binds the consuming AgentRun
+back to the same cycle. An idle Session creates its Run through the ordinary
+execution path. The Session and cycle identity remain stable across any number
+of Runs.
 
 Before continuity history is appended, the compaction summary hook replaces the
 bounded Scheduled Task section with sanitized snapshots of every current started
@@ -339,6 +361,9 @@ and result text.
 
 ## Changelog
 
+- **2026-10-05** (spec_version 16) — Made Scheduled descriptions independent of
+  ownership gates and retained exact target/owner mutation admission so Task
+  creation cannot escape archive and admitted-versus-started deletion stays atomic.
 - **2026-10-01** (spec_version 14) — Moved Scheduled Toolkit cycle reads and
   management mutations behind completed repository operations while preserving
   authority, mutation lock order, execution-state projection, and post-commit

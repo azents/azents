@@ -1,17 +1,16 @@
 """Password reset token repository."""
 
 import datetime
-from typing import Any, cast
 
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
-from sqlalchemy.engine import CursorResult
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.models.password_reset_token import (
     RDBPasswordResetToken,
     RDBPasswordResetTokenRedemption,
 )
+from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.repos.mutation_result import mutation_result
 
 from .data import (
     PasswordResetToken,
@@ -28,7 +27,7 @@ class PasswordResetTokenRepository:
 
     async def create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: PasswordResetTokenCreate,
     ) -> PasswordResetToken:
         """Create Password reset token."""
@@ -38,17 +37,17 @@ class PasswordResetTokenRepository:
             created_by_user_id=create.created_by_user_id,
             expires_at=create.expires_at,
         )
-        session.add(rdb_token)
-        await session.flush()
+        session.write_session.add(rdb_token)
+        await session.write_session.flush()
         return self._build(rdb_token)
 
     async def get_by_token_hash(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         token_hash: str,
     ) -> PasswordResetToken | None:
         """Fetch password reset token by token hash."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBPasswordResetToken).where(
                 RDBPasswordResetToken.token_hash == token_hash
             )
@@ -60,18 +59,18 @@ class PasswordResetTokenRepository:
 
     async def list_all(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         offset: int = 0,
         limit: int = 50,
     ) -> PasswordResetTokenList:
         """Fetch Password reset token list."""
-        count_result = await session.execute(
+        count_result = await session.read_session.execute(
             sa.select(sa.func.count()).select_from(RDBPasswordResetToken)
         )
         total = count_result.scalar() or 0
 
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBPasswordResetToken)
             .order_by(RDBPasswordResetToken.created_at.desc())
             .offset(offset)
@@ -84,31 +83,30 @@ class PasswordResetTokenRepository:
 
     async def revoke(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         token_id: str,
         *,
         revoked_at: datetime.datetime,
     ) -> bool:
         """Revoke Password reset token."""
-        result = cast(
-            CursorResult[Any],
-            await session.execute(
+        result = mutation_result(
+            await session.write_session.execute(
                 sa.update(RDBPasswordResetToken)
                 .where(RDBPasswordResetToken.id == token_id)
                 .values(revoked_at=revoked_at)
-            ),
+            )
         )
         return (result.rowcount or 0) > 0
 
     async def get_available_by_token_hash(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         token_hash: str,
         *,
         now: datetime.datetime,
     ) -> Result[PasswordResetToken, PasswordResetTokenUnavailable]:
         """Fetch usable password reset token."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBPasswordResetToken).where(
                 RDBPasswordResetToken.token_hash == token_hash,
                 RDBPasswordResetToken.revoked_at.is_(None),
@@ -123,13 +121,13 @@ class PasswordResetTokenRepository:
 
     async def claim_for_redemption(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         token_hash: str,
         *,
         now: datetime.datetime,
     ) -> Result[PasswordResetToken, PasswordResetTokenUnavailable]:
         """Claim password reset token for redeem."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBPasswordResetToken)
             .where(
                 RDBPasswordResetToken.token_hash == token_hash,
@@ -147,7 +145,7 @@ class PasswordResetTokenRepository:
 
     async def create_redemption(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: PasswordResetTokenRedemptionCreate,
     ) -> PasswordResetTokenRedemption:
         """Create Password reset token redemption record."""
@@ -158,17 +156,17 @@ class PasswordResetTokenRepository:
             user_agent=create.user_agent,
             redeemed_at=create.redeemed_at,
         )
-        session.add(rdb_redemption)
-        await session.flush()
+        session.write_session.add(rdb_redemption)
+        await session.write_session.flush()
         return self._build_redemption(rdb_redemption)
 
     async def list_redemptions_by_token_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         password_reset_token_id: str,
     ) -> list[PasswordResetTokenRedemption]:
         """Fetch Password reset token redemption record."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBPasswordResetTokenRedemption)
             .where(
                 RDBPasswordResetTokenRedemption.password_reset_token_id

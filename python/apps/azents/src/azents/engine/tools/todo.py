@@ -1,7 +1,7 @@
 """Session-scoped todo Toolkit State tools."""
 
 from collections.abc import Awaitable, Callable
-from typing import Literal, Self
+from typing import Literal, Self, assert_never
 
 from pydantic import BaseModel, Field
 
@@ -10,6 +10,11 @@ from azents.core.engine_tool_state import (
     TodoItem,
     TodoState,
     TodoStatus,
+)
+from azents.core.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
+    accepts_execution_owner,
 )
 from azents.core.toolkit_state import ToolkitStateModel
 from azents.core.tools import (
@@ -29,11 +34,6 @@ from azents.engine.hooks.types import (
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
 from azents.repos.toolkit_state.engine import TodoStateStore
-from azents.services.session_resource_authority import (
-    SessionExecutionOwner,
-    SessionResourceAuthority,
-    accepts_execution_owner,
-)
 
 TODO_STATUS_VALUES = {"pending", "in_progress", "completed"}
 TodoOperation = Literal["replace", "clear"]
@@ -83,8 +83,8 @@ class TodoToolkit(Toolkit[TodoToolkitConfig]):
         self,
         *,
         store: TodoStateStore,
-        agent_id: str = "",
-        session_id: str = "",
+        agent_id: str | None,
+        session_id: str | None,
     ) -> None:
         """Create Todo Toolkit."""
         self.store = store
@@ -97,12 +97,13 @@ class TodoToolkit(Toolkit[TodoToolkitConfig]):
         owner: SessionExecutionOwner,
     ) -> None:
         """Bind this resolved Toolkit to one immutable Session owner."""
+        if self._session_id is None:
+            raise ValueError("Execution owner Session does not match Toolkit")
         if accepts_execution_owner(
             self._execution_owner,
             owner,
             session_id=self._session_id,
         ):
-            self.store = self.store.for_execution(owner)
             self._execution_owner = owner
 
     def bind_execution_authority(
@@ -131,7 +132,7 @@ class TodoToolkit(Toolkit[TodoToolkitConfig]):
         context: CompactionSummaryHookContext,
     ) -> CompactionSummaryReplace | None:
         """Append current Todo state to compaction summary."""
-        if not self._agent_id or not self._session_id:
+        if self._agent_id is None or self._session_id is None:
             return None
         state = await self.store.load(self._agent_id, self._session_id)
         snapshot = render_todo_snapshot(state)
@@ -145,7 +146,7 @@ class TodoToolkit(Toolkit[TodoToolkitConfig]):
         """Return current todo prompt and update_todo tool."""
         if context.resource_authority is not None:
             self.bind_execution_authority(context.resource_authority)
-        if not self._session_id:
+        if self._agent_id is None or self._session_id is None:
             return ToolkitState(
                 status=ToolkitStatus.ENABLED,
                 tools=[],
@@ -188,7 +189,7 @@ class TodoToolkitProvider(ToolkitProvider[TodoToolkitConfig]):
         context: ResolveContext,
     ) -> Toolkit[TodoToolkitConfig]:
         """Return executable Todo Toolkit."""
-        return TodoToolkit(store=self.store)
+        return TodoToolkit(store=self.store, agent_id=None, session_id=None)
 
 
 def render_todo_prompt(state: TodoState | None = None) -> str:
@@ -239,6 +240,8 @@ def apply_todo_update(_current: TodoState, update: UpdateTodoInput) -> TodoState
             return TodoState()
         case "replace":
             return TodoState(items=[_to_item(item) for item in update.items])
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def _to_item(item: TodoUpdateItem) -> TodoItem:

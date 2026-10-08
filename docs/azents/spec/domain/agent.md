@@ -1,16 +1,44 @@
 ---
 title: "Agent Domain Spec"
 created: 2026-04-20
+updated: 2026-10-06
 tags: [backend, engine]
 spec_type: domain
 domain: agent
 owner: "@Hardtack"
 code_paths:
+  - python/apps/azents/src/azents/repos/subagent_tool_operations.py
+  - python/apps/azents/src/azents/repos/hierarchy_contention.py
+  - python/apps/azents/src/azents/repos/hierarchy_operation_fences_test.py
+  - python/apps/azents/src/azents/repos/agent_session/**
+  - python/apps/azents/src/azents/repos/session_execution/ownership.py
+  - python/apps/azents/src/azents/core/active_model_capabilities.py
+  - python/apps/azents/src/azents/repos/active_model_capabilities.py
+  - python/apps/azents/src/azents/services/active_model_capabilities.py
+  - python/apps/azents/src/azents/engine/events/effective_model_request.py
+  - python/apps/azents/src/azents/core/agent_automatic_project.py
+  - python/apps/azents/src/azents/core/agent_errors.py
+  - python/apps/azents/src/azents/core/chat_data.py
+  - python/apps/azents/src/azents/core/exchange_file_errors.py
+  - python/apps/azents/src/azents/core/external_channel_access.py
+  - python/apps/azents/src/azents/core/external_channel_conversation_data.py
+  - python/apps/azents/src/azents/core/historical_memory_settings.py
+  - python/apps/azents/src/azents/core/mailbox_errors.py
+  - python/apps/azents/src/azents/core/memory_scope.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/core/session_workspace_paths.py
+  - python/apps/azents/src/azents/repos/engine_resolve.py
+  - python/apps/azents/src/azents/repos/engine_tool_repositories.py
+  - python/apps/azents/src/azents/repos/model_metadata_operations.py
+  - python/apps/azents/src/azents/repos/skill_state_store.py
+  - python/apps/azents/src/azents/repos/vfs_projection_operations.py
+  - python/apps/azents/src/azents/repos/vfs_read_authority.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/core/agent.py
   - python/apps/azents/src/azents/core/builtin_tools.py
   - python/apps/azents/src/azents/core/credentials.py
   - python/apps/azents/src/azents/core/llm_catalog.py
+  - python/apps/azents/src/azents/core/model_capability_contract.py
   - python/apps/azents/src/azents/core/llm_mapping.py
   - python/apps/azents/src/azents/services/model_metadata.py
   - python/apps/azents/src/azents/core/inference_profile.py
@@ -34,6 +62,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_admin/**
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/repos/agent_decommission/**
+  - python/apps/azents/src/azents/repos/agent_decommission_operations.py
+  - python/apps/azents/src/azents/core/retirement_data.py
   - python/apps/azents/src/azents/repos/agent_avatar_cleanup/**
   - python/apps/azents/src/azents/repos/agent_decommission_finalizer/**
   - python/apps/azents/src/azents/repos/llm_provider_integration/**
@@ -41,7 +71,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/model_candidate_health/**
   - python/apps/azents/src/azents/repos/model_candidate_chain_cutover/**
   - python/apps/azents/src/azents/services/model_availability.py
-  - python/apps/azents/src/azents/services/model_candidate_selection.py
+  - python/apps/azents/src/azents/repos/model_candidate_selection.py
   - python/apps/azents/src/azents/repos/runtime_profile/**
   - python/apps/azents/src/azents/services/agent/**
   - python/apps/azents/src/azents/services/agent_automatic_project/**
@@ -76,10 +106,11 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/components/AgentAutomaticProjects.tsx
   - typescript/apps/azents-web/src/features/agents/components/AgentForm.tsx
   - typescript/apps/azents-web/src/features/agents/components/AgentToolkitSection.tsx
-  - typescript/apps/azents-web/src/features/agents/components/SelectableModelOptionsEditor.tsx
+  - typescript/apps/azents-web/src/features/agents/components/ManagedAgentToolkitSection.tsx
+  - typescript/apps/azents-web/src/shared/model-options/components/SelectableModelOptionsEditor.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentAutomaticProjectsContainer.ts
   - typescript/apps/azents-web/src/features/agents/containers/useAgentToolkitManagementContainer.ts
-  - typescript/apps/azents-web/src/features/agents/model-selection.ts
+  - typescript/apps/azents-web/src/shared/model-options/model-selection.ts
   - typescript/apps/azents-web/src/features/agents/terminalSettingsVisibility.ts
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/runtime-profiles/**
@@ -94,6 +125,8 @@ api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/admins
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
+  - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories
+  - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id}
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/automatic-session-projects
   - /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime
@@ -116,8 +149,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-10-01
-spec_version: 86
+last_verified_at: 2026-10-08
+spec_version: 96
 ---
 
 # Agent Domain Spec
@@ -157,7 +190,7 @@ Session or Agent settings operates on the same Agent-owned service.
 | `runtime_profile_selection_version` | positive optimistic version for replacing or clearing the Agent selection |
 | `toolkit_management_available` | requester-relative true only for a Workspace Owner or explicit AgentAdmin of this active Agent; grants the enhanced saved-Agent Toolkit management flow but does not disclose any Toolkit state itself |
 | `terminal_enabled` | Agent-owned default-true browser Terminal policy. It is independently editable from Runtime capability and never gates Worker Runtime Toolkit access |
-| `memory_enabled` | whether memory prompt/tool is exposed |
+| `memory_enabled` | gates Saved/Historical automatic context, preparation, mutation tools, and model-facing live Memory VFS access; retained human settings inspection remains available |
 | `max_turns` | run turn limit. null means unlimited |
 | `auto_archive_ttl_days` | positive whole-day inactivity TTL for automatic archive of this Agent's non-primary root Sessions. Defaults to `30` and applies dynamically to existing active Sessions |
 | `external_channel_default_response_mode` | required `mention_only` or `all_messages` value copied into each newly selected provider-channel participation setting and into legacy isolated-thread Bindings that have no setup claim. Existing Agents default to `all_messages` |
@@ -276,7 +309,32 @@ Required snapshot fields:
 - `source_metadata`
 - `last_refreshed_at`
 
-Snapshot is created by resolving submitted model identifiers through stored model catalog projection at submit time. Runtime does not query latest listing again and uses snapshot in Agent row as source of truth.
+Submitted exact integration/model IDs and ordered settings form user
+configuration. `normalized_capabilities` has schema version `3`: final support is
+represented by its boolean/list fields, with a separate `structured_response`
+boolean and `request_constraints` for known defaults and feature conditions.
+Source evidence and compiler diagnostics do not become another final support
+state.
+
+Agent detail/list responses and their chat model controls compile current
+authorized LOCAL declarations for those same IDs and return detached metadata
+copies. Lists batch exact choices by Workspace, including distinct existing
+aliases. Missing required metadata retains the selected identity and reports a
+diagnostic with empty support; it does not choose another candidate. Unrelated
+PATCH and label saves persist user settings without copying response metadata
+back into the Agent row.
+
+NEW operations capture compiled metadata before profile preparation. Once
+captured, retries, quota progression and historical execution use the operation's
+candidate snapshots. Lowerers validate the actual encoded request against those
+final fields and conditions without mutable catalog lookup.
+
+Configuration controls use the complete final effort and built-in lists.
+Conditional potential stays configurable until actual request admission evaluates
+effective effort and function declarations. Existing effort ordering/adaptation
+is retained for concrete model changes; valid values and explicit null are
+preserved. The canonical domain is `none`, `minimal`, `low`, `medium`, `high`,
+`xhigh`, and `max`; provider `ultra` remains raw declaration evidence only.
 
 ### 1.2 WorkspaceModelSettings
 
@@ -297,9 +355,14 @@ Rules:
 
 - If Workspace default selectable model options are absent, creating Agent without explicit model options fails.
 - Once Workspace defaults are configured, the default selectable model list cannot be cleared to empty.
-- Workspace default selectable model list uses the same label, order, cap, and fallback invariants as Agent selectable model options.
+- Workspace default selectable model lists retain Agent label, order and cap validation. Partial Workspace updates distinguish omission from explicit null.
+- Omitted default main/lightweight labels retain their current values, including whole-option replacement if the selected label still exists. Removed labels fall back to the first ordered option; initial configuration with omitted labels also uses the first option.
+- Explicit null requests a clear and is rejected with `DefaultModelCannotBeCleared`/HTTP 400 when defaults are configured or the request supplies a nonempty new option list. Rejection precedes candidate resolution and mutation; mixed requests are not partially stored.
+- Empty unconfigured records retain their nullable representation and existing creation/rejection behavior. Empty/unknown string normalization remains separate from null. New Agents copy the selected Workspace labels; existing Agents are not changed by Workspace updates.
 - Updating Workspace defaults recomputes the denormalized effective default snapshots from default labels.
-- New Agents copy each Workspace option's model snapshot and complete model-scoped settings, including built-in tool configs; later Workspace changes do not change existing Agent options or effective snapshots.
+- New Agents copy exact Workspace identities, order and complete model-scoped settings,
+  including built-in configs, while capturing current compiled capabilities for those
+  choices. Existing Agents retain their user configuration when Workspace defaults change.
 - Public Workspace mutation accepts only the nested default candidate-chain contract. The
   denormalized default snapshots remain internal derived mirrors.
 
@@ -347,6 +410,31 @@ non-empty policy is cleared. It preserves the settings row as the required empty
 authority so Runtime-free and later re-added Agents can continue creating automatic root Sessions.
 
 ## 2. API Contract
+
+Agent, Session and coordination descriptions do not acquire an Agent-wide,
+root-tree or execution-owner row gate. Captured execution ownership can be
+validated by a plain read; a description is not ownership handover or lifecycle
+admission. Actual output and lifecycle mutations retain their existing exact
+Session generation, resource, claim and status conditions through commit.
+
+Subagent creation and follow-up capacity admission coordinate with the existing
+root SessionAgent hierarchy row. Ordinary path/tree/status reads, message
+inventory and single-target interruption do not inherit that root gate. Actual
+collaboration mutations admit only their source/target Session rows in stable
+order with ordinary waiting locks. A database-confirmed deadlock or serialization
+abort releases the complete owning transaction before retry; recovery covers
+either hierarchy mutation or terminal-delivery victim without replaying model,
+tool or broker effects. Original source ownership and detached inputs are
+retained and revalidated in a fresh scope. Source owner-generation validation is
+fenced only after the required mutation rows have been admitted. Cancellation,
+ownership loss and uncertain commit do not retry.
+
+Stop, archive, restore, purge and decommission admit the existing root and its
+current Session tree as a mutation boundary shared with child creation. A child
+cannot escape an admitted transition through an enumeration race. Irreversible
+purge cutoffs, exact attempts/leases, participant snapshots, tombstones and
+already-started Scheduled results retain their existing semantics; policy and
+lifecycle status descriptions do not claim destructive work.
 
 ### 2.1 Agent create/update
 
@@ -420,6 +508,12 @@ Create/update requests accept selectable model options as the current model cont
 - `main_model_label` / `lightweight_model_label` omitted, null, or absent from the final list: fallback to the first ordered option label.
 - Internal effective `model_selection` and `lightweight_model_selection` mirrors are recomputed from each final label's Primary candidate. Public requests and responses expose only the nested chains and selected labels.
 - `model_parameters` is whole-object replace for the remaining Agent-global inference parameters such as temperature and default reasoning effort. Unknown keys are rejected; context, output, and built-in tool settings do not exist at Agent scope.
+- Existing `top_k` is an Agent-local positive integer, not a per-prompt or preset
+  override. Its exact nullable value is carried through Run resolution and model
+  preparation. The installed Google, Anthropic and applicable Bedrock codecs
+  transmit it; a codec without an adopted mapping fails before provider dispatch.
+  Saved support predicates and denials remain authoritative, and saved selections
+  are not rewritten to make the parameter available.
 - `subagent_settings` is a whole-object replace when supplied. Omitted create requests use the default `{ "max_subagents": 3, "max_depth": 1 }`; omitted update requests leave the stored settings unchanged.
 - `runtime_profile_id` omitted or null on create produces a Runtime-free Agent and does not copy the
   Workspace default. An explicit available Profile produces a managed Agent.
@@ -553,9 +647,17 @@ POST /agent/v1/workspaces/{handle}/agents/{agent_id}/memories
 GET /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
 PATCH /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
 DELETE /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
+GET /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories?scope={team|user}
+GET /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id}
 ```
 
-These routes are Agent-scoped because Memory belongs to Agent. The Agent settings UI also updates `memory_enabled` through the normal Agent update endpoint. Detailed Memory visibility, conflict, and scope semantics are defined in [`memory.md`](memory.md).
+These routes are Agent-scoped because Memory belongs to Agent. Saved routes
+retain CRUD; Historical routes expose only authorized source-linked inspection,
+with cursor pagination and no human edit/delete. The settings page separates
+Saved and Historical kinds and retains the existing `memory_enabled` toggle
+through the normal Agent update endpoint. Inspection remains available while
+Memory is disabled. Detailed visibility, source lifecycle, conflict, scope, and
+pagination semantics are defined in [`memory.md`](memory.md).
 
 Public integration model listing uses stored model catalog projections. The picker reads catalog entries for the selected integration, falling back to provider system catalog entries where applicable. Submit normalization resolves direct transition inputs and selectable model option entries through stored catalog projection and must not refetch dynamic provider listing as a fallback.
 
@@ -576,6 +678,20 @@ normal session lifecycle, waits for retention purge to own permanent Session del
 current-generation Runtime terminal-delete acknowledgement before finalization. The completed job
 remains a content-free tombstone; no public immediate-delete or request-specific purge-deadline
 path exists.
+
+Scheduler claim, phase/retry updates, root retirement, direct-root cleanup
+preparation and finalization finish in complete repository-owned database
+operations. Root and Runtime resource-binding descriptions use native read-only
+scopes. Locked retirement retains Scheduled active-cycle eligibility, durable
+stop writes, descriptive retention lookup, ordered lifecycle participant
+termination, archive/purge scheduling and job phase update in one database-only
+group. Every decommission phase, retry and finalization write carries the claimed
+attempt count together with lease-owner identity; reclaim by the same scheduler
+invalidates an older attempt, and failed attempt CAS rolls back the whole root
+or direct-root preparation group. Provider cleanup, Broker stop publication,
+Runtime requests and S3/avatar deletion occur between completed operations;
+post-commit effect failure cannot undo committed state. Unlimited-retention
+rejection and current-generation Runtime acknowledgement remain unchanged.
 
 External Channel state follows the same irreversible coordinator boundary.
 Decommission disconnects an Agent-owned Single App, removes only the Agent's route
@@ -653,6 +769,12 @@ Runtime does not query Workspace defaults or model listing. Workspace defaults a
 
 ## 4. Built-in Tool Validation
 
+Configuration and settings-copy validation use final supported-tool membership.
+They do not remove a conditional tool by evaluating an incomplete runtime request.
+Actual request admission evaluates captured conditions with the complete encoded
+effort and JSON-function declarations; support, strict schemas and structured
+responses remain separate.
+
 Each selectable model option owns a semantic built-in tool opt-in list. Model snapshot `normalized_capabilities.built_in_tools.supported` means the capability is selectable; it does not prescribe whether the provider or Azents executes it. A supported tool omitted from that option's settings is not exposed when the option is selected.
 
 The configurable implemented registry contains `web_search` and `image_generation`. Capability projection filters out unimplemented identifiers such as `web_fetch`. Agent and Workspace submit normalization rejects unknown, duplicate, or capability-unsupported names per option. `image_generation` uses the same model-scoped validation contract as other builtins and does not restore historical provider-specific Agent validation conditions.
@@ -665,18 +787,25 @@ Each selectable model snapshot can carry a default input window and a maximum
 input window. A missing default resolves to the maximum. For each option, an unset
 `context_window_tokens` cap uses the resolved default; an explicit cap uses the
 requested value up to the resolved maximum. Metadata from the local validated
-retained-source DB snapshot fills only a missing maximum; it cannot lower a
+current source-model exact-key read fills only a missing maximum; it cannot lower a
 provider default. If maximum and source metadata are absent but a default exists,
 that default supplies the maximum. The 128,000-token fallback applies only when
 all three are absent. Library profiles and installed model maps are not fallback
 authorities, and this resolution does not fetch remote source or model listings.
 
-Main and lightweight calculations share one captured local source snapshot when
+Main and lightweight calculations share one coherent capture of requested exact keys when
 either saved maximum is missing. Known saved maxima require no source read for
-context-limit computation; pricing capture remains a separate operation input.
-Agent list responses reuse one captured snapshot across the entire list.
+context-limit computation. Agent list responses group only missing-maximum exact
+keys across the entire list, without restoring a full source dataset.
 Foreground resolution, compaction, subagent scheduling, worker calculations and
 API displays use the same pure limit math and exact semantic model/source lookup.
+
+Explicit selection copies the current catalog entry's normalized available or unavailable
+pricing definition into every saved candidate. Primary, fallback, lightweight, compaction,
+and subagent selection propagation preserves that definition without mutable price lookup.
+Catalog refresh does not change saved prices. Historical selection JSON without pricing
+decodes read-only as absent; actual dispatch leaves local estimation unavailable rather
+than enriching or rewriting the selection.
 
 `effective_context_window_tokens` in Agent response is calculated from the smaller
 of the default main option's resolved effective input window and the default
@@ -689,8 +818,10 @@ Prepared foreground turns use the prompt-selected option instead of the default 
 
 ## 6. Memory / toolkit / avatar
 
-- Agent with `memory_enabled=false` does not expose memory prompt/tool.
-- Toolkit CRUD, ownership, OAuth, and runtime state follow [`toolkit.md`](toolkit.md). A saved Agent response includes requester-relative `toolkit_management_available`; it is derived from Workspace Owner or explicit AgentAdmin authority for that exact active Agent. When false, saved-Agent settings retain the legacy shared attach/detach section and disclose no Agent-only Toolkit state. When true, `Add Toolkit` begins with Toolkit type selection and then offers eligible Workspace-shared candidates or an Agent-only configuration flow without changing Agent creation or Chat.
+- Agent with `memory_enabled=false` suppresses automatic Memory context,
+  Historical discovery/preparation, Saved mutation tools, and model-facing
+  Memory VFS access; retained human settings inspection remains available.
+- Toolkit CRUD, ownership, OAuth, and runtime state follow [`toolkit.md`](toolkit.md). A saved Agent response includes requester-relative `toolkit_management_available`; it is derived from Workspace Owner or explicit AgentAdmin authority for that exact active Agent. When false, saved-Agent settings retain the legacy shared attach/detach section and disclose no Agent-only Toolkit state. When true, `Add Toolkit` opens a two-tab tile catalog with new Agent-only Provider selection as default and a separate existing Workspace Toolkit tab. Additions persist through their own operations without submitting the Agent form; compact connected cards open allowlisted details and existing ownership-correct actions. Agent creation and Chat remain unchanged.
 - Avatar is stored as stored image metadata through upload service image handler and resolved to public URL in Agent response.
 - Main Web provides available avatar variants as responsive width candidates and
   declares the rendered CSS width, allowing the browser to select a thumbnail that
@@ -723,6 +854,29 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-10-06** (spec_version 95) — Replaced partial hierarchy NOWAIT admission
+  with exact waiting locks and complete DB-operation recovery for both terminal
+  and hierarchy deadlock victims, preserving capacity and source ownership.
+
+- **2026-10-05** (spec_version 94) — Completed decommission repository transaction
+  ownership while preserving ordered root retirement, claimed-attempt fencing,
+  Runtime acknowledgement and post-commit external cleanup.
+- **2026-10-05** (spec_version 93) — Separated Agent/tree descriptions from
+  operation-scoped hierarchy and exact Session mutation admission, preserving
+  child-creation cutoffs and savepoint-safe collaboration ordering.
+- **2026-10-03** (spec_version 91) — Embedded normalized catalog prices in saved
+  candidates and replaced whole-source context fallback with grouped exact current reads.
+- **2026-10-03** (spec_version 90) — Carried existing Agent-local top-k to
+  model preparation with exact SDK encoding or explicit incompatibility.
+- **2026-10-03** (spec_version 89) — Preserved conditional reasoning-effort
+  potential across profile/default/candidate/subagent preparation without weakening
+  actual saved-predicate dispatch validation or historical guards.
+- **2026-10-03** (spec_version 88) — Preserved complete saved v2 support,
+  conditional configuration/dispatch separation and historical descriptor absence
+  across explicit reselection, ordinary saves and catalog refresh.
+- **2026-10-02** (spec_version 87) — Added read-only Historical settings
+  routes and Saved/Historical kind selection under the existing Memory toggle,
+  including retained disabled-state human inspection.
 - **2026-10-01** (spec_version 86) — Moved effective built-in model capability policy into the core validation authority shared by catalog projection and Agent settings.
 - **2026-09-29** (spec_version 84) — Added registry-owned exclusive processing
   speeds while preserving saved support, inference snapshots, and inheritance.

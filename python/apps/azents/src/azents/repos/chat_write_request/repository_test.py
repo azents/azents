@@ -1,25 +1,26 @@
 """ChatWriteRequestRepository tests."""
 
 import datetime
-from types import SimpleNamespace
 from typing import NamedTuple
 from unittest.mock import AsyncMock, MagicMock
 
 from azcommon.result import Success
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import AgentSessionProductMode, LLMProvider
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
@@ -38,7 +39,7 @@ class _AgentSessionFixture(NamedTuple):
     workspace_id: str
 
 
-async def _create_workspace(session: AsyncSession, handle: str) -> str:
+async def _create_workspace(session: WriteSession, handle: str) -> str:
     """Create Workspace for tests."""
     repo = WorkspaceRepository()
     result = await repo.create(
@@ -51,13 +52,13 @@ async def _create_workspace(session: AsyncSession, handle: str) -> str:
     return workspace_id
 
 
-async def _create_user(session: AsyncSession, email: str) -> str:
+async def _create_user(session: WriteSession, email: str) -> str:
     """Create User for tests."""
     user = await UserRepository().create(session, UserCreate(email=email))
     return user.id
 
 
-async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> str:
+async def _create_agent(session: WriteSession, workspace_id: str, slug: str) -> str:
     """Create Agent for tests."""
 
     integration = RDBLLMProviderIntegration(
@@ -67,8 +68,8 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
 
     agent = RDBAgent(
         workspace_id=workspace_id,
@@ -102,20 +103,20 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     runtime = RDBAgentRuntime(
         workspace_id=workspace_id,
         agent_id=agent.id,
     )
     runtime.workspace_path = "/workspace/agent"
-    session.add(runtime)
-    await session.flush()
+    session.write_session.add(runtime)
+    await session.write_session.flush()
     return agent.id
 
 
 async def _create_agent_session(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     handle: str,
     slug: str,
@@ -165,11 +166,13 @@ class TestChatWriteRequestRepository:
     async def test_delete_by_requester_user_id_deletes_retained_rows(self) -> None:
         """Delete retained idempotency rows for one requester User."""
         session = MagicMock(spec=AsyncSession)
-        session.execute = AsyncMock(return_value=SimpleNamespace(rowcount=2))
+        result = MagicMock(spec=CursorResult)
+        result.rowcount = 2
+        session.execute = AsyncMock(return_value=result)
         session.flush = AsyncMock()
 
         deleted = await ChatWriteRequestRepository().delete_by_requester_user_id(
-            session,
+            ReadWriteSession(session),
             requester_user_id="user-1",
         )
 
@@ -182,7 +185,7 @@ class TestChatWriteRequestRepository:
 
     async def test_create_idempotent_returns_created_record(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """First request creates record and returns created=True."""
         session_id, user_id, _agent_id, _workspace_id = await _create_agent_session(
@@ -192,7 +195,7 @@ class TestChatWriteRequestRepository:
         )
         repo = ChatWriteRequestRepository()
 
-        record, created = await repo.create_idempotent(
+        request_result = await repo.create_idempotent(
             rdb_session,
             _create_payload(
                 session_id=session_id,
@@ -200,6 +203,8 @@ class TestChatWriteRequestRepository:
                 client_request_id="request-1",
             ),
         )
+        record = request_result.record
+        created = request_result.created
 
         assert created is True
         assert len(record.id) == 32
@@ -213,7 +218,7 @@ class TestChatWriteRequestRepository:
 
     async def test_create_idempotent_returns_existing_record_on_retry(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Retry with same session/user/client_request_id returns existing record."""
         session_id, user_id, _agent_id, _workspace_id = await _create_agent_session(
@@ -228,8 +233,12 @@ class TestChatWriteRequestRepository:
             client_request_id="request-1",
         )
 
-        first, first_created = await repo.create_idempotent(rdb_session, payload)
-        second, second_created = await repo.create_idempotent(rdb_session, payload)
+        request_result = await repo.create_idempotent(rdb_session, payload)
+        first = request_result.record
+        first_created = request_result.created
+        request_result = await repo.create_idempotent(rdb_session, payload)
+        second = request_result.record
+        second_created = request_result.created
 
         assert first_created is True
         assert second_created is False
@@ -238,7 +247,7 @@ class TestChatWriteRequestRepository:
 
     async def test_agent_scoped_creation_key_returns_original_session_record(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A new-Session retry cannot create a record for another Session."""
         session_id, user_id, agent_id, workspace_id = await _create_agent_session(
@@ -275,14 +284,18 @@ class TestChatWriteRequestRepository:
             }
         )
 
-        first, first_created = await repo.create_idempotent(
+        request_result = await repo.create_idempotent(
             rdb_session,
             first_create,
         )
-        second, second_created = await repo.create_idempotent(
+        first = request_result.record
+        first_created = request_result.created
+        request_result = await repo.create_idempotent(
             rdb_session,
             conflicting_create,
         )
+        second = request_result.record
+        second_created = request_result.created
 
         assert first_created is True
         assert second_created is False

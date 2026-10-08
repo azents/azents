@@ -36,24 +36,48 @@ class TestAgentSessionModelAvailabilityResponse(unittest.TestCase):
         if include_optional:
             return AgentSessionModelAvailabilityResponse(
                 semantic_label = '0',
-                primary = { },
+                primary = azentspublicclient.models.model_candidate_identity.ModelCandidateIdentity(
+                    llm_provider_integration_id = '0', 
+                    model_identifier = '0', ),
                 primary_display_name = '0',
                 state = 'available',
                 deadline = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 server_time = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 first_usable_fallback_display_name = '',
-                reservation = { }
+                reservation = azentspublicclient.models.primary_model_reservation.PrimaryModelReservation(
+                    schema_version = 1, 
+                    semantic_label = '0', 
+                    candidate = azentspublicclient.models.model_candidate_identity.ModelCandidateIdentity(
+                        llm_provider_integration_id = '0', 
+                        model_identifier = '0', ), 
+                    health_generation = 1.0, 
+                    reservation_generation = 1.0, 
+                    claim_token = '0', 
+                    created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                    expires_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
             )
         else:
             return AgentSessionModelAvailabilityResponse(
                 semantic_label = '0',
-                primary = { },
+                primary = azentspublicclient.models.model_candidate_identity.ModelCandidateIdentity(
+                    llm_provider_integration_id = '0', 
+                    model_identifier = '0', ),
                 primary_display_name = '0',
                 state = 'available',
                 deadline = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 server_time = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 first_usable_fallback_display_name = '',
-                reservation = { },
+                reservation = azentspublicclient.models.primary_model_reservation.PrimaryModelReservation(
+                    schema_version = 1, 
+                    semantic_label = '0', 
+                    candidate = azentspublicclient.models.model_candidate_identity.ModelCandidateIdentity(
+                        llm_provider_integration_id = '0', 
+                        model_identifier = '0', ), 
+                    health_generation = 1.0, 
+                    reservation_generation = 1.0, 
+                    claim_token = '0', 
+                    created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                    expires_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ),
         )
         """
 

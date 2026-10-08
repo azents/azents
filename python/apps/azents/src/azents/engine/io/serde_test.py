@@ -187,8 +187,6 @@ class TestUsageSerde:
             cache_creation_tokens=5,
             reasoning_tokens=20,
             cost_usd=0.000123,
-            raw={"model": "test"},
-            raw_hidden_params={"response_cost": 0.000123, "model_id": "claude-sonnet"},
         )
         d = serialize_usage(usage)
         assert d is not None
@@ -203,7 +201,6 @@ class TestUsageSerde:
             total_tokens=150,
             cached_tokens=None,
             reasoning_tokens=None,
-            raw=None,
         )
         d = serialize_usage(usage)
         assert d is not None
@@ -216,7 +213,28 @@ class TestUsageSerde:
         assert restored.prompt_tokens == 100
         assert restored.cache_creation_tokens is None
         assert restored.cost_usd is None
-        assert restored.raw_hidden_params is None
+
+    def test_historical_raw_is_not_reserialized(self) -> None:
+        """Historical receipts do not enter the normalized durable representation."""
+        restored = deserialize_usage(
+            {
+                "prompt_tokens": 100,
+                "completion_tokens": 50,
+                "total_tokens": 150,
+                "cached_tokens": 80,
+                "cost_usd": 0.125,
+                "raw": {"attribution": {"items": {"private-item": {}}}},
+                "raw_hidden_params": {"response_cost": 0.125},
+            }
+        )
+        assert restored is not None
+        assert serialize_usage(restored) == {
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "total_tokens": 150,
+            "cached_tokens": 80,
+            "cost_usd": 0.125,
+        }
 
     def test_round_trip_cache_creation_only(self) -> None:
         """Round-trip with only cache_creation_tokens."""

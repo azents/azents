@@ -5,7 +5,6 @@ from typing import Never
 
 import pytest
 from azcommon.result import Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelAppMode,
@@ -14,18 +13,19 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelTransport,
 )
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.connection import (
     ExternalChannelConnectionRepository,
 )
 from azents.repos.external_channel.data import ExternalChannelConnectionCreate
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 
 
 async def _create_workspace(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     *,
     handle: str,
 ) -> str:
@@ -80,7 +80,7 @@ class _FailAfterConnectionCreateRepository(ExternalChannelRepository):
 
     async def create_connection(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: ExternalChannelConnectionCreate,
     ) -> Never:
         connection = await super().create_connection(session, create)
@@ -90,7 +90,7 @@ class _FailAfterConnectionCreateRepository(ExternalChannelRepository):
 
 @pytest.mark.asyncio
 async def test_create_connection_commits_completed_record_and_rolls_back_failure(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A failed lower operation cannot retain a partially-created connection."""
     workspace_id = await _create_workspace(
@@ -135,7 +135,7 @@ async def test_create_connection_commits_completed_record_and_rolls_back_failure
 
 @pytest.mark.asyncio
 async def test_load_connection_configuration_hides_missing_and_cross_workspace_rows(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Completed configuration reads preserve the Workspace ownership boundary."""
     workspace_id = await _create_workspace(
@@ -175,7 +175,7 @@ async def test_load_connection_configuration_hides_missing_and_cross_workspace_r
 
 @pytest.mark.asyncio
 async def test_update_connection_health_generation_fence_reports_stale_and_missing(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Health persistence distinguishes successful, stale, and missing outcomes."""
     workspace_id = await _create_workspace(

@@ -8,12 +8,12 @@ import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from fastapi import Depends
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.password_login import RDBPasswordLogin
 from azents.rdb.models.user_email import RDBUserEmail
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.password_login import PasswordLoginRepository
 from azents.repos.password_login.data import PasswordLogin
 from azents.repos.user import UserRepository
@@ -35,7 +35,7 @@ class SecurityOperationRepository:
     user_repository: Annotated[UserRepository, Depends()]
     password_repository: Annotated[PasswordLoginRepository, Depends()]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
     async def get_user(self, user_id: str) -> User | None:
@@ -53,7 +53,7 @@ class SecurityOperationRepository:
         async with self.session_manager() as session:
             if await self.user_repository.get(session, user_id) is None:
                 return False
-            await session.execute(
+            await session.write_session.execute(
                 insert(RDBPasswordLogin)
                 .values(id=uuid7().hex, user_id=user_id, password_hash=password_hash)
                 .on_conflict_do_update(
@@ -78,7 +78,7 @@ class SecurityOperationRepository:
                     RDBUserEmail.user_id == user_id,
                     RDBUserEmail.verified_at.is_not(None),
                 )
-                deleted = await session.scalar(
+                deleted = await session.write_session.scalar(
                     sa.delete(RDBPasswordLogin)
                     .where(RDBPasswordLogin.user_id == user_id, verified_email)
                     .returning(RDBPasswordLogin.id)

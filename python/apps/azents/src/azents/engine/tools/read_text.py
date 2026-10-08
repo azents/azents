@@ -1,18 +1,13 @@
-"""read_text tool.
-
-Read and return text file from session data storage.
-Used to inspect full content of truncated tool output or read text files
-uploaded by user.
-"""
+"""Generic text read tool for Runtime paths and registered VFS mounts."""
 
 import logging
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.path_policy import RUNTIME_ACCESSIBLE_PATHS_MSG
-from azents.services.file_storage import FileStorage
+from azents.services.file_storage import TextReadableStorage
 from azents.services.runtime_storage_error import RuntimeStorageError
 
 logger = logging.getLogger(__name__)
@@ -22,8 +17,12 @@ _MAX_TEXT_READ_CHARACTERS = 64 * 1024
 class ReadTextInput(BaseModel):
     """read_text tool input."""
 
+    model_config = ConfigDict(extra="forbid")
+
     path: str = Field(
-        description="Absolute runtime text path to read",
+        description=(
+            "Absolute Runtime text path or canonical azents:// file URI to read"
+        ),
     )
     offset: int = Field(
         default=0,
@@ -45,7 +44,7 @@ class ReadTextInput(BaseModel):
 
 def make_read_text_tool(
     *,
-    session_storage: FileStorage,
+    session_storage: TextReadableStorage,
     agent_id: str,
 ) -> FunctionTool:
     """Create read_text tool.
@@ -110,7 +109,7 @@ def make_read_text_tool(
         name="read",
         description=(
             "Read a text file from storage. "
-            "Provide an absolute runtime path. "
+            "Provide an absolute Runtime path or canonical azents:// file URI. "
             f"{RUNTIME_ACCESSIBLE_PATHS_MSG} "
             "Supports character offset and limit, plus explicit text encoding "
             "(default utf-8) for reading large files in chunks."

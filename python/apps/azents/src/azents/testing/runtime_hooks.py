@@ -39,6 +39,18 @@ from azents.engine.tooling.make_tool import make_tool
 
 logger = logging.getLogger(__name__)
 
+type RuntimeHookQAContext = (
+    SessionStartHookContext
+    | RunStartHookContext
+    | RunEndHookContext
+    | TurnStartHookContext
+    | TurnEndHookContext
+    | BeforeToolCallHookContext
+    | AfterToolCallHookContext
+    | RuntimeHibernateHookContext
+    | RuntimeRestoreHookContext
+)
+
 
 class TestenvRuntimeHookQAConfig(BaseModel):
     """testenv runtime hook QA settings."""
@@ -176,19 +188,41 @@ class TestenvRuntimeHookQAToolkit(Toolkit[TestenvRuntimeHookQAConfig]):
     async def _on_runtime_restore(self, context: RuntimeRestoreHookContext) -> None:
         self._log("on_runtime_restore", context)
 
-    def _log(self, lifecycle: str, context: object) -> None:
+    def _log(self, lifecycle: str, context: RuntimeHookQAContext) -> None:
         """Leave QA lifecycle event without sensitive payload."""
+        toolkit_slug = (
+            context.toolkit_slug
+            if isinstance(context, BeforeToolCallHookContext | AfterToolCallHookContext)
+            else None
+        )
+        tool_name = (
+            context.tool_name
+            if isinstance(context, BeforeToolCallHookContext | AfterToolCallHookContext)
+            else None
+        )
+        run_id = (
+            None
+            if isinstance(
+                context, RuntimeHibernateHookContext | RuntimeRestoreHookContext
+            )
+            else context.run_id
+        )
+        reason = (
+            context.reason
+            if isinstance(context, RunEndHookContext | TurnEndHookContext)
+            else None
+        )
         logger.info(
-            "Runtime hook QA lifecycle event: %s",
-            lifecycle,
+            "Runtime hook QA lifecycle event",
             extra={
                 "runtime_hook_qa_lifecycle": lifecycle,
-                "workspace_id": getattr(context, "workspace_id", None),
-                "agent_id": getattr(context, "agent_id", None),
-                "session_id": getattr(context, "session_id", None),
-                "run_id": getattr(context, "run_id", None),
-                "reason": getattr(context, "reason", None),
-                "tool_name": getattr(context, "tool_name", None),
+                "workspace_id": context.workspace_id,
+                "agent_id": context.agent_id,
+                "session_id": context.session_id,
+                "run_id": run_id,
+                "reason": reason,
+                "tool_name": tool_name,
+                "toolkit_slug": toolkit_slug,
             },
         )
 

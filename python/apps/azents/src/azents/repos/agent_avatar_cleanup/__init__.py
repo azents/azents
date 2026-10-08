@@ -3,10 +3,10 @@
 import datetime
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.upload_images import StoredImage
 from azents.rdb.models.agent_avatar_cleanup import RDBAgentAvatarCleanupJob
-from azents.services.uploads.schema import StoredImage
+from azents.rdb.session_capabilities import WriteSession
 
 from .data import AgentAvatarCleanupJob
 
@@ -16,7 +16,7 @@ class AgentAvatarCleanupRepository:
 
     async def claim_due(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         now: datetime.datetime,
         lease_token: str,
@@ -43,7 +43,7 @@ class AgentAvatarCleanupRepository:
             .limit(limit)
             .cte("due_agent_avatar_cleanup_jobs")
         )
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentAvatarCleanupJob)
             .where(
                 RDBAgentAvatarCleanupJob.id.in_(sa.select(candidates.c.id)),
@@ -60,7 +60,7 @@ class AgentAvatarCleanupRepository:
 
     async def mark_retry(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         job_id: str,
         lease_token: str,
@@ -69,7 +69,7 @@ class AgentAvatarCleanupRepository:
         now: datetime.datetime,
     ) -> bool:
         """Release one token-owned job for bounded retry after a failed delete."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentAvatarCleanupJob)
             .where(
                 RDBAgentAvatarCleanupJob.id == job_id,
@@ -88,13 +88,13 @@ class AgentAvatarCleanupRepository:
 
     async def delete_completed(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         job_id: str,
         lease_token: str,
     ) -> bool:
         """Delete one successfully handled, token-owned cleanup job."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.delete(RDBAgentAvatarCleanupJob)
             .where(
                 RDBAgentAvatarCleanupJob.id == job_id,

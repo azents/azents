@@ -1,0 +1,206 @@
+"""Repository-owned terminal Run finalization and direct-parent delivery."""
+
+import dataclasses
+import datetime
+from typing import Annotated
+
+from fastapi import Depends
+
+from azents.core.enums import (
+    AgentRunParentResultDeliveryState,
+    AgentRunStatus,
+    AgentSessionStatus,
+    SessionAgentKind,
+)
+from azents.core.terminal_result import terminal_result_content
+from azents.rdb.deps import get_session_manager
+from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
+from azents.repos.agent_execution import AgentRunRepository
+from azents.repos.agent_mailbox import AgentMailboxRepository
+from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.hierarchy_contention import retry_hierarchy_operation
+from azents.repos.terminal_finalization_data import (
+    TerminalDeliveryDisposition,
+    TerminalFinalizationOutcome,
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class TerminalRunFinalizationRepository:
+    """Finalize terminal Runs and direct-parent mailbox delivery atomically."""
+
+    session_manager: Annotated[
+        SessionManager[WriteSession], Depends(get_session_manager)
+    ]
+    agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
+    agent_session_repository: Annotated[
+        AgentSessionRepository, Depends(AgentSessionRepository)
+    ]
+    agent_mailbox_repository: Annotated[
+        AgentMailboxRepository, Depends(AgentMailboxRepository)
+    ]
+
+    @retry_hierarchy_operation
+    async def finalize_run(
+        self,
+        run_id: str,
+    ) -> TerminalFinalizationOutcome:
+        """Finalize one already-terminal Run in a completed transaction."""
+        async with self.session_manager() as session:
+            return await self.finalize_run_in_session(session, run_id=run_id)
+
+    async def finalize_run_in_session(
+        self,
+        session: WriteSession,
+        *,
+        run_id: str,
+    ) -> TerminalFinalizationOutcome:
+        """Finalize one terminal Run in a composing repository transaction."""
+        await self.lock_run_finalization(session, run_id=run_id)
+        candidate = await self.agent_run_repository.get_by_id(session, run_id)
+        if candidate is None:
+            return TerminalFinalizationOutcome(
+                run_id=run_id,
+                disposition=TerminalDeliveryDisposition.INELIGIBLE,
+                mailbox_item_id=None,
+            )
+        user_stop_requested = await self.agent_session_repository.has_stop_request(
+            session,
+            candidate.session_id,
+        )
+        source = await self.agent_session_repository.get_session_agent_by_session_id(
+            session,
+            candidate.session_id,
+        )
+        if source is None:
+            return TerminalFinalizationOutcome(
+                run_id=run_id,
+                disposition=TerminalDeliveryDisposition.INELIGIBLE,
+                mailbox_item_id=None,
+            )
+        run = await self.agent_run_repository.lock_by_id(session, run_id)
+        if run is None or run.session_id != source.agent_session_id:
+            return TerminalFinalizationOutcome(
+                run_id=run_id,
+                disposition=TerminalDeliveryDisposition.INELIGIBLE,
+                mailbox_item_id=None,
+            )
+        if user_stop_requested and run.status is AgentRunStatus.INTERRUPTED:
+            stopped = await self.agent_run_repository.mark_stopped_for_user_stop(
+                session,
+                run_id,
+                ended_at=datetime.datetime.now(datetime.UTC),
+            )
+            if stopped is None:
+                return TerminalFinalizationOutcome(
+                    run_id=run_id,
+                    disposition=TerminalDeliveryDisposition.INELIGIBLE,
+                    mailbox_item_id=None,
+                )
+            run = stopped
+        if run.parent_result_delivery_state is not None:
+            return TerminalFinalizationOutcome(
+                run_id=run_id,
+                disposition=TerminalDeliveryDisposition.ALREADY_FINALIZED,
+                mailbox_item_id=run.parent_result_mailbox_item_id,
+            )
+        if run.status not in _TERMINAL_RUN_STATUSES:
+            return TerminalFinalizationOutcome(
+                run_id=run_id,
+                disposition=TerminalDeliveryDisposition.INELIGIBLE,
+                mailbox_item_id=None,
+            )
+        if source.kind is not SessionAgentKind.SUBAGENT:
+            return await self._suppress(session, run_id=run_id)
+        if source.parent_session_agent_id is None:
+            return await self._suppress(session, run_id=run_id)
+        parent = await self.agent_session_repository.get_session_agent_by_id(
+            session,
+            source.parent_session_agent_id,
+        )
+        if parent is None:
+            return await self._suppress(session, run_id=run_id)
+        parent_session = (
+            await self.agent_session_repository.fence_active_mailbox_target(
+                session,
+                parent.agent_session_id,
+            )
+        )
+        if (
+            parent_session is None
+            or parent_session.status is not AgentSessionStatus.ACTIVE
+        ):
+            return await self._suppress(session, run_id=run_id)
+        mailbox_item = await self.agent_mailbox_repository.enqueue_terminal_result(
+            session,
+            source=source,
+            target=parent,
+            run=run,
+            content=terminal_result_content(
+                status=run.status,
+                message=run.terminal_result_message,
+            ),
+        )
+        finalized = await self.agent_run_repository.mark_parent_result_enqueued(
+            session,
+            run_id=run.id,
+            mailbox_item_id=mailbox_item.id,
+            enqueued_at=datetime.datetime.now(datetime.UTC),
+        )
+        if (
+            finalized.parent_result_delivery_state
+            is not AgentRunParentResultDeliveryState.ENQUEUED
+        ):
+            raise RuntimeError("Terminal parent result delivery did not finalize")
+        return TerminalFinalizationOutcome(
+            run_id=run.id,
+            disposition=TerminalDeliveryDisposition.ENQUEUED,
+            mailbox_item_id=mailbox_item.id,
+        )
+
+    async def lock_run_finalization(
+        self,
+        session: WriteSession,
+        *,
+        run_id: str,
+    ) -> None:
+        """Lock the exact Run delivery state before dependent terminal mutation."""
+        await self.agent_run_repository.lock_by_id(session, run_id)
+
+    async def finalize_runs_in_session(
+        self,
+        session: WriteSession,
+        run_ids: list[str],
+    ) -> list[TerminalFinalizationOutcome]:
+        """Finalize multiple terminal Runs in one repository transaction."""
+        return [
+            await self.finalize_run_in_session(session, run_id=run_id)
+            for run_id in run_ids
+        ]
+
+    async def _suppress(
+        self,
+        session: WriteSession,
+        *,
+        run_id: str,
+    ) -> TerminalFinalizationOutcome:
+        finalized = await self.agent_run_repository.mark_parent_result_suppressed(
+            session,
+            run_id=run_id,
+            finalized_at=datetime.datetime.now(datetime.UTC),
+        )
+        return TerminalFinalizationOutcome(
+            run_id=run_id,
+            disposition=TerminalDeliveryDisposition.SUPPRESSED,
+            mailbox_item_id=finalized.parent_result_mailbox_item_id,
+        )
+
+
+_TERMINAL_RUN_STATUSES = {
+    AgentRunStatus.COMPLETED,
+    AgentRunStatus.FAILED,
+    AgentRunStatus.STOPPED,
+    AgentRunStatus.INTERRUPTED,
+    AgentRunStatus.CANCELLED,
+}

@@ -4,10 +4,17 @@ spec_type: domain
 domain: user-auth
 owner: "@Hardtack"
 created: 2026-04-20
-updated: 2026-09-16
+updated: 2026-10-08
 tags: [backend, security, api]
 code_paths:
   - python/apps/azents/src/azents/core/auth/**
+  - python/apps/azents/src/azents/core/account_access.py
+  - python/apps/azents/src/azents/core/credential_read.py
+  - python/apps/azents/src/azents/core/signup_token_operations.py
+  - python/apps/azents/src/azents/core/user.py
+  - python/apps/azents/src/azents/core/user_email.py
+  - python/apps/azents/src/azents/core/system_user_role.py
+  - python/apps/azents/src/azents/core/retirement_data.py
   - python/apps/azents/src/azents/core/email/**
   - python/apps/azents/src/azents/api/public/auth/v1/**
   - python/apps/azents/src/azents/api/admin/auth/v1/**
@@ -30,17 +37,22 @@ code_paths:
   - python/apps/azents/src/azents/repos/user/**
   - python/apps/azents/src/azents/repos/user_email/**
   - python/apps/azents/src/azents/repos/auth_operation/**
+  - python/apps/azents/src/azents/repos/account_access.py
+  - python/apps/azents/src/azents/repos/credential_read_operations.py
   - python/apps/azents/src/azents/repos/security_operation/**
   - python/apps/azents/src/azents/repos/session/**
   - python/apps/azents/src/azents/repos/password_login/**
   - python/apps/azents/src/azents/repos/email_verification/**
   - python/apps/azents/src/azents/repos/email_verification_operation/**
   - python/apps/azents/src/azents/repos/signup_token/**
+  - python/apps/azents/src/azents/repos/signup_token_operations.py
   - python/apps/azents/src/azents/repos/password_reset_token/**
   - python/apps/azents/src/azents/repos/system_user_role/**
   - python/apps/azents/src/azents/repos/system_bootstrap/**
   - python/apps/azents/src/azents/repos/owner_lifecycle/**
+  - python/apps/azents/src/azents/repos/owner_lifecycle_operations.py
   - python/apps/azents/src/azents/services/auth/**
+  - python/apps/azents/src/azents/services/account_access.py
   - python/apps/azents/src/azents/services/email_verification/**
   - python/apps/azents/src/azents/services/signup_token/**
   - python/apps/azents/src/azents/services/credential/**
@@ -75,6 +87,11 @@ code_paths:
   - typescript/apps/azents-web/src/app/(app)/api/chat/upload/route.ts
   - typescript/apps/azents-web/src/app/(app)/api/trpc/**
   - typescript/apps/azents-web/src/app/(app)/runtime-web/auth/**
+  - typescript/apps/azents-web/src/features/runtime-web/runtimeWebAuthBootstrap*
+  - typescript/apps/azents-web/src/features/runtime-web/RuntimeWebAuthPage.tsx
+  - typescript/apps/azents-web/src/features/runtime-web/containers/RuntimeWebAuthContainer.tsx
+  - typescript/apps/azents-web/src/features/runtime-web/components/RuntimeWebAuth.tsx
+  - typescript/apps/azents-web/src/features/runtime-web/containers/useRuntimeWebAuthContainer.ts
   - typescript/apps/azents-web/src/shared/lib/auth-cookie-policy*
   - typescript/apps/azents-web/src/shared/lib/cookies.ts
   - typescript/apps/azents-web/src/shared/lib/getInitialAuthState.ts
@@ -82,6 +99,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/lib/locale.ts
   - typescript/apps/azents-web/src/shared/lib/request-origin*
   - typescript/apps/azents-web/src/shared/lib/runtime-web-auth*
+  - typescript/apps/azents-web/src/shared/lib/runtime-web-return-target*
   - typescript/apps/azents-web/src/shared/providers/account-locale-sync.tsx
   - typescript/apps/azents-web/src/shared/providers/locale.tsx
   - typescript/apps/azents-web/src/i18n/request.ts
@@ -113,8 +131,8 @@ api_routes:
   - /system/v1
   - /system-setting/v1
   - /debug/v1
-last_verified_at: 2026-09-16
-spec_version: 22
+last_verified_at: 2026-10-08
+spec_version: 29
 ---
 
 # User & Authentication
@@ -134,7 +152,7 @@ Core characteristics:
 - **Independent Admin Web session** — Admin Web signs in through the Public API but stores separately named HTTP-only cookies and forwards the current user access token to the Admin API.
 - **Explicit existing-install promotion** — Existing users gain initial or recovery access only through the exact-email operator CLI. One invocation may repeat `--email` to grant multiple existing users sequentially; startup and migrations never auto-promote a user.
 - **Credential provider projection** — email/password are summarized by credential provider abstraction and exposed differently for public login projection and authenticated security projection.
-- **SMTP-gated email credential** — email credential is valid login/elevation credential only when SMTP is configured, even if verified primary email exists. When SMTP disabled, other valid credential such as password is needed.
+- **SMTP-gated email credential** — email credential is valid login/elevation credential only when SMTP is configured, even if a verified linked email exists. When SMTP disabled, other valid credential such as password is needed.
 - **Password is one login method** — password login is stored as bcrypt hash. Security setting changes require elevated access token.
 - **Admin-issued password reset** — password recovery is not self-service email flow; it uses admin-issued user_id-bound, hash-only, single-use reset token.
 - **Refresh token rotation + grace** — refresh token has rotation period and grace period to mitigate simultaneous request race.
@@ -286,9 +304,36 @@ Token usable conditions:
 
 Redeem transaction first validates token usability, email match, and existing registration. After all validations that can fail pass, it claims `used_count` with conditional update and creates user, verified primary email, password login, session, and redemption audit row.
 
+Token creation, count/page listing, exact preview lookup, revocation and redemption
+finish in completed repository-owned database groups. Password strength, token
+hashing, the captured application clock, bcrypt and refresh-token generation are
+prepared before redemption enters its database scope. That same pre-bcrypt clock
+drives the existing eligibility, conditional claim and audit timestamps.
+
+Redemption preserves one atomic claim/account/password/authentication-Session/audit
+operation, including the original email and availability checks and failure
+ordering. A post-write password-creation failure abandons the group through the
+existing narrow primitive rollback. No successful query follows that rollback.
+Committed success returns detached User/Session IDs before JWT construction;
+post-commit JWT failure does not replay or compensate accepted database creation.
+
+Preview evaluates the original detached-token predicates with its pre-read clock,
+and revocation retains timestamp capture inside its owned scope. These boundaries
+add no registration, creator-role or enabled-user filter, lock, retry, isolation,
+TTL or public-schema policy.
+
 ### 3.3 Email signup delivery
 
 `POST /auth/v1/signup/email` creates email-bound signup token and sends `/signup?token=...` link by email if email service is configured. If email service is not configured, it fails with `SignupEmailDeliveryUnavailable`. Manual delivery uses admin signup token create API.
+
+Email availability is checked before token creation; rendering and delivery follow
+the completed token operation. Unconfigured email and a false delivery receipt
+raise `SignupEmailDeliveryUnavailable` through the natural server error boundary
+rather than an explicit product 503 mapping. Successful delivery returns the
+typed output; transport exceptions and cancellation propagate unchanged.
+False, raised or cancelled delivery does not revoke or replay the already-created
+token. Ordinary HTTP error handling does not expose transport text or plaintext
+token data. The precreation predicate and postcommit token semantics are unchanged.
 
 ### 3.4 Password login
 
@@ -308,11 +353,30 @@ Main Web post-authentication redirects accept only same-origin path references t
 
 Credential providers produce an internal credential summary with `configured`, `valid`, `can_login`, `can_elevate`, `can_remove`, and optional `unavailable_reason`.
 
-- Email credential is configured when the user has a verified primary email.
+- Email credential is configured when any linked email is verified; it is not
+  restricted to the primary address.
 - Email credential is valid only when email delivery/SMTP is configured.
 - Password credential is configured and valid when a `PasswordLogin` row exists.
 - `GET /auth/v1/login/methods?email=` returns only no-leak public projection: `has_password` for the specific user email and `email_available` for instance-level SMTP availability. Unknown email returns `has_password=false`; `email_available` is not user-specific.
 - `GET /security/v1/auth-methods` and `/elevation-methods` return authenticated diagnostic projection including `configured`, `valid`, capabilities, and `unavailable_reason`.
+
+Credential read groups complete in repository-owned scopes and return ordered
+configuration facts. Application providers build SMTP-dependent summaries and
+public/security/elevation/removal projections only after those scopes close.
+The User group retains its initial User lookup, ordered provider queries and
+redundant Email-provider User lookup; a missing initial User returns absence,
+while late Email-provider absence only marks that Email fact unconfigured.
+Login lookup retains exact supplied-email reads, including any linked address
+for password presence. Existing disabled-user and unverified-address read behavior
+does not gain a new filter.
+
+Provider order and duplicate entries remain significant: public login uses the
+last Password summary, removal projection selects the first matching target, and
+all valid entries count toward the last-valid-credential invariant. Environment
+availability remains a pure application projection, not a database callback or
+SMTP effect. These are read snapshots with no post-provider final mutation or
+new authorization/isolation guarantee; actual password removal keeps its separate
+conditional database authority.
 
 ### 3.6 Admin-issued password reset
 
@@ -329,6 +393,21 @@ Token preview validates hash, expiry, `used_at`, and `revoked_at`. A valid previ
 
 Token redeem validates password policy before consuming the token. On success it atomically marks the token used, creates or updates the target user's password credential, revokes all existing sessions for the user, and writes a `PasswordResetTokenRedemption` audit row. Redeem returns success only; it does not issue login tokens.
 
+Password-reset creation, count/page listing, preview, revocation and redemption
+finish inside completed repository-owned database operations. Listing and preview
+use the native read-only manager. Password policy, hashing, the captured redemption
+clock and token generation occur before mutation scopes; URL and masked-email
+projection occur after repository completion.
+
+Redemption preserves one atomic eligibility/user lookup, conditional single-use
+claim, password create-or-update, authentication-Session revocation and redemption
+audit group. The absent-password branch uses PostgreSQL conflict-update within that
+same transaction rather than a rolled-back insert followed by restarted SQL. A
+failed post-claim password update abandons the whole group before ordinary invalid
+token evidence returns. Exceptions and cancellation roll back all group writes.
+Terminal invalidation follows committed success and cannot compensate or replay
+accepted redemption if publication fails. No login token is issued.
+
 ### 3.7 System roles and Admin API authorization
 
 `system_user_roles` stores instance-wide assignments separately from Workspace membership. The only current role is `system_admin`. Every operational Admin API request decodes the ordinary Azents access token, verifies its live Session/User, and reads the current assignment from PostgreSQL. Role state is not embedded in the JWT, so grant or revoke applies immediately to an already-issued access token.
@@ -339,12 +418,41 @@ Adding System Settings does not alter bootstrap or role lifecycle behavior. Boot
 
 Role revoke and User deletion share one serialized transaction boundary. An operation that would remove the final `system_admin` fails with stable `409 Conflict`, while deleting a non-final administrator cascades that user's assignment.
 
+System-role reads, locked grant/revoke, and account administration finish their
+database work inside completed domain repository operations. Grant returns the
+detached assignment and whether it was created from the same locked operation,
+preserving idempotent assignment metadata and post-commit audit logging. Exact
+normalized-email promotion resolves the User in a completed read, then the grant
+operation rechecks enabled-User authority under the existing shared mutation lock.
+Role mutation and account deletion retain that same database advisory lock.
+
 Private User Session owner lifecycle is coordinated with account and membership changes. Membership
 loss immediately revokes access to owned User Sessions and schedules asynchronous archive after a safe
 stop. Account deletion immediately disables access and revokes live auth Sessions; final User row
 removal waits until owned private User Session purge and private User Memory cleanup complete. Team
 Sessions, Agent Memory, and Workspace-owned Toolkits are not purged by User Session owner cleanup.
 `GET /user/v1/me/system-roles` exposes only the authenticated user's current roles for Main Web navigation. UI visibility is not an authorization control.
+
+Account deletion atomically disables access, removes system roles, revokes all
+authentication Sessions, and creates or retrieves the account-purge job before
+returning to the service. Terminal invalidation and accepted-deletion logging
+follow transaction completion. A missing User remains a successful no-op without
+those effects; an existing already-disabled User still follows the accepted,
+idempotent cleanup and publication path. A failure before commit rolls back the
+whole database group, while publication failure cannot undo committed authority.
+
+Membership/account lifecycle claims, phase/retry/completion writes and User root
+retirement finish in complete repository-owned database operations. Root listings
+and the associated-User Session existence predicate use native read-only scopes.
+Locked retirement preserves Scheduled started-cycle retention, ordered
+stop/participant/archive mutations and purge scheduling. Account purge accelerates
+already archived roots without adding a provider cleanup effect; membership
+archive still permits Unlimited retention. Final account cleanup atomically
+completes the owned job, detaches retained Team-side Chat request, Mailbox,
+ExchangeFile and External Channel references, deletes private User Memory and
+deletes the User. Failure or cancellation rolls back that database group.
+Provider cleanup and Broker signals follow completed retirement; publication
+failure does not compensate committed state.
 
 The operator CLI accepts one or more repeated `--email` options and grants `system_admin`
 sequentially to each normalized exact email. Every successful grant is committed and reported before
@@ -360,6 +468,21 @@ ownership, and environment configuration do not auto-promote users.
 The setup token is either operator-configured or generated with at least 256 bits of entropy. Only its hash is stored. A generated plaintext token is logged once after durable persistence; a configured plaintext token is never logged. While the instance remains empty, a configured token can replace an unconsumed generated token.
 
 Bootstrap serializes concurrent attempts and atomically creates the first User, verified primary email, password login, `system_admin` assignment, normal refresh Session, and consumed marker. It creates no Workspace or Workspace membership. Validation and rolled-back failures do not consume the token; after any User exists, bootstrap cannot reopen.
+
+Setup-token initialization and final bootstrap mutation retain the existing shared
+advisory serialization. Status and preliminary admission finish in native
+read-only repository operations. Preliminary admission preserves the existing
+User-count, active/unconsumed state and setup-token rejection order before password
+policy/hash preparation. The final locked mutation repeats all authority checks
+after preparation, so preliminary admission does not authorize later writes.
+
+Password policy/hash, setup/refresh-token preparation and clock capture occur
+outside active database scopes. The first verified User, password credential,
+system-admin role, authentication Session and setup-token consumption remain one
+atomic database-only group. Detached committed User/Session IDs return before JWT
+construction and success logging; a post-commit JWT failure does not roll back or
+reopen bootstrap. Generated-token logging follows completed initialization only
+when that operation actually persisted a new generated hash.
 
 ### 3.9 Admin Web session
 
@@ -381,6 +504,28 @@ the ordinary Refine/SPA redirect contract instead.
 
 ### 3.10 Runtime Web browser identity
 
+The Main Web authentication connection screen starts its existing same-origin
+JSON POST through a self-contained inline bootstrap in the initial HTML. It does
+not wait for Next.js static assets or React hydration. Client navigation invokes
+the same bootstrap as an enhancement; a document-local guard prevents duplicate
+identity issuance when hydration follows inline execution. The checking, error,
+and retry presentation retains the same Mantine layout and localized copy.
+An authentication document rendered at another origin first performs a full
+navigation to the configured Main Web authentication route; it never submits
+the Main Web authentication request to a Runtime application's origin.
+Successful identity completion uses history-replacing navigation rather than
+adding an authentication-completion entry. Shared-cookie mode replaces the Main
+Web authentication page directly with the service URL. Separate-domain mode
+replaces that page with a one-shot same-origin Blob document that submits the
+existing broker POST during parsing, before load. The intermediate native forms
+retain their existing Origin, cookie and ticket checks; the broker completion
+document replaces its own entry with the service URL. The Blob URL is revoked
+before its form submission, or when replacement navigation throws. Its fixed
+inline script and broker-scoped form-action CSP carry only the initiation ID and
+return target, never a ticket or identity secret. Back/Forward resumes the
+pre-authentication page/service rather than replaying the automatic exchange.
+Explicit user login and activation pages keep their ordinary navigation behavior.
+
 Runtime Web never exposes the Main Web access token, refresh token, Gateway identity,
 broker binding, or one-time ticket to application JavaScript or a URL. Production
 Main Web access and refresh cookies use host-only `__Host-` names, `Secure`,
@@ -399,6 +544,17 @@ Main Web activation route. Authorization is rechecked against the service's curr
 Workspace and Agent ownership before the user may choose 1, 6, or 24 hours and turn
 the service On with its displayed revision. Activation does not create an approval
 request, replace browser identity authority, or put a credential in the URL.
+
+Authentication and Off-service activation preserve the original service path,
+query string (including duplicate keys and percent encoding), and browser fragment.
+The Gateway carries an origin-relative `return_to` through the Main Web route;
+the browser adds the fragment and retains it through any required Main Web login.
+Shared-cookie completion and the separate-domain native POST chain return to that
+target on the service's authorized canonical origin. Activation completion keeps
+the same target when turning the service On. Absolute or protocol-relative
+destinations, backslashes, ASCII whitespace and control characters are rejected
+at the trusted navigation boundaries. Return targets are presentation data, not
+identity or service-access authority, and create no persisted binding state.
 
 Shared-cookie mode mints the identity through the authenticated Public API and writes
 it from a trusted Main Web response to the configured parent cookie domain.
@@ -481,6 +637,12 @@ stateDiagram-v2
 - Logout commits Session revocation before publishing Runtime Terminal
   invalidation. Publication failure does not reopen the completed database
   transaction.
+- Access-token subject admission reads the enabled User and the exact matching,
+  unrevoked, unexpired authentication Session in one completed repository read.
+  Required authentication retains the existing `401`/Bearer challenge and optional
+  authentication returns no identity for invalid subjects. JWT decoding, HTTP
+  errors, elevation context, and permission projection remain outside repository
+  operations.
 
 ## 5. Password and Elevation
 
@@ -501,7 +663,11 @@ transactions. Password setup uses an atomic unique-user upsert. Password removal
 rechecks verified email presence in its final DELETE statement, using the email
 delivery availability supplied before the operation; an earlier eligible
 credential projection alone cannot authorize deletion. Credential projection and
-UserEmail administration retain their separate existing boundaries.
+UserEmail administration retain their separate policy boundaries. User CRUD,
+primary-email creation, and UserEmail administration now call completed
+repository operations without receiving or passing live database sessions.
+Count/page reads remain grouped, and locale patch omission, email uniqueness,
+and existing foreign-key failure semantics are unchanged.
 
 - `[registration-default-signup-token]` — default new signup is signup token redeem.
 - `[legacy-open-registration-explicit]` — email OTP new user auto-creation is allowed only when `registration_mode=open`.
@@ -521,6 +687,14 @@ UserEmail administration retain their separate existing boundaries.
 - `[admin-bootstrap-secret-hash-only]` — configured setup-token plaintext is never stored or logged; generated plaintext is emitted only once after hash persistence.
 - `[system-admin-live-lookup]` — Admin authorization reads the persisted role for every protected request rather than trusting JWT role claims.
 - `[system-admin-final-assignment]` — role revoke and User deletion cannot leave the instance with zero system administrators.
+
+Ordinary role reads and grants do not acquire the global administrator-removal
+advisory gate. Actual role grant holds only exact active-User eligibility through
+commit; disable/revocation cannot leave a newly granted role after its sweep.
+Final-admin counting includes enabled Users only, so a disabled legacy assignment
+cannot authorize removal of the last enabled administrator. Actual Session
+issuance likewise retains its exact active-User mutation fence; ordinary User and
+Session lookup does not inherit it.
 - `[system-admin-distinct-from-workspace]` — OWNER/MANAGER Workspace roles do not grant Admin API access.
 - `[system-admin-existing-install-cli]` — users-first installations and recovery require explicit exact-email CLI grant; no automatic promotion path exists.
 - `[system-settings-existing-admin-boundary]` — System Settings uses the same live persisted `system_admin` dependency and does not change bootstrap, promotion, revoke, or final-admin behavior.
@@ -546,7 +720,10 @@ UserEmail administration retain their separate existing boundaries.
 - `POST /token/refresh` → `{ access_token, refresh_token, expires_in }`
 - `POST /logout` → 204
 - `POST /login/password` → `{ access_token, refresh_token, expires_in }`
-- `GET /login/methods?email=` → `{ has_password, email_available }`
+- `GET /login/methods` → `{ has_password, email_available }`. Optional `email`
+  adds the existing email-specific password lookup. Without `email`, it returns
+  instance email-delivery availability with `has_password=false` and performs no
+  user lookup.
 - `POST /password-reset-tokens/preview` → `{ valid, email, expires_at }` (`email` is a masked current email hint)
 - `POST /password-reset-tokens/redeem` → `{ success }`
 
@@ -590,7 +767,13 @@ All other Admin API operations, including `/auth/v1` token operations, `/system-
 ## 8. Frontend Routes
 
 - `/` — has no presentation surface. Requests with Main Web authentication cookies redirect to `/workspaces`; requests without them redirect to `/login`. Protected routes retain authoritative downstream session checks.
-- `/login` — existing login page. Existing users continue with password or email OTP. It exposes a signup-link request action only when registration policy and email delivery allow it.
+- `/login` — server rendering checks instance email-delivery availability before
+  displaying the form. When delivery is disabled, the first screen contains editable
+  email and password inputs and submits directly to password login, without code
+  delivery guidance or an email-only intermediate step. When delivery is enabled,
+  existing users continue with the existing email-first password or email OTP flow.
+  It exposes a signup-link request action only when registration policy and email
+  delivery allow it. Password login retains cookie issuance and safe `next` navigation.
 - `/signup?token=...` — previews a signup token, shows a masked email hint, and redeems it with user-entered email and password.
 - `/reset-password?token=...` — previews an admin-issued reset token and submits a new password. Success does not auto-login; user signs in separately.
 Main Web has no setup route. It shows the configured Admin Web URL only when the authenticated Public API self-role projection includes `system_admin`; it never imports or calls the Admin API client.
@@ -601,6 +784,42 @@ Admin-issued signup/password-reset token management and other instance-wide oper
 
 ## 9. Changelog
 
+- **2026-10-08** — Replaced transient Runtime Web authentication history entries
+  while preserving the native separate-domain exchange and original return URL.
+
+- **2026-10-08** — Preserved Runtime Web service path, query and fragment through
+  authentication, Main Web login and Off-service activation without changing
+  the authentication screen design or identity authority.
+
+- **2026-10-08** — Removed application-bundle hydration from Runtime Web
+  authentication bootstrap while preserving the existing screen and identity
+  exchange protocol.
+
+- **2026-10-07** — Added instance login availability lookup without an email and
+  single-screen email/password login when email delivery is disabled.
+
+- **2026-10-05** (v29) — Integrated completed owner-lifecycle transaction ownership
+  with password reset and first-admin bootstrap. Preserved root retirement,
+  atomic account finalization, single-use authority rechecks and post-commit
+  provider/Broker effects.
+
+- **2026-10-05** (v28) — Completed password-reset and first-admin bootstrap
+  repository operations, retaining single-use atomic mutation groups and final
+  authority revalidation with hash preparation before SQL and effects after commit.
+
+
+- **2026-10-03** (v25) — Completed all five SignupToken database groups in domain
+  repository operations. Preserved prepared-clock/crypto ordering, atomic
+  claim/account/password/Session/audit behavior, public errors and post-commit
+  JWT/email failure retention; shared domain failures use canonical pure definitions.
+- **2026-10-02** (v24) — Completed Credential grouped-read transaction ownership
+  and session-free provider projection while preserving query/order/duplicate
+  behavior, public/admission contracts and separate password deletion authority.
+  Clarified existing any-verified-linked-email configuration semantics.
+- **2026-10-02** (v23) — Moved User, UserEmail, system-role and authentication
+  admission lifetimes into completed repository operations. Preserved shared
+  role/deletion locking, final-admin protection, atomic access-disable and purge
+  scheduling, post-commit effects, and existing authentication/API behavior.
 - **2026-09-16** (v22) — Removed the public product-marketing landing surface and
   made the Main Web root redirect unauthenticated requests to `/login` and
   authenticated requests to `/workspaces`.

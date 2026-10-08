@@ -6,7 +6,6 @@ from typing import Literal, assert_never
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.discord_external_channel_presentation import (
     render_discord_persisted_progress,
@@ -27,7 +26,16 @@ from azents.core.enums import (
     ExternalChannelWorkStatus,
     ExternalChannelWorkTaskStatus,
 )
+from azents.core.external_channel_effect_intent import (
+    ProviderReplyPart,
+    RetainedDiscordDeliveryIdentity,
+)
 from azents.core.external_channel_file import ExternalChannelOutboundFileManifest
+from azents.core.external_channel_limits import (
+    DISCORD_CREATE_MESSAGE_MAX_REQUEST_BYTES,
+    DISCORD_DEFAULT_MAX_FILE_BYTES,
+    SLACK_MARKDOWN_TEXT_MAX_LENGTH,
+)
 from azents.core.external_channel_progress import ExternalChannelDesiredProgress
 from azents.core.external_channel_provider import (
     decode_provider_connection_configuration,
@@ -55,6 +63,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelSetupClaim,
 )
 from azents.rdb.models.workspace import RDBWorkspace
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.external_channel.work_data import (
     AwaitingInputSettlement,
     ChannelActionEffectPlan,
@@ -72,13 +81,6 @@ from azents.repos.external_channel.work_state import (
 )
 from azents.repos.scheduled_task.lifecycle import (
     ScheduledTaskLifecycleRepository,
-)
-from azents.services.external_channel.discord_delivery import (
-    DISCORD_CREATE_MESSAGE_MAX_REQUEST_BYTES,
-    DISCORD_DEFAULT_MAX_FILE_BYTES,
-)
-from azents.services.external_channel.slack_events import (
-    SLACK_MARKDOWN_TEXT_MAX_LENGTH,
 )
 
 INITIAL_PROGRESS_CLAIM_ATTEMPTS = 3
@@ -101,7 +103,7 @@ class ExternalChannelWorkRepository:
 
     async def prepare_access_control_create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         access_request_id: str,
         connection_id: str,
@@ -112,7 +114,7 @@ class ExternalChannelWorkRepository:
         operation_seed: str,
     ) -> ProviderEffectPlan | None:
         """Claim one access-control create as conservatively unknown before I/O."""
-        request = await session.scalar(
+        request = await session.write_session.scalar(
             sa.select(RDBExternalChannelAccessRequest)
             .where(
                 RDBExternalChannelAccessRequest.id == access_request_id,
@@ -128,7 +130,7 @@ class ExternalChannelWorkRepository:
         ):
             return None
         request.control_projection_status = ExternalChannelWorkProjectionStatus.UNKNOWN
-        await session.flush()
+        await session.write_session.flush()
         return await self.prepare_direct_control(
             session,
             connection_id=connection_id,
@@ -142,7 +144,7 @@ class ExternalChannelWorkRepository:
 
     async def prepare_direct_control(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         connection_id: str,
         resource_id: str | None,
@@ -166,7 +168,7 @@ class ExternalChannelWorkRepository:
                     )
                 )
             )
-        connection = await session.scalar(
+        connection = await session.read_session.scalar(
             sa.select(RDBExternalChannelConnection).where(*connection_conditions)
         )
         if connection is None:
@@ -174,7 +176,7 @@ class ExternalChannelWorkRepository:
         resource = (
             None
             if resource_id is None
-            else await session.scalar(
+            else await session.read_session.scalar(
                 sa.select(RDBExternalChannelResource).where(
                     RDBExternalChannelResource.id == resource_id,
                     RDBExternalChannelResource.connection_id == connection.id,
@@ -188,7 +190,7 @@ class ExternalChannelWorkRepository:
         route = (
             None
             if route_id is None
-            else await session.scalar(
+            else await session.read_session.scalar(
                 sa.select(RDBExternalChannelAgentRoute).where(
                     RDBExternalChannelAgentRoute.id == route_id,
                     RDBExternalChannelAgentRoute.connection_id == connection.id,
@@ -209,7 +211,7 @@ class ExternalChannelWorkRepository:
         binding = (
             None
             if binding_id is None
-            else await session.scalar(
+            else await session.read_session.scalar(
                 sa.select(RDBExternalChannelBinding).where(
                     RDBExternalChannelBinding.id == binding_id,
                     RDBExternalChannelBinding.resource_id == resource_id,
@@ -221,7 +223,7 @@ class ExternalChannelWorkRepository:
             return None
         if binding is not None:
             if route is None:
-                route = await session.scalar(
+                route = await session.read_session.scalar(
                     sa.select(RDBExternalChannelAgentRoute).where(
                         RDBExternalChannelAgentRoute.id == binding.route_id,
                         RDBExternalChannelAgentRoute.connection_id == connection.id,
@@ -235,7 +237,7 @@ class ExternalChannelWorkRepository:
         agent = (
             None
             if route is None or route.agent_id is None
-            else await session.scalar(
+            else await session.read_session.scalar(
                 sa.select(RDBAgent).where(
                     RDBAgent.id == route.agent_id,
                     RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
@@ -245,11 +247,11 @@ class ExternalChannelWorkRepository:
         workspace = (
             None
             if agent is None
-            else await session.get(RDBWorkspace, agent.workspace_id)
+            else await session.read_session.get(RDBWorkspace, agent.workspace_id)
         )
         agent_session = None
         if binding is not None:
-            agent_session = await session.scalar(
+            agent_session = await session.read_session.scalar(
                 sa.select(RDBAgentSession).where(
                     RDBAgentSession.id == binding.agent_session_id,
                     RDBAgentSession.status == AgentSessionStatus.ACTIVE,
@@ -284,33 +286,34 @@ class ExternalChannelWorkRepository:
 
     async def revalidate_direct_control(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         plan: ProviderEffectPlan,
     ) -> ProviderEffectPlan | None:
         """Refresh one process-local control against current provider authority."""
         target = plan.target
+        intent = target.decode_intent()
         route_id: str | None = None
         if (
             target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
-            and target.request_payload.get("control_kind") == "setup_required"
+            and intent.control_kind == "setup_required"
         ):
-            setup_claim_id = target.request_payload.get("setup_claim_id")
-            if not isinstance(setup_claim_id, str):
+            setup_claim_id = intent.setup_claim_id
+            if setup_claim_id is None:
                 return None
-            claim = await session.get(
+            claim = await session.read_session.get(
                 RDBExternalChannelSetupClaim,
                 setup_claim_id,
             )
             if claim is None or claim.route_id is None:
                 return None
             route_id = claim.route_id
-        access_request_id = target.request_payload.get("access_request_id")
+        access_request_id = intent.access_request_id
         if (
             target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
-            and isinstance(access_request_id, str)
+            and access_request_id is not None
         ):
-            request = await session.scalar(
+            request = await session.read_session.scalar(
                 sa.select(RDBExternalChannelAccessRequest).where(
                     RDBExternalChannelAccessRequest.id == access_request_id,
                     RDBExternalChannelAccessRequest.status
@@ -337,7 +340,7 @@ class ExternalChannelWorkRepository:
 
     async def prepare_binding_effect(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -349,7 +352,7 @@ class ExternalChannelWorkRepository:
     ) -> ProviderEffectPlan | None:
         """Prepare one process-local effect for an exact current Binding."""
         row = (
-            await session.execute(
+            await session.write_session.execute(
                 sa.select(
                     RDBExternalChannelBinding,
                     RDBExternalChannelResource,
@@ -426,7 +429,7 @@ class ExternalChannelWorkRepository:
 
     async def revalidate_binding_effect(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         plan: ProviderEffectPlan,
     ) -> ProviderEffectPlan | None:
@@ -450,7 +453,7 @@ class ExternalChannelWorkRepository:
 
     async def prepare_binding_reply_effects(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         session_id: str,
@@ -463,7 +466,7 @@ class ExternalChannelWorkRepository:
     ) -> tuple[ProviderEffectPlan, ...]:
         """Prepare ordered reply parts for one exact current Binding."""
         row = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(
                     RDBExternalChannelBinding,
                     RDBExternalChannelResource,
@@ -525,17 +528,16 @@ class ExternalChannelWorkRepository:
             slack_text_limit=SLACK_MARKDOWN_TEXT_MAX_LENGTH - 512,
         )
         plans: list[ProviderEffectPlan] = []
-        for ordinal, raw_payload in enumerate(payloads):
-            payload = dict(raw_payload)
+        for ordinal, reply_part in enumerate(payloads):
+            payload = dict(reply_part.payload)
             if connection.provider is ExternalChannelProvider.SLACK:
                 payload["reply_broadcast"] = (
-                    slack_reply_broadcast
-                    and payload.get("conversation_scope") == "thread"
+                    slack_reply_broadcast and reply_part.conversation_scope == "thread"
                 )
             else:
                 payload["forward_to_parent"] = (
                     discord_forward_to_parent
-                    and payload.get("conversation_scope") == "thread"
+                    and reply_part.conversation_scope == "thread"
                 )
             plan = await self.prepare_direct_control(
                 session,
@@ -554,7 +556,7 @@ class ExternalChannelWorkRepository:
 
     async def revalidate_terminal_control(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         plan: ProviderEffectPlan,
     ) -> ProviderEffectPlan | None:
@@ -563,7 +565,7 @@ class ExternalChannelWorkRepository:
         if target.binding_id is None or target.resource_id is None:
             return None
         row = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(
                     RDBExternalChannelBinding,
                     RDBExternalChannelResource,
@@ -603,7 +605,7 @@ class ExternalChannelWorkRepository:
 
     async def prepare_initial_progress(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -612,7 +614,7 @@ class ExternalChannelWorkRepository:
     ) -> ProviderEffectPlan | None:
         """Plan the first current progress projection after canonical admission."""
         row = (
-            await session.execute(
+            await session.write_session.execute(
                 sa.select(
                     RDBExternalChannelBinding,
                     RDBExternalChannelResource,
@@ -773,19 +775,17 @@ class ExternalChannelWorkRepository:
 
     async def prepare_access_control_delete(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         access_request_id: str,
     ) -> ProviderEffectPlan | None:
         """Capture the current access-control message for one direct delete."""
-        request = await session.scalar(
-            sa.select(RDBExternalChannelAccessRequest)
-            .where(
+        request = await session.write_session.scalar(
+            sa.select(RDBExternalChannelAccessRequest).where(
                 RDBExternalChannelAccessRequest.id == access_request_id,
                 RDBExternalChannelAccessRequest.status
                 != ExternalChannelAccessRequestStatus.PENDING,
             )
-            .with_for_update()
         )
         if (
             request is None
@@ -794,20 +794,24 @@ class ExternalChannelWorkRepository:
             is not ExternalChannelWorkProjectionStatus.PRESENT
         ):
             return None
-        route = await session.get(RDBExternalChannelAgentRoute, request.route_id)
-        resource = await session.get(RDBExternalChannelResource, request.resource_id)
+        route = await session.write_session.get(
+            RDBExternalChannelAgentRoute, request.route_id
+        )
+        resource = await session.write_session.get(
+            RDBExternalChannelResource, request.resource_id
+        )
         if (
             route is None
             or resource is None
             or resource.connection_id != route.connection_id
         ):
             return None
-        connection = await session.get(
+        connection = await session.write_session.get(
             RDBExternalChannelConnection, route.connection_id
         )
         if connection is None:
             return None
-        binding = await session.scalar(
+        binding = await session.write_session.scalar(
             sa.select(RDBExternalChannelBinding).where(
                 RDBExternalChannelBinding.resource_id == resource.id,
                 RDBExternalChannelBinding.route_id == route.id,
@@ -833,16 +837,17 @@ class ExternalChannelWorkRepository:
 
     async def apply_access_control_outcome(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         plan: ProviderEffectPlan,
         outcome: ProviderMutationOutcome,
     ) -> bool:
         """Compare-and-set current access-control provider projection state."""
-        access_request_id = plan.target.request_payload.get("access_request_id")
-        if not isinstance(access_request_id, str):
+        intent = plan.target.decode_intent()
+        access_request_id = intent.access_request_id
+        if access_request_id is None:
             return False
-        request = await session.scalar(
+        request = await session.write_session.scalar(
             sa.select(RDBExternalChannelAccessRequest)
             .where(RDBExternalChannelAccessRequest.id == access_request_id)
             .with_for_update()
@@ -850,9 +855,9 @@ class ExternalChannelWorkRepository:
         if request is None:
             return False
         if plan.target.operation is ExternalChannelDeliveryOperation.PROGRESS_DELETE:
-            expected_key = plan.target.request_payload.get("provider_message_key")
+            expected_key = intent.provider_message_key
             if (
-                not isinstance(expected_key, str)
+                expected_key is None
                 or request.control_provider_message_key != expected_key
             ):
                 return False
@@ -890,12 +895,12 @@ class ExternalChannelWorkRepository:
                 )
         else:
             return False
-        await session.flush()
+        await session.write_session.flush()
         return True
 
     async def ensure_active_work(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -975,7 +980,7 @@ class ExternalChannelWorkRepository:
 
     async def resume_from_human_input(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -1008,13 +1013,13 @@ class ExternalChannelWorkRepository:
 
     async def has_active_binding(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         agent_id: str,
     ) -> bool:
         """Return whether the root Session can receive Channel Actions."""
-        exists = await session.scalar(
+        exists = await session.read_session.scalar(
             sa.select(
                 sa.exists().where(
                     RDBExternalChannelBinding.agent_session_id == session_id,
@@ -1036,7 +1041,7 @@ class ExternalChannelWorkRepository:
 
     async def get_active_file_access_target(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         agent_id: str,
@@ -1044,7 +1049,7 @@ class ExternalChannelWorkRepository:
     ) -> ExternalChannelFileAccessTarget | None:
         """Resolve one active binding and its current provider credential boundary."""
         row = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(
                     RDBExternalChannelBinding,
                     RDBExternalChannelConnection,
@@ -1104,14 +1109,14 @@ class ExternalChannelWorkRepository:
 
     async def list_active_work(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         agent_id: str,
     ) -> list[ChannelWorkSnapshot]:
         """List active binding work in stable binding order."""
         rows = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(
                     RDBExternalChannelBinding,
                     RDBExternalChannelResource,
@@ -1171,7 +1176,7 @@ class ExternalChannelWorkRepository:
 
     async def commit_direct_action(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         agent_id: str,
@@ -1204,18 +1209,16 @@ class ExternalChannelWorkRepository:
         if files and message is None:
             raise ValueError("Channel file publication requires a message.")
 
-        session_row = await session.scalar(
-            sa.select(RDBAgentSession)
-            .where(
+        session_row = await session.write_session.scalar(
+            sa.select(RDBAgentSession).where(
                 RDBAgentSession.id == session_id,
                 RDBAgentSession.agent_id == agent_id,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
             )
-            .with_for_update()
         )
         if session_row is None:
             raise ValueError("AgentSession is not active.")
-        agent = await session.scalar(
+        agent = await session.write_session.scalar(
             sa.select(RDBAgent).where(
                 RDBAgent.id == agent_id,
                 RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
@@ -1223,7 +1226,7 @@ class ExternalChannelWorkRepository:
         )
         if agent is None:
             raise ValueError("Agent is not active.")
-        binding = await session.scalar(
+        binding = await session.write_session.scalar(
             sa.select(RDBExternalChannelBinding)
             .where(
                 RDBExternalChannelBinding.id == binding_id,
@@ -1234,7 +1237,7 @@ class ExternalChannelWorkRepository:
         )
         if binding is None:
             raise ValueError("External Channel binding is not active.")
-        route = await session.scalar(
+        route = await session.write_session.scalar(
             sa.select(RDBExternalChannelAgentRoute).where(
                 RDBExternalChannelAgentRoute.id == binding.route_id,
                 RDBExternalChannelAgentRoute.agent_id == agent_id,
@@ -1242,7 +1245,7 @@ class ExternalChannelWorkRepository:
         )
         if route is None:
             raise ValueError("External Channel route is not active.")
-        connection = await session.scalar(
+        connection = await session.write_session.scalar(
             sa.select(RDBExternalChannelConnection).where(
                 RDBExternalChannelConnection.id == route.connection_id,
             )
@@ -1250,7 +1253,7 @@ class ExternalChannelWorkRepository:
         if connection is None:
             raise ValueError("External Channel connection is unavailable.")
         _validate_message_length(connection.provider, message)
-        resource = await session.scalar(
+        resource = await session.write_session.scalar(
             sa.select(RDBExternalChannelResource).where(
                 RDBExternalChannelResource.id == binding.resource_id,
                 RDBExternalChannelResource.connection_id == connection.id,
@@ -1260,7 +1263,7 @@ class ExternalChannelWorkRepository:
         )
         if resource is None:
             raise ValueError("External Channel resource is unavailable.")
-        workspace = await session.get(RDBWorkspace, agent.workspace_id)
+        workspace = await session.write_session.get(RDBWorkspace, agent.workspace_id)
 
         def new_work(
             tracker_visibility: Literal["hidden", "visible"],
@@ -1355,16 +1358,16 @@ class ExternalChannelWorkRepository:
                 )
                 return effect_index
 
-            move_tracker_before_reply = (
+            recreate_discord_tracker = (
                 connection.provider is ExternalChannelProvider.DISCORD
                 and mode
                 in {
                     ExternalChannelActionMode.CONTINUE,
                     ExternalChannelActionMode.REQUEST_INPUT,
                 }
-                and message is not None
                 and requested_tasks is not None
-                and requested_tasks != work.tasks
+                and [task.title for task in requested_tasks]
+                != [task.title for task in work.tasks]
             )
             reply_parts = (
                 _reply_parts(
@@ -1378,17 +1381,17 @@ class ExternalChannelWorkRepository:
             )
 
             def append_reply_effects() -> None:
-                for part, payload in enumerate(reply_parts):
+                for part, reply_part in enumerate(reply_parts):
                     append_effect(
                         ExternalChannelDeliveryOperation.REPLY,
-                        payload,
+                        reply_part.payload,
                         part=part,
                         expected_desired_progress_revision=None,
                         dependencies=(),
                         projection_host_kind=None,
                     )
 
-            if message is not None and not move_tracker_before_reply:
+            if message is not None and not recreate_discord_tracker:
                 append_reply_effects()
 
             projection_parts = {
@@ -1464,7 +1467,6 @@ class ExternalChannelWorkRepository:
                         desired_pages = tuple(
                             (page.text, page.embeds) for page in rendered_discord.pages
                         )
-                    recreate_discord_tracker = move_tracker_before_reply
                     for part_ordinal, (text, presentation) in enumerate(desired_pages):
                         part = projection_parts.pop(part_ordinal, None)
                         if recreate_discord_tracker:
@@ -1647,7 +1649,7 @@ class ExternalChannelWorkRepository:
                             dependencies=(),
                             projection_host_kind=part.host_kind,
                         )
-            if move_tracker_before_reply:
+            if recreate_discord_tracker:
                 append_reply_effects()
             result = ChannelActionTransition(
                 binding_id=binding.id,
@@ -1670,7 +1672,7 @@ class ExternalChannelWorkRepository:
 
     async def settle_awaiting_input(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         agent_id: str,
@@ -1724,7 +1726,7 @@ class ExternalChannelWorkRepository:
 
     async def revalidate_direct_effect(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         effect: ChannelActionEffectPlan,
     ) -> ProviderEffectPlan | None:
@@ -1733,7 +1735,7 @@ class ExternalChannelWorkRepository:
         if target.binding_id is None or target.resource_id is None:
             return None
         row = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(
                     RDBExternalChannelBinding,
                     RDBExternalChannelResource,
@@ -1822,7 +1824,7 @@ class ExternalChannelWorkRepository:
 
     async def apply_direct_effect_outcome(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         effect: ChannelActionEffectPlan,
         outcome: ProviderMutationOutcome,
@@ -1832,6 +1834,7 @@ class ExternalChannelWorkRepository:
         if expected_revision is None:
             return True
         target = effect.provider.target
+        intent = target.decode_intent()
         if (
             target.agent_id is None
             or target.agent_session_id is None
@@ -1863,9 +1866,7 @@ class ExternalChannelWorkRepository:
             host_kind = effect.projection_host_kind
             if host_kind is None:
                 raise AssertionError("Progress effects require a Tracker host kind.")
-            target_message_key = target.request_payload.get("provider_message_key")
-            if not isinstance(target_message_key, str):
-                target_message_key = None
+            target_message_key = intent.provider_message_key
             if part is None:
                 part = ChannelWorkProjectionPartState(
                     part_ordinal=effect.part,
@@ -1931,14 +1932,14 @@ class ExternalChannelWorkRepository:
 
     async def record_discord_delivery_channel(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         resource_id: str,
         delivery_channel_id: str,
         initial_thread_title: str | None,
     ) -> str | None:
         """Retain one provisioned Discord thread for all later provider effects."""
-        resource = await session.get(
+        resource = await session.write_session.get(
             RDBExternalChannelResource,
             resource_id,
             with_for_update=True,
@@ -1946,18 +1947,18 @@ class ExternalChannelWorkRepository:
         if resource is None:
             return None
         labels = dict(resource.labels or {})
-        if labels.get("provider") != ExternalChannelProvider.DISCORD.value:
+        retained = RetainedDiscordDeliveryIdentity.decode(labels)
+        if not retained.discord:
             return None
-        existing = labels.get("delivery_channel_id")
-        if isinstance(existing, str) and existing:
-            return existing
+        if retained.delivery_channel_id is not None:
+            return retained.delivery_channel_id
         labels["thread_channel_id"] = delivery_channel_id
         labels["delivery_channel_id"] = delivery_channel_id
         labels["thread_id"] = delivery_channel_id
         if initial_thread_title is not None:
             labels[DISCORD_INITIAL_THREAD_TITLE_LABEL] = initial_thread_title
         resource.labels = labels
-        await session.flush()
+        await session.write_session.flush()
         return delivery_channel_id
 
 
@@ -2064,6 +2065,27 @@ def _slack_resource_thread_ts(
 
 
 def _reply_parts(
+    *,
+    provider: ExternalChannelProvider,
+    labels: dict[str, object] | None,
+    text: str,
+    files: Sequence[ExternalChannelOutboundFileManifest],
+    slack_text_limit: int | None = None,
+) -> tuple[ProviderReplyPart, ...]:
+    """Decode internally produced reply scopes before application decisions."""
+    return tuple(
+        ProviderReplyPart.decode(payload)
+        for payload in _raw_reply_parts(
+            provider=provider,
+            labels=labels,
+            text=text,
+            files=files,
+            slack_text_limit=slack_text_limit,
+        )
+    )
+
+
+def _raw_reply_parts(
     *,
     provider: ExternalChannelProvider,
     labels: dict[str, object] | None,
@@ -2265,7 +2287,7 @@ def projection_state(
 
 
 async def terminate_binding_with_plans(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     binding: RDBExternalChannelBinding,
     resource: RDBExternalChannelResource,
@@ -2278,18 +2300,26 @@ async def terminate_binding_with_plans(
     """Commit one binding termination and capture bounded cleanup plans."""
     if binding.disconnected_at is not None:
         return ()
-    route = await session.get(RDBExternalChannelAgentRoute, binding.route_id)
+    route = await session.write_session.get(
+        RDBExternalChannelAgentRoute, binding.route_id
+    )
     if route is None:
         raise RuntimeError("External Channel binding route disappeared.")
-    connection = await session.get(RDBExternalChannelConnection, route.connection_id)
-    agent_session = await session.get(RDBAgentSession, binding.agent_session_id)
+    connection = await session.write_session.get(
+        RDBExternalChannelConnection, route.connection_id
+    )
+    agent_session = await session.write_session.get(
+        RDBAgentSession, binding.agent_session_id
+    )
     agent = (
         None
         if agent_session is None
-        else await session.get(RDBAgent, agent_session.agent_id)
+        else await session.write_session.get(RDBAgent, agent_session.agent_id)
     )
     workspace = (
-        None if agent is None else await session.get(RDBWorkspace, agent.workspace_id)
+        None
+        if agent is None
+        else await session.write_session.get(RDBWorkspace, agent.workspace_id)
     )
     if connection is None or agent_session is None or agent is None:
         raise RuntimeError("External Channel binding authority disappeared.")
@@ -2422,5 +2452,5 @@ async def terminate_binding_with_plans(
         plans.extend(mutation.result)
     binding.disconnected_at = now
     binding.disconnect_reason = reason
-    await session.flush()
+    await session.write_session.flush()
     return tuple(plans)

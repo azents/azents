@@ -4,7 +4,8 @@ import datetime
 
 from azcommon.datetime import tznow
 from azcommon.result import Failure, Success
-from sqlalchemy.ext.asyncio import AsyncSession
+
+from azents.rdb.session_capabilities import WriteSession
 
 from . import EmailVerificationRepository
 from .data import AlreadyVerified, EmailVerificationCreate, NotFound
@@ -23,7 +24,7 @@ def _past(minutes: int = 10) -> datetime.datetime:
 class TestEmailVerificationRepository:
     """EmailVerificationRepository tests."""
 
-    async def test_create(self, rdb_session: AsyncSession) -> None:
+    async def test_create(self, rdb_session: WriteSession) -> None:
         """Create verification record."""
         # Given: prepare create data
         repo = EmailVerificationRepository()
@@ -47,7 +48,7 @@ class TestEmailVerificationRepository:
         assert verification.verified_at is None
         assert verification.created_at
 
-    async def test_get(self, rdb_session: AsyncSession) -> None:
+    async def test_get(self, rdb_session: WriteSession) -> None:
         """Fetch verification record by ID."""
         # Given: create verification record
         repo = EmailVerificationRepository()
@@ -69,7 +70,7 @@ class TestEmailVerificationRepository:
         assert verification.id == created.id
         assert verification.email == "ev-get@example.com"
 
-    async def test_get_not_found(self, rdb_session: AsyncSession) -> None:
+    async def test_get_not_found(self, rdb_session: WriteSession) -> None:
         """Return None when fetching by nonexistent ID."""
         # Given: nonexistent ID
         repo = EmailVerificationRepository()
@@ -80,7 +81,7 @@ class TestEmailVerificationRepository:
         # Then: None
         assert verification is None
 
-    async def test_get_by_email_and_csrf(self, rdb_session: AsyncSession) -> None:
+    async def test_get_by_email_and_csrf(self, rdb_session: WriteSession) -> None:
         """Fetch by email + CSRF token."""
         # Given: create verification record
         repo = EmailVerificationRepository()
@@ -104,7 +105,7 @@ class TestEmailVerificationRepository:
         assert verification.id == created.id
 
     async def test_get_by_email_and_csrf_not_found(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Return None for nonexistent email + CSRF combination."""
         # Given: nonexistent combination
@@ -118,7 +119,7 @@ class TestEmailVerificationRepository:
         # Then: None
         assert verification is None
 
-    async def test_mark_verified(self, rdb_session: AsyncSession) -> None:
+    async def test_mark_verified(self, rdb_session: WriteSession) -> None:
         """Mark verification complete."""
         # Given: create unverified record
         repo = EmailVerificationRepository()
@@ -139,7 +140,7 @@ class TestEmailVerificationRepository:
         assert isinstance(result, Success)
         assert result.value.verified_at is not None
 
-    async def test_mark_verified_not_found(self, rdb_session: AsyncSession) -> None:
+    async def test_mark_verified_not_found(self, rdb_session: WriteSession) -> None:
         """Return NotFound when verifying nonexistent record."""
         # Given: nonexistent ID
         repo = EmailVerificationRepository()
@@ -152,7 +153,7 @@ class TestEmailVerificationRepository:
         assert isinstance(result.error, NotFound)
 
     async def test_mark_verified_already_verified(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Return AlreadyVerified when re-verifying already verified record."""
         # Given: already verified record
@@ -175,7 +176,7 @@ class TestEmailVerificationRepository:
         assert isinstance(result, Failure)
         assert isinstance(result.error, AlreadyVerified)
 
-    async def test_delete_stale_by_email(self, rdb_session: AsyncSession) -> None:
+    async def test_delete_stale_by_email(self, rdb_session: WriteSession) -> None:
         """Delete stale verification records."""
         # Given: create expired record and valid record
         repo = EmailVerificationRepository()
@@ -211,7 +212,7 @@ class TestEmailVerificationRepository:
         assert remaining is not None
 
     async def test_delete_stale_removes_verified(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Verified record is also deleted as stale."""
         # Given: verified record
@@ -236,7 +237,7 @@ class TestEmailVerificationRepository:
         remaining = await repo.get(rdb_session, created.id)
         assert remaining is None
 
-    async def test_list_all(self, rdb_session: AsyncSession) -> None:
+    async def test_list_all(self, rdb_session: WriteSession) -> None:
         """Fetch all verification records."""
         # Given: create verification record
         repo = EmailVerificationRepository()
@@ -257,7 +258,7 @@ class TestEmailVerificationRepository:
         assert ev_list.total >= 1
         assert len(ev_list.items) >= 1
 
-    async def test_list_by_email(self, rdb_session: AsyncSession) -> None:
+    async def test_list_by_email(self, rdb_session: WriteSession) -> None:
         """Fetch valid verification records by email."""
         # Given: create valid records for specific email
         repo = EmailVerificationRepository()

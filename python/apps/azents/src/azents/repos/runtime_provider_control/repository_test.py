@@ -1,6 +1,7 @@
 """Runtime Provider Control persistence tests."""
 
 import datetime
+from typing import NamedTuple
 
 import sqlalchemy as sa
 from azcommon.datetime import tznow
@@ -9,7 +10,6 @@ from azents_runtime_control.provider import (
     RuntimeProviderOperationalWarning,
     RuntimeProviderOperationalWarningSeverity,
 )
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeProviderAuthMethod,
@@ -22,6 +22,7 @@ from azents.core.enums import (
     RuntimeProviderScope,
 )
 from azents.rdb.models.runtime_provider_control import RDBRuntimeProviderConnection
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_provider.data import (
     RuntimeProviderBootstrapSourceCreate,
     RuntimeProviderCreate,
@@ -43,9 +44,15 @@ from .data import (
 from .repository import RuntimeProviderControlRepository
 
 
-async def _provider_source_and_binding(
-    session: AsyncSession,
-) -> tuple[str, str, str]:
+class _ProviderFixture(NamedTuple):
+    """Durable Provider, bootstrap source and issued-token binding identities."""
+
+    provider_id: str
+    source_id: str
+    binding_id: str
+
+
+async def _provider_source_and_binding(session: WriteSession) -> _ProviderFixture:
     """Create a durable Provider, bootstrap source, and issued-token binding."""
     provider_repository = RuntimeProviderRepository()
     provider = await provider_repository.create(
@@ -83,7 +90,9 @@ async def _provider_source_and_binding(
             config=None,
         ),
     )
-    return provider.id, source.id, binding.id
+    return _ProviderFixture(
+        provider_id=provider.id, source_id=source.id, binding_id=binding.id
+    )
 
 
 class TestRuntimeProviderControlRepository:
@@ -91,13 +100,14 @@ class TestRuntimeProviderControlRepository:
 
     async def test_grant_consumes_once_and_persists_credential(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A grant creates exactly one credential even after replay."""
         repository = RuntimeProviderControlRepository()
-        provider_id, source_id, binding_id = await _provider_source_and_binding(
-            rdb_session
-        )
+        provider_fixture = await _provider_source_and_binding(rdb_session)
+        provider_id = provider_fixture.provider_id
+        source_id = provider_fixture.source_id
+        binding_id = provider_fixture.binding_id
         now = tznow()
         grant = await repository.create_enrollment_grant(
             rdb_session,
@@ -148,13 +158,14 @@ class TestRuntimeProviderControlRepository:
 
     async def test_connection_diagnostics_replace_only_on_active_generation(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A reconnect never inherits or permits updates to an older snapshot."""
         repository = RuntimeProviderControlRepository()
-        provider_id, source_id, binding_id = await _provider_source_and_binding(
-            rdb_session
-        )
+        provider_fixture = await _provider_source_and_binding(rdb_session)
+        provider_id = provider_fixture.provider_id
+        source_id = provider_fixture.source_id
+        binding_id = provider_fixture.binding_id
         auth_subject = f"admin:{provider_id}"
         now = tznow()
         grant = await repository.create_enrollment_grant(
@@ -219,13 +230,13 @@ class TestRuntimeProviderControlRepository:
             operational_diagnostics=replacement,
         )
         first_row = (
-            await rdb_session.execute(
+            await rdb_session.write_session.execute(
                 sa.select(RDBRuntimeProviderConnection).where(
                     RDBRuntimeProviderConnection.id == first.id
                 )
             )
         ).scalar_one()
-        await rdb_session.refresh(first_row)
+        await rdb_session.write_session.refresh(first_row)
         assert first_row.diagnostics_checked_at == replacement.checked_at
         assert first_row.operational_diagnostics is not None
         warnings = first_row.operational_diagnostics["warnings"]
@@ -271,7 +282,7 @@ class TestRuntimeProviderControlRepository:
             operational_diagnostics=initial,
         )
         second_row = (
-            await rdb_session.execute(
+            await rdb_session.write_session.execute(
                 sa.select(RDBRuntimeProviderConnection).where(
                     RDBRuntimeProviderConnection.id == second.id
                 )
@@ -308,13 +319,14 @@ class TestRuntimeProviderControlRepository:
 
     async def test_revoked_credential_cannot_heartbeat_connection(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Credential revocation immediately prevents connection heartbeat."""
         repository = RuntimeProviderControlRepository()
-        provider_id, source_id, binding_id = await _provider_source_and_binding(
-            rdb_session
-        )
+        provider_fixture = await _provider_source_and_binding(rdb_session)
+        provider_id = provider_fixture.provider_id
+        source_id = provider_fixture.source_id
+        binding_id = provider_fixture.binding_id
         auth_subject = f"admin:{provider_id}"
         now = tznow()
         grant = await repository.create_enrollment_grant(
@@ -420,11 +432,12 @@ class TestRuntimeProviderControlRepository:
 
     async def test_revoked_binding_disconnects_kubernetes_connection(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Binding revocation immediately removes workload connection authority."""
         repository = RuntimeProviderControlRepository()
-        provider_id, _, _ = await _provider_source_and_binding(rdb_session)
+        provider_fixture = await _provider_source_and_binding(rdb_session)
+        provider_id = provider_fixture.provider_id
         binding_repository = RuntimeProviderAuthBindingRepository()
         subject = "system:serviceaccount:azents-runtime:provider"
         binding = await binding_repository.create(
@@ -486,7 +499,6 @@ class TestRuntimeProviderControlRepository:
             rdb_session,
             provider_id=provider_id,
             now=now + datetime.timedelta(seconds=1),
-            for_update=True,
         )
         assert not await repository.has_connected_connection(
             rdb_session,

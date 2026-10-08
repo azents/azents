@@ -6,10 +6,10 @@ from typing import Annotated, assert_never
 from azcommon.datetime import tznow
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.password_login import PasswordLoginRepository
 from azents.repos.session import SessionRepository
 from azents.repos.session.data import NotFound, Session, SessionCreate, TokenMatch
@@ -40,7 +40,7 @@ class AuthOperationRepository:
     ]
     session_repository: Annotated[SessionRepository, Depends(SessionRepository)]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
     async def resolve_verified_email_user(
@@ -128,7 +128,8 @@ class AuthOperationRepository:
             if matched is None:
                 return Failure(RefreshTokenRejected())
 
-            authentication_session, token_match = matched
+            authentication_session = matched.session
+            token_match = matched.token_match
             eligibility_now = tznow()
             if (
                 authentication_session.revoked_at is not None

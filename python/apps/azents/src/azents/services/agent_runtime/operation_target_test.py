@@ -2,12 +2,18 @@
 
 import asyncio
 import dataclasses
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentLifecycleStatus,
+    AgentRuntimeCapability,
     RuntimeDesiredState,
     RuntimeProviderConnectionState,
     RuntimeProviderObservedState,
@@ -17,10 +23,16 @@ from azents.core.runtime_profile import (
     RuntimeConfigurationDocument,
     RuntimeConfigurationStateStatus,
 )
+from azents.rdb.session_capabilities import ReadOnlySession
+from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime.data import AgentRuntime
+from azents.repos.agent_runtime.lifecycle_operations import (
+    AgentRuntimeLifecycleOperationsRepository,
+)
 from azents.repos.runtime_profile.data import (
     RuntimeConfigurationAppliedSlot,
     RuntimeConfigurationSlot,
+    RuntimeConfigurationState,
 )
 from azents.services.agent_runtime.lifecycle_data import RuntimeOperationAuthority
 from azents.services.runtime_profile_resolution.data import (
@@ -613,3 +625,87 @@ async def test_resolve_operation_target_wait_is_cancellable(
 
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "case",
+    [
+        "ready",
+        "missing-agent",
+        "disabled",
+        "missing-runtime",
+        "missing-configuration",
+        "unready",
+        "generation-mismatch",
+        "terminal",
+    ],
+)
+async def test_target_projection_uses_retained_read_scope(case: str) -> None:
+    """Projection does not enter real admission, reconciliation or waiting."""
+
+    service = AsyncMock(spec=AgentRuntimeService)
+
+    operations = object.__new__(AgentRuntimeLifecycleOperationsRepository)
+    service.operations = operations
+    operations.agent_repository = AsyncMock()
+    operations.runtime_repository = AsyncMock()
+    operations.runtime_profile_repository = AsyncMock()
+    operations.session_manager = AsyncMock()
+    service._qualified_operation_target = (
+        AgentRuntimeService._qualified_operation_target
+    )
+
+    @asynccontextmanager
+    async def reads() -> AsyncIterator[ReadOnlySession]:
+        yield ReadOnlySession(AsyncMock(spec=AsyncSession))
+
+    operations.read_session_manager = reads
+    operations.agent_repository.get_by_id.return_value = (
+        None
+        if case == "missing-agent"
+        else Agent.model_construct(
+            lifecycle_status=AgentLifecycleStatus.ACTIVE,
+            runtime_capability=AgentRuntimeCapability.NONE
+            if case == "disabled"
+            else AgentRuntimeCapability.MANAGED,
+            runtime_capability_version=4,
+        )
+    )
+    resolution = _resolution(
+        runtime=_runtime(
+            runner_state=RuntimeRunnerState.STARTING
+            if case == "unready"
+            else RuntimeRunnerState.READY
+        ),
+        applied_revision=_revision(desired_generation=1)
+        if case == "generation-mismatch"
+        else None,
+    )
+    if case == "terminal":
+        resolution = dataclasses.replace(
+            resolution,
+            runtime=resolution.runtime.model_copy(
+                update={"terminal_delete_requested_generation": 2}
+            ),
+        )
+    operations.runtime_repository.get_by_agent_id.return_value = (
+        None if case == "missing-runtime" else resolution.runtime
+    )
+    operations.runtime_profile_repository.get_configuration_state.return_value = (
+        None
+        if case == "missing-configuration"
+        else RuntimeConfigurationState(
+            runtime_id="runtime-1",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+            desired=resolution.desired,
+            applied=resolution.applied,
+        )
+    )
+    target = await AgentRuntimeService.project_operation_target(service, "agent-1")
+    assert (target is not None) == (case == "ready")
+    service._require_runtime_operation_capability.assert_not_awaited()
+    service._ensure_runtime_for_agent.assert_not_awaited()
+    service.ensure_started_for_agent.assert_not_awaited()
+    operations.session_manager.assert_not_called()

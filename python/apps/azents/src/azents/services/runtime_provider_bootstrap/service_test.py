@@ -3,8 +3,6 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.enums import (
     RuntimeProviderAuthMethod,
     RuntimeProviderAvailabilityMode,
@@ -19,8 +17,14 @@ from azents.core.enums import (
     RuntimeProviderScope,
 )
 from azents.core.platform_runtime_system_setting import PlatformRuntimeConfig
+from azents.core.runtime_provider_bootstrap import (
+    RuntimeProviderBootstrapAuthenticationInput,
+    RuntimeProviderBootstrapDeclarationInput,
+    RuntimeProviderBootstrapSnapshot,
+)
 from azents.core.system_setting import SystemSettingSection
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_binding.data import (
@@ -29,13 +33,11 @@ from azents.repos.runtime_provider_binding.data import (
 from azents.repos.runtime_provider_binding.repository import (
     RuntimeProviderAuthBindingRepository,
 )
+from azents.repos.runtime_provider_bootstrap_operations import (
+    RuntimeProviderBootstrapOperations,
+)
 from azents.repos.system_setting.repository import SystemSettingRepository
 
-from .data import (
-    RuntimeProviderBootstrapAuthenticationInput,
-    RuntimeProviderBootstrapDeclarationInput,
-    RuntimeProviderBootstrapSnapshot,
-)
 from .service import RuntimeProviderBootstrapService
 
 
@@ -81,13 +83,13 @@ def _snapshot(
 
 @asynccontextmanager
 async def _session_context(
-    session: AsyncSession,
-) -> AsyncGenerator[AsyncSession, None]:
+    session: WriteSession,
+) -> AsyncGenerator[WriteSession, None]:
     """Expose one test session through the production SessionManager shape."""
     yield session
 
 
-def _single_session_manager(session: AsyncSession) -> SessionManager[AsyncSession]:
+def _single_session_manager(session: WriteSession) -> SessionManager[WriteSession]:
     """Build a production-shaped SessionManager for one test session."""
     return lambda: _session_context(session)
 
@@ -97,15 +99,17 @@ class TestRuntimeProviderBootstrapService:
 
     async def test_creates_bootstrap_provider_and_is_idempotent(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A matching second snapshot reuses the original aggregate."""
         repository = RuntimeProviderRepository()
         service = RuntimeProviderBootstrapService(
-            session_manager=_single_session_manager(rdb_session),
-            repository=repository,
-            system_setting_repository=SystemSettingRepository(),
-            binding_repository=RuntimeProviderAuthBindingRepository(),
+            operations=RuntimeProviderBootstrapOperations(
+                session_manager=_single_session_manager(rdb_session),
+                repository=repository,
+                system_setting_repository=SystemSettingRepository(),
+                binding_repository=RuntimeProviderAuthBindingRepository(),
+            )
         )
 
         first = await service.reconcile(_snapshot())
@@ -117,14 +121,12 @@ class TestRuntimeProviderBootstrapService:
         provider = await repository.get_by_provider_id(
             rdb_session,
             provider_logical_id="system-kubernetes",
-            for_update=False,
         )
         assert provider is not None
         declaration = await repository.get_bootstrap_declaration(
             rdb_session,
             source_id=first.source_id,
             declaration_key="runtime-provider-kubernetes",
-            for_update=False,
         )
         assert declaration is not None
         assert declaration.provider_id == provider.id
@@ -171,7 +173,7 @@ class TestRuntimeProviderBootstrapService:
 
     async def test_conflicts_without_adopting_admin_provider(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Bootstrap must never adopt an aggregate created by an Admin."""
         repository = RuntimeProviderRepository()
@@ -193,10 +195,12 @@ class TestRuntimeProviderBootstrapService:
             ),
         )
         service = RuntimeProviderBootstrapService(
-            session_manager=_single_session_manager(rdb_session),
-            repository=repository,
-            system_setting_repository=SystemSettingRepository(),
-            binding_repository=RuntimeProviderAuthBindingRepository(),
+            operations=RuntimeProviderBootstrapOperations(
+                session_manager=_single_session_manager(rdb_session),
+                repository=repository,
+                system_setting_repository=SystemSettingRepository(),
+                binding_repository=RuntimeProviderAuthBindingRepository(),
+            )
         )
 
         result = await service.reconcile(
@@ -233,7 +237,6 @@ class TestRuntimeProviderBootstrapService:
             rdb_session,
             source_id=result.source_id,
             declaration_key="admin-provider-claim",
-            for_update=False,
         )
         assert declaration is not None
         assert declaration.provider_id is None
@@ -242,7 +245,7 @@ class TestRuntimeProviderBootstrapService:
 
     async def test_auth_subject_conflict_does_not_create_provider(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A pre-owned auth subject cannot leave a new orphan Provider."""
         repository = RuntimeProviderRepository()
@@ -280,10 +283,12 @@ class TestRuntimeProviderBootstrapService:
             ),
         )
         service = RuntimeProviderBootstrapService(
-            session_manager=_single_session_manager(rdb_session),
-            repository=repository,
-            system_setting_repository=SystemSettingRepository(),
-            binding_repository=binding_repository,
+            operations=RuntimeProviderBootstrapOperations(
+                session_manager=_single_session_manager(rdb_session),
+                repository=repository,
+                system_setting_repository=SystemSettingRepository(),
+                binding_repository=binding_repository,
+            )
         )
 
         result = await service.reconcile(_snapshot())
@@ -294,23 +299,24 @@ class TestRuntimeProviderBootstrapService:
             await repository.get_by_provider_id(
                 rdb_session,
                 provider_logical_id="system-kubernetes",
-                for_update=False,
             )
             is None
         )
 
     async def test_conflicts_when_authentication_config_changes(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A declaration cannot silently replace its bound authentication config."""
         repository = RuntimeProviderRepository()
         binding_repository = RuntimeProviderAuthBindingRepository()
         service = RuntimeProviderBootstrapService(
-            session_manager=_single_session_manager(rdb_session),
-            repository=repository,
-            system_setting_repository=SystemSettingRepository(),
-            binding_repository=binding_repository,
+            operations=RuntimeProviderBootstrapOperations(
+                session_manager=_single_session_manager(rdb_session),
+                repository=repository,
+                system_setting_repository=SystemSettingRepository(),
+                binding_repository=binding_repository,
+            )
         )
         initial_snapshot = _snapshot()
         initial = await service.reconcile(initial_snapshot)
@@ -344,15 +350,17 @@ class TestRuntimeProviderBootstrapService:
 
     async def test_conflicts_without_adopting_other_source_provider(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A source cannot claim the logical identity owned by another source."""
         repository = RuntimeProviderRepository()
         service = RuntimeProviderBootstrapService(
-            session_manager=_single_session_manager(rdb_session),
-            repository=repository,
-            system_setting_repository=SystemSettingRepository(),
-            binding_repository=RuntimeProviderAuthBindingRepository(),
+            operations=RuntimeProviderBootstrapOperations(
+                session_manager=_single_session_manager(rdb_session),
+                repository=repository,
+                system_setting_repository=SystemSettingRepository(),
+                binding_repository=RuntimeProviderAuthBindingRepository(),
+            )
         )
         first = await service.reconcile(_snapshot(source_key="helm/one/azents"))
         second = await service.reconcile(_snapshot(source_key="helm/two/azents"))
@@ -364,7 +372,6 @@ class TestRuntimeProviderBootstrapService:
             rdb_session,
             source_id=second.source_id,
             declaration_key="runtime-provider-kubernetes",
-            for_update=False,
         )
         assert declaration is not None
         assert declaration.provider_id is None
@@ -372,15 +379,17 @@ class TestRuntimeProviderBootstrapService:
 
     async def test_authoritative_omission_marks_declaration_absent(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Withdrawal preserves the aggregate and records declaration absence."""
         repository = RuntimeProviderRepository()
         service = RuntimeProviderBootstrapService(
-            session_manager=_single_session_manager(rdb_session),
-            repository=repository,
-            system_setting_repository=SystemSettingRepository(),
-            binding_repository=RuntimeProviderAuthBindingRepository(),
+            operations=RuntimeProviderBootstrapOperations(
+                session_manager=_single_session_manager(rdb_session),
+                repository=repository,
+                system_setting_repository=SystemSettingRepository(),
+                binding_repository=RuntimeProviderAuthBindingRepository(),
+            )
         )
         initial = await service.reconcile(_snapshot())
 
@@ -392,14 +401,12 @@ class TestRuntimeProviderBootstrapService:
         provider = await repository.get_by_provider_id(
             rdb_session,
             provider_logical_id="system-kubernetes",
-            for_update=False,
         )
         assert provider is not None
         declaration = await repository.get_bootstrap_declaration(
             rdb_session,
             source_id=initial.source_id,
             declaration_key="runtime-provider-kubernetes",
-            for_update=False,
         )
         assert declaration is not None
         assert declaration.provider_id == provider.id
@@ -415,15 +422,17 @@ class TestRuntimeProviderBootstrapService:
 
     async def test_terminal_provider_is_not_restored_by_bootstrap(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A force-retired logical identity remains reserved after source return."""
         repository = RuntimeProviderRepository()
         service = RuntimeProviderBootstrapService(
-            session_manager=_single_session_manager(rdb_session),
-            repository=repository,
-            system_setting_repository=SystemSettingRepository(),
-            binding_repository=RuntimeProviderAuthBindingRepository(),
+            operations=RuntimeProviderBootstrapOperations(
+                session_manager=_single_session_manager(rdb_session),
+                repository=repository,
+                system_setting_repository=SystemSettingRepository(),
+                binding_repository=RuntimeProviderAuthBindingRepository(),
+            )
         )
         initial = await service.reconcile(_snapshot())
         provider_id = initial.created_provider_ids[0]
@@ -444,7 +453,6 @@ class TestRuntimeProviderBootstrapService:
             rdb_session,
             source_id=initial.source_id,
             declaration_key="runtime-provider-kubernetes",
-            for_update=False,
         )
         assert declaration is not None
         assert declaration.state == RuntimeProviderBootstrapDeclarationState.CONFLICT

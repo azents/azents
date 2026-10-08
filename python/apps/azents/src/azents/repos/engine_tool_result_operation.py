@@ -3,9 +3,8 @@
 import dataclasses
 from typing import Protocol
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.client_tools import ClientToolWireDialect
 from azents.engine.events.types import (
     ActiveToolCall,
@@ -13,7 +12,9 @@ from azents.engine.events.types import (
     Event,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution.data import EventCreate
+from azents.repos.session_execution.ownership import fence_owned_session_mutation
 
 
 class ToolCallIdentity(Protocol):
@@ -54,7 +55,7 @@ class ToolResultRunRepository(Protocol):
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         run_id: str,
     ) -> ToolResultRunState | None:
         """Lock and return one AgentRun."""
@@ -62,7 +63,7 @@ class ToolResultRunRepository(Protocol):
 
     async def update_phase(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         run_id: str,
         phase: AgentRunPhase,
         *,
@@ -77,7 +78,7 @@ class ToolResultTranscriptRepository(Protocol):
 
     async def append(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: EventCreate,
     ) -> Event:
         """Append one durable Event."""
@@ -93,9 +94,10 @@ def tool_result_external_id(run_id: str, call_id: str) -> str:
 class EngineToolResultOperationRepository:
     """Own completed client tool-result admission transactions."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     run_repository: ToolResultRunRepository
     transcript_repository: ToolResultTranscriptRepository
+    owner: SessionExecutionOwner | None
 
     async def finalize(
         self,
@@ -107,6 +109,8 @@ class EngineToolResultOperationRepository:
     ) -> Event:
         """Finalize one tool result in a completed transaction."""
         async with self.session_manager() as session:
+            if self.owner is not None:
+                await fence_owned_session_mutation(session, self.owner)
             return await self.finalize_in_session(
                 session,
                 run_id=run_id,
@@ -117,7 +121,7 @@ class EngineToolResultOperationRepository:
 
     async def finalize_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         run_id: str,
         session_id: str,
@@ -125,6 +129,8 @@ class EngineToolResultOperationRepository:
         result: ClientToolResultPayload,
     ) -> Event:
         """Finalize one tool result inside a composing repository transaction."""
+        if self.owner is not None:
+            await fence_owned_session_mutation(session, self.owner)
         if result.call_id != call.call_id:
             raise ValueError("Tool result call ID does not match admitted call")
         if result.wire_dialect != call.wire_dialect:

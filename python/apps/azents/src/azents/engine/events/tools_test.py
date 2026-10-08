@@ -1,11 +1,13 @@
 """Event tool catalog tests."""
 
 import asyncio
+import logging
 
 import pytest
 from pydantic import BaseModel
 
 from azents.core.enums import LLMProvider
+from azents.core.llm_catalog import ModelCapabilities, ModelToolCallingCapabilities
 from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
 from azents.engine.events.generated_files import GeneratedFileOutput
 from azents.engine.events.openai_responses import OpenAIResponsesLowerer
@@ -18,6 +20,7 @@ from azents.engine.events.tools import (
     ToolCatalog,
     ToolCatalogClientToolExecutor,
     ToolCatalogClientToolInvoker,
+    _call_cancel_handler,
     build_tool_catalog,
     extend_prepared_tool_catalog_with_json_functions,
     project_tool_catalog_for_client_compatibility,
@@ -164,6 +167,7 @@ async def test_build_tool_catalog_prefixes_and_lowers_native_schema() -> None:
             ToolkitBinding(
                 toolkit=_Toolkit(),
                 slug="demo",
+                base_slug="demo",
                 use_prefix=True,
             )
         ],
@@ -188,12 +192,16 @@ async def test_build_tool_catalog_prefixes_and_lowers_native_schema() -> None:
     assert catalog.native_tools[0]["strict"] is False
 
     request = OpenAIResponsesLowerer(
+        top_k=None,
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",
         model="gpt-5.1",
+        model_capabilities=ModelCapabilities(
+            tool_calling=ModelToolCallingCapabilities(supported=True)
+        ),
         tools=catalog.native_tools,
-    ).lower([], model="gpt-5.1")
+    ).lower([], native_replay_context=None, model="gpt-5.1")
     assert request.tools == catalog.native_tools
 
 
@@ -228,30 +236,35 @@ async def test_build_tool_catalog_classifies_direct_and_deferred_tools() -> None
             ToolkitBinding(
                 toolkit=_Toolkit(),
                 slug="core",
+                base_slug="core",
                 use_prefix=False,
                 toolkit_type=None,
             ),
             ToolkitBinding(
                 toolkit=_Toolkit(),
                 slug="azents",
+                base_slug="azents",
                 use_prefix=True,
                 toolkit_type="github",
             ),
             ToolkitBinding(
                 toolkit=_InlineToolkit(switch_installation),
                 slug="github",
+                base_slug="github",
                 use_prefix=True,
                 toolkit_type="github",
             ),
             ToolkitBinding(
                 toolkit=_InlineToolkit(channel_action),
                 slug="external_channel",
+                base_slug="external_channel",
                 use_prefix=False,
                 toolkit_type=None,
             ),
             ToolkitBinding(
                 toolkit=_InlineToolkit(download_external_file),
                 slug="external_channel",
+                base_slug="external_channel",
                 use_prefix=False,
                 toolkit_type=None,
             ),
@@ -282,6 +295,7 @@ async def test_build_tool_catalog_exposes_all_opted_in_toolkit_tools_directly() 
             ToolkitBinding(
                 toolkit=_Toolkit(),
                 slug="critical",
+                base_slug="critical",
                 use_prefix=True,
                 toolkit_type="mcp",
                 toolkit_config_id="toolkit-config-1",
@@ -310,6 +324,7 @@ async def test_catalog_enriches_registered_tool_call_with_source_snapshot() -> N
             ToolkitBinding(
                 toolkit=toolkit,
                 slug="github",
+                base_slug="github",
                 use_prefix=True,
                 toolkit_type="github",
                 toolkit_config_id="toolkit-config-1",
@@ -339,7 +354,104 @@ async def test_catalog_enriches_registered_tool_call_with_source_snapshot() -> N
         "toolkit_type": "github",
         "toolkit_name": "GitHub",
         "toolkit_slug": "github",
+        "toolkit_namespace": "github",
+        "source_identity": {},
     }
+
+
+async def test_catalog_uses_effective_namespace_and_source_qualifier() -> None:
+    """Separate the stored base Slug from the final model-visible namespace."""
+    toolkit = _Toolkit()
+    toolkit.display_name = "Production MCP"
+    toolkit.source_identity = (("server", "https://mcp.example"),)
+    catalog = await build_tool_catalog(
+        toolkit_bindings=[
+            ToolkitBinding(
+                toolkit=toolkit,
+                slug="mcp_2",
+                base_slug="mcp",
+                use_prefix=True,
+                toolkit_type="mcp",
+                toolkit_config_id="toolkit-config-2",
+            )
+        ],
+        context=TurnContext(
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=_noop_publish,
+        ),
+    )
+
+    entry = catalog.entries["mcp_2__echo"]
+    assert entry.source.slug == "mcp"
+    assert entry.source.namespace == "mcp_2"
+    assert entry.source.display_name == "Production MCP"
+    assert entry.source.source_identity == (("server", "https://mcp.example"),)
+    assert "Source: Production MCP; namespace mcp_2" in entry.tool.spec.description
+    assert "server https://mcp.example" in entry.tool.spec.description
+
+
+async def test_catalog_rejects_duplicate_final_names_before_publication() -> None:
+    """Fail instead of silently overwriting two equal final catalog names."""
+    first = _Toolkit()
+    second = _Toolkit()
+    with pytest.raises(ValueError, match="Duplicate final Toolkit tool name"):
+        await build_tool_catalog(
+            toolkit_bindings=[
+                ToolkitBinding(
+                    toolkit=first,
+                    slug="mcp",
+                    base_slug="mcp",
+                    use_prefix=True,
+                    toolkit_type="mcp",
+                    toolkit_config_id="toolkit-config-1",
+                ),
+                ToolkitBinding(
+                    toolkit=second,
+                    slug="mcp",
+                    base_slug="other",
+                    use_prefix=True,
+                    toolkit_type="mcp",
+                    toolkit_config_id="toolkit-config-2",
+                ),
+            ],
+            context=TurnContext(
+                workspace_id="workspace-1",
+                model="gpt-5.1",
+                run_id="run-1",
+                publish_event=_noop_publish,
+            ),
+        )
+
+
+async def test_source_qualifier_retains_namespace_after_long_toolkit_name() -> None:
+    """Bound the Name without truncating namespace or connection identity."""
+    toolkit = _Toolkit()
+    toolkit.display_name = "N" * 255
+    toolkit.source_identity = (("server", "https://mcp.example"),)
+    catalog = await build_tool_catalog(
+        toolkit_bindings=[
+            ToolkitBinding(
+                toolkit=toolkit,
+                slug="mcp_2",
+                base_slug="mcp",
+                use_prefix=True,
+                toolkit_type="mcp",
+                toolkit_config_id="toolkit-config-long-name",
+            )
+        ],
+        context=TurnContext(
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=_noop_publish,
+        ),
+    )
+
+    description = catalog.entries["mcp_2__echo"].tool.spec.description
+    assert "namespace mcp_2" in description
+    assert "server https://mcp.example" in description
 
 
 async def test_extend_tool_catalog_marks_runtime_builtin_direct() -> None:
@@ -379,6 +491,7 @@ async def test_build_tool_catalog_separates_dynamic_prompt_layer() -> None:
             ToolkitBinding(
                 toolkit=_DynamicPromptToolkit(),
                 slug="memory",
+                base_slug="memory",
                 use_prefix=True,
             )
         ],
@@ -417,6 +530,7 @@ async def test_native_tools_are_sorted_by_function_name() -> None:
             ToolkitBinding(
                 toolkit=_InlineToolkit(tool),
                 slug="",
+                base_slug="",
                 use_prefix=False,
             )
             for tool in tools
@@ -441,7 +555,7 @@ async def test_client_tool_executor_returns_event_result() -> None:
     """Convert Tool handler result to event client_tool_result."""
     catalog = await build_tool_catalog(
         toolkit_bindings=[
-            ToolkitBinding(toolkit=_Toolkit(), slug="", use_prefix=False)
+            ToolkitBinding(toolkit=_Toolkit(), slug="", base_slug="", use_prefix=False)
         ],
         context=TurnContext(
             workspace_id="workspace-1",
@@ -494,6 +608,7 @@ async def test_client_tool_executor_binds_exact_call_identity() -> None:
                     )
                 ),
                 slug="",
+                base_slug="",
                 use_prefix=False,
             )
         ],
@@ -544,6 +659,7 @@ async def test_client_tool_executor_preserves_failed_result_metadata() -> None:
                     )
                 ),
                 slug="",
+                base_slug="",
                 use_prefix=False,
             )
         ],
@@ -597,6 +713,7 @@ async def test_client_tool_executor_applies_global_text_output_cap() -> None:
                     )
                 ),
                 slug="",
+                base_slug="",
                 use_prefix=False,
             )
         ],
@@ -646,6 +763,7 @@ async def test_client_tool_invoker_preserves_text_before_global_cap() -> None:
                     )
                 ),
                 slug="",
+                base_slug="",
                 use_prefix=False,
             )
         ],
@@ -706,6 +824,7 @@ async def test_client_tool_executor_caps_structured_text_output_parts() -> None:
                     )
                 ),
                 slug="",
+                base_slug="",
                 use_prefix=False,
             )
         ],
@@ -767,6 +886,7 @@ async def test_client_tool_executor_carries_transient_generated_files() -> None:
                     )
                 ),
                 slug="",
+                base_slug="",
                 use_prefix=False,
             )
         ],
@@ -826,6 +946,7 @@ async def test_client_tool_executor_preserves_function_tool_result_metadata() ->
                     )
                 ),
                 slug="",
+                base_slug="",
                 use_prefix=False,
             )
         ],
@@ -884,6 +1005,7 @@ async def test_client_tool_executor_dispatches_cancel_handler() -> None:
                     )
                 ),
                 slug="",
+                base_slug="",
                 use_prefix=False,
             )
         ],
@@ -916,6 +1038,60 @@ async def test_client_tool_executor_dispatches_cancel_handler() -> None:
     ]
 
 
+async def test_cancel_handler_failure_is_observed_once_without_blocking_stop(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Cancellation isolation keeps stop moving and logs a content-safe failure."""
+    secret = "synthetic-provider-token-do-not-log"
+    requests: list[FunctionToolCancelRequest] = []
+
+    async def cancel_handler(request: FunctionToolCancelRequest) -> None:
+        requests.append(request)
+        raise RuntimeError(secret)
+
+    tool = FunctionTool(
+        spec=FunctionToolSpec(
+            name="slow", description="Slow tool.", input_schema={"type": "object"}
+        ),
+        handler=_echo,
+        cancel_handler=cancel_handler,
+    )
+    request = FunctionToolCancelRequest(call_id="call-1", name="slow", arguments=secret)
+    with caplog.at_level(logging.WARNING, logger="azents.engine.events.tools"):
+        await _call_cancel_handler(tool, request)
+    assert requests == [request]
+    assert len(caplog.records) == 1
+    record = caplog.records[0]
+    assert record.getMessage() == "Tool cancellation handler failed"
+    assert record.exc_info is not None
+    assert record.exc_info[2] is not None
+    assert secret not in caplog.text
+    assert secret not in repr(record.__dict__)
+
+
+async def test_cancel_handler_outer_cancellation_remains_cancellation(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An execution cancellation is not converted to a handler failure."""
+
+    async def cancel_handler(_request: FunctionToolCancelRequest) -> None:
+        raise asyncio.CancelledError
+
+    tool = FunctionTool(
+        spec=FunctionToolSpec(
+            name="slow", description="Slow tool.", input_schema={"type": "object"}
+        ),
+        handler=_echo,
+        cancel_handler=cancel_handler,
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await _call_cancel_handler(
+            tool,
+            FunctionToolCancelRequest(call_id="call-1", name="slow", arguments="{}"),
+        )
+    assert caplog.records == []
+
+
 async def test_client_tool_executor_migrates_function_tool_result_parts() -> None:
     """FunctionToolResult output part input is validated as event output parts."""
     catalog = await build_tool_catalog(
@@ -923,6 +1099,7 @@ async def test_client_tool_executor_migrates_function_tool_result_parts() -> Non
             ToolkitBinding(
                 toolkit=_FunctionToolResultToolkit(),
                 slug="",
+                base_slug="",
                 use_prefix=False,
             )
         ],
@@ -1006,6 +1183,7 @@ async def test_client_tool_executor_rejects_dialect_mismatch_before_handler() ->
                     )
                 ),
                 slug="",
+                base_slug="",
                 use_prefix=False,
             )
         ],
@@ -1068,6 +1246,7 @@ async def test_client_tool_executor_rejects_json_for_custom_declaration() -> Non
                     )
                 ),
                 slug="",
+                base_slug="",
                 use_prefix=False,
             )
         ],

@@ -3,9 +3,8 @@
 import dataclasses
 import datetime
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
 from azents.repos.mcp_oauth_connection.data import MCPOAuthConnection
 
@@ -14,7 +13,7 @@ from azents.repos.mcp_oauth_connection.data import MCPOAuthConnection
 class MCPOAuthRuntimeOperationRepository:
     """Own completed MCP OAuth preflight and conditional finalization."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     connection_repository: MCPOAuthConnectionRepository
 
     async def load(self, *, toolkit_id: str) -> MCPOAuthConnection | None:

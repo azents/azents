@@ -29,21 +29,21 @@ import {
 import { IconArrowLeft } from "@tabler/icons-react";
 import Link from "next/link";
 import { useId } from "react";
-import { hasInvalidImageGenerationSelections } from "../model-selection";
+import { hasInvalidImageGenerationSelections } from "@/shared/model-options/model-selection";
 import { shouldShowAgentTerminalSettings } from "../terminalSettingsVisibility";
 import { AgentAdminSection } from "./AgentAdminSection";
 import { AgentToolkitSection } from "./AgentToolkitSection";
-import { SelectableModelOptionsEditor } from "./SelectableModelOptionsEditor";
 import type { MemberItem } from "../containers/useAgentFormContainer";
 import type { AgentFormTranslator } from "../containers/useAgentFormTranslations";
+import type { AgentFormValues } from "../schemas";
+import type { AdminListState, AgentFormState, MutationState } from "../types";
+import type { SelectableModelOptionsEditorProps } from "@/shared/model-options/components/SelectableModelOptionsEditor";
 import type {
   ImageGenerationCatalogState,
   ModelCatalogState,
   ModelSelectionOption,
   ProviderIntegrationOption,
-} from "../model-selection";
-import type { AgentFormValues } from "../schemas";
-import type { AdminListState, AgentFormState, MutationState } from "../types";
+} from "@/shared/model-options/model-selection";
 import type {
   AgentAdminResponse,
   ModelReasoningEffort,
@@ -116,6 +116,9 @@ export interface AgentFormProps {
 }
 
 interface AgentFormViewProps extends AgentFormProps {
+  renderModelOptionsEditor: (
+    props: SelectableModelOptionsEditorProps,
+  ) => React.ReactNode;
   form: UseFormReturnType<AgentFormValues>;
   hasSubmitAttempted: boolean;
   onSubmitAttempted: () => void;
@@ -130,6 +133,7 @@ interface AgentFormViewProps extends AgentFormProps {
 }
 
 export function AgentForm({
+  renderModelOptionsEditor,
   t,
   form,
   hasSubmitAttempted,
@@ -323,15 +327,15 @@ export function AgentForm({
                 </Alert>
               )}
 
-            {showModel && (
-              <SelectableModelOptionsEditor
-                handle={handle}
-                title={t("selectableModelOptions.title")}
-                description={t("selectableModelOptions.description")}
-                options={form.values.selectable_model_options}
-                mainModelLabel={form.values.main_model_label}
-                lightweightModelLabel={form.values.lightweight_model_label}
-                defaultReasoningEffortControl={
+            {showModel &&
+              renderModelOptionsEditor({
+                handle,
+                title: t("selectableModelOptions.title"),
+                description: t("selectableModelOptions.description"),
+                options: form.values.selectable_model_options,
+                mainModelLabel: form.values.main_model_label,
+                lightweightModelLabel: form.values.lightweight_model_label,
+                defaultReasoningEffortControl:
                   selectedModelSupportsReasoning ? (
                     <Select
                       label={t("defaultReasoningEffortLabel")}
@@ -347,26 +351,21 @@ export function AgentForm({
                       }}
                       error={form.errors.reasoning_effort}
                     />
-                  ) : null
-                }
-                providerOptions={providerOptions}
-                canEdit
-                showValidationErrors={hasSubmitAttempted}
-                onSyncCatalog={onSyncCatalog}
-                imageGenerationCatalogStates={imageGenerationCatalogStates}
-                canSyncImageCatalog={canSyncImageCatalog}
-                onSyncImageCatalog={onSyncImageCatalog}
-                onChangeOptions={(options) =>
-                  form.setFieldValue("selectable_model_options", options)
-                }
-                onChangeMainModelLabel={(label) =>
-                  form.setFieldValue("main_model_label", label)
-                }
-                onChangeLightweightModelLabel={(label) =>
-                  form.setFieldValue("lightweight_model_label", label)
-                }
-              />
-            )}
+                  ) : null,
+                providerOptions,
+                canEdit: true,
+                showValidationErrors: hasSubmitAttempted,
+                onSyncCatalog,
+                imageGenerationCatalogStates,
+                canSyncImageCatalog,
+                onSyncImageCatalog,
+                onChangeOptions: (options) =>
+                  form.setFieldValue("selectable_model_options", options),
+                onChangeMainModelLabel: (label) =>
+                  form.setFieldValue("main_model_label", label),
+                onChangeLightweightModelLabel: (label) =>
+                  form.setFieldValue("lightweight_model_label", label),
+              })}
 
             {showProfile && (
               <Textarea

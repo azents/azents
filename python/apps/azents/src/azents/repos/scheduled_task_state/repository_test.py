@@ -2,9 +2,8 @@
 
 import datetime
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.enums import ScheduledTaskStatus
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.scheduled_task_state import ScheduledTaskStateRepository
 
 
@@ -17,7 +16,7 @@ class TestScheduledTaskStateRepository:
 
     async def test_claim_due_allows_only_one_lease_owner(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Concurrent claim semantics allow only one lease owner."""
         repo = ScheduledTaskStateRepository()
@@ -49,7 +48,7 @@ class TestScheduledTaskStateRepository:
 
     async def test_claim_due_reclaims_expired_lease(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Expired lease can be claimed by another owner."""
         repo = ScheduledTaskStateRepository()
@@ -80,7 +79,7 @@ class TestScheduledTaskStateRepository:
 
     async def test_mark_success_releases_lease_and_resets_failure(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Success releases lease and stores result summary."""
         repo = ScheduledTaskStateRepository()
@@ -115,7 +114,7 @@ class TestScheduledTaskStateRepository:
 
     async def test_trigger_marks_task_due(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Manual trigger marks next_run_at as requested time."""
         repo = ScheduledTaskStateRepository()

@@ -15,6 +15,7 @@ from azents_runtime_control.apply_patch import (
 )
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from azents.core.vfs import VfsUriError, parse_vfs_search_uri
 from azents.engine.run.client_tool_compatibility import ClientToolModelProfile
 from azents.engine.run.types import (
     FunctionTool,
@@ -55,20 +56,22 @@ multiple files, or combined add/update/delete operations. Read existing files be
 patching them. Send one complete V4A patch through the `patch` argument without Markdown
 fences. Include each file only once, use exact context, and do not invent line numbers.
 After an applicability failure, read the current source before retrying. A commit-phase
-failure may have partially applied the patch, so re-read every affected file before
-continuing.
+failure on Runtime may have partially applied the patch, so re-read every affected
+file before continuing. Writable VFS patches are all-or-none; conflicts require fresh
+reads. Keep all targets in one bound VFS file domain, without Runtime fallback.
 """
 
 GPT_V4A_PLAINTEXT_CUSTOM_APPLY_PATCH_PROMPT = """\
 Use `edit` for one small exact replacement. Use `apply_patch` for multiple hunks,
 multiple files, or combined add/update/delete operations. Read existing files before
 patching them. Send exactly one plaintext input with this first line:
-`*** Base Path: /absolute/runtime/path`
+`*** Base Path: /absolute/runtime/path` or `*** Base Path: azents://writable-mount`
 Immediately follow it with one complete V4A patch beginning `*** Begin Patch`. Use LF,
 do not add a blank line, Markdown fence, or commentary, and include each file only once.
 After an applicability failure, read the current source before retrying. A commit-phase
-failure may have partially applied the patch, so re-read every affected file before
-continuing.
+failure on Runtime may have partially applied the patch, so re-read every affected
+file before continuing. Writable VFS patches are all-or-none; read every existing
+target in this execution first and keep all targets in the same bound file domain.
 """
 
 
@@ -295,7 +298,12 @@ def parse_plaintext_custom_apply_patch_input(arguments: str) -> ApplyPatchInput:
         raise ApplyPatchPlaintextInputError("base_path_too_long")
     if _contains_prohibited_base_path_character(base_path):
         raise ApplyPatchPlaintextInputError("invalid_base_path_character")
-    if not os.path.isabs(base_path):
+    if base_path.startswith("azents://"):
+        try:
+            parse_vfs_search_uri(base_path)
+        except VfsUriError:
+            raise ApplyPatchPlaintextInputError("invalid_vfs_base") from None
+    elif not os.path.isabs(base_path):
         raise ApplyPatchPlaintextInputError("base_path_not_absolute")
     patch = arguments[newline_index + 1 :]
     if not patch:

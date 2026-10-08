@@ -9,7 +9,7 @@ from typing import Annotated, assert_never
 from azcommon.result import Failure, Success
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from azents.repos.system_user_role.data import LastSystemAdmin
+from azents.core.system_user_role import LastSystemAdmin
 from azents.services.user import UserService
 from azents.utils.fastapi.route import RouteMounter
 

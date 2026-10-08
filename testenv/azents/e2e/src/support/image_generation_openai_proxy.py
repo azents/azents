@@ -11,11 +11,19 @@ import urllib.error
 import urllib.request
 from base64 import b64encode, urlsafe_b64encode
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import ClassVar, NamedTuple, Protocol, runtime_checkable
+from typing import (
+    ClassVar,
+    Literal,
+    NamedTuple,
+    Protocol,
+    assert_never,
+    runtime_checkable,
+)
 from urllib.parse import parse_qs, urlsplit
 
 _PROMPT = "Provider image generation handoff"
@@ -70,6 +78,298 @@ Preserve provider-hosted tool semantics across compaction.
 - Continue the deterministic provider semantic transcript verification.
 """
 
+_HISTORICAL_MEMORY_PREFIX = "Historical Memory E2E "
+_HISTORICAL_MEMORY_INSPECT_PREFIX = f"{_HISTORICAL_MEMORY_PREFIX}inspect "
+_HISTORICAL_MEMORY_SUMMARY = (
+    "User correction: retain the approved blue rollout, not the Agent's red proposal.\n"
+    "Evidence: the source reports a passed local check, not a production deployment.\n"
+    "Unfinished work: verify the pending rollout before release.\n"
+    "Delivery uncertainty: no external completion is verified."
+)
+
+
+_CONSOLIDATION_TASK_MARKER = "You are an internal historical-context Memory Agent."
+_CONSOLIDATION_SENTINEL = re.compile(r"AGENTIC_(?:TEAM|PERSONAL)_[a-zA-Z0-9]+_V[0-9]+")
+
+
+class ConsolidationFixtureCall(NamedTuple):
+    call_id: str
+    name: str
+    arguments: dict[str, object]
+
+
+class ConsolidationFixturePlan(NamedTuple):
+    call: ConsolidationFixtureCall | None
+    final_text: str | None
+
+
+class ConsolidationFixtureContinuation(NamedTuple):
+    chain_id: str
+    input_items: list[dict[str, object]]
+
+
+class ConsolidationFixtureRequest(NamedTuple):
+    chain_id: str
+    request: dict[str, object]
+
+
+def is_consolidation_fixture_request(request: dict[str, object]) -> bool:
+    """Match the current private task and every tool in its closed file contract."""
+    instructions = request.get("instructions")
+    tools = request.get("tools")
+    if (
+        not isinstance(instructions, str)
+        or not instructions.lstrip().startswith(_CONSOLIDATION_TASK_MARKER)
+        or "azents://execution/README.md" not in instructions
+        or "azents://execution/inputs/" not in instructions
+        or "submit_memory" not in instructions
+        or not isinstance(tools, list)
+        or not tools
+    ):
+        return False
+    names: set[str] = set()
+    for tool in tools:
+        if not isinstance(tool, dict):
+            return False
+        name, kind = tool.get("name"), tool.get("type")
+        if not isinstance(name, str) or name in names:
+            return False
+        if kind != "function" and not (name == "apply_patch" and kind == "custom"):
+            return False
+        names.add(name)
+    return (
+        {"read", "write", "edit", "glob", "submit_memory"}
+        <= names
+        <= {
+            "read",
+            "write",
+            "edit",
+            "delete",
+            "glob",
+            "grep",
+            "apply_patch",
+            "submit_memory",
+        }
+    )
+
+
+def consolidation_fixture_request(
+    request: dict[str, object],
+    continuations: Mapping[str, ConsolidationFixtureContinuation],
+    *,
+    new_chain_id: str,
+) -> ConsolidationFixtureRequest:
+    """Emulate provider stored context without mixing logical executions."""
+    inputs = [_object(item) for item in _list(request.get("input", []))]
+    previous = request.get("previous_response_id")
+    if isinstance(previous, str) and previous.startswith("resp_consolidation_"):
+        stored = continuations.get(previous)
+        if stored is None:
+            raise ValueError("Consolidation fixture context is unavailable.")
+        return ConsolidationFixtureRequest(
+            stored.chain_id, {**request, "input": [*stored.input_items, *inputs]}
+        )
+    identifiers = {
+        call_id.rsplit("_", 1)[-1]
+        for item in inputs
+        if isinstance(call_id := item.get("call_id"), str)
+        and call_id.startswith("call_consolidation_")
+    }
+    if len(identifiers) > 1:
+        raise ValueError("Consolidation fixture mixes execution identities.")
+    chain_id = next(iter(identifiers), new_chain_id)
+    return ConsolidationFixtureRequest(chain_id, {**request, "input": inputs})
+
+
+def consolidation_fixture_plan(
+    request: dict[str, object], *, chain_id: str
+) -> ConsolidationFixturePlan:
+    """Choose real file-tool rounds from returned own-scope evidence."""
+    outputs: dict[str, str] = {}
+    for raw in _list(request.get("input", [])):
+        item = _object(raw)
+        if item.get("type") != "function_call_output":
+            continue
+        call_id, output = item.get("call_id"), item.get("output")
+        if not isinstance(call_id, str) or not call_id.startswith(
+            "call_consolidation_"
+        ):
+            continue
+        if not call_id.endswith(f"_{chain_id}") or not isinstance(output, str):
+            raise ValueError("Consolidation fixture result is invalid.")
+        stage = call_id.removeprefix("call_consolidation_").removesuffix(f"_{chain_id}")
+        outputs[stage] = output
+
+    def call(
+        stage: str, name: str, arguments: dict[str, object]
+    ) -> ConsolidationFixturePlan:
+        return ConsolidationFixturePlan(
+            ConsolidationFixtureCall(
+                f"call_consolidation_{stage}_{chain_id}", name, arguments
+            ),
+            None,
+        )
+
+    def read(stage: str, path: str) -> ConsolidationFixturePlan:
+        return call(
+            stage,
+            "read",
+            {"path": path, "offset": 0, "limit": 10000, "encoding": "utf-8"},
+        )
+
+    if "readme" not in outputs:
+        return read("readme", "azents://execution/README.md")
+    if "inputs" not in outputs:
+        return call("inputs", "glob", {"pattern": "azents://execution/inputs/*.md"})
+    paths = tuple(
+        dict.fromkeys(
+            re.findall(r"azents://execution/inputs/[0-9a-f]{32}\.md", outputs["inputs"])
+        )
+    )
+    for index, path in enumerate(paths):
+        if f"source{index}" not in outputs:
+            return read(f"source{index}", path)
+    useful = [
+        outputs[f"source{index}"]
+        for index in range(len(paths))
+        if _CONSOLIDATION_SENTINEL.search(outputs[f"source{index}"])
+    ]
+    context = "\n".join(
+        re.sub(r"azents://[^\s\"'`]+", "[provided summary]", text)[:1200]
+        for text in useful
+    )
+    markdown = (
+        "### Current historical findings\n" + context
+        if useful
+        else "No useful historical findings in the provided summaries."
+    )
+    # Exercise the host's normal-ending continuation before any submission.
+    if (
+        "The Memory task is not complete: no explicit submission has been accepted."
+        not in json.dumps(request.get("input", []))
+    ):
+        return ConsolidationFixturePlan(None, "CONSOLIDATION_FIXTURE_NOT_SUBMITTED")
+    result_path = "azents://execution/result.md"
+    if "write_oversized" not in outputs:
+        return call(
+            "write_oversized",
+            "write",
+            {
+                "path": result_path,
+                "content": "Oversized candidate " * 600,
+                "overwrite": False,
+            },
+        )
+    if "submit_oversized" not in outputs:
+        return call("submit_oversized", "submit_memory", {"path": result_path})
+    if "observe_result" not in outputs:
+        return read("observe_result", result_path)
+    if "write_corrected" not in outputs:
+        return call(
+            "write_corrected",
+            "write",
+            {
+                "path": result_path,
+                "content": markdown,
+                "overwrite": True,
+            },
+        )
+    if "submit_corrected" not in outputs:
+        return call("submit_corrected", "submit_memory", {"path": result_path})
+    return ConsolidationFixturePlan(
+        None, "CONSOLIDATION_FIXTURE_FINISHED_NOT_THE_PUBLICATION_BODY"
+    )
+
+
+def historical_memory_summary_response(request: _ModelRequestInput) -> str | None:
+    """Match the source-preparation task and return its deterministic result."""
+    request = _decode_model_request(request)
+    instructions = request.instructions
+    if instructions is None or (
+        "Create a bounded, self-contained historical account from the source Session."
+        not in instructions
+    ):
+        return None
+    source = request.input_json
+    if _HISTORICAL_MEMORY_PREFIX not in source:
+        return None
+    if f"{_HISTORICAL_MEMORY_PREFIX}empty" in source:
+        return '{"summary":""}'
+    if f"{_HISTORICAL_MEMORY_PREFIX}malformed" in source:
+        return '{"summary":42,"unexpected":true}'
+    if f"{_HISTORICAL_MEMORY_PREFIX}oversized" in source:
+        return json.dumps({"summary": "Bounded evidence " * 1_000})
+    sentinels = tuple(dict.fromkeys(_CONSOLIDATION_SENTINEL.findall(source)))
+    suffix = "\nSynthetic scope evidence: " + " ".join(sentinels) if sentinels else ""
+    return json.dumps({"summary": _HISTORICAL_MEMORY_SUMMARY + suffix})
+
+
+class HistoricalMemoryInspection(NamedTuple):
+    """One deterministic generic-read call with explicit field identity."""
+
+    call_id: str
+    name: str
+    arguments: dict[str, object]
+
+
+@dataclass(frozen=True)
+class _HistoricalInspectionControl:
+    """The local read/glob/grep fixture protocol, including its optional nonce."""
+
+    operation: Literal["read", "glob", "grep"]
+    path: str
+    nonce: str | None
+
+
+def _decode_historical_inspection_control(text: str) -> _HistoricalInspectionControl:
+    payload = _object(json.loads(text))
+    required = {"operation", "path"}
+    if not required <= payload.keys() or payload.keys() - required - {"nonce"}:
+        raise ValueError("Historical inspection requires one read/glob/grep location.")
+    path = payload["path"]
+    nonce = payload.get("nonce")
+    if not isinstance(path, str) or (nonce is not None and not isinstance(nonce, str)):
+        raise ValueError("Historical inspection requires one read/glob/grep location.")
+    match payload["operation"]:
+        case "read":
+            return _HistoricalInspectionControl("read", path, nonce)
+        case "glob":
+            return _HistoricalInspectionControl("glob", path, nonce)
+        case "grep":
+            return _HistoricalInspectionControl("grep", path, nonce)
+        case _:
+            raise ValueError(
+                "Historical inspection requires one read/glob/grep location."
+            )
+
+
+def historical_memory_inspection(
+    request: _ModelRequestInput,
+) -> HistoricalMemoryInspection | None:
+    """Match one current read/glob/grep fixture without historical-call bleed."""
+    user_text = _last_user_text(request)
+    if not isinstance(user_text, str) or not user_text.startswith(
+        _HISTORICAL_MEMORY_INSPECT_PREFIX
+    ):
+        return None
+    control = _decode_historical_inspection_control(
+        user_text[len(_HISTORICAL_MEMORY_INSPECT_PREFIX) :]
+    )
+    name, path = control.operation, control.path
+    call_id = f"call_historical_memory_{sha256(user_text.encode()).hexdigest()[:16]}"
+    arguments: dict[str, object]
+    if name == "glob":
+        arguments = {"pattern": path}
+    elif name == "grep":
+        arguments = {"path": path, "pattern": "blue"}
+    else:
+        arguments = {"path": path}
+    return HistoricalMemoryInspection(
+        call_id=call_id,
+        name=name,
+        arguments=arguments,
+    )
+
 
 class _DynamicWorktreeScenario(NamedTuple):
     """Dynamic worktree operation, exact path, and force flag."""
@@ -100,6 +400,291 @@ def _list(value: object) -> list[object]:
     if not isinstance(value, list):
         raise ValueError("Expected a list.")
     return value
+
+
+@dataclass(frozen=True)
+class _ToolOutputObservation:
+    """A tool result identity and its consumed diagnostic text."""
+
+    call_id: str
+    kind: str | None
+    output_text: str | None
+
+
+@dataclass(frozen=True)
+class _ModelInputItem:
+    """The fields used for matching one extensible provider input item."""
+
+    object_item: bool
+    role: str | None
+    kind: str | None
+    call_id_present: bool
+    call_id: str | None
+    tool_call_id: str | None
+    text: str | None
+    tool_outputs: tuple[_ToolOutputObservation, ...]
+    wire_json: str
+
+    @property
+    def effective_call_id(self) -> str | None:
+        return self.call_id if self.call_id_present else self.tool_call_id
+
+
+@dataclass(frozen=True)
+class _NamedTool:
+    name: str | None
+    kind: str | None
+
+
+@dataclass(frozen=True)
+class _PreparedMatcherContext:
+    """Local matcher fields are explicit and independent of provider wire data."""
+
+    generation_present: bool
+    generation: int | None
+    turn: str | None
+    flow: str | None
+    reference_tokens: tuple[str, ...]
+    reference_tokens_are_tuple: bool
+    observed_stages: tuple[str, ...]
+    request_key: str | None
+
+
+@dataclass(frozen=True)
+class _ModelRequest:
+    """Validated matching fields alongside opaque provider snapshots for egress."""
+
+    model: str | None
+    stream: bool
+    instructions: str | None
+    previous_response_id: str | None
+    input_text: str | None
+    responses_input_present: bool
+    input_items: tuple[_ModelInputItem, ...] | None
+    input_strings: tuple[str, ...]
+    input_json: str
+    named_tools: tuple[_NamedTool, ...]
+    tools_json: str
+    tool_outputs: tuple[_ToolOutputObservation, ...]
+    context: _PreparedMatcherContext | None
+    matching_text: str
+    matching_ascii_text: str
+    matching_sorted_text: str
+    request_fingerprint: str
+    wire_json: str
+
+
+type _ModelRequestInput = _ModelRequest | dict[str, object]
+
+
+def _optional_string(value: object) -> str | None:
+    """Unsupported optional provider fields do not participate in local matching."""
+    return value if isinstance(value, str) else None
+
+
+def _decode_string_leaves(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, dict):
+        return tuple(
+            text
+            for child in _object(value).values()
+            for text in _decode_string_leaves(child)
+        )
+    if isinstance(value, list):
+        return tuple(
+            text for child in _list(value) for text in _decode_string_leaves(child)
+        )
+    return ()
+
+
+def _decode_tool_outputs(value: object) -> tuple[_ToolOutputObservation, ...]:
+    """Validate the consumed identities while allowing provider-owned extra fields."""
+    outputs: list[_ToolOutputObservation] = []
+    if isinstance(value, dict):
+        payload = _object(value)
+        kind = _optional_string(payload.get("type"))
+        call_id = _optional_string(payload.get("call_id"))
+        text = _optional_string(payload.get("output"))
+        if (
+            kind in {"function_call_output", "custom_tool_call_output"}
+            and call_id is not None
+        ):
+            outputs.append(_ToolOutputObservation(call_id, kind, text))
+        tool_call_id = _optional_string(payload.get("tool_call_id"))
+        if payload.get("role") == "tool" and tool_call_id is not None:
+            outputs.append(_ToolOutputObservation(tool_call_id, None, text))
+        for child in payload.values():
+            outputs.extend(_decode_tool_outputs(child))
+    elif isinstance(value, list):
+        for child in _list(value):
+            outputs.extend(_decode_tool_outputs(child))
+    return tuple(outputs)
+
+
+def _decode_model_input_item(value: object) -> _ModelInputItem:
+    payload = _object(value) if isinstance(value, dict) else {}
+    content = payload.get("content")
+    text: str | None = None
+    if isinstance(content, str):
+        text = content
+    elif isinstance(content, list):
+        parts: list[str] = []
+        for raw in _list(content):
+            if not isinstance(raw, dict):
+                continue
+            part = _object(raw)
+            part_text = part.get("text")
+            if part.get("type") in {"input_text", "text"} and isinstance(
+                part_text, str
+            ):
+                parts.append(part_text)
+        text = "".join(parts)
+    return _ModelInputItem(
+        object_item=isinstance(value, dict),
+        role=_optional_string(payload.get("role")),
+        kind=_optional_string(payload.get("type")),
+        call_id_present="call_id" in payload,
+        call_id=_optional_string(payload.get("call_id")),
+        tool_call_id=_optional_string(payload.get("tool_call_id")),
+        text=text,
+        tool_outputs=_decode_tool_outputs(value),
+        wire_json=json.dumps(value),
+    )
+
+
+def _decode_matcher_context(
+    payload: dict[str, object],
+) -> _PreparedMatcherContext | None:
+    fields = {
+        "_external_channel_fixture_generation",
+        "_external_channel_fixture_turn",
+        "_external_channel_fixture_flow",
+        "_external_channel_fixture_reference_tokens",
+        "_external_channel_fixture_observed_stages",
+        "_external_channel_fixture_request_key",
+    }
+    if fields.isdisjoint(payload):
+        return None
+    generation = payload.get("_external_channel_fixture_generation")
+    references = payload.get("_external_channel_fixture_reference_tokens")
+    stages = payload.get("_external_channel_fixture_observed_stages")
+    return _PreparedMatcherContext(
+        generation_present="_external_channel_fixture_generation" in payload,
+        generation=(
+            generation
+            if isinstance(generation, int) and not isinstance(generation, bool)
+            else None
+        ),
+        turn=_optional_string(payload.get("_external_channel_fixture_turn")),
+        flow=_optional_string(payload.get("_external_channel_fixture_flow")),
+        reference_tokens=(
+            tuple(item for item in references if isinstance(item, str))
+            if isinstance(references, list | tuple)
+            else ()
+        ),
+        reference_tokens_are_tuple=isinstance(references, tuple),
+        observed_stages=(
+            tuple(item for item in stages if isinstance(item, str))
+            if isinstance(stages, list)
+            else ()
+        ),
+        request_key=_optional_string(
+            payload.get("_external_channel_fixture_request_key")
+        ),
+    )
+
+
+def _decode_model_request(value: object) -> _ModelRequest:
+    """Project matching fields while retaining provider compatibility at egress."""
+    if isinstance(value, _ModelRequest):
+        return value
+    payload = _object(value)
+    input_value = payload.get("input", payload.get("messages"))
+    tools = payload.get("tools")
+    named_tools: list[_NamedTool] = []
+    if isinstance(tools, list):
+        for raw in _list(tools):
+            if isinstance(raw, dict):
+                tool = _object(raw)
+                named_tools.append(
+                    _NamedTool(
+                        _optional_string(tool.get("name")),
+                        _optional_string(tool.get("type")),
+                    )
+                )
+    return _ModelRequest(
+        model=_optional_string(payload.get("model")),
+        stream=payload.get("stream") is True,
+        instructions=_optional_string(payload.get("instructions")),
+        previous_response_id=_optional_string(payload.get("previous_response_id")),
+        input_text=input_value if isinstance(input_value, str) else None,
+        responses_input_present=isinstance(payload.get("input"), list),
+        input_items=(
+            tuple(_decode_model_input_item(item) for item in _list(input_value))
+            if isinstance(input_value, list)
+            else None
+        ),
+        input_strings=_decode_string_leaves(input_value),
+        input_json=json.dumps(payload.get("input"), ensure_ascii=False),
+        named_tools=tuple(named_tools),
+        tools_json=json.dumps(payload.get("tools", [])),
+        tool_outputs=_decode_tool_outputs(payload),
+        context=_decode_matcher_context(payload),
+        # Existing inert selectors match the full serialized provider request.
+        # Decode those textual selector projections once, independently of the
+        # opaque journal/relay snapshot retained solely for egress.
+        matching_text=json.dumps(payload, ensure_ascii=False),
+        matching_ascii_text=json.dumps(payload),
+        matching_sorted_text=json.dumps(payload, sort_keys=True),
+        request_fingerprint=sha256(
+            json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()
+        ).hexdigest(),
+        wire_json=json.dumps(payload),
+    )
+
+
+def _model_request_egress(request: _ModelRequestInput) -> dict[str, object]:
+    """Restore only the opaque snapshot and explicitly declared matcher tuple."""
+    decoded = _decode_model_request(request)
+    payload = _object(json.loads(decoded.wire_json))
+    context = decoded.context
+    if context is not None and context.reference_tokens_are_tuple:
+        payload["_external_channel_fixture_reference_tokens"] = context.reference_tokens
+    return payload
+
+
+def _model_tools_egress(request: _ModelRequestInput) -> object:
+    """Relay provider-owned tool declarations without inspecting their JSON."""
+    return json.loads(_decode_model_request(request).tools_json)
+
+
+def _model_input_item_egress(item: _ModelInputItem) -> object:
+    return json.loads(item.wire_json)
+
+
+def _with_input_alias(item: _ModelInputItem, call_id: str) -> _ModelInputItem:
+    """Encode a declared alias change while relaying the opaque item extras."""
+    payload = _object(_model_input_item_egress(item))
+    payload["tool_call_id" if item.role == "tool" else "call_id"] = call_id
+    return _decode_model_input_item(payload)
+
+
+def _prepared_matcher_view(
+    request: _ModelRequest,
+    items: tuple[_ModelInputItem, ...],
+    context: _PreparedMatcherContext,
+) -> _ModelRequest:
+    """Encode typed local view fields without inspecting opaque provider extras."""
+    payload = _model_request_egress(request)
+    payload["input"] = [_model_input_item_egress(item) for item in items]
+    payload["_external_channel_fixture_turn"] = context.turn
+    payload["_external_channel_fixture_flow"] = context.flow
+    payload["_external_channel_fixture_reference_tokens"] = context.reference_tokens
+    payload["_external_channel_fixture_generation"] = context.generation
+    payload["_external_channel_fixture_observed_stages"] = list(context.observed_stages)
+    payload["_external_channel_fixture_request_key"] = context.request_key
+    return _decode_model_request(payload)
 
 
 _SEMANTIC_FOLLOW_UP_RESPONSES = {
@@ -364,10 +949,10 @@ _DYNAMIC_WORKTREE_EXTERNAL_FINISH_CALL_ID = "call_dynamic_worktree_external_fini
 
 
 def _dynamic_worktree_scenario(
-    request: dict[str, object],
+    request: _ModelRequestInput,
 ) -> _DynamicWorktreeScenario | None:
     """Return the deterministic dynamic-worktree operation and exact path."""
-    serialized = json.dumps(request, ensure_ascii=False)
+    serialized = _decode_model_request(request).matching_text
     create_prefix = json.dumps(
         _DYNAMIC_WORKTREE_CREATE_PREFIX,
         ensure_ascii=False,
@@ -437,7 +1022,7 @@ def _dynamic_worktree_scenario(
 
 
 def _dynamic_worktree_external_source(
-    request: dict[str, object],
+    request: _ModelRequestInput,
 ) -> str | None:
     """Return the current External Channel continuity source Project."""
     user_text = _last_user_text(request)
@@ -452,10 +1037,10 @@ def _dynamic_worktree_external_source(
 
 
 def _dynamic_worktree_external_stage(
-    request: dict[str, object],
+    request: _ModelRequestInput,
 ) -> str | None:
     """Return one deterministic External Channel worktree request stage."""
-    serialized = json.dumps(request, ensure_ascii=False)
+    serialized = _decode_model_request(request).matching_text
     user_text = _last_user_text(request)
     if (
         _DYNAMIC_WORKTREE_EXTERNAL_MARKER not in serialized
@@ -488,120 +1073,66 @@ def _dynamic_worktree_external_stage(
     return None
 
 
-def _last_user_text(request: dict[str, object]) -> str | None:
+def _last_user_text(request: _ModelRequestInput) -> str | None:
     """Return the text from the last user input or message item."""
-    input_value = request.get("input", request.get("messages"))
-    if isinstance(input_value, str):
-        return input_value
-    if not isinstance(input_value, list):
+    request = _decode_model_request(request)
+    if request.input_text is not None:
+        return request.input_text
+    if request.input_items is None:
         return None
-    input_items = _list(input_value)
-    for raw_item in reversed(input_items):
-        if not isinstance(raw_item, dict):
-            continue
-        item = _object(raw_item)
-        if item.get("role") != "user":
-            continue
-        content = item.get("content")
-        if isinstance(content, str):
-            return content
-        if not isinstance(content, list):
-            return None
-        text_parts: list[str] = []
-        for raw_part in _list(content):
-            if not isinstance(raw_part, dict):
-                continue
-            part = _object(raw_part)
-            text = part.get("text")
-            if part.get("type") in {"input_text", "text"} and isinstance(text, str):
-                text_parts.append(text)
-        return "".join(text_parts)
+    for item in reversed(request.input_items):
+        if item.role == "user":
+            return item.text
     return None
 
 
-def _request_has_named_tool(request: dict[str, object], name: str) -> bool:
+def _request_has_named_tool(request: _ModelRequestInput, name: str) -> bool:
     """Return whether a model request exposes one named function tool."""
-    tools = request.get("tools")
-    if not isinstance(tools, list):
-        return False
-    for raw_tool in _list(tools):
-        if not isinstance(raw_tool, dict):
-            continue
-        tool = _object(raw_tool)
-        if tool.get("name") == name:
-            return True
-    return False
+    request = _decode_model_request(request)
+    return any(tool.name == name for tool in request.named_tools)
 
 
 def _request_has_named_tool_type(
-    request: dict[str, object],
+    request: _ModelRequestInput,
     *,
     name: str,
     tool_type: str,
 ) -> bool:
     """Return whether a request exposes one named tool with the exact dialect."""
-    tools = request.get("tools")
-    if not isinstance(tools, list):
-        return False
-    for raw_tool in _list(tools):
-        if not isinstance(raw_tool, dict):
-            continue
-        tool = _object(raw_tool)
-        if tool.get("name") == name and tool.get("type") == tool_type:
-            return True
-    return False
+    request = _decode_model_request(request)
+    return any(
+        tool.name == name and tool.kind == tool_type for tool in request.named_tools
+    )
 
 
 def request_has_tool_output(value: object, call_id: str) -> bool:
     """Find one completed tool output in nested Responses or Chat input."""
-    if isinstance(value, dict):
-        item = _object(value)
-        item_type = item.get("type")
-        if (
-            isinstance(item_type, str)
-            and item_type in {"function_call_output", "custom_tool_call_output"}
-            and item.get("call_id") == call_id
-        ):
-            return True
-        if item.get("role") == "tool" and item.get("tool_call_id") == call_id:
-            return True
-        return any(request_has_tool_output(child, call_id) for child in item.values())
-    if isinstance(value, list):
-        return any(request_has_tool_output(child, call_id) for child in _list(value))
-    return False
+    if isinstance(value, _ModelRequest | _ModelInputItem):
+        outputs = value.tool_outputs
+    else:
+        outputs = _decode_tool_outputs(value)
+    return any(output.call_id == call_id for output in outputs)
 
 
-def apply_patch_scenario(request: dict[str, object]) -> str | None:
+def apply_patch_scenario(request: _ModelRequestInput) -> str | None:
     """Return the current deterministic apply-patch scenario."""
+    request = _decode_model_request(request)
     user_text = _last_user_text(request)
     if user_text == _APPLY_PATCH_SUCCESS_MESSAGE:
         return "success"
     if user_text == _APPLY_PATCH_TRAVERSAL_MESSAGE:
         return "traversal"
 
-    input_value = request.get("input", request.get("messages"))
     message_scenarios: list[str] = []
-
-    def visit_message(value: object) -> None:
-        if isinstance(value, str):
-            if value == _APPLY_PATCH_SUCCESS_MESSAGE:
-                message_scenarios.append("success")
-            elif value == _APPLY_PATCH_TRAVERSAL_MESSAGE:
-                message_scenarios.append("traversal")
-            return
-        if isinstance(value, list):
-            for child in _list(value):
-                visit_message(child)
-            return
-        if isinstance(value, dict):
-            for child in _object(value).values():
-                visit_message(child)
-
-    visit_message(input_value)
+    for text in request.input_strings:
+        if text == _APPLY_PATCH_SUCCESS_MESSAGE:
+            message_scenarios.append("success")
+        elif text == _APPLY_PATCH_TRAVERSAL_MESSAGE:
+            message_scenarios.append("traversal")
     if message_scenarios:
         return message_scenarios[-1]
 
-    previous_response_id = request.get("previous_response_id")
+    previous_response_id = request.previous_response_id
     response_scenarios = {
         "resp_apply_patch_success": "success",
         "resp_apply_patch_success_inspect": "success",
@@ -621,25 +1152,23 @@ def apply_patch_scenario(request: dict[str, object]) -> str | None:
         _APPLY_PATCH_TRAVERSAL_CALL_ID: "traversal",
         _APPLY_PATCH_TRAVERSAL_INSPECT_CALL_ID: "traversal",
     }
-    if not isinstance(input_value, list):
+    if request.input_items is None:
         return None
-    for raw_item in reversed(_list(input_value)):
-        if not isinstance(raw_item, dict):
-            continue
-        item = _object(raw_item)
-        call_id = item.get("call_id", item.get("tool_call_id"))
-        if isinstance(call_id, str):
+    for item in reversed(request.input_items):
+        call_id = item.effective_call_id
+        if call_id is not None:
             scenario = call_scenarios.get(call_id)
             if scenario is not None:
                 return scenario
     return None
 
 
-def is_run_tool_to_file_scenario(request: dict[str, object]) -> bool:
+def is_run_tool_to_file_scenario(request: _ModelRequestInput) -> bool:
     """Recognize the deterministic Runtime output materialization journey."""
+    request = _decode_model_request(request)
     if _last_user_text(request) == _RUN_TOOL_TO_FILE_PROMPT:
         return True
-    previous_response_id = request.get("previous_response_id")
+    previous_response_id = request.previous_response_id
     if previous_response_id in {
         "resp_run_tool_to_file_create",
         "resp_run_tool_to_file_store",
@@ -669,46 +1198,36 @@ def external_channel_file_tool_output_evidence(
     }
     evidence: dict[str, dict[str, object]] = {}
 
-    def visit(item: object) -> None:
-        if isinstance(item, dict):
-            payload = _object(item)
-            call_id = payload.get("call_id")
-            item_type = payload.get("type")
-            if (
-                isinstance(call_id, str)
-                and call_id in call_ids
-                and item_type in {"function_call_output", "custom_tool_call_output"}
-            ):
-                output = payload.get("output")
-                if isinstance(output, str):
-                    error_match = re.search(
-                        r"(?i)\b(error|failed|unavailable|denied|invalid)\b",
-                        output,
-                    )
-                    evidence[call_id] = {
-                        "present": True,
-                        "length": len(output),
-                        "error": (output[:512] if error_match is not None else None),
-                    }
-                else:
-                    evidence[call_id] = {
-                        "present": True,
-                        "length": None,
-                        "error": None,
-                    }
-            for child in payload.values():
-                visit(child)
-        elif isinstance(item, list):
-            for child in _list(item):
-                visit(child)
-
-    visit(value)
+    outputs = (
+        value.tool_outputs
+        if isinstance(value, _ModelRequest | _ModelInputItem)
+        else _decode_tool_outputs(value)
+    )
+    for result in outputs:
+        if result.call_id not in call_ids or result.kind not in {
+            "function_call_output",
+            "custom_tool_call_output",
+        }:
+            continue
+        output = result.output_text
+        error_match = (
+            re.search(r"(?i)\b(error|failed|unavailable|denied|invalid)\b", output)
+            if output is not None
+            else None
+        )
+        evidence[result.call_id] = {
+            "present": True,
+            "length": len(output) if output is not None else None,
+            "error": output[:512]
+            if output is not None and error_match is not None
+            else None,
+        }
     return evidence
 
 
-def external_channel_binding(request: dict[str, object]) -> str | None:
+def external_channel_binding(request: _ModelRequestInput) -> str | None:
     """Extract the binding handle from an external turn or compacted work."""
-    serialized = json.dumps(request, ensure_ascii=False)
+    serialized = _decode_model_request(request).matching_text
     turn_match = _EXTERNAL_CHANNEL_TURN_BINDING.search(serialized)
     if turn_match is not None:
         return turn_match.group(1)
@@ -717,7 +1236,7 @@ def external_channel_binding(request: dict[str, object]) -> str | None:
 
 
 def latest_external_channel_human_binding(
-    request: dict[str, object],
+    request: _ModelRequestInput,
 ) -> str | None:
     """Return the Binding from the latest canonical human External Channel turn."""
     latest_user_text = _last_user_text(request)
@@ -731,7 +1250,7 @@ def latest_external_channel_human_binding(
 
 
 def _latest_external_channel_progress_marker(
-    request: dict[str, object],
+    request: _ModelRequestInput,
 ) -> bool:
     """Return whether the current logical user turn starts progress work."""
     latest_user_text = _last_user_text(request)
@@ -742,7 +1261,7 @@ def _latest_external_channel_progress_marker(
 
 
 def has_current_external_channel_progress_result(
-    request: dict[str, object],
+    request: _ModelRequestInput,
 ) -> bool:
     """Return whether a current tool result follows the latest user turn."""
     return any(
@@ -751,18 +1270,14 @@ def has_current_external_channel_progress_result(
     )
 
 
-def has_current_tool_output(request: dict[str, object], call_id: str) -> bool:
+def has_current_tool_output(request: _ModelRequestInput, call_id: str) -> bool:
     """Return whether one tool output follows the latest logical user turn."""
-    input_value = request.get("input", request.get("messages"))
-    if not isinstance(input_value, list):
+    request = _decode_model_request(request)
+    if request.input_items is None:
         return False
-    input_items = _list(input_value)
+    input_items = request.input_items
     latest_user_index = max(
-        (
-            index
-            for index, raw_item in enumerate(input_items)
-            if isinstance(raw_item, dict) and _object(raw_item).get("role") == "user"
-        ),
+        (index for index, item in enumerate(input_items) if item.role == "user"),
         default=-1,
     )
     if latest_user_index < 0:
@@ -773,7 +1288,7 @@ def has_current_tool_output(request: dict[str, object], call_id: str) -> bool:
     )
 
 
-def is_external_channel_progress_request(request: dict[str, object]) -> bool:
+def is_external_channel_progress_request(request: _ModelRequestInput) -> bool:
     """Recognize the deterministic progress journey by stable request markers."""
     return (
         _latest_external_channel_progress_marker(request)
@@ -786,7 +1301,7 @@ def is_external_channel_progress_request(request: dict[str, object]) -> bool:
 
 
 def is_external_channel_quiet_work_request(
-    request: dict[str, object],
+    request: _ModelRequestInput,
 ) -> bool:
     """Recognize the Discord-only quiet-work progress journey."""
     latest_user_text = _last_user_text(request)
@@ -798,7 +1313,7 @@ def is_external_channel_quiet_work_request(
 
 
 def is_external_channel_quiet_work_setup_request(
-    request: dict[str, object],
+    request: _ModelRequestInput,
 ) -> bool:
     """Recognize the isolated setup flow that establishes quiet-work Binding."""
     latest_user_text = _last_user_text(request)
@@ -822,10 +1337,10 @@ def is_external_channel_quiet_work_setup_request(
 
 
 def is_external_channel_discord_title_request(
-    request: dict[str, object],
+    request: _ModelRequestInput,
 ) -> bool:
     """Recognize only the Discord P0 automatic-title model request."""
-    serialized = json.dumps(request, ensure_ascii=False)
+    serialized = _decode_model_request(request).matching_text
     return (
         _SESSION_TITLE_SYSTEM_MARKER in serialized
         and _EXTERNAL_CHANNEL_DISCORD_TITLE_MARKER in serialized
@@ -833,10 +1348,10 @@ def is_external_channel_discord_title_request(
 
 
 def is_external_channel_slack_response_mode_title_request(
-    request: dict[str, object],
+    request: _ModelRequestInput,
 ) -> bool:
     """Recognize only the Slack response-mode automatic-title request."""
-    serialized = json.dumps(request, sort_keys=True)
+    serialized = _decode_model_request(request).matching_sorted_text
     return (
         _SESSION_TITLE_SYSTEM_MARKER in serialized
         and _last_user_text(request)
@@ -845,7 +1360,7 @@ def is_external_channel_slack_response_mode_title_request(
 
 
 def external_channel_progress_evidence(
-    request: dict[str, object],
+    request: _ModelRequestInput,
 ) -> dict[str, object]:
     """Return sanitized evidence about one deterministic progress request."""
     latest_user_text = _last_user_text(request)
@@ -869,25 +1384,25 @@ def external_channel_progress_evidence(
     }
 
 
-def external_channel_file_locators(request: dict[str, object]) -> list[str]:
+def external_channel_file_locators(request: _ModelRequestInput) -> list[str]:
     """Extract ordered opaque file locators from the rendered external message."""
-    serialized = json.dumps(request, ensure_ascii=False)
+    serialized = _decode_model_request(request).matching_text
     return list(dict.fromkeys(_EXTERNAL_CHANNEL_FILE_LOCATOR.findall(serialized)))
 
 
 def external_channel_file_declared_sizes(
-    request: dict[str, object],
+    request: _ModelRequestInput,
 ) -> list[int]:
     """Extract ordered declared sizes from rendered file metadata."""
-    serialized = json.dumps(request, ensure_ascii=False)
+    serialized = _decode_model_request(request).matching_text
     return [
         int(value) for value in _EXTERNAL_CHANNEL_FILE_DECLARED_SIZE.findall(serialized)
     ]
 
 
-def is_external_channel_file_request(request: dict[str, object]) -> bool:
+def is_external_channel_file_request(request: _ModelRequestInput) -> bool:
     """Recognize the file journey before or after deferred-tool activation."""
-    serialized = json.dumps(request, ensure_ascii=False)
+    serialized = _decode_model_request(request).matching_text
     return (
         _EXTERNAL_CHANNEL_FILE_MARKER in serialized
         and external_channel_binding(request) is not None
@@ -904,10 +1419,10 @@ def is_external_channel_file_request(request: dict[str, object]) -> bool:
 
 
 def external_channel_file_evidence(
-    request: dict[str, object],
+    request: _ModelRequestInput,
 ) -> dict[str, object]:
     """Return sanitized request-stage evidence for the file-transfer journey."""
-    serialized = json.dumps(request, ensure_ascii=False)
+    serialized = _decode_model_request(request).matching_text
     return {
         "matched": is_external_channel_file_request(request),
         "binding": external_channel_binding(request),
@@ -932,9 +1447,10 @@ def external_channel_file_evidence(
     }
 
 
-def _is_semantic_compaction_request(request: dict[str, object]) -> bool:
+def _is_semantic_compaction_request(request: _ModelRequestInput) -> bool:
     """Return whether compaction belongs to the semantic transcript scenario."""
-    instructions = request.get("instructions")
+    request = _decode_model_request(request)
+    instructions = request.instructions
     user_text = _last_user_text(request)
     return (
         isinstance(instructions, str)
@@ -993,35 +1509,100 @@ _PROVIDER_TOOL_LIVE_BARRIER = _ProviderToolLiveBarrier()
 _INFERENCE_PROFILE_BARRIER = _ProviderToolLiveBarrier()
 
 
-def _inference_profile_source_payload() -> list[dict[str, object]]:
-    """Supply synthetic prices through the ordinary validated-source API."""
-    return [
-        {
-            "id": "openai",
-            "name": "OpenAI",
-            "api_pattern": r"https://api\.openai\.com",
-            "models": [
-                {
-                    "id": model,
-                    "name": model,
-                    "match": {"equals": model},
-                    "context_window": 128_000,
-                    "prices": {
-                        "input_mtok": 1,
-                        "cache_read_mtok": 0.1,
-                        "cache_write_mtok": 1,
-                        "output_mtok": 2,
-                    },
-                }
-                for model in (
-                    "gpt-5.5",
-                    "gpt-5.5-mini",
-                    "gpt-6-astra",
-                    "gpt-5.6-sol",
-                )
-            ],
+type _InferenceProfileSourceVariant = Literal["baseline", "refreshed", "missing-model"]
+
+
+@dataclass(frozen=True)
+class _InferenceProfileSourceControl:
+    """Accept only the bounded source-only fixture control."""
+
+    variant: _InferenceProfileSourceVariant
+
+
+def _decode_inference_profile_source_control(
+    body: bytes,
+) -> _InferenceProfileSourceControl:
+    """Validate the exact control object before entering fixture state logic."""
+    payload: object = json.loads(body)
+    if not isinstance(payload, dict) or set(payload) != {"variant"}:
+        raise ValueError("A valid catalog source variant is required.")
+    match payload["variant"]:
+        case "baseline":
+            return _InferenceProfileSourceControl(variant="baseline")
+        case "refreshed":
+            return _InferenceProfileSourceControl(variant="refreshed")
+        case "missing-model":
+            return _InferenceProfileSourceControl(variant="missing-model")
+        case _:
+            raise ValueError("A valid catalog source variant is required.")
+
+
+def _inference_profile_source_payload(
+    variant: _InferenceProfileSourceVariant,
+) -> dict[str, dict[str, object]]:
+    """Supply inert exact-scoped facts and per-token synthetic catalog prices."""
+    full_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+    model_efforts = {
+        "gpt-5.5": full_efforts,
+        "gpt-5.5-mini": [],
+        "gpt-6-astra": full_efforts,
+        "gpt-5.6-sol": full_efforts,
+    }
+    model_web_search = {
+        "gpt-5.5": True,
+        "gpt-5.5-mini": False,
+        "gpt-6-astra": True,
+        "gpt-5.6-sol": True,
+    }
+    payload: dict[str, dict[str, object]] = {
+        model: {
+            "litellm_provider": "openai",
+            "display_name": model,
+            "mode": "responses",
+            "supported_endpoints": ["/v1/responses"],
+            "max_input_tokens": 128_000,
+            "supported_modalities": ["text", "image", "pdf"],
+            "supported_output_modalities": ["text"],
+            "supports_vision": True,
+            "supports_pdf_input": True,
+            "supports_function_calling": True,
+            "supports_parallel_function_calling": True,
+            "supports_response_schema": True,
+            "supports_reasoning": bool(efforts),
+            "reasoning_effort_levels": list(efforts),
+            "supports_web_search": model_web_search[model],
+            "input_cost_per_token": 0.000001,
+            "output_cost_per_token": 0.000002,
+            "cache_read_input_token_cost": 0.0000001,
+            "cache_creation_input_token_cost": 0.000001,
         }
-    ]
+        for model, efforts in model_efforts.items()
+    }
+    payload["gpt-5.5-title-plain"] = {
+        **payload["gpt-5.5"],
+        "display_name": "Plain Title Deterministic",
+        "supports_response_schema": False,
+        "supports_reasoning": False,
+        "reasoning_effort_levels": [],
+    }
+    match variant:
+        case "baseline":
+            pass
+        case "refreshed":
+            payload["gpt-5.5"].update(
+                {
+                    "reasoning_effort_levels": [
+                        effort for effort in full_efforts if effort != "max"
+                    ],
+                    "input_cost_per_token": 0.000003,
+                    "output_cost_per_token": 0.000004,
+                }
+            )
+        case "missing-model":
+            del payload["gpt-5.5"]
+        case _:
+            assert_never(variant)
+    return payload
 
 
 def inference_profile_scenario(user_text: str | None) -> str | None:
@@ -1032,9 +1613,9 @@ def inference_profile_scenario(user_text: str | None) -> str | None:
     return scenario if scenario in _INFERENCE_PROFILE_TIERS else None
 
 
-def is_inference_profile_title_request(request: dict[str, object]) -> bool:
+def is_inference_profile_title_request(request: _ModelRequestInput) -> bool:
     """Recognize the independent title operation for a synthetic profile input."""
-    serialized = json.dumps(request, ensure_ascii=False)
+    serialized = _decode_model_request(request).matching_text
     return (
         _SESSION_TITLE_SYSTEM_MARKER in serialized
         and _INFERENCE_PROFILE_PREFIX in serialized
@@ -1087,72 +1668,81 @@ class _ExternalChannelResponseRegistry:
                 reset_state()
 
     def run_if_current(
-        self, request: dict[str, object], dispatch: Callable[[], None]
+        self, request: _ModelRequestInput, dispatch: Callable[[], None]
     ) -> bool:
         """Serialize all scoped state mutations with generation retirement."""
+        request = _decode_model_request(request)
+        matcher = request.context
         with self._lock:
-            if request.get("_external_channel_fixture_generation") != self._generation:
+            if matcher is None or matcher.generation != self._generation:
                 return False
             dispatch()
             return True
 
-    def released_outcome_replay(self, request: dict[str, object]) -> bool:
+    def released_outcome_replay(self, request: _ModelRequestInput) -> bool:
         """Recognize a previously chosen rich outcome, including delayed retries."""
+        request = _decode_model_request(request)
+        matcher = request.context
         with self._lock:
-            if request.get("_external_channel_fixture_generation") != self._generation:
+            if matcher is None or matcher.generation != self._generation:
                 return False
-            key = request.get("_external_channel_fixture_request_key")
-            if isinstance(key, str) and key in self._released_outcomes:
+            key = matcher.request_key
+            if key is not None and key in self._released_outcomes:
                 return True
-            context = self._responses.get(str(request.get("previous_response_id")))
+            context = self._responses.get(str(request.previous_response_id))
             return (
                 context is not None
                 and context.released_outcome
-                and context.turn == request.get("_external_channel_fixture_turn")
+                and context.turn == matcher.turn
                 and context.binding == external_channel_binding(request)
             )
 
-    def remember_released_outcome(self, request: dict[str, object]) -> None:
+    def remember_released_outcome(self, request: _ModelRequestInput) -> None:
         """Retain only a safe request fingerprint, never response/body contents."""
+        request = _decode_model_request(request)
+        matcher = request.context
         with self._lock:
-            key = request.get("_external_channel_fixture_request_key")
-            if isinstance(key, str):
+            key = matcher.request_key if matcher is not None else None
+            if key is not None:
                 self._released_outcomes[key] = None
                 while len(self._released_outcomes) > self._limit:
                     self._released_outcomes.popitem(last=False)
-            previous = str(request.get("previous_response_id"))
+            previous = str(request.previous_response_id)
             context = self._responses.get(previous)
             if (
                 context is not None
-                and context.turn == request.get("_external_channel_fixture_turn")
+                and context.turn == (matcher.turn if matcher is not None else None)
                 and context.binding == external_channel_binding(request)
             ):
                 self._responses[previous] = context._replace(released_outcome=True)
 
-    def prepare(self, request: dict[str, object]) -> dict[str, object]:
-        """Build a local matcher view; never alter the upstream request."""
-        input_value = request.get("input")
-        if not isinstance(input_value, list):
+    def prepare(self, request: _ModelRequestInput) -> dict[str, object]:
+        """Keep the public helper's wire interface at an explicit fixture boundary."""
+        decoded = _decode_model_request(request)
+        prepared = self.prepare_model(decoded)
+        if prepared is decoded and isinstance(request, dict):
             return request
-        items = _list(input_value)
+        return _model_request_egress(prepared)
+
+    def prepare_model(self, request: _ModelRequest) -> _ModelRequest:
+        """Build a typed matcher view while preserving the original upstream body."""
+        if not request.responses_input_present or request.input_items is None:
+            return request
+        items = request.input_items
         latest_text = _last_user_text(request)
         human_binding = latest_external_channel_human_binding(request)
         binding = human_binding or external_channel_binding(request)
         with self._lock:
             generation = self._generation
-            context = self._responses.get(str(request.get("previous_response_id")))
+            context = self._responses.get(str(request.previous_response_id))
             if latest_text is None:
                 if (
                     context is None
                     or len(items) != 1
-                    or any(
-                        isinstance(item, dict) and item.get("role") == "user"
-                        for item in items
-                    )
+                    or any(item.role == "user" for item in items)
                     or not any(
-                        isinstance(item, dict)
-                        and item.get("type") == "function_call_output"
-                        and item.get("call_id") == context.call_id
+                        item.kind == "function_call_output"
+                        and item.call_id == context.call_id
                         for item in items
                     )
                 ):
@@ -1167,16 +1757,18 @@ class _ExternalChannelResponseRegistry:
                     "progress": _EXTERNAL_CHANNEL_PROGRESS_MARKER,
                     "resume": "",
                 }[flow]
-                items = [
-                    {
-                        "role": "user",
-                        "content": (
-                            "Message Type: EXTERNAL_CHANNEL_TURN\n"
-                            f"Binding: {binding}\n\n{marker}\n{references}"
-                        ),
-                    },
+                items = (
+                    _decode_model_input_item(
+                        {
+                            "role": "user",
+                            "content": (
+                                "Message Type: EXTERNAL_CHANNEL_TURN\n"
+                                f"Binding: {binding}\n\n{marker}\n{references}"
+                            ),
+                        }
+                    ),
                     *items,
-                ]
+                )
             elif binding is not None:
                 flow = (
                     "setup"
@@ -1196,56 +1788,52 @@ class _ExternalChannelResponseRegistry:
             else:
                 return request
             latest_user_index = max(
-                (
-                    index
-                    for index, item in enumerate(items)
-                    if isinstance(item, dict) and item.get("role") == "user"
-                ),
+                (index for index, item in enumerate(items) if item.role == "user"),
                 default=-1,
             )
-            normalized: list[object] = []
+            normalized: list[_ModelInputItem] = []
             observed_stages: list[str] = []
             for index, item in enumerate(items):
-                if not isinstance(item, dict):
+                if not item.object_item:
                     normalized.append(item)
                     continue
-                raw_call_id = item.get("call_id", item.get("tool_call_id"))
+                raw_call_id = item.effective_call_id
                 alias = self._aliases.get((str(binding), str(raw_call_id)))
                 if (
                     alias is not None
                     and alias.binding == binding
-                    and (
-                        item.get("type") == "function_call_output"
-                        or item.get("role") == "tool"
-                    )
+                    and (item.kind == "function_call_output" or item.role == "tool")
                 ):
-                    key = "tool_call_id" if item.get("role") == "tool" else "call_id"
-                    normalized.append({**item, key: alias.stage})
+                    normalized.append(_with_input_alias(item, alias.stage))
                     if index > latest_user_index and alias.turn == turn:
                         observed_stages.append(alias.stage)
                 else:
                     normalized.append(item)
-        return {
-            **request,
-            "input": normalized,
-            "_external_channel_fixture_turn": turn,
-            "_external_channel_fixture_flow": flow,
-            "_external_channel_fixture_reference_tokens": reference_tokens,
-            "_external_channel_fixture_generation": generation,
-            "_external_channel_fixture_observed_stages": observed_stages,
-            "_external_channel_fixture_request_key": sha256(
-                json.dumps(request, sort_keys=True, ensure_ascii=False).encode()
-            ).hexdigest(),
-        }
+        return _prepared_matcher_view(
+            request,
+            tuple(normalized),
+            _PreparedMatcherContext(
+                generation_present=True,
+                generation=generation,
+                turn=turn,
+                flow=flow,
+                reference_tokens=reference_tokens,
+                reference_tokens_are_tuple=True,
+                observed_stages=tuple(observed_stages),
+                request_key=request.request_fingerprint,
+            ),
+        )
 
     def issue(
         self,
-        request: dict[str, object],
+        request: _ModelRequestInput,
         stage: str,
         *,
         arguments: dict[str, object] | None = None,
     ) -> tuple[str, str, str] | None:
         """Give new logical calls distinct identities and keep retries stable."""
+        request = _decode_model_request(request)
+        matcher = request.context
         known_stages = _EXTERNAL_CHANNEL_PROGRESS_CALL_IDS | {
             _EXTERNAL_CHANNEL_SEARCH_CALL_ID,
             _EXTERNAL_CHANNEL_QUIET_WORK_SETUP_SEARCH_CALL_ID,
@@ -1255,17 +1843,18 @@ class _ExternalChannelResponseRegistry:
         binding = latest_external_channel_human_binding(
             request
         ) or external_channel_binding(request)
-        turn = request.get("_external_channel_fixture_turn")
-        flow = request.get("_external_channel_fixture_flow")
+        turn = matcher.turn if matcher is not None else None
+        flow = matcher.flow if matcher is not None else None
         if (
             stage not in known_stages
+            or matcher is None
             or binding is None
             or not isinstance(turn, str)
             or not isinstance(flow, str)
         ):
             return None
         with self._lock:
-            if request.get("_external_channel_fixture_generation") != self._generation:
+            if matcher.generation != self._generation:
                 raise _ExternalChannelStaleResponseContext(
                     "External Channel fixture generation was retired."
                 )
@@ -1300,11 +1889,11 @@ class _ExternalChannelResponseRegistry:
                 and flow == "progress"
                 else stage
             )
-            tokens = request.get("_external_channel_fixture_reference_tokens")
             reference_tokens = tuple(
                 token
                 for token in _EXTERNAL_CHANNEL_PROGRESS_REFERENCE_TOKENS
-                if isinstance(tokens, tuple) and token in tokens
+                if matcher.reference_tokens_are_tuple
+                and token in matcher.reference_tokens
             )
             context = _ExternalChannelResponseContext(
                 binding,
@@ -1480,13 +2069,20 @@ def _reset_external_channel_progress_state() -> None:
     _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.clear()
 
 
-def _external_channel_quiet_work_barrier_binding(body: bytes) -> str | None:
-    """Decode the one bounded Binding used to arm the quiet-work barrier."""
+@dataclass(frozen=True)
+class _QuietWorkBarrierControl:
+    """One exact bounded Binding for the local Work barrier protocol."""
+
+    binding: str
+
+
+def _decode_quiet_work_barrier_control(body: bytes) -> _QuietWorkBarrierControl | None:
+    """Decode an exact local control object before mutating barrier state."""
     try:
         payload: object = json.loads(body)
     except json.JSONDecodeError:
         return None
-    if not isinstance(payload, dict):
+    if not isinstance(payload, dict) or set(payload) != {"binding"}:
         return None
     binding = _object(payload).get("binding")
     if (
@@ -1494,11 +2090,98 @@ def _external_channel_quiet_work_barrier_binding(body: bytes) -> str | None:
         or _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER_BINDING.fullmatch(binding) is None
     ):
         return None
-    return binding
+    return _QuietWorkBarrierControl(binding)
+
+
+def _external_channel_quiet_work_barrier_binding(body: bytes) -> str | None:
+    """Keep the scalar compatibility view at the fixture's helper boundary."""
+    control = _decode_quiet_work_barrier_control(body)
+    return control.binding if control is not None else None
+
+
+@dataclass(frozen=True)
+class _OAuthConnectionScenario:
+    """Validated local account fixture state rather than a raw control dictionary."""
+
+    provider: Literal["chatgpt", "xai"]
+    scenario: str
+    access_token: str
+    refresh_token: str
+
+
+def _decode_oauth_connection_scenario(body: bytes) -> _OAuthConnectionScenario:
+    payload = _object(json.loads(body))
+    if set(payload) != {"provider", "scenario", "access_token", "refresh_token"}:
+        raise ValueError("Invalid OAuth fixture scenario.")
+    scenario, access_token, refresh_token = (
+        payload["scenario"],
+        payload["access_token"],
+        payload["refresh_token"],
+    )
+    if (
+        not isinstance(scenario, str)
+        or not isinstance(access_token, str)
+        or not isinstance(refresh_token, str)
+    ):
+        raise ValueError("Invalid OAuth fixture scenario.")
+    match payload["provider"]:
+        case "chatgpt":
+            return _OAuthConnectionScenario(
+                "chatgpt", scenario, access_token, refresh_token
+            )
+        case "xai":
+            return _OAuthConnectionScenario(
+                "xai", scenario, access_token, refresh_token
+            )
+        case _:
+            raise ValueError("Invalid OAuth fixture scenario.")
+
+
+@dataclass(frozen=True)
+class _DeviceAuthorizationRequest:
+    """The consumed field projected from the extensible provider request."""
+
+    device_auth_id: str | None
+
+
+def _decode_device_authorization(body: bytes) -> _DeviceAuthorizationRequest:
+    # Provider-owned extra fields (such as user_code) remain compatible.
+    payload = _object(json.loads(body))
+    device_auth_id = payload.get("device_auth_id")
+    return _DeviceAuthorizationRequest(
+        device_auth_id if isinstance(device_auth_id, str) else None
+    )
+
+
+@dataclass(frozen=True)
+class _ImageGenerationRequest:
+    """A matching prompt and opaque original wire snapshot for journal egress."""
+
+    prompt: str | None
+    wire_json: str
+
+
+def _decode_image_generation_request(body: bytes) -> _ImageGenerationRequest:
+    # OpenAI/xAI own additional generation fields; this fixture consumes prompt.
+    payload = _object(json.loads(body))
+    prompt = payload.get("prompt")
+    return _ImageGenerationRequest(
+        prompt if isinstance(prompt, str) else None,
+        json.dumps(payload),
+    )
+
+
+def _image_request_egress(request: _ImageGenerationRequest) -> dict[str, object]:
+    """Relay the opaque journal snapshot without inspecting its contents."""
+    return _object(json.loads(request.wire_json))
 
 
 class _State:
+    catalog_source_variant: ClassVar[_InferenceProfileSourceVariant] = "baseline"
     requests: ClassVar[list[dict[str, object]]] = []
+    consolidation_continuations: ClassVar[
+        OrderedDict[str, ConsolidationFixtureContinuation]
+    ] = OrderedDict()
     openai_image_requests: ClassVar[list[dict[str, object]]] = []
     dynamic_worktree_requests: ClassVar[list[dict[str, object]]] = []
     external_channel_progress_requests: ClassVar[list[dict[str, object]]] = []
@@ -1507,11 +2190,11 @@ class _State:
     oauth_requests: ClassVar[list[dict[str, object]]] = []
     subscription_usage_requests: ClassVar[list[dict[str, object]]] = []
     subscription_usage_sequences: ClassVar[dict[tuple[str, str], int]] = {}
-    oauth_connection_queues: ClassVar[dict[str, list[dict[str, str]]]] = {
+    oauth_connection_queues: ClassVar[dict[str, list[_OAuthConnectionScenario]]] = {
         "chatgpt": [],
         "xai": [],
     }
-    oauth_connection_sessions: ClassVar[dict[str, dict[str, str]]] = {}
+    oauth_connection_sessions: ClassVar[dict[str, _OAuthConnectionScenario]] = {}
     oauth_connection_sequence: ClassVar[int] = 0
     lock: ClassVar[threading.Lock] = threading.Lock()
 
@@ -1522,7 +2205,9 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         """Return a local journal, deterministic usage, or proxied response."""
         if self.path == "/inference-profile/catalog-source":
-            self._write_json(200, _inference_profile_source_payload())
+            with _State.lock:
+                variant = _State.catalog_source_variant
+            self._write_json(200, _inference_profile_source_payload(variant))
             return
         if self.path == _INFERENCE_PROFILE_BARRIER_PATH:
             self._write_json(200, _INFERENCE_PROFILE_BARRIER.evidence())
@@ -1552,6 +2237,8 @@ class _Handler(BaseHTTPRequestHandler):
         if journal is not None:
             with _State.lock:
                 journal.clear()
+                if journal is _State.requests:
+                    _State.consolidation_continuations.clear()
                 if journal is _State.subscription_usage_requests:
                     _State.subscription_usage_sequences.clear()
             if journal is _State.external_channel_progress_requests:
@@ -1564,6 +2251,23 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         """Handle deterministic image, hosted-tool, and OAuth boundaries."""
+        if self.path == "/inference-profile/catalog-source":
+            try:
+                control = _decode_inference_profile_source_control(self._read_body())
+            except ValueError:
+                self._write_json(
+                    400,
+                    {
+                        "error": {
+                            "message": "A valid catalog source variant is required."
+                        }
+                    },
+                )
+                return
+            with _State.lock:
+                _State.catalog_source_variant = control.variant
+            self._write_json(200, {"variant": control.variant})
+            return
         if self.path == _INFERENCE_PROFILE_BARRIER_PATH:
             _INFERENCE_PROFILE_BARRIER.arm()
             self._write_json(201, _INFERENCE_PROFILE_BARRIER.evidence())
@@ -1581,14 +2285,14 @@ class _Handler(BaseHTTPRequestHandler):
             self._write_json(200, _PROVIDER_TOOL_LIVE_BARRIER.evidence())
             return
         if self.path == _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER_PATH:
-            binding = _external_channel_quiet_work_barrier_binding(self._read_body())
-            if binding is None:
+            control = _decode_quiet_work_barrier_control(self._read_body())
+            if control is None:
                 self._write_json(
                     400,
                     {"error": {"message": "A bounded nonblank Binding is required."}},
                 )
                 return
-            _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.arm(binding)
+            _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.arm(control.binding)
             self._write_json(201, _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.evidence())
             return
         if self.path == _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER_RELEASE_PATH:
@@ -1620,20 +2324,21 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path not in {"/v1/responses", "/v1/chat/completions"}:
             self._proxy(body)
             return
-        request_value: object = json.loads(body)
-        if not isinstance(request_value, dict):
+        try:
+            request = _decode_model_request(json.loads(body))
+        except ValueError:
             self._write_json(400, {"error": {"message": "invalid request"}})
             return
-        request = _object(request_value)
         if self.path == "/v1/responses":
-            request = _EXTERNAL_CHANNEL_RESPONSES.prepare(request)
+            request = _EXTERNAL_CHANNEL_RESPONSES.prepare_model(request)
         self._dispatch_prepared_request(request, body)
 
     def _dispatch_prepared_request(
-        self, request: dict[str, object], body: bytes
+        self, request: _ModelRequestInput, body: bytes
     ) -> None:
         """Reject retired matchers before any Work or response state mutation."""
-        if "_external_channel_fixture_generation" in request:
+        request = _decode_model_request(request)
+        if request.context is not None and request.context.generation_present:
             admitted = _EXTERNAL_CHANNEL_RESPONSES.run_if_current(
                 request, lambda: self._dispatch_model_request(request, body)
             )
@@ -1649,13 +2354,179 @@ class _Handler(BaseHTTPRequestHandler):
             return
         self._dispatch_model_request(request, body)
 
-    def _dispatch_model_request(self, request: dict[str, object], body: bytes) -> None:
+    def _dispatch_model_request(self, request: _ModelRequestInput, body: bytes) -> None:
         """Route one generation-fenced local model request."""
+        request = _decode_model_request(request)
         user_text = _last_user_text(request)
+        if self.path == "/v1/responses":
+            fixture_request = _model_request_egress(request)
+            if is_consolidation_fixture_request(fixture_request):
+                try:
+                    with _State.lock:
+                        logical = consolidation_fixture_request(
+                            fixture_request,
+                            _State.consolidation_continuations,
+                            new_chain_id=os.urandom(16).hex(),
+                        )
+                        plan = consolidation_fixture_plan(
+                            logical.request, chain_id=logical.chain_id
+                        )
+                        _State.requests.append(
+                            {
+                                **logical.request,
+                                "fixture_consolidation_chain": logical.chain_id,
+                                "fixture_physical_input": fixture_request.get("input"),
+                            }
+                        )
+                        if plan.call is not None:
+                            call = plan.call
+                            response_id = f"resp_{call.call_id.removeprefix('call_')}"
+                            item: dict[str, object] = {
+                                "id": f"fc_{call.call_id.removeprefix('call_')}",
+                                "type": "function_call",
+                                "status": "completed",
+                                "call_id": call.call_id,
+                                "name": call.name,
+                                "arguments": json.dumps(
+                                    call.arguments,
+                                    ensure_ascii=False,
+                                    separators=(",", ":"),
+                                ),
+                            }
+                            _State.consolidation_continuations[response_id] = (
+                                ConsolidationFixtureContinuation(
+                                    logical.chain_id,
+                                    [
+                                        *[
+                                            _object(item)
+                                            for item in _list(
+                                                logical.request.get("input", [])
+                                            )
+                                        ],
+                                        item,
+                                    ],
+                                )
+                            )
+                        else:
+                            response_id = f"resp_consolidation_final_{logical.chain_id}"
+                            _State.consolidation_continuations[response_id] = (
+                                ConsolidationFixtureContinuation(
+                                    logical.chain_id,
+                                    [
+                                        *[
+                                            _object(item)
+                                            for item in _list(
+                                                logical.request.get("input", [])
+                                            )
+                                        ],
+                                        {
+                                            "role": "assistant",
+                                            "content": plan.final_text,
+                                        },
+                                    ],
+                                )
+                            )
+                            while len(_State.consolidation_continuations) > 256:
+                                _State.consolidation_continuations.popitem(last=False)
+                except ValueError:
+                    self._write_json(
+                        409,
+                        {
+                            "error": {
+                                "message": "Invalid consolidation fixture context."
+                            }
+                        },
+                    )
+                    return
+                if plan.call is not None:
+                    self._write_function_call_response(
+                        request,
+                        call_id=plan.call.call_id,
+                        name=plan.call.name,
+                        arguments=plan.call.arguments,
+                    )
+                else:
+                    assert plan.final_text is not None
+                    self._write_text_response(
+                        request,
+                        plan.final_text,
+                        response_id=f"resp_consolidation_final_{logical.chain_id}",
+                    )
+                return
+            try:
+                historical_summary = historical_memory_summary_response(request)
+                historical_inspection = historical_memory_inspection(request)
+            except ValueError, json.JSONDecodeError:
+                self._write_json(
+                    409, {"error": {"message": "Invalid Historical fixture request."}}
+                )
+                return
+            previous = request.previous_response_id
+            historical_continuation = isinstance(previous, str) and previous.startswith(
+                "resp_historical_memory_"
+            )
+            if historical_summary is not None:
+                with _State.lock:
+                    _State.requests.append(_model_request_egress(request))
+                if f"{_HISTORICAL_MEMORY_PREFIX}provider-failure" in request.input_json:
+                    self._write_json(
+                        500,
+                        {
+                            "error": {
+                                "message": "Deterministic Historical provider failure."
+                            }
+                        },
+                    )
+                    return
+                self._write_text_response(
+                    request,
+                    historical_summary,
+                    response_id="resp_historical_memory_summary",
+                )
+                return
+            if (
+                isinstance(user_text, str)
+                and user_text.startswith(_HISTORICAL_MEMORY_PREFIX)
+            ) or historical_continuation:
+                with _State.lock:
+                    _State.requests.append(_model_request_egress(request))
+                instructions = request.instructions or ""
+                if _SESSION_TITLE_SYSTEM_MARKER in instructions:
+                    self._write_text_response(
+                        request,
+                        '{"title":"Historical Memory E2E"}',
+                        response_id="resp_historical_memory_title",
+                    )
+                    return
+                if historical_inspection is not None:
+                    if not has_current_tool_output(
+                        request, historical_inspection.call_id
+                    ):
+                        if not _request_has_named_tool(
+                            request, historical_inspection.name
+                        ):
+                            self._write_json(
+                                409,
+                                {"error": {"message": "Generic read tool is missing."}},
+                            )
+                            return
+                        self._write_function_call_response(
+                            request,
+                            call_id=historical_inspection.call_id,
+                            name=historical_inspection.name,
+                            arguments=historical_inspection.arguments,
+                        )
+                        return
+                self._write_text_response(
+                    request,
+                    "HISTORICAL_MEMORY_E2E_TURN_COMPLETED",
+                    response_id="resp_historical_memory_turn",
+                )
+                return
         compaction_request = _is_semantic_compaction_request(request)
         if self.path == "/v1/responses" and is_inference_profile_title_request(request):
             with _State.lock:
-                _State.requests.append(request)
+                _State.requests.append(_model_request_egress(request))
             self._write_text_response(
                 request,
                 '{"title":"Synthetic inference profile"}',
@@ -1683,18 +2554,25 @@ class _Handler(BaseHTTPRequestHandler):
             *(f"{_BRAVE_PROMPT_PREFIX}{kind}" for kind in _BRAVE_KINDS),
             f"{_BRAVE_PROMPT_PREFIX}disabled",
         }
+        matching_text = _decode_model_request(request).matching_text
+        watchdog_title_request = _SESSION_TITLE_SYSTEM_MARKER in matching_text and any(
+            prompt in matching_text
+            for prompt in ("Provider title retry", "Structured title fallback")
+        )
         if (
             user_text in captured_prompts
+            or watchdog_title_request
             or inference_profile_scenario(user_text) is not None
             or compaction_request
             or request_has_tool_output(request, "call_brave_e2e_images")
             or (
                 self.path == "/v1/responses"
-                and "Brave Search E2E external_channel" in json.dumps(request)
+                and "Brave Search E2E external_channel"
+                in _decode_model_request(request).matching_ascii_text
             )
         ):
             with _State.lock:
-                _State.requests.append(request)
+                _State.requests.append(_model_request_egress(request))
         profile_scenario = inference_profile_scenario(user_text)
         if self.path == "/v1/responses" and profile_scenario is not None:
             if profile_scenario == "rejected":
@@ -1777,7 +2655,8 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if (
             self.path == "/v1/responses"
-            and "Brave Search E2E external_channel" in json.dumps(request)
+            and "Brave Search E2E external_channel"
+            in _decode_model_request(request).matching_ascii_text
             and (binding := external_channel_binding(request)) is not None
         ):
             search_id = "call_brave_e2e_channel_images"
@@ -2016,7 +2895,7 @@ class _Handler(BaseHTTPRequestHandler):
                     input_value=_APPLY_PATCH_TRAVERSAL_INPUT,
                 )
                 return
-        serialized = json.dumps(request, ensure_ascii=False)
+        serialized = _decode_model_request(request).matching_text
         dynamic_worktree_external_stage = _dynamic_worktree_external_stage(request)
         if self.path == "/v1/responses" and dynamic_worktree_external_stage is not None:
             binding = external_channel_binding(request)
@@ -2622,11 +3501,10 @@ class _Handler(BaseHTTPRequestHandler):
         ):
             if progress_request and not released_outcome_replay:
                 _EXTERNAL_CHANNEL_PROGRESS_SEQUENCES.start(binding)
-            observed_stages = request.get("_external_channel_fixture_observed_stages")
-            if (
-                isinstance(observed_stages, list)
-                and _EXTERNAL_CHANNEL_OUTCOME_PROGRESS_CALL_ID in observed_stages
-            ):
+            observed_stages = (
+                request.context.observed_stages if request.context is not None else ()
+            )
+            if _EXTERNAL_CHANNEL_OUTCOME_PROGRESS_CALL_ID in observed_stages:
                 _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.complete_progress_boundary(binding)
             if (
                 _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.has_progress_issued_for(binding)
@@ -2852,7 +3730,7 @@ class _Handler(BaseHTTPRequestHandler):
                                 },
                                 {
                                     "id": "summarize",
-                                    "title": "Summarize the incident",
+                                    "title": "Summarize the confirmed incident",
                                     "status": "pending",
                                     "details": "Preparing the incident summary.",
                                 },
@@ -2963,36 +3841,13 @@ class _Handler(BaseHTTPRequestHandler):
     def _queue_oauth_connection_scenario(self, body: bytes) -> None:
         """Queue one fake account for the next provider device flow."""
         try:
-            payload: object = json.loads(body)
-        except json.JSONDecodeError:
-            self._write_json(400, {"error": "invalid request"})
-            return
-        if not isinstance(payload, dict):
-            self._write_json(400, {"error": "invalid request"})
-            return
-        request = _object(payload)
-        provider = request.get("provider")
-        scenario = request.get("scenario")
-        access_token = request.get("access_token")
-        refresh_token = request.get("refresh_token")
-        if (
-            not isinstance(provider, str)
-            or provider not in _State.oauth_connection_queues
-            or not isinstance(scenario, str)
-            or not isinstance(access_token, str)
-            or not isinstance(refresh_token, str)
-        ):
+            request = _decode_oauth_connection_scenario(body)
+        except ValueError:
             self._write_json(400, {"error": "invalid request"})
             return
         with _State.lock:
-            _State.oauth_connection_queues[provider].append(
-                {
-                    "scenario": scenario,
-                    "access_token": access_token,
-                    "refresh_token": refresh_token,
-                }
-            )
-        self._write_json(201, {"queued": True, "provider": provider})
+            _State.oauth_connection_queues[request.provider].append(request)
+        self._write_json(201, {"queued": True, "provider": request.provider})
 
     @staticmethod
     def _start_oauth_connection(provider: str) -> str | None:
@@ -3007,7 +3862,7 @@ class _Handler(BaseHTTPRequestHandler):
             return connection_id
 
     @staticmethod
-    def _oauth_connection(connection_id: str) -> dict[str, str] | None:
+    def _oauth_connection(connection_id: str) -> _OAuthConnectionScenario | None:
         """Return one configured fake provider account."""
         with _State.lock:
             return _State.oauth_connection_sessions.get(connection_id)
@@ -3030,15 +3885,11 @@ class _Handler(BaseHTTPRequestHandler):
     def _write_chatgpt_device_authorization(self, body: bytes) -> None:
         """Complete one deterministic ChatGPT device authorization."""
         try:
-            payload: object = json.loads(body)
-        except json.JSONDecodeError:
+            request = _decode_device_authorization(body)
+        except ValueError:
             self._write_json(400, {"error": "invalid request"})
             return
-        if not isinstance(payload, dict):
-            self._write_json(400, {"error": "invalid request"})
-            return
-        request = _object(payload)
-        connection_id = request.get("device_auth_id")
+        connection_id = request.device_auth_id
         if (
             not isinstance(connection_id, str)
             or self._oauth_connection(connection_id) is None
@@ -3237,12 +4088,12 @@ class _Handler(BaseHTTPRequestHandler):
             if connection is None:
                 self._write_json(400, {"error": "invalid_grant"})
                 return
-            scenario = connection["scenario"]
+            scenario = connection.scenario
             self._write_json(
                 200,
                 {
-                    "access_token": connection["access_token"],
-                    "refresh_token": connection["refresh_token"],
+                    "access_token": connection.access_token,
+                    "refresh_token": connection.refresh_token,
                     "expires_in": 3600,
                     "token_type": "Bearer",
                     "id_token": self._fake_id_token(
@@ -3389,14 +4240,13 @@ class _Handler(BaseHTTPRequestHandler):
     def _write_image_api_response(self, body: bytes) -> None:
         """Handle the OpenAI client tool and xAI Imagine on their shared path."""
         try:
-            value: object = json.loads(body)
-        except json.JSONDecodeError:
+            request = _decode_image_generation_request(body)
+        except ValueError:
             self._write_json(400, {"error": {"message": "invalid request"}})
             return
-        if isinstance(value, dict) and value.get("prompt") == _OPENAI_IMAGE_PROMPT:
-            request = _object(value)
+        if request.prompt == _OPENAI_IMAGE_PROMPT:
             with _State.lock:
-                _State.openai_image_requests.append(request)
+                _State.openai_image_requests.append(_image_request_egress(request))
             self._write_json(
                 200,
                 {
@@ -3412,15 +4262,11 @@ class _Handler(BaseHTTPRequestHandler):
     def _write_xai_imagine_response(self, body: bytes) -> None:
         """Return deterministic Imagine output and bounded auth failures."""
         try:
-            request_value: object = json.loads(body)
-        except json.JSONDecodeError:
+            request = _decode_image_generation_request(body)
+        except ValueError:
             self._write_json(400, {"error": {"message": "invalid request"}})
             return
-        if not isinstance(request_value, dict):
-            self._write_json(400, {"error": {"message": "invalid request"}})
-            return
-        request = _object(request_value)
-        prompt = request.get("prompt")
+        prompt = request.prompt
         if not isinstance(prompt, str):
             self._write_json(400, {"error": {"message": "prompt is required"}})
             return
@@ -3466,12 +4312,12 @@ class _Handler(BaseHTTPRequestHandler):
             if connection is None:
                 self._write_json(400, {"error": "invalid_grant"})
                 return
-            scenario = connection["scenario"]
+            scenario = connection.scenario
             self._write_json(
                 200,
                 {
-                    "access_token": connection["access_token"],
-                    "refresh_token": connection["refresh_token"],
+                    "access_token": connection.access_token,
+                    "refresh_token": connection.refresh_token,
                     "expires_in": 3600,
                     "token_type": "Bearer",
                     "id_token": self._fake_id_token(
@@ -3528,14 +4374,14 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _write_text_response(
         self,
-        request: dict[str, object],
+        request: _ModelRequestInput,
         text: str,
         *,
         response_id: str,
     ) -> None:
         """Write one deterministic assistant message response."""
-        model_value = request.get("model")
-        model = model_value if isinstance(model_value, str) else "gpt-5.5"
+        request = _decode_model_request(request)
+        model = request.model if request.model is not None else "gpt-5.5"
         item_id = f"msg_{response_id.removeprefix('resp_')}"
         message_item: dict[str, object] = {
             "id": item_id,
@@ -3556,7 +4402,7 @@ class _Handler(BaseHTTPRequestHandler):
             model=model,
             output=[message_item],
         )
-        if request.get("stream") is not True:
+        if not request.stream:
             self._write_json(200, response)
             return
         self._write_sse(
@@ -3592,11 +4438,11 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _write_semantic_web_search_response(
         self,
-        request: dict[str, object],
+        request: _ModelRequestInput,
     ) -> None:
         """Write Web-search semantics followed by a separate assistant answer."""
-        model_value = request.get("model")
-        model = model_value if isinstance(model_value, str) else "gpt-5.5"
+        request = _decode_model_request(request)
+        model = request.model if request.model is not None else "gpt-5.5"
         search_item: dict[str, object] = {
             "id": _SEMANTIC_ITEM_ID,
             "type": "web_search_call",
@@ -3631,7 +4477,7 @@ class _Handler(BaseHTTPRequestHandler):
             model=model,
             output=[search_item, message_item],
         )
-        if request.get("stream") is not True:
+        if not request.stream:
             self._write_json(200, response)
             return
         self._write_sse(
@@ -3697,11 +4543,11 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _write_provider_tool_live_response(
         self,
-        request: dict[str, object],
+        request: _ModelRequestInput,
     ) -> None:
         """Hold one running Web-search event until the E2E snapshot is verified."""
-        model_value = request.get("model")
-        model = model_value if isinstance(model_value, str) else "gpt-5.5"
+        request = _decode_model_request(request)
+        model = request.model if request.model is not None else "gpt-5.5"
         search_item: dict[str, object] = {
             "id": _PROVIDER_TOOL_LIVE_ITEM_ID,
             "type": "web_search_call",
@@ -3731,7 +4577,7 @@ class _Handler(BaseHTTPRequestHandler):
             model=model,
             output=[search_item, message_item],
         )
-        if request.get("stream") is not True:
+        if not request.stream:
             self._write_json(200, response)
             return
 
@@ -3807,15 +4653,15 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _write_function_call_response(
         self,
-        request: dict[str, object],
+        request: _ModelRequestInput,
         *,
         call_id: str,
         name: str,
         arguments: dict[str, object],
     ) -> None:
         """Write one deterministic Responses function call."""
-        model_value = request.get("model")
-        model = model_value if isinstance(model_value, str) else "gpt-5.5"
+        request = _decode_model_request(request)
+        model = request.model if request.model is not None else "gpt-5.5"
         response_id = f"resp_{call_id.removeprefix('call_')}"
         item_id = f"fc_{call_id.removeprefix('call_')}"
         try:
@@ -3849,7 +4695,7 @@ class _Handler(BaseHTTPRequestHandler):
             model=model,
             output=[function_item],
         )
-        if request.get("stream") is not True:
+        if not request.stream:
             self._write_json(200, response)
             return
         self._write_sse(
@@ -3893,15 +4739,15 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _write_custom_tool_call_response(
         self,
-        request: dict[str, object],
+        request: _ModelRequestInput,
         *,
         call_id: str,
         name: str,
         input_value: str,
     ) -> None:
         """Write one deterministic Responses plaintext custom-tool call."""
-        model_value = request.get("model")
-        model = model_value if isinstance(model_value, str) else "gpt-5.5"
+        request = _decode_model_request(request)
+        model = request.model if request.model is not None else "gpt-5.5"
         response_id = f"resp_{call_id.removeprefix('call_')}"
         item_id = f"ctc_{call_id.removeprefix('call_')}"
         custom_item: dict[str, object] = {
@@ -3917,7 +4763,7 @@ class _Handler(BaseHTTPRequestHandler):
             model=model,
             output=[custom_item],
         )
-        if request.get("stream") is not True:
+        if not request.stream:
             self._write_json(200, response)
             return
         self._write_sse(
@@ -3964,7 +4810,7 @@ class _Handler(BaseHTTPRequestHandler):
     def _response(
         self,
         *,
-        request: dict[str, object],
+        request: _ModelRequestInput,
         response_id: str,
         model: str,
         output: list[dict[str, object]],
@@ -3979,7 +4825,7 @@ class _Handler(BaseHTTPRequestHandler):
             "output": output,
             "parallel_tool_calls": True,
             "tool_choice": "auto",
-            "tools": request.get("tools", []),
+            "tools": _model_tools_egress(request),
             "usage": {
                 "input_tokens": 1,
                 "output_tokens": 1,
@@ -4030,10 +4876,10 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.flush()
         self.close_connection = True
 
-    def _write_image_generation_response(self, request: dict[str, object]) -> None:
+    def _write_image_generation_response(self, request: _ModelRequestInput) -> None:
         image_base64 = b64encode(_IMAGE_PATH.read_bytes()).decode()
-        model_value = request.get("model")
-        model = model_value if isinstance(model_value, str) else "gpt-5.5"
+        request = _decode_model_request(request)
+        model = request.model if request.model is not None else "gpt-5.5"
         response_id = "resp_provider_image_generation"
         item_id = "ig_provider_image_generation"
         created_at = time.time()
@@ -4052,7 +4898,7 @@ class _Handler(BaseHTTPRequestHandler):
             "output": [image_item],
             "parallel_tool_calls": True,
             "tool_choice": "auto",
-            "tools": request.get("tools", []),
+            "tools": _model_tools_egress(request),
             "usage": {
                 "input_tokens": 1,
                 "output_tokens": 1,
@@ -4064,7 +4910,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "output_tokens_details": {"reasoning_tokens": 0},
             },
         }
-        if request.get("stream") is not True:
+        if not request.stream:
             self._write_json(200, response)
             return
 

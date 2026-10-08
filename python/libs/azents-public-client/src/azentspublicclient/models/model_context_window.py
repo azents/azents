@@ -25,7 +25,7 @@ from typing_extensions import Self
 
 class ModelContextWindow(BaseModel):
     """
-    Model context window capability.
+    Saved context limits, independent of supported control membership.
     """ # noqa: E501
     default_input_tokens: Optional[Annotated[int, Field(strict=True, ge=1)]] = None
     max_input_tokens: Optional[Annotated[int, Field(strict=True, ge=1)]] = None
@@ -105,10 +105,13 @@ class ModelContextWindow(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "default_input_tokens": obj.get("default_input_tokens"),
             "max_input_tokens": obj.get("max_input_tokens"),
             "max_output_tokens": obj.get("max_output_tokens")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

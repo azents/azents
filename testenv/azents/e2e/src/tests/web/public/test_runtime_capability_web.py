@@ -1,6 +1,7 @@
 """Optional managed Runtime Web Surface E2E journey."""
 
 from dataclasses import dataclass
+from urllib.parse import parse_qs, urlsplit
 
 import azentsadminclient
 import azentspublicclient
@@ -94,8 +95,10 @@ def _login_main_web(
     driver.delete_all_cookies()
     driver.get(f"{base_url}/login")
     email_input = _wait(driver).until(ec.element_to_be_clickable((By.NAME, "email")))
-    email_input.send_keys(email, Keys.ENTER)
-    _wait(driver).until(ec.url_contains("/login/password"))
+    email_input.send_keys(email)
+    if not driver.find_elements(By.NAME, "password"):
+        email_input.send_keys(Keys.ENTER)
+        _wait(driver).until(ec.url_contains("/login/password"))
     password_input = _wait(driver).until(
         ec.element_to_be_clickable((By.NAME, "password"))
     )
@@ -232,19 +235,14 @@ def _assert_mobile_session_panel(driver: WebDriver) -> None:
         "Keep this draft while inspecting the session"
     )
     composer.clear()
+    # Closing hides the panel before its asynchronous route update completes.
+    # Settle that navigation before changing the responsive layout.
+    _wait(driver).until(
+        lambda current: "page" not in parse_qs(urlsplit(current.current_url).query)
+    )
     driver.set_window_size(1440, 1000)
-    metrics = (By.CSS_SELECTOR, "[role='tab'][aria-label='Metrics']")
-    if not _has_visible_css_element(driver, metrics[1]):
-        _wait(driver).until(
-            lambda current: next(
-                (
-                    item
-                    for item in current.find_elements(*toggle)
-                    if item.is_displayed()
-                ),
-                False,
-            )
-        ).click()
+    # Desktop layout opens the panel automatically after the responsive state
+    # settles. Toggling during that transition can close the newly opened panel.
     _wait(driver).until(
         ec.element_to_be_clickable(
             (By.XPATH, "//*[@role='tab' and @aria-label='Metrics']")

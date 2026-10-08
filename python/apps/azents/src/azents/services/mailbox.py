@@ -2,40 +2,46 @@
 
 import asyncio
 import dataclasses
-import datetime
 import enum
 import logging
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Protocol, assert_never
 
 from fastapi import Depends
 from pydantic import TypeAdapter
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.action_execution_data import ActionExecution
 from azents.core.enums import (
-    AgentRunStatus,
-    AgentSessionStatus,
     EventKind,
     ExternalChannelPrincipalAuthorType,
     MailboxItemKind,
-    MailboxSchedulingMode,
 )
-from azents.core.external_channel_file import add_external_channel_file_locators
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
     RequestedInferenceProfile,
     SessionInferenceState,
 )
-from azents.core.llm_catalog import ModelReasoningEffort
-from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.core.json_value import JSONValue
+from azents.core.mailbox_data import (
+    AgentCreateGitWorktreeContinuationResult,
+    AgentRemoveGitWorktreeContinuationResult,
+    ExternalChannelMessageMailboxPayload,
+    MailboxItem,
+    ScheduledTaskContinuationMailboxPayload,
+    ScheduledTaskTriggerMailboxPayload,
+    TurnActionContinuationMailboxPayload,
+)
+from azents.core.mailbox_errors import (
+    MailboxOwnerGenerationStaleError,
+    MailboxPreparationStaleError,
+)
 from azents.engine.events.action_messages import (
     OperationAction,
     TurnAction,
 )
 from azents.engine.events.types import (
     AgentMessagePayload,
-    AgentRunState,
     Event,
     ExternalChannelMessagePayload,
     FileOutputPart,
@@ -50,29 +56,6 @@ from azents.engine.io.user_input import RunUserMessage
 from azents.engine.run.resolve import (
     materialize_admitted_input_exchange_file_attachments,
 )
-from azents.rdb.deps import get_session_manager
-from azents.rdb.models.event import JSONValue
-from azents.rdb.session import SessionManager
-from azents.repos.action_execution import ActionExecutionRepository
-from azents.repos.action_execution.data import ActionExecution
-from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
-from azents.repos.agent_execution.data import EventCreate
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.external_channel.data import ExternalChannelMailboxProjectionItem
-from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.repos.mailbox import MailboxRepository
-from azents.repos.mailbox.data import (
-    AgentCreateGitWorktreeContinuationResult,
-    AgentRemoveGitWorktreeContinuationResult,
-    ExternalChannelMessageMailboxPayload,
-    MailboxEnvelopePayload,
-    MailboxItem,
-    MailboxItemCreate,
-    MailboxPresentationItem,
-    ScheduledTaskContinuationMailboxPayload,
-    ScheduledTaskTriggerMailboxPayload,
-    TurnActionContinuationMailboxPayload,
-)
 from azents.repos.mailbox.promotion import (
     MailboxActionExecutionCreate,
     MailboxPromotionConflict,
@@ -81,15 +64,9 @@ from azents.repos.mailbox.promotion import (
     MailboxPromotionPlan,
     MailboxPromotionRepository,
 )
-from azents.repos.scheduled_task.presentation import (
-    render_scheduled_task_runtime_message,
-)
-from azents.repos.scheduled_task.repository import ScheduledTaskRepository
-from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
-from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleRecord
+from azents.repos.mailbox_runtime_operations import MailboxRuntimeOperations
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
-from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.services.session_title import (
     initial_title_from_user_text,
 )
@@ -110,36 +87,6 @@ _EXTERNAL_CHANNEL_CONTEXT_OMITTED_REMINDER = (
 
 
 @dataclasses.dataclass(frozen=True)
-class MailboxEnqueue:
-    """Input buffer enqueue request."""
-
-    session_id: str
-    kind: MailboxItemKind
-    scheduling_mode: MailboxSchedulingMode
-    requested_model_target_label: str | None
-    requested_reasoning_effort: ModelReasoningEffort | None
-    requested_enabled_execution_options: list[ModelExecutionOptionId]
-    sender_user_id: str | None
-    order_group: str | None
-    order_sequence: int
-    content: str
-    idempotency_key: str | None
-    metadata: dict[str, str]
-    attachments: list[str]
-    file_parts: list[FileOutputPart]
-    action: dict[str, JSONValue] | None = None
-    payload: MailboxEnvelopePayload | None = None
-
-
-@dataclasses.dataclass(frozen=True)
-class MailboxAdmissionResult:
-    """Input buffer enqueue result."""
-
-    mailbox_item: MailboxItem
-    created: bool
-
-
-@dataclasses.dataclass(frozen=True)
 class PendingInputInferenceProfile:
     """Inference requirements projected from the next pending input."""
 
@@ -147,14 +94,6 @@ class PendingInputInferenceProfile:
     exists: bool
     requires_inference: bool
     requested_inference_profile: RequestedInferenceProfile | None
-
-
-class MailboxPreparationStaleError(RuntimeError):
-    """The FIFO head changed after its preparation snapshot was read."""
-
-
-class MailboxOwnerGenerationStaleError(RuntimeError):
-    """The Session owner generation changed before FIFO promotion."""
 
 
 class TurnEffect(enum.StrEnum):
@@ -204,15 +143,6 @@ class PromotedMailboxItems:
     deduped_count: int
     complete_run: bool
     suppress_parent_result: bool
-
-
-@dataclasses.dataclass(frozen=True)
-class ScheduledMailboxAdmission:
-    """Result of one atomic Scheduled trigger/continuation admission."""
-
-    run: AgentRunState | None
-    promoted: PromotedMailboxItems | None
-    stale: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -287,271 +217,20 @@ class MailboxProcessor(Protocol):
 class MailboxService:
     """Own session-bound input buffer reads, writes, and promotion."""
 
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+    runtime_operations: Annotated[
+        MailboxRuntimeOperations, Depends(MailboxRuntimeOperations)
     ]
-    mailbox_item_repository: Annotated[MailboxRepository, Depends(MailboxRepository)]
     exchange_file_service: Annotated[ExchangeFileService, Depends(ExchangeFileService)]
     model_file_service: Annotated[ModelFileService, Depends(ModelFileService)]
-    agent_session_repository: Annotated[
-        AgentSessionRepository, Depends(AgentSessionRepository)
-    ]
-    event_transcript_repository: Annotated[
-        EventTranscriptRepository, Depends(EventTranscriptRepository)
-    ]
-    agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
-    scheduled_task_repository: Annotated[
-        ScheduledTaskRepository, Depends(ScheduledTaskRepository)
-    ]
-    scheduled_task_cycle_repository: Annotated[
-        ScheduledTaskCycleRepository, Depends(ScheduledTaskCycleRepository)
-    ]
-    action_execution_repository: Annotated[
-        ActionExecutionRepository, Depends(ActionExecutionRepository)
-    ]
     turn_action_capabilities: Annotated[TurnActionCapabilityRegistry, Depends()]
     promotion_repository: Annotated[MailboxPromotionRepository, Depends()]
-    external_channel_repository: Annotated[
-        ExternalChannelRepository,
-        Depends(ExternalChannelRepository.create),
-    ]
-
-    async def enqueue(
-        self,
-        session: AsyncSession,
-        input: MailboxEnqueue,
-    ) -> MailboxAdmissionResult:
-        """Create one pending input and persist its wake transition."""
-        result = await self._enqueue_without_running_transition(session, input)
-        if input.scheduling_mode is MailboxSchedulingMode.WAKE_SESSION:
-            await self.agent_session_repository.mark_running_for_input_wakeup(
-                session,
-                input.session_id,
-            )
-        return result
-
-    async def _enqueue_without_running_transition(
-        self,
-        session: AsyncSession,
-        input: MailboxEnqueue,
-    ) -> MailboxAdmissionResult:
-        """Create one pending input before applying its Session transition."""
-        existing = None
-        if input.idempotency_key is not None:
-            existing = await self.mailbox_item_repository.get_by_idempotency_key(
-                session,
-                session_id=input.session_id,
-                kind=input.kind,
-                idempotency_key=input.idempotency_key,
-            )
-        if existing is None:
-            created = True
-            create = MailboxItemCreate(
-                session_id=input.session_id,
-                kind=input.kind,
-                scheduling_mode=input.scheduling_mode,
-                requested_model_target_label=input.requested_model_target_label,
-                requested_reasoning_effort=input.requested_reasoning_effort,
-                requested_enabled_execution_options=(
-                    input.requested_enabled_execution_options
-                ),
-                sender_user_id=input.sender_user_id,
-                order_group=input.order_group,
-                order_sequence=input.order_sequence,
-                content=input.content,
-                idempotency_key=input.idempotency_key,
-                metadata=input.metadata,
-                action=input.action,
-                attachments=input.attachments,
-                file_parts=input.file_parts,
-                payload=input.payload,
-            )
-            if input.idempotency_key is None:
-                mailbox_item = await self.mailbox_item_repository.create(
-                    session,
-                    create,
-                )
-            else:
-                mailbox_item = await self.mailbox_item_repository.create_idempotent(
-                    session,
-                    create,
-                    idempotency_key=input.idempotency_key,
-                )
-        else:
-            created = False
-            mailbox_item = existing
-        if mailbox_item.scheduling_mode != input.scheduling_mode:
-            raise ValueError(
-                "Input idempotency key already used for another scheduling mode"
-            )
-        if (
-            mailbox_item.requested_model_target_label
-            != input.requested_model_target_label
-            or mailbox_item.requested_reasoning_effort
-            != input.requested_reasoning_effort
-            or mailbox_item.requested_enabled_execution_options
-            != input.requested_enabled_execution_options
-        ):
-            raise ValueError(
-                "Input idempotency key already used for another inference profile"
-            )
-        return MailboxAdmissionResult(mailbox_item=mailbox_item, created=created)
-
-    async def enqueue_many(
-        self,
-        session: AsyncSession,
-        inputs: Sequence[MailboxEnqueue],
-    ) -> list[MailboxAdmissionResult]:
-        """Create pending inputs and persist each distinct wake transition."""
-        results = [
-            await self._enqueue_without_running_transition(session, input)
-            for input in inputs
-        ]
-        wake_session_ids = {
-            input.session_id
-            for input in inputs
-            if input.scheduling_mode is MailboxSchedulingMode.WAKE_SESSION
-        }
-        for session_id in sorted(wake_session_ids):
-            await self.agent_session_repository.mark_running_for_input_wakeup(
-                session,
-                session_id,
-            )
-        return results
-
-    async def enqueue_idle_continuations(
-        self,
-        session: AsyncSession,
-        inputs: Sequence[MailboxEnqueue],
-    ) -> list[MailboxAdmissionResult]:
-        """Create idle-hook inputs whose caller owns the resulting Session state."""
-        return [
-            await self._enqueue_without_running_transition(session, input)
-            for input in inputs
-        ]
-
-    async def enqueue_many_in_transaction(
-        self,
-        inputs: Sequence[MailboxEnqueue],
-    ) -> list[MailboxAdmissionResult]:
-        """Create pending inputs in one transaction."""
-        async with self.session_manager() as session:
-            return await self.enqueue_many(session, inputs)
-
-    async def list_by_session_id(
-        self,
-        session: AsyncSession,
-        session_id: str,
-    ) -> list[MailboxItem]:
-        """Fetch pending input buffers for a session."""
-        return await self.mailbox_item_repository.list_by_session_id(
-            session,
-            session_id,
-        )
-
-    async def get_by_id(
-        self,
-        session: AsyncSession,
-        *,
-        buffer_id: str,
-    ) -> MailboxItem | None:
-        """Fetch a pending MailboxItem by its durable acceptance identity."""
-        return await self.mailbox_item_repository.get_by_id(session, buffer_id)
-
-    async def get_by_idempotency_key(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-        kind: MailboxItemKind,
-        idempotency_key: str,
-    ) -> MailboxItem | None:
-        """Fetch one pending mailbox item by its producer identity."""
-        return await self.mailbox_item_repository.get_by_idempotency_key(
-            session,
-            session_id=session_id,
-            kind=kind,
-            idempotency_key=idempotency_key,
-        )
-
-    async def has_seen_action_type(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-        action_type: str,
-    ) -> bool:
-        """Return whether an action type is pending, live, or terminally recorded."""
-        pending = await self.mailbox_item_repository.list_by_session_id(
-            session,
-            session_id,
-        )
-        if any(
-            item.kind is MailboxItemKind.ACTION_MESSAGE
-            and item.presentation.action is not None
-            and item.presentation.action.get("type") == action_type
-            for item in pending
-        ):
-            return True
-        if await self.action_execution_repository.has_action_type_by_session_id(
-            session,
-            session_id=session_id,
-            action_type=action_type,
-        ):
-            return True
-        repository = self.event_transcript_repository
-        return await repository.has_action_execution_result_with_type(
-            session,
-            session_id=session_id,
-            action_type=action_type,
-        )
-
-    async def delete_by_session_and_id(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-        buffer_id: str,
-    ) -> bool:
-        """Delete one pending input buffer by session and ID."""
-        return await self.mailbox_item_repository.delete_by_session_and_id(
-            session,
-            session_id,
-            buffer_id,
-        )
-
-    async def delete_by_session_id(
-        self,
-        session: AsyncSession,
-        session_id: str,
-    ) -> int:
-        """Delete all pending input buffers for a session."""
-        return await self.mailbox_item_repository.delete_by_session_id(
-            session,
-            session_id,
-        )
-
-    async def move_by_session_id(
-        self,
-        session: AsyncSession,
-        *,
-        from_session_id: str,
-        to_session_id: str,
-    ) -> int:
-        """Move pending input buffers between sessions."""
-        return await self.mailbox_item_repository.move_by_session_id(
-            session,
-            from_session_id=from_session_id,
-            to_session_id=to_session_id,
-        )
 
     async def peek_pending_inference_profile(
         self,
         session_id: str,
     ) -> PendingInputInferenceProfile:
         """Read the next pending input profile without consuming the buffer."""
-        async with self.session_manager() as session:
-            buffer = await self._first_promotable_mailbox_item(session, session_id)
+        buffer = await self.runtime_operations.first_promotable(session_id)
         return PendingInputInferenceProfile(
             mailbox_item_id=buffer.id if buffer is not None else None,
             exists=buffer is not None,
@@ -566,167 +245,16 @@ class MailboxService:
         )
 
     async def has_pending_session_mailbox_items(self, session_id: str) -> bool:
-        """Check whether session still has unflushed MailboxItem."""
-        async with self.session_manager() as session:
-            return (
-                await self._first_promotable_mailbox_item(session, session_id)
-                is not None
-            )
+        """Check whether the current FIFO head remains pending."""
+        return await self.runtime_operations.first_promotable(session_id) is not None
 
     async def has_pending_wake_session_mailbox_items(self, session_id: str) -> bool:
         """Check whether pending input can start or resume an idle session."""
-        async with self.session_manager() as session:
-            pending = await self.mailbox_item_repository.list_for_flush(
-                session,
-                session_id,
-            )
-            for buffer in pending:
-                if buffer.scheduling_mode is MailboxSchedulingMode.WAKE_SESSION:
-                    return True
-            return False
+        return await self.runtime_operations.has_pending_wake_items(session_id)
 
     async def has_pending_agent_messages(self, session_id: str) -> bool:
         """Check whether the session mailbox has pending agent input."""
-        async with self.session_manager() as session:
-            return await self.mailbox_item_repository.has_by_session_id_and_kind(
-                session,
-                session_id=session_id,
-                kind=MailboxItemKind.AGENT_MESSAGE,
-            )
-
-    async def admit_scheduled_mailbox_head(
-        self,
-        *,
-        session_id: str,
-        owner_generation: int,
-        expected_buffer_id: str | None,
-    ) -> ScheduledMailboxAdmission | None:
-        """Atomically admit one Scheduled FIFO head into a cycle-bound pending Run."""
-        async with self.session_manager() as session:
-            agent_session = await self.agent_session_repository.lock_by_id(
-                session, session_id
-            )
-            if agent_session is None:
-                raise ValueError("AgentSession not found")
-            if agent_session.owner_generation != owner_generation:
-                raise MailboxOwnerGenerationStaleError(
-                    "Session owner generation changed before Scheduled admission"
-                )
-            buffer = await self.mailbox_item_repository.lock_oldest_by_session_id(
-                session, session_id
-            )
-            if buffer is None or buffer.id != expected_buffer_id:
-                return None
-            if buffer.kind not in {
-                MailboxItemKind.SCHEDULED_TASK_TRIGGER,
-                MailboxItemKind.SCHEDULED_TASK_CONTINUATION,
-            }:
-                return None
-            payload = buffer.payload
-            if isinstance(
-                payload,
-                ScheduledTaskTriggerMailboxPayload
-                | ScheduledTaskContinuationMailboxPayload,
-            ):
-                cycle_id = payload.cycle_id
-            else:
-                raise ValueError("Scheduled Task mailbox payload is malformed.")
-            cycle = await self.scheduled_task_cycle_repository.lock(
-                session,
-                agent_id=agent_session.agent_id,
-                session_id=session_id,
-                cycle_id=cycle_id,
-            )
-            if cycle is None:
-                await self.mailbox_item_repository.delete_claimed_by_ids(
-                    session, session_id, [buffer.id]
-                )
-                await session.commit()
-                return ScheduledMailboxAdmission(run=None, promoted=None, stale=True)
-
-            if buffer.kind is MailboxItemKind.SCHEDULED_TASK_TRIGGER:
-                task = await self.scheduled_task_repository.get_by_session_and_id(
-                    session,
-                    session_id=session_id,
-                    task_id=cycle.state.task_id,
-                    lock=True,
-                )
-                if (
-                    cycle.state.phase != "admitted"
-                    or task is None
-                    or task.active_cycle_id != cycle_id
-                    or task.active_scheduled_for != cycle.state.scheduled_for
-                ):
-                    await self.scheduled_task_cycle_repository.delete_if_admitted(
-                        session,
-                        agent_id=agent_session.agent_id,
-                        session_id=session_id,
-                        cycle_id=cycle_id,
-                    )
-                    await self.mailbox_item_repository.delete_claimed_by_ids(
-                        session, session_id, [buffer.id]
-                    )
-                    await session.commit()
-                    return ScheduledMailboxAdmission(
-                        run=None, promoted=None, stale=True
-                    )
-            elif cycle.state.phase != "started":
-                await self.mailbox_item_repository.delete_claimed_by_ids(
-                    session, session_id, [buffer.id]
-                )
-                await session.commit()
-                return ScheduledMailboxAdmission(run=None, promoted=None, stale=True)
-
-            run = await self.agent_run_repository.create_pending(
-                session,
-                session_id=session_id,
-                parent_agent_run_id=None,
-                scheduled_task_cycle_id=cycle_id,
-            )
-            started_at = datetime.datetime.now(datetime.UTC)
-            if buffer.kind is MailboxItemKind.SCHEDULED_TASK_TRIGGER:
-                await self.scheduled_task_cycle_repository.start(
-                    session, record=cycle, run_id=run.id, started_at=started_at
-                )
-            else:
-                await self.scheduled_task_cycle_repository.bind_run(
-                    session, record=cycle, run_id=run.id
-                )
-            promoted = self._scheduled_promoted_item(buffer, cycle)
-            inserted = await self._append_mailbox_item_events(
-                session, session_id, [promoted]
-            )
-            event_ids = [event.id for event in inserted]
-            await self.agent_run_repository.associate_input_events(
-                session, run_id=run.id, event_ids=event_ids
-            )
-            deleted = await self.mailbox_item_repository.delete_claimed_by_ids(
-                session, session_id, [buffer.id]
-            )
-            if deleted != 1:
-                raise RuntimeError("Scheduled Task mailbox admission lost its FIFO row")
-            await session.commit()
-            return ScheduledMailboxAdmission(
-                run=run,
-                promoted=PromotedMailboxItems(
-                    turn_effect=TurnEffect.ELIGIBLE,
-                    operation_action=None,
-                    requested_inference_profile=None,
-                    user_messages=[promoted.user_message]
-                    if promoted.user_message is not None
-                    else [],
-                    events=inserted,
-                    promoted_event_ids=event_ids,
-                    deleted_buffer_ids=[buffer.id],
-                    changed_session_agent_ids=[],
-                    claimed_count=1,
-                    inserted_count=len(inserted),
-                    deduped_count=0,
-                    complete_run=False,
-                    suppress_parent_result=False,
-                ),
-                stale=False,
-            )
+        return await self.runtime_operations.has_pending_agent_messages(session_id)
 
     async def flush_session_mailbox_items(
         self,
@@ -832,7 +360,9 @@ class MailboxService:
                 ) from exc
 
         if committed.deferred:
-            complete_run = active_run_id == predecessor_run_id
+            complete_run = (
+                predecessor_run_id is not None and active_run_id == predecessor_run_id
+            )
             return PromotedMailboxItems(
                 turn_effect=TurnEffect.NEUTRAL,
                 operation_action=None,
@@ -854,7 +384,11 @@ class MailboxService:
             )
         return PromotedMailboxItems(
             turn_effect=(
-                TurnEffect.FAILED if committed.handled_failure else outcome.turn_effect
+                TurnEffect.FAILED
+                if committed.handled_failure
+                else outcome.turn_effect
+                if committed.promoted_event_ids
+                else TurnEffect.NEUTRAL
             ),
             operation_action=operation,
             requested_inference_profile=(
@@ -868,7 +402,7 @@ class MailboxService:
                 else [
                     item.user_message
                     for item in outcome.promoted
-                    if item.user_message is not None
+                    if item.user_message is not None and committed.promoted_event_ids
                 ]
             ),
             events=committed.events,
@@ -882,82 +416,22 @@ class MailboxService:
             suppress_parent_result=outcome.suppress_parent_result,
         )
 
-    async def _acknowledge_promoted_agent_results(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-        promoted: list[_PromotedMailboxItem],
-    ) -> list[str]:
-        """Advance source cursors for terminal results consumed by the model."""
-        result_payloads: list[AgentMessagePayload] = []
-        for item in promoted:
-            if item.event_kind is not EventKind.AGENT_MESSAGE:
-                continue
-            payload = _AGENT_MESSAGE_ADAPTER.validate_python(item.payload)
-            if payload.message_kind == "agent_result":
-                result_payloads.append(payload)
-        if not result_payloads:
-            return []
-
-        repository = self.agent_session_repository
-        target = await repository.get_session_agent_by_session_id(session, session_id)
-        if target is None:
-            return []
-
-        changed_ids: list[str] = []
-        for payload in result_payloads:
-            if payload.target_session_agent_id != target.id:
-                continue
-            assert payload.source_run_id is not None
-            assert payload.source_run_index is not None
-            assert payload.run_status is not None
-            source = await repository.get_session_agent_by_id(
-                session,
-                payload.source_session_agent_id,
-            )
-            run = await self.agent_run_repository.get_by_id(
-                session,
-                payload.source_run_id,
-            )
-            if (
-                source is None
-                or source.parent_session_agent_id != target.id
-                or run is None
-                or run.session_id != source.agent_session_id
-                or run.run_index != payload.source_run_index
-                or run.status != payload.run_status
-                or run.terminal_result_event_id
-                != payload.source_terminal_result_event_id
-            ):
-                continue
-            updated = await repository.advance_session_agent_observation_cursor(
-                session,
-                session_agent_id=payload.source_session_agent_id,
-                parent_session_agent_id=target.id,
-                parent_observed_run_index=payload.source_run_index,
-                parent_observed_event_id=payload.source_terminal_result_event_id,
-            )
-            if updated is not None:
-                changed_ids.append(updated.id)
-        return list(dict.fromkeys(changed_ids))
-
     def _scheduled_promoted_item(
         self,
         buffer: MailboxItem,
-        cycle: ScheduledTaskCycleRecord,
     ) -> _PromotedMailboxItem:
-        """Render Scheduled input from the immutable cycle snapshot."""
-        state = cycle.state
-        content = render_scheduled_task_runtime_message(
-            title=state.title,
-            objective=state.objective,
-            schedule_type=state.schedule_type,
-            scheduled_at=state.scheduled_at,
-            cron_expression=state.cron_expression,
-            timezone=state.timezone,
-            scheduled_for=state.scheduled_for,
-        )
+        """Convert the admitted Scheduled envelope to ordinary typed turn input."""
+        scheduled = buffer.payload
+        if not isinstance(
+            scheduled,
+            ScheduledTaskTriggerMailboxPayload
+            | ScheduledTaskContinuationMailboxPayload,
+        ):
+            raise ValueError("Scheduled Task mailbox payload is malformed.")
+        content = buffer.presentation.content
+        title = buffer.presentation.metadata["title"]
+        if not isinstance(title, str):
+            raise ValueError("Scheduled Task mailbox title is malformed.")
         user_message = make_run_user_message(
             sender_user_id=None,
             content=content,
@@ -970,15 +444,15 @@ class MailboxService:
         if buffer.kind is MailboxItemKind.SCHEDULED_TASK_TRIGGER:
             event_kind = EventKind.SCHEDULED_TASK_TRIGGER
             payload = ScheduledTaskTriggerPayload(
-                cycle_id=state.cycle_id,
-                title=state.title,
+                cycle_id=scheduled.cycle_id,
+                title=title,
                 content=content,
             )
         else:
             event_kind = EventKind.SCHEDULED_TASK_CONTINUATION
             payload = ScheduledTaskContinuationPayload(
-                cycle_id=state.cycle_id,
-                title=state.title,
+                cycle_id=scheduled.cycle_id,
+                title=title,
                 content=content,
             )
         return _PromotedMailboxItem(
@@ -1001,11 +475,9 @@ class MailboxService:
         active_run_id: str | None,
     ) -> PreparedMailboxPromotion:
         """Resolve FIFO attachments and TurnAction I/O without an active transaction."""
-        async with self.session_manager() as session:
-            agent_session = await self.agent_session_repository.get_by_id(
-                session, session_id
-            )
-            buffer = await self._first_promotable_mailbox_item(session, session_id)
+        preparation = await self.runtime_operations.read_preparation(session_id)
+        agent_session = preparation.agent_session
+        buffer = preparation.buffer
         if agent_session is None:
             raise ValueError("AgentSession not found")
         actual_buffer_id = buffer.id if buffer is not None else None
@@ -1030,41 +502,18 @@ class MailboxService:
                     raise MailboxPreparationStaleError(
                         "Attachment materialization requires an active AgentRun"
                     )
-                async with self.session_manager() as session:
-                    current = await self.agent_session_repository.get_by_id(
-                        session, session_id
-                    )
-                    repository = self.agent_session_repository
-                    get_root = repository.get_root_session_agent_by_session_id
-                    root = await get_root(session, session_id)
-                    run = await self.agent_run_repository.get_by_id(
-                        session, active_run_id
-                    )
-                if (
-                    current is None
-                    or root is None
-                    or run is None
-                    or run.session_id != session_id
-                    or run.status
-                    not in {AgentRunStatus.PENDING, AgentRunStatus.RUNNING}
-                    or current.workspace_id != agent_session.workspace_id
-                    or current.agent_id != agent_session.agent_id
-                    or current.status is not AgentSessionStatus.ACTIVE
-                    or current.owner_generation != owner_generation
-                ):
+                authority = await self.runtime_operations.attachment_authority(
+                    session_id=session_id,
+                    active_run_id=active_run_id,
+                    agent_id=agent_session.agent_id,
+                    workspace_id=agent_session.workspace_id,
+                    owner_generation=owner_generation,
+                )
+                if authority is None:
                     raise MailboxPreparationStaleError(
                         "Canonical resource authority changed before attachment "
                         "materialization"
                     )
-                authority = SessionResourceAuthority(
-                    workspace_id=current.workspace_id,
-                    agent_id=current.agent_id,
-                    session_id=session_id,
-                    root_session_id=root.agent_session_id,
-                    run_id=run.id,
-                    run_index=run.run_index,
-                    owner_generation=owner_generation,
-                )
                 materialized = (
                     await materialize_admitted_input_exchange_file_attachments(
                         buffer.presentation.attachments,
@@ -1114,19 +563,6 @@ class MailboxService:
             files=files,
             turn_action=prepared_action,
         )
-
-    async def _first_promotable_mailbox_item(
-        self,
-        session: AsyncSession,
-        session_id: str,
-    ) -> MailboxItem | None:
-        """Return the current FIFO head without consuming it."""
-        pending = await self.mailbox_item_repository.list_for_flush(
-            session,
-            session_id,
-            limit=1,
-        )
-        return pending[0] if pending else None
 
     @asynccontextmanager
     async def _discard_prepared_model_files_on_failure(
@@ -1293,48 +729,6 @@ class MailboxService:
             ),
         )
 
-    async def _append_mailbox_item_events(
-        self,
-        session: AsyncSession,
-        session_id: str,
-        promoted: list[_PromotedMailboxItem],
-    ) -> list[Event]:
-        """Append MailboxItem event input to transcript."""
-        inserted: list[Event] = []
-        repository = self.event_transcript_repository
-        for item in promoted:
-            existing = await repository.get_by_external_id(
-                session,
-                session_id,
-                item.external_id,
-            )
-            if existing is not None:
-                continue
-            inserted.append(
-                await repository.append_with_deferred_session_projections(
-                    session,
-                    EventCreate(
-                        session_id=session_id,
-                        kind=item.event_kind,
-                        payload={
-                            **item.payload,
-                            "mailbox_item_id": item.buffer.id,
-                            "mailbox_item_key": (
-                                item.item_key or item.buffer.presentation.item_key
-                            ),
-                        },
-                        external_id=item.external_id,
-                    ),
-                )
-            )
-        if inserted:
-            await repository.advance_session_projections(
-                session,
-                session_id=session_id,
-                events=inserted,
-            )
-        return inserted
-
 
 @dataclasses.dataclass(frozen=True)
 class _UserMessageMailboxProcessor:
@@ -1434,7 +828,7 @@ class _ExternalChannelContinuationMailboxProcessor:
 
 @dataclasses.dataclass(frozen=True)
 class _ScheduledTaskMailboxProcessor:
-    """Promote a Scheduled Task trigger or continuation as typed input."""
+    """Promote Scheduled input through the common FIFO turn path."""
 
     service: MailboxService
 
@@ -1443,8 +837,10 @@ class _ScheduledTaskMailboxProcessor:
         context: MailboxPreparationContext,
         buffer: MailboxItem,
     ) -> MailboxPreparationOutcome:
-        del context, buffer
-        return _preparation_outcome([], TurnEffect.NEUTRAL)
+        del context
+        return _preparation_outcome(
+            [self.service._scheduled_promoted_item(buffer)], TurnEffect.ELIGIBLE
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1516,62 +912,6 @@ class _AgentMessageMailboxProcessor:
             ],
             TurnEffect.ELIGIBLE,
         )
-
-
-def build_external_channel_mailbox_payload(
-    item: ExternalChannelMailboxProjectionItem,
-    *,
-    context_omitted: bool,
-    initial_title_eligible: bool,
-) -> ExternalChannelMessageMailboxPayload:
-    """Materialize one immutable External Channel message at admission."""
-    if not item.provider_tenant_id:
-        raise ValueError("External Channel message is missing provider tenant ID.")
-    payload = ExternalChannelMessagePayload(
-        provider=item.provider,
-        provider_tenant_id=item.provider_tenant_id,
-        resource_id=item.resource_id,
-        resource_label=_external_resource_label(item),
-        resource_type=item.resource_type,
-        binding_id=item.binding_id,
-        invocation_batch_id=item.invocation_id,
-        external_message_id=item.provider_message_key,
-        projection_root_id=(
-            f"external-channel:{item.binding_id}:{item.provider_message_key}"
-        ),
-        provider_message_key=item.provider_message_key,
-        provider_position=item.provider_position,
-        principal_id=item.principal_id,
-        provider_user_id=item.provider_user_id,
-        sender_display_name=item.sender_display_name,
-        author_type=item.author_type,
-        prompt_role=item.prompt_role,
-        body=item.body,
-        attachment_metadata=add_external_channel_file_locators(
-            item.attachment_metadata or {},
-            binding_id=item.binding_id,
-            provider_message_key=item.provider_message_key,
-        ),
-        reference_mappings=_external_reference_mappings(item.reference_mappings),
-        provider_created_at=item.provider_created_at,
-        provider_updated_at=item.provider_updated_at,
-        original_url=item.original_url,
-        truncated_context_message_count=0,
-        truncated_context_size=0,
-    )
-    return ExternalChannelMessageMailboxPayload(
-        type=MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE.value,
-        items=[
-            MailboxPresentationItem(
-                item_key="external_channel_message:0",
-                presentation_kind="external_channel_message",
-                content=item.body or "",
-                metadata={"external_channel_message": payload.model_dump(mode="json")},
-            )
-        ],
-        context_omitted=context_omitted,
-        initial_title_eligible=initial_title_eligible,
-    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1740,55 +1080,6 @@ def _turn_effect_from_action(
             assert_never(effect)
 
 
-def _external_resource_label(item: ExternalChannelMailboxProjectionItem) -> str:
-    """Return the validated provider resource label for one projection item."""
-    labels = item.resource_labels
-    provider_resource_key = item.provider_resource_key
-    if not isinstance(labels, dict) or not labels:
-        raise ValueError("External Channel message is missing resource labels.")
-    channel_id = (
-        labels.get("display_name")
-        or labels.get("channel_name")
-        or labels.get("channel_id")
-        or labels.get("parent_channel_id")
-        or labels.get("thread_id")
-    )
-    if not isinstance(channel_id, str) or not channel_id:
-        raise ValueError("External Channel message is missing resource channel label.")
-    thread_ts = labels.get("thread_ts")
-    if thread_ts is None and labels.get("parent_channel_id") == channel_id:
-        thread_ts = labels.get("thread_id")
-    if thread_ts is not None and not isinstance(thread_ts, str):
-        raise ValueError("External Channel message has an invalid thread label.")
-    if not isinstance(provider_resource_key, str) or not provider_resource_key:
-        raise ValueError("External Channel message is missing resource identity.")
-    return f"{channel_id}:{thread_ts}" if thread_ts else channel_id
-
-
-def _external_reference_mappings(
-    value: dict[str, object] | None,
-) -> dict[str, dict[str, str]]:
-    """Return a validated provider reference mapping."""
-    if not isinstance(value, dict):
-        return {}
-    mappings: dict[str, dict[str, str]] = {}
-    for category in ("users", "channels"):
-        raw_entries = value.get(category)
-        if not isinstance(raw_entries, dict):
-            continue
-        entries = {
-            identifier: display_name
-            for identifier, display_name in raw_entries.items()
-            if isinstance(identifier, str)
-            and identifier
-            and isinstance(display_name, str)
-            and display_name
-        }
-        if entries:
-            mappings[category] = entries
-    return mappings
-
-
 def _buffer_requires_inference(
     buffer: MailboxItem,
     capabilities: TurnActionCapabilityRegistry,
@@ -1802,13 +1093,10 @@ def _buffer_requires_inference(
             | MailboxItemKind.TURN_ACTION_CONTINUATION
             | MailboxItemKind.AGENT_MESSAGE
             | MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE
-        ):
-            return True
-        case (
-            MailboxItemKind.SCHEDULED_TASK_TRIGGER
+            | MailboxItemKind.SCHEDULED_TASK_TRIGGER
             | MailboxItemKind.SCHEDULED_TASK_CONTINUATION
         ):
-            return False
+            return True
         case MailboxItemKind.ACTION_MESSAGE:
             if buffer.presentation.action is None:
                 raise ValueError("Action message input buffer requires action payload")

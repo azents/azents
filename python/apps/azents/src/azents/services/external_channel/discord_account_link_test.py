@@ -18,6 +18,18 @@ from azents.services.external_channel.discord_account_link import (
 _NOW = datetime.datetime(2026, 9, 13, tzinfo=datetime.UTC)
 
 
+def test_absent_web_url_has_no_account_navigation_control() -> None:
+    presentation = discord_account_link_presentation(
+        state=ExternalAccountNativeLinkState(
+            link=None, management_path="/account/external-accounts"
+        ),
+        provider_status=ExternalAccountOAuthEffectiveStatus.READY,
+        web_url=None,
+    )
+    assert presentation.summary is None
+    assert presentation.rows == []
+
+
 def _components(row: dict[str, object]) -> list[dict[str, object]]:
     components = row["components"]
     assert isinstance(components, list)

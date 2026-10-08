@@ -1,23 +1,22 @@
 """Agent automatic Project policy management service."""
 
 import dataclasses
-from datetime import UTC, datetime
 from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import AgentProjectCatalogStatus
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.agent import AgentRepository
-from azents.repos.agent.data import NotFound
-from azents.repos.agent_admin import AgentAdminRepository
-from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
-from azents.repos.agent_automatic_project.data import AgentAutomaticProjectPolicy
-from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
-from azents.repos.agent_project_catalog.data import AgentProjectCatalogStatusPatch
+from azents.core.agent_automatic_project import AgentAutomaticProjectPolicy
+from azents.core.agent_errors import NotFound
+from azents.core.session_workspace_paths import (
+    InvalidProjectPath,
+    normalize_agent_workspace_root,
+    normalize_session_workspace_path,
+)
+from azents.repos.agent_automatic_project_operations import (
+    AgentAutomaticProjectOperationsRepository,
+    AutomaticProjectDenial,
+)
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeRunnerOperationClient,
 )
@@ -35,11 +34,6 @@ from azents.services.runtime_directory_validation import (
     validate_runtime_directory,
 )
 from azents.services.runtime_storage_error import RuntimeStorageError
-from azents.services.session_workspace_project import (
-    InvalidProjectPath,
-    normalize_agent_workspace_root,
-    normalize_session_workspace_path,
-)
 
 from .data import (
     AgentAutomaticProjectPolicyNotFound,
@@ -48,35 +42,13 @@ from .data import (
 )
 
 
-def _available_catalog_status_patch() -> AgentProjectCatalogStatusPatch:
-    """Build a catalog projection patch for a validated directory."""
-    return AgentProjectCatalogStatusPatch(
-        status=AgentProjectCatalogStatus.AVAILABLE,
-        status_detail=None,
-        checked_at=datetime.now(UTC),
-    )
-
-
 @dataclasses.dataclass
 class AgentAutomaticProjectService:
     """Manage one Agent's automatic root Session Project policy."""
 
-    agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
-    agent_admin_repository: Annotated[
-        AgentAdminRepository,
-        Depends(AgentAdminRepository),
-    ]
-    policy_repository: Annotated[
-        AgentAutomaticProjectRepository,
-        Depends(AgentAutomaticProjectRepository),
-    ]
-    catalog_repository: Annotated[
-        AgentProjectCatalogRepository,
-        Depends(AgentProjectCatalogRepository),
-    ]
-    session_manager: Annotated[
-        SessionManager[AsyncSession],
-        Depends(get_session_manager),
+    repository: Annotated[
+        AgentAutomaticProjectOperationsRepository,
+        Depends(AgentAutomaticProjectOperationsRepository),
     ]
     runtime_target_resolver: Annotated[
         RuntimeOperationTargetResolver,
@@ -101,23 +73,18 @@ class AgentAutomaticProjectService:
         | AgentAutomaticProjectPolicyNotFound,
     ]:
         """Return the current management policy without Runtime interaction."""
-        authorization = await self._authorize(
+        result = await self.repository.read(
             agent_id=agent_id,
             workspace_id=workspace_id,
             workspace_user_id=workspace_user_id,
         )
-        match authorization:
-            case Success():
-                pass
+        match result:
+            case Success(policy):
+                return Success(policy)
             case Failure(error):
-                return Failure(error)
+                return Failure(self._read_error(error, agent_id=agent_id))
             case _:
-                assert_never(authorization)
-        async with self.session_manager() as session:
-            policy = await self.policy_repository.get_policy(session, agent_id=agent_id)
-        if policy is None:
-            return Failure(AgentAutomaticProjectPolicyNotFound(agent_id=agent_id))
-        return Success(policy)
+                assert_never(result)
 
     async def replace_policy(
         self,
@@ -138,24 +105,16 @@ class AgentAutomaticProjectService:
         | AgentAutomaticProjectPolicyNotFound,
     ]:
         """Validate and atomically replace the complete ordered policy."""
-        authorization = await self._authorize(
+        early_policy = await self.repository.read(
             agent_id=agent_id,
             workspace_id=workspace_id,
             workspace_user_id=workspace_user_id,
         )
-        match authorization:
-            case Success():
-                pass
-            case Failure(error):
-                return Failure(error)
-            case _:
-                assert_never(authorization)
-        early_policy = await self._get_policy(agent_id)
         match early_policy:
             case Success(policy):
                 pass
             case Failure(error):
-                return Failure(error)
+                return Failure(self._read_error(error, agent_id=agent_id))
             case _:
                 assert_never(early_policy)
         if policy.revision != expected_revision:
@@ -211,83 +170,48 @@ class AgentAutomaticProjectService:
                 case _:
                     assert_never(validation)
 
-        async with self.session_manager() as session:
-            locked_policy = await self.policy_repository.lock_policy(
-                session,
-                agent_id=agent_id,
-            )
-            if locked_policy is None:
-                return Failure(AgentAutomaticProjectPolicyNotFound(agent_id=agent_id))
-            if locked_policy.revision != expected_revision:
+        replacement = await self.repository.replace(
+            agent_id=agent_id,
+            workspace_id=workspace_id,
+            workspace_user_id=workspace_user_id,
+            expected_revision=expected_revision,
+            paths=normalized_paths,
+        )
+        match replacement:
+            case Success(replaced):
+                return Success(replaced)
+            case Failure(AutomaticProjectDenial.REVISION_CONFLICT):
                 return Failure(
                     AutomaticSessionProjectsRevisionConflict(
                         expected_revision=expected_revision,
                     )
                 )
-            replacement = await self.policy_repository.replace_policy(
-                session,
-                agent_id=agent_id,
-                expected_revision=expected_revision,
-                paths=normalized_paths,
-                updated_by_workspace_user_id=workspace_user_id,
-            )
-            match replacement:
-                case Success(replaced):
-                    pass
-                case Failure():
-                    return Failure(
-                        AutomaticSessionProjectsRevisionConflict(
-                            expected_revision=expected_revision,
-                        )
-                    )
-                case _:
-                    assert_never(replacement)
-            for path in normalized_paths:
-                await self.catalog_repository.update_status(
-                    session,
-                    agent_id=agent_id,
-                    path=path,
-                    patch=_available_catalog_status_patch(),
-                )
-            await session.commit()
-        return Success(replaced)
+            case Failure(error):
+                return Failure(self._read_error(error, agent_id=agent_id))
+            case _:
+                assert_never(replacement)
 
-    async def _authorize(
-        self,
+    @staticmethod
+    def _read_error(
+        denial: AutomaticProjectDenial,
         *,
         agent_id: str,
-        workspace_id: str,
-        workspace_user_id: str,
-    ) -> Result[None, NotFound | NotBelongToWorkspace | NotAdmin]:
-        """Require Agent ownership and an explicit AgentAdmin relationship."""
-        async with self.session_manager() as session:
-            agent = await self.agent_repository.get_by_id(session, agent_id)
-            if agent is None:
-                return Failure(NotFound(agent_id=agent_id))
-            if agent.workspace_id != workspace_id:
-                return Failure(NotBelongToWorkspace(agent_id=agent_id))
-            is_admin = await self.agent_admin_repository.is_admin(
-                session,
-                agent_id,
-                workspace_user_id,
-            )
-        if not is_admin:
-            return Failure(NotAdmin(agent_id=agent_id))
-        return Success(None)
-
-    async def _get_policy(
-        self,
-        agent_id: str,
-    ) -> Result[
-        AgentAutomaticProjectPolicy,
-        AgentAutomaticProjectPolicyNotFound,
-    ]:
-        """Read one policy snapshot before any Runtime operation."""
-        async with self.session_manager() as session:
-            policy = await self.policy_repository.get_policy(session, agent_id=agent_id)
-        if policy is None:
-            return Failure(AgentAutomaticProjectPolicyNotFound(agent_id=agent_id))
-        return Success(policy)
+    ) -> (
+        NotFound | NotBelongToWorkspace | NotAdmin | AgentAutomaticProjectPolicyNotFound
+    ):
+        match denial:
+            case AutomaticProjectDenial.AGENT_MISSING:
+                return NotFound(agent_id=agent_id)
+            case AutomaticProjectDenial.FOREIGN_WORKSPACE:
+                return NotBelongToWorkspace(agent_id=agent_id)
+            case AutomaticProjectDenial.ADMIN_REQUIRED:
+                return NotAdmin(agent_id=agent_id)
+            case AutomaticProjectDenial.POLICY_MISSING:
+                return AgentAutomaticProjectPolicyNotFound(agent_id=agent_id)
+            case AutomaticProjectDenial.REVISION_CONFLICT:
+                raise RuntimeError("Policy read returned a mutation-only denial")
+            case _:
+                assert_never(denial)
 
     async def _validate_directories(
         self,

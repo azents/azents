@@ -75,6 +75,20 @@ class TestAgentV1Api(unittest.TestCase):
         """
         pass
 
+    def test_agent_v1_get_agent_consolidated_memory(self) -> None:
+        """Test case for agent_v1_get_agent_consolidated_memory
+
+        Get Agent Consolidated Memory
+        """
+        pass
+
+    def test_agent_v1_get_agent_historical_memory(self) -> None:
+        """Test case for agent_v1_get_agent_historical_memory
+
+        Get Agent Historical Memory
+        """
+        pass
+
     def test_agent_v1_get_agent_memory(self) -> None:
         """Test case for agent_v1_get_agent_memory
 
@@ -93,6 +107,13 @@ class TestAgentV1Api(unittest.TestCase):
         """Test case for agent_v1_list_agent_admins
 
         List Agent Admins
+        """
+        pass
+
+    def test_agent_v1_list_agent_historical_memories(self) -> None:
+        """Test case for agent_v1_list_agent_historical_memories
+
+        List Agent Historical Memories
         """
         pass
 

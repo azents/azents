@@ -15,21 +15,27 @@ from azents.core.agent import (
     SelectableModelSettings,
     SubagentSettings,
 )
+from azents.core.agent_automatic_project import AgentAutomaticProjectPolicy
 from azents.core.enums import AgentRuntimeCapability, AgentType
+from azents.core.historical_memory_settings import (
+    HistoricalMemorySettingsScope,
+)
+from azents.core.memory_scope import MemoryScope
 from azents.core.model_execution_options import (
     ModelExecutionOptionDefinition,
     list_model_execution_option_definitions,
 )
-from azents.repos.agent_automatic_project.data import AgentAutomaticProjectPolicy
-from azents.repos.memory.data import MemoryScope
+from azents.core.upload_images import UploadedImage
 from azents.services.agent.data import (
     AgentAdminOutput,
     AgentDecommissionOutput,
     AgentOutput,
     AvatarUploadTicketOutput,
 )
+from azents.services.historical_memory.settings_data import (
+    HistoricalMemorySettingsOutput,
+)
 from azents.services.memory.data import MemoryOutput
-from azents.services.uploads.schema import UploadedImage
 
 
 class SelectableModelCandidateResponse(BaseModel):
@@ -203,7 +209,7 @@ class AutomaticSessionProjectsResponse(BaseModel):
 
     @classmethod
     def convert_from(cls, data: AgentAutomaticProjectPolicy) -> Self:
-        """Convert a policy repository snapshot to an API response."""
+        """Convert a domain policy snapshot to an API response."""
         return cls(
             revision=data.revision,
             project_paths=list(data.project_paths),
@@ -447,6 +453,55 @@ class MemoryListResponse(BaseModel):
     """Memory list response."""
 
     items: list[MemoryResponse]
+    next_cursor: str | None
+
+
+class ConsolidatedMemoryResponse(BaseModel):
+    """Current integrated Memory settings overview for one exact scope."""
+
+    scope: HistoricalMemorySettingsScope
+    markdown: str | None
+    published_at: datetime.datetime | None
+
+
+class HistoricalMemoryResponse(BaseModel):
+    """Read-only Historical Memory settings response."""
+
+    source_session_id: str
+    scope: HistoricalMemorySettingsScope
+    source_title: str | None
+    source_activity_through: datetime.datetime
+    prepared_at: datetime.datetime
+    summary: str
+    source_path: str
+
+    @classmethod
+    def convert_from(
+        cls,
+        data: HistoricalMemorySettingsOutput,
+        *,
+        handle: str,
+        agent_id: str,
+    ) -> Self:
+        """Convert a visible Historical Memory source to its public response."""
+        return cls(
+            source_session_id=data.source_session_id,
+            scope=data.scope,
+            source_title=data.source_title,
+            source_activity_through=data.source_activity_through,
+            prepared_at=data.prepared_at,
+            summary=data.summary,
+            source_path=(
+                f"/w/{handle}/agents/{agent_id}/sessions/{data.source_session_id}"
+            ),
+        )
+
+
+class HistoricalMemoryListResponse(BaseModel):
+    """Cursor-paginated Historical Memory settings response."""
+
+    items: list[HistoricalMemoryResponse]
+    next_cursor: str | None
 
 
 class MemoryCreateRequest(BaseModel):

@@ -4,7 +4,6 @@ import dataclasses
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import EventKind
 from azents.core.goal import (
@@ -13,14 +12,15 @@ from azents.core.goal import (
     GoalState,
     GoalUpdateStatus,
 )
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.toolkit_state import ToolkitStateIdentity
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
+from azents.repos.session_execution.ownership import fence_owned_session_mutation
 from azents.repos.toolkit_state.store import ToolkitStateHandle, ToolkitStateStore
-from azents.services.session_resource_authority import SessionExecutionOwner
 
 
 class GoalAlreadyExistsError(ValueError):
@@ -66,22 +66,21 @@ class GoalStateStore:
     def __init__(
         self,
         *,
-        session_manager: SessionManager[AsyncSession],
+        session_manager: SessionManager[WriteSession],
+        owner: SessionExecutionOwner | None,
     ) -> None:
         """Create Goal state store."""
         self.session_manager = session_manager
+        self.owner = owner
 
     def for_execution(
         self,
         owner: SessionExecutionOwner,
     ) -> "GoalStateStore":
-        """Bind Goal operations to one durable Session owner."""
+        """Bind critical Goal event publication without gating private state."""
         return GoalStateStore(
-            session_manager=OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            )
+            session_manager=self.session_manager,
+            owner=owner,
         )
 
     async def load(self, agent_id: str, session_id: str) -> GoalState:
@@ -91,7 +90,7 @@ class GoalStateStore:
 
     async def load_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
         session_id: str,
     ) -> GoalState:
@@ -121,7 +120,7 @@ class GoalStateStore:
 
     async def create_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -266,7 +265,7 @@ class GoalStateStore:
 
     async def set_status_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -306,6 +305,10 @@ class GoalStateStore:
     ) -> None:
         """Add Goal completion briefing event in a completed transaction."""
         async with self.session_manager() as session:
+            if self.owner is not None:
+                if self.owner.session_id != session_id:
+                    raise ValueError("Goal event Session does not match owner")
+                await fence_owned_session_mutation(session, self.owner)
             await EventTranscriptRepository().append(
                 session,
                 EventCreate(
@@ -321,11 +324,11 @@ class GoalStateStore:
             )
 
     @staticmethod
-    def _make_handle(
-        session: AsyncSession,
+    def _make_handle[S: ReadSession](
+        session: S,
         agent_id: str,
         session_id: str,
-    ) -> ToolkitStateHandle[GoalState] | None:
+    ) -> ToolkitStateHandle[GoalState, S] | None:
         """Create the Goal Toolkit State handle for one Session identity."""
         if not agent_id or not session_id:
             return None
@@ -345,8 +348,8 @@ def _unfinished(state: GoalState) -> bool:
 
 def get_goal_state_store(
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ],
 ) -> GoalStateStore:
     """Create the repository-owned Goal state store dependency."""
-    return GoalStateStore(session_manager=session_manager)
+    return GoalStateStore(session_manager=session_manager, owner=None)

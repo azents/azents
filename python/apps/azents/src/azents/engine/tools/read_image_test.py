@@ -3,11 +3,12 @@
 import datetime
 import json
 from dataclasses import dataclass, field
-from typing import cast
+from typing import NamedTuple
 
 import pytest
 
 from azents.core.enums import ModelFileStatus
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.run.types import (
     FunctionTool,
     FunctionToolError,
@@ -20,11 +21,9 @@ from azents.runtime.transfer.runtime_image_read import (
     RuntimeImageReadError,
     RuntimeImageReadModelFileOversized,
     RuntimeImageReadRequest,
-    RuntimeImageReadService,
 )
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
-from azents.services.model_file import ModelFileOversized, ModelFileService
-from azents.services.session_resource_authority import SessionResourceAuthority
+from azents.services.model_file import ModelFileOversized
 
 _MODEL_FILE = ModelFile(
     id="m" * 32,
@@ -69,23 +68,30 @@ class _FakeRuntimeImageReadService:
 # ---------------------------------------------------------------------------
 
 
+class _ReadImageFixture(NamedTuple):
+    """Named collaborators for one Runtime image read tool."""
+
+    tool: FunctionTool
+    storage: FakeSharedStorage
+    service: _FakeRuntimeImageReadService
+
+
 def _make_tool(
     *,
     files: dict[str, bytes] | None = None,
-) -> tuple[FunctionTool, FakeSharedStorage, _FakeRuntimeImageReadService]:
+) -> _ReadImageFixture:
     """Create read_image tool and fake storage for tests."""
     storage = FakeSharedStorage(files)
     runtime_image_read_service = _FakeRuntimeImageReadService()
     tool = make_read_image_tool(
         session_storage=storage,
-        model_file_service=cast(ModelFileService, object()),
         authority=_authority(),
-        runtime_image_read_service=cast(
-            RuntimeImageReadService, runtime_image_read_service
-        ),
+        runtime_image_read_service=runtime_image_read_service,
         resolve_runtime_target=_target,
     )
-    return tool, storage, runtime_image_read_service
+    return _ReadImageFixture(
+        tool=tool, storage=storage, service=runtime_image_read_service
+    )
 
 
 async def _target() -> ServerToRuntimeTarget:
@@ -105,7 +111,9 @@ class TestReadImageFromSessionData:
         """Read PNG image from agent/photo.png URI."""
         # Given: PNG file in session data
         png_data = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
-        tool, _, service = _make_tool(files={"/workspace/agent/photo.png": png_data})
+        fixture = _make_tool(files={"/workspace/agent/photo.png": png_data})
+        tool = fixture.tool
+        service = fixture.service
 
         # When: call read_image
         result = await tool.handler(json.dumps({"path": "/workspace/agent/photo.png"}))
@@ -126,7 +134,7 @@ class TestReadImageFromSessionData:
         """Read JPEG image from agent/photo.jpg URI."""
         # Given: JPEG file in session data
         jpeg_data = b"\xff\xd8\xff\xe0" + b"\x00" * 50
-        tool, _, _ = _make_tool(files={"/workspace/agent/photo.jpg": jpeg_data})
+        tool = _make_tool(files={"/workspace/agent/photo.jpg": jpeg_data}).tool
 
         # When: call read_image
         result = await tool.handler(json.dumps({"path": "/workspace/agent/photo.jpg"}))
@@ -140,7 +148,9 @@ class TestReadImageFromSessionData:
         """Read WebP image from agent/photo.webp URI."""
         # Given: WebP file in session data
         webp_data = b"RIFF\x00\x00\x00\x00WEBP" + b"\x00" * 50
-        tool, _, service = _make_tool(files={"/workspace/agent/photo.webp": webp_data})
+        fixture = _make_tool(files={"/workspace/agent/photo.webp": webp_data})
+        tool = fixture.tool
+        service = fixture.service
 
         # When: call read_image
         result = await tool.handler(json.dumps({"path": "/workspace/agent/photo.webp"}))
@@ -160,25 +170,25 @@ class TestReadImageErrors:
 
     async def test_unsupported_path(self) -> None:
         """Disallowed path raises FunctionToolError."""
-        tool, _, _ = _make_tool()
+        tool = _make_tool().tool
         with pytest.raises(FunctionToolError, match="File not found"):
             await tool.handler(json.dumps({"path": "/tmp/image.png"}))
 
     async def test_unsupported_extension(self) -> None:
         """Unsupported extension raises FunctionToolError."""
-        tool, _, _ = _make_tool()
+        tool = _make_tool().tool
         with pytest.raises(FunctionToolError, match="Unsupported image format"):
             await tool.handler(json.dumps({"path": "/workspace/agent/document.pdf"}))
 
     async def test_no_extension(self) -> None:
         """File without extension raises FunctionToolError."""
-        tool, _, _ = _make_tool()
+        tool = _make_tool().tool
         with pytest.raises(FunctionToolError, match="Unsupported image format"):
             await tool.handler(json.dumps({"path": "/workspace/agent/noextension"}))
 
     async def test_file_not_found(self) -> None:
         """Nonexistent file raises FunctionToolError."""
-        tool, _, _ = _make_tool(files={})
+        tool = _make_tool(files={}).tool
         with pytest.raises(FunctionToolError, match="File not found"):
             await tool.handler(json.dumps({"path": "/workspace/agent/missing.png"}))
 
@@ -186,7 +196,7 @@ class TestReadImageErrors:
         """Image exceeding 20MB raises FunctionToolError."""
         # Given: 21MB image
         large_data = b"\x00" * (21 * 1024 * 1024)
-        tool, _, _ = _make_tool(files={"/workspace/agent/huge.png": large_data})
+        tool = _make_tool(files={"/workspace/agent/huge.png": large_data}).tool
 
         # When/Then: FunctionToolError
         with pytest.raises(FunctionToolError, match="Image too large"):
@@ -202,9 +212,8 @@ class TestReadImageErrors:
         )
         tool = make_read_image_tool(
             session_storage=storage,
-            model_file_service=cast(ModelFileService, object()),
             authority=_authority(),
-            runtime_image_read_service=cast(RuntimeImageReadService, transfer),
+            runtime_image_read_service=transfer,
             resolve_runtime_target=_target,
         )
 
@@ -235,7 +244,7 @@ class TestReadImageRuntimeStorage:
     async def test_reads_from_session_storage(self) -> None:
         """read_image reads image from runtime session_storage."""
         png_data = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
-        tool, _, _ = _make_tool(files={"/workspace/agent/photo.png": png_data})
+        tool = _make_tool(files={"/workspace/agent/photo.png": png_data}).tool
 
         # When: call read_image
         result = await tool.handler(json.dumps({"path": "/workspace/agent/photo.png"}))

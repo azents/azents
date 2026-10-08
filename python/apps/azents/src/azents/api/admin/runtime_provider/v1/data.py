@@ -24,7 +24,10 @@ from azents.core.runtime_profile import (
     parse_workspace_runtime_profile_policy,
     project_runtime_network,
 )
-from azents.repos.runtime_provider.data import RuntimeProvider
+from azents.core.runtime_provider_admin import (
+    RuntimeProviderOperationalDiagnosticsProjection,
+)
+from azents.core.runtime_provider_data import RuntimeProvider
 from azents.repos.runtime_provider_binding.data import (
     RuntimeProviderAuthBindingAuditEvent,
 )
@@ -35,9 +38,6 @@ from azents.services.runtime_profile_admin.service import (
     AdminWorkspaceRuntimeProfileDetailProjection,
     RuntimeInfrastructureProfileDeletionImpactProjection,
     RuntimeInfrastructureProfileProjection,
-)
-from azents.services.runtime_provider_admin.service import (
-    RuntimeProviderOperationalDiagnosticsProjection,
 )
 from azents.services.runtime_provider_binding_admin.service import (
     RuntimeProviderBindingAdminProjection,

@@ -17,7 +17,7 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.model_built_in_tool_capabilities import ModelBuiltInToolCapabilities
 from azentspublicclient.models.model_compatibility_capabilities import ModelCompatibilityCapabilities
@@ -25,14 +25,16 @@ from azentspublicclient.models.model_context_window import ModelContextWindow
 from azentspublicclient.models.model_modalities import ModelModalities
 from azentspublicclient.models.model_parameter_capabilities import ModelParameterCapabilities
 from azentspublicclient.models.model_reasoning_capabilities import ModelReasoningCapabilities
+from azentspublicclient.models.model_request_constraints import ModelRequestConstraints
 from azentspublicclient.models.model_tool_calling_capabilities import ModelToolCallingCapabilities
 from typing import Optional, Set
 from typing_extensions import Self
 
 class ModelCapabilities(BaseModel):
     """
-    Normalized LLM model capability contract.
+    One final boolean/list feature contract with separate request constraints.
     """ # noqa: E501
+    capability_schema_version: Optional[StrictInt] = 3
     context_window: Optional[ModelContextWindow] = None
     modalities: Optional[ModelModalities] = None
     tool_calling: Optional[ModelToolCallingCapabilities] = None
@@ -40,8 +42,20 @@ class ModelCapabilities(BaseModel):
     built_in_tools: Optional[ModelBuiltInToolCapabilities] = None
     parameters: Optional[ModelParameterCapabilities] = None
     compatibility: Optional[ModelCompatibilityCapabilities] = None
+    structured_response: Optional[StrictBool] = False
+    request_constraints: Optional[ModelRequestConstraints] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["context_window", "modalities", "tool_calling", "reasoning", "built_in_tools", "parameters", "compatibility"]
+    __properties: ClassVar[List[str]] = ["capability_schema_version", "context_window", "modalities", "tool_calling", "reasoning", "built_in_tools", "parameters", "compatibility", "structured_response", "request_constraints"]
+
+    @field_validator('capability_schema_version')
+    def capability_schema_version_validate_enum(cls, value):
+        """Validates the enum"""
+        if value is None:
+            return value
+
+        if value not in set([3]):
+            raise ValueError("must be one of enum values (3)")
+        return value
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -105,6 +119,9 @@ class ModelCapabilities(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of compatibility
         if self.compatibility:
             _dict['compatibility'] = self.compatibility.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of request_constraints
+        if self.request_constraints:
+            _dict['request_constraints'] = self.request_constraints.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -121,14 +138,20 @@ class ModelCapabilities(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
+            "capability_schema_version": obj.get("capability_schema_version") if obj.get("capability_schema_version") is not None else 3,
             "context_window": ModelContextWindow.from_dict(obj["context_window"]) if obj.get("context_window") is not None else None,
             "modalities": ModelModalities.from_dict(obj["modalities"]) if obj.get("modalities") is not None else None,
             "tool_calling": ModelToolCallingCapabilities.from_dict(obj["tool_calling"]) if obj.get("tool_calling") is not None else None,
             "reasoning": ModelReasoningCapabilities.from_dict(obj["reasoning"]) if obj.get("reasoning") is not None else None,
             "built_in_tools": ModelBuiltInToolCapabilities.from_dict(obj["built_in_tools"]) if obj.get("built_in_tools") is not None else None,
             "parameters": ModelParameterCapabilities.from_dict(obj["parameters"]) if obj.get("parameters") is not None else None,
-            "compatibility": ModelCompatibilityCapabilities.from_dict(obj["compatibility"]) if obj.get("compatibility") is not None else None
+            "compatibility": ModelCompatibilityCapabilities.from_dict(obj["compatibility"]) if obj.get("compatibility") is not None else None,
+            "structured_response": obj.get("structured_response") if obj.get("structured_response") is not None else False,
+            "request_constraints": ModelRequestConstraints.from_dict(obj["request_constraints"]) if obj.get("request_constraints") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

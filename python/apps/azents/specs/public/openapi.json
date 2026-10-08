@@ -469,6 +469,256 @@
         }
       }
     },
+    "/agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories": {
+      "get": {
+        "tags": [
+          "Agent v1"
+        ],
+        "summary": "List Agent Historical Memories",
+        "description": "List currently visible Historical Memory for settings inspection.",
+        "operationId": "agent_v1_list_agent_historical_memories",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/HistoricalMemorySettingsScope",
+              "description": "Exact Historical Memory source scope"
+            },
+            "description": "Exact Historical Memory source scope"
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional source title or summary search",
+              "title": "Query"
+            },
+            "description": "Optional source title or summary search"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque continuation cursor",
+              "title": "Cursor"
+            },
+            "description": "Opaque continuation cursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Maximum records to return",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "Maximum records to return"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoricalMemoryListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id}": {
+      "get": {
+        "tags": [
+          "Agent v1"
+        ],
+        "summary": "Get Agent Historical Memory",
+        "description": "Return one currently visible Historical Memory source.",
+        "operationId": "agent_v1_get_agent_historical_memory",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "source_session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoricalMemoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/v1/workspaces/{handle}/agents/{agent_id}/consolidated-memory": {
+      "get": {
+        "tags": [
+          "Agent v1"
+        ],
+        "summary": "Get Agent Consolidated Memory",
+        "description": "Inspect the current integrated Memory without starting consolidation.",
+        "operationId": "agent_v1_get_agent_consolidated_memory",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/HistoricalMemorySettingsScope",
+              "description": "Integrated Memory scope"
+            },
+            "description": "Integrated Memory scope"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsolidatedMemoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/agent/v1/workspaces/{handle}/agents/{agent_id}/memories": {
       "get": {
         "tags": [
@@ -546,6 +796,38 @@
               "title": "Query"
             },
             "description": "Search query"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque page cursor",
+              "title": "Cursor"
+            },
+            "description": "Opaque page cursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Page size",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "Page size"
           }
         ],
         "responses": {
@@ -2215,15 +2497,22 @@
           "Auth v1"
         ],
         "summary": "Get Login Methods",
-        "description": "Get available login methods for an email.",
+        "description": "Get login availability, optionally including an email's password status.",
         "operationId": "auth_v1_get_login_methods",
         "parameters": [
           {
             "name": "email",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": "string",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Email"
             }
           }
@@ -17831,6 +18120,17 @@
             "$ref": "#/components/schemas/ModelCapabilities",
             "description": "Runtime capability snapshot"
           },
+          "pricing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelPricingDefinition"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Saved normalized pricing; absent on historical selections"
+          },
           "model_snapshot": {
             "additionalProperties": true,
             "type": "object",
@@ -17881,6 +18181,7 @@
           "model_display_name",
           "model_developer",
           "normalized_capabilities",
+          "pricing",
           "model_snapshot"
         ],
         "title": "AgentModelSelection",
@@ -19984,22 +20285,28 @@
             "anyOf": [
               {
                 "type": "string",
-                "maxLength": 100,
-                "minLength": 1,
-                "pattern": "^[a-z0-9_]+$",
-                "description": "Unique within the owning Agent's effective Toolkit namespace. Use lowercase letters, numbers, and underscores only."
+                "description": "Optional base alias. Explicit values are normalized to lowercase ASCII letters, numbers, and underscores."
               },
               {
                 "type": "null"
               }
             ],
             "title": "Slug",
-            "description": "Unique within the owning Agent's effective Toolkit namespace. Use lowercase letters, numbers, and underscores only."
+            "description": "Optional non-unique base alias; blank values use the Name default."
           },
           "name": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255,
+                "description": "Display name"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Name",
-            "description": "Display name"
+            "description": "Optional display name for registered Providers; generic MCP requires one."
           },
           "description": {
             "anyOf": [
@@ -20060,7 +20367,6 @@
         "type": "object",
         "required": [
           "toolkit_type",
-          "name",
           "config"
         ],
         "title": "AgentToolkitConfigCreateRequest",
@@ -20070,11 +20376,8 @@
         "properties": {
           "slug": {
             "type": "string",
-            "maxLength": 100,
-            "minLength": 1,
-            "pattern": "^[a-z0-9_]+$",
             "title": "Slug",
-            "description": "Unique within the owning Agent's effective Toolkit namespace. Use lowercase letters, numbers, and underscores only."
+            "description": "Optional base alias. Explicit values are normalized to lowercase ASCII letters, numbers, and underscores."
           },
           "name": {
             "type": "string",
@@ -21722,6 +22025,215 @@
         "title": "BuiltinToolConfig",
         "description": "Built-in tool setting enabled for one selectable model option."
       },
+      "CatalogOffPeakRule": {
+        "properties": {
+          "windows": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogTimeWindow"
+            },
+            "type": "array",
+            "title": "Windows"
+          },
+          "weekday_timezone": {
+            "type": "string",
+            "title": "Weekday Timezone"
+          },
+          "overrides": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogPriceRate"
+            },
+            "type": "array",
+            "title": "Overrides"
+          }
+        },
+        "type": "object",
+        "required": [
+          "windows",
+          "weekday_timezone",
+          "overrides"
+        ],
+        "title": "CatalogOffPeakRule"
+      },
+      "CatalogPriceIssue": {
+        "properties": {
+          "source_field": {
+            "type": "string",
+            "title": "Source Field"
+          },
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/PriceMetric"
+            },
+            "type": "array",
+            "title": "Metrics"
+          },
+          "dimension": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "residency",
+                  "geography",
+                  "speed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dimension"
+          },
+          "invalid": {
+            "type": "boolean",
+            "title": "Invalid"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_field",
+          "metrics",
+          "dimension",
+          "invalid"
+        ],
+        "title": "CatalogPriceIssue",
+        "description": "A required but uninterpretable dimension that prevents a partial total."
+      },
+      "CatalogPriceRate": {
+        "properties": {
+          "metric": {
+            "$ref": "#/components/schemas/PriceMetric"
+          },
+          "tier": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PriceTier"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "above_input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Above Input Tokens"
+          },
+          "usd_per_unit": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usd Per Unit"
+          },
+          "search_context_size": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Search Context Size"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metric",
+          "tier",
+          "above_input_tokens",
+          "usd_per_unit",
+          "search_context_size"
+        ],
+        "title": "CatalogPriceRate",
+        "description": "A whole-quantity tariff, not a progressive marginal bracket."
+      },
+      "CatalogPriceRules": {
+        "properties": {
+          "rates": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogPriceRate"
+            },
+            "type": "array",
+            "title": "Rates"
+          },
+          "off_peak": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogOffPeakRule"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogPriceIssue"
+            },
+            "type": "array",
+            "title": "Issues"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rates",
+          "off_peak",
+          "issues"
+        ],
+        "title": "CatalogPriceRules"
+      },
+      "CatalogTimeWindow": {
+        "properties": {
+          "start_minute": {
+            "type": "integer",
+            "title": "Start Minute"
+          },
+          "end_minute": {
+            "type": "integer",
+            "title": "End Minute"
+          },
+          "weekdays": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array",
+                "uniqueItems": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weekdays"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start_minute",
+          "end_minute",
+          "weekdays"
+        ],
+        "title": "CatalogTimeWindow",
+        "description": "UTC minute window with an independently scoped weekday calendar."
+      },
       "ChatEditMessageWriteRequest": {
         "properties": {
           "agent_id": {
@@ -23057,6 +23569,44 @@
         "type": "object",
         "title": "ConnectionAccessPolicyRequest",
         "description": "Dedicated External Channel ingress policy request."
+      },
+      "ConsolidatedMemoryResponse": {
+        "properties": {
+          "scope": {
+            "$ref": "#/components/schemas/HistoricalMemorySettingsScope"
+          },
+          "markdown": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Markdown"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scope",
+          "markdown",
+          "published_at"
+        ],
+        "title": "ConsolidatedMemoryResponse",
+        "description": "Current integrated Memory settings overview for one exact scope."
       },
       "CreateGitWorktreeAction": {
         "properties": {
@@ -24917,6 +25467,96 @@
         "title": "HealthStatus",
         "description": "Server status response model."
       },
+      "HistoricalMemoryListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/HistoricalMemoryResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "HistoricalMemoryListResponse",
+        "description": "Cursor-paginated Historical Memory settings response."
+      },
+      "HistoricalMemoryResponse": {
+        "properties": {
+          "source_session_id": {
+            "type": "string",
+            "title": "Source Session Id"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/HistoricalMemorySettingsScope"
+          },
+          "source_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Title"
+          },
+          "source_activity_through": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Source Activity Through"
+          },
+          "prepared_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Prepared At"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "source_path": {
+            "type": "string",
+            "title": "Source Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_session_id",
+          "scope",
+          "source_title",
+          "source_activity_through",
+          "prepared_at",
+          "summary",
+          "source_path"
+        ],
+        "title": "HistoricalMemoryResponse",
+        "description": "Read-only Historical Memory settings response."
+      },
+      "HistoricalMemorySettingsScope": {
+        "type": "string",
+        "enum": [
+          "team",
+          "user"
+        ],
+        "title": "HistoricalMemorySettingsScope",
+        "description": "One exact Historical Memory settings source scope."
+      },
       "ImageFile": {
         "properties": {
           "url": {
@@ -24943,100 +25583,6 @@
         ],
         "title": "ImageFile",
         "description": "Single image for API response — resolved URL + resolution."
-      },
-      "ImageGenerationCatalogAttemptResponse": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status"
-          },
-          "started_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Started At"
-          },
-          "finished_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Finished At"
-          },
-          "failure_code": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Failure Code"
-          },
-          "failure_message": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Failure Message"
-          },
-          "action_hint": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Action Hint"
-          },
-          "fetched_count": {
-            "type": "integer",
-            "title": "Fetched Count"
-          },
-          "matched_count": {
-            "type": "integer",
-            "title": "Matched Count"
-          },
-          "skipped_count": {
-            "type": "integer",
-            "title": "Skipped Count"
-          },
-          "hidden_count": {
-            "type": "integer",
-            "title": "Hidden Count"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "status",
-          "started_at",
-          "finished_at",
-          "failure_code",
-          "failure_message",
-          "action_hint",
-          "fetched_count",
-          "matched_count",
-          "skipped_count",
-          "hidden_count"
-        ],
-        "title": "ImageGenerationCatalogAttemptResponse",
-        "description": "Latest image-generation catalog synchronization attempt response."
       },
       "ImageGenerationCatalogEntryResponse": {
         "properties": {
@@ -25119,6 +25665,95 @@
         "title": "ImageGenerationCatalogEntryResponse",
         "description": "Stored image-generation catalog entry response."
       },
+      "ImageGenerationCatalogSyncStatusResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "failure_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Code"
+          },
+          "failure_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Message"
+          },
+          "action_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Hint"
+          },
+          "fetched_count": {
+            "type": "integer",
+            "title": "Fetched Count"
+          },
+          "matched_count": {
+            "type": "integer",
+            "title": "Matched Count"
+          },
+          "skipped_count": {
+            "type": "integer",
+            "title": "Skipped Count"
+          },
+          "hidden_count": {
+            "type": "integer",
+            "title": "Hidden Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "started_at",
+          "finished_at",
+          "failure_code",
+          "failure_message",
+          "action_hint",
+          "fetched_count",
+          "matched_count",
+          "skipped_count",
+          "hidden_count"
+        ],
+        "title": "ImageGenerationCatalogSyncStatusResponse",
+        "description": "Current image-generation synchronization response."
+      },
       "ImageGenerationModelCatalogResponse": {
         "properties": {
           "default_available": {
@@ -25140,40 +25775,7 @@
             ],
             "title": "Catalog Id"
           },
-          "snapshot_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Snapshot Id"
-          },
-          "snapshot_configuration_version": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Snapshot Configuration Version"
-          },
-          "current_configuration_version": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Current Configuration Version"
-          },
-          "snapshot_created_at": {
+          "last_success_at": {
             "anyOf": [
               {
                 "type": "string",
@@ -25183,12 +25785,12 @@
                 "type": "null"
               }
             ],
-            "title": "Snapshot Created At"
+            "title": "Last Success At"
           },
-          "latest_attempt": {
+          "latest_sync": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ImageGenerationCatalogAttemptResponse"
+                "$ref": "#/components/schemas/ImageGenerationCatalogSyncStatusResponse"
               },
               {
                 "type": "null"
@@ -25199,9 +25801,9 @@
             "type": "boolean",
             "title": "Stale"
           },
-          "generation_current": {
+          "usable": {
             "type": "boolean",
-            "title": "Generation Current"
+            "title": "Usable"
           },
           "sync_available_at": {
             "anyOf": [
@@ -25236,13 +25838,10 @@
           "default_available",
           "explicit_selection_supported",
           "catalog_id",
-          "snapshot_id",
-          "snapshot_configuration_version",
-          "current_configuration_version",
-          "snapshot_created_at",
-          "latest_attempt",
+          "last_success_at",
+          "latest_sync",
           "stale",
-          "generation_current",
+          "usable",
           "sync_available_at",
           "automatic_retry_blocked",
           "entries",
@@ -28227,11 +28826,23 @@
             },
             "type": "array",
             "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
           }
         },
         "type": "object",
         "required": [
-          "items"
+          "items",
+          "next_cursor"
         ],
         "title": "MemoryListResponse",
         "description": "Memory list response."
@@ -28357,7 +28968,7 @@
         },
         "type": "object",
         "title": "ModelBuiltInToolCapabilities",
-        "description": "Represents provider built-in tool capability."
+        "description": "Supported route-projected built-in tools."
       },
       "ModelCandidateIdentity": {
         "properties": {
@@ -28383,6 +28994,12 @@
       },
       "ModelCapabilities": {
         "properties": {
+          "capability_schema_version": {
+            "type": "integer",
+            "const": 3,
+            "title": "Capability Schema Version",
+            "default": 3
+          },
           "context_window": {
             "$ref": "#/components/schemas/ModelContextWindow"
           },
@@ -28403,11 +29020,49 @@
           },
           "compatibility": {
             "$ref": "#/components/schemas/ModelCompatibilityCapabilities"
+          },
+          "structured_response": {
+            "type": "boolean",
+            "title": "Structured Response",
+            "default": false
+          },
+          "request_constraints": {
+            "$ref": "#/components/schemas/ModelRequestConstraints"
           }
         },
         "type": "object",
         "title": "ModelCapabilities",
-        "description": "Normalized LLM model capability contract."
+        "description": "One final boolean/list feature contract with separate request constraints."
+      },
+      "ModelCapabilityFeature": {
+        "type": "string",
+        "enum": [
+          "function_calling",
+          "parallel_function_calls",
+          "strict_function_schema",
+          "structured_response",
+          "reasoning",
+          "reasoning_summaries",
+          "temperature",
+          "max_output_tokens",
+          "top_p",
+          "top_k",
+          "stop_sequences",
+          "input:text",
+          "input:image",
+          "input:pdf",
+          "input:audio",
+          "input:video",
+          "output:text",
+          "output:image",
+          "output:pdf",
+          "output:audio",
+          "output:video",
+          "builtin:web_search",
+          "builtin:image_generation"
+        ],
+        "title": "ModelCapabilityFeature",
+        "description": "Stable keys for features derived from the final boolean/list fields."
       },
       "ModelCatalogEntryListResponse": {
         "properties": {
@@ -28418,18 +29073,7 @@
           "catalog_scope": {
             "$ref": "#/components/schemas/LLMCatalogScope"
           },
-          "current_snapshot_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Current Snapshot Id"
-          },
-          "current_snapshot_created_at": {
+          "last_success_at": {
             "anyOf": [
               {
                 "type": "string",
@@ -28439,12 +29083,12 @@
                 "type": "null"
               }
             ],
-            "title": "Current Snapshot Created At"
+            "title": "Last Success At"
           },
-          "latest_attempt": {
+          "latest_sync": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ModelCatalogSyncAttemptResponse"
+                "$ref": "#/components/schemas/ModelCatalogSyncStatusResponse"
               },
               {
                 "type": "null"
@@ -28495,9 +29139,8 @@
         "required": [
           "catalog_id",
           "catalog_scope",
-          "current_snapshot_id",
-          "current_snapshot_created_at",
-          "latest_attempt",
+          "last_success_at",
+          "latest_sync",
           "stale",
           "sync_available_at",
           "automatic_retry_blocked",
@@ -28566,6 +29209,9 @@
             ],
             "title": "Family"
           },
+          "pricing": {
+            "$ref": "#/components/schemas/ModelPricingDefinition"
+          },
           "source_metadata": {
             "anyOf": [
               {
@@ -28603,18 +29249,97 @@
           "visibility_status",
           "publisher",
           "family",
+          "pricing",
           "source_metadata",
           "projection_metadata"
         ],
         "title": "ModelCatalogEntryResponse",
         "description": "Stored model catalog entry response."
       },
-      "ModelCatalogSyncAttemptResponse": {
+      "ModelCatalogSyncResponse": {
         "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
+          "provider": {
+            "$ref": "#/components/schemas/LLMProvider"
           },
+          "catalog_id": {
+            "type": "string",
+            "title": "Catalog Id"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "visible_count": {
+            "type": "integer",
+            "title": "Visible Count"
+          },
+          "hidden_count": {
+            "type": "integer",
+            "title": "Hidden Count"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "failure_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Code"
+          },
+          "failure_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Message"
+          },
+          "action_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Hint"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "catalog_id",
+          "last_success_at",
+          "visible_count",
+          "hidden_count",
+          "status",
+          "failure_code",
+          "failure_message",
+          "action_hint"
+        ],
+        "title": "ModelCatalogSyncResponse",
+        "description": "Model catalog sync response."
+      },
+      "ModelCatalogSyncStatusResponse": {
+        "properties": {
           "status": {
             "type": "string",
             "title": "Status"
@@ -28688,7 +29413,6 @@
         },
         "type": "object",
         "required": [
-          "id",
           "status",
           "started_at",
           "finished_at",
@@ -28700,89 +29424,8 @@
           "skipped_count",
           "hidden_count"
         ],
-        "title": "ModelCatalogSyncAttemptResponse",
-        "description": "Latest model catalog sync attempt response."
-      },
-      "ModelCatalogSyncResponse": {
-        "properties": {
-          "provider": {
-            "$ref": "#/components/schemas/LLMProvider"
-          },
-          "catalog_id": {
-            "type": "string",
-            "title": "Catalog Id"
-          },
-          "snapshot_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Snapshot Id"
-          },
-          "visible_count": {
-            "type": "integer",
-            "title": "Visible Count"
-          },
-          "hidden_count": {
-            "type": "integer",
-            "title": "Hidden Count"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status"
-          },
-          "failure_code": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Failure Code"
-          },
-          "failure_message": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Failure Message"
-          },
-          "action_hint": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Action Hint"
-          }
-        },
-        "type": "object",
-        "required": [
-          "provider",
-          "catalog_id",
-          "snapshot_id",
-          "visible_count",
-          "hidden_count",
-          "status",
-          "failure_code",
-          "failure_message",
-          "action_hint"
-        ],
-        "title": "ModelCatalogSyncResponse",
-        "description": "Model catalog sync response."
+        "title": "ModelCatalogSyncStatusResponse",
+        "description": "Current model catalog synchronization response."
       },
       "ModelCompatibilityCapabilities": {
         "properties": {
@@ -28821,7 +29464,7 @@
         },
         "type": "object",
         "title": "ModelCompatibilityCapabilities",
-        "description": "Provider compatibility capability."
+        "description": "Descriptive route metadata; never a second feature admission authority."
       },
       "ModelContextWindow": {
         "properties": {
@@ -28864,7 +29507,7 @@
         },
         "type": "object",
         "title": "ModelContextWindow",
-        "description": "Model context window capability."
+        "description": "Saved context limits, independent of supported control membership."
       },
       "ModelExecutionOptionDefinition": {
         "properties": {
@@ -28927,6 +29570,47 @@
         "title": "ModelExecutionOptionId",
         "description": "Stable identifier for a directly selectable model execution option."
       },
+      "ModelFeatureCondition": {
+        "properties": {
+          "feature": {
+            "$ref": "#/components/schemas/ModelCapabilityFeature"
+          },
+          "reasoning_efforts": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ReasoningEffortValue"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Efforts"
+          },
+          "function_tools": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Function Tools"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "feature",
+          "reasoning_efforts",
+          "function_tools"
+        ],
+        "title": "ModelFeatureCondition",
+        "description": "Constrain a present feature without defining a second support fact.\n\nNull means that a request dimension is unconstrained. Consumers evaluate\nthese conditions against the complete effective request, never raw settings."
+      },
       "ModelModalities": {
         "properties": {
           "input": {
@@ -28946,7 +29630,7 @@
         },
         "type": "object",
         "title": "ModelModalities",
-        "description": "Input/output modalities supported by the model."
+        "description": "Supported input/output forms; absent entries mean unsupported."
       },
       "ModelModality": {
         "type": "string",
@@ -28990,7 +29674,7 @@
         },
         "type": "object",
         "title": "ModelParameterCapabilities",
-        "description": "Configurable generation parameters supported by the model."
+        "description": "Final supported generation controls."
       },
       "ModelParameters": {
         "properties": {
@@ -29068,6 +29752,90 @@
         "title": "ModelParameters",
         "description": "LLM model parameters.\n\nEvery field is optional; unset fields use model defaults."
       },
+      "ModelPricingDefinition": {
+        "properties": {
+          "rules": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogPriceRules"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelPricingUnavailableReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Key"
+          },
+          "source_model_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Model Key"
+          },
+          "collected_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collected At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "rules",
+          "unavailable_reason",
+          "source_key",
+          "source_model_key",
+          "collected_at"
+        ],
+        "title": "ModelPricingDefinition",
+        "description": "Compact normalized prices copied from a catalog into a saved selection."
+      },
+      "ModelPricingUnavailableReason": {
+        "type": "string",
+        "enum": [
+          "source_unavailable",
+          "model_unmatched",
+          "provider_pricing_mismatch",
+          "invalid_price",
+          "missing_price",
+          "invalid_usage",
+          "unsupported_service_tier",
+          "unknown_billable_component",
+          "unsupported_billing_rule"
+        ],
+        "title": "ModelPricingUnavailableReason"
+      },
       "ModelReasoningCapabilities": {
         "properties": {
           "supported": {
@@ -29083,20 +29851,14 @@
             "title": "Effort Levels"
           },
           "summaries": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Summaries"
+            "type": "boolean",
+            "title": "Summaries",
+            "default": false
           }
         },
         "type": "object",
         "title": "ModelReasoningCapabilities",
-        "description": "Represents reasoning capability."
+        "description": "Final reasoning support and the supported selectable effort list."
       },
       "ModelReasoningEffort": {
         "type": "string",
@@ -29112,6 +29874,31 @@
         "title": "ModelReasoningEffort",
         "description": "Normalized reasoning effort level in ascending order."
       },
+      "ModelRequestConstraints": {
+        "properties": {
+          "known_default": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReasoningEffortValue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "feature_conditions": {
+            "items": {
+              "$ref": "#/components/schemas/ModelFeatureCondition"
+            },
+            "type": "array",
+            "title": "Feature Conditions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ModelRequestConstraints",
+        "description": "Known request metadata, independent of final feature membership.\n\nA missing default is omitted knowledge, not another feature support state.\nThe final capability fields alone determine whether a feature is present."
+      },
       "ModelToolCallingCapabilities": {
         "properties": {
           "supported": {
@@ -29120,31 +29907,19 @@
             "default": false
           },
           "parallel_tool_calls": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Parallel Tool Calls"
+            "type": "boolean",
+            "title": "Parallel Tool Calls",
+            "default": false
           },
           "strict_json_schema": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Strict Json Schema"
+            "type": "boolean",
+            "title": "Strict Json Schema",
+            "default": false
           }
         },
         "type": "object",
         "title": "ModelToolCallingCapabilities",
-        "description": "Represents tool calling capability."
+        "description": "Final function and function-schema capabilities."
       },
       "MultiChannelDefaultRequest": {
         "properties": {
@@ -30027,6 +30802,43 @@
         "title": "PreviewSignupTokenResponse",
         "description": "Signup token preview response."
       },
+      "PriceMetric": {
+        "type": "string",
+        "enum": [
+          "input_tokens",
+          "output_tokens",
+          "cache_read_tokens",
+          "cache_write_tokens",
+          "cache_write_1h_tokens",
+          "reasoning_tokens",
+          "input_audio_tokens",
+          "input_image_tokens",
+          "output_audio_tokens",
+          "output_image_tokens",
+          "web_search",
+          "maps_grounding",
+          "file_search",
+          "code_interpreter",
+          "input_images",
+          "output_images",
+          "input_audio_seconds",
+          "input_video_seconds",
+          "output_audio_seconds",
+          "output_video_seconds"
+        ],
+        "title": "PriceMetric"
+      },
+      "PriceTier": {
+        "type": "string",
+        "enum": [
+          "standard",
+          "priority",
+          "flex",
+          "batches",
+          "ultrafast"
+        ],
+        "title": "PriceTier"
+      },
       "PrimaryModelReservation": {
         "properties": {
           "schema_version": {
@@ -30429,6 +31241,18 @@
         ],
         "title": "ProjectBrowserModeResponse",
         "description": "Workspace browser mode descriptor response."
+      },
+      "ReasoningEffortValue": {
+        "type": "string",
+        "enum": [
+          "none",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
       },
       "ReceivedInvitationListResponse": {
         "properties": {
@@ -34802,22 +35626,28 @@
             "anyOf": [
               {
                 "type": "string",
-                "maxLength": 100,
-                "minLength": 1,
-                "pattern": "^[a-z0-9_]+$",
-                "description": "Workspace-unique slug. Use lowercase letters, numbers, and underscores only."
+                "description": "Optional base alias. Explicit values are normalized to lowercase ASCII letters, numbers, and underscores."
               },
               {
                 "type": "null"
               }
             ],
             "title": "Slug",
-            "description": "Workspace-unique slug. Use lowercase letters, numbers, and underscores only."
+            "description": "Optional non-unique base alias; blank values use the Name default."
           },
           "name": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255,
+                "description": "Display name"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Name",
-            "description": "Display name"
+            "description": "Optional display name for registered Providers; generic MCP requires one."
           },
           "description": {
             "anyOf": [
@@ -34878,7 +35708,6 @@
         "type": "object",
         "required": [
           "toolkit_type",
-          "name",
           "config"
         ],
         "title": "ToolkitConfigCreateRequest",
@@ -35017,14 +35846,12 @@
         "properties": {
           "slug": {
             "type": "string",
-            "maxLength": 100,
-            "minLength": 1,
-            "pattern": "^[a-z0-9_]+$",
             "title": "Slug",
-            "description": "Workspace-unique slug. Use lowercase letters, numbers, and underscores only."
+            "description": "Optional base alias. Explicit values are normalized to lowercase ASCII letters, numbers, and underscores."
           },
           "name": {
             "type": "string",
+            "maxLength": 255,
             "title": "Name",
             "description": "Display name"
           },
@@ -35209,7 +36036,7 @@
           "block"
         ],
         "title": "UnsupportedMediaPolicy",
-        "description": "Unsupported media handling policy."
+        "description": "Descriptive unsupported media handling policy."
       },
       "UpdateMyProfileRequest": {
         "properties": {

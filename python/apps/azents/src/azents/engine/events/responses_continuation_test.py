@@ -1,6 +1,7 @@
 """Responses continuation planner tests."""
 
 from collections.abc import Mapping, Sequence
+from typing import NamedTuple
 
 import pytest
 
@@ -20,6 +21,7 @@ def _request(
 ) -> NativeModelRequest:
     """Build a full logical request for continuation tests."""
     return NativeModelRequest(
+        native_replay_context=None,
         model=model,
         input=[dict(item) for item in input_items],
         tools=(tools if tools is not None else [{"type": "function", "name": "read"}]),
@@ -29,9 +31,16 @@ def _request(
     )
 
 
+class _ContinuationSeed(NamedTuple):
+    """Completed request and output used to establish a continuation."""
+
+    request: NativeModelRequest
+    output: dict[str, object]
+
+
 def _seed(
     planner: ResponsesContinuationPlanner,
-) -> tuple[NativeModelRequest, dict[str, object]]:
+) -> _ContinuationSeed:
     """Record one completed function-call response."""
     request = _request([{"role": "user", "content": "read file"}])
     output: dict[str, object] = {
@@ -46,7 +55,7 @@ def _seed(
         response_id="resp-1",
         output_items=[output],
     )
-    return request, output
+    return _ContinuationSeed(request=request, output=output)
 
 
 def test_first_request_uses_full_input() -> None:
@@ -63,7 +72,9 @@ def test_first_request_uses_full_input() -> None:
 def test_exact_prefix_sends_only_new_input() -> None:
     """Strip the prior request and response output from an exact continuation."""
     planner = ResponsesContinuationPlanner()
-    previous, output = _seed(planner)
+    seed = _seed(planner)
+    previous = seed.request
+    output = seed.output
     delta = {
         "type": "function_call_output",
         "call_id": "call-1",
@@ -138,7 +149,9 @@ def test_custom_tool_call_does_not_continue_with_function_output() -> None:
 def test_request_property_change_uses_full_input(changed: str) -> None:
     """Do not chain across any request-property change."""
     planner = ResponsesContinuationPlanner()
-    previous, output = _seed(planner)
+    seed = _seed(planner)
+    previous = seed.request
+    output = seed.output
     delta = {"type": "function_call_output", "call_id": "call-1", "output": "x"}
     model = "gpt-5.2" if changed == "model" else previous.model
     tools = [] if changed == "tools" else previous.tools
@@ -164,7 +177,9 @@ def test_request_property_change_uses_full_input(changed: str) -> None:
 def test_prefix_mismatch_or_empty_delta_uses_full_input(mismatch: str) -> None:
     """Fall back when the full logical request cannot prove the exact boundary."""
     planner = ResponsesContinuationPlanner()
-    previous, output = _seed(planner)
+    seed = _seed(planner)
+    previous = seed.request
+    output = seed.output
     delta = {"type": "function_call_output", "call_id": "call-1", "output": "x"}
     input_items = [*previous.input, output, delta]
     if mismatch == "request":
@@ -184,7 +199,9 @@ def test_prefix_mismatch_or_empty_delta_uses_full_input(mismatch: str) -> None:
 def test_store_false_and_disabled_planner_use_full_input() -> None:
     """Require provider storage and stop chaining after stored state is rejected."""
     planner = ResponsesContinuationPlanner()
-    previous, output = _seed(planner)
+    seed = _seed(planner)
+    previous = seed.request
+    output = seed.output
     delta = {"type": "function_call_output", "call_id": "call-1", "output": "x"}
     unstored = _request(
         [*previous.input, output, delta],

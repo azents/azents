@@ -13,11 +13,10 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from textwrap import dedent
-from typing import Protocol
+from typing import Protocol, assert_never
 
 from mcp.types import Tool as McpBaseTool
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from azents.core.engine_tool_state import McpToolSnapshotState
 from azents.core.github_auth import (
@@ -31,6 +30,10 @@ from azents.core.github_credentials import (
     GitHubSecretsPAT,
 )
 from azents.core.mcp_transport import test_mcp_transport
+from azents.core.session_resource_authority import (
+    SessionExecutionOwner,
+    accepts_execution_owner,
+)
 from azents.core.tools import (
     GitHubToolkitConfig,
     McpToolkitConfig,
@@ -44,10 +47,14 @@ from azents.core.tools import (
 )
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
+from azents.engine.tools.background_discovery import (
+    DISCOVERY_ERRORS,
+    observe_discovery_failure,
+    require_expected_discovery_failure,
+)
 from azents.engine.tools.mcp import McpToolkit
 from azents.engine.tools.mcp_base import wrap_mcp_tool
-from azents.rdb.session import SessionManager
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
+from azents.repos.engine_tool_repositories import EngineMcpSnapshotFactory
 from azents.repos.toolkit_state.engine import (
     GitHubSelectedInstallationStore,
     McpToolSnapshotStore,
@@ -55,10 +62,7 @@ from azents.repos.toolkit_state.engine import (
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
 )
-from azents.services.session_resource_authority import (
-    SessionExecutionOwner,
-    accepts_execution_owner,
-)
+from azents.utils.logging import sanitized_exception_info
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +185,8 @@ _SAFE_TOOL_SEGMENT = re.compile(r"[^a-zA-Z0-9_]")
 class GitHubSwitchInstallationInput(BaseModel):
     """Input for selecting the default GitHub installation."""
 
+    model_config = ConfigDict(extra="forbid")
+
     installation: str = Field(
         min_length=1,
         description="Installation ID or account login to select for gh CLI defaults",
@@ -209,7 +215,7 @@ class GitHubInstallationBinding:
     lazy_mcp_config: McpToolkitConfig | None
     lazy_mcp_secret_provider: Callable[[], Awaitable[str | None]] | None
     lazy_mcp_proxy_url: str | None
-    session_manager: SessionManager[AsyncSession] | None
+    snapshot_factory: EngineMcpSnapshotFactory | None
     agent_id: str
     session_id: str
     state_name: str
@@ -380,24 +386,9 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
             session_id=session_id,
         ):
             return
-        if isinstance(
-            self.selected_installation_store,
-            GitHubSelectedInstallationStore,
-        ):
-            self.selected_installation_store = (
-                self.selected_installation_store.for_execution(owner)
-            )
         if self._mcp is not None:
             self._mcp.bind_execution_owner(owner)
         for binding in self._installation_bindings:
-            if binding.session_manager is not None:
-                binding.session_manager = OwnerBoundSessionManager(
-                    session_manager=binding.session_manager,
-                    session_id=owner.session_id,
-                    owner_generation=owner.owner_generation,
-                )
-            if binding.snapshot_store is not None:
-                binding.snapshot_store = binding.snapshot_store.for_execution(owner)
             if binding.mcp_toolkit is not None:
                 binding.mcp_toolkit.bind_execution_owner(owner)
         self._execution_owner = owner
@@ -527,6 +518,9 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
             and self._lazy_mcp_task is None
         ):
             self._lazy_mcp_task = asyncio.create_task(self._prepare_lazy_mcp())
+            self._lazy_mcp_task.add_done_callback(
+                observe_discovery_failure(logger, toolkit="github")
+            )
         return self
 
     async def __aexit__(self, *exc: object) -> None:
@@ -556,6 +550,9 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
         ):
             binding.lazy_mcp_task = asyncio.create_task(
                 self._prepare_installation_mcp(binding)
+            )
+            binding.lazy_mcp_task.add_done_callback(
+                observe_discovery_failure(logger, toolkit="github")
             )
 
     async def _exit_installation_binding(
@@ -593,7 +590,7 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
                 secret=secret,
                 on_auth_failure=binding.lazy_mcp_secret_provider,
                 proxy_url=binding.lazy_mcp_proxy_url,
-                session_manager=binding.session_manager,
+                snapshot_factory=binding.snapshot_factory,
                 agent_id=binding.agent_id,
                 session_id=binding.session_id,
                 state_name=binding.state_name,
@@ -602,15 +599,21 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
             binding.lazy_mcp_error = None
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
+        except (*DISCOVERY_ERRORS, ExceptionGroup) as exc:
+            require_expected_discovery_failure(exc)
             logger.exception(
                 "Failed to prepare GitHub MCP toolkit",
                 extra={
                     "installation_id": binding.target.installation_id,
                     "account_login": binding.target.account_login,
                 },
+                exc_info=sanitized_exception_info(
+                    exc, message="GitHub MCP preparation failed"
+                ),
             )
-            binding.lazy_mcp_error = f"GitHub toolkit preparation failed: {exc}"
+            binding.lazy_mcp_error = (
+                f"GitHub toolkit preparation failed: {type(exc).__name__}"
+            )
 
     async def _installation_update_context(
         self,
@@ -723,14 +726,25 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
                 secret=secret,
                 on_auth_failure=self._lazy_mcp_secret_provider,
                 proxy_url=self._lazy_mcp_proxy_url,
+                snapshot_factory=None,
+                agent_id=None,
+                session_id=None,
             )
             await self._mcp.__aenter__()
             self._lazy_mcp_error = None
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
-            logger.exception("Failed to prepare GitHub MCP toolkit")
-            self._lazy_mcp_error = f"GitHub toolkit preparation failed: {exc}"
+        except (*DISCOVERY_ERRORS, ExceptionGroup) as exc:
+            require_expected_discovery_failure(exc)
+            logger.exception(
+                "Failed to prepare GitHub MCP toolkit",
+                exc_info=sanitized_exception_info(
+                    exc, message="GitHub MCP preparation failed"
+                ),
+            )
+            self._lazy_mcp_error = (
+                f"GitHub toolkit preparation failed: {type(exc).__name__}"
+            )
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Fetch tools from GitHub MCP server and filter by toolset.
@@ -825,6 +839,9 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
                 and self._lazy_mcp_task is None
             ):
                 self._lazy_mcp_task = asyncio.create_task(self._prepare_lazy_mcp())
+                self._lazy_mcp_task.add_done_callback(
+                    observe_discovery_failure(logger, toolkit="github")
+                )
             if self._lazy_mcp_task is not None and not self._lazy_mcp_task.done():
                 return ToolkitState(status=ToolkitStatus.ENABLED, tools=[])
             if self._lazy_mcp_error is not None:
@@ -859,15 +876,15 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
         self,
         *,
         platform_runtime: PlatformGitHubAppRuntimeService,
-        session_manager: SessionManager[AsyncSession] | None = None,
+        snapshot_factory: EngineMcpSnapshotFactory | None = None,
     ) -> None:
         """Initialize GitHubToolkitProvider.
 
         :param platform_runtime: Operation-boundary Platform App resolver
-        :param session_manager: DB session manager for Toolkit State
+        :param snapshot_factory: DB session manager for Toolkit State
         """
         self.platform_runtime = platform_runtime
-        self.session_manager = session_manager
+        self.snapshot_factory = snapshot_factory
 
     def to_mcp_config(self, config: GitHubToolkitConfig) -> McpToolkitConfig:
         """Convert to fixed GitHub MCP settings."""
@@ -944,8 +961,8 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
                     platform.private_key,
                     first.installation_id,
                 )
-            case _:
-                return None
+            case _ as unreachable:
+                assert_never(unreachable)
 
     async def validate_credentials(
         self,
@@ -1003,7 +1020,7 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
             mcp_toolkit = McpToolkit(
                 config=mcp_config,
                 proxy_url=proxy_url,
-                session_manager=self.session_manager,
+                snapshot_factory=self.snapshot_factory,
                 agent_id=context.agent_id,
                 session_id=context.session_id,
                 state_name=_github_snapshot_state_name(
@@ -1034,8 +1051,8 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
                     context,
                     proxy_url=proxy_url,
                 )
-            case _:
-                raise ValueError(f"Unknown GitHub secret type: {type(secrets)}")
+            case _ as unreachable:
+                assert_never(unreachable)
 
     def _resolve_pat(
         self,
@@ -1057,7 +1074,7 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
             config=mcp_config,
             secret=secrets.token,
             proxy_url=proxy_url,
-            session_manager=self.session_manager,
+            snapshot_factory=self.snapshot_factory,
             agent_id=context.agent_id,
             session_id=context.session_id,
             state_name=_github_snapshot_state_name(
@@ -1090,12 +1107,14 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
         context: ResolveContext,
     ) -> GitHubSelectedInstallationStore | None:
         """Create selected installation store when session identity is available."""
-        if self.session_manager is None:
+        if self.snapshot_factory is None:
             return None
-        return GitHubSelectedInstallationStore(
-            session_manager=self.session_manager,
-            agent_id=context.agent_id,
-            session_id=context.session_id,
+        return (
+            self.snapshot_factory.selected_installation(
+                agent_id=context.agent_id, session_id=context.session_id
+            )
+            if self.snapshot_factory is not None
+            else None
         )
 
     async def _resolve_github_app(
@@ -1123,7 +1142,7 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
             private_key=secrets.private_key,
             targets=secrets.installations,
             proxy_url=proxy_url,
-            session_manager=self.session_manager,
+            snapshot_factory=self.snapshot_factory,
             agent_id=context.agent_id,
             session_id=context.session_id,
             toolkit_id=context.toolkit_id,
@@ -1166,7 +1185,7 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
             expected_app_id=secrets.app_id,
             targets=secrets.installations,
             proxy_url=proxy_url,
-            session_manager=self.session_manager,
+            snapshot_factory=self.snapshot_factory,
             agent_id=context.agent_id,
             session_id=context.session_id,
             toolkit_id=context.toolkit_id,
@@ -1202,7 +1221,7 @@ def _build_installation_bindings(
     private_key: str,
     targets: list[GitHubInstallationTarget],
     proxy_url: str | None,
-    session_manager: SessionManager[AsyncSession] | None,
+    snapshot_factory: EngineMcpSnapshotFactory | None,
     agent_id: str,
     session_id: str,
     toolkit_id: str,
@@ -1231,22 +1250,25 @@ def _build_installation_bindings(
                 lazy_mcp_config=mcp_config,
                 lazy_mcp_secret_provider=provide_token,
                 lazy_mcp_proxy_url=proxy_url,
-                session_manager=session_manager,
+                snapshot_factory=snapshot_factory,
                 agent_id=agent_id,
                 session_id=session_id,
                 state_name=_github_snapshot_state_name(
                     toolkit_id=toolkit_id,
                     suffix=f"installation:{target.installation_id}",
                 ),
-                snapshot_store=McpToolSnapshotStore(
-                    session_manager=session_manager,
-                    agent_id=agent_id,
-                    session_id=session_id,
-                    toolkit_namespace="mcp",
-                    state_name=_github_snapshot_state_name(
-                        toolkit_id=toolkit_id,
-                        suffix=f"installation:{target.installation_id}",
-                    ),
+                snapshot_store=(
+                    snapshot_factory.create(
+                        agent_id=agent_id,
+                        session_id=session_id,
+                        toolkit_namespace="mcp",
+                        state_name=_github_snapshot_state_name(
+                            toolkit_id=toolkit_id,
+                            suffix=f"installation:{target.installation_id}",
+                        ),
+                    )
+                    if snapshot_factory is not None
+                    else None
                 ),
             )
         )
@@ -1260,7 +1282,7 @@ def _build_platform_installation_bindings(
     expected_app_id: str,
     targets: list[GitHubInstallationTarget],
     proxy_url: str | None,
-    session_manager: SessionManager[AsyncSession] | None,
+    snapshot_factory: EngineMcpSnapshotFactory | None,
     agent_id: str,
     session_id: str,
     toolkit_id: str,
@@ -1294,22 +1316,25 @@ def _build_platform_installation_bindings(
                 lazy_mcp_config=mcp_config,
                 lazy_mcp_secret_provider=provide_token,
                 lazy_mcp_proxy_url=proxy_url,
-                session_manager=session_manager,
+                snapshot_factory=snapshot_factory,
                 agent_id=agent_id,
                 session_id=session_id,
                 state_name=_github_snapshot_state_name(
                     toolkit_id=toolkit_id,
                     suffix=f"installation:{target.installation_id}",
                 ),
-                snapshot_store=McpToolSnapshotStore(
-                    session_manager=session_manager,
-                    agent_id=agent_id,
-                    session_id=session_id,
-                    toolkit_namespace="mcp",
-                    state_name=_github_snapshot_state_name(
-                        toolkit_id=toolkit_id,
-                        suffix=f"installation:{target.installation_id}",
-                    ),
+                snapshot_store=(
+                    snapshot_factory.create(
+                        agent_id=agent_id,
+                        session_id=session_id,
+                        toolkit_namespace="mcp",
+                        state_name=_github_snapshot_state_name(
+                            toolkit_id=toolkit_id,
+                            suffix=f"installation:{target.installation_id}",
+                        ),
+                    )
+                    if snapshot_factory is not None
+                    else None
                 ),
             )
         )

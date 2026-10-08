@@ -5,7 +5,6 @@ from typing import Annotated
 
 import sqlalchemy as sa
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentRuntimeCapability,
@@ -19,6 +18,7 @@ from azents.rdb.models.agent_runtime_removal import (
     RDBAgentRuntimeRemovalOperation,
 )
 from azents.rdb.models.runtime_profile import RDBRuntimeConfigurationState
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_runtime_removal_scope import (
     AgentRuntimeRemovalScopeRepository,
 )
@@ -39,14 +39,15 @@ class AgentRuntimeRemovalFinalizerRepository:
 
     async def finalize(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         operation_id: str,
         lease_owner: str,
+        expected_attempt: int,
         now: datetime.datetime,
     ) -> bool:
         """Commit `removing → none` and complete its operation atomically."""
-        operation = await session.scalar(
+        operation = await session.write_session.scalar(
             sa.select(RDBAgentRuntimeRemovalOperation)
             .where(
                 RDBAgentRuntimeRemovalOperation.id == operation_id,
@@ -55,6 +56,7 @@ class AgentRuntimeRemovalFinalizerRepository:
                 RDBAgentRuntimeRemovalOperation.stage
                 == AgentRuntimeRemovalStage.FINALIZING,
                 RDBAgentRuntimeRemovalOperation.lease_owner == lease_owner,
+                RDBAgentRuntimeRemovalOperation.attempt_count == expected_attempt,
             )
             .with_for_update()
         )
@@ -66,7 +68,7 @@ class AgentRuntimeRemovalFinalizerRepository:
         ):
             raise RuntimeError("Runtime removal evidence is incomplete")
 
-        agent = await session.scalar(
+        agent = await session.write_session.scalar(
             sa.select(RDBAgent)
             .where(
                 RDBAgent.id == operation.agent_id,
@@ -86,14 +88,14 @@ class AgentRuntimeRemovalFinalizerRepository:
             agent_id=operation.agent_id,
             agent_runtime_id=operation.agent_runtime_id,
         )
-        runtime = await session.scalar(
+        runtime = await session.write_session.scalar(
             sa.select(RDBAgentRuntime)
             .where(RDBAgentRuntime.agent_id == operation.agent_id)
             .with_for_update()
         )
         self._require_physical_deletion(operation=operation, runtime=runtime)
         if runtime is not None:
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBRuntimeConfigurationState).where(
                     RDBRuntimeConfigurationState.runtime_id == runtime.id
                 )
@@ -113,7 +115,7 @@ class AgentRuntimeRemovalFinalizerRepository:
         operation.last_error_summary = None
         operation.completed_at = now
         operation.updated_at = now
-        await session.flush()
+        await session.write_session.flush()
         return True
 
     def _require_physical_deletion(

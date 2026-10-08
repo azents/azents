@@ -831,6 +831,7 @@
     "retryUnavailable": "La relance est disponible uniquement pour le dernier échec lorsque la session est inactive."
   },
   "composerProfile": {
+    "applyError": "Impossible d’appliquer les paramètres du modèle. Réessayez.",
     "model": "Modèle",
     "effortLabel": "Effort de raisonnement",
     "done": "Terminé",

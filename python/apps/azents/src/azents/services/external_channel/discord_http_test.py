@@ -24,6 +24,8 @@ from azents.core.enums import (
     ScheduledTaskScheduleType,
 )
 from azents.core.external_channel_projection import is_external_channel_projection
+from azents.core.scheduled_task_control import ScheduledTaskProviderControlResult
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
     ExternalChannelInteractionAdmission,
@@ -31,6 +33,10 @@ from azents.repos.external_channel.data import (
     ExternalChannelPrincipalCreate,
     ExternalChannelTrigger,
 )
+from azents.repos.external_channel.http_admission_read import (
+    ExternalChannelHTTPAdmissionReadRepository,
+)
+from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.scheduled_task.data import ScheduledTask
 from azents.services.external_channel.discord_http import (
     DiscordHTTPAdmissionService,
@@ -50,10 +56,7 @@ from azents.services.external_channel.discord_settings_scope import (
     build_discord_settings_custom_id,
     parse_discord_settings_custom_id,
 )
-from azents.services.scheduled_task.control import (
-    ScheduledTaskProviderControlResult,
-    build_scheduled_task_control_locator,
-)
+from azents.services.scheduled_task.control import build_scheduled_task_control_locator
 from azents.testing.external_channel import make_provider_effect_plan
 
 _NOW = datetime.datetime(2026, 7, 26, 1, 0, tzinfo=datetime.UTC)
@@ -111,7 +114,7 @@ def test_scheduled_task_cancel_confirmation_is_ephemeral() -> None:
     ]
 
 
-class _RepositoryDouble:
+class _RepositoryDouble(ExternalChannelRepository):
     """Return one selector-scoped active connection."""
 
     def __init__(self, configuration: ExternalChannelConnectionConfiguration) -> None:
@@ -120,7 +123,7 @@ class _RepositoryDouble:
 
     async def get_discord_http_configuration_by_selector_hash(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         selector_hash: str,
     ) -> ExternalChannelConnectionConfiguration:
@@ -378,8 +381,9 @@ def _service(
     cleanup_plans: tuple[object, ...] = (),
 ) -> _DiscordHTTPServiceFixture:
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        yield object()  # ty: ignore[invalid-yield] # The tested service does not access the placeholder session.
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
+        async with AsyncSession() as session:
+            yield ReadWriteSession(session)
 
     repository = _RepositoryDouble(configuration)
     shortcut_source = _ShortcutSourceDouble()
@@ -388,8 +392,10 @@ def _service(
     interaction_response = _InteractionResponseDouble()
     return _DiscordHTTPServiceFixture(
         service=DiscordHTTPAdmissionService(
-            session_manager=session_manager,
-            repository=repository,  # ty: ignore[invalid-argument-type] # Focused repository double implements the exercised lookup.
+            configuration_repository=ExternalChannelHTTPAdmissionReadRepository(
+                session_manager=session_manager,
+                repository=repository,
+            ),
             admission_service=admission,  # ty: ignore[invalid-argument-type] # Focused admission double implements the exercised lifecycle.
             shortcut_source_service=shortcut_source,  # ty: ignore[invalid-argument-type] # Focused shortcut double implements ensure().
             selector_response_service=selector_response,  # ty: ignore[invalid-argument-type] # Focused response double implements initial_response().
@@ -419,14 +425,17 @@ def _ingress_service(
     dispatcher: DiscordHTTPAdmissionService,
 ) -> _DiscordHTTPIngressFixture:
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        yield object()  # ty: ignore[invalid-yield] # The tested service does not access the placeholder session.
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
+        async with AsyncSession() as session:
+            yield ReadWriteSession(session)
 
     resolver = _DispatcherResolverDouble(dispatcher)
     return _DiscordHTTPIngressFixture(
         service=DiscordHTTPIngressService(
-            session_manager=session_manager,
-            repository=_RepositoryDouble(configuration),  # ty: ignore[invalid-argument-type] # Focused repository double implements the exercised lookup.
+            configuration_repository=ExternalChannelHTTPAdmissionReadRepository(
+                session_manager=session_manager,
+                repository=_RepositoryDouble(configuration),
+            ),
             admission_service=admission,  # ty: ignore[invalid-argument-type] # Focused admission double implements the exercised lifecycle.
             config=SimpleNamespace(
                 auth=SimpleNamespace(jwt=SimpleNamespace(secret_key="settings-secret"))

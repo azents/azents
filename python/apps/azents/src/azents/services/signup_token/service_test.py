@@ -3,9 +3,9 @@
 import datetime
 from unittest.mock import AsyncMock, create_autospec
 
+import pytest
 from azcommon.logging import RuntimeEnvironment
 from azcommon.result import Failure, Success
-from sqlalchemy.ext.asyncio import AsyncSession
 from types_aiobotocore_ses.client import SESClient
 
 from azents.core.config import (
@@ -16,21 +16,27 @@ from azents.core.config import (
     RefreshTokenConfig,
     SignupTokenConfig,
 )
+from azents.core.email.deps import create_template_environment
 from azents.core.email.service import EmailService
 from azents.core.enums import SignupTokenDeliveryMethod
+from azents.core.signup_token_operations import (
+    InvalidSignupToken,
+    SignupTokenEmailMismatch,
+)
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.password_login import PasswordLoginRepository
 from azents.repos.session import SessionRepository
 from azents.repos.signup_token import SignupTokenRepository
+from azents.repos.signup_token_operations import SignupTokenOperationRepository
 from azents.repos.user import UserRepository
 from azents.repos.user_email import UserEmailRepository
 from azents.services.signup_token import SignupTokenService, hash_signup_token
 from azents.services.signup_token.data import (
     CreateSignupTokenInput,
-    InvalidSignupToken,
     RedeemSignupTokenInput,
     SignupEmailDeliveryUnavailable,
-    SignupTokenEmailMismatch,
+    SignupTokenWithPlaintextOutput,
     WeakSignupPassword,
 )
 
@@ -50,21 +56,27 @@ _TEST_AUTH_CONFIG = AuthConfig(
 
 
 def _make_service(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     *,
     email_service: EmailService | None = None,
 ) -> SignupTokenService:
     """Create SignupTokenService for tests."""
     if email_service is None:
-        email_service = EmailService(config=None, ses_client=None)
+        email_service = EmailService(
+            config=None,
+            ses_client=None,
+            template_environment=create_template_environment(),
+        )
     return SignupTokenService(
-        signup_token_repo=SignupTokenRepository(),
-        user_repo=UserRepository(),
-        user_email_repo=UserEmailRepository(),
-        password_login_repo=PasswordLoginRepository(),
-        session_repo=SessionRepository(),
+        operation_repository=SignupTokenOperationRepository(
+            session_manager=rdb_session_manager,
+            signup_token_repository=SignupTokenRepository(),
+            user_repository=UserRepository(),
+            user_email_repository=UserEmailRepository(),
+            password_login_repository=PasswordLoginRepository(),
+            session_repository=SessionRepository(),
+        ),
         email_service=email_service,
-        session_manager=rdb_session_manager,
         auth_config=_TEST_AUTH_CONFIG,
         config=Config.model_construct(
             runtime_env=RuntimeEnvironment.LOCAL,
@@ -78,7 +90,7 @@ class TestSignupTokenService:
 
     async def test_list_all_excludes_plaintext_token_and_hash(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """List output does not include plaintext token or token hash."""
         service = _make_service(rdb_session_manager)
@@ -101,7 +113,7 @@ class TestSignupTokenService:
 
     async def test_redeem_creates_verified_user_and_session(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """On redeem success, create verified UserEmail and session."""
         service = _make_service(rdb_session_manager)
@@ -158,7 +170,7 @@ class TestSignupTokenService:
 
     async def test_redeem_rejects_email_mismatch(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Reject redeem when token email differs from input email."""
         service = _make_service(rdb_session_manager)
@@ -194,7 +206,7 @@ class TestSignupTokenService:
 
     async def test_redeem_rejects_weak_password_without_consuming_token(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Weak password failure does not increase token use count."""
         service = _make_service(rdb_session_manager)
@@ -230,7 +242,7 @@ class TestSignupTokenService:
 
     async def test_redeem_rejects_existing_email_without_consuming_token(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Already-signed-up email failure does not increase token use count."""
         service = _make_service(rdb_session_manager)
@@ -285,7 +297,7 @@ class TestSignupTokenService:
 
     async def test_redeem_rejects_reused_single_use_token(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Reject reuse of single-use token."""
         service = _make_service(rdb_session_manager)
@@ -324,7 +336,7 @@ class TestSignupTokenService:
 
     async def test_redeem_rejects_expired_token(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Reject expired token redeem."""
         service = _make_service(rdb_session_manager)
@@ -354,7 +366,7 @@ class TestSignupTokenService:
 
     async def test_redeem_rejects_revoked_token(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Reject revoked token redeem."""
         service = _make_service(rdb_session_manager)
@@ -385,7 +397,7 @@ class TestSignupTokenService:
 
     async def test_create_email_delivery_token_sends_email(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Create token for email delivery and call mail send."""
         email_service = EmailService(
@@ -398,13 +410,14 @@ class TestSignupTokenService:
                 web_url="https://azents.example.com",
             ),
             ses_client=create_autospec(SESClient, instance=True),
+            template_environment=create_template_environment(),
         )
         email_service.send_signup_token = AsyncMock(return_value=True)
         service = _make_service(rdb_session_manager, email_service=email_service)
 
         result = await service.create_email_delivery_token("mail@example.com")
 
-        assert isinstance(result, Success)
+        assert isinstance(result, SignupTokenWithPlaintextOutput)
         email_service.send_signup_token.assert_awaited_once()
         await_args = email_service.send_signup_token.await_args
         assert await_args is not None
@@ -414,12 +427,10 @@ class TestSignupTokenService:
 
     async def test_create_email_delivery_token_requires_email_service(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
-        """Return delivery unavailable when email service is not configured."""
+        """Raise delivery unavailable when email service is not configured."""
         service = _make_service(rdb_session_manager)
 
-        result = await service.create_email_delivery_token("mail@example.com")
-
-        assert isinstance(result, Failure)
-        assert isinstance(result.error, SignupEmailDeliveryUnavailable)
+        with pytest.raises(SignupEmailDeliveryUnavailable, match="not configured"):
+            await service.create_email_delivery_token("mail@example.com")

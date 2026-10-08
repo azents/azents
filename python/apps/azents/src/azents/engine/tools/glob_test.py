@@ -1,7 +1,8 @@
 """glob tool tests."""
 
 import json
-from typing import List
+from typing import List, NamedTuple
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -9,24 +10,32 @@ from azents.engine.io.attachments import RuntimeAttachment
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tools.glob import make_glob_tool
 from azents.engine.tools.testing import FakeSharedStorage
+from azents.services.file_storage import GlobResult
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
+class _ToolFixture(NamedTuple):
+    """The typed tool and storage used by one file-query test."""
+
+    tool: FunctionTool
+    storage: FakeSharedStorage
+
+
 def _make_tool(
     *,
     files: dict[str, bytes] | None = None,
     agent_id: str = "agent-1",
-) -> tuple[FunctionTool, FakeSharedStorage]:
+) -> _ToolFixture:
     """Create glob tool and fake storage for tests."""
     storage = FakeSharedStorage(files)
     tool = make_glob_tool(
         session_storage=storage,
         agent_id=agent_id,
     )
-    return tool, storage
+    return _ToolFixture(tool=tool, storage=storage)
 
 
 # ---------------------------------------------------------------------------
@@ -39,28 +48,43 @@ class TestGlob:
 
     async def test_match_all_txt(self) -> None:
         """Match only txt files with *.txt pattern."""
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={
                 "/workspace/agent/file1.txt": b"a",
                 "/workspace/agent/file2.txt": b"b",
                 "/workspace/agent/image.png": b"img",
             }
-        )
+        ).tool
         result = await tool.handler(json.dumps({"pattern": "/workspace/agent/*.txt"}))
         assert isinstance(result, str)
         assert "file1.txt" in result
         assert "file2.txt" in result
         assert "image.png" not in result
 
+    async def test_renders_backend_deadline_truncation(self) -> None:
+        """Glob never presents a backend-truncated result as complete."""
+        storage = AsyncMock()
+        storage.glob.return_value = GlobResult(
+            files=(),
+            truncated=True,
+            stopped_reason="deadline",
+        )
+        tool = make_glob_tool(session_storage=storage, agent_id="agent-1")
+
+        result = await tool.handler(json.dumps({"pattern": "azents://skills/**/*.md"}))
+
+        assert isinstance(result, str)
+        assert "backend deadline reached" in result
+
     async def test_match_nested_pattern(self) -> None:
         """Match nested pattern (skills/*/SKILL.md)."""
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={
                 "/workspace/agent/skills/search/SKILL.md": b"s",
                 "/workspace/agent/skills/code/SKILL.md": b"c",
                 "/workspace/agent/skills/code/README.md": b"r",
             }
-        )
+        ).tool
         result = await tool.handler(
             json.dumps({"pattern": "/workspace/agent/skills/*/SKILL.md"})
         )
@@ -71,7 +95,7 @@ class TestGlob:
         self,
     ) -> None:
         """Match brace alternatives with `**` consuming zero or more directories."""
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={
                 "/foo/bar/baz.jpg": b"jpg",
                 "/foo/bar/baz.png": b"png",
@@ -80,7 +104,7 @@ class TestGlob:
                 "/foo/bar/baz.gif": b"gif",
                 "/foo/bar/images/other.jpg": b"other",
             }
-        )
+        ).tool
 
         result = await tool.handler(
             json.dumps({"pattern": "/foo/bar/**/baz.{jpg,png}"})
@@ -96,14 +120,14 @@ class TestGlob:
 
     async def test_nested_brace_alternatives(self) -> None:
         """Expand nested comma-separated brace alternatives."""
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={
                 "/foo/baz.jpg": b"jpg",
                 "/foo/baz.jpeg": b"jpeg",
                 "/foo/baz.png": b"png",
                 "/foo/baz.gif": b"gif",
             }
-        )
+        ).tool
 
         result = await tool.handler(
             json.dumps({"pattern": "/foo/baz.{jpg,{jpeg,png}}"})
@@ -117,13 +141,13 @@ class TestGlob:
 
     async def test_unbalanced_braces_remain_literal(self) -> None:
         """Keep an unbalanced brace expression literal like Bash."""
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={
                 "/foo/baz.{jpg,png": b"literal",
                 "/foo/baz.jpg": b"jpg",
                 "/foo/baz.png": b"png",
             }
-        )
+        ).tool
 
         result = await tool.handler(json.dumps({"pattern": "/foo/baz.{jpg,png"}))
 
@@ -134,12 +158,12 @@ class TestGlob:
 
     async def test_later_balanced_brace_expands_after_unmatched_opening(self) -> None:
         """Expand a later balanced group after an unmatched opening brace."""
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={
                 "/foo/{literal/baz.jpg": b"jpg",
                 "/foo/{literal/baz.png": b"png",
             }
-        )
+        ).tool
 
         result = await tool.handler(
             json.dumps({"pattern": "/foo/{literal/baz.{jpg,png}"})
@@ -151,12 +175,12 @@ class TestGlob:
 
     async def test_later_brace_expands_after_literal_braces(self) -> None:
         """Continue searching after a balanced brace without alternatives."""
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={
                 "/foo/{literal}/baz.jpg": b"jpg",
                 "/foo/{literal}/baz.png": b"png",
             }
-        )
+        ).tool
 
         result = await tool.handler(
             json.dumps({"pattern": "/foo/{literal}/baz.{jpg,png}"})
@@ -168,13 +192,13 @@ class TestGlob:
 
     async def test_brace_pattern_in_directory_segment(self) -> None:
         """List from the non-glob prefix when braces select directories."""
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={
                 "/foo/bar/report.txt": b"bar",
                 "/foo/baz/report.txt": b"baz",
                 "/foo/qux/report.txt": b"qux",
             }
-        )
+        ).tool
 
         result = await tool.handler(json.dumps({"pattern": "/foo/{bar,baz}/*.txt"}))
 
@@ -185,13 +209,13 @@ class TestGlob:
 
     async def test_match_recursive_hidden_directory_pattern(self) -> None:
         """Find recursive patterns under hidden directories."""
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={
                 "/workspace/agent/.claude/skills/feature-design/SKILL.md": b"s",
                 "/workspace/agent/.claude/skills/create-pr/SKILL.md": b"c",
                 "/workspace/agent/.claude/settings.json": b"{}",
             }
-        )
+        ).tool
 
         result = await tool.handler(
             json.dumps({"pattern": "/workspace/agent/.claude/skills/**"})
@@ -205,12 +229,12 @@ class TestGlob:
 
     async def test_match_hidden_directory_child_directories(self) -> None:
         """Glob patterns also return directory matches."""
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={
                 "/workspace/agent/.claude/skills/feature-design/SKILL.md": b"s",
                 "/workspace/agent/.claude/skills/create-pr/SKILL.md": b"c",
             }
-        )
+        ).tool
 
         result = await tool.handler(
             json.dumps({"pattern": "/workspace/agent/.claude/skills/*"})
@@ -222,12 +246,12 @@ class TestGlob:
 
     async def test_default_exclude_skips_node_modules(self) -> None:
         """Skip heavy directories with default exclude."""
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={
                 "/workspace/agent/src/app.ts": b"a",
                 "/workspace/agent/node_modules/pkg/index.ts": b"b",
             }
-        )
+        ).tool
 
         result = await tool.handler(json.dumps({"pattern": "/workspace/agent/**"}))
 
@@ -237,13 +261,13 @@ class TestGlob:
 
     async def test_exclude_adds_to_default_excludes(self) -> None:
         """exclude adds patterns while preserving default excludes."""
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={
                 "/workspace/agent/src/app.ts": b"a",
                 "/workspace/agent/generated/output.ts": b"b",
                 "/workspace/agent/node_modules/pkg/index.ts": b"c",
             }
-        )
+        ).tool
 
         result = await tool.handler(
             json.dumps(
@@ -261,12 +285,12 @@ class TestGlob:
 
     async def test_disable_default_excludes_allows_node_modules(self) -> None:
         """disable_default_excludes=true allows default-excluded directories."""
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={
                 "/workspace/agent/src/app.ts": b"a",
                 "/workspace/agent/node_modules/pkg/index.ts": b"b",
             }
-        )
+        ).tool
 
         result = await tool.handler(
             json.dumps(
@@ -283,26 +307,26 @@ class TestGlob:
 
     async def test_no_matches(self) -> None:
         """Return guidance message when no file matches."""
-        tool, _ = _make_tool(files={"/workspace/agent/data.csv": b"x"})
+        tool = _make_tool(files={"/workspace/agent/data.csv": b"x"}).tool
         result = await tool.handler(json.dumps({"pattern": "/workspace/agent/*.txt"}))
         assert isinstance(result, str)
         assert "No files matched" in result
 
     async def test_empty_directory(self) -> None:
         """Empty directory has no matches."""
-        tool, _ = _make_tool()
+        tool = _make_tool().tool
         result = await tool.handler(json.dumps({"pattern": "/workspace/agent/*"}))
         assert isinstance(result, str)
         assert "No files matched" in result
 
     async def test_match_all(self) -> None:
         """Match all files with * pattern."""
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={
                 "/workspace/agent/a.txt": b"a",
                 "/workspace/agent/b.md": b"b",
             }
-        )
+        ).tool
 
         # When
         result = await tool.handler(json.dumps({"pattern": "/workspace/agent/*"}))
@@ -323,7 +347,7 @@ class TestGlobErrors:
     @pytest.mark.parametrize("group_count", [9, 1000])
     async def test_brace_expansion_limit_is_rejected(self, group_count: int) -> None:
         """Reject excessive alternatives without recursive parser failure."""
-        tool, _ = _make_tool()
+        tool = _make_tool().tool
         pattern = "/foo/" + "{a,b}" * group_count
 
         with pytest.raises(FunctionToolError, match="maximum of 256 alternatives"):
@@ -332,21 +356,21 @@ class TestGlobErrors:
     @pytest.mark.parametrize("pattern", ["~", "~/*.txt", "~alice/*.txt"])
     async def test_tilde_expansion_is_rejected(self, pattern: str) -> None:
         """Reject shell-dependent home-directory expansion."""
-        tool, _ = _make_tool()
+        tool = _make_tool().tool
 
         with pytest.raises(FunctionToolError, match="Tilde expansion is not supported"):
             await tool.handler(json.dumps({"pattern": pattern}))
 
     async def test_no_matches_for_invalid_prefix(self) -> None:
         """Nonexistent path prefix pattern has no matches."""
-        tool, _ = _make_tool()
+        tool = _make_tool().tool
         result = await tool.handler(json.dumps({"pattern": "/tmp/*.txt"}))
         assert isinstance(result, str)
         assert "No files matched" in result
 
     async def test_relative_path_pattern_no_matches(self) -> None:
         """Relative path pattern has no matches."""
-        tool, _ = _make_tool()
+        tool = _make_tool().tool
         result = await tool.handler(json.dumps({"pattern": "agent/*.txt"}))
         assert isinstance(result, str)
         assert "No files matched" in result

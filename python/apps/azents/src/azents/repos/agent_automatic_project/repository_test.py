@@ -9,15 +9,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import LLMProvider, WorkspaceUserRole
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
 from azents.testing.model_selection import (
@@ -29,7 +30,7 @@ from . import AgentAutomaticProjectRepository
 from .data import AgentAutomaticProjectPolicyRevisionConflict
 
 
-async def _create_workspace(session: AsyncSession, handle: str) -> str:
+async def _create_workspace(session: WriteSession, handle: str) -> str:
     """Create Workspace for policy repository tests."""
     repo = WorkspaceRepository()
     result = await repo.create(
@@ -42,7 +43,7 @@ async def _create_workspace(session: AsyncSession, handle: str) -> str:
     return workspace_id
 
 
-async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> str:
+async def _create_agent(session: WriteSession, workspace_id: str, slug: str) -> str:
     """Create Agent and its initial empty policy setting."""
     integration = RDBLLMProviderIntegration(
         workspace_id=workspace_id,
@@ -51,8 +52,8 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
 
     agent = RDBAgent(
         workspace_id=workspace_id,
@@ -86,15 +87,15 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
-    session.add(RDBAgentAutomaticProjectSetting(agent_id=agent.id))
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
+    session.write_session.add(RDBAgentAutomaticProjectSetting(agent_id=agent.id))
+    await session.write_session.flush()
     return agent.id
 
 
 async def _create_workspace_user(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     workspace_id: str,
     email: str,
@@ -119,7 +120,8 @@ class TestAgentAutomaticProjectRepository:
 
     async def test_get_policy_reads_setting_and_items_in_one_statement(self) -> None:
         """Read one coherent policy snapshot without a second item query."""
-        session = AsyncMock(spec=AsyncSession)
+        _raw_session = AsyncMock(spec=AsyncSession)
+        session = ReadWriteSession(_raw_session)
         now = datetime.datetime.now(datetime.UTC)
         setting = RDBAgentAutomaticProjectSetting(agent_id="agent-policy-read")
         setting.created_at = now
@@ -129,7 +131,7 @@ class TestAgentAutomaticProjectRepository:
             (setting, "/workspace/agent/first"),
             (setting, "/workspace/agent/second"),
         ]
-        session.execute.return_value = result
+        _raw_session.execute.return_value = result
 
         policy = await AgentAutomaticProjectRepository().get_policy(
             session,
@@ -141,11 +143,11 @@ class TestAgentAutomaticProjectRepository:
             "/workspace/agent/first",
             "/workspace/agent/second",
         )
-        assert session.execute.await_count == 1
+        assert _raw_session.execute.await_count == 1
 
     async def test_get_policy_returns_initial_empty_revision_one(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Every persisted policy can represent an empty Project list."""
         workspace_id = await _create_workspace(rdb_session, "automatic-policy-empty")
@@ -167,7 +169,7 @@ class TestAgentAutomaticProjectRepository:
 
     async def test_replace_policy_preserves_submitted_path_order(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Successful whole-list replacement increments revision and keeps order."""
         workspace_id = await _create_workspace(rdb_session, "automatic-policy-order")
@@ -207,7 +209,7 @@ class TestAgentAutomaticProjectRepository:
 
     async def test_replace_policy_stale_revision_keeps_existing_items(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A failed revision predicate never deletes the current item set."""
         workspace_id = await _create_workspace(rdb_session, "automatic-policy-stale")
@@ -249,7 +251,7 @@ class TestAgentAutomaticProjectRepository:
 
     async def test_replace_policy_empty_list_clears_existing_items(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """An empty whole-list replacement clears persisted policy paths."""
         workspace_id = await _create_workspace(rdb_session, "automatic-policy-clear")
@@ -290,7 +292,7 @@ class TestAgentAutomaticProjectRepository:
 
     async def test_replace_policy_rejects_duplicate_paths(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """The database constraint rejects duplicate persisted Project paths."""
         workspace_id = await _create_workspace(
@@ -312,7 +314,7 @@ class TestAgentAutomaticProjectRepository:
             IntegrityError,
             match="uq_agent_automatic_project_items_agent_path",
         ):
-            async with rdb_session.begin_nested():
+            async with rdb_session.write_session.begin_nested():
                 await AgentAutomaticProjectRepository().replace_policy(
                     rdb_session,
                     agent_id=agent_id,

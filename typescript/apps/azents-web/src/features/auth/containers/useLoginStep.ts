@@ -1,7 +1,8 @@
 "use client";
 
+import { useHash } from "@mantine/hooks";
 /**
- * Login step: Email input container
+ * Login step container
  *
  * On email submit:
  * 1. Check password setup with getLoginMethods
@@ -10,22 +11,27 @@
  */
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useRef, useState } from "react";
-import { getSafeLoginNext } from "@/shared/lib/login-redirect";
+import {
+  getPostLoginRedirect,
+  getSafeLoginNext,
+} from "@/shared/lib/login-redirect";
+import { runtimeWebLoginNextWithFragment } from "@/shared/lib/runtime-web-return-target";
 import { trpc } from "@/trpc/client";
-import type { LoginState } from "../types";
+import { useLoginStepForm } from "./useLoginStepForm";
+import type { LoginState, LoginStepContainerProps } from "../types";
 
-export interface LoginStepContainerProps {
-  state: LoginState;
-  signupEmailAvailable: boolean;
-  signupEmailSent: boolean;
-  onSubmit: (email: string) => void;
-  onRequestSignupEmail: (email: string) => void;
-}
-
-export function useLoginStep(): LoginStepContainerProps {
+export function useLoginStep({
+  emailAvailable,
+}: {
+  emailAvailable: boolean;
+}): LoginStepContainerProps {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const next = getSafeLoginNext(searchParams.get("next"));
+  const [fragment] = useHash();
+  const next = runtimeWebLoginNextWithFragment(
+    getSafeLoginNext(searchParams.get("next")),
+    fragment,
+  );
   const utils = trpc.useUtils();
   const signupStatusQuery = trpc.auth.getSignupStatus.useQuery();
 
@@ -33,6 +39,12 @@ export function useLoginStep(): LoginStepContainerProps {
   const emailRef = useRef("");
   const [checking, setChecking] = useState(false);
   const [signupEmailSent, setSignupEmailSent] = useState(false);
+
+  const passwordLoginMutation = trpc.auth.passwordLogin.useMutation({
+    onSuccess: () => {
+      window.location.href = getPostLoginRedirect(next);
+    },
+  });
 
   const requestSignupEmailMutation = trpc.auth.requestSignupEmail.useMutation({
     onSuccess: () => {
@@ -57,18 +69,25 @@ export function useLoginStep(): LoginStepContainerProps {
 
   const state: LoginState = checking
     ? { type: "CHECKING_METHODS" }
-    : sendCodeMutation.isPending || requestSignupEmailMutation.isPending
-      ? { type: "SENDING" }
-      : {
-          type: "IDLE",
-          error:
-            sendCodeMutation.error?.message ??
-            requestSignupEmailMutation.error?.message ??
-            null,
-        };
+    : passwordLoginMutation.isPending
+      ? { type: "SUBMITTING" }
+      : sendCodeMutation.isPending || requestSignupEmailMutation.isPending
+        ? { type: "SENDING" }
+        : {
+            type: "IDLE",
+            error:
+              passwordLoginMutation.error?.message ??
+              sendCodeMutation.error?.message ??
+              requestSignupEmailMutation.error?.message ??
+              null,
+          };
 
   const onSubmit = useCallback(
-    (email: string) => {
+    (email: string, password: string) => {
+      if (!emailAvailable) {
+        passwordLoginMutation.mutate({ email, password });
+        return;
+      }
       emailRef.current = email;
 
       void (async () => {
@@ -92,7 +111,14 @@ export function useLoginStep(): LoginStepContainerProps {
         sendCodeMutation.mutate({ email });
       })();
     },
-    [utils, sendCodeMutation, next, router],
+    [
+      emailAvailable,
+      passwordLoginMutation,
+      utils,
+      sendCodeMutation,
+      next,
+      router,
+    ],
   );
 
   const onRequestSignupEmail = useCallback(
@@ -103,12 +129,20 @@ export function useLoginStep(): LoginStepContainerProps {
     [requestSignupEmailMutation],
   );
 
+  const form = useLoginStepForm({
+    emailAvailable,
+    onSubmit,
+    onRequestSignupEmail,
+  });
+
   return {
     state,
+    emailAvailable,
     signupEmailAvailable:
       signupStatusQuery.data?.email_signup_available ?? false,
     signupEmailSent,
     onSubmit,
     onRequestSignupEmail,
+    form,
   };
 }

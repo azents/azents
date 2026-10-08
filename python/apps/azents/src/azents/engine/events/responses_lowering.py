@@ -9,14 +9,19 @@ from collections.abc import Mapping, Sequence
 from typing import ClassVar
 
 from openai.types.responses.response_includable import ResponseIncludable
+from pydantic import BaseModel, ConfigDict
 
 from azents.core.enums import EventKind, LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
+from azents.core.model_capability_contract import ModelCapabilityFeature
 from azents.core.model_execution_options import (
     ModelExecutionOptionId,
     validate_execution_options,
 )
 from azents.core.type_guards import is_string_object_dict
+from azents.engine.events.effective_model_request import (
+    normalize_effective_model_request,
+)
 from azents.engine.events.external_channel_rendering import (
     render_external_channel_message,
     render_external_channel_turn,
@@ -26,6 +31,14 @@ from azents.engine.events.file_parts import (
     ModelFileResolver,
     lower_file_output_part,
 )
+from azents.engine.events.model_messages import ModelTranscriptMessage
+from azents.engine.events.model_support_contract import (
+    ModelSupportContext,
+    effective_model_support_context,
+    saved_builtin_tool_allowed,
+    validate_saved_model_request,
+)
+from azents.engine.events.native_replay import native_replay_schema_version
 from azents.engine.events.output_parts import (
     iter_output_parts,
     lower_output_to_text,
@@ -51,7 +64,6 @@ from azents.engine.events.types import (
     ClientToolCallPayload,
     ClientToolResultPayload,
     CompactionSummaryPayload,
-    Event,
     ExternalChannelMessagePayload,
     FileOutputPart,
     InputContentPart,
@@ -85,6 +97,22 @@ _OPENAI_PROMPT_CACHE_KEY_MAX_CHARS = 64
 _REASONING_ENCRYPTED_CONTENT_INCLUDE: ResponseIncludable = "reasoning.encrypted_content"
 _HISTORICAL_CUSTOM_TOOL_OUTPUT_MAX_CHARS = 2_000
 logger = logging.getLogger(__name__)
+
+
+class _FunctionSupportOptions(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    strict: bool | None = None
+
+
+class _ToolSupportOptions(BaseModel):
+    """Decode function presence before evaluating saved request predicates."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    type: str = "function"
+    strict: bool | None = None
+    function: _FunctionSupportOptions | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -224,6 +252,7 @@ class ResponsesRequestLowerer:
         reasoning_effort: str | None = None,
         supported_execution_options: Sequence[ModelExecutionOptionId],
         enabled_execution_options: Sequence[ModelExecutionOptionId],
+        top_k: int | None,
         hosted_tools: Sequence[BuiltinToolSpec] | None = None,
         prompt_cache_scope: str | None = None,
         model_developer: LLMModelDeveloper | None = None,
@@ -245,6 +274,7 @@ class ResponsesRequestLowerer:
         self._temperature = temperature
         self._max_output_tokens = max_output_tokens
         self._top_p = top_p
+        self._top_k = top_k
         self._stop = list(stop) if stop is not None else None
         self._reasoning_effort = reasoning_effort
         self._supported_execution_options = list(supported_execution_options)
@@ -253,11 +283,7 @@ class ResponsesRequestLowerer:
         self._prompt_cache_scope = prompt_cache_scope
         self._model_developer = model_developer
         self._model_capabilities = model_capabilities or ModelCapabilities()
-        self._file_part_capabilities = (
-            FilePartLoweringCapabilities.from_model_capabilities(
-                self._model_capabilities
-            )
-        )
+        self._file_part_capabilities = FilePartLoweringCapabilities()
         self.model_file_resolver = model_file_resolver
         self._historical_plaintext_custom_supported = (
             historical_plaintext_custom_supported
@@ -272,16 +298,46 @@ class ResponsesRequestLowerer:
 
     def lower(
         self,
-        transcript: Sequence[Event],
+        transcript: Sequence[ModelTranscriptMessage],
         *,
         model: str,
+        native_replay_context: str | None,
         system_prompt: str | None = None,
     ) -> NativeModelRequest:
         """Convert Event transcript to a provider-native Responses request."""
+        if model != self.model:
+            raise ValueError("Lowerer model identity differs from the selected model")
         input_items: list[dict[str, object]] = []
         kwargs = self._lower_model_kwargs()
+        context = self._resolve_support_context(kwargs, tools=self._tools)
+        hosted = _lower_hosted_tools(
+            self._hosted_tools,
+            provider=self.provider,
+            provider_id=self._provider_id,
+            model_developer=self._model_developer,
+            model_capabilities=self._model_capabilities,
+            request_context=context,
+        )
+        tools = [*self._tools, *hosted.tools]
+        kwargs.update(hosted.kwargs)
+        context = self._resolve_support_context(kwargs, tools=tools)
+        self._file_part_capabilities = (
+            FilePartLoweringCapabilities.from_model_capabilities(
+                self._model_capabilities, context=context
+            )
+        )
         default_instructions = kwargs.get("instructions") or _DEFAULT_INSTRUCTIONS
         instructions = system_prompt or str(default_instructions)
+        self.schema_version = native_replay_schema_version(
+            instructions, native_replay_context=native_replay_context
+        )
+        self.compat_key = build_native_compat_key(
+            adapter=self.adapter,
+            native_format=self.native_format,
+            provider=self.provider,
+            model=model,
+            schema_version=self.schema_version,
+        )
         if _uses_input_message_instructions(
             provider=self.provider,
             provider_id=self._provider_id,
@@ -356,14 +412,6 @@ class ResponsesRequestLowerer:
             # remain stable across turns.
             input_items = _omit_response_item_ids_for_unstored_request(input_items)
         input_items = _drop_orphan_tool_outputs(input_items)
-        hosted = _lower_hosted_tools(
-            self._hosted_tools,
-            provider=self.provider,
-            provider_id=self._provider_id,
-            model_developer=self._model_developer,
-            model_capabilities=self._model_capabilities,
-        )
-        tools = [*self._tools, *hosted.tools]
         prompt_cache_inputs = _apply_provider_prompt_cache_hints(
             input_items,
             tools,
@@ -378,11 +426,49 @@ class ResponsesRequestLowerer:
             input=input_items,
             tools=tools,
             kwargs=kwargs,
+            native_replay_context=native_replay_context,
         )
+
+    def _resolve_support_context(
+        self, kwargs: dict[str, object], *, tools: Sequence[dict[str, object]]
+    ) -> ModelSupportContext:
+        """Validate controls and resolve the same context used for rich input."""
+        options = {
+            key: value
+            for key, value in kwargs.items()
+            if key
+            not in {
+                "api_key",
+                "base_url",
+                "api_base",
+                "extra_headers",
+                "vertex_credentials",
+                "aws_secret_access_key",
+                "custom_llm_provider",
+            }
+        }
+        if (
+            "parallel_tool_calls" not in options
+            and not self._model_capabilities.supports(
+                ModelCapabilityFeature.PARALLEL_FUNCTION_CALLS
+            )
+        ):
+            kwargs["parallel_tool_calls"] = False
+            options["parallel_tool_calls"] = False
+        effective = normalize_effective_model_request(
+            dialect="native_responses",
+            options=options,
+            parameters=None,
+            native_tools=tools,
+        )
+        validate_saved_model_request(self._model_capabilities, request=effective)
+        return effective_model_support_context(self._model_capabilities, effective)
 
     def _lower_model_kwargs(self) -> dict[str, object]:
         """Lower RunRequest model options to provider-native Responses kwargs."""
         kwargs: dict[str, object] = dict(self._credential_kwargs)
+        if self._top_k is not None or self._extra_kwargs.get("top_k") is not None:
+            raise ValueError("Selected top-k has no mapping in this model codec.")
         if self._provider_id in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
             kwargs.setdefault("custom_llm_provider", "openai")
             base_url = kwargs.get("base_url") or kwargs.get("api_base")
@@ -416,7 +502,12 @@ class ResponsesRequestLowerer:
         if self._stop is not None:
             kwargs["stop"] = self._stop
         if self._reasoning_effort is not None:
-            kwargs["reasoning"] = {"effort": self._reasoning_effort, "summary": "auto"}
+            reasoning: dict[str, object] = {"effort": self._reasoning_effort}
+            if self._model_capabilities.supports(
+                ModelCapabilityFeature.REASONING_SUMMARIES
+            ):
+                reasoning["summary"] = "auto"
+            kwargs["reasoning"] = reasoning
         kwargs.update(self._extra_kwargs)
         service_tier = resolve_openai_service_tier(
             provider=self._provider_id,
@@ -432,7 +523,7 @@ class ResponsesRequestLowerer:
 
     def _compatible_native_items(
         self,
-        event: Event,
+        event: ModelTranscriptMessage,
         *,
         retain_response_item_ids: bool,
     ) -> list[dict[str, object]] | None:
@@ -536,7 +627,7 @@ class ResponsesRequestLowerer:
 
     def _lower_event(
         self,
-        event: Event,
+        event: ModelTranscriptMessage,
         *,
         replayable_plaintext_custom_call_ids: set[str],
     ) -> dict[str, object] | None:
@@ -745,7 +836,7 @@ def _historical_custom_tool_result_projection(
 
 
 def _replays_plaintext_custom_call(
-    event: Event,
+    event: ModelTranscriptMessage,
     native_items: Sequence[dict[str, object]],
 ) -> bool:
     """Return whether compatible native replay retained a custom call item."""
@@ -756,7 +847,9 @@ def _replays_plaintext_custom_call(
     )
 
 
-def _lowers_plaintext_custom_call(event: Event, item: dict[str, object]) -> bool:
+def _lowers_plaintext_custom_call(
+    event: ModelTranscriptMessage, item: dict[str, object]
+) -> bool:
     """Return whether semantic lowering emitted a custom call item."""
     return (
         isinstance(event.payload, ClientToolCallPayload)
@@ -918,11 +1011,11 @@ def _lower_hosted_tools(
     provider_id: LLMProvider | None,
     model_developer: LLMModelDeveloper | None,
     model_capabilities: ModelCapabilities,
+    request_context: ModelSupportContext,
 ) -> _HostedToolLowering:
     """Lower semantic hosted tool settings to the native Responses surface."""
     native_tools: list[dict[str, object]] = []
     kwargs: dict[str, object] = {}
-    supported = set(model_capabilities.built_in_tools.supported)
     target = _hosted_tool_target(
         provider=provider,
         provider_id=provider_id,
@@ -937,7 +1030,9 @@ def _lower_hosted_tools(
             json.dumps(item.config, sort_keys=True, separators=(",", ":")),
         ),
     ):
-        if tool.name not in supported:
+        if not saved_builtin_tool_allowed(
+            model_capabilities, tool=tool.name, context=request_context
+        ):
             msg = f"Required builtin tool is not supported: {tool.name}"
             raise UnsupportedRequiredBuiltinToolError(msg)
         config = dict(tool.config)

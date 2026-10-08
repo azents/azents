@@ -28,6 +28,7 @@ const modelSelection = {
     compatibility: {},
   },
   model_snapshot: {},
+  pricing: null,
   source_metadata: null,
   last_refreshed_at: null,
 };

@@ -10,8 +10,8 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ScheduledTaskScheduleType,
 )
-from azents.repos.scheduled_task.data import MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH
-from azents.services.scheduled_task.management import (
+from azents.core.scheduled_task import MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH
+from azents.core.scheduled_task_management import (
     ScheduledTaskCurrentCycleProjection,
     ScheduledTaskManagementProjection,
 )

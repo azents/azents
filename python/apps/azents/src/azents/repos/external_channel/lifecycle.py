@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import NamedTuple
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentLifecycleStatus,
@@ -23,6 +22,12 @@ from azents.core.enums import (
     ExternalChannelSetupClaimStatus,
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
+)
+from azents.core.external_channel_impact import (
+    ExternalChannelMultiConnectionImpact,
+    ExternalChannelMultiImpactBinding,
+    ExternalChannelMultiImpactDefault,
+    ExternalChannelMultiRouteImpact,
 )
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.rdb.models.agent import RDBAgent
@@ -42,14 +47,11 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelSetupClaim,
 )
 from azents.rdb.models.external_model_settings import RDBExternalModelDraft
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelAgentDecommissionCleanup,
     ExternalChannelArchiveTermination,
     ExternalChannelMultiConnectionDisconnect,
-    ExternalChannelMultiConnectionImpact,
-    ExternalChannelMultiImpactBinding,
-    ExternalChannelMultiImpactDefault,
-    ExternalChannelMultiRouteImpact,
     ExternalChannelMultiRouteRemoval,
     ExternalChannelPurgeCleanup,
     ExternalChannelPurgeVerification,
@@ -108,7 +110,7 @@ class ExternalChannelLifecycleRepository:
 
     async def terminate_session_tree(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_ids: Sequence[str],
         now: datetime.datetime,
@@ -121,7 +123,7 @@ class ExternalChannelLifecycleRepository:
         )
         resources = {
             resource.id: resource
-            for resource in await session.scalars(
+            for resource in await session.write_session.scalars(
                 sa.select(RDBExternalChannelResource)
                 .where(
                     RDBExternalChannelResource.id.in_(
@@ -172,15 +174,19 @@ class ExternalChannelLifecycleRepository:
 
     async def validate_restore_session_tree(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_ids: Sequence[str],
     ) -> ExternalChannelRestoreValidation:
         """Assert restore cannot reactivate prior External Channel state."""
-        bindings = await self._locked_bindings(
-            session,
-            session_ids=session_ids,
-            connected_only=False,
+        bindings = list(
+            (
+                await session.read_session.scalars(
+                    sa.select(RDBExternalChannelBinding)
+                    .where(RDBExternalChannelBinding.agent_session_id.in_(session_ids))
+                    .order_by(RDBExternalChannelBinding.id)
+                )
+            ).all()
         )
         if any(binding.disconnected_at is None for binding in bindings):
             raise RuntimeError("Restored External Channel binding was reactivated")
@@ -197,7 +203,7 @@ class ExternalChannelLifecycleRepository:
 
     async def purge_session_tree(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_ids: Sequence[str],
     ) -> ExternalChannelPurgeCleanup:
@@ -244,7 +250,7 @@ class ExternalChannelLifecycleRepository:
             RDBExternalChannelBinding,
             RDBExternalChannelBinding.id.in_(binding_ids),
         )
-        await session.flush()
+        await session.write_session.flush()
         return ExternalChannelPurgeCleanup(
             deleted_session_grant_count=deleted_session_grant_count,
             preserved_agent_grant_reference_count=preserved_agent_grant_reference_count,
@@ -255,7 +261,7 @@ class ExternalChannelLifecycleRepository:
 
     async def verify_session_tree_purged(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_ids: Sequence[str],
     ) -> ExternalChannelPurgeVerification:
@@ -296,7 +302,7 @@ class ExternalChannelLifecycleRepository:
 
     async def project_multi_route_impact(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection_id: str,
         route_id: str,
@@ -309,7 +315,7 @@ class ExternalChannelLifecycleRepository:
         )
         if route is None:
             return None
-        connection = await session.get(
+        connection = await session.write_session.get(
             RDBExternalChannelConnection,
             route.connection_id,
         )
@@ -323,26 +329,24 @@ class ExternalChannelLifecycleRepository:
 
     async def project_multi_connection_impact(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         connection_id: str,
     ) -> ExternalChannelMultiConnectionImpact | None:
         """Project a sanitized deterministic whole-Multi-App disconnect impact."""
-        connection = await session.scalar(
-            sa.select(RDBExternalChannelConnection)
-            .where(
+        connection = await session.read_session.scalar(
+            sa.select(RDBExternalChannelConnection).where(
                 RDBExternalChannelConnection.id == connection_id,
                 RDBExternalChannelConnection.app_mode == ExternalChannelAppMode.MULTI,
                 RDBExternalChannelConnection.status
                 != ExternalChannelConnectionStatus.DISCONNECTED,
             )
-            .with_for_update()
         )
         if connection is None:
             return None
         routes = list(
             (
-                await session.scalars(
+                await session.read_session.scalars(
                     sa.select(RDBExternalChannelAgentRoute)
                     .where(
                         RDBExternalChannelAgentRoute.connection_id == connection.id,
@@ -350,7 +354,6 @@ class ExternalChannelLifecycleRepository:
                         == ExternalChannelAppMode.MULTI,
                     )
                     .order_by(RDBExternalChannelAgentRoute.id)
-                    .with_for_update()
                 )
             ).all()
         )
@@ -419,7 +422,7 @@ class ExternalChannelLifecycleRepository:
 
     async def remove_multi_route(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection_id: str,
         route_id: str,
@@ -434,7 +437,7 @@ class ExternalChannelLifecycleRepository:
         )
         if route is None:
             return None
-        connection = await session.get(
+        connection = await session.write_session.get(
             RDBExternalChannelConnection,
             route.connection_id,
         )
@@ -450,7 +453,7 @@ class ExternalChannelLifecycleRepository:
         )
         defaults = list(
             (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBExternalChannelChannelDefault)
                     .where(
                         RDBExternalChannelChannelDefault.route_id == route.id,
@@ -491,7 +494,7 @@ class ExternalChannelLifecycleRepository:
             )
         interactions = list(
             (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBExternalChannelInteraction)
                     .where(
                         RDBExternalChannelInteraction.connection_id == connection.id,
@@ -510,7 +513,7 @@ class ExternalChannelLifecycleRepository:
         ).where(RDBExternalChannelBinding.route_id == route.id)
         resources = list(
             (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBExternalChannelResource)
                     .where(
                         RDBExternalChannelResource.id.in_(
@@ -524,7 +527,7 @@ class ExternalChannelLifecycleRepository:
         )
         bindings = list(
             (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBExternalChannelBinding)
                     .where(
                         RDBExternalChannelBinding.route_id == route.id,
@@ -537,7 +540,7 @@ class ExternalChannelLifecycleRepository:
         )
         access_requests = list(
             (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBExternalChannelAccessRequest)
                     .where(
                         RDBExternalChannelAccessRequest.route_id == route.id,
@@ -581,7 +584,7 @@ class ExternalChannelLifecycleRepository:
             route.catalog_removed_at = now
             route.catalog_removed_by_user_id = removed_by_user_id
         route.agent_id = None
-        await session.flush()
+        await session.write_session.flush()
         return ExternalChannelMultiRouteRemoval(
             impact=impact,
             cleanup_plans=cleanup_plans,
@@ -589,7 +592,7 @@ class ExternalChannelLifecycleRepository:
 
     async def reenable_multi_route(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection_id: str,
         route_id: str,
@@ -602,7 +605,7 @@ class ExternalChannelLifecycleRepository:
         )
         if route is None:
             return False
-        agent = await session.scalar(
+        agent = await session.write_session.scalar(
             sa.select(RDBAgent)
             .where(
                 RDBAgent.id == route.agent_id_snapshot,
@@ -610,7 +613,9 @@ class ExternalChannelLifecycleRepository:
             )
             .with_for_update()
         )
-        connection = await session.get(RDBExternalChannelConnection, connection_id)
+        connection = await session.write_session.get(
+            RDBExternalChannelConnection, connection_id
+        )
         if (
             agent is None
             or connection is None
@@ -628,12 +633,12 @@ class ExternalChannelLifecycleRepository:
         route.catalog_status = ExternalChannelRouteCatalogStatus.AVAILABLE
         route.catalog_removed_at = None
         route.catalog_removed_by_user_id = None
-        await session.flush()
+        await session.write_session.flush()
         return True
 
     async def disconnect_multi_connection(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection_id: str,
         now: datetime.datetime,
@@ -652,7 +657,7 @@ class ExternalChannelLifecycleRepository:
 
     async def disconnect_single_connection(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection_id: str,
         now: datetime.datetime,
@@ -671,7 +676,7 @@ class ExternalChannelLifecycleRepository:
 
     async def _disconnect_connection(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection_id: str,
         expected_app_mode: ExternalChannelAppMode,
@@ -680,7 +685,7 @@ class ExternalChannelLifecycleRepository:
         defer_provider_state_purge: bool,
     ) -> ExternalChannelMultiConnectionDisconnect | None:
         """Terminalize every live routing root for one immutable App mode."""
-        connection = await session.scalar(
+        connection = await session.write_session.scalar(
             sa.select(RDBExternalChannelConnection)
             .where(RDBExternalChannelConnection.id == connection_id)
             .with_for_update()
@@ -689,7 +694,7 @@ class ExternalChannelLifecycleRepository:
             return None
         routes = list(
             (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBExternalChannelAgentRoute)
                     .where(RDBExternalChannelAgentRoute.connection_id == connection.id)
                     .order_by(RDBExternalChannelAgentRoute.id)
@@ -700,7 +705,7 @@ class ExternalChannelLifecycleRepository:
         route_ids = [route.id for route in routes]
         defaults = list(
             (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBExternalChannelChannelDefault)
                     .where(
                         RDBExternalChannelChannelDefault.connection_id == connection.id,
@@ -721,7 +726,7 @@ class ExternalChannelLifecycleRepository:
         claims = participation_state.claims
         interactions = list(
             (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBExternalChannelInteraction)
                     .where(
                         RDBExternalChannelInteraction.connection_id == connection.id,
@@ -736,7 +741,7 @@ class ExternalChannelLifecycleRepository:
         )
         resources = list(
             (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBExternalChannelResource)
                     .where(RDBExternalChannelResource.connection_id == connection.id)
                     .order_by(RDBExternalChannelResource.id)
@@ -746,7 +751,7 @@ class ExternalChannelLifecycleRepository:
         )
         bindings = list(
             (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBExternalChannelBinding)
                     .where(
                         RDBExternalChannelBinding.route_id.in_(route_ids),
@@ -759,7 +764,7 @@ class ExternalChannelLifecycleRepository:
         )
         access_requests = list(
             (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBExternalChannelAccessRequest)
                     .where(
                         RDBExternalChannelAccessRequest.route_id.in_(route_ids),
@@ -836,7 +841,7 @@ class ExternalChannelLifecycleRepository:
             connection.socket_heartbeat_at = None
             connection.socket_gap_detected_at = None
             connection.socket_gap_reason = None
-        await session.flush()
+        await session.write_session.flush()
         return ExternalChannelMultiConnectionDisconnect(
             disconnected_route_count=disconnected_route_count,
             invalidated_default_count=len(defaults),
@@ -851,7 +856,7 @@ class ExternalChannelLifecycleRepository:
 
     async def purge_disconnected_connection_provider_state(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection_ids: Sequence[str],
     ) -> int:
@@ -861,7 +866,7 @@ class ExternalChannelLifecycleRepository:
             return 0
         connections = list(
             (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBExternalChannelConnection)
                     .where(
                         RDBExternalChannelConnection.id.in_(unique_ids),
@@ -879,19 +884,19 @@ class ExternalChannelLifecycleRepository:
             )
         for connection in connections:
             self._purge_connection_provider_state(connection)
-        await session.flush()
+        await session.write_session.flush()
         return len(connections)
 
     async def cleanup_decommissioned_agent(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         now: datetime.datetime,
     ) -> ExternalChannelAgentDecommissionCleanup:
         """Terminalize relationships without erasing shared App provenance."""
         route_rows = (
-            await session.execute(
+            await session.write_session.execute(
                 sa.select(
                     RDBExternalChannelAgentRoute.id,
                     RDBExternalChannelAgentRoute.connection_id,
@@ -943,7 +948,7 @@ class ExternalChannelLifecycleRepository:
             RDBExternalChannelBlock,
             RDBExternalChannelBlock.agent_id == agent_id,
         )
-        await session.flush()
+        await session.write_session.flush()
         return ExternalChannelAgentDecommissionCleanup(
             cleanup_plans=tuple(plans),
             provider_state_purge_connection_ids=tuple(
@@ -967,13 +972,13 @@ class ExternalChannelLifecycleRepository:
 
     async def _lock_multi_route(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection_id: str,
         route_id: str,
     ) -> RDBExternalChannelAgentRoute | None:
         """Lock connection then route for one Multi relationship transition."""
-        connection = await session.scalar(
+        connection = await session.write_session.scalar(
             sa.select(RDBExternalChannelConnection)
             .where(RDBExternalChannelConnection.id == connection_id)
             .with_for_update()
@@ -983,7 +988,7 @@ class ExternalChannelLifecycleRepository:
             or connection.app_mode is not ExternalChannelAppMode.MULTI
         ):
             return None
-        route = await session.scalar(
+        route = await session.write_session.scalar(
             sa.select(RDBExternalChannelAgentRoute)
             .where(
                 RDBExternalChannelAgentRoute.id == route_id,
@@ -997,7 +1002,7 @@ class ExternalChannelLifecycleRepository:
 
     async def _lock_participation_state(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection_id: str,
         route_ids: Sequence[str] | None,
@@ -1021,7 +1026,7 @@ class ExternalChannelLifecycleRepository:
             )
         settings = tuple(
             (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBExternalChannelParticipationSetting)
                     .where(*setting_conditions)
                     .order_by(RDBExternalChannelParticipationSetting.id)
@@ -1031,7 +1036,7 @@ class ExternalChannelLifecycleRepository:
         )
         claims = tuple(
             (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBExternalChannelSetupClaim)
                     .where(*claim_conditions)
                     .order_by(RDBExternalChannelSetupClaim.id)
@@ -1065,7 +1070,7 @@ class ExternalChannelLifecycleRepository:
 
     @staticmethod
     async def _connected_parent_binding_count(
-        session: AsyncSession,
+        session: ReadSession,
         *,
         route_ids: Sequence[str],
     ) -> int:
@@ -1073,7 +1078,7 @@ class ExternalChannelLifecycleRepository:
         if not route_ids:
             return 0
         return int(
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(sa.func.count(RDBExternalChannelBinding.id))
                 .join(
                     RDBExternalChannelResource,
@@ -1092,7 +1097,7 @@ class ExternalChannelLifecycleRepository:
 
     async def _project_route_impact(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         route_id: str,
         generation: datetime.datetime,
@@ -1111,7 +1116,7 @@ class ExternalChannelLifecycleRepository:
             ),
         )
         bound_resource_count = int(
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(
                     sa.func.count(sa.distinct(RDBExternalChannelBinding.resource_id))
                 ).where(RDBExternalChannelBinding.route_id == route_id)
@@ -1170,7 +1175,7 @@ class ExternalChannelLifecycleRepository:
 
     async def _impact_details(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         route_ids: Sequence[str],
     ) -> _ExternalChannelImpactDetails:
@@ -1180,7 +1185,7 @@ class ExternalChannelLifecycleRepository:
                 affected_defaults=(), affected_bindings=()
             )
         default_rows = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(
                     RDBExternalChannelChannelDefault,
                     RDBExternalChannelAgentRoute,
@@ -1207,7 +1212,7 @@ class ExternalChannelLifecycleRepository:
             )
         ).all()
         binding_rows = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(
                     RDBExternalChannelBinding,
                     RDBExternalChannelResource,
@@ -1261,7 +1266,7 @@ class ExternalChannelLifecycleRepository:
 
     async def _terminalize_bindings(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         bindings: Sequence[RDBExternalChannelBinding],
         resources: Sequence[RDBExternalChannelResource],
@@ -1293,7 +1298,7 @@ class ExternalChannelLifecycleRepository:
 
     async def _locked_bindings(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_ids: Sequence[str],
         connected_only: bool,
@@ -1306,7 +1311,7 @@ class ExternalChannelLifecycleRepository:
             predicate.append(RDBExternalChannelBinding.disconnected_at.is_(None))
         return list(
             (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBExternalChannelBinding)
                     .where(*predicate)
                     .order_by(RDBExternalChannelBinding.id)
@@ -1317,14 +1322,14 @@ class ExternalChannelLifecycleRepository:
 
     async def _session_tree_access_request_ids(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_ids: Sequence[str],
     ) -> list[str]:
         """Lock access requests directly owned by the Session tree."""
         return list(
             (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBExternalChannelAccessRequest.id)
                     .where(
                         RDBExternalChannelAccessRequest.agent_session_id.in_(
@@ -1339,12 +1344,12 @@ class ExternalChannelLifecycleRepository:
 
     async def _detach_agent_grants(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         access_request_ids: Sequence[str],
     ) -> int:
         """Preserve Agent grants while releasing their Session request reference."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBExternalChannelAccessGrant)
             .where(
                 RDBExternalChannelAccessGrant.scope
@@ -1360,35 +1365,35 @@ class ExternalChannelLifecycleRepository:
 
     async def _delete(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         model: type[RDBModel],
         predicate: sa.ColumnElement[bool],
     ) -> int:
         """Delete matching ORM rows and return the exact count."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.delete(model).where(predicate).returning(sa.literal(1))
         )
         return len(result.scalars().all())
 
     async def _count(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         model: type[RDBModel],
         predicate: sa.ColumnElement[bool],
     ) -> int:
         """Count ORM rows matching one lifecycle ownership predicate."""
-        count = await session.scalar(
+        count = await session.read_session.scalar(
             sa.select(sa.func.count()).select_from(model).where(predicate)
         )
         return count or 0
 
     async def _update_count(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         statement: sa.Update,
     ) -> int:
         """Apply one terminal transition and return its affected row count."""
-        result = await session.execute(statement.returning(sa.literal(1)))
+        result = await session.write_session.execute(statement.returning(sa.literal(1)))
         return len(result.scalars().all())
 
 

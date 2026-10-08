@@ -1,24 +1,31 @@
 """Repository-owned atomic Mailbox promotion."""
 
 import dataclasses
+import datetime
 import enum
 import logging
 from typing import Annotated
 
 from fastapi import Depends
 from pydantic import TypeAdapter
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.action_execution_data import ActionExecution, ActionExecutionCreate
 from azents.core.enums import ActionExecutionStatus, AgentRunStatus, EventKind
+from azents.core.json_value import JSONValue
+from azents.core.mailbox_data import (
+    MailboxItem,
+    ScheduledTaskContinuationMailboxPayload,
+    ScheduledTaskTriggerMailboxPayload,
+)
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.skill_projection import SkillProjectionItem, resolve_active_skill
 from azents.engine.events.types import AgentMessagePayload, Event
 from azents.rdb.deps import get_session_manager
-from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.action_execution import ActionExecutionRepository
-from azents.repos.action_execution.data import ActionExecution, ActionExecutionCreate
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
-from azents.repos.agent_execution.data import EventCreate
+from azents.repos.agent_execution.data import AgentRunPatch, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.goal.store import (
     GoalAlreadyExistsError,
@@ -26,7 +33,9 @@ from azents.repos.goal.store import (
     get_goal_state_store,
 )
 from azents.repos.mailbox import MailboxRepository
-from azents.repos.mailbox.data import MailboxItem
+from azents.repos.scheduled_task.repository import ScheduledTaskRepository
+from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
+from azents.repos.session_execution.ownership import fence_owned_session_mutation
 from azents.repos.skill_state import SkillStateRepository
 
 logger = logging.getLogger(__name__)
@@ -115,12 +124,20 @@ class MailboxPromotionResult:
     deferred: bool
 
 
+@dataclasses.dataclass(frozen=True)
+class MailboxEventAppendResult:
+    """All ordered events and the events newly inserted by this promotion."""
+
+    ordered: list[Event]
+    inserted: list[Event]
+
+
 @dataclasses.dataclass
 class MailboxPromotionRepository:
     """Compose the final database-only Mailbox promotion transaction."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     mailbox_repository: Annotated[MailboxRepository, Depends(MailboxRepository)]
     session_repository: Annotated[
@@ -137,13 +154,18 @@ class MailboxPromotionRepository:
     skill_state_repository: Annotated[
         SkillStateRepository, Depends(SkillStateRepository)
     ]
+    scheduled_task_repository: Annotated[
+        ScheduledTaskRepository, Depends(ScheduledTaskRepository)
+    ]
+    scheduled_task_cycle_repository: Annotated[
+        ScheduledTaskCycleRepository, Depends(ScheduledTaskCycleRepository)
+    ]
 
     async def promote(self, plan: MailboxPromotionPlan) -> MailboxPromotionResult:
         """Validate authority and atomically promote one prepared FIFO head."""
         async with self.session_manager() as session:
-            agent_session = await self.session_repository.lock_by_id(
-                session,
-                plan.session_id,
+            agent_session = await fence_owned_session_mutation(
+                session, SessionExecutionOwner(plan.session_id, plan.owner_generation)
             )
             if agent_session is None:
                 raise ValueError("AgentSession not found")
@@ -210,6 +232,17 @@ class MailboxPromotionRepository:
 
             handled_failure = False
             prepared_events = plan.success_events
+            if isinstance(
+                buffer.payload,
+                ScheduledTaskTriggerMailboxPayload
+                | ScheduledTaskContinuationMailboxPayload,
+            ) and not await self._bind_scheduled_input(
+                session,
+                agent_id=agent_session.agent_id,
+                buffer=buffer,
+                run_id=plan.active_run_id,
+            ):
+                prepared_events = []
             if plan.skill_revalidation is not None:
                 state = await self.skill_state_repository.load_in_session(
                     session,
@@ -252,7 +285,7 @@ class MailboxPromotionRepository:
                     ),
                 )
 
-            ordered_events, inserted_events = await self._append_events(
+            appended = await self._append_events(
                 session,
                 session_id=plan.session_id,
                 buffer=buffer,
@@ -260,7 +293,7 @@ class MailboxPromotionRepository:
             )
             event_by_external_id = {
                 event.external_id: event
-                for event in ordered_events
+                for event in appended.ordered
                 if event.external_id is not None
             }
             for prepared in prepared_events:
@@ -307,24 +340,94 @@ class MailboxPromotionRepository:
                 )
             return MailboxPromotionResult(
                 buffer=buffer,
-                events=inserted_events,
+                events=appended.inserted,
                 promoted_event_ids=promoted_event_ids,
                 deleted_buffer_ids=[buffer.id],
                 changed_session_agent_ids=changed_session_agent_ids,
                 action_execution=action_execution,
-                deduped_count=len(ordered_events) - len(inserted_events),
+                deduped_count=len(appended.ordered) - len(appended.inserted),
                 handled_failure=handled_failure,
                 deferred=False,
             )
 
+    async def _bind_scheduled_input(
+        self,
+        session: WriteSession,
+        *,
+        agent_id: str,
+        buffer: MailboxItem,
+        run_id: str | None,
+    ) -> bool:
+        """Bind valid Scheduled input to the Run consuming the common FIFO head."""
+        if run_id is None:
+            raise ValueError("Scheduled input requires a consuming AgentRun")
+        run = await self.run_repository.lock_by_id(session, run_id)
+        if (
+            run is None
+            or run.session_id != buffer.session_id
+            or run.status not in {AgentRunStatus.PENDING, AgentRunStatus.RUNNING}
+        ):
+            raise ValueError("Scheduled input consuming AgentRun is not active")
+        payload = buffer.payload
+        if not isinstance(
+            payload,
+            ScheduledTaskTriggerMailboxPayload
+            | ScheduledTaskContinuationMailboxPayload,
+        ):
+            raise ValueError("Scheduled Task mailbox payload is malformed")
+        cycle = await self.scheduled_task_cycle_repository.lock(
+            session,
+            agent_id=agent_id,
+            session_id=buffer.session_id,
+            cycle_id=payload.cycle_id,
+        )
+        if cycle is None:
+            return False
+        if isinstance(payload, ScheduledTaskTriggerMailboxPayload):
+            task = await self.scheduled_task_repository.get_by_session_and_id(
+                session,
+                session_id=buffer.session_id,
+                task_id=cycle.state.task_id,
+                lock=True,
+            )
+            if (
+                cycle.state.phase != "admitted"
+                or task is None
+                or task.active_cycle_id != payload.cycle_id
+                or task.active_scheduled_for != cycle.state.scheduled_for
+            ):
+                await self.scheduled_task_cycle_repository.delete_if_admitted(
+                    session,
+                    agent_id=agent_id,
+                    session_id=buffer.session_id,
+                    cycle_id=payload.cycle_id,
+                )
+                return False
+            await self.scheduled_task_cycle_repository.start(
+                session,
+                record=cycle,
+                run_id=run_id,
+                started_at=datetime.datetime.now(datetime.UTC),
+            )
+        else:
+            if cycle.state.phase != "started":
+                return False
+            await self.scheduled_task_cycle_repository.bind_run(
+                session, record=cycle, run_id=run_id
+            )
+        await self.run_repository.update(
+            session, run_id, AgentRunPatch(scheduled_task_cycle_id=payload.cycle_id)
+        )
+        return True
+
     async def _append_events(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         buffer: MailboxItem,
         prepared: list[MailboxPromotionEvent],
-    ) -> tuple[list[Event], list[Event]]:
+    ) -> MailboxEventAppendResult:
         """Append prepared events and recover idempotent conflicts."""
         events_by_external_id: dict[str, Event] = {}
         inserted: list[Event] = []
@@ -367,11 +470,14 @@ class MailboxPromotionRepository:
         ]
         if missing:
             raise RuntimeError("Conflicted input buffer event was not found")
-        return [events_by_external_id[item.external_id] for item in prepared], inserted
+        return MailboxEventAppendResult(
+            ordered=[events_by_external_id[item.external_id] for item in prepared],
+            inserted=inserted,
+        )
 
     async def _acknowledge_agent_results(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         prepared: list[MailboxPromotionEvent],

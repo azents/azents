@@ -38,7 +38,7 @@ class TestChatEventResponse(unittest.TestCase):
                 id = '',
                 session_id = '',
                 kind = 'user_message',
-                payload = { },
+                payload = azentspublicclient.models.payload.Payload(),
                 external_id = '',
                 adapter = '',
                 provider = '',
@@ -52,7 +52,7 @@ class TestChatEventResponse(unittest.TestCase):
                 id = '',
                 session_id = '',
                 kind = 'user_message',
-                payload = { },
+                payload = azentspublicclient.models.payload.Payload(),
                 schema_version = '',
                 created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
         )

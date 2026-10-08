@@ -4,8 +4,19 @@ created: 2026-05-10
 tags: [backend, engine, frontend]
 spec_type: flow
 owner: "@Hardtack"
-touches_domains: [agent, conversation, workspace, toolkit]
+touches_domains: [agent, conversation, workspace, toolkit, memory]
 code_paths:
+  - python/apps/azents/src/azents/core/agent_session_input_data.py
+  - python/apps/azents/src/azents/core/chat_data.py
+  - python/apps/azents/src/azents/core/exchange_file_errors.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/core/session_workspace_paths.py
+  - python/apps/azents/src/azents/repos/agent_session_input_operations.py
+  - python/apps/azents/src/azents/repos/chat_write_operations.py
+  - python/apps/azents/src/azents/repos/input_attachment_claim.py
+  - python/apps/azents/src/azents/repos/engine_resolve.py
+  - python/apps/azents/src/azents/repos/vfs_projection_operations.py
+  - python/apps/azents/src/azents/repos/vfs_read_authority.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/core/vfs.py
   - python/apps/azents/src/azents/core/config.py
@@ -17,9 +28,12 @@ code_paths:
   - python/apps/azents/src/azents/services/file_storage.py
   - python/apps/azents/src/azents/services/artifact.py
   - python/apps/azents/src/azents/services/model_file.py
-  - python/apps/azents/src/azents/services/session_resource_authority.py
+  - python/apps/azents/src/azents/repos/session_resource_authority.py
   - python/apps/azents/src/azents/services/agent_session_input.py
   - python/apps/azents/src/azents/services/vfs.py
+  - python/apps/azents/src/azents/services/vfs_read.py
+  - python/apps/azents/src/azents/services/memory_vfs.py
+  - python/apps/azents/src/azents/engine/tools/readable_storage.py
   - python/apps/azents/src/azents/repos/artifact/**
   - python/apps/azents/src/azents/repos/model_file/**
   - python/apps/azents/src/azents/repos/exchange_file/**
@@ -33,6 +47,11 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/exchange_file.py
   - python/apps/azents/src/azents/services/session_storage.py
   - python/apps/azents/src/azents/services/archived_session_purge.py
+  - python/apps/azents/src/azents/services/file_lifecycle_cleanup.py
+  - python/apps/azents/src/azents/repos/archived_session_purge_operations.py
+  - python/apps/azents/src/azents/repos/file_lifecycle_cleanup_operations.py
+  - python/apps/azents/src/azents/core/archived_session_purge_data.py
+  - python/apps/azents/src/azents/core/file_lifecycle_cleanup_data.py
   - python/apps/azents/src/azents/services/uploads/**
   - python/apps/azents/src/azents/services/chat/workspace.py
   - python/apps/azents/src/azents/core/file_transfer.py
@@ -41,6 +60,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/exchange_upload_operation.py
   - python/apps/azents/src/azents/engine/run/resolve.py
   - python/apps/azents/src/azents/engine/events/file_parts.py
+  - python/apps/azents/src/azents/engine/events/pydantic_ai_lowering.py
+  - python/apps/azents/src/azents/engine/events/responses_lowering.py
   - python/apps/azents/src/azents/engine/events/fork_context.py
   - python/apps/azents/src/azents/engine/events/model_file_parts.py
   - python/apps/azents/src/azents/engine/events/model_file_materializer.py
@@ -68,8 +89,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-10-01
-spec_version: 54
+last_verified_at: 2026-10-05
+spec_version: 60
 ---
 
 # File Exchange Storage
@@ -154,6 +175,12 @@ publication identity, and cleanup responsibility; it never persists the signed c
 Prepare and finalize remain uploader/Agent-authorized; root/session claiming occurs at
 input acceptance rather than upload preparation. Repeated finalize recovers the same
 publication, including uncertain metadata commits, rather than publishing twice.
+The finalized-publication observer uses an ordinary read-only scope without upload
+or Agent row locks. It retains exact uploader, Agent/Workspace membership,
+publication identity, manifest, availability, expiry and blob-deletion checks;
+missing metadata is never recreated and no object bytes are read or rewritten.
+Actual claim, verified finalization and cleanup transitions retain their exact
+mutation guards, so this lag-tolerant observation does not admit a new publication.
 Browser cancellation aborts local hashing/network work and removes pending state on
 remove, clear, or unmount. Abandoned operations expire into durable scheduler cleanup.
 Chat upload exposes prepare/finalize; Workspace Upload's server status/cancel lifecycle
@@ -174,7 +201,7 @@ not.
 
 ### Agent imports user or internal file
 
-`import_file` tool uses resolver registry by scheme. Supported schemes are `exchange://{object_key}`, `artifact://{storage_key}`, and canonical `azents://` paths present in the current AgentRun projection. URI is storage location, not entity reference. Do not put business logic that extracts entity id from URI string. Default destination is `/tmp/agent/imports/`, and default destination collisions are deduped with numeric suffix. If explicit destination already exists, fail by default and overwrite only when `overwrite=true`.
+`import_file` tool uses resolver registry by scheme. Supported schemes are `exchange://{object_key}`, `artifact://{storage_key}`, and canonical managed Skills `azents://` paths present in the current AgentRun projection. The live `azents://memory` mount has no transfer capability and is unavailable to `import_file`. URI is storage location, not entity reference. Do not put business logic that extracts entity id from URI string. Default destination is `/tmp/agent/imports/`, and default destination collisions are deduped with numeric suffix. If explicit destination already exists, fail by default and overwrite only when `overwrite=true`.
 Sources larger than the shared 128 MiB general-file limit fail before admission, and
 the tool reports the size-limit rejection without presenting it as a destination-path
 failure.
@@ -207,13 +234,26 @@ staging, verifies exact length and SHA-256, and atomically publishes the destina
 Worker and Runtime Control do not relay the complete-file body.
 Original file bytes are not attached directly to the LLM prompt.
 
-`azents://` materializes one immutable managed file from the current run projection.
+Importable managed Skills `azents://` paths materialize one immutable file from
+the current run projection.
 The resolver verifies run, Agent, Session, and Workspace ownership, exact projection
 membership, Base64 decoding, decoded size, and content hash before incrementally staging
-the source into the same Server-to-Runtime transfer service. Ordinary Runtime file
-tools do not resolve the URI directly. The source entry remains in the retained AgentRun
+the source into the same Server-to-Runtime transfer service. Generic `read`, `grep`,
+and `glob` can inspect managed URIs through the Runtime-independent VFS reader;
+Runtime mutation tools remain filesystem-only. The source entry remains in the retained AgentRun
 projection; only the copied Runtime path follows Runtime persistence rules, and a
 default `/tmp/agent/imports/` copy is temporary.
+
+### Read-only Memory VFS is not file exchange
+
+`azents://memory` exposes live authorized Saved/Historical records and original
+Session evidence through generic `read`, `grep`, and `glob`, without starting or
+allocating a Runtime. It is not part of `agent_runs.vfs_projection` and does not
+create ExchangeFile, Artifact, ModelFile, or transferable storage objects.
+Every operation independently checks Memory enablement and current root/source
+authority; broad search omits tool-result bodies and exact results expose only
+bounded persisted text. The mount has no write, import, or transfer capability.
+See [`memory.md`](../domain/memory.md) for namespace, limits, and lifecycle.
 
 ### Agent stores visible Tool output in Runtime
 
@@ -277,6 +317,19 @@ Event transcript keeps only artifact metadata and `artifact://...` URI. Lowerer 
 
 ### Explicit FilePart for model rich input
 
+Rich-input admission uses the saved semantic contract and effective request
+conditions on both the native Responses and PydanticAI routes. For implemented
+image/PDF forms, unknown model support is not an explicit denial: authorized
+request-local bytes remain rich input, and the provider retains its ordinary
+request-error boundary. This does not advertise unknown support as known or
+rewrite the saved descriptor. Explicit unsupported support and unmet conditional
+predicates still produce bounded placeholders. Conditional checks use the actual
+wire effort and function-tool presence before content lowering. Historical
+descriptor absence retains the saved conservative modality view; unimplemented
+audio/video and native text-file routes are not enabled by this behavior.
+Existing ModelFile authority, deletion/materialization checks, and non-image
+byte budgets are unchanged.
+
 Attachment and Artifact are not generally converted to ModelFile/FilePart. The user-input promotion boundary is the explicit exception for claimed upload attachments: it resolves the Exchange bytes and creates a FilePart before the user event enters model input. Tool implementations that directly have bytes may also create normalized blobs in ModelFileStore and return FilePart. `read_image` first obtains its bytes by claiming a verified Runtime transfer object; Runner Control never carries the image body or Base64 image data. A separate FilePart creation tool exposed to the model is not current contract. FilePart references ModelFile entity by `model_file_id`, not URI. ModelFile itself does not create URI.
 
 ModelFileStore is model input blob store, not original preservation store. Image ModelFile is normalized to JPEG at creation. Non-image ModelFile is not normalized and only size cap applies. ModelFile has current lifecycle status `available` or `deleted`; persistent run-age degradation and `unreachable` stages are not part of the current lifecycle. Scheduler-owned GC deletes unpinned ModelFiles after their single durable FilePart event falls behind the AgentSession model-input head cursor.
@@ -331,6 +384,13 @@ tree. After purge fencing and run shutdown, the purge workflow:
 3. verifies that every selected resource reached its terminal metadata and blob state; and
 4. deletes file metadata before the root Session cascade.
 
+The purge repository captures terminal file metadata after atomic owner fencing and
+expiration, closes the preparation scope before blob deletion, and verifies the
+selected terminal metadata again inside restrictive finalization. Ordinary cleanup
+likewise reads pending metadata through completed native read-only operations, then
+records each successful external delete in a completed mutation operation. Services
+receive detached records rather than live database handles.
+
 Any required blob cleanup failure aborts database subtree deletion and leaves ownership, terminal
 metadata, durable purge progress, and retry information available for a later pass. Git worktree
 state is not a file-storage purge prerequisite: the database-only compatibility participant advances
@@ -339,8 +399,20 @@ database cascade erase the last cleanup reference before external deletion succe
 
 ### Agent presents sandbox file
 
-`present_file` publishes only files under the current Runner-reported Agent Workspace as a
-public Exchange attachment. Files outside the allowed path are rejected. It uses one
+Exchange publication recovery uses a completed
+`ExchangeFileOperationRepository.load_publication_for_recovery` operation with
+an independently injected native PostgreSQL read-only scope. The repository
+translates only database failures into `ExchangeFilePublicationRecoveryError`
+after closing that scope. The service retains uploaded objects when a committed
+publication cannot be disproven; absent metadata permits the existing
+compensation path. Unexpected failures and cancellation propagate unchanged.
+The service does not own SQLAlchemy error handling or live membership reads.
+
+`present_file` publishes files from any absolute Runtime path, including `/tmp` and
+paths outside the Agent Workspace, as a public Exchange attachment. Relative paths
+and file-location URIs are rejected before Runtime access. Sources remain subject to
+the Runtime operating-system user's filesystem permissions and the Runner's regular-file,
+stable-source verification. Workspace containment is not a publication requirement. It uses one
 Runtime-to-server direct PUT transfer, then publishes the verified immutable transfer
 object through a native object-store copy. Product metadata is committed only after
 that copy succeeds; a failed, cancelled, changed, oversized, or unverified Runtime
@@ -457,6 +529,23 @@ later `import_file` must explicitly copy them into the new Runtime.
 
 ## Changelog
 
+- **2026-10-05** (spec_version 60) — Made file cleanup and archived-root purge
+  metadata preparation/settlement repository-owned, retaining exact lease/cursor
+  predicates and object deletion strictly between completed database operations.
+
+- **2026-10-05** (spec_version 59) — Recorded completed read-only Exchange
+  publication recovery and its narrow database-error boundary, retaining
+  conservative verified-object compensation behavior.
+
+- **2026-10-05** (spec_version 58) — Separated finalized upload-publication
+  observation from upload/Agent mutation locks while preserving exact uploader,
+  scope, manifest and lifecycle checks and actual claim/finalization fencing.
+- **2026-10-03** (spec_version 56) — Removed the Workspace publication allowlist
+  from `present_file`; retained absolute Runtime paths, filesystem permissions,
+  Session authority, and verified direct-transfer requirements.
+- **2026-10-02** (spec_version 55) — Distinguished generic read-only live
+  Memory VFS access from immutable managed Skills import; Memory creates no
+  transferable file-exchange object and has no import/transfer capability.
 - **2026-10-01** (spec_version 54) — Moved generated provider-output scope,
   retry-metadata, and cleanup-protection reads behind completed repository
   operations while preserving atomic Event/metadata admission and

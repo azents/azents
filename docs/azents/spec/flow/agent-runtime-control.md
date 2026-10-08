@@ -6,19 +6,36 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, workspace, conversation, toolkit]
 code_paths:
+  - python/apps/azents/src/azents/core/agent_session_input_data.py
+  - python/apps/azents/src/azents/core/chat_data.py
+  - python/apps/azents/src/azents/core/exchange_file_errors.py
+  - python/apps/azents/src/azents/core/session_resource_authority.py
+  - python/apps/azents/src/azents/core/session_workspace_items.py
+  - python/apps/azents/src/azents/core/session_workspace_paths.py
+  - python/apps/azents/src/azents/repos/session_execution/ownership.py
+  - python/apps/azents/src/azents/repos/engine_tool_repositories.py
+  - python/apps/azents/src/azents/repos/skill_state_store.py
   - proto/azents/runtime_control/v1/**
   - python/libs/azents-runtime-control/**
   - python/apps/azents/src/azents/repos/agent_runtime/**
   - python/apps/azents/src/azents/repos/runtime_lifecycle_dispatch/**
+  - python/apps/azents/src/azents/repos/runtime_reconciliation*
+  - python/apps/azents/src/azents/repos/runtime_report*
+  - python/apps/azents/src/azents/repos/runtime_stream_route*
   - python/apps/azents/src/azents/rdb/models/agent_runtime.py
   - python/apps/azents/src/azents/rdb/models/agent_runtime_removal.py
+  - python/apps/azents/src/azents/repos/agent_runtime_removal/**
   - python/apps/azents/src/azents/repos/agent_runtime_removal_scope/**
   - python/apps/azents/src/azents/repos/agent_runtime_removal_finalizer/**
+  - python/apps/azents/src/azents/repos/agent_decommission/**
+  - python/apps/azents/src/azents/repos/agent_decommission_finalizer/**
+  - python/apps/azents/src/azents/services/agent_decommission.py
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/agent_runtime_transition/**
   - python/apps/azents/src/azents/services/runtime_terminal/**
   - python/apps/azents/src/azents/services/terminal_policy/**
   - python/apps/azents/src/azents/services/session_working_folder_binding*
+  - python/apps/azents/src/azents/repos/session_working_folder_binding/**
   - python/apps/azents/src/azents/api/public/agent_runtime/**
   - python/apps/azents/src/azents/api/public/terminal/**
   - python/apps/azents/src/azents/api/public/chat/**
@@ -31,6 +48,12 @@ code_paths:
   - python/apps/azents/src/azents/services/runtime_recreation/**
   - python/apps/azents/src/azents/core/runtime_provider_credential.py
   - python/apps/azents/src/azents/core/runtime_runner_credential.py
+  - python/apps/azents/src/azents/core/runtime_connection_registration.py
+  - python/apps/azents/src/azents/core/runtime_provider_control.py
+  - python/apps/azents/src/azents/core/runtime_recreation.py
+  - python/apps/azents/src/azents/repos/runtime_connection_registration_operations.py
+  - python/apps/azents/src/azents/repos/runtime_runner_auth_operations.py
+  - python/apps/azents/src/azents/repos/runtime_recreation_operations.py
   - python/apps/azents/src/azents/core/runtime_connection_generation.py
   - python/apps/azents/src/azents/rdb/models/runtime_provider_binding.py
   - python/apps/azents/src/azents/rdb/models/runtime_provider_control.py
@@ -51,7 +74,10 @@ code_paths:
   - python/apps/azents/src/azents/worker/health.py
   - python/apps/azents/src/azents/utils/logging.py
   - python/apps/azents/src/azents/services/session_git_worktree/**
+  - python/apps/azents/src/azents/repos/session_git_worktree/**
+  - python/apps/azents/src/azents/services/agent_project_catalog/**
   - python/apps/azents/src/azents/services/chat/workspace.py
+  - python/apps/azents/src/azents/repos/agent_workspace_access.py
   - python/apps/azents/src/azents/services/browser_file_download.py
   - python/apps/azents/src/azents/core/file_transfer.py
   - python/apps/azents/src/azents/engine/tools/builtin.py
@@ -83,8 +109,8 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
-last_verified_at: 2026-10-01
-spec_version: 91
+last_verified_at: 2026-10-08
+spec_version: 103
 ---
 
 # Agent Runtime Control
@@ -99,6 +125,21 @@ The local all-in-one devserver starts Runtime Control before composing the Worke
 then keeps Runtime Control, APIs, Worker, and Scheduler under one shared shutdown
 lifecycle. Local configuration uses the same trusted coordinator interface as
 production while explicitly opting into insecure loopback transport.
+
+With `AZ_SESSION_BROKER_BACKEND=memory`, the non-reload all-in-one root creates
+the shared AppContext first and passes its exact Runtime and Terminal coordination
+stores into Runtime Control. APIs, Worker and Control therefore observe the same
+process-local connection, command, reply and terminal state. Transfer, Workspace
+Upload, Runtime Web capacity, broadcast/live projections, external-channel
+conversation locks and Provider enrollment limiting also use memory adapters.
+Neither application composition nor Runtime Control constructs a Redis client in
+this mode. Worker readiness does not ping Redis.
+
+Standalone Runtime Control rejects memory selection without shared local stores;
+independent API/Worker/Scheduler roots and reload mode likewise reject unsupported
+memory composition. Redis remains the default for distributed deployments, with
+no automatic memory fallback. Restart loses ephemeral coordination, not durable
+Runtime existence, authorization or recovery authority.
 
 ## Planes
 
@@ -181,6 +222,25 @@ read or migrate the retired volatile namespace.
 
 ## Runtime Web Exposure
 
+Runtime Web service authorization, configuration preflight, idempotent service
+mutation and database-time observation complete inside repository-owned operations.
+The opaque-ID activation path discovers current membership and applies its On CAS
+in the same operation. Services receive detached records and database timestamps;
+public URL resolution and projection occur only after database completion.
+Gateway binding, identity and ticket operations retain their exact configuration
+and one-use predicates. Gateway admission and access revalidation read current
+membership, Agent, exposure and Runtime generations against PostgreSQL time in one
+completed database-only snapshot. Opaque secret generation remains outside these
+operations; no session or transaction crosses into transport or orchestration.
+
+Service descriptions use ordinary reads without a hidden row-lock mode.
+Metadata, Off, reset and delete mutate with exact service/revision predicates;
+reset additionally requires current On state, so a stale reset cannot revive an
+Off service. Active service quota is protected only at actual slot admission.
+Identity/ticket issuance retains its configuration-finalization guard, including
+same-mode revocation ordering; ordinary configuration/identity projection does
+not inherit this mutation fence.
+
 Runtime Web gives one Agent and numeric loopback port one stable opaque HTTPS
 service URL. PostgreSQL stores the service's selected 1-, 6-, or 24-hour duration,
 nullable exposure deadline, and monotonic revision. Effective On state exists only
@@ -243,6 +303,39 @@ Control-to-Control relay. A relay cannot relay again. The Owner performs one exa
 PostgreSQL authority validation for every new logical stream before Runtime capacity
 admission and Runner forwarding.
 
+Owner acquisition, renewal, resolution, join-nonce consumption, draining, and exact-epoch
+release each finish in a completed database-only route operation before local projection,
+capacity, registry, or transport work. Resolution uses an ordinary read-only scope for
+the retained route and Runtime, validating both generations, protocol, lease expiry
+and drain state without a row lock. It may observe committed lag and is not route
+acquisition or nonce authority. Acquisition retains Runtime-then-route locking;
+renewal and join consumption retain route-then-Runtime mutation fencing. PostgreSQL
+time remains lease authority. Renewal does not extend the original one-time offer deadline.
+Registry admission checks the local deadline again after committed nonce consumption:
+expiry at that boundary rejects the join without restoring its consumed nonce. Cleanup
+releases only the original exact epoch and cannot delete replacement ownership.
+Disconnected source notification queues do not interrupt Runner/registry/owner
+release. All binding and capacity releases run even if an earlier cleanup fails;
+unexpected errors remain observable. Joined owner state is removed when its
+Runner Web connection ends so same-generation reconnect can acquire a new epoch.
+
+Hop credit translation uses per-stream consumed-byte deltas. A fresh Runner
+session never inherits the historical absolute total of a still-live Gateway
+connection. Request consumption returned to that Gateway stays cumulative for
+its complete source-connection lifetime, including Runner epoch replacement.
+Duplicate updates contribute zero delta, decreasing totals fail closed, and
+retired per-stream ledgers are removed with the stream. Before translation or
+ledger mutation, each upstream connection's acknowledged stream sum must fit
+its advertised session consumption. Source-side validation retains the complete
+source connection history across Runner replacement.
+Shared sender credit uses exact per-stream acknowledgement deltas plus once-only
+terminal debit release in both directions. Closing a stream returns its reserved
+but unacknowledged bytes without lowering absolute sent totals. Later cumulative
+peer session totals are validated separately (monotonic and not beyond sent bytes)
+and cannot double-credit those retired bytes. Retirement wakes shared-window
+waiters; repeated failed uploads or aborted downloads cannot permanently consume
+the session window. Queue resource release also completes if callbacks cancel.
+
 Runtime capacity is Owner-scoped ephemeral operational state, not durable product
 authority. It bounds active HTTP, SSE, and WebSocket streams, pending opens, buffered
 bytes, bandwidth, and burst grants. In-memory and Redis backends implement the same
@@ -265,19 +358,61 @@ retaining request history or depending on Redis.
 Programmatic requests receive bounded `401`, `409`, `410`, `429`, `502`, or `503`
 responses as applicable; safe browser navigation is redirected only to the exact
 configured Main Web authentication or Off-service activation route.
+Those redirects carry the original origin-relative path and query as `return_to`.
+Main Web preserves the inherited browser fragment through login and the identity
+exchange, then resumes the original URL on the authorized service origin instead
+of its index page. The same target survives Off-service activation. The navigation
+target never supplies an origin or replaces service access authority; external,
+protocol-relative, backslash and control-character targets fail closed.
+Identity-completion navigation replaces the transient authentication history
+entry. Separate-domain entry uses a one-shot same-origin Blob form document to
+retain the native POST contract while replacing the Main Web connecting screen;
+the broker completion replaces its own entry with the preserved service URL.
+Intermediate parser-time form submissions retain the existing broker authority.
+This does not delete arbitrary earlier browser history or change user login and
+activation navigation.
 
 Gateway authentication is browser-vendor and version neutral and does not use
 User-Agent Client Hints, an allowlist, or a browser-proof cookie. HTTP and WebSocket
 use the same exact identity-cookie contract. Gateway policy independently rejects
-Service Worker requests, cross-root origins, invalid Fetch Metadata, ambiguous hosts,
+ambiguous hosts,
 non-origin-form targets, oversized headers or bodies, and unauthorized WebSocket
-upgrades before application content is returned. Upstream access-control headers are
-replaced by Gateway policy, hop-by-hop headers are removed, cookies are bounded and
-rewritten for the service host, and security responses are content-free.
+upgrades before application content is returned. Runtime applications own their
+CSRF and CORS policy: authenticated requests are forwarded without an Origin or
+Fetch Metadata admission gate, including null/absent origins and form POST.
+OPTIONS follows the same platform identity and access checks as other requests;
+the Gateway does not synthesize anonymous browser preflight responses.
+Application access-control, cache, referrer, opener, permission, and framing response
+headers remain authoritative. The Gateway does not inject application security or
+cache policy. Ordered end-to-end fields, including Authorization, Origin, Referer,
+custom headers, and repeated values, are preserved. Each request Cookie field
+loses only exact platform-owned cookie pairs; application cookies retain their
+names, values, and order, enabling application login sessions. Only exact
+platform-owned Set-Cookie names are blocked; lookalike application names are not
+reserved by prefix. Application Set-Cookie fields remain separate and retain
+their attributes except existing exact localhost/loopback Domain adaptation.
+Standard hop-by-hop fields and all fields nominated by repeated Connection
+headers are consumed. The Gateway regenerates the local Host for HTTP routing.
+HTTP request framing is regenerated from parsed ingress framing: a request with
+neither Content-Length nor Transfer-Encoding is bodyless and carries
+Content-Length zero to the Runner, rather than an unknown-length body. Explicit
+Content-Length is preserved even when Connection nominates that field; framing
+is proxy-owned. Actual chunked bodies remain streamed without a fixed length.
+HTTP method does not determine body presence: GET bodies are preserved. No
+whole-request buffering or content encoding/decompression is introduced.
+WebSocket handshake fields are consumed only for regenerated WebSocket handshakes;
+ordinary HTTP retains unrelated WebSocket-named fields. Application WebSocket 101
+headers and cookies reach the browser after handshake-field consumption.
+Loopback Location URLs retain their existing public-service adaptation.
+Service-Worker and worker-destination Fetch Metadata are application fields and do
+not trigger Gateway rejection. An app-origin Worker can persist across service
+re-exposure and application replacement; application owners own that browser
+lifecycle and caching risk. Workers cannot control distinct Main Web/broker
+origins, read HttpOnly cookie values, or bypass Gateway network authority.
+Gateway security responses are content-free.
 Gateway-generated authentication, activation, transfer, and error documents deny
-framing. Proxied application responses receive no Gateway-invented framing policy;
-application-provided `X-Frame-Options` and Content Security Policy remain
-authoritative for application content.
+framing and retain platform security headers. Broker and Main Web authentication
+routes retain their exact-origin protections independently of application traffic.
 
 The Runner owns one pooled loopback HTTP client per accepted generation. It connects
 only to the requested numeric `127.0.0.1` port with an origin-form target, disables
@@ -299,6 +434,10 @@ The binding insertion is linearized with the drain state so an open racing route
 capacity admission cannot enter after the drain boundary. Owner loss, route-lease
 loss, generation replacement, authority revocation, relay failure, overload, or
 protocol ambiguity terminates affected work without replay or active-stream resume.
+Bounded late input frames for a known retired Runner stream are discarded rather
+than failing unrelated streams or the entire Runner session. Unknown stream IDs,
+reused opens, and stale owner authority remain protocol errors; failed requests
+are not replayed.
 
 Gateway readiness requires valid configuration, database authority, exact protocol
 compatibility, at least one active Control session, acceptable local pressure, and a
@@ -419,7 +558,18 @@ Backend lifecycle policy remains a later infrastructure-owned defense and is not
 Runtime Transfer authorization or startup input.
 
 Cleanup responsibility is `pending` before the first exact external cleanup
-attempt. A handled multipart-abort, completed-object-delete, combined, or
+attempt. Outstanding direct capabilities defer physical cleanup without delaying
+logical terminal settlement or correlation: an owned Direct GET source is protected
+until its admission deadline plus five minutes, and Direct PUT ingress is protected
+until the later of ingress expiry and admission deadline plus five minutes.
+Terminal and stale-stream repair derive the same boundary from retained exact-attempt
+metadata, retain pending responsibility or existing genuine failure evidence, and
+skip external cleanup while protected. Repeated expected deferral emits no per-attempt
+warning or traceback and does not increment cleanup failure evidence; it remains
+observable through the existing aggregate repair observation. The object-store
+boundary independently signals typed expected deferral instead of cleanup success.
+At the exact safe time, ordinary idempotent cleanup becomes eligible.
+A handled multipart-abort, completed-object-delete, combined, or
 preparation cleanup failure changes it to `retryable_failure` with bounded latest
 evidence. Each later failed repair updates the observation and saturating attempt
 count; successful cleanup clears the evidence and marks cleanup complete. The
@@ -437,6 +587,17 @@ and safe transfer/attempt or aggregate artifact fields. It never logs storage
 keys, raw provider upload IDs, raw exception text, hashes, credentials,
 endpoints, or bytes. State-independent orphan repair additionally reports
 bounded listed/deleted/aborted/failed/skipped counters.
+
+Direct-object Runner capability, PUT grant, HEAD, and immutable-copy boundaries
+classify only SDK connection, HTTP transport, and service response failures as
+ordinary storage unavailability. Workspace Upload finalization also handles its
+explicit object-validation failures; its state-independent orphan repair counts
+only expected storage failures. Programming and SDK argument-validation failures
+propagate to the owning error boundary instead of becoming an outage response or
+cleanup counter. Cancellation propagates unchanged, and reserved ingress/source
+handles and pending immutable-copy cleanup evidence remain available for repair.
+The managed Runner session reader closes its queue on every exit and leaves
+exception logging to the handling boundary.
 
 Runtime-to-Server transfer cleanup uses bounded abandon, status-recovery, and
 cancellation-confirmation attempts after the transfer result is fixed. A
@@ -495,6 +656,12 @@ separate Runtime/access union only for file-browser layout and obtains lifecycle
 actions from the same server authority. The public single-summary projection is not
 part of the current API.
 
+Workspace file orchestration injects the completed
+`AgentWorkspaceAccessRepository` for Agent and requester membership authority.
+Its native read-only database scope closes before Runtime lifecycle or Runner
+operations begin. This access boundary does not start a Runtime, invent a
+Workspace path, or change the existing exact operation-target authority.
+
 Runtime Settings and Workspace render one user-impact status plus separate execution
 environment, Runtime connection, and host-control facts. Selected and applied Runtime
 Profile, execution Profile, and network values remain available for verification, while
@@ -542,6 +709,21 @@ A final database-only transaction records durable acceptance and Provider connec
 evidence. If final acceptance fails, Control revokes the promoted volatile connection.
 No Redis, HTTP, gRPC, filesystem, object-store, or other external call occurs while any
 of these database transactions is open.
+
+Services sequence completed repository operations for allocation, ordinary authority
+observation and final acceptance. Provider and Runner observations use native read-only
+scopes and do not acquire acceptance fences. Actual acceptance revalidates authority
+under the same write transaction as generation acceptance; Provider acceptance also
+commits credential, binding, connection and audit changes atomically. Failure or
+cancellation rolls back the whole database operation before volatile revocation.
+Replacement callbacks run only after durable acceptance completes.
+
+Recreation creation records the exact version of its validated target snapshot.
+Dispatch alone fences that target version together with the item attempt and Runtime
+configuration-generation mutation. Creation/projection, active/running item reads,
+claims and item processing finish in repository-owned database-only operations.
+Terminal invalidation consumes the detached successful dispatch result after the
+operation commits.
 
 Redis and in-memory coordination do not allocate, persist, restore, infer, or fall back
 for connection generations. An empty coordination store therefore makes prior streams
@@ -633,6 +815,25 @@ and dispatch: only a successful correlated `OBSERVE` completion may hand it curr
 `UPDATE_CONFIGURATION` dispatch. The Reconciler does not reinterpret Provider lifecycle facts and
 does not persist a drift candidate, claim, retry time, or completion history.
 
+The report adapters translate decoded protocol facts into completed repository operations.
+Provider configuration evidence, observed state/failure, and connection evidence retain
+one atomic report transaction; terminal-delete acknowledgement retains its existing atomic
+group. Restart rearm remains a distinct later transaction. Runner configuration evidence,
+workspace path/state/failure, and eligible failure clearing likewise remain atomic.
+Normal stale query outcomes commit already-reached evidence as before; exceptions and
+cancellation roll back the operation. Registration validation and heartbeat evidence reads
+also close before gRPC output. The Runtime Web generation gate runs only after the
+completed Runner delegate, including its normal no-op returns.
+
+Reconciliation loads the three ordered candidate lists together. Lifecycle candidate IDs
+suppress adoption and observation; only successfully dispatched adoption IDs suppress
+observation, so a false adoption dispatch leaves observation eligible.
+Periodic profile gating and the observe-requested marker complete before coordination
+or dispatch; a later false dispatch result does not undo that committed marker.
+Adoption and one-shot repair snapshots are separate completed reads, and the final
+post-coordination dispatch admission still revalidates current authority. Start-timeout
+mutation completes separately after connection refresh and dispatch attempts.
+
 The Kubernetes Provider owns each Runtime-specific enforcement bundle. Direct mode owns the
 Runtime Pod, PVC, and complete Runtime NetworkPolicy. Proxy-required mode additionally owns one
 dedicated proxy Pod, stable Service, canonical policy ConfigMap, logical-Runtime CA Secret, proxy
@@ -653,13 +854,14 @@ live-stream `OBSERVE` completion reporting `network_enforcement:drifted` may imm
 Provider reconnect, Control restart, stale generation/configuration fence, unsupported evidence, or
 dispatch failure creates no replay or hot loop; the next periodic `OBSERVE` is the only retry.
 The Reconciler prepares every Provider command through a completed claim-free database preflight.
-That operation locks the Agent before the Runtime, validates the selected Runtime snapshot and
-managed/removing capability, and returns detached Provider routing evidence. It closes before
+That operation uses ordinary Agent and Runtime reads, validates the selected Runtime snapshot and
+managed/removing capability, and returns detached Provider routing evidence. A held writer does
+not block this description, and the observation does not authorize dispatch. It closes before
 Runtime Control reads the Redis-or-memory connection registry. A missing live connection records
 `disconnected` through a separately revalidated database operation without consuming the lifecycle
 claim, so an undispatched `stop` or other lifecycle command remains eligible after reconnect.
 
-After resolving a live connection, a second completed database-only operation re-locks the Agent
+After resolving a live connection, a second completed database-only mutation operation locks the Agent
 and Runtime, revalidates the preflight snapshot and live/required Provider generation, checks the
 required observed generation and configuration sequence, atomically claims lifecycle dispatch when
 applicable, and validates the exact configuration document. It returns an immutable admitted
@@ -728,8 +930,11 @@ Every Provider stream declares exactly one authentication method in gRPC metadat
 
 The normalized Provider authentication result contains the durable binding ID, Provider ID, method, normalized subject, method-safe audit metadata, and evidence expiry. Control records that result on the durable Provider connection. An issued-token connection records its credential ID; a Kubernetes ServiceAccount connection has no synthetic credential or enrollment grant. A binding must be active and belong to the authenticated Provider. Registration `provider_id`, credential identifiers, scope, and generation cannot select or discover a Provider; a mismatched registration is rejected with `PERMISSION_DENIED`.
 
-The public Provider enrollment exchange rate limit is a best-effort Redis abuse-control
-window, not credential authority. Replacing Redis empty opens a fresh counting window.
+The public Provider enrollment exchange rate limit is a best-effort abuse-control
+window, backed by Redis by default and process-local memory in co-located memory
+mode, not credential authority. Replacing Redis empty or restarting the memory
+process opens a fresh counting window. Both implementations retain the same
+grant/source-address key, attempt limit and fixed-window duration.
 Every exchange still applies PostgreSQL-backed grant consumption, expiry, revocation,
 binding, subject, and Provider checks, so lost rate-limit state cannot make invalid
 enrollment evidence usable.
@@ -751,6 +956,19 @@ Provider connection authority remains binding-backed after registration. Heartbe
 Runner authentication uses a signed credential bound to one logical Runtime ID and its durable desired generation. Runtime Control derives its signing key from the existing credential-encryption root and does not require an operator-managed shared Runtime Control token. The Provider receives the plaintext credential only in the lifecycle command and injects it into the Runtime Runner as `AZ_RUNTIME_RUNNER_AUTH_TOKEN`; it is not persisted or logged. A deterministic one-way credential fingerprint may be retained as the non-secret connection credential identifier.
 
 Before accepting a Runner stream, Control verifies the signature, resolves the Runtime ID and desired generation from the verified credential, loads the durable Runtime, and requires the generation to equal the current durable desired generation. A registration `runtime_id` may only match that resolved identity; another Runtime claim is rejected with `PERMISSION_DENIED`. Missing, malformed, tampered, absent-Runtime, or stale-generation Runner credentials are rejected with `UNAUTHENTICATED`. Desired-generation changes invalidate prior credentials without a wall-clock refresh or a shared-token compatibility path. Physical connection generation fencing remains separate from this logical Runtime-incarnation authority.
+
+Credential polling and pre-promotion Runner authorization use ordinary Runtime reads
+without a registration lock. They may observe committed evidence while a writer changes
+the desired generation. Final connection acceptance separately fences that exact Runtime
+generation through durable connection-generation acceptance in the same transaction;
+a replaced desired generation cannot gain accepted connection authority from the earlier
+observation. This fence does not extend across volatile promotion or transport I/O.
+
+Provider pre-promotion authorization likewise uses ordinary Provider/binding reads
+with unchanged method, subject, evidence-expiry and credential checks. Actual final
+connection publication separately fences those identities through credential-use,
+binding-connected, connection/audit and generation-acceptance commit. A binding
+revoked after the observation cannot be accepted as current by that earlier result.
 
 The Runner retries transient Control stream failures with its process-start
 credential. Registration-time `UNAUTHENTICATED` and an accepted connection whose
@@ -866,6 +1084,18 @@ framed helper protocol. Model-visible operation envelopes, logical paths, result
 cancellation, bounded-resource, atomicity, and error contracts remain unchanged. Product services
 may retain narrower boundaries for their own actions, such as user-visible file presentation.
 
+Runner operation ingress decodes transport JSON into operation-specific typed
+payloads before dispatch. Extension keys and the existing optional null/default
+choices remain supported; malformed supplied fields retain their operation's
+validation/error boundary, and handlers own filesystem, process, and Git outcomes.
+
+Handled Runner authentication, Control-stream, transfer, Web-protocol, and
+operation failures use bounded implementation-owned reason labels. Logging formats
+a new bounded exception value, while separate structured fields retain the original
+exception type and at most 16 origin-frame locations: file basename, function, and
+line. Original exception values, chains, locals, and source text are excluded.
+This diagnostic projection does not change the operation result or reconnect policy.
+
 `file.stat` is the authoritative operation for classifying a workspace path as file, directory, symlink, other, or missing before a caller chooses a file or directory operation.
 
 `file.list` accepts either a workspace file path or directory path. File paths return that single file entry. Directory paths are direct-child listings by default, and callers can opt into recursive listing with exclude patterns so high-level file tools can skip heavy trees such as `.git` or `node_modules`.
@@ -908,6 +1138,13 @@ non-directory target return `worktree_ownership_ambiguous` without deletion.
 `already_absent` when that exact branch no longer exists. These operations return semantic failures
 for non-Git paths, invalid refs, collisions, ownership ambiguity, and Git command failures so product
 services can persist bounded setup or cleanup classifications.
+
+Server-side allocation, Project registration and destructive path-claim mutations
+retain transaction-scoped coordination for the exact Runtime and normalized paths.
+The existing overlap check covers ancestor and descendant targets; exact-path
+uniqueness alone does not replace it. Ordinary allocation/Project/cleanup inventory
+does not acquire that coordination. The claim transaction closes before Runner I/O,
+which still revalidates the recorded target, branch or discovery fingerprint.
 
 Session-folder archive cleanup validates the stored exact path against the current
 managed Agent Workspace before Runner I/O and preserves that lexical target through
@@ -968,6 +1205,10 @@ ready desired current-configuration slot at a new positive configuration sequenc
 dispatching compute. A later start or authorized Runtime-dependent operation performs ordinary lazy
 provisioning.
 
+Observing an existing logical Runtime does not lock or initialize it. Actual creation
+uses the unique Agent-to-Runtime identity to return one INSERT winner or its retained
+competitor; that creation contract does not turn ordinary getters into admission.
+
 Permanent removal is a separate irreversible product transition. Its PostgreSQL coordinator fences
 Agent work, interrupts active Session trees, clears Runtime-owned product state, requests terminal
 delete, and remains pending through Provider outage or ambiguous dispatch. Finalization requires
@@ -976,6 +1217,18 @@ logical Runtime ID but advances desired generation and clears Provider/Runner ob
 Workspace path, the bounded configuration-state row, failure, terminal-request, and
 incarnation-scoped dispatch state. The Runtime-owned configuration-sequence high-water mark remains
 monotonic across terminal cleanup and rearm.
+
+Removal and Agent-decommission coordinators retain the `attempt_count` returned by
+each winning claim together with its lease owner. Their phase/progress, retry,
+acknowledgement and completion mutations, including finalization, match that captured
+attempt. Reclaim advances the existing counter even when the Worker or Scheduler
+lease-owner label is unchanged, so an earlier attempt cannot mutate the replacement
+claim. Pending deletion and acknowledgement observation is nonlocking; first target
+recording and actual acknowledgement persistence retain their mutation fences.
+Removal acknowledgement must match the admitted Runtime ID and current
+desired/requested/acknowledged target generation. When physical deletion is required,
+finalization also matches the recorded acknowledgement kind and time. A rearmed target
+cannot be completed by an older ack.
 
 - `start` sets desired state to running.
 - `stop` sets desired state to stopped and must preserve workspace data.
@@ -1029,12 +1282,31 @@ applied or desired authority as appropriate. Runner loss, terminal deletion, cap
 change, supersession of the serving applied generation, timeout, cancellation, or authority drift
 fails closed rather than retargeting the operation to another Runtime incarnation.
 
-Runtime Toolkit prompt projection loads the Agent Runtime and its current
-configuration state in one completed repository-owned read transaction. Session
-Project projection uses a separate completed repository-owned read transaction
+Runtime Toolkit prompt projection loads the Agent Runtime and retained
+configuration state in one completed repository-owned read-only transaction. Session
+Project projection uses a separate completed repository-owned read-only transaction
 and preserves repository ordering before the Engine applies its existing
 path-order presentation. These reads return detached results before Runtime
 coordination, Runner operations, or other external work begins.
+
+Model-visible target and folder projection do not invoke Runtime reconciliation
+or actual-operation admission. A retained applied configuration must qualify the
+retained desired generation, ready Runner and Runner-reported workspace; missing,
+terminal or unready evidence projects no target. Existing BOUND context, exact
+Agent/Runtime association and canonical root-derived folder path are read without
+Agent/context locks or PENDING binding. Worktree create/remove visibility shares
+this retained eligibility. Actual Runtime and worktree admission retains current
+capability, target/configuration, binding and execution-owner checks, so a stale
+description cannot retarget an external operation.
+
+Worktree action descriptions, cleanup enumeration and catalog filesystem status
+refresh do not inherit an execution-owned transaction wrapper. Actual action
+admission, resource claims, event/result publication and terminal-history/continuation
+groups explicitly fence the exact Session and captured executing or recovery owner
+generation through their database commit. Pre-I/O owner validation is a separate
+nonlocking observation, not an exclusion spanning Runner work. Existing BOUND folder
+resolution is ordinary; only the actual PENDING-to-BOUND mutation enters its
+capability/context/binding fence.
 
 Desired/applied mismatch never authorizes implicit recreation. Kubernetes CIDR-only or proxy-owned
 policy/artifact changes may adopt in place through exact aggregate Provider and ordinary Runner
@@ -1046,6 +1318,13 @@ applied and the Runtime has the expected desired generation, Provider-running
 observation, connected Provider, ready positive-generation Runner, and current
 Runner-reported Agent Workspace path. Stopped Runtimes skip immediate recreation
 and adopt the current Profile on their next start.
+
+Recreation operation creation keeps the target version already checked at admission
+rather than adopting a newer version through a second lookup. Target descriptions
+have no hidden lock mode. Actual restart dispatch excludes replacement of that exact
+target through its configuration/item mutation; item settlement and retry retain the
+claimed attempt with atomic operation counts, and successful completion requires
+evidence for the exact dispatched generation.
 
 Start, stop, restart, ordinary recreation, recovery, and in-place adoption preserve Agent Workspace
 data. Reset and terminal delete retain their explicit destructive boundaries. Provider or Profile
@@ -1118,6 +1397,46 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-10-08** — Made identity completion replace transient authentication
+  entries, including the initial separate-domain native POST handoff.
+
+- **2026-10-07 (spec_version=103)** — Corrected hop-credit accounting across
+  Runner replacement, completed exact-owner cleanup after dead source queues,
+  and isolated late input on known retired streams.
+
+- **2026-10-07 (spec_version=102)** — Preserved parsed request body framing so
+  unframed bodyless HTTP requests no longer acquire chunked transfer encoding.
+
+- **2026-10-07 (spec_version=101)** — Preserved application cookies and all
+  end-to-end headers, consumed dynamic Connection fields and protocol-specific
+  handshake fields, forwarded application WebSocket 101 headers, and removed
+  the app Worker-destination header rejection.
+
+- **2026-10-07 (spec_version=100)** — Made authenticated Runtime application traffic
+  transparent to app-owned CSRF/CORS and response-header policies while retaining
+  platform identity, access, exposure, transport, and broker protections.
+
+- **2026-10-05** (spec_version 98) — Narrowed direct-object storage failure
+  classification while preserving cancellation and durable cleanup evidence;
+  removed duplicate logging from the managed Runner session reader.
+- **2026-10-05** (spec_version 98) — Completed Runtime Web service and Gateway
+  authentication/admission database operations before detached projection and
+  transport; grouped opaque-ID activation membership preflight with its exact On CAS.
+
+- **2026-10-05** (spec_version 97) — Recorded completed read-only Workspace
+  access authority before Runtime and Runner orchestration.
+
+- **2026-10-05** (spec_version 96) — Distinguished expected direct-capability
+  cleanup deferral from genuine failure in terminal and stale-stream repair,
+  preserving read/write grace, exact cleanup identity, and real failure diagnostics.
+- **2026-10-05** (spec_version 95) — Separated Runtime, Runner, binding and worktree
+  descriptions from actual mutation fences; retained captured removal/decommission
+  attempts, exact resource acknowledgements, recreation targets and path overlap.
+  Route resolution and Provider pre-promotion observation are nonlocking while
+  actual epoch/nonce and connection acceptance remain separately fenced.
+- **2026-10-02** (spec_version 92) — Moved Runtime stream route, report, and
+  reconciliation scopes into completed database-only repository operations,
+  preserving lock order, nonce consumption, report atomicity, and dispatch ordering.
 - **2026-10-01** (spec_version 91) — Moved Runtime Toolkit behavior and Session
   Project reads into completed repository-owned transactions while preserving
   configuration authority, unavailable projection, and Project presentation.

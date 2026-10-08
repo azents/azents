@@ -8,7 +8,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **provider** | [**LLMProvider**](LLMProvider.md) |  | 
 **catalog_id** | **str** |  | 
-**snapshot_id** | **str** |  | 
+**last_success_at** | **datetime** |  | 
 **visible_count** | **int** |  | 
 **hidden_count** | **int** |  | 
 **status** | **str** |  | 

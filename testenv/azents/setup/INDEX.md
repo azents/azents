@@ -12,7 +12,7 @@ The fixture provider resolves setup dependencies and evaluates each entry's veri
 | id | provides | requires | idempotent | summary |
 |---|---|---|---|---|
 | `agent-dummy-key` | agent.id, agent.model_slug | llm-provider-dummy | ✓ | Create agent with dummy-key LLM integration and default Runtime selection |
-| `llm-provider-dummy` | integration.id, integration.provider, integration.name, integration.model_config_id | test-user-workspace | ✗ | Register dummy-key OpenAI LLM integration and ModelConfig for LLM-bypass pipeline tests |
+| `llm-provider-dummy` | integration.id, integration.provider, integration.name, integration.model_identifier | test-user-workspace | ✗ | Register dummy-key OpenAI integration and choose a current model for LLM-bypass pipeline tests |
 | `test-user-workspace` | user.email, user.access_token, user.refresh_token, ws.handle, ws.name | — | ✗ | Create new azents user and workspace, record in state.json |
 <!-- AUTO-GENERATED:END -->
 

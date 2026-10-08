@@ -4,15 +4,16 @@ from typing import NamedTuple
 
 import pytest
 from azcommon.result import Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentRuntimeCapability, LLMProvider
+from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.runtime_web import (
     RDBRuntimeWebAuthConfiguration,
     RuntimeWebActorKind,
 )
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_web.data import RuntimeWebOperationIdentity
 from azents.repos.runtime_web.repository import (
     RuntimeWebRepository,
@@ -22,7 +23,6 @@ from azents.repos.runtime_web.repository import (
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
@@ -38,7 +38,7 @@ class _RuntimeWebAuthorityFixture(NamedTuple):
 
 
 async def _authority_fixture(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     handle: str = "runtime-web",
     email: str = "runtime-web@example.com",
@@ -57,8 +57,8 @@ async def _authority_fixture(
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
     model_selection = make_test_model_selection_dict(
         integration_id=integration.id,
         provider=LLMProvider.ANTHROPIC,
@@ -77,13 +77,13 @@ async def _authority_fixture(
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     user = await UserRepository().create(session, UserCreate(email=email))
-    configuration = await session.get(RDBRuntimeWebAuthConfiguration, 1)
+    configuration = await session.read_session.get(RDBRuntimeWebAuthConfiguration, 1)
     assert configuration is not None
     configuration.enabled = True
-    await session.flush()
+    await session.write_session.flush()
     return _RuntimeWebAuthorityFixture(workspace_id, agent.id, user.id)
 
 
@@ -102,7 +102,7 @@ def _operation(
 
 
 async def test_agent_request_creates_off_service_and_replays_exact_identity(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     fixture = await _authority_fixture(rdb_session)
     repository = RuntimeWebRepository(random_bytes=lambda size: b"a" * size)
@@ -135,7 +135,7 @@ async def test_agent_request_creates_off_service_and_replays_exact_identity(
 
 
 async def test_user_transitions_preserve_selected_duration_contract(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     fixture = await _authority_fixture(
         rdb_session,
@@ -207,7 +207,7 @@ async def test_user_transitions_preserve_selected_duration_contract(
 
 
 async def test_stale_revision_and_quota_fail_without_partial_mutation(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     fixture = await _authority_fixture(
         rdb_session,
@@ -257,7 +257,7 @@ async def test_stale_revision_and_quota_fail_without_partial_mutation(
 
 
 async def test_delete_and_recreate_never_reuses_service_identity(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     fixture = await _authority_fixture(
         rdb_session,

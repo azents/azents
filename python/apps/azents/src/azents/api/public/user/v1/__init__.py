@@ -9,7 +9,7 @@ from typing import Annotated, assert_never
 from fastapi import APIRouter, Depends, HTTPException
 
 from azents.core.auth.deps import CurrentUser, get_current_user
-from azents.repos.user.data import NotFound, UserUpdate
+from azents.core.user import NotFound, UserUpdate
 from azents.services.system_user_role.service import SystemUserRoleService
 from azents.services.user import UserService
 from azents.utils.fastapi.route import RouteMounter

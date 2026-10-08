@@ -5,7 +5,6 @@ import datetime
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentRuntimeRemovalStage,
@@ -15,6 +14,7 @@ from azents.core.enums import (
 from azents.rdb.models.agent_runtime_removal import (
     RDBAgentRuntimeRemovalOperation,
 )
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import (
     AgentRuntimeRemovalCreateResult,
@@ -27,7 +27,7 @@ class AgentRuntimeRemovalRepository:
 
     async def create_or_get_active(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         workspace_id: str,
@@ -44,7 +44,7 @@ class AgentRuntimeRemovalRepository:
         queued_runtime_action_count: int,
     ) -> AgentRuntimeRemovalCreateResult:
         """Create one active removal operation or return the conflicting one."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             insert(RDBAgentRuntimeRemovalOperation)
             .values(
                 id=uuid7().hex,
@@ -68,7 +68,7 @@ class AgentRuntimeRemovalRepository:
         row = result.scalar_one_or_none()
         idempotency_match = True
         if row is None:
-            row = await session.scalar(
+            row = await session.write_session.scalar(
                 sa.select(RDBAgentRuntimeRemovalOperation).where(
                     RDBAgentRuntimeRemovalOperation.agent_id == agent_id,
                     RDBAgentRuntimeRemovalOperation.idempotency_key == idempotency_key,
@@ -78,7 +78,7 @@ class AgentRuntimeRemovalRepository:
             )
         if row is None:
             idempotency_match = False
-            row = await session.scalar(
+            row = await session.write_session.scalar(
                 sa.select(RDBAgentRuntimeRemovalOperation).where(
                     RDBAgentRuntimeRemovalOperation.agent_id == agent_id,
                     RDBAgentRuntimeRemovalOperation.status
@@ -87,7 +87,7 @@ class AgentRuntimeRemovalRepository:
             )
         if row is None:
             raise RuntimeError("Agent Runtime removal operation creation failed")
-        await session.flush()
+        await session.write_session.flush()
         return AgentRuntimeRemovalCreateResult(
             operation=self._build(row),
             idempotency_match=idempotency_match,
@@ -95,20 +95,22 @@ class AgentRuntimeRemovalRepository:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         operation_id: str,
     ) -> AgentRuntimeRemovalOperation | None:
         """Fetch one Runtime removal operation."""
-        row = await session.get(RDBAgentRuntimeRemovalOperation, operation_id)
+        row = await session.read_session.get(
+            RDBAgentRuntimeRemovalOperation, operation_id
+        )
         return None if row is None else self._build(row)
 
     async def get_active_by_agent_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
     ) -> AgentRuntimeRemovalOperation | None:
         """Fetch the Agent's single non-terminal removal operation."""
-        row = await session.scalar(
+        row = await session.read_session.scalar(
             sa.select(RDBAgentRuntimeRemovalOperation).where(
                 RDBAgentRuntimeRemovalOperation.agent_id == agent_id,
                 RDBAgentRuntimeRemovalOperation.status
@@ -119,13 +121,13 @@ class AgentRuntimeRemovalRepository:
 
     async def get_by_agent_idempotency_key(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         idempotency_key: str,
     ) -> AgentRuntimeRemovalOperation | None:
         """Fetch an active or completed operation by idempotency identity."""
-        row = await session.scalar(
+        row = await session.read_session.scalar(
             sa.select(RDBAgentRuntimeRemovalOperation).where(
                 RDBAgentRuntimeRemovalOperation.agent_id == agent_id,
                 RDBAgentRuntimeRemovalOperation.idempotency_key == idempotency_key,
@@ -135,11 +137,11 @@ class AgentRuntimeRemovalRepository:
 
     async def get_latest_completed_by_agent_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
     ) -> AgentRuntimeRemovalOperation | None:
         """Fetch the Agent's most recently completed removal operation."""
-        row = await session.scalar(
+        row = await session.read_session.scalar(
             sa.select(RDBAgentRuntimeRemovalOperation)
             .where(
                 RDBAgentRuntimeRemovalOperation.agent_id == agent_id,
@@ -156,20 +158,21 @@ class AgentRuntimeRemovalRepository:
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         operation_id: str,
     ) -> AgentRuntimeRemovalOperation | None:
         """Lock one removal operation for exact transition validation."""
-        row = await session.scalar(
+        row = await session.write_session.scalar(
             sa.select(RDBAgentRuntimeRemovalOperation)
             .where(RDBAgentRuntimeRemovalOperation.id == operation_id)
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         return None if row is None else self._build(row)
 
     async def claim_due(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         now: datetime.datetime,
         lease_owner: str,
@@ -210,7 +213,7 @@ class AgentRuntimeRemovalRepository:
             .limit(1)
             .scalar_subquery()
         )
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentRuntimeRemovalOperation)
             .where(RDBAgentRuntimeRemovalOperation.id == candidate)
             .values(
@@ -234,21 +237,23 @@ class AgentRuntimeRemovalRepository:
 
     async def set_stage(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         operation_id: str,
         lease_owner: str,
+        expected_attempt: int,
         stage: AgentRuntimeRemovalStage,
         now: datetime.datetime,
     ) -> bool:
         """Advance the stage of an owned running operation."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentRuntimeRemovalOperation)
             .where(
                 RDBAgentRuntimeRemovalOperation.id == operation_id,
                 RDBAgentRuntimeRemovalOperation.status
                 == AgentRuntimeRemovalStatus.RUNNING,
                 RDBAgentRuntimeRemovalOperation.lease_owner == lease_owner,
+                RDBAgentRuntimeRemovalOperation.attempt_count == expected_attempt,
             )
             .values(stage=stage, updated_at=now)
             .returning(RDBAgentRuntimeRemovalOperation.id)
@@ -257,10 +262,11 @@ class AgentRuntimeRemovalRepository:
 
     async def record_cleanup_progress(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         operation_id: str,
         lease_owner: str,
+        expected_attempt: int,
         expected_cursor_context_id: str | None,
         cursor_context_id: str | None,
         scanned_count: int,
@@ -303,13 +309,14 @@ class AgentRuntimeRemovalRepository:
         }
         if completed:
             values["product_cleanup_completed_at"] = now
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentRuntimeRemovalOperation)
             .where(
                 RDBAgentRuntimeRemovalOperation.id == operation_id,
                 RDBAgentRuntimeRemovalOperation.status
                 == AgentRuntimeRemovalStatus.RUNNING,
                 RDBAgentRuntimeRemovalOperation.lease_owner == lease_owner,
+                RDBAgentRuntimeRemovalOperation.attempt_count == expected_attempt,
                 RDBAgentRuntimeRemovalOperation.product_cleanup_completed_at.is_(None),
                 expected_cursor,
             )
@@ -320,10 +327,11 @@ class AgentRuntimeRemovalRepository:
 
     async def record_physical_delete_target(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         operation_id: str,
         lease_owner: str,
+        expected_attempt: int,
         required: bool,
         target_generation: int | None,
         requested_at: datetime.datetime | None,
@@ -332,13 +340,14 @@ class AgentRuntimeRemovalRepository:
         """Record the immutable physical-deletion requirement and target."""
         if required != (target_generation is not None and requested_at is not None):
             raise ValueError("Physical deletion target evidence is inconsistent")
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentRuntimeRemovalOperation)
             .where(
                 RDBAgentRuntimeRemovalOperation.id == operation_id,
                 RDBAgentRuntimeRemovalOperation.status
                 == AgentRuntimeRemovalStatus.RUNNING,
                 RDBAgentRuntimeRemovalOperation.lease_owner == lease_owner,
+                RDBAgentRuntimeRemovalOperation.attempt_count == expected_attempt,
                 RDBAgentRuntimeRemovalOperation.physical_deletion_required.is_(None),
             )
             .values(
@@ -353,21 +362,23 @@ class AgentRuntimeRemovalRepository:
 
     async def record_physical_delete_acknowledgement(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         operation_id: str,
         lease_owner: str,
+        expected_attempt: int,
         acknowledgement_kind: RuntimeTerminalDeleteAcknowledgementKind,
         acknowledged_at: datetime.datetime,
     ) -> bool:
         """Record exact terminal physical-deletion evidence once."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentRuntimeRemovalOperation)
             .where(
                 RDBAgentRuntimeRemovalOperation.id == operation_id,
                 RDBAgentRuntimeRemovalOperation.status
                 == AgentRuntimeRemovalStatus.RUNNING,
                 RDBAgentRuntimeRemovalOperation.lease_owner == lease_owner,
+                RDBAgentRuntimeRemovalOperation.attempt_count == expected_attempt,
                 RDBAgentRuntimeRemovalOperation.physical_deletion_required.is_(True),
                 RDBAgentRuntimeRemovalOperation.target_terminal_delete_generation.is_not(
                     None
@@ -390,23 +401,25 @@ class AgentRuntimeRemovalRepository:
 
     async def mark_retry(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         operation_id: str,
         lease_owner: str,
+        expected_attempt: int,
         next_attempt_at: datetime.datetime,
         error_kind: str,
         error_summary: str,
         now: datetime.datetime,
     ) -> bool:
         """Release an owned operation into bounded retry wait."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentRuntimeRemovalOperation)
             .where(
                 RDBAgentRuntimeRemovalOperation.id == operation_id,
                 RDBAgentRuntimeRemovalOperation.status
                 == AgentRuntimeRemovalStatus.RUNNING,
                 RDBAgentRuntimeRemovalOperation.lease_owner == lease_owner,
+                RDBAgentRuntimeRemovalOperation.attempt_count == expected_attempt,
             )
             .values(
                 status=AgentRuntimeRemovalStatus.RETRY_WAIT,
@@ -423,20 +436,22 @@ class AgentRuntimeRemovalRepository:
 
     async def mark_completed(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         operation_id: str,
         lease_owner: str,
+        expected_attempt: int,
         now: datetime.datetime,
     ) -> bool:
         """Complete an owned operation and release its lease."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentRuntimeRemovalOperation)
             .where(
                 RDBAgentRuntimeRemovalOperation.id == operation_id,
                 RDBAgentRuntimeRemovalOperation.status
                 == AgentRuntimeRemovalStatus.RUNNING,
                 RDBAgentRuntimeRemovalOperation.lease_owner == lease_owner,
+                RDBAgentRuntimeRemovalOperation.attempt_count == expected_attempt,
                 RDBAgentRuntimeRemovalOperation.stage
                 == AgentRuntimeRemovalStage.FINALIZING,
                 RDBAgentRuntimeRemovalOperation.product_cleanup_completed_at.is_not(

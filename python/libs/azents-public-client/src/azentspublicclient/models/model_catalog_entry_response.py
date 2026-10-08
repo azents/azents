@@ -22,6 +22,7 @@ from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.model_capabilities import ModelCapabilities
 from azentspublicclient.models.model_execution_option_id import ModelExecutionOptionId
+from azentspublicclient.models.model_pricing_definition import ModelPricingDefinition
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -39,10 +40,11 @@ class ModelCatalogEntryResponse(BaseModel):
     visibility_status: StrictStr
     publisher: Optional[StrictStr]
     family: Optional[StrictStr]
+    pricing: ModelPricingDefinition
     source_metadata: Optional[Dict[str, Any]]
     projection_metadata: Optional[Dict[str, Any]]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "provider", "provider_model_identifier", "display_name", "normalized_capabilities", "supported_execution_options", "lifecycle_status", "visibility_status", "publisher", "family", "source_metadata", "projection_metadata"]
+    __properties: ClassVar[List[str]] = ["id", "provider", "provider_model_identifier", "display_name", "normalized_capabilities", "supported_execution_options", "lifecycle_status", "visibility_status", "publisher", "family", "pricing", "source_metadata", "projection_metadata"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -88,6 +90,9 @@ class ModelCatalogEntryResponse(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of normalized_capabilities
         if self.normalized_capabilities:
             _dict['normalized_capabilities'] = self.normalized_capabilities.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of pricing
+        if self.pricing:
+            _dict['pricing'] = self.pricing.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -124,7 +129,9 @@ class ModelCatalogEntryResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "id": obj.get("id"),
             "provider": obj.get("provider"),
             "provider_model_identifier": obj.get("provider_model_identifier"),
@@ -135,8 +142,10 @@ class ModelCatalogEntryResponse(BaseModel):
             "visibility_status": obj.get("visibility_status"),
             "publisher": obj.get("publisher"),
             "family": obj.get("family"),
+            "pricing": ModelPricingDefinition.from_dict(obj["pricing"]) if obj.get("pricing") is not None else None,
             "source_metadata": obj.get("source_metadata"),
             "projection_metadata": obj.get("projection_metadata")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

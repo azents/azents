@@ -11,7 +11,9 @@
 import { useDocumentVisibility } from "@mantine/hooks";
 import * as Sentry from "@sentry/nextjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { knownReasoningEffort } from "@/shared/lib/reasoning-effort";
 import { trpc } from "@/trpc/client";
+import { actionExecutionResultFromEvent } from "../actionExecutionDecoder";
 import { continuationMetadata } from "../continuationPresentation";
 import { executionOptionIdsFromValue } from "../executionOptions";
 import {
@@ -76,7 +78,6 @@ import type {
   ChatEventResponse,
   ChatWriteResponse,
   LiveEventListResponse,
-  ModelReasoningEffort,
   PendingMailboxEnvelope,
   RequestedInferenceProfile,
 } from "@azents/public-client";
@@ -90,23 +91,6 @@ type WritableChatAction = Extract<
   | { type: "skill" }
   | { type: "cleanup_orphan_git_worktrees" }
 >;
-
-function modelReasoningEffortFromValue(
-  value: string | null,
-): ModelReasoningEffort | null {
-  switch (value) {
-    case "none":
-    case "minimal":
-    case "low":
-    case "medium":
-    case "high":
-    case "xhigh":
-    case "max":
-      return value;
-    default:
-      return null;
-  }
-}
 
 function writableChatAction(
   action?: ChatAction | null,
@@ -1479,36 +1463,6 @@ function upsertActionExecutionProjection(
   return actionExecutions.map((item, itemIndex) =>
     itemIndex === index ? actionExecution : item,
   );
-}
-
-function isActionExecutionProjectionValue(
-  value: unknown,
-): value is ActionExecutionProjectionResponse {
-  if (!isRecord(value) || !isRecord(value.execution)) {
-    return false;
-  }
-  return (
-    typeof value.execution.id === "string" &&
-    typeof value.execution.source_mailbox_item_id === "string" &&
-    typeof value.execution.status === "string" &&
-    Array.isArray(value.events)
-  );
-}
-
-function actionExecutionResultFromEvent(
-  event: ChatEventResponse,
-): ActionExecutionProjection | null {
-  if (event.kind !== "action_execution_result" || !isRecord(event.payload)) {
-    return null;
-  }
-  return isActionExecutionProjectionValue(event.payload.action_execution)
-    ? {
-        ...event.payload.action_execution,
-        provenance: "durable",
-        historyEventId: event.id,
-        historyCreatedAt: event.created_at,
-      }
-    : null;
 }
 
 function isCompletedGitWorktreeActionExecution(
@@ -3146,9 +3100,7 @@ export function useChatSessionContainer(
         sessionId,
         profile,
       });
-      const reasoningEffort = modelReasoningEffortFromValue(
-        profile.reasoning_effort,
-      );
+      const reasoningEffort = knownReasoningEffort(profile.reasoning_effort);
       if (profile.reasoning_effort !== null && reasoningEffort === null) {
         return false;
       }

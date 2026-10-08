@@ -1,15 +1,13 @@
 """PasswordLogin repository."""
 
-from typing import Any, cast
-
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
 from azcommon.sqlalchemy.postgres import is_constrained_by
-from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.models.password_login import RDBPasswordLogin
+from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.repos.mutation_result import mutation_result
 
 from .data import AlreadyExists, NotFound, PasswordLogin, PasswordLoginCreate
 
@@ -18,7 +16,7 @@ class PasswordLoginRepository:
     """PasswordLogin CRUD repository."""
 
     async def create(
-        self, session: AsyncSession, create: PasswordLoginCreate
+        self, session: WriteSession, create: PasswordLoginCreate
     ) -> Result[PasswordLogin, AlreadyExists]:
         """Create PasswordLogin.
 
@@ -31,17 +29,17 @@ class PasswordLoginRepository:
                 user_id=create.user_id,
                 password_hash=create.password_hash,
             )
-            session.add(rdb)
-            await session.flush()
+            session.write_session.add(rdb)
+            await session.write_session.flush()
             return Success(self._build(rdb))
         except IntegrityError as e:
-            await session.rollback()
+            await session.write_session.rollback()
             if is_constrained_by(e, RDBPasswordLogin.UQ_USER_ID):
                 return Failure(AlreadyExists(user_id=create.user_id))
             raise
 
     async def get_by_user_id(
-        self, session: AsyncSession, user_id: str
+        self, session: ReadSession, user_id: str
     ) -> PasswordLogin | None:
         """Fetch PasswordLogin by User ID.
 
@@ -49,7 +47,7 @@ class PasswordLoginRepository:
         :param user_id: User ID
         :return: PasswordLogin or None
         """
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBPasswordLogin).where(RDBPasswordLogin.user_id == user_id)
         )
         rdb = result.scalar_one_or_none()
@@ -57,20 +55,20 @@ class PasswordLoginRepository:
             return None
         return self._build(rdb)
 
-    async def exists_for_user(self, session: AsyncSession, user_id: str) -> bool:
+    async def exists_for_user(self, session: ReadSession, user_id: str) -> bool:
         """Check whether password is set for User.
 
         :param session: Database session
         :param user_id: User ID
         :return: Password existence flag
         """
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(sa.exists().where(RDBPasswordLogin.user_id == user_id))
         )
         return result.scalar() or False
 
     async def update_password_hash(
-        self, session: AsyncSession, user_id: str, password_hash: str
+        self, session: WriteSession, user_id: str, password_hash: str
     ) -> Result[PasswordLogin, NotFound]:
         """Update password hash.
 
@@ -79,7 +77,7 @@ class PasswordLoginRepository:
         :param password_hash: New password hash
         :return: Updated PasswordLogin or error
         """
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBPasswordLogin)
             .where(RDBPasswordLogin.user_id == user_id)
             .values(password_hash=password_hash)
@@ -91,7 +89,7 @@ class PasswordLoginRepository:
         return Success(self._build(rdb))
 
     async def delete_by_user_id(
-        self, session: AsyncSession, user_id: str
+        self, session: WriteSession, user_id: str
     ) -> Result[None, NotFound]:
         """Delete password for User.
 
@@ -99,11 +97,10 @@ class PasswordLoginRepository:
         :param user_id: User ID
         :return: Success or error
         """
-        result = cast(
-            CursorResult[Any],
-            await session.execute(
+        result = mutation_result(
+            await session.write_session.execute(
                 sa.delete(RDBPasswordLogin).where(RDBPasswordLogin.user_id == user_id)
-            ),
+            )
         )
         if result.rowcount == 0:
             return Failure(NotFound(user_id=user_id))

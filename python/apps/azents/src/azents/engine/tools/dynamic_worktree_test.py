@@ -1,21 +1,21 @@
 """Dynamic Worktree Toolkit tests."""
 
 import json
-from typing import cast
 
 import pytest
 
-from azents.broker.types import BrokerMessage, SessionBroker, SessionWakeUp
+from azents.broker.types import BrokerMessage, SessionWakeUp
+from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.core.tools import ToolkitStatus, TurnContext
 from azents.engine.run.turn_action_bridge import TurnActionBridgeBoundary
 from azents.engine.run.types import FunctionToolError
 from azents.engine.tooling.execution_context import client_tool_execution_context
 from azents.services.session_git_worktree import (
     AgentCreateGitWorktreeAdmission,
+    AgentGitWorktreeToolAvailability,
     AgentRemoveGitWorktreeAdmission,
     SessionGitWorktreeService,
 )
-from azents.services.session_resource_authority import SessionResourceAuthority
 
 from .dynamic_worktree import DynamicWorktreeToolkit
 
@@ -45,7 +45,7 @@ def _turn_context() -> TurnContext:
     )
 
 
-class _Service:
+class _Service(SessionGitWorktreeService):
     """SessionGitWorktreeService fake for Toolkit tests."""
 
     def __init__(
@@ -61,27 +61,19 @@ class _Service:
         self.remove_admissions: list[dict[str, object]] = []
         self.failure: ValueError | None = None
 
-    async def agent_create_git_worktree_available(
+    async def project_agent_git_worktree_availability(
         self,
         *,
         agent_id: str,
         session_id: str,
-    ) -> bool:
-        """Return configured projection eligibility."""
+    ) -> AgentGitWorktreeToolAvailability:
+        """Return both configured tools from one descriptive projection."""
         assert agent_id == "agent-1"
         assert session_id == "session-1"
-        return self.available
-
-    async def agent_remove_git_worktree_available(
-        self,
-        *,
-        agent_id: str,
-        session_id: str,
-    ) -> bool:
-        """Return configured removal projection eligibility."""
-        assert agent_id == "agent-1"
-        assert session_id == "session-1"
-        return self.remove_available
+        return AgentGitWorktreeToolAvailability(
+            create=self.available,
+            remove=self.remove_available,
+        )
 
     async def admit_agent_create_git_worktree(
         self,
@@ -166,8 +158,8 @@ class _Broker:
 def _toolkit(service: _Service, broker: _Broker) -> DynamicWorktreeToolkit:
     """Create a Toolkit with typed production collaborators."""
     return DynamicWorktreeToolkit(
-        service=cast(SessionGitWorktreeService, service),
-        broker=cast(SessionBroker, broker),
+        service=service,
+        broker=broker,
         agent_id="agent-1",
         session_id="session-1",
     )

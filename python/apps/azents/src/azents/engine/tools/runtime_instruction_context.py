@@ -6,8 +6,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
+from azents.core.session_workspace_project import SessionWorkspaceProject
 from azents.repos.exchange_file.data import ExchangeFile
-from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.runtime.transfer.present_file_publication import (
     PresentFilePublicationRequest,
 )

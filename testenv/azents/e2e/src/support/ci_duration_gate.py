@@ -14,6 +14,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from typing import Literal, TypedDict
 
 METRIC = "pytest-call-total-v1"
 STATUS_CONTEXT = "ci-python-e2e"
@@ -66,6 +67,7 @@ class WorkflowRun:
     run_id: int
     status: str
     url: str
+    conclusion: str | None
 
 
 @dataclass(frozen=True)
@@ -73,7 +75,82 @@ class CandidateReport:
     """Candidate workflow run and its parsed report."""
 
     run_id: int
-    report: dict[str, object]
+    report: CandidatePayload
+
+
+@dataclass(frozen=True)
+class CandidateTiming:
+    """Validated candidate measurements used by reevaluation."""
+
+    lanes: Mapping[str, Decimal]
+    diagnostics: Mapping[str, Mapping[str, Decimal]]
+
+
+@dataclass(frozen=True)
+class InvalidCandidateTiming:
+    """Keep invalid candidate evidence distinguishable from absent evidence."""
+
+    reason: str
+
+
+@dataclass(frozen=True)
+class CandidatePayload:
+    """The candidate identity and decoded timing verdict."""
+
+    head_sha: str
+    timing: CandidateTiming | InvalidCandidateTiming
+
+
+@dataclass(frozen=True)
+class TestPhaseTiming:
+    """One validated timing record; other record kinds are not gate inputs."""
+
+    node_id: str
+    phase: Literal["setup", "call", "teardown"]
+    duration_seconds: Decimal
+
+
+@dataclass(frozen=True)
+class PullIdentity:
+    """The GitHub PR fields used for target selection and publication fencing."""
+
+    head_sha: str
+    base_sha: str
+    head_repository: str | None
+    number: int | None
+    state: str | None
+
+
+@dataclass(frozen=True)
+class PullComment:
+    """A GitHub comment eligible for sticky-comment replacement."""
+
+    comment_id: int
+    body: str
+
+
+class DurationReport(TypedDict):
+    """The existing report egress schema, constructed from decoded evidence."""
+
+    schema_version: int
+    metric: str
+    outcome: str
+    reason: str
+    head_sha: str
+    base_sha: str
+    base_run_id: int | None
+    base_run_status: str | None
+    base_run_url: str | None
+    lanes: dict[str, str | None]
+    base_lanes: dict[str, str | None]
+    lane_diagnostics: dict[str, dict[str, str | None]]
+    base_lane_diagnostics: dict[str, dict[str, str | None]]
+    critical_lane: str | None
+    base_critical_lane: str | None
+    observed_seconds: str | None
+    reference_seconds: str | None
+    threshold_seconds: str | None
+    increase_percent: str | None
 
 
 @dataclass(frozen=True)
@@ -118,6 +195,179 @@ def _objects(text: str) -> list[dict[str, object]]:
     return objects
 
 
+def _mapping(value: object, reason: str) -> dict[str, object]:
+    """Validate a raw object within an operation decoder only."""
+    if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):
+        raise EvidenceError(reason)
+    return value
+
+
+def _string(value: object, reason: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise EvidenceError(reason)
+    return value
+
+
+def _duration(value: object) -> Decimal:
+    """Timing producers use JSON numbers; historical reports use decimal strings."""
+    if isinstance(value, bool) or not isinstance(value, str | int | float):
+        raise EvidenceError("invalid_duration")
+    return _seconds(str(value))
+
+
+def _decode_test_phase(text: str) -> TestPhaseTiming | None:
+    payload = _object(text)
+    if payload.get("record_type") != "test_phase":
+        return None
+    required = {"record_type", "node_id", "phase", "duration_seconds"}
+    if not required <= payload.keys() or payload.keys() - required - {"outcome"}:
+        raise EvidenceError("invalid_test_phase_timing")
+    if "outcome" in payload:
+        _string(payload["outcome"], "invalid_test_phase_timing")
+    node_id = _string(payload["node_id"], "invalid_test_phase_timing")
+    duration = _duration(payload["duration_seconds"])
+    match payload["phase"]:
+        case "setup":
+            return TestPhaseTiming(node_id, "setup", duration)
+        case "call":
+            return TestPhaseTiming(node_id, "call", duration)
+        case "teardown":
+            return TestPhaseTiming(node_id, "teardown", duration)
+        case _:
+            raise EvidenceError("invalid_test_phase_timing")
+
+
+def _decode_runs(text: str, repository: str) -> tuple[WorkflowRun, ...]:
+    """Project GitHub's extensible response into the fields owned by this gate."""
+    rows = _object(text).get("workflow_runs")
+    if not isinstance(rows, list):
+        raise EvidenceError("invalid_run_list")
+    runs: list[WorkflowRun] = []
+    for value in rows:
+        if not isinstance(value, dict):
+            continue
+        row = _mapping(value, "invalid_run_list")
+        run_id = row.get("id")
+        if isinstance(run_id, bool) or not isinstance(run_id, int):
+            continue
+        # Older compact inventories omit status; explicit malformed values fail.
+        status = _string(row.get("status", "completed"), "invalid_run_status")
+        conclusion = row.get("conclusion")
+        if conclusion is not None and not isinstance(conclusion, str):
+            raise EvidenceError("invalid_run_conclusion")
+        url = row.get("html_url")
+        if url is None or url == "":
+            url = f"https://github.com/{repository}/actions/runs/{run_id}"
+        url = _string(url, "invalid_run_url")
+        runs.append(WorkflowRun(run_id, status, url, conclusion))
+    return tuple(runs)
+
+
+def _decode_pull(value: object) -> PullIdentity:
+    """GitHub owns extra API fields; only this validated projection crosses ingress."""
+    pull = _mapping(value, "invalid_pull_request")
+    head = _mapping(pull.get("head"), "invalid_pull_request")
+    base = _mapping(pull.get("base"), "invalid_pull_request")
+    head_sha = _string(head.get("sha"), "invalid_pull_request")
+    base_sha = _string(base.get("sha"), "invalid_pull_request")
+    if not _SHA.fullmatch(head_sha) or not _SHA.fullmatch(base_sha):
+        raise EvidenceError("invalid_pull_request")
+    repository = head.get("repo")
+    head_repository: str | None = None
+    if repository is not None:
+        head_repository = _string(
+            _mapping(repository, "invalid_pull_request").get("full_name"),
+            "invalid_pull_request",
+        )
+    number = pull.get("number")
+    if number is not None and (isinstance(number, bool) or not isinstance(number, int)):
+        raise EvidenceError("invalid_pull_request")
+    state = pull.get("state")
+    if state is not None and not isinstance(state, str):
+        raise EvidenceError("invalid_pull_request")
+    return PullIdentity(head_sha, base_sha, head_repository, number, state)
+
+
+def _decode_pulls(text: str) -> tuple[PullIdentity, ...]:
+    pulls: list[PullIdentity] = []
+    for value in _objects(text):
+        try:
+            pulls.append(_decode_pull(value))
+        except EvidenceError:
+            continue
+    return tuple(pulls)
+
+
+def _decode_pull_text(text: str) -> PullIdentity:
+    return _decode_pull(_object(text))
+
+
+def _decode_comments(text: str) -> tuple[PullComment, ...]:
+    """Project the extensible GitHub comment response without retaining raw JSON."""
+    comments: list[PullComment] = []
+    for value in _objects(text):
+        comment_id = value.get("id")
+        body = value.get("body")
+        if (
+            isinstance(comment_id, bool)
+            or not isinstance(comment_id, int)
+            or not isinstance(body, str)
+        ):
+            continue
+        comments.append(PullComment(comment_id, body))
+    return tuple(comments)
+
+
+def _decode_candidate(text: str) -> CandidatePayload:
+    """Decode current reports and older compact head/lanes reports at ingress."""
+    payload = _object(text)
+    head_sha = _string(payload.get("head_sha"), "invalid_candidate_report")
+    if not _SHA.fullmatch(head_sha):
+        raise EvidenceError("invalid_candidate_report")
+    raw_lanes = _mapping(payload.get("lanes"), "invalid_candidate_lanes")
+    # Older reports may omit schema/metric and diagnostics. Other known egress
+    # fields are not reevaluation inputs; unexpected fields are rejected.
+    try:
+        if payload.keys() - DurationReport.__annotations__.keys():
+            raise EvidenceError("invalid_candidate_report")
+        if "schema_version" in payload and (
+            isinstance(payload["schema_version"], bool)
+            or not isinstance(payload["schema_version"], int)
+            or payload["schema_version"] != 1
+        ):
+            raise EvidenceError("invalid_candidate_report")
+        if "metric" in payload and payload["metric"] != METRIC:
+            raise EvidenceError("invalid_candidate_report")
+        if not raw_lanes or any(not _LANE.fullmatch(lane) for lane in raw_lanes):
+            raise EvidenceError("invalid_candidate_lanes")
+        lanes = {lane: _duration(value) for lane, value in raw_lanes.items()}
+        diagnostics: dict[str, Mapping[str, Decimal]] = {}
+        if payload.get("lane_diagnostics") is not None:
+            raw_diagnostics = _mapping(
+                payload["lane_diagnostics"], "invalid_candidate_diagnostics"
+            )
+            for lane, raw in raw_diagnostics.items():
+                values = _mapping(raw, "invalid_candidate_diagnostics")
+                if not _LANE.fullmatch(lane) or values.keys() - {
+                    "setup",
+                    "call",
+                    "teardown",
+                    "wall",
+                }:
+                    raise EvidenceError("invalid_candidate_diagnostics")
+                diagnostics[lane] = {
+                    phase: _duration(value)
+                    for phase, value in values.items()
+                    if value is not None
+                }
+        timing: CandidateTiming | InvalidCandidateTiming = CandidateTiming(
+            lanes, diagnostics
+        )
+    except EvidenceError as error:
+        timing = InvalidCandidateTiming(str(error))
+    return CandidatePayload(head_sha, timing)
+
+
 def _seconds(text: str) -> Decimal:
     try:
         value = Decimal(text.strip())
@@ -156,20 +406,14 @@ def load_lanes(root: Path) -> LaneEvidence:
         seen: set[tuple[str, str]] = set()
         call_count = 0
         for line in path.read_text(encoding="utf-8").splitlines():
-            payload = _object(line)
-            if payload.get("record_type") != "test_phase":
+            record = _decode_test_phase(line)
+            if record is None:
                 continue
-            node_id, phase = payload.get("node_id"), payload.get("phase")
-            if (
-                not isinstance(node_id, str)
-                or not node_id
-                or phase not in phases
-                or (node_id, str(phase)) in seen
-            ):
+            if (record.node_id, record.phase) in seen:
                 raise EvidenceError("invalid_test_phase_timing")
-            seen.add((node_id, str(phase)))
-            phases[str(phase)] += _seconds(str(payload.get("duration_seconds")))
-            if phase == "call":
+            seen.add((record.node_id, record.phase))
+            phases[record.phase] += record.duration_seconds
+            if record.phase == "call":
                 call_count += 1
         try:
             junit = element_tree.parse(path.parent / "junit.xml").getroot()
@@ -191,34 +435,20 @@ def load_lanes(root: Path) -> LaneEvidence:
 
 
 def _runs(repository: str, sha: str, command: Runner) -> list[WorkflowRun]:
-    payload = _object(
-        command(
-            [
-                "gh",
-                "api",
-                "--method",
-                "GET",
-                f"repos/{repository}/actions/workflows/ci.yaml/runs"
-                f"?head_sha={sha}&per_page=10",
-            ]
+    return list(
+        _decode_runs(
+            command(
+                [
+                    "gh",
+                    "api",
+                    "--method",
+                    "GET",
+                    f"repos/{repository}/actions/workflows/ci.yaml/runs?head_sha={sha}&per_page=10",
+                ]
+            ),
+            repository,
         )
     )
-    rows = payload.get("workflow_runs")
-    if not isinstance(rows, list):
-        raise EvidenceError("invalid_run_list")
-    runs: list[WorkflowRun] = []
-    for row in rows:
-        if not isinstance(row, dict) or not isinstance(row.get("id"), int):
-            continue
-        run_id = row["id"]
-        status = row.get("status")
-        url = row.get("html_url")
-        if not isinstance(status, str):
-            status = "completed"
-        if not isinstance(url, str) or not url:
-            url = f"https://github.com/{repository}/actions/runs/{run_id}"
-        runs.append(WorkflowRun(run_id, status, url))
-    return runs
 
 
 def _download_sample(
@@ -316,7 +546,7 @@ def compare(
     head_sha: str,
     base_sha: str,
     diagnostics: Mapping[str, Mapping[str, Decimal]] | None = None,
-) -> dict[str, object]:
+) -> DurationReport:
     """Compute the exact twenty-percent verdict."""
     critical = max(lanes.items(), key=lambda item: item[1])[0]
     base_critical = max(base.lanes.items(), key=lambda item: item[1])[0]
@@ -361,7 +591,7 @@ def unavailable(
     base: str,
     diagnostics: Mapping[str, Mapping[str, Decimal]] | None = None,
     run: WorkflowRun | None = None,
-) -> dict[str, object]:
+) -> DurationReport:
     """Keep current measurements visible while the base comparison is pending."""
     return {
         "schema_version": 1,
@@ -388,7 +618,7 @@ def unavailable(
     }
 
 
-def invalid_evidence(reason: str, head: str, base: str) -> dict[str, object]:
+def invalid_evidence(reason: str, head: str, base: str) -> DurationReport:
     """Fail closed when the candidate measurement itself is invalid."""
     return {
         **unavailable({}, reason, head, base),
@@ -396,20 +626,20 @@ def invalid_evidence(reason: str, head: str, base: str) -> dict[str, object]:
     }
 
 
-def render(report: Mapping[str, object]) -> str:
+def render(report: DurationReport) -> str:
     """Render a scan-first verdict before exposing raw evidence."""
-    outcome = str(report["outcome"])
-    observed = report.get("observed_seconds")
-    reference = report.get("reference_seconds")
-    increase = report.get("increase_percent")
-    threshold = report.get("threshold_seconds")
-    lane = html.escape(str(report.get("critical_lane") or "unknown"))
+    outcome = report["outcome"]
+    observed = report["observed_seconds"]
+    reference = report["reference_seconds"]
+    increase = report["increase_percent"]
+    threshold = report["threshold_seconds"]
+    lane = html.escape(report["critical_lane"] or "unknown")
     change = (
         f"{Decimal(str(increase)):+.2f}".rstrip("0").rstrip(".")
         if increase is not None
         else None
     )
-    reason_code = str(report.get("reason"))
+    reason_code = report["reason"]
     status = {
         "pass": "✅ Within limit",
         "regression": "❌ Over 20% limit",
@@ -448,10 +678,10 @@ def render(report: Mapping[str, object]) -> str:
             "base_workflow_running": "Base CI is still running",
             "compatible_base_run_unavailable": "Base timing artifact unavailable",
             "github_evidence_unavailable": "GitHub timing evidence unavailable",
-        }.get(str(report.get("reason")), "Required base timing evidence unavailable")
-        run_url = report.get("base_run_url")
-        run_id = report.get("base_run_id")
-        if isinstance(run_url, str) and run_url:
+        }.get(report["reason"], "Required base timing evidence unavailable")
+        run_url = report["base_run_url"]
+        run_id = report["base_run_id"]
+        if run_url:
             reason += (
                 f": [workflow run {html.escape(str(run_id))}]({html.escape(run_url)})"
             )
@@ -462,7 +692,7 @@ def render(report: Mapping[str, object]) -> str:
             "incomplete_call_timing": "Current test timing evidence incomplete",
             "invalid_test_phase_timing": "Current test timing evidence invalid",
             "junit_evidence_unavailable": "Current JUnit evidence unavailable",
-        }.get(str(report.get("reason")), "Current timing evidence invalid")
+        }.get(report["reason"], "Current timing evidence invalid")
         lines.extend(["", reason])
     lines.extend(
         [
@@ -472,11 +702,11 @@ def render(report: Mapping[str, object]) -> str:
             "",
             "| Run | Lane | Test | Setup | Teardown | Total |",
             "| --- | --- | ---: | ---: | ---: | ---: |",
-            _diagnostic_row("Candidate", lane, report.get("lane_diagnostics")),
+            _diagnostic_row("Candidate", lane, report["lane_diagnostics"]),
             _diagnostic_row(
                 "Base",
-                html.escape(str(report.get("base_critical_lane") or "unknown")),
-                report.get("base_lane_diagnostics"),
+                html.escape(report["base_critical_lane"] or "unknown"),
+                report["base_lane_diagnostics"],
             ),
             "",
             f"- Change: **{change if change is not None else 'unavailable'}%**",
@@ -501,9 +731,11 @@ def render(report: Mapping[str, object]) -> str:
     return "\n".join(lines)
 
 
-def _diagnostic_row(label: str, lane: str, raw: object) -> str:
-    values = raw.get(lane) if isinstance(raw, dict) else None
-    if not isinstance(values, dict):
+def _diagnostic_row(
+    label: str, lane: str, diagnostics: Mapping[str, Mapping[str, str | None]]
+) -> str:
+    values = diagnostics.get(lane)
+    if values is None:
         unavailable = " | ".join(["unavailable"] * 4)
         return f"| {label} | `{lane}` | {unavailable} |"
     cells = [
@@ -530,7 +762,7 @@ def evaluate(
     run_id: int,
     work_dir: Path,
     command: Runner,
-) -> dict[str, object]:
+) -> DurationReport:
     """Evaluate current local artifacts against an existing base run."""
     try:
         evidence = load_lanes(artifacts_root)
@@ -570,7 +802,7 @@ def _candidate_report(
     repository: str, head_sha: str, work_dir: Path, command: Runner
 ) -> CandidateReport:
     for run in _runs(repository, head_sha, command):
-        if run.status != "completed":
+        if run.status != "completed" or run.conclusion == "cancelled":
             continue
         destination = work_dir / f"candidate-{run.run_id}"
         try:
@@ -590,43 +822,26 @@ def _candidate_report(
                     str(destination),
                 ]
             )
-            report = _object((destination / "report.json").read_text(encoding="utf-8"))
+            report = _decode_candidate(
+                (destination / "report.json").read_text(encoding="utf-8")
+            )
         except (EvidenceError, OSError):
             continue
-        if report.get("head_sha") == head_sha and isinstance(report.get("lanes"), dict):
+        if report.head_sha == head_sha:
             return CandidateReport(run_id=run.run_id, report=report)
     raise EvidenceError("candidate_evidence_unavailable")
-
-
-def _report_diagnostics(
-    report: Mapping[str, object],
-) -> dict[str, dict[str, Decimal]]:
-    raw = report.get("lane_diagnostics")
-    if not isinstance(raw, dict):
-        return {}
-    diagnostics: dict[str, dict[str, Decimal]] = {}
-    for lane, values in raw.items():
-        if not isinstance(lane, str) or not isinstance(values, dict):
-            continue
-        parsed: dict[str, Decimal] = {}
-        for name in ("setup", "call", "teardown", "wall"):
-            value = values.get(name)
-            if value is not None:
-                parsed[name] = _seconds(str(value))
-        diagnostics[lane] = parsed
-    return diagnostics
 
 
 def _publish_status(
     repository: str,
     head_sha: str,
     base_sha: str,
-    result: Mapping[str, object],
+    result: DurationReport,
     fallback_target: str,
     command: Runner,
 ) -> None:
-    outcome = str(result["outcome"])
-    reason = str(result.get("reason"))
+    outcome = result["outcome"]
+    reason = result["reason"]
     state = {
         "pass": "success",
         "comparison_unavailable": (
@@ -635,9 +850,7 @@ def _publish_status(
         "regression": "failure",
         "evidence_invalid": "failure",
     }.get(outcome, "failure")
-    target = result.get("base_run_url")
-    if not isinstance(target, str) or not target:
-        target = fallback_target
+    target = result["base_run_url"] or fallback_target
     command(
         [
             "gh",
@@ -694,10 +907,10 @@ def _update_sticky_comment(
     pull_number: int,
     head_sha: str,
     candidate_target: str,
-    result: Mapping[str, object],
+    result: DurationReport,
     command: Runner,
 ) -> None:
-    comments = _objects(
+    comments = _decode_comments(
         command(
             [
                 "gh",
@@ -710,20 +923,16 @@ def _update_sticky_comment(
     )
     duration = render(result)
     for comment in comments:
-        comment_id = comment.get("id")
-        body = comment.get("body")
-        if not isinstance(comment_id, int) or not isinstance(body, str):
+        if _sticky_marker(comment.body) is None:
             continue
-        if _sticky_marker(body) is None:
-            continue
-        updated = _replace_duration(body, duration)
+        updated = _replace_duration(comment.body, duration)
         command(
             [
                 "gh",
                 "api",
                 "--method",
                 "PATCH",
-                f"repos/{repository}/issues/comments/{comment_id}",
+                f"repos/{repository}/issues/comments/{comment.comment_id}",
                 "--raw-field",
                 f"body={updated}",
             ]
@@ -765,45 +974,31 @@ def _pull_matches(
     command: Runner,
 ) -> bool:
     """Reject evidence publication after the PR identity changes."""
-    pull = _object(command(["gh", "api", f"repos/{repository}/pulls/{pull_number}"]))
-    head, base = pull.get("head"), pull.get("base")
-    if not isinstance(head, dict) or not isinstance(base, dict):
-        raise EvidenceError("invalid_pull_request")
-    return head.get("sha") == head_sha and base.get("sha") == base_sha
+    pull = _decode_pull_text(
+        command(["gh", "api", f"repos/{repository}/pulls/{pull_number}"])
+    )
+    return pull.head_sha == head_sha and pull.base_sha == base_sha
 
 
 def recheck(repository: str, pull_number: int, work_dir: Path, command: Runner) -> str:
     """Recompare recorded candidate evidence and synchronize status plus comment."""
-    pull = _object(command(["gh", "api", f"repos/{repository}/pulls/{pull_number}"]))
-    head = pull.get("head")
-    base = pull.get("base")
-    if not isinstance(head, dict) or not isinstance(base, dict):
-        raise EvidenceError("invalid_pull_request")
-    head_repository = head.get("repo")
-    if (
-        not isinstance(head_repository, dict)
-        or head_repository.get("full_name") != repository
-    ):
+    pull = _decode_pull_text(
+        command(["gh", "api", f"repos/{repository}/pulls/{pull_number}"])
+    )
+    if pull.head_repository != repository:
         return f"PR #{pull_number}: fork pull request skipped"
-    head_sha, base_sha = head.get("sha"), base.get("sha")
-    if not isinstance(head_sha, str) or not isinstance(base_sha, str):
-        raise EvidenceError("invalid_pull_request")
+    head_sha, base_sha = pull.head_sha, pull.base_sha
     try:
         candidate = _candidate_report(repository, head_sha, work_dir, command)
     except (EvidenceError, OSError):
         return f"PR #{pull_number}: no duration evidence"
     run_id = candidate.run_id
-    report = candidate.report
     candidate_target = f"https://github.com/{repository}/actions/runs/{run_id}"
-    try:
-        raw = report["lanes"]
-        if not isinstance(raw, dict) or not raw:
-            raise EvidenceError("invalid_candidate_lanes")
-        lanes = {str(lane): _seconds(str(value)) for lane, value in raw.items()}
-        diagnostics = _report_diagnostics(report)
-    except (EvidenceError, ValueError) as error:
-        result = invalid_evidence(str(error), head_sha, base_sha)
+    timing = candidate.report.timing
+    if isinstance(timing, InvalidCandidateTiming):
+        result = invalid_evidence(timing.reason, head_sha, base_sha)
     else:
+        lanes, diagnostics = timing.lanes, timing.diagnostics
         try:
             sample = find_sample(
                 repository, base_sha, set(lanes), run_id, work_dir / "base", command
@@ -844,6 +1039,34 @@ def recheck(repository: str, pull_number: int, work_dir: Path, command: Runner) 
     return f"PR #{pull_number}: {result['outcome']} ({result['reason']})"
 
 
+def affected_pull_numbers(
+    repository: str, completed_sha: str, command: Runner
+) -> tuple[int, ...]:
+    """Select the completed candidate and every exact-base dependent PR."""
+    if not _SHA.fullmatch(completed_sha):
+        raise EvidenceError("completed_sha_unavailable")
+    pulls = _decode_pulls(
+        command(
+            [
+                "gh",
+                "api",
+                "--paginate",
+                "--slurp",
+                f"repos/{repository}/pulls?state=open&per_page=100",
+            ]
+        )
+    )
+    numbers: set[int] = set()
+    for pull in pulls:
+        if pull.state != "open" or pull.number is None:
+            continue
+        if pull.head_repository != repository:
+            continue
+        if pull.head_sha == completed_sha or pull.base_sha == completed_sha:
+            numbers.add(pull.number)
+    return tuple(sorted(numbers))
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
@@ -853,11 +1076,13 @@ def _parser() -> argparse.ArgumentParser:
     for name in ("repository", "base-sha", "head-sha"):
         gate.add_argument(f"--{name}", required=True)
     gate.add_argument("--run-id", type=int, required=True)
-    gate.add_argument("--publish-status", action="store_true")
     check = commands.add_parser("recheck")
     check.add_argument("--repository", required=True)
     check.add_argument("--pull-number", type=int, required=True)
     check.add_argument("--work-dir", type=Path, required=True)
+    targets = commands.add_parser("targets")
+    targets.add_argument("--repository", required=True)
+    targets.add_argument("--completed-sha", required=True)
     return parser
 
 
@@ -867,6 +1092,10 @@ def main(
     """Run the workflow helper."""
     args = _parser().parse_args(argv)
     command = command_runner or _run
+    if args.command == "targets":
+        numbers = affected_pull_numbers(args.repository, args.completed_sha, command)
+        sys.stdout.write("\n".join(str(number) for number in numbers) + "\n")
+        return 0
     if args.command == "recheck":
         sys.stdout.write(
             recheck(args.repository, args.pull_number, args.work_dir, command) + "\n"
@@ -886,15 +1115,6 @@ def main(
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     args.report_markdown.write_text(render(report), encoding="utf-8")
-    if args.publish_status:
-        _publish_status(
-            args.repository,
-            args.head_sha,
-            args.base_sha,
-            report,
-            f"https://github.com/{args.repository}/actions/runs/{args.run_id}",
-            command,
-        )
     return 0 if report["outcome"] in {"pass", "comparison_unavailable"} else 1
 
 

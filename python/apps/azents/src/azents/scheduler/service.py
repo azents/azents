@@ -7,15 +7,13 @@ import logging
 from typing import Annotated
 from uuid import uuid4
 
+from azcommon.logging import bind_extra
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.job_runtime.deps import get_job_runtime
 from azents.job_runtime.types import JobOutcomeStatus, JobRequest, JobRuntime
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.scheduled_task_state import ScheduledTaskStateRepository
 from azents.repos.scheduled_task_state.data import ScheduledTaskState
+from azents.repos.scheduler_state_operations import SchedulerStateOperationRepository
 from azents.scheduler.executor import (
     SCHEDULER_JOB_HANDLER_KEY,
     ScheduledTaskJobPayload,
@@ -32,11 +30,8 @@ _DEFAULT_POLL_INTERVAL = datetime.timedelta(seconds=10)
 class SchedulerService:
     """Periodic scheduled task service."""
 
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ]
-    state_repository: Annotated[
-        ScheduledTaskStateRepository, Depends(ScheduledTaskStateRepository)
+    repository: Annotated[
+        SchedulerStateOperationRepository, Depends(SchedulerStateOperationRepository)
     ]
     job_runtime: Annotated[JobRuntime, Depends(get_job_runtime)]
     scheduler_id: str = dataclasses.field(default_factory=lambda: uuid4().hex)
@@ -44,7 +39,8 @@ class SchedulerService:
 
     async def run(self, shutdown_event: asyncio.Event) -> None:
         """Run scheduler loop until shutdown."""
-        logger.info("Scheduler starting", extra={"scheduler_id": self.scheduler_id})
+        L = bind_extra(logger, {"scheduler_id": self.scheduler_id})
+        L.info("Scheduler starting")
         await self.ensure_registered_states()
         try:
             while not shutdown_event.is_set():
@@ -58,30 +54,25 @@ class SchedulerService:
                 except asyncio.TimeoutError:
                     continue
         finally:
-            logger.info("Scheduler stopped", extra={"scheduler_id": self.scheduler_id})
+            L.info("Scheduler stopped")
 
     async def ensure_registered_states(self) -> None:
         """Ensure DB state rows exist for all registered task definitions."""
         now = _utcnow()
-        async with self.session_manager() as session:
-            for definition in get_task_definitions():
-                await self.state_repository.ensure_state(
-                    session,
-                    task_key=definition.key,
-                    next_run_at=now,
-                )
+        await self.repository.ensure_registered_states(
+            task_keys=tuple(definition.key for definition in get_task_definitions()),
+            now=now,
+        )
 
     async def list_states(self) -> list[ScheduledTaskState]:
         """Return all scheduler states."""
         await self.ensure_registered_states()
-        async with self.session_manager() as session:
-            return await self.state_repository.list_states(session)
+        return await self.repository.list_states()
 
     async def get_state(self, task_key: str) -> ScheduledTaskState | None:
         """Return one scheduler state."""
         await self.ensure_registered_states()
-        async with self.session_manager() as session:
-            return await self.state_repository.get(session, task_key)
+        return await self.repository.get_state(task_key)
 
     async def trigger(self, task_key: str) -> ScheduledTaskState | None:
         """Request manual execution for one task key."""
@@ -89,12 +80,7 @@ class SchedulerService:
         if _get_definition(task_key) is None:
             return None
         now = _utcnow()
-        async with self.session_manager() as session:
-            state = await self.state_repository.trigger(
-                session,
-                task_key=task_key,
-                now=now,
-            )
+        state = await self.repository.trigger(task_key=task_key, now=now)
         logger.info(
             "Scheduled task trigger requested",
             extra={"task_key": task_key, "scheduler_id": self.scheduler_id},
@@ -128,25 +114,20 @@ class SchedulerService:
         definition: ScheduledTaskDefinition,
         now: datetime.datetime,
     ) -> ScheduledTaskState | None:
-        lease_until = now + definition.timeout + datetime.timedelta(seconds=30)
-        async with self.session_manager() as session:
-            state = await self.state_repository.claim_due(
-                session,
-                task_key=definition.key,
-                now=now,
-                lease_owner=self.scheduler_id,
-                lease_until=lease_until,
-            )
-        if state is None:
-            logger.debug(
-                "Scheduled task not claimed",
-                extra={"task_key": definition.key, "scheduler_id": self.scheduler_id},
-            )
-            return None
-        logger.info(
-            "Scheduled task claimed",
-            extra={"task_key": definition.key, "scheduler_id": self.scheduler_id},
+        L = bind_extra(
+            logger, {"task_key": definition.key, "scheduler_id": self.scheduler_id}
         )
+        lease_until = now + definition.timeout + datetime.timedelta(seconds=30)
+        state = await self.repository.claim_due(
+            task_key=definition.key,
+            now=now,
+            lease_owner=self.scheduler_id,
+            lease_until=lease_until,
+        )
+        if state is None:
+            L.debug("Scheduled task not claimed")
+            return None
+        L.info("Scheduled task claimed")
         return state
 
     async def _execute_claimed(
@@ -154,6 +135,9 @@ class SchedulerService:
         definition: ScheduledTaskDefinition,
         state: ScheduledTaskState,
     ) -> None:
+        L = bind_extra(
+            logger, {"task_key": definition.key, "scheduler_id": self.scheduler_id}
+        )
         attempt_started_at = state.last_started_at
         if attempt_started_at is None:
             raise RuntimeError("Claimed scheduled task is missing its start timestamp.")
@@ -186,29 +170,26 @@ class SchedulerService:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            await self._record_failure(definition, state, exc)
+            await self._record_failure(definition, state, exc, log=L)
             return
         finished_at = _utcnow()
         next_run_at = finished_at + definition.interval
-        async with self.session_manager() as session:
-            await self.state_repository.mark_success(
-                session,
-                task_key=definition.key,
-                lease_owner=self.scheduler_id,
-                finished_at=finished_at,
-                next_run_at=next_run_at,
-                result_summary=result.summary,
-            )
-        logger.info(
-            "Scheduled task succeeded",
-            extra={"task_key": definition.key, "scheduler_id": self.scheduler_id},
+        await self.repository.mark_success(
+            task_key=definition.key,
+            lease_owner=self.scheduler_id,
+            finished_at=finished_at,
+            next_run_at=next_run_at,
+            result_summary=result.summary,
         )
+        L.info("Scheduled task succeeded")
 
     async def _record_failure(
         self,
         definition: ScheduledTaskDefinition,
         state: ScheduledTaskState,
         exc: Exception,
+        *,
+        log: logging.LoggerAdapter[logging.Logger],
     ) -> None:
         finished_at = _utcnow()
         next_run_at = compute_failure_next_run_at(
@@ -217,24 +198,19 @@ class SchedulerService:
             state.failure_streak + 1,
             finished_at,
         )
-        async with self.session_manager() as session:
-            await self.state_repository.mark_failure(
-                session,
-                task_key=definition.key,
-                lease_owner=self.scheduler_id,
-                finished_at=finished_at,
-                next_run_at=next_run_at,
-                error_code=(
-                    exc.error_code
-                    if isinstance(exc, ScheduledTaskJobFailure)
-                    else type(exc).__name__
-                ),
-                error_message=str(exc),
-            )
-        logger.exception(
-            "Scheduled task failed",
-            extra={"task_key": definition.key, "scheduler_id": self.scheduler_id},
+        await self.repository.mark_failure(
+            task_key=definition.key,
+            lease_owner=self.scheduler_id,
+            finished_at=finished_at,
+            next_run_at=next_run_at,
+            error_code=(
+                exc.error_code
+                if isinstance(exc, ScheduledTaskJobFailure)
+                else type(exc).__name__
+            ),
+            error_message=str(exc),
         )
+        log.exception("Scheduled task failed")
 
 
 def _get_definition(task_key: str) -> ScheduledTaskDefinition | None:

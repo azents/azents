@@ -3,12 +3,11 @@
 import dataclasses
 import hashlib
 import secrets
-from typing import Annotated, assert_never
+from typing import Annotated
 
 from azcommon.datetime import tznow
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.auth.jwt import create_access_token
 from azents.core.auth.password import (
@@ -20,33 +19,23 @@ from azents.core.config import AuthConfig, Config
 from azents.core.deps import get_auth_config, get_config
 from azents.core.email.service import EmailService
 from azents.core.enums import SignupTokenDeliveryMethod
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.password_login import PasswordLoginRepository
-from azents.repos.password_login.data import PasswordLoginCreate
-from azents.repos.session import SessionRepository
-from azents.repos.session.data import SessionCreate
-from azents.repos.signup_token import SignupTokenRepository
-from azents.repos.signup_token.data import (
-    SignupTokenCreate,
-    SignupTokenRedemptionCreate,
-    SignupTokenUnavailable,
+from azents.core.signup_token_operations import (
+    InvalidSignupToken,
+    SignupTokenEmailAlreadyRegistered,
+    SignupTokenEmailMismatch,
+    SignupTokenRedeemCommand,
 )
-from azents.repos.user import UserRepository
-from azents.repos.user.data import UserCreate
-from azents.repos.user_email import UserEmailRepository
+from azents.repos.signup_token.data import SignupTokenCreate
+from azents.repos.signup_token_operations import SignupTokenOperationRepository
 from azents.services._utils import generate_refresh_token
 
 from .data import (
     CreateSignupTokenInput,
-    InvalidSignupToken,
     PreviewSignupTokenInput,
     PreviewSignupTokenOutput,
     RedeemSignupTokenInput,
     RedeemSignupTokenOutput,
     SignupEmailDeliveryUnavailable,
-    SignupTokenEmailAlreadyRegistered,
-    SignupTokenEmailMismatch,
     SignupTokenListOutput,
     SignupTokenOutput,
     SignupTokenWithPlaintextOutput,
@@ -84,15 +73,10 @@ def mask_signup_email(email: str) -> str:
 class SignupTokenService:
     """Signup token service."""
 
-    signup_token_repo: Annotated[SignupTokenRepository, Depends()]
-    user_repo: Annotated[UserRepository, Depends()]
-    user_email_repo: Annotated[UserEmailRepository, Depends()]
-    password_login_repo: Annotated[PasswordLoginRepository, Depends()]
-    session_repo: Annotated[SessionRepository, Depends()]
-    email_service: Annotated[EmailService, Depends()]
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+    operation_repository: Annotated[
+        SignupTokenOperationRepository, Depends(SignupTokenOperationRepository)
     ]
+    email_service: Annotated[EmailService, Depends()]
     auth_config: Annotated[AuthConfig, Depends(get_auth_config)]
     config: Annotated[Config, Depends(get_config)]
 
@@ -113,18 +97,16 @@ class SignupTokenService:
         )
         max_uses = input.max_uses or self.auth_config.signup_token.default_max_uses
 
-        async with self.session_manager() as session:
-            token = await self.signup_token_repo.create(
-                session,
-                SignupTokenCreate(
-                    token_hash=token_hash,
-                    email=normalize_signup_email(input.email),
-                    created_by_user_id=input.created_by_user_id,
-                    delivery_method=input.delivery_method,
-                    expires_at=expires_at,
-                    max_uses=max_uses,
-                ),
+        token = await self.operation_repository.create(
+            create=SignupTokenCreate(
+                token_hash=token_hash,
+                email=normalize_signup_email(input.email),
+                created_by_user_id=input.created_by_user_id,
+                delivery_method=input.delivery_method,
+                expires_at=expires_at,
+                max_uses=max_uses,
             )
+        )
 
         return SignupTokenWithPlaintextOutput(
             token=SignupTokenOutput.convert_from(token),
@@ -143,12 +125,7 @@ class SignupTokenService:
         :param limit: Maximum return count
         :return: signup token list
         """
-        async with self.session_manager() as session:
-            result = await self.signup_token_repo.list_all(
-                session,
-                offset=offset,
-                limit=limit,
-            )
+        result = await self.operation_repository.list_all(offset=offset, limit=limit)
         return SignupTokenListOutput(
             items=[SignupTokenOutput.convert_from(token) for token in result.items],
             total=result.total,
@@ -165,8 +142,7 @@ class SignupTokenService:
         """
         token_hash = hash_signup_token(input.token)
         now = tznow()
-        async with self.session_manager() as session:
-            token = await self.signup_token_repo.get_by_token_hash(session, token_hash)
+        token = await self.operation_repository.get_by_token_hash(token_hash=token_hash)
 
         if token is None:
             return PreviewSignupTokenOutput(valid=False, email=None, expires_at=None)
@@ -214,93 +190,28 @@ class SignupTokenService:
             else None
         )
 
-        async with self.session_manager() as session:
-            available_result = await self.signup_token_repo.get_available_by_token_hash(
-                session,
-                token_hash,
+        result = await self.operation_repository.redeem(
+            command=SignupTokenRedeemCommand(
+                token_hash=token_hash,
                 now=now,
+                email=email,
+                password_hash=password_hash,
+                refresh_token=refresh_token,
+                expires_at=expires_at,
+                max_expires_at=max_expires_at,
+                user_agent=input.user_agent,
+                ip_address=input.ip_address,
             )
-            if available_result.success:
-                token = available_result.value
-                pass
-            else:
-                error = available_result.error
-                match error:
-                    case SignupTokenUnavailable():
-                        return Failure(InvalidSignupToken())
-                    case _:
-                        assert_never(error)
-
-            if token.email != email:
-                return Failure(SignupTokenEmailMismatch())
-
-            existing_email = await self.user_email_repo.get_by_email(session, email)
-            if existing_email is not None:
-                return Failure(SignupTokenEmailAlreadyRegistered(email=email))
-
-            claim_result = await self.signup_token_repo.claim_for_redemption(
-                session,
-                token_hash,
-                now=now,
-            )
-            if claim_result.success:
-                token = claim_result.value
-                pass
-            else:
-                error = claim_result.error
-                match error:
-                    case SignupTokenUnavailable():
-                        return Failure(InvalidSignupToken())
-                    case _:
-                        assert_never(error)
-
-            user = await self.user_repo.create_with_verified_primary_email(
-                session,
-                UserCreate(email=email),
-                verified_at=now,
-            )
-            password_create_result = await self.password_login_repo.create(
-                session,
-                PasswordLoginCreate(
-                    user_id=user.id,
-                    password_hash=password_hash,
-                ),
-            )
-            match password_create_result:
-                case Success():
-                    pass
-                case Failure():
-                    return Failure(SignupTokenEmailAlreadyRegistered(email=email))
-                case _:
-                    assert_never(password_create_result)
-
-            db_session = await self.session_repo.create(
-                session,
-                SessionCreate(
-                    user_id=user.id,
-                    refresh_token=refresh_token,
-                    expires_at=expires_at,
-                    max_expires_at=max_expires_at,
-                    user_agent=input.user_agent,
-                    ip_address=input.ip_address,
-                ),
-            )
-            await self.signup_token_repo.create_redemption(
-                session,
-                SignupTokenRedemptionCreate(
-                    signup_token_id=token.id,
-                    user_id=user.id,
-                    email=email,
-                    ip_address=input.ip_address,
-                    user_agent=input.user_agent,
-                    redeemed_at=now,
-                ),
-            )
+        )
+        if result.success:
+            facts = result.value
+        else:
+            return Failure(result.error)
 
         access_token = create_access_token(
             config=self.auth_config.jwt,
-            user_id=user.id,
-            session_id=db_session.id,
+            user_id=facts.user_id,
+            session_id=facts.session_id,
         )
         return Success(
             RedeemSignupTokenOutput(
@@ -316,24 +227,22 @@ class SignupTokenService:
         :param token_id: signup token ID
         :return: True when token exists
         """
-        async with self.session_manager() as session:
-            return await self.signup_token_repo.revoke(
-                session,
-                token_id,
-                revoked_at=tznow(),
-            )
+        return await self.operation_repository.revoke(token_id=token_id)
 
     async def create_email_delivery_token(
         self,
         email: str,
-    ) -> Result[SignupTokenWithPlaintextOutput, SignupEmailDeliveryUnavailable]:
+    ) -> SignupTokenWithPlaintextOutput:
         """Create and send signup token for email delivery.
 
         :param email: Email to fix to token
-        :return: Created token or delivery unavailable
+        :return: Created token after accepted delivery
+        :raises SignupEmailDeliveryUnavailable: Email delivery is unavailable
         """
         if not self.email_service.configured:
-            return Failure(SignupEmailDeliveryUnavailable())
+            raise SignupEmailDeliveryUnavailable(
+                "Signup email delivery is not configured."
+            )
 
         created = await self.create(
             CreateSignupTokenInput(
@@ -351,8 +260,10 @@ class SignupTokenService:
             expire_hours=self.auth_config.signup_token.default_expire_hours,
         )
         if not sent:
-            return Failure(SignupEmailDeliveryUnavailable())
-        return Success(created)
+            raise SignupEmailDeliveryUnavailable(
+                "Signup email delivery did not complete."
+            )
+        return created
 
     async def create_manual_token_for_email(
         self,

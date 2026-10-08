@@ -8,11 +8,13 @@ from unittest.mock import AsyncMock
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentSessionStatus
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.model_metadata_source import ModelMetadataSourceRepository
+from azents.repos.model_metadata_source_data import CapturedContextSource
 from azents.repos.subagent_coordination.repository import (
     SubagentCoordinationRepository,
 )
@@ -21,12 +23,13 @@ from azents.repos.subagent_tool_operations import SubagentToolOperationRepositor
 
 async def test_subagent_tool_operations_close_before_returning_effect_targets() -> None:
     """Subagent reads and queueing return detached results after commit."""
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
     transaction_active = False
     transaction_count = 0
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         nonlocal transaction_active, transaction_count
         assert not transaction_active
         transaction_active = True
@@ -66,7 +69,7 @@ async def test_subagent_tool_operations_close_before_returning_effect_targets() 
     sessions.resolve_session_agent_path.return_value = target
     sessions.lock_session_agent_by_id.return_value = current
     sessions.lock_by_id.return_value = locked_target
-    sources.get_current.return_value = None
+    sources.capture_for_context.return_value = CapturedContextSource(models=())
     coordination.project_root_tree.return_value = None
     operations = SubagentToolOperationRepository(
         session_manager=session_manager,
@@ -75,15 +78,18 @@ async def test_subagent_tool_operations_close_before_returning_effect_targets() 
         agent_run_repository=runs,
         event_transcript_repository=transcripts,
         mailbox_repository=mailbox,
-        source_snapshot_repository=sources,
+        source_repository=sources,
         coordination_repository=coordination,
+        owner=None,
     )
 
     assert await operations.get_agent("agent-1") is agent
     assert not transaction_active
     assert await operations.get_current_session_agent("root-session") is current
     assert not transaction_active
-    assert await operations.load_model_source_snapshot() is None
+    assert await operations.load_model_context(requests=[]) == CapturedContextSource(
+        models=()
+    )
     assert not transaction_active
     assert (
         await operations.list_agents(

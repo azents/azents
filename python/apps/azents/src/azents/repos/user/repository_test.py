@@ -1,6 +1,6 @@
 """User repository tests."""
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from azents.rdb.session_capabilities import WriteSession
 
 from . import UserRepository
 from .data import UserCreate
@@ -9,7 +9,7 @@ from .data import UserCreate
 class TestUserRepository:
     """UserRepository tests."""
 
-    async def test_create(self, rdb_session: AsyncSession) -> None:
+    async def test_create(self, rdb_session: WriteSession) -> None:
         """Create User + UserEmail."""
         # Given: prepare create data
         repo = UserRepository()
@@ -24,7 +24,7 @@ class TestUserRepository:
         assert user.created_at
         assert user.updated_at
 
-    async def test_get(self, rdb_session: AsyncSession) -> None:
+    async def test_get(self, rdb_session: WriteSession) -> None:
         """Fetch User by ID."""
         # Given: create User
         repo = UserRepository()
@@ -39,7 +39,7 @@ class TestUserRepository:
         assert user.primary_email_id == created.primary_email_id
         assert user.primary_email == "gu-get@example.com"
 
-    async def test_get_not_found(self, rdb_session: AsyncSession) -> None:
+    async def test_get_not_found(self, rdb_session: WriteSession) -> None:
         """Return None when fetching by nonexistent ID."""
         # Given: nonexistent ID
         repo = UserRepository()
@@ -50,7 +50,7 @@ class TestUserRepository:
         # Then: None
         assert user is None
 
-    async def test_get_by_email(self, rdb_session: AsyncSession) -> None:
+    async def test_get_by_email(self, rdb_session: WriteSession) -> None:
         """Fetch User by email."""
         # Given: create User
         repo = UserRepository()
@@ -66,7 +66,7 @@ class TestUserRepository:
         assert user.id == created.id
         assert user.primary_email == "gu-by-email@example.com"
 
-    async def test_get_by_email_not_found(self, rdb_session: AsyncSession) -> None:
+    async def test_get_by_email_not_found(self, rdb_session: WriteSession) -> None:
         """Return None when fetching by nonexistent email."""
         # Given: nonexistent email
         repo = UserRepository()
@@ -77,7 +77,7 @@ class TestUserRepository:
         # Then: None
         assert user is None
 
-    async def test_list_all(self, rdb_session: AsyncSession) -> None:
+    async def test_list_all(self, rdb_session: WriteSession) -> None:
         """Fetch all User list."""
         # Given: create multiple Users
         repo = UserRepository()
@@ -91,7 +91,7 @@ class TestUserRepository:
         assert user_list.total >= 2
         assert len(user_list.items) >= 2
 
-    async def test_list_all_pagination(self, rdb_session: AsyncSession) -> None:
+    async def test_list_all_pagination(self, rdb_session: WriteSession) -> None:
         """Paginate all User list."""
         # Given: create User
         repo = UserRepository()
@@ -106,7 +106,7 @@ class TestUserRepository:
         assert len(user_list.items) == 1
         assert user_list.total >= 3
 
-    async def test_delete(self, rdb_session: AsyncSession) -> None:
+    async def test_delete(self, rdb_session: WriteSession) -> None:
         """Delete User."""
         # Given: create User
         repo = UserRepository()

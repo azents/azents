@@ -15,8 +15,12 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     WorkspaceUserRole,
 )
+from azents.core.memory_scope import MemoryScope
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent.data import Agent
-from azents.repos.memory.data import Memory, MemoryScope
+from azents.repos.memory.data import Memory
+from azents.repos.memory.ui_operations import MemoryUIOperations
+from azents.repos.memory.ui_paging import MemoryUICursorError, MemoryUIPage
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_selectable_model_options,
@@ -24,7 +28,12 @@ from azents.testing.model_selection import (
 from azents.testing.types import require_instance
 
 from . import MemoryService
-from .data import DuplicateMemory, MemoryCreateInput, MemoryUpdateInput
+from .data import (
+    DuplicateMemory,
+    MemoryCreateInput,
+    MemoryCursorInvalid,
+    MemoryUpdateInput,
+)
 
 _NOW = datetime.datetime.now(datetime.timezone.utc)
 
@@ -93,14 +102,16 @@ def _make_service() -> MemoryService:
     admin_repository = AsyncMock()
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
         yield AsyncMock(spec=AsyncSession)
 
     return MemoryService(
-        repository=repository,
-        agent_repository=agent_repository,
-        admin_repository=admin_repository,
-        session_manager=session_manager,
+        operations=MemoryUIOperations(
+            repository=repository,
+            agent_repository=agent_repository,
+            admin_repository=admin_repository,
+            session_manager=session_manager,
+        ),
     )
 
 
@@ -110,8 +121,8 @@ class TestMemoryService:
     async def test_create_rejects_duplicate_name_in_scope(self) -> None:
         """Human create uses strict conflict semantics instead of upsert."""
         service = _make_service()
-        agent_repo = require_instance(service.agent_repository, AsyncMock)
-        memory_repo = require_instance(service.repository, AsyncMock)
+        agent_repo = require_instance(service.operations.agent_repository, AsyncMock)
+        memory_repo = require_instance(service.operations.repository, AsyncMock)
         agent_repo.get_by_id.return_value = _make_agent()
         memory_repo.get_by_name.return_value = _make_memory(name="dupe")
 
@@ -137,9 +148,9 @@ class TestMemoryService:
     async def test_member_cannot_update_agent_scope_memory(self) -> None:
         """Agent-scope writes require Agent admin or workspace owner."""
         service = _make_service()
-        agent_repo = require_instance(service.agent_repository, AsyncMock)
-        memory_repo = require_instance(service.repository, AsyncMock)
-        admin_repo = require_instance(service.admin_repository, AsyncMock)
+        agent_repo = require_instance(service.operations.agent_repository, AsyncMock)
+        memory_repo = require_instance(service.operations.repository, AsyncMock)
+        admin_repo = require_instance(service.operations.admin_repository, AsyncMock)
         agent_repo.get_by_id.return_value = _make_agent()
         memory_repo.get_by_id.return_value = _make_memory(scope=MemoryScope.AGENT)
         admin_repo.is_admin.return_value = False
@@ -160,8 +171,8 @@ class TestMemoryService:
     async def test_member_updates_own_user_scope_memory(self) -> None:
         """User-scope writes are allowed for the current authenticated user."""
         service = _make_service()
-        agent_repo = require_instance(service.agent_repository, AsyncMock)
-        memory_repo = require_instance(service.repository, AsyncMock)
+        agent_repo = require_instance(service.operations.agent_repository, AsyncMock)
+        memory_repo = require_instance(service.operations.repository, AsyncMock)
         existing = _make_memory(
             scope=MemoryScope.USER,
             user_id="user-1",
@@ -188,11 +199,13 @@ class TestMemoryService:
 
     async def test_list_user_scope_uses_current_user_id(self) -> None:
         """User-scope list never exposes another user's Memory rows."""
-        service = _make_service()
-        agent_repo = require_instance(service.agent_repository, AsyncMock)
-        memory_repo = require_instance(service.repository, AsyncMock)
-        agent_repo.get_by_id.return_value = _make_agent()
-        memory_repo.list.return_value = []
+        operations = AsyncMock(spec=MemoryUIOperations)
+        service = MemoryService(operations=operations)
+        operations.get_agent.return_value = _make_agent()
+        operations.list_memories.return_value = MemoryUIPage(
+            items=(_make_memory(user_id="user-1", scope=MemoryScope.USER),),
+            next_cursor="next-page",
+        )
 
         result = await service.list_by_agent(
             "agent-1",
@@ -203,9 +216,57 @@ class TestMemoryService:
             scope=MemoryScope.USER,
             type=None,
             query=None,
+            cursor=None,
+            limit=20,
         )
 
         assert isinstance(result, Success)
-        memory_repo.list.assert_awaited_once()
-        _, kwargs = memory_repo.list.await_args
-        assert kwargs["user_id"] == "user-1"
+        assert result.value.next_cursor == "next-page"
+        assert len(result.value.items) == 1
+        operations.list_memories.assert_awaited_once_with(
+            agent_id="agent-1",
+            user_id="user-1",
+            type=None,
+            query=None,
+            cursor=None,
+            limit=20,
+        )
+
+    async def test_invalid_cursor_returns_typed_failure(self) -> None:
+        operations = AsyncMock(spec=MemoryUIOperations)
+        operations.get_agent.return_value = _make_agent()
+        operations.list_memories.side_effect = MemoryUICursorError("Invalid cursor.")
+        service = MemoryService(operations=operations)
+        result = await service.list_by_agent(
+            "agent-1",
+            workspace_id="ws-1",
+            workspace_user_id="wu-1",
+            user_id="user-1",
+            role=WorkspaceUserRole.MEMBER,
+            scope=MemoryScope.AGENT,
+            type=None,
+            query=None,
+            cursor="invalid",
+            limit=20,
+        )
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, MemoryCursorInvalid)
+
+    async def test_agent_access_failure_does_not_query_page(self) -> None:
+        operations = AsyncMock(spec=MemoryUIOperations)
+        operations.get_agent.return_value = None
+        service = MemoryService(operations=operations)
+        result = await service.list_by_agent(
+            "agent-1",
+            workspace_id="ws-1",
+            workspace_user_id="wu-1",
+            user_id="user-1",
+            role=WorkspaceUserRole.MEMBER,
+            scope=MemoryScope.USER,
+            type=None,
+            query=None,
+            cursor=None,
+            limit=20,
+        )
+        assert isinstance(result, Failure)
+        operations.list_memories.assert_not_awaited()
