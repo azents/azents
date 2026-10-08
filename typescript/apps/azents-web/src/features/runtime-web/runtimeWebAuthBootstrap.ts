@@ -80,7 +80,7 @@ export function startRuntimeWebAuth(): Promise<RuntimeWebAuthResult> {
           "destination" in body &&
           typeof body.destination === "string"
         ) {
-          window.location.assign(body.destination);
+          window.location.replace(body.destination);
           return { type: "NAVIGATING" };
         }
         if (
@@ -91,6 +91,7 @@ export function startRuntimeWebAuth(): Promise<RuntimeWebAuthResult> {
           typeof body.initiationId === "string"
         ) {
           const form = document.createElement("form");
+          form.id = "continue";
           form.method = "POST";
           form.action = body.brokerDestination;
           const input = document.createElement("input");
@@ -103,8 +104,29 @@ export function startRuntimeWebAuth(): Promise<RuntimeWebAuthResult> {
           target.name = "return_target";
           target.value = returnTarget;
           form.append(target);
-          document.body.append(form);
-          form.submit();
+          // Replace this entry with a same-origin document whose parser submits
+          // the native POST before load. The browser replaces that transient
+          // document too, without changing the broker's Origin/cookie contract.
+          const policy = document.createElement("meta");
+          policy.httpEquiv = "Content-Security-Policy";
+          policy.content = `default-src 'none'; script-src 'nonce-runtime-web'; form-action ${new URL(body.brokerDestination).origin}`;
+          const page = new Blob(
+            [
+              '<!doctype html><meta charset="utf-8"><title>Runtime Web</title>',
+              '<meta name="referrer" content="strict-origin">',
+              policy.outerHTML,
+              form.outerHTML,
+              '<script nonce="runtime-web">URL.revokeObjectURL(location.href);document.getElementById("continue").submit()</script>',
+            ],
+            { type: "text/html" },
+          );
+          const pageUrl = URL.createObjectURL(page);
+          try {
+            window.location.replace(pageUrl);
+          } catch (error) {
+            URL.revokeObjectURL(pageUrl);
+            throw error;
+          }
           return { type: "NAVIGATING" };
         }
       }
@@ -124,5 +146,5 @@ export function startRuntimeWebAuth(): Promise<RuntimeWebAuthResult> {
 }
 
 export function runtimeWebAuthBootstrapScript(): string {
-  return `void (${startRuntimeWebAuth.toString()})()`;
+  return `void (${startRuntimeWebAuth.toString().replace(/<\/script/gi, "<\\/script")})()`;
 }

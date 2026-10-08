@@ -1733,7 +1733,8 @@ def _completion_document(destination: str) -> str:
     return (
         "<!doctype html><meta charset=utf-8><title>Runtime Web</title>"
         f'<a id="continue" href="{encoded}">Continue</a>'
-        '<script nonce="runtime-web">document.getElementById("continue").click()'
+        '<script nonce="runtime-web">window.location.replace('
+        'document.getElementById("continue").href)'
         "</script>"
     )
 

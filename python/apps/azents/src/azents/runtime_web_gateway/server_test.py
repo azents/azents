@@ -51,6 +51,7 @@ from azents.runtime_web_gateway.operations import (
 from azents.runtime_web_gateway.server import (
     LinuxProcResidentMemorySampler,
     _assemble_websocket_response_event,
+    _completion_document,
     _response_is_sse,
     _selected_websocket_subprotocol,
     _send_websocket_frames,
@@ -105,6 +106,32 @@ _SETTINGS = RuntimeWebGatewaySettings.model_validate(
     }
 )
 _NOW = datetime.now(UTC)
+
+
+def test_completion_replaces_history_with_fixed_script() -> None:
+    document = _completion_document(
+        "https://endpoint.services.example.net/catalog?tag=one&tag=two#details"
+    )
+    assert (
+        'href="https://endpoint.services.example.net/catalog?tag=one&amp;tag=two#details"'
+        in document
+    )
+    assert (
+        'window.location.replace(document.getElementById("continue").href)' in document
+    )
+    assert ".click()" not in document
+    assert ">Continue</a>" in document
+
+
+def test_completion_escapes_attribute_content_and_keeps_inline_script_fixed() -> None:
+    document = _completion_document('https://endpoint.test/?q="</script><script>bad')
+    assert (
+        'href="https://endpoint.test/?q=&quot;&lt;/script&gt;&lt;script&gt;bad"'
+        in document
+    )
+    assert document.count("<script") == 1
+
+
 _SERVICE = RuntimeWebServiceRecord(
     id="e" * 32,
     workspace_id="w" * 32,

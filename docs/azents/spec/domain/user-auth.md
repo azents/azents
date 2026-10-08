@@ -513,6 +513,18 @@ and retry presentation retains the same Mantine layout and localized copy.
 An authentication document rendered at another origin first performs a full
 navigation to the configured Main Web authentication route; it never submits
 the Main Web authentication request to a Runtime application's origin.
+Successful identity completion uses history-replacing navigation rather than
+adding an authentication-completion entry. Shared-cookie mode replaces the Main
+Web authentication page directly with the service URL. Separate-domain mode
+replaces that page with a one-shot same-origin Blob document that submits the
+existing broker POST during parsing, before load. The intermediate native forms
+retain their existing Origin, cookie and ticket checks; the broker completion
+document replaces its own entry with the service URL. The Blob URL is revoked
+before its form submission, or when replacement navigation throws. Its fixed
+inline script and broker-scoped form-action CSP carry only the initiation ID and
+return target, never a ticket or identity secret. Back/Forward resumes the
+pre-authentication page/service rather than replaying the automatic exchange.
+Explicit user login and activation pages keep their ordinary navigation behavior.
 
 Runtime Web never exposes the Main Web access token, refresh token, Gateway identity,
 broker binding, or one-time ticket to application JavaScript or a URL. Production
@@ -771,6 +783,9 @@ Admin Web `/login` selects one of two modes from Admin bootstrap status. An empt
 Admin-issued signup/password-reset token management and other instance-wide operations remain on Admin Web/Admin API. Workspace-scoped product administration remains on Main Web/Public API.
 
 ## 9. Changelog
+
+- **2026-10-08** — Replaced transient Runtime Web authentication history entries
+  while preserving the native separate-domain exchange and original return URL.
 
 - **2026-10-08** — Preserved Runtime Web service path, query and fragment through
   authentication, Main Web login and Off-service activation without changing
