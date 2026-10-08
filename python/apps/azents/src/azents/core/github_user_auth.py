@@ -22,7 +22,7 @@ from pydantic import (
     ValidationError,
 )
 
-from azents.core.github_auth import GitHubClientFactory, create_github_client
+from azents.core.github_auth import GitHubClientFactory
 
 _API_VERSION = "2022-11-28"
 _PAGE_SIZE = 100
@@ -293,7 +293,7 @@ async def exchange_user_code(
     code: str,
     redirect_uri: str,
     code_verifier: str,
-    client_factory: GitHubClientFactory = create_github_client,
+    client_factory: GitHubClientFactory,
 ) -> GitHubUserToken:
     """Exchange once with PKCE through GitHubKit's public fixed-endpoint transport."""
     async with _client(None, client_factory) as client:
@@ -313,7 +313,7 @@ async def exchange_user_code(
 
 
 async def get_user_identity(
-    token: str, *, client_factory: GitHubClientFactory = create_github_client
+    token: str, *, client_factory: GitHubClientFactory
 ) -> GitHubUserIdentity:
     """Read the execution account from the user token, never from browser input."""
     async with _client(None, client_factory) as client:
@@ -329,7 +329,7 @@ async def get_user_identity(
 
 
 async def get_app_registration(
-    jwt_token: str, *, client_factory: GitHubClientFactory = create_github_client
+    jwt_token: str, *, client_factory: GitHubClientFactory
 ) -> GitHubUserAppIdentity:
     """Read the App ID and OAuth client ID using authenticated App registration."""
     async with _client(None, client_factory) as client:
@@ -390,7 +390,7 @@ async def list_user_access(
     *,
     app_id: int,
     cursor: str | None,
-    client_factory: GitHubClientFactory = create_github_client,
+    client_factory: GitHubClientFactory,
 ) -> GitHubUserAccessPage:
     """Traverse selected-App owners/repos with bounded work and a continuation."""
     coordinates = _decode_cursor(cursor)
@@ -479,7 +479,7 @@ async def revoke_user_token(
     client_id: str,
     client_secret: str,
     token: str,
-    client_factory: GitHubClientFactory = create_github_client,
+    client_factory: GitHubClientFactory,
 ) -> None:
     """Strictly revoke the captured token with observable failures for recovery."""
     async with _client(

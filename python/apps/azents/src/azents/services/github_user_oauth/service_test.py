@@ -65,7 +65,7 @@ class _Harness:
     attempt: GitHubUserAttempt
 
 
-def _harness(*, platform: bool = False, agent_id: str | None = None) -> _Harness:
+def _harness(*, platform: bool, agent_id: str | None) -> _Harness:
     now = datetime.datetime.now(datetime.UTC)
     requester = GitHubUserRequester(
         user_id="manager",
@@ -245,7 +245,7 @@ def _failure() -> GitHubUserProviderError:
 async def test_connect_has_pkce_fixed_callback_and_preserves_active(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    h = _harness()
+    h = _harness(platform=False, agent_id=None)
     monkeypatch.setattr(service_module, "create_github_app_jwt", lambda *args: "jwt")
     output = await h.service.connect(h.requester)
     params = parse_qs(urlsplit(output.authorization_url).query)
@@ -261,7 +261,7 @@ async def test_connect_has_pkce_fixed_callback_and_preserves_active(
 
 
 async def test_exchange_stages_verified_identity_without_activation() -> None:
-    h = _harness(agent_id="agent")
+    h = _harness(platform=False, agent_id="agent")
     output = await h.service.exchange(
         h.requester, code="code", state="github_user.attempt.nonce"
     )
@@ -278,7 +278,7 @@ async def test_exchange_stages_verified_identity_without_activation() -> None:
 async def test_synthetic_browser_origin_requires_explicit_testenv(
     monkeypatch: pytest.MonkeyPatch, testenv_enabled: bool
 ) -> None:
-    h = _harness()
+    h = _harness(platform=False, agent_id=None)
     monkeypatch.setattr(service_module, "create_github_app_jwt", lambda *args: "jwt")
     service = dataclasses.replace(
         h.service,
@@ -298,7 +298,7 @@ async def test_synthetic_browser_origin_requires_explicit_testenv(
 
 
 async def test_context_failure_never_calls_provider() -> None:
-    h = _harness()
+    h = _harness(platform=False, agent_id=None)
     h.repository.claim_exchange.side_effect = GitHubUserOAuthError(
         GitHubUserErrorCode.STALE, "Wrong session."
     )
@@ -312,7 +312,7 @@ async def test_context_failure_never_calls_provider() -> None:
 async def test_expiring_response_stays_rejected_when_cleanup_fails(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    h = _harness()
+    h = _harness(platform=False, agent_id=None)
     h.provider.exchange.side_effect = GitHubUserTokenRejected(
         reason="expiring_token", issued_token="expiring-token"
     )
@@ -337,7 +337,7 @@ async def test_expiring_response_stays_rejected_when_cleanup_fails(
 async def test_disconnect_failure_still_completes_locally_without_probe(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    h = _harness()
+    h = _harness(platform=False, agent_id=None)
     h.provider.revoke.side_effect = _failure()
     with caplog.at_level(logging.WARNING):
         await h.service.disconnect(h.requester)
@@ -352,7 +352,7 @@ async def test_disconnect_failure_still_completes_locally_without_probe(
 async def test_replacement_failure_keeps_new_connection_and_old_cleanup_target() -> (
     None
 ):
-    h = _harness()
+    h = _harness(platform=False, agent_id=None)
     assert h.state.context is not None and h.state.context.connection is not None
     before = h.state.context.connection
     after = dataclasses.replace(before, id="new-connection", access_token="new-token")
@@ -381,7 +381,7 @@ async def test_replacement_failure_keeps_new_connection_and_old_cleanup_target()
 
 
 async def test_successful_transfer_does_not_revoke_active_candidate() -> None:
-    h = _harness()
+    h = _harness(platform=False, agent_id=None)
     assert h.state.context is not None and h.state.context.connection is not None
     connection = dataclasses.replace(
         h.state.context.connection, id="new", access_token="new-token"
@@ -394,7 +394,7 @@ async def test_successful_transfer_does_not_revoke_active_candidate() -> None:
 
 
 async def test_cancel_cleanup_failure_is_local_success() -> None:
-    h = _harness()
+    h = _harness(platform=False, agent_id=None)
     h.repository.cancel.return_value = (_revocation(h, "candidate-token"),)
     h.provider.revoke.side_effect = _failure()
     await h.service.cancel(h.requester, attempt_id="attempt")
@@ -411,7 +411,7 @@ async def test_cleanup_is_awaited_and_bounded_without_background_work(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    h = _harness()
+    h = _harness(platform=False, agent_id=None)
     entered = asyncio.Event()
     never_release = asyncio.Event()
 
@@ -431,7 +431,7 @@ async def test_cleanup_is_awaited_and_bounded_without_background_work(
 
 
 async def test_cleanup_programming_defect_remains_visible() -> None:
-    h = _harness()
+    h = _harness(platform=False, agent_id=None)
     h.provider.revoke.side_effect = RuntimeError("Unexpected defect.")
     with pytest.raises(RuntimeError, match="Unexpected defect"):
         await h.service.cleanup_revocations((_revocation(h, "old-token"),))
@@ -439,7 +439,7 @@ async def test_cleanup_programming_defect_remains_visible() -> None:
 
 
 async def test_cleanup_cancellation_propagates_without_later_io() -> None:
-    h = _harness()
+    h = _harness(platform=False, agent_id=None)
     h.provider.revoke.side_effect = asyncio.CancelledError()
     with pytest.raises(asyncio.CancelledError):
         await h.service.cleanup_revocations(
@@ -452,7 +452,7 @@ async def test_cleanup_cancellation_propagates_without_later_io() -> None:
 async def test_missing_platform_registration_does_not_block_disconnect(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    h = _harness(platform=True)
+    h = _harness(platform=True, agent_id=None)
     h.platform.resolve.return_value = ResolvedPlatformGitHubApp(
         app_id=None,
         client_id=None,
@@ -470,7 +470,7 @@ async def test_missing_platform_registration_does_not_block_disconnect(
 
 
 async def test_late_parent_removal_cannot_activate_and_uses_captured_cleanup() -> None:
-    h = _harness()
+    h = _harness(platform=False, agent_id=None)
     entered, release = asyncio.Event(), asyncio.Event()
 
     async def identity(token: str) -> GitHubUserIdentity:
@@ -495,7 +495,7 @@ async def test_late_parent_removal_cannot_activate_and_uses_captured_cleanup() -
 
 
 async def test_cancelled_exchange_is_not_shielded_or_finalized() -> None:
-    h = _harness()
+    h = _harness(platform=False, agent_id=None)
     entered, release = asyncio.Event(), asyncio.Event()
 
     async def identity(token: str) -> GitHubUserIdentity:
@@ -517,7 +517,7 @@ async def test_cancelled_exchange_is_not_shielded_or_finalized() -> None:
 
 
 async def test_received_token_equal_to_current_active_is_not_revoked() -> None:
-    h = _harness()
+    h = _harness(platform=False, agent_id=None)
     h.provider.exchange.side_effect = GitHubUserTokenRejected(
         reason="invalid_response", issued_token="old-token"
     )
@@ -529,7 +529,7 @@ async def test_received_token_equal_to_current_active_is_not_revoked() -> None:
 
 
 async def test_current_review_and_status_have_no_cleanup_contract() -> None:
-    h = _harness()
+    h = _harness(platform=False, agent_id=None)
     h.repository.read_review.return_value = dataclasses.replace(
         h.attempt,
         status=GitHubUserAttemptStatus.REVIEW,
@@ -549,7 +549,7 @@ async def test_current_review_and_status_have_no_cleanup_contract() -> None:
 
 
 async def test_scope_denial_precedes_availability_settings_read() -> None:
-    h = _harness()
+    h = _harness(platform=False, agent_id=None)
     h.repository.authorize_scope.side_effect = GitHubUserOAuthError(
         GitHubUserErrorCode.AUTHORITY, "Not a manager."
     )
@@ -567,7 +567,7 @@ async def test_scope_denial_precedes_availability_settings_read() -> None:
     "reason", ["authentication", "target_denied", "provider_unavailable"]
 )
 async def test_access_failures_preserve_account_classification(reason: str) -> None:
-    h = _harness()
+    h = _harness(platform=False, agent_id=None)
     if reason == "authentication":
         failure = GitHubUserProviderError(reason="authentication", status_code=401)
     elif reason == "target_denied":
@@ -588,7 +588,7 @@ async def test_access_failures_preserve_account_classification(reason: str) -> N
 
 
 async def test_extra_credential_token_is_rejected_without_disclosure() -> None:
-    h = _harness()
+    h = _harness(platform=False, agent_id=None)
     assert h.state.context is not None
     values = json.loads(h.state.context.toolkit.credentials or "null")
     values["access_token"] = "injected-secret-token"
@@ -606,7 +606,7 @@ async def test_extra_credential_token_is_rejected_without_disclosure() -> None:
 
 
 async def test_invalid_local_cursor_remains_an_input_error() -> None:
-    h = _harness()
+    h = _harness(platform=False, agent_id=None)
     h.provider.access.side_effect = ValueError("Invalid cursor.")
     with pytest.raises(GitHubUserOAuthError) as error:
         await h.service.access(h.requester, cursor="bad")
@@ -615,7 +615,7 @@ async def test_invalid_local_cursor_remains_an_input_error() -> None:
 
 
 async def test_access_returns_observations_not_new_authority() -> None:
-    h = _harness()
+    h = _harness(platform=False, agent_id=None)
     h.provider.access.return_value = GitHubUserAccessPage(
         installations=(), next_cursor="more"
     )

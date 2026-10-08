@@ -18,11 +18,13 @@ attempt_status_enum = ENUM(
     GitHubUserAttemptStatus,
     name="github_user_attempt_status",
     values_callable=lambda enum_type: [value.value for value in enum_type],
+    create_type=False,
 )
 connection_status_enum = ENUM(
     GitHubUserConnectionStatus,
     name="github_user_connection_status",
     values_callable=lambda enum_type: [value.value for value in enum_type],
+    create_type=False,
 )
 
 

@@ -47,7 +47,7 @@ async def _runtime_fixture(
     manager: SessionManager[WriteSession], *, owned: bool
 ) -> _RuntimeFixture:
     setup = await _harness(manager)
-    await _save_credentials(manager, setup)
+    await _save_credentials(manager, setup, app_id="123", client_id="Iv1.client")
     attempt = await _review(setup, "current-token")
     result = await setup.repository.confirm(
         requester=setup.requester,
