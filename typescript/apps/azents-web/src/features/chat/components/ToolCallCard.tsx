@@ -47,6 +47,7 @@ import { ChatCodeBlock } from "./ChatCodeBlock";
 import { FileAttachmentList } from "./FileAttachmentList";
 import { SkillContentPanel } from "./SkillContentPanel";
 import { ToolCallStatusIcon } from "./ToolCallStatusIcon";
+import { ToolInputContent } from "./ToolInputContent";
 import type {
   KnownToolDetailLabel,
   KnownToolPresentation,
@@ -787,13 +788,7 @@ function RawPayloadContent({
           <Text size="xs" c="dimmed" mb="xs">
             {t("arguments")}
           </Text>
-          <ScrollArea.Autosize
-            mah={rem(240)}
-            scrollbarSize={activityDetailScrollbarSize}
-            {...activityDetailScrollAreaProps}
-          >
-            <Code block>{rawText(argumentsText)}</Code>
-          </ScrollArea.Autosize>
+          <ToolInputContent input={argumentsText} />
         </Box>
       ) : null}
       {outputText.length > 0 ? (
@@ -886,7 +881,25 @@ function StandardSpecializedToolCallCard({
 }): ReactElement {
   const t = useTranslations("chat.toolCall");
   const [rawOpened, setRawOpened] = useState(false);
-  const detail = presentationDetail(presentation, t);
+  const semanticDetail = presentationDetail(presentation, t);
+  const output = toolCall.result ?? "";
+  const alreadyShowsOutput =
+    ((presentation.detail?.type === "output" ||
+      presentation.detail?.type === "process") &&
+      presentation.detail.output === output) ||
+    (presentation.detail?.type === "semantic" &&
+      presentation.detail.sections.some(
+        (section) => section.content === output,
+      ));
+  const detail =
+    toolCall.status === "failed" && output.length > 0 && !alreadyShowsOutput ? (
+      <Stack gap="sm">
+        <RawPayloadContent argumentsText="" outputText={output} />
+        {semanticDetail}
+      </Stack>
+    ) : (
+      semanticDetail
+    );
   const qualifier = presentationQualifier(presentation, t);
   const visibleAttachments = genericVisibleAttachments(
     toolCall,

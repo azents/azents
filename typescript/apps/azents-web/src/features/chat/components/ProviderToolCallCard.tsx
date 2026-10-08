@@ -27,6 +27,7 @@ import {
 } from "./providerToolCallPresentation";
 import { providerWebSearchPresentation } from "./providerWebSearchPresentation";
 import { ToolCallStatusIcon } from "./ToolCallStatusIcon";
+import { ToolInputContent } from "./ToolInputContent";
 import type { ProviderToolCall } from "../types";
 import type { ReactElement } from "react";
 
@@ -60,13 +61,7 @@ function RawProviderToolDetails({
           <Text size="xs" c="dimmed" mb="xs">
             {t("arguments")}
           </Text>
-          <ScrollArea.Autosize
-            mah={rem(240)}
-            scrollbarSize={activityDetailScrollbarSize}
-            {...activityDetailScrollAreaProps}
-          >
-            <Code block>{toolCall.arguments}</Code>
-          </ScrollArea.Autosize>
+          <ToolInputContent input={toolCall.arguments} />
         </Box>
       ) : null}
       {hasOutput ? (
@@ -184,12 +179,24 @@ export function ProviderToolCallCard({
         ))}
       </Stack>
     ) : null;
-  const detail =
+  const primaryDetail =
     webSearchDetail ??
     rawDetails ??
     (visibleAttachments.length > 0 && !showAttachmentsDirectly ? (
       <FileAttachmentList files={visibleAttachments} />
     ) : null);
+  const detail =
+    webSearchDetail !== null &&
+    toolCall.status === "failed" &&
+    (toolCall.output?.trim().length ?? 0) > 0 &&
+    webSearch?.summary !== toolCall.output ? (
+      <Stack gap="sm">
+        <RawProviderToolDetails toolCall={{ ...toolCall, arguments: "" }} />
+        {primaryDetail}
+      </Stack>
+    ) : (
+      primaryDetail
+    );
 
   return (
     <>

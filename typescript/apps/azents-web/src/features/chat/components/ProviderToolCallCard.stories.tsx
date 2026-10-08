@@ -1,4 +1,4 @@
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { binaryAttachment, imageAttachment } from "../story-fixtures";
 import { ProviderToolCallCard } from "./ProviderToolCallCard";
@@ -67,7 +67,7 @@ export const WebSearchResults = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await userEvent.click(canvas.getByRole("button", { name: /Web search/ }));
+    await userEvent.click(canvas.getByRole("button", { name: /^Web search/ }));
     await expect(canvas.getByText("Azents agent platform")).toBeVisible();
     await expect(
       canvas.getByText("site:docs.example.com agent workflows"),
@@ -144,6 +144,60 @@ export const Failed = {
       status: "failed",
       output: "The provider rejected the request.",
     },
+  },
+} satisfies Story;
+
+export const FailedSearchExpanded = {
+  args: {
+    toolCall: {
+      id: "provider-failed-search",
+      name: "web_search",
+      arguments: '{"query":"Azents"}',
+      status: "failed",
+      output: "The provider rejected the request.",
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.queryByText(/provider rejected/)).toBeNull();
+    await userEvent.click(canvas.getByRole("button", { name: /^Web search/ }));
+    await waitFor(() =>
+      expect(
+        canvas.getByText("The provider rejected the request."),
+      ).toBeVisible(),
+    );
+    await expect(canvas.getAllByText("Azents")).toHaveLength(2);
+    await userEvent.click(
+      canvas.getByRole("button", { name: "View raw data for Web search" }),
+    );
+    const dialog = within(within(document.body).getByRole("dialog"));
+    await waitFor(() => expect(dialog.getByText("query")).toBeVisible());
+    await expect(dialog.getByText("Azents")).toBeVisible();
+  },
+} satisfies Story;
+
+export const ObjectInputDetails = {
+  args: {
+    toolCall: {
+      id: "provider-object-input",
+      name: "image_generation",
+      arguments: '{"prompt":"first line\\nsecond line","count":1}',
+      status: "completed",
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", {
+        name: "View raw data for Image generation",
+      }),
+    );
+    const dialog = within(within(document.body).getByRole("dialog"));
+    await waitFor(() => expect(dialog.getByText("prompt")).toBeVisible());
+    await expect(dialog.getByText("count")).toBeVisible();
+    await expect(dialog.getByText(/first line/)).toHaveTextContent(
+      "first line second line",
+    );
   },
 } satisfies Story;
 

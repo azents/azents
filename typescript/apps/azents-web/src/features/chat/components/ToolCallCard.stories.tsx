@@ -1,5 +1,5 @@
 import { Box, rem } from "@mantine/core";
-import { expect, fireEvent, userEvent, within } from "storybook/test";
+import { expect, fireEvent, userEvent, waitFor, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import {
   attachmentToolCall,
@@ -334,6 +334,95 @@ export const GenericFailureExpanded = {
   },
 } satisfies Story;
 
+export const FailedWriteExpanded = {
+  args: {
+    toolCall: {
+      id: "failed-write-story",
+      name: "write",
+      arguments: '{"path":"/workspace/example.txt","content":"hello"}',
+      result: "Permission denied: /workspace/example.txt",
+      status: "failed",
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.queryByText(/Permission denied/)).toBeNull();
+    await userEvent.click(canvas.getByRole("button", { name: /^Wrote/ }));
+    await waitFor(() =>
+      expect(
+        canvas.getByText("Permission denied: /workspace/example.txt"),
+      ).toBeVisible(),
+    );
+  },
+} satisfies Story;
+
+export const FailedEditExpanded = {
+  args: {
+    toolCall: {
+      id: "failed-edit-story",
+      name: "edit",
+      arguments:
+        '{"path":"/workspace/example.ts","old_string":"old value","new_string":"new value"}',
+      result: "The requested text was not found.",
+      status: "failed",
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: /^Edit/ }));
+    await waitFor(() =>
+      expect(
+        canvas.getByText("The requested text was not found."),
+      ).toBeVisible(),
+    );
+    await expect(canvas.getByText("old value")).toBeVisible();
+    await expect(canvas.getByText("new value")).toBeVisible();
+  },
+} satisfies Story;
+
+export const FailedReadWithoutDuplicateOutput = {
+  args: {
+    toolCall: {
+      id: "failed-read-story",
+      name: "read",
+      arguments: '{"path":"/workspace/missing.txt"}',
+      result: "No such file or directory.",
+      status: "failed",
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: /^Read/ }));
+    await waitFor(() =>
+      expect(canvasElement.querySelector("pre")).toHaveTextContent(
+        "No such file or directory.",
+      ),
+    );
+    await expect(canvasElement.querySelectorAll("pre")).toHaveLength(1);
+  },
+} satisfies Story;
+
+export const FailedGrepWithoutDuplicateOutput = {
+  args: {
+    toolCall: {
+      id: "failed-grep-story",
+      name: "grep",
+      arguments: '{"pattern":"needle","path":"/workspace/missing"}',
+      result: "Search path does not exist.",
+      status: "failed",
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: /^Grep/ }));
+    await waitFor(() =>
+      expect(canvas.getAllByText("Search path does not exist.")).toHaveLength(
+        1,
+      ),
+    );
+  },
+} satisfies Story;
+
 export const KnownGrepVerticalFields = {
   args: {
     toolCall: {
@@ -463,16 +552,53 @@ export const KnownReadWithRawData = {
     const canvas = within(canvasElement);
     await expect(canvas.getByText("Read")).toBeVisible();
     await expect(canvas.getByText("types.ts")).toBeVisible();
-    await userEvent.click(canvas.getByRole("button", { name: /Read/ }));
-    await expect(
-      canvas.getByText("export interface ActiveToolCall"),
-    ).toBeVisible();
+    await userEvent.click(canvas.getByRole("button", { name: /^Read/ }));
+    await waitFor(() =>
+      expect(canvasElement.querySelector("pre")).toHaveTextContent(
+        "export interface ActiveToolCall",
+      ),
+    );
     await userEvent.click(
       canvas.getByRole("button", { name: "View raw data for Read" }),
     );
-    await expect(within(document.body).getByText("Raw data")).toBeVisible();
+    await waitFor(() =>
+      expect(within(document.body).getByText("Raw data")).toBeVisible(),
+    );
     await expect(within(document.body).getByText("Tool name")).toBeVisible();
-    await expect(within(document.body).getByText("read")).toBeVisible();
+    await waitFor(() =>
+      expect(within(document.body).getByText("read")).toBeVisible(),
+    );
+    const dialog = within(within(document.body).getByRole("dialog"));
+    await expect(dialog.getByText("path")).toBeVisible();
+    await expect(dialog.getByText("offset")).toBeVisible();
+    await expect(dialog.getByText("1200")).toBeVisible();
+  },
+} satisfies Story;
+
+export const GenericObjectInputDetails = {
+  args: {
+    toolCall: {
+      id: "generic-object-input-story",
+      name: "custom_tool",
+      arguments: JSON.stringify({
+        content: "first line\nsecond line",
+        enabled: false,
+        option: null,
+      }),
+      status: "completed",
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: "View raw data for custom_tool" }),
+    );
+    const dialog = within(within(document.body).getByRole("dialog"));
+    await expect(dialog.getAllByRole("term")).toHaveLength(3);
+    await waitFor(() => expect(dialog.getByText("content")).toBeVisible());
+    await expect(dialog.getByText(/first line/)).toHaveTextContent(
+      "first line second line",
+    );
   },
 } satisfies Story;
 
@@ -493,11 +619,12 @@ export const GenericRawDataWithoutPayload = {
         name: "View raw data for custom_database_query",
       }),
     );
-    await expect(within(document.body).getByText("Raw data")).toBeVisible();
+    await waitFor(() =>
+      expect(within(document.body).getByText("Raw data")).toBeVisible(),
+    );
     await expect(within(document.body).getByText("Tool name")).toBeVisible();
-    await expect(
-      within(document.body).getByText("custom_database_query"),
-    ).toBeVisible();
+    const dialog = within(within(document.body).getByRole("dialog"));
+    await expect(dialog.getByText("custom_database_query")).toBeVisible();
   },
 } satisfies Story;
 
