@@ -7,8 +7,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from azcommon.result import Success
+from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.crypto import CredentialCipher
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentRuntimeCapability,
@@ -171,6 +173,7 @@ async def test_agent_atomic_operations_close_before_returning() -> None:
     )
     repository = AgentOperationsRepository(
         session_manager=session_manager,
+        credential_cipher=CredentialCipher(Fernet.generate_key().decode()),
         agent_repository=agent_repository,
         admin_repository=admin_repository,
         workspace_model_settings_repository=AsyncMock(
@@ -261,6 +264,7 @@ async def test_update_rejects_revoked_admin_before_mutation() -> None:
     admin_repository.is_admin.return_value = False
     repository = AgentOperationsRepository(
         session_manager=session_manager,
+        credential_cipher=CredentialCipher(Fernet.generate_key().decode()),
         agent_repository=agent_repository,
         admin_repository=admin_repository,
         workspace_model_settings_repository=AsyncMock(

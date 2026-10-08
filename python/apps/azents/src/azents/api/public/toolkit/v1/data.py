@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
 from azents.core.enums import MCPOAuthConnectionStatus
+from azents.core.github_user_oauth import GitHubUserConnectionStatus
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppAuthorizationReason,
 )
@@ -45,6 +46,19 @@ class GitHubPlatformAuthorizationStateResponse(BaseModel):
     reason: PlatformGitHubAppAuthorizationReason
 
 
+class GitHubUserConnectionSummaryResponse(BaseModel):
+    """Allowlisted user-account execution identity."""
+
+    id: str
+    account_id: int
+    account_login: str
+    account_avatar_url: str | None
+    app_id: str
+    source: Literal["platform_user", "byoa_user"]
+    status: GitHubUserConnectionStatus
+    failure_reason: str | None
+
+
 class ToolkitConfigResponse(BaseModel):
     """Toolkit Config response model."""
 
@@ -64,6 +78,7 @@ class ToolkitConfigResponse(BaseModel):
     always_expose_tools: bool
     oauth_connection: MCPOAuthConnectionSummaryResponse | None = None
     authorization_state: GitHubPlatformAuthorizationStateResponse | None = None
+    github_user_connection: GitHubUserConnectionSummaryResponse | None = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
 

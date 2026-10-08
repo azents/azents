@@ -4,10 +4,14 @@ import dataclasses
 from typing import Annotated
 
 from fastapi import Depends
+from pydantic import TypeAdapter
 
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
-from azents.core.github_credentials import GitHubSecretsAppPlatform
+from azents.core.github_credentials import (
+    GitHubSecretsAppPlatform,
+    GitHubSecretsAppPlatformUser,
+)
 from azents.core.github_system_setting_data import PlatformGitHubAppToolkitBindingImpact
 from azents.rdb.session_capabilities import ReadSession
 from azents.repos.github_platform_system_setting.repository import (
@@ -60,8 +64,9 @@ class PlatformGitHubAppBindingRepository:
     def _decode_current(
         self,
         encrypted_credentials: str,
-    ) -> GitHubSecretsAppPlatform:
-        """Decode a Platform Toolkit credential with its required App ID."""
-        return GitHubSecretsAppPlatform.model_validate_json(
-            self.cipher.decrypt(encrypted_credentials)
+    ) -> GitHubSecretsAppPlatform | GitHubSecretsAppPlatformUser:
+        """Decode either Platform authority with its required App binding."""
+        adapter = TypeAdapter[GitHubSecretsAppPlatform | GitHubSecretsAppPlatformUser](
+            GitHubSecretsAppPlatform | GitHubSecretsAppPlatformUser
         )
+        return adapter.validate_json(self.cipher.decrypt(encrypted_credentials))

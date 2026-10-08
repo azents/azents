@@ -2,13 +2,19 @@
 
 import datetime
 import json
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, create_autospec
 
+import pytest
 from azcommon.result import Failure, Success
 from pydantic import BaseModel, ConfigDict
 
+from azents.core.config import Config
+from azents.core.enums import WorkspaceUserRole
+from azents.core.github_user_auth import GitHubUserProviderError
+from azents.core.github_user_oauth import GitHubUserRegistration, GitHubUserRevocation
 from azents.core.system_setting import SystemSettingFieldSource
 from azents.core.tools import McpToolkitConfig, ResolveContext, Toolkit, ToolkitProvider
+from azents.repos.github_user_oauth.operations import GitHubUserOAuthOperationRepository
 from azents.repos.toolkit.data import ToolkitConfig
 from azents.repos.toolkit_operations.data import (
     PlatformAuthorityRejected,
@@ -16,8 +22,11 @@ from azents.repos.toolkit_operations.data import (
 )
 from azents.repos.toolkit_operations.owned import AgentToolkitOperationsRepository
 from azents.services.github_platform_system_setting.runtime import (
+    PlatformGitHubAppRuntimeService,
     ResolvedPlatformGitHubApp,
 )
+from azents.services.github_user_oauth.provider import GitHubUserProvider
+from azents.services.github_user_oauth.service import GitHubUserOAuthService
 from azents.services.toolkit import ToolkitService, merge_envvar_credentials
 from azents.services.toolkit.data import (
     InvalidConfig,
@@ -210,6 +219,7 @@ class TestMergeEnvVarCredentials:
             operations_repository=operations_repository,
             toolkit_registry={},
             github_runtime=MagicMock(),
+            github_user_oauth=AsyncMock(spec=GitHubUserOAuthService),
         )
         update: ToolkitUpdateInput = {"config": new_config}
 
@@ -269,6 +279,7 @@ async def test_create_external_validation_sees_no_repository_transaction() -> No
         operations_repository=operations,
         toolkit_registry={"github": provider},
         github_runtime=runtime,
+        github_user_oauth=AsyncMock(spec=GitHubUserOAuthService),
     )
 
     result = await service.create(
@@ -316,6 +327,7 @@ async def test_update_maps_final_platform_revalidation_failure() -> None:
         operations_repository=operations,
         toolkit_registry={"github": provider},
         github_runtime=runtime,
+        github_user_oauth=AsyncMock(spec=GitHubUserOAuthService),
     )
 
     result = await service.update_by_id(
@@ -384,6 +396,7 @@ async def test_kubernetes_config_update_rejects_missing_replacement_credentials(
         operations_repository=operations,
         toolkit_registry={},
         github_runtime=MagicMock(),
+        github_user_oauth=AsyncMock(spec=GitHubUserOAuthService),
     )
 
     result = await service.update_by_id(
@@ -419,3 +432,76 @@ async def test_kubernetes_config_update_rejects_missing_replacement_credentials(
     assert isinstance(result, Failure)
     assert isinstance(result.error, InvalidConfig)
     operations.update.assert_not_awaited()
+
+
+@pytest.mark.parametrize("owned", [False, True])
+async def test_delete_finishes_locally_before_failed_revocation(
+    owned: bool, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Provider cleanup failure cannot reject shared or owned local deletion."""
+    active = [False]
+    committed = [False]
+    target = GitHubUserRevocation(
+        registration=GitHubUserRegistration(
+            source="byoa_user",
+            app_id="123",
+            client_id="client-123",
+            client_secret="private-client-secret",
+            toolkit_revision=1,
+            platform_generation=None,
+        ),
+        access_token="private-retired-token",
+    )
+
+    async def delete(
+        *args: object, **kwargs: object
+    ) -> Success[tuple[GitHubUserRevocation, ...]]:
+        del args, kwargs
+        active[0] = True
+        committed[0] = True
+        active[0] = False
+        return Success((target,))
+
+    async def revoke(*, client_id: str, client_secret: str, token: str) -> None:
+        assert not active[0] and committed[0]
+        assert client_id == "client-123"
+        assert client_secret == "private-client-secret"
+        assert token == "private-retired-token"
+        raise GitHubUserProviderError(reason="provider_unavailable", status_code=503)
+
+    provider = create_autospec(GitHubUserProvider, instance=True)
+    provider.revoke.side_effect = revoke
+    cleanup = GitHubUserOAuthService(
+        repository=create_autospec(GitHubUserOAuthOperationRepository, instance=True),
+        config=create_autospec(Config, instance=True),
+        platform_runtime=create_autospec(
+            PlatformGitHubAppRuntimeService, instance=True
+        ),
+        provider=provider,
+    )
+    operations, owned_operations = MagicMock(), MagicMock()
+    operations.delete = AsyncMock(side_effect=delete)
+    owned_operations.delete_agent_owned = AsyncMock(side_effect=delete)
+    service = ToolkitService(
+        operations_repository=operations,
+        owned_operations=owned_operations,
+        toolkit_registry={},
+        github_runtime=MagicMock(),
+        github_user_oauth=cleanup,
+    )
+    if owned:
+        result = await service.delete_agent_owned(
+            "agent-1",
+            "toolkit-1",
+            workspace_id="workspace-1",
+            workspace_user_id="member-1",
+            role=WorkspaceUserRole.OWNER,
+        )
+    else:
+        result = await service.delete_by_id("toolkit-1", workspace_id="workspace-1")
+    assert result == Success(None)
+    assert committed == [True]
+    provider.revoke.assert_awaited_once()
+    assert "local completion is unchanged" in caplog.text
+    assert "private-retired-token" not in caplog.text
+    assert "private-client-secret" not in caplog.text

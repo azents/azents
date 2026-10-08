@@ -64,6 +64,7 @@ from azents.services.active_model_capabilities import (
     ActiveModelCapabilitiesService,
     apply_to_agent_read,
 )
+from azents.services.github_user_oauth.service import GitHubUserOAuthService
 from azents.services.image_generation_catalog import ImageGenerationCatalogService
 from azents.services.llm_catalog import ModelCatalogReadService
 from azents.services.model_metadata import ModelMetadataService
@@ -191,6 +192,7 @@ class AgentService:
         AgentOperationsRepository,
         Depends(AgentOperationsRepository),
     ]
+    github_user_oauth_service: Annotated[GitHubUserOAuthService, Depends()]
     model_catalog_read_service: Annotated[ModelCatalogReadService, Depends()]
     model_metadata_service: Annotated[
         ModelMetadataService, Depends(ModelMetadataService)
@@ -739,6 +741,9 @@ class AgentService:
                         return Failure(UnlimitedRetention(agent_id=agent_id))
                     case _:
                         assert_never(error)
+        await self.github_user_oauth_service.cleanup_revocations(
+            request.github_user_revocations
+        )
         publisher = self.terminal_policy_invalidation_publisher
         await publisher.publish_terminal_policy_invalidation(
             TerminalPolicySourceInvalidation(

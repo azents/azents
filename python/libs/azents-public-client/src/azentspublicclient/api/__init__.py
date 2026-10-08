@@ -7,6 +7,7 @@ from azentspublicclient.api.auth_v1_api import AuthV1Api
 from azentspublicclient.api.chat_gpto_auth_v1_api import ChatGPTOAuthV1Api
 from azentspublicclient.api.chat_v1_api import ChatV1Api
 from azentspublicclient.api.external_channel_v1_api import ExternalChannelV1Api
+from azentspublicclient.api.git_hub_user_toolkit_v1_api import GitHubUserToolkitV1Api
 from azentspublicclient.api.health_v1_api import HealthV1Api
 from azentspublicclient.api.invitation_v1_api import InvitationV1Api
 from azentspublicclient.api.join_request_v1_api import JoinRequestV1Api

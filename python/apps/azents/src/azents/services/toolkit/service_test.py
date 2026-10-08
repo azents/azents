@@ -37,6 +37,7 @@ from azents.services.agent.data import NotAdmin
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
 )
+from azents.services.github_user_oauth.service import GitHubUserOAuthService
 from azents.services.toolkit import ToolkitService, merge_envvar_credentials
 from azents.services.toolkit.data import (
     AgentNotBelongToWorkspace,
@@ -905,4 +906,5 @@ def _build_service(
         owned_operations=owned,
         toolkit_registry=toolkit_registry,
         github_runtime=github_runtime,
+        github_user_oauth=AsyncMock(spec=GitHubUserOAuthService),
     )

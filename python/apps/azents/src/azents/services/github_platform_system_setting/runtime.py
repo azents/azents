@@ -6,7 +6,10 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from azents.core.github_credentials import GitHubSecretsAppPlatform
+from azents.core.github_credentials import (
+    GitHubSecretsAppPlatform,
+    GitHubSecretsAppPlatformUser,
+)
 from azents.core.github_system_setting import (
     PlatformGitHubAppConfig,
     PlatformGitHubAppSecrets,
@@ -68,7 +71,7 @@ class PlatformGitHubAppRuntimeService:
 
     @staticmethod
     def authorization_state(
-        credentials: GitHubSecretsAppPlatform,
+        credentials: GitHubSecretsAppPlatform | GitHubSecretsAppPlatformUser,
         *,
         effective_app_id: str | None,
     ) -> PlatformGitHubAppAuthorizationState | None:

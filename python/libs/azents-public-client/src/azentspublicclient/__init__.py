@@ -24,6 +24,7 @@ __all__ = [
     "ChatGPTOAuthV1Api",
     "ChatV1Api",
     "ExternalChannelV1Api",
+    "GitHubUserToolkitV1Api",
     "HealthV1Api",
     "InvitationV1Api",
     "JoinRequestV1Api",
@@ -261,6 +262,19 @@ __all__ = [
     "GitHubPlatformInstallationsRequest",
     "GitHubPlatformInstallationsResponse",
     "GitHubPlatformOAuthUrlResponse",
+    "GitHubSetupAvailability",
+    "GitHubUserAccessPage",
+    "GitHubUserAttemptRequest",
+    "GitHubUserCandidateSummary",
+    "GitHubUserConnectOutput",
+    "GitHubUserConnectionStatus",
+    "GitHubUserConnectionSummary",
+    "GitHubUserConnectionSummaryResponse",
+    "GitHubUserExchangeRequest",
+    "GitHubUserInstallation",
+    "GitHubUserRepository",
+    "GitHubUserRepositoryPermissions",
+    "GitHubUserStatusOutput",
     "GitRefEntryResponse",
     "GitRefPreviewResponse",
     "GitWorktreeWorkspaceItemResponse",
@@ -608,6 +622,7 @@ from azentspublicclient.api.auth_v1_api import AuthV1Api as AuthV1Api
 from azentspublicclient.api.chat_gpto_auth_v1_api import ChatGPTOAuthV1Api as ChatGPTOAuthV1Api
 from azentspublicclient.api.chat_v1_api import ChatV1Api as ChatV1Api
 from azentspublicclient.api.external_channel_v1_api import ExternalChannelV1Api as ExternalChannelV1Api
+from azentspublicclient.api.git_hub_user_toolkit_v1_api import GitHubUserToolkitV1Api as GitHubUserToolkitV1Api
 from azentspublicclient.api.health_v1_api import HealthV1Api as HealthV1Api
 from azentspublicclient.api.invitation_v1_api import InvitationV1Api as InvitationV1Api
 from azentspublicclient.api.join_request_v1_api import JoinRequestV1Api as JoinRequestV1Api
@@ -849,6 +864,19 @@ from azentspublicclient.models.git_hub_platform_install_url_response import GitH
 from azentspublicclient.models.git_hub_platform_installations_request import GitHubPlatformInstallationsRequest as GitHubPlatformInstallationsRequest
 from azentspublicclient.models.git_hub_platform_installations_response import GitHubPlatformInstallationsResponse as GitHubPlatformInstallationsResponse
 from azentspublicclient.models.git_hub_platform_o_auth_url_response import GitHubPlatformOAuthUrlResponse as GitHubPlatformOAuthUrlResponse
+from azentspublicclient.models.git_hub_setup_availability import GitHubSetupAvailability as GitHubSetupAvailability
+from azentspublicclient.models.git_hub_user_access_page import GitHubUserAccessPage as GitHubUserAccessPage
+from azentspublicclient.models.git_hub_user_attempt_request import GitHubUserAttemptRequest as GitHubUserAttemptRequest
+from azentspublicclient.models.git_hub_user_candidate_summary import GitHubUserCandidateSummary as GitHubUserCandidateSummary
+from azentspublicclient.models.git_hub_user_connect_output import GitHubUserConnectOutput as GitHubUserConnectOutput
+from azentspublicclient.models.git_hub_user_connection_status import GitHubUserConnectionStatus as GitHubUserConnectionStatus
+from azentspublicclient.models.git_hub_user_connection_summary import GitHubUserConnectionSummary as GitHubUserConnectionSummary
+from azentspublicclient.models.git_hub_user_connection_summary_response import GitHubUserConnectionSummaryResponse as GitHubUserConnectionSummaryResponse
+from azentspublicclient.models.git_hub_user_exchange_request import GitHubUserExchangeRequest as GitHubUserExchangeRequest
+from azentspublicclient.models.git_hub_user_installation import GitHubUserInstallation as GitHubUserInstallation
+from azentspublicclient.models.git_hub_user_repository import GitHubUserRepository as GitHubUserRepository
+from azentspublicclient.models.git_hub_user_repository_permissions import GitHubUserRepositoryPermissions as GitHubUserRepositoryPermissions
+from azentspublicclient.models.git_hub_user_status_output import GitHubUserStatusOutput as GitHubUserStatusOutput
 from azentspublicclient.models.git_ref_entry_response import GitRefEntryResponse as GitRefEntryResponse
 from azentspublicclient.models.git_ref_preview_response import GitRefPreviewResponse as GitRefPreviewResponse
 from azentspublicclient.models.git_worktree_workspace_item_response import GitWorktreeWorkspaceItemResponse as GitWorktreeWorkspaceItemResponse

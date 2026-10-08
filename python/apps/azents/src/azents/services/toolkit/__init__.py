@@ -7,11 +7,16 @@ from typing import Annotated, Any, assert_never, overload
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ConfigDict, TypeAdapter, ValidationError
 
 from azents.core.enums import MCPOAuthConnectionStatus, WorkspaceUserRole
-from azents.core.github_credentials import GitHubSecrets, GitHubSecretsAppPlatform
+from azents.core.github_credentials import (
+    GitHubSecrets,
+    GitHubSecretsAppPlatform,
+    GitHubSecretsAppPlatformUser,
+)
 from azents.core.github_installation import GitHubInstallationSnapshot
+from azents.core.github_user_oauth import GitHubUserConnectionStatus
 from azents.core.mcp_credentials import McpSecrets
 from azents.core.toolkit_errors import (
     AgentToolkitNotFound,
@@ -50,7 +55,11 @@ from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
     ResolvedPlatformGitHubApp,
 )
+from azents.services.github_user_oauth.service import GitHubUserOAuthService
 from azents.services.toolkit.credential_edits import merge_kubernetes_credentials
+from azents.services.toolkit.github_user_registration import (
+    merge_github_user_registration,
+)
 
 from .data import (
     AgentNotBelongToWorkspace,
@@ -75,7 +84,9 @@ from .data import (
 )
 
 _mcp_secrets_adapter: TypeAdapter[McpSecrets] = TypeAdapter(McpSecrets)
-_github_secrets_adapter: TypeAdapter[GitHubSecrets] = TypeAdapter(GitHubSecrets)
+_github_secrets_adapter: TypeAdapter[GitHubSecrets] = TypeAdapter(
+    GitHubSecrets, config=ConfigDict(hide_input_in_errors=True)
+)
 _envvar_secrets_adapter: TypeAdapter[EnvVarToolkitSecrets] = TypeAdapter(
     EnvVarToolkitSecrets
 )
@@ -178,6 +189,7 @@ class ToolkitService:
         dict[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)
     ]
     github_runtime: Annotated[PlatformGitHubAppRuntimeService, Depends()]
+    github_user_oauth: Annotated[GitHubUserOAuthService, Depends()]
 
     async def create(
         self, create: ToolkitCreateInput, *, user_id: str
@@ -307,7 +319,9 @@ class ToolkitService:
         if "credentials" in update:
             update_credentials = update["credentials"]
             if update_credentials is not None:
-                prepared = await self._prepare_credentials(update_credentials)
+                prepared = await self._prepare_updated_credentials(
+                    existing, update_credentials
+                )
                 if isinstance(prepared, InvalidCredentials):
                     return Failure(prepared)
                 normalized_credentials = prepared.credentials
@@ -418,6 +432,7 @@ class ToolkitService:
         )
         if isinstance(result, Failure):
             return Failure(self._map_toolkit_read_error(result.error))
+        await self.github_user_oauth.cleanup_revocations(result.value)
         return Success(None)
 
     async def list_available(
@@ -519,6 +534,7 @@ class ToolkitService:
         result = (
             await self._attach_mcp_oauth_connection(toolkit) if attach_mcp else toolkit
         )
+        result = await self._attach_github_user_connection(result)
         platform_credentials = self._platform_credentials(result)
         if platform_credentials is None:
             return result
@@ -530,6 +546,9 @@ class ToolkitService:
     ) -> list[ToolkitOutput]:
         """Attach public Platform authorization states using one snapshot."""
         toolkits = [await self._attach_mcp_oauth_connection(item) for item in toolkits]
+        toolkits = [
+            await self._attach_github_user_connection(item) for item in toolkits
+        ]
         platform_items = [
             (toolkit, self._platform_credentials(toolkit)) for toolkit in toolkits
         ]
@@ -542,6 +561,17 @@ class ToolkitService:
             else toolkit
             for toolkit, credentials in platform_items
         ]
+
+    async def _attach_github_user_connection(
+        self, toolkit: ToolkitOutput
+    ) -> ToolkitOutput:
+        """Attach only redacted saved user identity."""
+        if toolkit.toolkit_type != "github" or toolkit.config.get(
+            "github_auth_type"
+        ) not in ("github_app_user", "github_app_platform_user"):
+            return toolkit
+        summary = await self.operations_repository.get_github_user_summary(toolkit.id)
+        return toolkit.model_copy(update={"github_user_connection": summary})
 
     async def _attach_mcp_oauth_connection(
         self,
@@ -558,12 +588,34 @@ class ToolkitService:
         summary = await self.operations_repository.get_oauth_summary(toolkit.id)
         return toolkit.model_copy(update={"oauth_connection": summary})
 
+    async def _prepare_updated_credentials(
+        self, existing: ToolkitConfig, submitted: dict[str, object]
+    ) -> _PreparedCredentials | InvalidCredentials:
+        """Keep omitted write-only BYOA values only for the same App registration."""
+        if (
+            existing.toolkit_type == "github"
+            and submitted.get("type") == "github_app_user"
+        ):
+            try:
+                submitted = merge_github_user_registration(
+                    existing.credentials, submitted
+                )
+            except ValidationError as error:
+                return InvalidCredentials(
+                    f"Invalid GitHub registration: {error.error_count()} "
+                    "validation error(s)"
+                )
+        return await self._prepare_credentials(submitted)
+
     async def _prepare_credentials(
         self,
         credentials: dict[str, object] | None,
     ) -> _PreparedCredentials | InvalidCredentials:
         """Bind Platform credentials to one external settings snapshot."""
-        if credentials is None or credentials.get("type") != "github_app_platform":
+        if credentials is None or credentials.get("type") not in (
+            "github_app_platform",
+            "github_app_platform_user",
+        ):
             return _PreparedCredentials(credentials=credentials, platform=None)
         platform = await self.github_runtime.resolve()
         if platform.app_id is None:
@@ -583,15 +635,21 @@ class ToolkitService:
         if prepared.credentials is None or prepared.platform is None:
             return None
         credentials = _github_secrets_adapter.validate_python(prepared.credentials)
-        if not isinstance(credentials, GitHubSecretsAppPlatform):
+        if not isinstance(
+            credentials, GitHubSecretsAppPlatform | GitHubSecretsAppPlatformUser
+        ):
             return None
         return PlatformToolkitAuthority(
             app_id=credentials.app_id,
             app_id_source=prepared.platform.app_id_source,
             user_id=user_id,
-            installation_ids=frozenset(
-                int(installation.installation_id)
-                for installation in credentials.installations
+            installation_ids=(
+                frozenset(
+                    int(installation.installation_id)
+                    for installation in credentials.installations
+                )
+                if isinstance(credentials, GitHubSecretsAppPlatform)
+                else frozenset()
             ),
         )
 
@@ -615,12 +673,14 @@ class ToolkitService:
     @staticmethod
     def _platform_credentials(
         toolkit: ToolkitOutput,
-    ) -> GitHubSecretsAppPlatform | None:
+    ) -> GitHubSecretsAppPlatform | GitHubSecretsAppPlatformUser | None:
         """Parse persisted Platform credentials for redacted projection."""
         if toolkit.toolkit_type != "github" or toolkit.credentials is None:
             return None
         credentials = _github_secrets_adapter.validate_json(toolkit.credentials)
-        if isinstance(credentials, GitHubSecretsAppPlatform):
+        if isinstance(
+            credentials, GitHubSecretsAppPlatform | GitHubSecretsAppPlatformUser
+        ):
             return credentials
         return None
 
@@ -898,6 +958,7 @@ class ToolkitService:
         )
         if isinstance(result, Failure):
             return Failure(self._map_agent_management_error(result.error))
+        await self.github_user_oauth.cleanup_revocations(result.value)
         return Success(None)
 
     async def store_agent_oauth_connection(
@@ -1196,7 +1257,9 @@ class ToolkitService:
         if "credentials" in update:
             submitted = update["credentials"]
             if submitted is not None:
-                preparation = await self._prepare_credentials(submitted)
+                preparation = await self._prepare_updated_credentials(
+                    existing, submitted
+                )
                 if isinstance(preparation, InvalidCredentials):
                     return Failure(preparation)
                 prepared = preparation
@@ -1316,6 +1379,15 @@ class ToolkitService:
             return "disabled"
         if toolkit.authorization_state is not None:
             return "authorization_required"
+        if toolkit.toolkit_type == "github" and toolkit.config.get(
+            "github_auth_type"
+        ) in ("github_app_user", "github_app_platform_user"):
+            if (
+                toolkit.github_user_connection is None
+                or toolkit.github_user_connection.status
+                is not GitHubUserConnectionStatus.CONNECTED
+            ):
+                return "authorization_required"
         mcp_config = _resolve_mcp_config(
             toolkit.toolkit_type,
             toolkit.config,

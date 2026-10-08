@@ -16414,6 +16414,1179 @@
         }
       }
     },
+    "/toolkit/v1/workspaces/{handle}/github/setup-availability": {
+      "get": {
+        "tags": [
+          "GitHub User Toolkit v1"
+        ],
+        "summary": "Shared Setup Availability",
+        "description": "Return local Platform registration availability for shared setup.",
+        "operationId": "github_user_toolkit_v1_shared_setup_availability",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubSetupAvailability"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/github/setup-availability": {
+      "get": {
+        "tags": [
+          "GitHub User Toolkit v1"
+        ],
+        "summary": "Agent Setup Availability",
+        "description": "Return local registration availability only to an Agent manager.",
+        "operationId": "github_user_toolkit_v1_agent_setup_availability",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubSetupAvailability"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/github-user/connect": {
+      "post": {
+        "tags": [
+          "GitHub User Toolkit v1"
+        ],
+        "summary": "Shared Connect",
+        "description": "Start one bound shared-Toolkit authorization without replacing credentials.",
+        "operationId": "github_user_toolkit_v1_shared_connect",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubUserConnectOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/github-user/connect": {
+      "post": {
+        "tags": [
+          "GitHub User Toolkit v1"
+        ],
+        "summary": "Agent Connect",
+        "description": "Start setup for a Toolkit owned by this exact managed Agent.",
+        "operationId": "github_user_toolkit_v1_agent_connect",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubUserConnectOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/github-user/exchange": {
+      "post": {
+        "tags": [
+          "GitHub User Toolkit v1"
+        ],
+        "summary": "Shared Exchange",
+        "description": "Stage verified account identity for the same shared setup context.",
+        "operationId": "github_user_toolkit_v1_shared_exchange",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GitHubUserExchangeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubUserCandidateSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/github-user/exchange": {
+      "post": {
+        "tags": [
+          "GitHub User Toolkit v1"
+        ],
+        "summary": "Agent Exchange",
+        "description": "Consume one callback without changing the existing Agent-owned credential.",
+        "operationId": "github_user_toolkit_v1_agent_exchange",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GitHubUserExchangeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubUserCandidateSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/github-user/attempts/{attempt_id}": {
+      "get": {
+        "tags": [
+          "GitHub User Toolkit v1"
+        ],
+        "summary": "Shared Review",
+        "description": "Read current review identity from the originating shared setup.",
+        "operationId": "github_user_toolkit_v1_shared_review",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Attempt Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubUserCandidateSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/github-user/attempts/{attempt_id}": {
+      "get": {
+        "tags": [
+          "GitHub User Toolkit v1"
+        ],
+        "summary": "Agent Review",
+        "description": "Read verified account/use scope after exact popup completion notification.",
+        "operationId": "github_user_toolkit_v1_agent_review",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Attempt Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubUserCandidateSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/github-user/confirm": {
+      "post": {
+        "tags": [
+          "GitHub User Toolkit v1"
+        ],
+        "summary": "Shared Confirm",
+        "description": "Explicitly activate reviewed account and sharing scope.",
+        "operationId": "github_user_toolkit_v1_shared_confirm",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GitHubUserAttemptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubUserConnectionSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/github-user/confirm": {
+      "post": {
+        "tags": [
+          "GitHub User Toolkit v1"
+        ],
+        "summary": "Agent Confirm",
+        "description": "Confirm account replacement within the exact Agent-owned Toolkit.",
+        "operationId": "github_user_toolkit_v1_agent_confirm",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GitHubUserAttemptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubUserConnectionSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/github-user/attempt": {
+      "delete": {
+        "tags": [
+          "GitHub User Toolkit v1"
+        ],
+        "summary": "Shared Cancel",
+        "description": "Cancel the initiating shared setup and revoke any issued candidate.",
+        "operationId": "github_user_toolkit_v1_shared_cancel",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GitHubUserAttemptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/github-user/attempt": {
+      "delete": {
+        "tags": [
+          "GitHub User Toolkit v1"
+        ],
+        "summary": "Agent Cancel",
+        "description": "Cancel only this Agent-owned setup attempt.",
+        "operationId": "github_user_toolkit_v1_agent_cancel",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GitHubUserAttemptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/github-user/connection": {
+      "delete": {
+        "tags": [
+          "GitHub User Toolkit v1"
+        ],
+        "summary": "Shared Disconnect",
+        "description": "Disconnect local shared use and attempt bounded token revocation.",
+        "operationId": "github_user_toolkit_v1_shared_disconnect",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/github-user/connection": {
+      "delete": {
+        "tags": [
+          "GitHub User Toolkit v1"
+        ],
+        "summary": "Agent Disconnect",
+        "description": "Disconnect the exact Agent-owned credential without affecting attachments.",
+        "operationId": "github_user_toolkit_v1_agent_disconnect",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/github-user/status": {
+      "get": {
+        "tags": [
+          "GitHub User Toolkit v1"
+        ],
+        "summary": "Shared Status",
+        "description": "Return redacted saved identity without asserting provider cleanup.",
+        "operationId": "github_user_toolkit_v1_shared_status",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubUserStatusOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/github-user/status": {
+      "get": {
+        "tags": [
+          "GitHub User Toolkit v1"
+        ],
+        "summary": "Agent Status",
+        "description": "Return connection details only within exact Agent management scope.",
+        "operationId": "github_user_toolkit_v1_agent_status",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubUserStatusOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/github-user/access": {
+      "get": {
+        "tags": [
+          "GitHub User Toolkit v1"
+        ],
+        "summary": "Shared Access",
+        "description": "Observe bounded personal and organization readiness for this account/App.",
+        "operationId": "github_user_toolkit_v1_shared_access",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubUserAccessPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/github-user/access": {
+      "get": {
+        "tags": [
+          "GitHub User Toolkit v1"
+        ],
+        "summary": "Agent Access",
+        "description": "Observe multi-owner readiness without granting participant list access.",
+        "operationId": "github_user_toolkit_v1_agent_access",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubUserAccessPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/user/v1/me": {
       "get": {
         "tags": [
@@ -24933,6 +26106,523 @@
         ],
         "title": "GitHubPlatformOAuthUrlResponse",
         "description": "GitHub Platform App OAuth URL response."
+      },
+      "GitHubSetupAvailability": {
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "configured",
+              "incomplete",
+              "absent"
+            ],
+            "title": "Platform"
+          },
+          "callback_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Callback Url"
+          },
+          "user_tokens_must_not_expire": {
+            "type": "boolean",
+            "title": "User Tokens Must Not Expire",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "platform",
+          "callback_url"
+        ],
+        "title": "GitHubSetupAvailability",
+        "description": "Local registration availability, independent of provider health."
+      },
+      "GitHubUserAccessPage": {
+        "properties": {
+          "installations": {
+            "items": {
+              "$ref": "#/components/schemas/GitHubUserInstallation"
+            },
+            "type": "array",
+            "title": "Installations"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "installations",
+          "next_cursor"
+        ],
+        "title": "GitHubUserAccessPage",
+        "description": "Bounded traversal result with an explicit continuation cursor."
+      },
+      "GitHubUserAttemptRequest": {
+        "properties": {
+          "attempt_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Attempt Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "attempt_id"
+        ],
+        "title": "GitHubUserAttemptRequest",
+        "description": "Exact local attempt for confirm or cancellation."
+      },
+      "GitHubUserCandidateSummary": {
+        "properties": {
+          "attempt_id": {
+            "type": "string",
+            "title": "Attempt Id"
+          },
+          "account_id": {
+            "type": "integer",
+            "title": "Account Id"
+          },
+          "account_login": {
+            "type": "string",
+            "title": "Account Login"
+          },
+          "account_avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Avatar Url"
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "platform_user",
+              "byoa_user"
+            ],
+            "title": "Source"
+          },
+          "sharing_scope": {
+            "type": "string",
+            "enum": [
+              "workspace_shared",
+              "agent_only"
+            ],
+            "title": "Sharing Scope"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "attempt_id",
+          "account_id",
+          "account_login",
+          "account_avatar_url",
+          "app_id",
+          "source",
+          "sharing_scope"
+        ],
+        "title": "GitHubUserCandidateSummary",
+        "description": "Verified account awaiting the manager's explicit confirmation."
+      },
+      "GitHubUserConnectOutput": {
+        "properties": {
+          "attempt_id": {
+            "type": "string",
+            "title": "Attempt Id"
+          },
+          "authorization_url": {
+            "type": "string",
+            "title": "Authorization Url"
+          },
+          "install_url": {
+            "type": "string",
+            "title": "Install Url"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "attempt_id",
+          "authorization_url",
+          "install_url"
+        ],
+        "title": "GitHubUserConnectOutput",
+        "description": "One setup URL and its local attempt identifier."
+      },
+      "GitHubUserConnectionStatus": {
+        "type": "string",
+        "enum": [
+          "connected",
+          "reconnect_required"
+        ],
+        "title": "GitHubUserConnectionStatus",
+        "description": "Current saved credential usability."
+      },
+      "GitHubUserConnectionSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "account_id": {
+            "type": "integer",
+            "title": "Account Id"
+          },
+          "account_login": {
+            "type": "string",
+            "title": "Account Login"
+          },
+          "account_avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Avatar Url"
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "platform_user",
+              "byoa_user"
+            ],
+            "title": "Source"
+          },
+          "status": {
+            "$ref": "#/components/schemas/GitHubUserConnectionStatus"
+          },
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "account_id",
+          "account_login",
+          "account_avatar_url",
+          "app_id",
+          "source",
+          "status",
+          "failure_reason"
+        ],
+        "title": "GitHubUserConnectionSummary",
+        "description": "Allowlisted public metadata without access or client credentials."
+      },
+      "GitHubUserConnectionSummaryResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "account_id": {
+            "type": "integer",
+            "title": "Account Id"
+          },
+          "account_login": {
+            "type": "string",
+            "title": "Account Login"
+          },
+          "account_avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Avatar Url"
+          },
+          "app_id": {
+            "type": "string",
+            "title": "App Id"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "platform_user",
+              "byoa_user"
+            ],
+            "title": "Source"
+          },
+          "status": {
+            "$ref": "#/components/schemas/GitHubUserConnectionStatus"
+          },
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "account_id",
+          "account_login",
+          "account_avatar_url",
+          "app_id",
+          "source",
+          "status",
+          "failure_reason"
+        ],
+        "title": "GitHubUserConnectionSummaryResponse",
+        "description": "Allowlisted user-account execution identity."
+      },
+      "GitHubUserExchangeRequest": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Code"
+          },
+          "state": {
+            "type": "string",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "State"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "state"
+        ],
+        "title": "GitHubUserExchangeRequest",
+        "description": "Transient provider callback inputs excluded from model representations."
+      },
+      "GitHubUserInstallation": {
+        "properties": {
+          "installation_id": {
+            "type": "integer",
+            "title": "Installation Id"
+          },
+          "app_id": {
+            "type": "integer",
+            "title": "App Id"
+          },
+          "account_login": {
+            "type": "string",
+            "title": "Account Login"
+          },
+          "account_type": {
+            "type": "string",
+            "title": "Account Type"
+          },
+          "account_avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Avatar Url"
+          },
+          "app_permissions": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "App Permissions"
+          },
+          "repositories": {
+            "items": {
+              "$ref": "#/components/schemas/GitHubUserRepository"
+            },
+            "type": "array",
+            "title": "Repositories"
+          },
+          "repositories_complete": {
+            "type": "boolean",
+            "title": "Repositories Complete"
+          },
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "authentication",
+                  "target_denied",
+                  "provider_unavailable",
+                  "invalid_response"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "installation_id",
+          "app_id",
+          "account_login",
+          "account_type",
+          "account_avatar_url",
+          "app_permissions",
+          "repositories",
+          "repositories_complete",
+          "failure_reason"
+        ],
+        "title": "GitHubUserInstallation",
+        "description": "One bounded owner observation with independent repository readiness."
+      },
+      "GitHubUserRepository": {
+        "properties": {
+          "repository_id": {
+            "type": "integer",
+            "title": "Repository Id"
+          },
+          "owner_login": {
+            "type": "string",
+            "title": "Owner Login"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "full_name": {
+            "type": "string",
+            "title": "Full Name"
+          },
+          "private": {
+            "type": "boolean",
+            "title": "Private"
+          },
+          "permissions": {
+            "$ref": "#/components/schemas/GitHubUserRepositoryPermissions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "repository_id",
+          "owner_login",
+          "name",
+          "full_name",
+          "private",
+          "permissions"
+        ],
+        "title": "GitHubUserRepository",
+        "description": "Owner-qualified repository observation, not a local execution allowlist."
+      },
+      "GitHubUserRepositoryPermissions": {
+        "properties": {
+          "read": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read"
+          },
+          "write": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Write"
+          },
+          "admin": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Admin"
+          }
+        },
+        "type": "object",
+        "required": [
+          "read",
+          "write",
+          "admin"
+        ],
+        "title": "GitHubUserRepositoryPermissions",
+        "description": "Observed account permissions; absent provider facts remain unknown."
+      },
+      "GitHubUserStatusOutput": {
+        "properties": {
+          "connection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GitHubUserConnectionSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "connection"
+        ],
+        "title": "GitHubUserStatusOutput",
+        "description": "Current saved connection, with no provider-cleanup success claim."
       },
       "GitRefEntryResponse": {
         "properties": {
@@ -35642,6 +37332,16 @@
               }
             ]
           },
+          "github_user_connection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GitHubUserConnectionSummaryResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -37764,6 +39464,10 @@
     {
       "name": "Toolkit OAuth v1",
       "description": "Toolkit OAuth2 connection flow."
+    },
+    {
+      "name": "GitHub User Toolkit v1",
+      "description": "GitHub user-account authorization and token cleanup."
     },
     {
       "name": "User v1",
