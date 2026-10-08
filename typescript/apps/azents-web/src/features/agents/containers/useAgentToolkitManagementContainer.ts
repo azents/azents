@@ -1,8 +1,17 @@
 "use client";
 
-import { useSessionStorage, useWindowEvent } from "@mantine/hooks";
+import {
+  readSessionStorageValue,
+  useSessionStorage,
+  useWindowEvent,
+} from "@mantine/hooks";
 import { useTranslations } from "next-intl";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  creationReturnPath,
+  deserializeGitHubUserCreation,
+  GITHUB_USER_CREATION_KEY,
+} from "@/features/toolkits/github-user-creation-state";
 import {
   consumeGitHubUserPopupHandoff,
   deserializeGitHubUserContext,
@@ -19,6 +28,7 @@ import {
   decodeAgentToolkitOAuthCallback,
   projectAgentToolkitManagementState,
 } from "../agentToolkitManagementState";
+import type { GitHubUserCreationContext } from "@/features/toolkits/github-user-creation-state";
 import type { GitHubUserContext } from "@/features/toolkits/github-user-oauth-state";
 import type { AgentToolkitManagementItemResponse } from "@azents/public-client";
 
@@ -96,6 +106,42 @@ export function useAgentToolkitManagementContainer({
     deserialize: deserializeGitHubUserContext,
   });
   const query = trpc.toolkit.listAgentManagement.useQuery({ handle, agentId });
+  const restoredGithubReview = useRef(false);
+  useEffect(() => {
+    if (restoredGithubReview.current || !query.data) {
+      return;
+    }
+    restoredGithubReview.current = true;
+    const creation = readSessionStorageValue<GitHubUserCreationContext | null>({
+      key: GITHUB_USER_CREATION_KEY,
+      deserialize: deserializeGitHubUserCreation,
+    });
+    if (
+      creation != null &&
+      creation.handle === handle &&
+      creation.agentId === agentId &&
+      creation.returnPath === creationReturnPath(handle, agentId)
+    ) {
+      setEditor({ type: "CREATE", toolkitType: "github" });
+      return;
+    }
+    const saved = readSessionStorageValue<GitHubUserContext | null>({
+      key: GITHUB_USER_CONTEXT_KEY,
+      deserialize: deserializeGitHubUserContext,
+    });
+    if (
+      saved?.reviewAttemptId != null &&
+      saved.handle === handle &&
+      (saved.agentId == null || saved.agentId === agentId) &&
+      saved.returnPath ===
+        `/w/${handle}/agents/${agentId}/settings/capabilities#agent-toolkits`
+    ) {
+      setEditor({
+        type: saved.returnView,
+        toolkitConfigId: saved.toolkitId,
+      });
+    }
+  }, [agentId, handle, query.data]);
   const definitionsQuery = trpc.toolkit.listToolkits.useQuery();
   const memberQuery = trpc.workspaceMember.me.useQuery({ handle });
   const canAuthorizeShared =

@@ -6,6 +6,7 @@ azentspublicclient/api/auth_v1_api.py
 azentspublicclient/api/chat_gpto_auth_v1_api.py
 azentspublicclient/api/chat_v1_api.py
 azentspublicclient/api/external_channel_v1_api.py
+azentspublicclient/api/git_hub_user_creation_v1_api.py
 azentspublicclient/api/git_hub_user_toolkit_v1_api.py
 azentspublicclient/api/health_v1_api.py
 azentspublicclient/api/invitation_v1_api.py
@@ -252,6 +253,9 @@ azentspublicclient/docs/GitHubUserConnectOutput.md
 azentspublicclient/docs/GitHubUserConnectionStatus.md
 azentspublicclient/docs/GitHubUserConnectionSummary.md
 azentspublicclient/docs/GitHubUserConnectionSummaryResponse.md
+azentspublicclient/docs/GitHubUserCreatedOutput.md
+azentspublicclient/docs/GitHubUserCreationReview.md
+azentspublicclient/docs/GitHubUserCreationV1Api.md
 azentspublicclient/docs/GitHubUserExchangeRequest.md
 azentspublicclient/docs/GitHubUserInstallation.md
 azentspublicclient/docs/GitHubUserRepository.md
@@ -834,6 +838,8 @@ azentspublicclient/models/git_hub_user_connect_output.py
 azentspublicclient/models/git_hub_user_connection_status.py
 azentspublicclient/models/git_hub_user_connection_summary.py
 azentspublicclient/models/git_hub_user_connection_summary_response.py
+azentspublicclient/models/git_hub_user_created_output.py
+azentspublicclient/models/git_hub_user_creation_review.py
 azentspublicclient/models/git_hub_user_exchange_request.py
 azentspublicclient/models/git_hub_user_installation.py
 azentspublicclient/models/git_hub_user_repository.py
@@ -1402,6 +1408,9 @@ azentspublicclient/test/test_git_hub_user_connect_output.py
 azentspublicclient/test/test_git_hub_user_connection_status.py
 azentspublicclient/test/test_git_hub_user_connection_summary.py
 azentspublicclient/test/test_git_hub_user_connection_summary_response.py
+azentspublicclient/test/test_git_hub_user_created_output.py
+azentspublicclient/test/test_git_hub_user_creation_review.py
+azentspublicclient/test/test_git_hub_user_creation_v1_api.py
 azentspublicclient/test/test_git_hub_user_exchange_request.py
 azentspublicclient/test/test_git_hub_user_installation.py
 azentspublicclient/test/test_git_hub_user_repository.py

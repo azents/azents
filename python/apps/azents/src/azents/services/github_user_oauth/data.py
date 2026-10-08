@@ -43,3 +43,23 @@ class GitHubSetupAvailability(BaseModel):
     platform: Literal["configured", "incomplete", "absent"]
     callback_url: str | None
     user_tokens_must_not_expire: bool = True
+
+
+class GitHubUserCreationReview(BaseModel):
+    """Verified account and desired nonsecret settings before publication."""
+
+    model_config = ConfigDict(extra="forbid")
+    candidate: GitHubUserCandidateSummary
+    name: str
+    slug: str
+    description: str | None
+    prompt: str | None
+    config: dict[str, object]
+    enabled: bool
+    always_expose_tools: bool
+
+
+class GitHubUserCreatedOutput(BaseModel):
+    """Exact successfully published Toolkit, without credential payloads."""
+
+    toolkit_id: str

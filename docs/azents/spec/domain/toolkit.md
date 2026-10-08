@@ -547,7 +547,19 @@ authority. The form and confirmation identify the account, selected App/source
 and Agent-only or Workspace-shared scope, including use by existing automatic
 execution and ordinary conversation disclosure.
 
-Setup reserves a ten-minute, one-use attempt bound to the exact active Azents
+New user-account Toolkit creation authorizes before publication. The shared and
+Agent-owned `github-user-creations` routes retain submitted settings/registration
+and a reviewed candidate in a separate encrypted ten-minute creation attempt,
+never in a saved draft Toolkit. Ordinary create rejects the two user-account
+modes with authorization guidance; PAT and installation creation are unchanged.
+Connect, exchange, review, cancel and confirm revalidate the exact active manager,
+Auth Session, Workspace, optional Agent, App/source and callback. Confirmation
+creates ToolkitConfig, its connected account and the Agent-owned namespace
+reservation in one database-only transaction. Failed confirmation rolls back all
+publication; cancellation, rejected exchange and expired/abandoned attempts
+expose no new Toolkit to lists, attachments or execution.
+
+Existing Toolkit setup reserves a ten-minute, one-use attempt bound to the exact active Azents
 User/Auth Session, Workspace, Toolkit, owning Agent when applicable, callback,
 registration and current connection. It verifies the App/client binding before
 issuing a PKCE S256 authorization URL with random state. GitHub authorization
@@ -562,9 +574,18 @@ must opt out of expiring user-to-server tokens; expiring/refresh envelopes are
 rejected with configuration guidance. There is no token refresh actor. Saved
 connection and candidate/setup payloads are encrypted at rest. Public status,
 review and access DTOs expose allowlisted identity/readiness only, not
-credentials. The popup is reserved before asynchronous preparation; callbacks
-notify only the exact same-origin opener with attempt identity and return to
-the originating Toolkit. Codes, state and credentials are not posted to it.
+credentials. Existing Toolkit authorization reserves a popup before asynchronous
+preparation; callbacks notify only the exact same-origin opener with attempt
+identity and automatically return to the originating Details/Edit surface.
+New creation uses the same browser context and restores the originating shared
+form or Agent configuration modal. Only nonsecret scope/attempt identity is
+persisted in browser Session storage; review is reread from the server and account
+and sharing confirmation remains explicit. Callback code/state are removed from
+the URL, and credentials are never posted to the opener or browser persistence.
+Same-registration edits retain the saved account; blank write-only registration
+fields preserve existing values, including untouched Platform-user forms.
+Visible source names consistently distinguish self-managed and platform-provided
+GitHub Apps in every supported locale.
 
 Access observations paginate App installations and their repositories for the
 connected user. Personal and multiple organization owners remain independently

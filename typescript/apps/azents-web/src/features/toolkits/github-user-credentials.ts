@@ -28,3 +28,18 @@ export function missingNewGitHubUserRegistration(
       typeof credentials?.[key] !== "string" || credentials[key].trim() === "",
   );
 }
+
+/** A saved source discriminator is not a registration change. */
+export function gitHubUserRegistrationDirty(
+  savedMode: unknown,
+  currentMode: unknown,
+  credentials: Record<string, unknown> | null,
+): boolean {
+  if (savedMode !== currentMode) {
+    return true;
+  }
+  if (currentMode === "github_app_platform_user") {
+    return false;
+  }
+  return normalizeGitHubUserCredentialEdits(credentials) != null;
+}
