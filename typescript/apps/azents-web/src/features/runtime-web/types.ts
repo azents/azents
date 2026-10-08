@@ -1,5 +1,8 @@
 import type { RuntimeWebServiceResponse } from "@azents/public-client";
 
+export type RuntimeWebAuthState =
+  { type: "CHECKING" } | { type: "ERROR"; message: string };
+
 export type RuntimeWebDurationSeconds = 3600 | 21_600 | 86_400;
 
 export type RuntimeWebServicesState =

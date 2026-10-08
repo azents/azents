@@ -1,5 +1,3 @@
-"use client";
-
 import {
   Alert,
   Button,
@@ -11,99 +9,33 @@ import {
   Title,
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
+import type { RuntimeWebAuthState } from "../types";
 
 interface RuntimeWebAuthProps {
   serviceId: string;
-}
-
-type AuthState = { type: "CHECKING" } | { type: "ERROR"; message: string };
-
-async function responseError(response: Response): Promise<string> {
-  const body: unknown = await response.json();
-  if (
-    typeof body === "object" &&
-    body !== null &&
-    "error" in body &&
-    typeof body.error === "string"
-  ) {
-    return body.error;
-  }
-  return `Runtime Web authentication failed (${response.status}).`;
+  mainWebOrigin: string | null;
+  state: RuntimeWebAuthState;
+  onRetry: () => void;
 }
 
 export function RuntimeWebAuth({
   serviceId,
+  mainWebOrigin,
+  state,
+  onRetry,
 }: RuntimeWebAuthProps): React.ReactElement {
   const t = useTranslations("runtimeWeb");
-  const [state, setState] = useState<AuthState>({ type: "CHECKING" });
-
-  useEffect(() => {
-    let active = true;
-    const start = async (): Promise<void> => {
-      try {
-        const response = await fetch("/runtime-web/auth/start", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ serviceId }),
-        });
-        if (!response.ok) {
-          throw new Error(await responseError(response));
-        }
-        const result: unknown = await response.json();
-        if (
-          typeof result !== "object" ||
-          result === null ||
-          !("mode" in result)
-        ) {
-          throw new Error(t("auth.invalidResponse"));
-        }
-        if (
-          result.mode === "shared_cookie" &&
-          "destination" in result &&
-          typeof result.destination === "string"
-        ) {
-          window.location.assign(result.destination);
-          return;
-        }
-        if (
-          result.mode === "separate_domain" &&
-          "brokerDestination" in result &&
-          typeof result.brokerDestination === "string" &&
-          "initiationId" in result &&
-          typeof result.initiationId === "string"
-        ) {
-          const form = document.createElement("form");
-          form.method = "POST";
-          form.action = result.brokerDestination;
-          const input = document.createElement("input");
-          input.type = "hidden";
-          input.name = "initiation_id";
-          input.value = result.initiationId;
-          form.append(input);
-          document.body.append(form);
-          form.submit();
-          return;
-        }
-        throw new Error(t("auth.invalidResponse"));
-      } catch (error) {
-        if (active) {
-          setState({
-            type: "ERROR",
-            message: error instanceof Error ? error.message : t("auth.failed"),
-          });
-        }
-      }
-    };
-    void start();
-    return () => {
-      active = false;
-    };
-  }, [serviceId, t]);
 
   return (
-    <Container size="xs" py="xl">
+    <Container
+      id="runtime-web-auth"
+      size="xs"
+      py="xl"
+      data-service-id={serviceId}
+      data-main-web-origin={mainWebOrigin ?? ""}
+      data-invalid-response={t("auth.invalidResponse")}
+      data-failed-message={t("auth.failed")}
+    >
       <Paper withBorder radius="lg" p="xl">
         <Stack align="center" gap="md" ta="center">
           {state.type === "CHECKING" ? <Loader size="sm" /> : null}
@@ -120,9 +52,7 @@ export function RuntimeWebAuth({
               <Alert color="red" w="100%">
                 {state.message}
               </Alert>
-              <Button onClick={() => window.location.reload()}>
-                {t("retry")}
-              </Button>
+              <Button onClick={onRetry}>{t("retry")}</Button>
             </>
           ) : null}
         </Stack>

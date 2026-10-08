@@ -961,7 +961,7 @@ def runtime_web_stack_factory(
         str,
         tuple[DockerContainer, DockerContainer, str, str],
     ] = {}
-    for mode in ("shared_cookie",):
+    for mode in ("shared_cookie", "separate_domain"):
         alias_suffix = mode.replace("_", "-")
         public_api_alias = f"runtime-web-public-{alias_suffix}"
         main_web_alias = f"runtime-web-main-{alias_suffix}"
@@ -2257,6 +2257,56 @@ def _assert_redis_capacity_fallback(
         }
         websocket.send("after-redis-recovery")
         assert websocket.recv(timeout=10) == "echo:after-redis-recovery"
+
+
+@pytest.mark.parametrize("auth_mode", ["shared_cookie", "separate_domain"])
+def test_runtime_web_authentication_without_next_assets(
+    runtime_web_application: _RuntimeWebApplication,
+    runtime_web_stack_factory: _RuntimeWebStackFactory,
+    auth_mode: str,
+) -> None:
+    """Authenticate a cold service navigation without Main Web bundle hydration."""
+    workspace = runtime_web_application.workspace
+    with runtime_web_stack_factory.start(
+        auth_mode,
+        maximum_active_exchanges=512,
+        maximum_application_buffer_bytes=16 * 1024 * 1024,
+        maintenance=False,
+        relay_path=False,
+    ) as stack:
+        with azentspublicclient.ApiClient(
+            configuration=azentspublicclient.Configuration(host=stack.public_api_url)
+        ) as client:
+            api = RuntimeWebV1Api(client)
+            _delete_existing_runtime_web_services(api=api, workspace=workspace)
+            service = api.runtime_web_v1_create_runtime_web_service(
+                handle=workspace.handle,
+                agent_id=workspace.agent_id,
+                runtime_web_create_request=RuntimeWebCreateRequest(
+                    port=_RUNTIME_WEB_PORT,
+                    label=f"Cold browser {auth_mode}",
+                    selected_duration_seconds=3_600,
+                    turn_on=True,
+                    operation_key=f"request-{unique()}",
+                ),
+                _headers=_headers(workspace.token),
+            )
+            assert service.url is not None
+            driver = _browser(selenium_url=stack.selenium_url, edge_ip=stack.edge_ip)
+            try:
+                _login(driver, email=workspace.email)
+                driver.execute_cdp_cmd("Network.enable", {})
+                driver.execute_cdp_cmd("Network.clearBrowserCache", {})
+                driver.execute_cdp_cmd(
+                    "Network.setBlockedURLs",
+                    {"urls": [f"{_MAIN_ORIGIN}/_next/static/*"]},
+                )
+                _open_application_in_browser(driver, endpoint_url=service.url)
+                assert driver.current_url == service.url
+                assert driver.get_cookie("__Http-Azents-Runtime-Web") is not None
+            finally:
+                driver.execute_cdp_cmd("Network.setBlockedURLs", {"urls": []})
+                driver.quit()
 
 
 def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(

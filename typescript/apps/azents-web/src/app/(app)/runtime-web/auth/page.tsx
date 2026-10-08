@@ -1,4 +1,5 @@
 import { notFound, redirect } from "next/navigation";
+import { getServerConfig } from "@/config/server";
 import { RuntimeWebAuthPage } from "@/features/runtime-web/RuntimeWebAuthPage";
 import { getInitialAuthState } from "@/shared/lib/getInitialAuthState";
 
@@ -20,5 +21,10 @@ export default async function Page({
     const next = `/runtime-web/auth?service_id=${encodeURIComponent(serviceId)}`;
     redirect(`/login?next=${encodeURIComponent(next)}`);
   }
-  return <RuntimeWebAuthPage serviceId={serviceId} />;
+  return (
+    <RuntimeWebAuthPage
+      serviceId={serviceId}
+      mainWebOrigin={getServerConfig().runtimeWebGatewayMainWebOrigin}
+    />
+  );
 }
