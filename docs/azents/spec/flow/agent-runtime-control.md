@@ -364,6 +364,13 @@ exchange, then resumes the original URL on the authorized service origin instead
 of its index page. The same target survives Off-service activation. The navigation
 target never supplies an origin or replaces service access authority; external,
 protocol-relative, backslash and control-character targets fail closed.
+Identity-completion navigation replaces the transient authentication history
+entry. Separate-domain entry uses a one-shot same-origin Blob form document to
+retain the native POST contract while replacing the Main Web connecting screen;
+the broker completion replaces its own entry with the preserved service URL.
+Intermediate parser-time form submissions retain the existing broker authority.
+This does not delete arbitrary earlier browser history or change user login and
+activation navigation.
 
 Gateway authentication is browser-vendor and version neutral and does not use
 User-Agent Client Hints, an allowlist, or a browser-proof cookie. HTTP and WebSocket
@@ -1389,6 +1396,9 @@ Required deterministic coverage:
 Live/provider evidence belongs in the testenv prerequisite system and must redact tokens, credential ids, auth headers, rendered secrets, and raw Runtime tokens.
 
 ## Changelog
+
+- **2026-10-08** — Made identity completion replace transient authentication
+  entries, including the initial separate-domain native POST handoff.
 
 - **2026-10-07 (spec_version=103)** — Corrected hop-credit accounting across
   Runner replacement, completed exact-owner cleanup after dead source queues,

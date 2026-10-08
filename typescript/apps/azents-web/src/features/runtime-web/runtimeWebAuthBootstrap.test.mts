@@ -4,6 +4,9 @@ import { runInNewContext } from "node:vm";
 import { runtimeWebAuthBootstrapScript } from "./runtimeWebAuthBootstrap.ts";
 
 class Element {
+  id = "";
+  httpEquiv = "";
+  content = "";
   dataset: Record<string, string> = {};
   method = "";
   action = "";
@@ -12,6 +15,34 @@ class Element {
   value = "";
   submitted = false;
   children: Element[] = [];
+  readonly tag: string;
+
+  constructor(tag = "div") {
+    this.tag = tag;
+  }
+
+  get outerHTML(): string {
+    const escape = (value: string): string =>
+      value
+        .replaceAll("&", "&amp;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("<", "&lt;");
+    const attributes = {
+      id: this.id,
+      method: this.method,
+      action: this.action,
+      type: this.type,
+      name: this.name,
+      value: this.value,
+      "http-equiv": this.httpEquiv,
+      content: this.content,
+    };
+    const encoded = Object.entries(attributes)
+      .filter(([, value]) => value !== "")
+      .map(([name, value]) => ` ${name}="${escape(value)}"`)
+      .join("");
+    return `<${this.tag}${encoded}>${this.children.map((child) => child.outerHTML).join("")}</${this.tag}>`;
+  }
 
   append(child: Element): void {
     this.children.push(child);
@@ -25,6 +56,10 @@ class Element {
 class Browser {
   root = new Element();
   body = new Element();
+  created: Element[] = [];
+  page: Blob | null = null;
+  revoked: string[] = [];
+  navigationError: Error | null = null;
   calls: Array<{ url: string; options: RequestInit }> = [];
   destination: string | null = null;
   response: Promise<Response>;
@@ -35,10 +70,15 @@ class Browser {
       search: "",
       hash: "",
       replace: (destination: string): void => {
+        if (this.navigationError !== null) {
+          throw this.navigationError;
+        }
         this.destination = destination;
       },
       assign: (destination: string): void => {
-        this.destination = destination;
+        throw new Error(
+          `Authentication must replace history instead of assign: ${destination}`,
+        );
       },
     },
   };
@@ -59,7 +99,11 @@ async function executeAndSettle(browser: Browser): Promise<unknown> {
   const execution: unknown = runInNewContext(script, {
     document: {
       getElementById: () => browser.root,
-      createElement: () => new Element(),
+      createElement: (tag: string): Element => {
+        const element = new Element(tag);
+        browser.created.push(element);
+        return element;
+      },
       body: browser.body,
     },
     window: browser.window,
@@ -68,6 +112,16 @@ async function executeAndSettle(browser: Browser): Promise<unknown> {
       return await browser.response;
     },
     Error,
+    Blob,
+    URL: class extends URL {
+      static override createObjectURL(page: Blob): string {
+        browser.page = page;
+        return "blob:https://main.test/native-post";
+      }
+      static override revokeObjectURL(url: string): void {
+        browser.revoked.push(url);
+      }
+    },
   });
   return await execution;
 }
@@ -113,11 +167,11 @@ void test("separate-domain authentication retains the native broker POST", async
     ),
   );
   await executeAndSettle(browser);
-  const [form] = browser.body.children;
+  const [form] = browser.created;
   assert.ok(form);
   assert.equal(form.method, "POST");
   assert.equal(form.action, "https://broker.test/bind");
-  assert.equal(form.submitted, true);
+  assert.equal(form.submitted, false);
   const [input] = form.children;
   assert.ok(input);
   assert.equal(input.type, "hidden");
@@ -127,7 +181,13 @@ void test("separate-domain authentication retains the native broker POST", async
   assert.ok(target);
   assert.equal(target.name, "return_target");
   assert.equal(target.value, "/");
-  assert.equal(browser.destination, null);
+  assert.equal(browser.destination, "blob:https://main.test/native-post");
+  assert.ok(browser.page);
+  const page = await browser.page.text();
+  assert.ok(page.includes("URL.revokeObjectURL(location.href)"));
+  assert.ok(page.includes('document.getElementById("continue").submit()'));
+  assert.ok(page.includes("form-action https://broker.test"));
+  assert.ok(!runtimeWebAuthBootstrapScript().includes("</script"));
 });
 
 void test("inline execution and later hydration share one pending operation", async () => {
@@ -144,6 +204,46 @@ void test("inline execution and later hydration share one pending operation", as
   );
   await Promise.all([first, second]);
   assert.equal(browser.destination, "https://service.test/");
+});
+
+void test("native POST replacement revokes its object URL when navigation throws", async () => {
+  const browser = new Browser(
+    Promise.resolve(
+      Response.json({
+        mode: "separate_domain",
+        brokerDestination: "https://broker.test/bind",
+        initiationId: "initiation-id",
+      }),
+    ),
+  );
+  browser.navigationError = new Error("Navigation unavailable");
+  const result = await executeAndSettle(browser);
+  assert.equal(
+    JSON.stringify(result),
+    JSON.stringify({
+      type: "ERROR",
+      message: "Navigation unavailable",
+    }),
+  );
+  assert.deepEqual(browser.revoked, ["blob:https://main.test/native-post"]);
+});
+
+void test("native POST document escapes target markup instead of interpolating it into script", async () => {
+  const browser = new Browser(
+    Promise.resolve(
+      Response.json({
+        mode: "separate_domain",
+        brokerDestination: "https://broker.test/bind",
+        initiationId: "initiation-id",
+      }),
+    ),
+  );
+  browser.root.dataset.returnTarget = '/?q="</script><script>bad';
+  await executeAndSettle(browser);
+  assert.ok(browser.page);
+  const page = await browser.page.text();
+  assert.ok(page.includes("&quot;&lt;/script>&lt;script>bad"));
+  assert.equal(page.match(/<script\b/g)?.length, 1);
 });
 
 for (const result of [
@@ -240,7 +340,7 @@ void test("a fragment already carried through login is not appended twice", asyn
   browser.window.location.hash = "#details";
   await executeAndSettle(browser);
   assert.equal(
-    browser.body.children[0]?.children[1]?.value,
+    browser.created[0]?.children[1]?.value,
     "/catalog/item?view=grid#details",
   );
 });

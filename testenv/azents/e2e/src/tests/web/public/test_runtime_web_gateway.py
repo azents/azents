@@ -2311,9 +2311,17 @@ def test_runtime_web_authentication_without_next_assets(
                     f"{service.url}catalog/%E2%9C%93?"
                     "view=grid&tag=one&tag=two&next=%2Fbasket#details"
                 )
+                previous_url = driver.current_url
                 _open_application_in_browser(driver, endpoint_url=destination)
                 assert driver.current_url == destination
                 assert driver.get_cookie("__Http-Azents-Runtime-Web") is not None
+                driver.back()
+                WebDriverWait(driver, 30).until(ec.url_to_be(previous_url))
+                driver.forward()
+                WebDriverWait(driver, 60).until(
+                    ec.visibility_of_element_located((By.ID, "ready"))
+                )
+                assert driver.current_url == destination
                 # Main Web login must carry the inherited browser fragment too.
                 driver.execute_cdp_cmd("Network.setBlockedURLs", {"urls": []})
                 driver.execute_cdp_cmd("Network.clearBrowserCookies", {})
@@ -2322,6 +2330,35 @@ def test_runtime_web_authentication_without_next_assets(
                 driver.get(destination)
                 WebDriverWait(driver, 30).until(ec.url_contains("/login"))
                 _submit_password_login(driver, email=workspace.email)
+                WebDriverWait(driver, 60).until(
+                    ec.visibility_of_element_located((By.ID, "ready"))
+                )
+                assert driver.current_url == destination
+                # Repeat with normal asset loading and only Runtime identity absent.
+                driver.delete_cookie("__Http-Azents-Runtime-Web")
+                driver.get(f"{_MAIN_ORIGIN}/workspaces")
+                WebDriverWait(driver, 30).until(ec.url_contains("/workspaces"))
+                previous_url = driver.current_url
+                # A real click ensures this is not Chrome's automatic skipping of
+                # non-user-activated history entries after scripted navigation.
+                driver.execute_script(
+                    """
+                    const link = document.createElement('a');
+                    link.id = 'history-service-link';
+                    link.href = arguments[0];
+                    link.textContent = 'Open service';
+                    document.body.append(link);
+                    """,
+                    destination,
+                )
+                driver.find_element(By.ID, "history-service-link").click()
+                WebDriverWait(driver, 60).until(
+                    ec.visibility_of_element_located((By.ID, "ready"))
+                )
+                assert driver.current_url == destination
+                driver.back()
+                WebDriverWait(driver, 30).until(ec.url_to_be(previous_url))
+                driver.forward()
                 WebDriverWait(driver, 60).until(
                     ec.visibility_of_element_located((By.ID, "ready"))
                 )
