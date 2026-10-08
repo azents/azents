@@ -45,6 +45,7 @@ export interface ToolkitFormContainerProps {
   agentId?: string;
   embedded?: boolean;
   onComplete?: () => void;
+  onPendingChange?: (pending: boolean) => void;
   initialToolkitType?: string;
 }
 
@@ -149,6 +150,7 @@ export function useToolkitFormContainer(
     agentId,
     embedded = false,
     onComplete,
+    onPendingChange,
     initialToolkitType,
   } = props;
   const router = useRouter();
@@ -197,6 +199,9 @@ export function useToolkitFormContainer(
     type: "IDLE",
     error: null,
   });
+  useEffect(() => {
+    onPendingChange?.(mutationState.type === "SUBMITTING");
+  }, [mutationState.type, onPendingChange]);
 
   const definitionsQuery = trpc.toolkit.listToolkits.useQuery();
   const workspaceToolkitQuery = trpc.toolkit.getConfig.useQuery(
@@ -317,11 +322,16 @@ export function useToolkitFormContainer(
     onSuccess: async (data) => {
       form.setValues({ name: data.name, slug: data.slug });
       setMutationState({ type: "IDLE", error: null });
-      if (agentId) {
-        await utils.toolkit.listAgentManagement.invalidate({ handle, agentId });
-        await utils.toolkit.listAgentManagement.fetch({ handle, agentId });
-      }
       onComplete?.();
+      if (agentId) {
+        // A committed create must not become an unsaved form after a read failure.
+        await utils.toolkit.listAgentManagement
+          .invalidate({ handle, agentId })
+          .catch(() => null);
+        await utils.toolkit.listAgentManagement
+          .fetch({ handle, agentId })
+          .catch(() => null);
+      }
     },
     onError: (error) => {
       setMutationState({ type: "IDLE", error: error.message });
@@ -330,6 +340,7 @@ export function useToolkitFormContainer(
   const updateAgentMutation = trpc.toolkit.updateAgentConfig.useMutation({
     onSuccess: async () => {
       setMutationState({ type: "IDLE", error: null });
+      onComplete?.();
       const invalidations: Array<Promise<unknown>> = [];
       if (agentId) {
         invalidations.push(
@@ -345,11 +356,12 @@ export function useToolkitFormContainer(
           }),
         );
       }
-      await Promise.all(invalidations);
+      await Promise.allSettled(invalidations);
       if (agentId) {
-        await utils.toolkit.listAgentManagement.fetch({ handle, agentId });
+        await utils.toolkit.listAgentManagement
+          .fetch({ handle, agentId })
+          .catch(() => null);
       }
-      onComplete?.();
     },
     onError: (error) => {
       setMutationState({ type: "IDLE", error: error.message });
@@ -722,6 +734,9 @@ export function useToolkitFormContainer(
     onAddScope,
     onDeleteScope,
     onCancel: () => {
+      if (mutationState.type === "SUBMITTING") {
+        return;
+      }
       if (embedded) {
         onComplete?.();
       } else {

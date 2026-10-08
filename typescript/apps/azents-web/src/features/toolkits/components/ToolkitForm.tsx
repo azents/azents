@@ -518,7 +518,12 @@ export function ToolkitForm({
             )}
 
             <Group justify="flex-end">
-              <Button type="button" variant="default" onClick={onCancel}>
+              <Button
+                type="button"
+                variant="default"
+                onClick={onCancel}
+                disabled={mutationState.type === "SUBMITTING"}
+              >
                 {t("cancel")}
               </Button>
               <Button

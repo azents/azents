@@ -23,10 +23,11 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/toolkit.py
   - typescript/apps/azents-web/src/app/(app)/oauth/mcp/callback/**
   - typescript/apps/azents-web/src/features/agents/components/AgentToolkitSection.tsx
+  - typescript/apps/azents-web/src/features/agents/components/ManagedAgentToolkitSection.tsx
   - typescript/apps/azents-web/src/features/toolkits/**
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
-last_verified_at: 2026-10-05
-spec_version: 12
+last_verified_at: 2026-10-08
+spec_version: 13
 ---
 
 # MCP OAuth Flow
@@ -336,7 +337,7 @@ Displayed fields:
 - expiration
 - connect/reconnect/disconnect actions
 
-The UI does not display account identity. An Agent-owned callback posts only a fixed event type and success boolean to its opener, refreshes the Agent management projection, and offers a fallback return link to the owning Agent settings Toolkit section.
+The compact Agent connection list keeps readiness and applicable authorize/reconnect actions visible. Details expose existing granted token scope/expiration separately from configured requested scopes, without performing remote grant introspection. A persisted Toolkit may be added before OAuth completes; addition does not claim connected external authorization. Parent Agent settings do not require another save. The UI does not display account identity. An Agent-owned callback posts only a fixed event type and success boolean to its opener, refreshes the Agent management projection, and offers a fallback return link to the owning Agent settings Toolkit section.
 
 ## Changelog
 

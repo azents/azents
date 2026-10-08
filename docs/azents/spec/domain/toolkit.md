@@ -101,6 +101,7 @@ code_paths:
   - typescript/apps/azents-web/src/app/(app)/oauth/mcp/callback/**
   - typescript/apps/azents-web/src/features/agents/agentToolkitManagementState.ts
   - typescript/apps/azents-web/src/features/agents/components/AgentToolkitSection.tsx
+  - typescript/apps/azents-web/src/features/agents/components/ManagedAgentToolkitSection.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentToolkitManagementContainer.ts
   - typescript/apps/azents-web/src/features/toolkits/**
   - typescript/apps/azents-web/src/features/toolkit-setup/**
@@ -109,8 +110,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-10-07
-spec_version: 138
+last_verified_at: 2026-10-08
+spec_version: 139
 ---
 
 # Toolkit
@@ -509,12 +510,16 @@ azents-web provides Workspace-shared Toolkit management screens and an authority
 
 The AWS Toolkit form describes the current AWS Managed MCP authorization model for its Access Key + SigV4 connection. It directs managers to grant only the downstream AWS service API permissions the Agent needs. It does not require the deprecated `aws-mcp:InvokeMcp`, `aws-mcp:CallReadOnlyTool`, or `aws-mcp:CallReadWriteTool` actions, which have no effect. MCP-specific restrictions use the `aws:ViaAWSMCPService` or `aws:CalledViaAWSMCP` IAM condition context keys.
 
-For a saved Agent, the Agent response's requester-relative `toolkit_management_available` flag is true only for a Workspace Owner or explicit AgentAdmin. The enhanced Toolkit section reads the Agent management projection and starts `Add Toolkit` with a persisted Toolkit type choice. After selection it shows only eligible Workspace-shared candidates for that type alongside the option to configure an Agent-only Toolkit. Saved cards label each item `Workspace shared` or `This Agent only`, show text readiness (`ready`, `authorization_required`, or `disabled`), and keep ownership-correct actions separate:
+For a saved Agent, the Agent response's requester-relative `toolkit_management_available` flag is true only for a Workspace Owner or explicit AgentAdmin. `Add Toolkit` opens a two-tab catalog. `New Toolkit` is the default and shows Provider-type tiles that open the existing Agent-only configuration form directly. `Workspace Toolkit` shows eligible saved shared instances of every type, excluding current attachments, with a final link to Workspace Toolkit creation. Selecting a shared tile attaches its exact ID immediately. Completing the Agent-only form persists that Toolkit immediately. Neither action submits or requires another save of the parent Agent form.
 
-- A Workspace-shared item can be detached. When an OAuth Toolkit requires authorization, a Workspace Owner/Manager can connect or reconnect directly from its Agent card; other Workspace object edits, disablement, and deletion remain in the Workspace Toolkit screens. Other authorization warnings link authorized managers to the Workspace Toolkit editor.
+Connected cards show service icon, Name, Type, short description, ownership and text readiness (`ready`, `authorization_required`, or `disabled`). Details separate technical identifiers, allowlisted Provider configuration and OAuth scope/expiration from the compact list. Configured features are not claimed to be external granted permissions. Raw config, credentials and absent account identities are never invented or dumped. Server resource URLs omit userinfo/query/fragment material. Toolkit icons use a common frontend type-keyed component, existing Tabler marks and bundled local SVGs; icons do not define Provider availability or require third-party runtime requests. Ownership-correct actions remain separate:
+
+- A Workspace-shared item can be detached from details. When an OAuth Toolkit requires authorization, a Workspace Owner/Manager can connect or reconnect directly from its Agent card or details; other Workspace object edits, disablement, and deletion remain in the Workspace Toolkit screens. Authorized managers receive a Workspace-management link; Agent administrators without Workspace write authority do not receive shared-object mutation actions.
 - An Agent-only item can be created, edited, connection-tested, enabled or disabled, OAuth-connected or disconnected, and deleted through nested Agent routes. When OAuth authorization is required, the card starts connect or reconnect directly; other authorization warnings open its editor. Deletion is confirmed as removal from that Agent with stored credentials deleted.
 - The reusable Toolkit form is embedded only under a saved Agent. Unsaved validation and connection-test errors remain in that form; closing it creates no ToolkitConfig.
 - Requesters without the flag retain the legacy shared attachment section. They receive no Agent-only item, ownership/readiness detail, or Agent-only management action. Chat has no Toolkit management surface.
+
+The catalog, form and details share a responsive dialog while the parent Agent form remains mounted. Agent-only edit/toggle/delete actions are available from details. An acknowledged write remains committed even when a subsequent management-query refresh fails; a read failure does not reclassify the form as unsaved. Saved OAuth-incomplete items retain authorization-required readiness. This readiness is based on persisted state, not live provider health.
 
 The Agent-only form uses the existing provider-specific config, credential, test, GitHub, and MCP OAuth controls. The callback return target is the owning Agent's capabilities Toolkit section. The callback's opener notification contains only its fixed event type and success boolean; credentials, tokens, codes, and state plaintext are never rendered or posted.
 The Agent card reserves an OAuth popup before requesting an authorization URL, verifies callback origin and popup source, and invalidates the Agent management projection on callback success. Failure leaves readiness unchanged and displays an error. The existing ownership-specific OAuth endpoints and backend permission checks remain authoritative.

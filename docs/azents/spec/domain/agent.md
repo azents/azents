@@ -106,6 +106,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/components/AgentAutomaticProjects.tsx
   - typescript/apps/azents-web/src/features/agents/components/AgentForm.tsx
   - typescript/apps/azents-web/src/features/agents/components/AgentToolkitSection.tsx
+  - typescript/apps/azents-web/src/features/agents/components/ManagedAgentToolkitSection.tsx
   - typescript/apps/azents-web/src/shared/model-options/components/SelectableModelOptionsEditor.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentAutomaticProjectsContainer.ts
   - typescript/apps/azents-web/src/features/agents/containers/useAgentToolkitManagementContainer.ts
@@ -148,8 +149,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-10-06
-spec_version: 95
+last_verified_at: 2026-10-08
+spec_version: 96
 ---
 
 # Agent Domain Spec
@@ -820,7 +821,7 @@ Prepared foreground turns use the prompt-selected option instead of the default 
 - Agent with `memory_enabled=false` suppresses automatic Memory context,
   Historical discovery/preparation, Saved mutation tools, and model-facing
   Memory VFS access; retained human settings inspection remains available.
-- Toolkit CRUD, ownership, OAuth, and runtime state follow [`toolkit.md`](toolkit.md). A saved Agent response includes requester-relative `toolkit_management_available`; it is derived from Workspace Owner or explicit AgentAdmin authority for that exact active Agent. When false, saved-Agent settings retain the legacy shared attach/detach section and disclose no Agent-only Toolkit state. When true, `Add Toolkit` begins with Toolkit type selection and then offers eligible Workspace-shared candidates or an Agent-only configuration flow without changing Agent creation or Chat.
+- Toolkit CRUD, ownership, OAuth, and runtime state follow [`toolkit.md`](toolkit.md). A saved Agent response includes requester-relative `toolkit_management_available`; it is derived from Workspace Owner or explicit AgentAdmin authority for that exact active Agent. When false, saved-Agent settings retain the legacy shared attach/detach section and disclose no Agent-only Toolkit state. When true, `Add Toolkit` opens a two-tab tile catalog with new Agent-only Provider selection as default and a separate existing Workspace Toolkit tab. Additions persist through their own operations without submitting the Agent form; compact connected cards open allowlisted details and existing ownership-correct actions. Agent creation and Chat remain unchanged.
 - Avatar is stored as stored image metadata through upload service image handler and resolved to public URL in Agent response.
 - Main Web provides available avatar variants as responsive width candidates and
   declares the rendered CSS width, allowing the browser to select a thumbnail that

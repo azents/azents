@@ -152,8 +152,9 @@ void test("projects shared candidates into stable select options", () => {
       availableShared: [
         {
           value: "toolkit-1",
-          label: "Workspace GitHub (github)",
+          label: "Workspace GitHub",
           toolkitType: "github",
+          description: null,
         },
       ],
     },
