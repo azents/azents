@@ -55,6 +55,7 @@ from azents.repos.model_metadata_source_data import (
 )
 from azents.repos.workspace_model_settings.data import WorkspaceModelSettings
 from azents.services.active_model_capabilities import ActiveModelCapabilitiesService
+from azents.services.github_user_oauth.service import GitHubUserOAuthService
 from azents.services.model_metadata import ModelMetadataService
 from azents.services.terminal_policy.invalidation import (
     NoopTerminalPolicyInvalidationPublisher,
@@ -630,6 +631,7 @@ def _make_service() -> AgentService:
             replacement=None, missing=frozenset()
         ),
         repository=repository,
+        github_user_oauth_service=AsyncMock(spec=GitHubUserOAuthService),
         model_catalog_read_service=model_catalog_read_service,
         image_generation_catalog_service=image_generation_catalog_service,
         runtime_profile_service=runtime_profile_service,

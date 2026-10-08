@@ -17,7 +17,7 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr, field_validator
+from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.git_hub_user_connection_status import GitHubUserConnectionStatus
 from typing import Optional, Set
@@ -25,7 +25,7 @@ from typing_extensions import Self
 
 class GitHubUserConnectionSummaryResponse(BaseModel):
     """
-    Allowlisted user-account execution identity and cleanup readiness.
+    Allowlisted user-account execution identity.
     """ # noqa: E501
     id: StrictStr
     account_id: StrictInt
@@ -35,9 +35,8 @@ class GitHubUserConnectionSummaryResponse(BaseModel):
     source: StrictStr
     status: GitHubUserConnectionStatus
     failure_reason: Optional[StrictStr]
-    cleanup_pending: StrictBool
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "account_id", "account_login", "account_avatar_url", "app_id", "source", "status", "failure_reason", "cleanup_pending"]
+    __properties: ClassVar[List[str]] = ["id", "account_id", "account_login", "account_avatar_url", "app_id", "source", "status", "failure_reason"]
 
     @field_validator('source')
     def source_validate_enum(cls, value):
@@ -123,8 +122,7 @@ class GitHubUserConnectionSummaryResponse(BaseModel):
             "app_id": obj.get("app_id"),
             "source": obj.get("source"),
             "status": obj.get("status"),
-            "failure_reason": obj.get("failure_reason"),
-            "cleanup_pending": obj.get("cleanup_pending")
+            "failure_reason": obj.get("failure_reason")
             }.items() if _key in obj
         })
         # store additional fields in additional_properties

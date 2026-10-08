@@ -9,6 +9,7 @@ from fastapi import Depends
 
 from azents.core.enums import AgentLifecycleStatus, WorkspaceUserRole
 from azents.core.github_installation import GitHubInstallationSnapshot
+from azents.core.github_user_oauth import GitHubUserRevocation
 from azents.core.toolkit_errors import NotFound
 from azents.core.toolkit_identifiers import resolve_default_toolkit_slug
 from azents.rdb.deps import get_session_manager
@@ -37,8 +38,8 @@ from azents.repos.toolkit_operations.data import (
     PlatformToolkitAuthority,
 )
 from azents.repos.toolkit_operations.github_user_guard import (
+    capture_user_toolkit_delete,
     guard_user_registration_update,
-    guard_user_toolkit_delete,
 )
 from azents.repos.toolkit_operations.owned_data import (
     AgentManagementDenied,
@@ -489,7 +490,7 @@ class AgentToolkitOperationsRepository:
         workspace_user_id: str,
         role: WorkspaceUserRole,
     ) -> Result[
-        None,
+        tuple[GitHubUserRevocation, ...],
         AgentWorkspaceMismatch | AgentManagementDenied | NotFound,
     ]:
         """Delete one ToolkitConfig owned by the exact managed Agent."""
@@ -518,11 +519,11 @@ class AgentToolkitOperationsRepository:
                     pass
                 case _:
                     assert_never(access)
-            await guard_user_toolkit_delete(
+            revocations = await capture_user_toolkit_delete(
                 session, toolkit, repository=self.toolkit_repo
             )
             await self.toolkit_repo.delete_by_id(session, toolkit_id)
-        return Success(None)
+        return Success(revocations)
 
     async def _get_managed_agent(
         self,

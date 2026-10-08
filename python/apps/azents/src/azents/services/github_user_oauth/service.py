@@ -1,8 +1,9 @@
-"""Sequence completed GitHub user setup operations and provider effects."""
+"""Sequence fail-closed user authorization and fail-open token cleanup."""
 
 import asyncio
 import dataclasses
 import datetime
+import logging
 import secrets
 from typing import Annotated
 from urllib.parse import quote, urlencode
@@ -27,7 +28,6 @@ from azents.core.github_user_auth import (
 from azents.core.github_user_oauth import (
     GitHubUserAttempt,
     GitHubUserCandidate,
-    GitHubUserCleanup,
     GitHubUserConnection,
     GitHubUserConnectionStatus,
     GitHubUserConnectionSummary,
@@ -36,6 +36,7 @@ from azents.core.github_user_oauth import (
     GitHubUserOAuthError,
     GitHubUserRegistration,
     GitHubUserRequester,
+    GitHubUserRevocation,
 )
 from azents.core.oauth2 import generate_pkce_pair
 from azents.repos.github_user_oauth.operations import GitHubUserOAuthOperationRepository
@@ -48,15 +49,14 @@ from azents.services.github_user_oauth.data import (
     GitHubUserConnectOutput,
     GitHubUserStatusOutput,
 )
-from azents.services.github_user_oauth.exchange_owner import (
-    GitHubUserExchangeOperation,
-    GitHubUserExchangeOwner,
-    get_github_user_exchange_owner,
-)
 from azents.services.github_user_oauth.provider import (
     GitHubUserProvider,
     get_github_user_provider,
 )
+from azents.utils.logging import sanitized_exception_info
+
+logger = logging.getLogger(__name__)
+_REVOCATION_TIMEOUT_SECONDS = 5.0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -67,17 +67,7 @@ class _PreparedRegistration:
     private_key: str = dataclasses.field(repr=False)
 
 
-@dataclasses.dataclass
-class _ExchangeReceipt:
-    """Retain exact received material until the owned operation settles."""
-
-    attempt: GitHubUserAttempt | None = dataclasses.field(repr=False)
-    access_token: str | None = dataclasses.field(repr=False)
-
-
-def project_connection(
-    connection: GitHubUserConnection, *, cleanup_pending: bool
-) -> GitHubUserConnectionSummary:
+def project_connection(connection: GitHubUserConnection) -> GitHubUserConnectionSummary:
     """Project only allowlisted metadata from an active connection."""
     return GitHubUserConnectionSummary(
         id=connection.id,
@@ -88,13 +78,12 @@ def project_connection(
         source=connection.registration.source,
         status=connection.status,
         failure_reason=connection.failure_reason,
-        cleanup_pending=cleanup_pending,
     )
 
 
 @dataclasses.dataclass(frozen=True)
 class GitHubUserOAuthService:
-    """Manage Toolkit-local user authorization without database lifetime handles."""
+    """Manage authorization through completed operations and bounded SDK calls."""
 
     repository: Annotated[
         GitHubUserOAuthOperationRepository, Depends(GitHubUserOAuthOperationRepository)
@@ -102,9 +91,6 @@ class GitHubUserOAuthService:
     config: Annotated[Config, Depends(get_config)]
     platform_runtime: Annotated[PlatformGitHubAppRuntimeService, Depends()]
     provider: Annotated[GitHubUserProvider, Depends(get_github_user_provider)]
-    exchange_owner: Annotated[
-        GitHubUserExchangeOwner, Depends(get_github_user_exchange_owner)
-    ]
 
     def callback_url(self) -> str:
         """Return the one registered callback, not a requester-controlled URL."""
@@ -143,25 +129,24 @@ class GitHubUserOAuthService:
             status = "configured"
         else:
             status = "incomplete"
-        callback = (
-            f"{self.config.web_url.rstrip('/')}/oauth/github/callback"
-            if self.config.web_url
-            else None
+        return GitHubSetupAvailability(
+            platform=status,
+            callback_url=(
+                f"{self.config.web_url.rstrip('/')}/oauth/github/callback"
+                if self.config.web_url
+                else None
+            ),
         )
-        return GitHubSetupAvailability(platform=status, callback_url=callback)
 
     async def status(self, requester: GitHubUserRequester) -> GitHubUserStatusOutput:
-        """Read redacted status under the same management boundary as setup."""
+        """Read saved connection identity under the setup management boundary."""
         context = await self.repository.read_context(requester=requester)
         return GitHubUserStatusOutput(
             connection=(
-                project_connection(
-                    context.connection, cleanup_pending=context.cleanup_pending
-                )
+                project_connection(context.connection)
                 if context.connection is not None
                 else None
-            ),
-            cleanup_pending=context.cleanup_pending,
+            )
         )
 
     async def _registration(self, context: GitHubUserContext) -> _PreparedRegistration:
@@ -223,7 +208,6 @@ class GitHubUserOAuthService:
     async def connect(self, requester: GitHubUserRequester) -> GitHubUserConnectOutput:
         """Reserve a bound attempt without replacing an existing credential."""
         context = await self.repository.read_context(requester=requester)
-        await self._cleanup_available(requester)
         prepared = await self._registration(context)
         registration = prepared.registration
         try:
@@ -244,7 +228,7 @@ class GitHubUserOAuthService:
             )
         pkce = generate_pkce_pair()
         nonce = secrets.token_urlsafe(32)
-        attempt = await self.repository.start(
+        result = await self.repository.start(
             requester=requester,
             registration=registration,
             redirect_uri=self.callback_url(),
@@ -253,7 +237,8 @@ class GitHubUserOAuthService:
             expires_at=datetime.datetime.now(datetime.UTC)
             + datetime.timedelta(minutes=10),
         )
-        await self._cleanup_available(requester)
+        await self.cleanup_revocations(result.revocations)
+        attempt = result.attempt
         state = f"github_user.{attempt.id}.{nonce}"
         authorization_url = "https://github.com/login/oauth/authorize?" + urlencode(
             {
@@ -279,39 +264,7 @@ class GitHubUserOAuthService:
         code: str,
         state: str,
     ) -> GitHubUserCandidateSummary:
-        """Keep the admitted exchange/capture alive when its HTTP caller disappears."""
-        receipt = _ExchangeReceipt(attempt=None, access_token=None)
-
-        async def call(
-            operation: GitHubUserExchangeOperation,
-        ) -> GitHubUserCandidateSummary | None:
-            return await self._exchange_once(
-                requester, code=code, state=state, receipt=receipt, operation=operation
-            )
-
-        async def finalize_detached() -> None:
-            if receipt.attempt is not None and receipt.access_token is not None:
-                await self._discard_issued(
-                    receipt.attempt, receipt.access_token, "caller_cancelled"
-                )
-
-        result = await self.exchange_owner.run(call, finalize_detached)
-        if result is None:
-            raise GitHubUserOAuthError(
-                GitHubUserErrorCode.STALE, "Authorization caller is no longer active."
-            )
-        return result
-
-    async def _exchange_once(
-        self,
-        requester: GitHubUserRequester,
-        *,
-        code: str,
-        state: str,
-        receipt: _ExchangeReceipt,
-        operation: GitHubUserExchangeOperation,
-    ) -> GitHubUserCandidateSummary | None:
-        """Consume once, capture before identity, and never activate on its own."""
+        """Consume once and hold a received token only until verified publication."""
         parts = state.split(".")
         if len(parts) != 3 or parts[0] != "github_user" or not parts[1] or not parts[2]:
             raise GitHubUserOAuthError(
@@ -323,10 +276,10 @@ class GitHubUserOAuthService:
             nonce=parts[2],
             redirect_uri=self.callback_url(),
         )
-        receipt.attempt = attempt
         try:
-            context = await self.repository.read_context(requester=requester)
-            prepared = await self._registration(context)
+            prepared = await self._registration(
+                await self.repository.read_context(requester=requester)
+            )
             if prepared.registration != attempt.registration:
                 raise GitHubUserOAuthError(
                     GitHubUserErrorCode.STALE,
@@ -358,6 +311,8 @@ class GitHubUserOAuthService:
                     redirect_uri=attempt.redirect_uri,
                     code_verifier=attempt.code_verifier,
                 )
+        except asyncio.CancelledError:
+            raise
         except TimeoutError:
             await self.repository.complete_failed_exchange(attempt_id=attempt.id)
             raise GitHubUserProviderError(
@@ -367,13 +322,9 @@ class GitHubUserOAuthService:
             await self.repository.complete_failed_exchange(attempt_id=attempt.id)
             raise
         except GitHubUserTokenRejected as error:
+            await self.repository.complete_failed_exchange(attempt_id=attempt.id)
             if error.issued_token is not None:
-                receipt.access_token = error.issued_token
-                await self._discard_issued(
-                    attempt, error.issued_token, "token_rejected"
-                )
-            else:
-                await self.repository.complete_failed_exchange(attempt_id=attempt.id)
+                await self._discard_received(attempt, error.issued_token)
             message = (
                 "GitHub returned an expiring user token. Disable user-to-server "
                 "token expiration in the selected App and restart authorization."
@@ -382,46 +333,27 @@ class GitHubUserOAuthService:
                 "selected App registration and restart authorization."
             )
             raise GitHubUserOAuthError(GitHubUserErrorCode.INVALID, message) from None
-        receipt.access_token = issued.access_token
-        retired = await self.repository.record_exchange_token(
-            attempt_id=attempt.id,
-            registration=attempt.registration,
-            access_token=issued.access_token,
-        )
-        if retired is not None:
-            await self._cleanup_one(retired, requester=requester)
-            raise GitHubUserOAuthError(
-                GitHubUserErrorCode.STALE, "GitHub setup is no longer current."
-            )
-        if operation.detached:
-            await self._discard_issued(attempt, issued.access_token, "caller_cancelled")
-            return None
         try:
             identity = await self.provider.identity(issued.access_token)
-        except GitHubUserProviderError:
-            await self._discard_issued(attempt, issued.access_token, "identity_failed")
-            raise
-        if operation.detached:
-            await self._discard_issued(attempt, issued.access_token, "caller_cancelled")
-            return None
-        candidate = GitHubUserCandidate(
-            access_token=issued.access_token,
-            account_id=identity.account_id,
-            account_login=identity.login,
-            account_avatar_url=identity.avatar_url,
-        )
-        try:
             current = await self._registration(
                 await self.repository.read_context(requester=requester)
             )
             review = await self.repository.store_review(
                 requester=requester,
                 attempt_id=attempt.id,
-                candidate=candidate,
+                candidate=GitHubUserCandidate(
+                    access_token=issued.access_token,
+                    account_id=identity.account_id,
+                    account_login=identity.login,
+                    account_avatar_url=identity.avatar_url,
+                ),
                 registration=current.registration,
             )
-        except GitHubUserOAuthError:
-            await self._discard_issued(attempt, issued.access_token, "setup_stale")
+        except asyncio.CancelledError:
+            raise
+        except GitHubUserProviderError, GitHubUserOAuthError, TimeoutError:
+            await self.repository.complete_failed_exchange(attempt_id=attempt.id)
+            await self._discard_received(attempt, issued.access_token)
             raise
         return self._project_candidate(review)
 
@@ -448,7 +380,7 @@ class GitHubUserOAuthService:
     async def review(
         self, requester: GitHubUserRequester, *, attempt_id: str
     ) -> GitHubUserCandidateSummary:
-        """Read verified review details after a fixed popup completion event."""
+        """Read verified details after a fixed popup completion event."""
         attempt = await self.repository.read_review(
             requester=requester, attempt_id=attempt_id
         )
@@ -465,142 +397,109 @@ class GitHubUserOAuthService:
     async def confirm(
         self, requester: GitHubUserRequester, *, attempt_id: str
     ) -> GitHubUserConnectionSummary:
-        """Publish only a current reviewed candidate and revoke its predecessor."""
+        """Publish a current candidate, then attempt its old token's revocation."""
         prepared = await self._registration(
             await self.repository.read_context(requester=requester)
         )
-        connection = await self.repository.confirm(
+        result = await self.repository.confirm(
             requester=requester,
             attempt_id=attempt_id,
             registration=prepared.registration,
         )
-        await self.cleanup_retry(requester)
-        return project_connection(connection, cleanup_pending=False)
+        await self.cleanup_revocations(result.revocations)
+        return project_connection(result.connection)
 
     async def cancel(self, requester: GitHubUserRequester, *, attempt_id: str) -> None:
-        """Cancel only the initiating attempt and revoke issued candidate tokens."""
-        await self.repository.cancel(requester=requester, attempt_id=attempt_id)
-        await self.cleanup_retry(requester)
+        """Remove the initiating attempt and attempt cleanup of its known token."""
+        revocations = await self.repository.cancel(
+            requester=requester, attempt_id=attempt_id
+        )
+        await self.cleanup_revocations(revocations)
 
     async def disconnect(self, requester: GitHubUserRequester) -> None:
-        """Retire local authority, then require successful single-token revocation."""
+        """Remove local authority; provider failure cannot restore or block it."""
         context = await self.repository.read_context(requester=requester)
         registration = None
         if context.connection is not None:
             try:
                 prepared = await self._registration(context)
             except GitHubUserOAuthError:
-                # Missing registration must not keep the old token executable.
+                # Missing registration does not keep a retired token executable.
                 registration = None
             else:
                 registration = prepared.registration
-        try:
-            await self.repository.disconnect(
-                requester=requester, registration=registration
-            )
-        except GitHubUserOAuthError as error:
-            if error.code is not GitHubUserErrorCode.CLEANUP_REQUIRED:
-                raise
-            await self._cleanup_available(requester)
-            raise
-        await self.cleanup_retry(requester)
+        revocations = await self.repository.disconnect(
+            requester=requester, registration=registration
+        )
+        await self.cleanup_revocations(revocations)
 
-    async def cleanup_retry(self, requester: GitHubUserRequester) -> None:
-        """Retry captured retired credentials under current management authority."""
-        await self._cleanup_available(requester)
-        await self.repository.ensure_cleanup_complete(requester=requester)
-
-    async def _cleanup_available(self, requester: GitHubUserRequester) -> None:
-        """Clean known retired tokens without claiming an unknown exchange is done."""
-        retired = await self.repository.list_cleanup(requester=requester)
-        for cleanup in retired:
-            await self._cleanup_one(cleanup, requester=requester)
-
-    async def _discard_issued(
-        self, attempt: GitHubUserAttempt, token: str, reason: str
-    ) -> None:
-        """Persist and revoke a discarded issued token even after authority loss."""
-        cleanup = await self.repository.retire_exchange_result(
-            attempt_id=attempt.id,
+    async def _discard_received(self, attempt: GitHubUserAttempt, token: str) -> None:
+        """Use captured facts after stale/removed setup without retaining cleanup."""
+        revocation = await self.repository.received_revocation(
+            toolkit_id=attempt.requester.toolkit_id,
             registration=attempt.registration,
             access_token=token,
-            reason=reason,
         )
-        if cleanup is not None:
-            await self._cleanup_one(cleanup, requester=attempt.requester)
+        if revocation is not None:
+            await self.cleanup_revocations((revocation,))
 
-    async def _retired_token_is_invalid(self, cleanup: GitHubUserCleanup) -> bool:
-        """Confirm invalidity of the captured token at GitHub's user endpoint."""
-        try:
-            await self.provider.identity(cleanup.access_token)
-        except GitHubUserProviderError as error:
-            return error.reason == "authentication" and error.status_code == 401
-        return False
-
-    async def _cleanup_one(
-        self, cleanup: GitHubUserCleanup, *, requester: GitHubUserRequester | None
+    async def cleanup_revocations(
+        self, revocations: tuple[GitHubUserRevocation, ...]
     ) -> None:
-        """Revoke the captured token; never resolve a newer execution credential."""
-        client_secret = cleanup.registration.client_secret
-        if cleanup.registration.source == "platform_user":
-            platform = await self.platform_runtime.resolve()
-            if (
-                platform.app_id == cleanup.registration.app_id
-                and platform.client_id == cleanup.registration.client_id
-                and platform.client_secret is not None
-            ):
-                client_secret = platform.client_secret
-        elif requester is not None:
+        """Await bounded exact-token attempts; local completion is not proof."""
+        for revocation in revocations:
+            registration = revocation.registration
             try:
-                prepared = await self._registration(
-                    await self.repository.read_context(requester=requester)
+                async with asyncio.timeout(_REVOCATION_TIMEOUT_SECONDS):
+                    client_secret = registration.client_secret
+                    if registration.source == "platform_user":
+                        platform = await self.platform_runtime.resolve()
+                        if (
+                            platform.app_id == registration.app_id
+                            and platform.client_id == registration.client_id
+                            and platform.client_secret is not None
+                        ):
+                            client_secret = platform.client_secret
+                    if client_secret is None:
+                        logger.warning(
+                            "GitHub token revocation was not attempted: "
+                            "registration unavailable; local completion is unchanged.",
+                            extra={
+                                "app_source": registration.source,
+                                "app_id": registration.app_id,
+                                "reason": "registration_unavailable",
+                            },
+                        )
+                        continue
+                    await self.provider.revoke(
+                        client_id=registration.client_id,
+                        client_secret=client_secret,
+                        token=revocation.access_token,
+                    )
+            except asyncio.CancelledError:
+                raise
+            except (GitHubUserProviderError, TimeoutError) as error:
+                logger.warning(
+                    "GitHub token revocation attempt failed; "
+                    "local completion is unchanged.",
+                    extra={
+                        "app_source": registration.source,
+                        "app_id": registration.app_id,
+                        "reason": (
+                            error.reason
+                            if isinstance(error, GitHubUserProviderError)
+                            else "timeout"
+                        ),
+                    },
+                    exc_info=sanitized_exception_info(
+                        error, message="GitHub token revocation attempt failed."
+                    ),
                 )
-            except GitHubUserOAuthError:
-                # Retired cleanup keeps its captured binding after admission loss.
-                pass
-            else:
-                if (
-                    prepared.registration.source == cleanup.registration.source
-                    and prepared.registration.app_id == cleanup.registration.app_id
-                    and prepared.registration.client_id
-                    == cleanup.registration.client_id
-                ):
-                    client_secret = prepared.registration.client_secret
-        if client_secret is None:
-            if await self._retired_token_is_invalid(cleanup):
-                await self.repository.finish_retired(cleanup_id=cleanup.id)
-                return
-            await self.repository.mark_retired_failure(
-                cleanup_id=cleanup.id, reason="registration_unavailable"
-            )
-            raise GitHubUserOAuthError(
-                GitHubUserErrorCode.CLEANUP_REQUIRED,
-                "GitHub token cleanup is incomplete. Restore the original App "
-                "registration and retry cleanup.",
-            )
-        try:
-            await self.provider.revoke(
-                client_id=cleanup.registration.client_id,
-                client_secret=client_secret,
-                token=cleanup.access_token,
-            )
-        except GitHubUserProviderError:
-            if await self._retired_token_is_invalid(cleanup):
-                await self.repository.finish_retired(cleanup_id=cleanup.id)
-                return
-            await self.repository.mark_retired_failure(
-                cleanup_id=cleanup.id, reason="provider_cleanup_failed"
-            )
-            raise GitHubUserOAuthError(
-                GitHubUserErrorCode.CLEANUP_REQUIRED,
-                "GitHub token cleanup is incomplete. Retry cleanup.",
-            ) from None
-        await self.repository.finish_retired(cleanup_id=cleanup.id)
 
     async def access(
         self, requester: GitHubUserRequester, *, cursor: str | None
     ) -> GitHubUserAccessPage:
-        """Observe App/account access without creating a local permissions ledger."""
+        """Observe App/account access without a local permissions ledger."""
         context = await self.repository.read_context(requester=requester)
         connection = context.connection
         if (
@@ -608,8 +507,7 @@ class GitHubUserOAuthService:
             or connection.status is not GitHubUserConnectionStatus.CONNECTED
         ):
             raise GitHubUserOAuthError(
-                GitHubUserErrorCode.INVALID,
-                "GitHub user authorization is required.",
+                GitHubUserErrorCode.INVALID, "GitHub user authorization is required."
             )
         prepared = await self._registration(context)
         registration = prepared.registration

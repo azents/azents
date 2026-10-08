@@ -64,9 +64,7 @@ class TestToolkitConfigResponse(unittest.TestCase):
                     app_id = '', 
                     source = 'platform_user', 
                     status = 'connected', 
-                    failure_reason = '', 
-                    cleanup_pending = True, ),
-                github_user_cleanup_pending = True,
+                    failure_reason = '', ),
                 created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f')
             )

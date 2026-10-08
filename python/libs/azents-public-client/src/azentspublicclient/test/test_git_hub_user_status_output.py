@@ -43,9 +43,7 @@ class TestGitHubUserStatusOutput(unittest.TestCase):
                     app_id = '', 
                     source = 'platform_user', 
                     status = 'connected', 
-                    failure_reason = '', 
-                    cleanup_pending = True, ),
-                cleanup_pending = True
+                    failure_reason = '', )
             )
         else:
             return GitHubUserStatusOutput(
@@ -57,9 +55,7 @@ class TestGitHubUserStatusOutput(unittest.TestCase):
                     app_id = '', 
                     source = 'platform_user', 
                     status = 'connected', 
-                    failure_reason = '', 
-                    cleanup_pending = True, ),
-                cleanup_pending = True,
+                    failure_reason = '', ),
         )
         """
 

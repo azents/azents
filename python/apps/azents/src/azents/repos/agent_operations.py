@@ -7,7 +7,10 @@ from azcommon.datetime import tznow
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 
+from azents.core.crypto import CredentialCipher
+from azents.core.deps import get_credential_cipher
 from azents.core.enums import AgentRuntimeCapability, WorkspaceUserRole
+from azents.core.github_user_oauth import GitHubUserRevocation
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.runtime_profile import RuntimeReconcileSourceKind
 from azents.rdb.deps import get_session_manager
@@ -32,7 +35,7 @@ from azents.repos.agent_decommission import AgentDecommissionRepository
 from azents.repos.agent_decommission.data import AgentDecommissionJob
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
-from azents.repos.github_user_oauth.parent_guards import assert_agent_delete_allowed
+from azents.repos.github_user_oauth.guards import capture_and_clear_agent_user_tokens
 from azents.repos.runtime_profile.availability import (
     RuntimeProfileAvailabilityRepository,
 )
@@ -112,6 +115,9 @@ class AgentDecommissionRequest:
 
     agent: Agent
     job: AgentDecommissionJob
+    github_user_revocations: tuple[GitHubUserRevocation, ...] = dataclasses.field(
+        repr=False
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -140,6 +146,7 @@ class AgentOperationsRepository:
         SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
+    credential_cipher: Annotated[CredentialCipher, Depends(get_credential_cipher)]
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
     admin_repository: Annotated[
         AgentAdminRepository,
@@ -414,7 +421,9 @@ class AgentOperationsRepository:
             )
             if settings.archived_session_retention_days is None:
                 return Failure(AgentOperationUnlimitedRetention(agent_id=agent_id))
-            await assert_agent_delete_allowed(session, agent_id=agent_id)
+            revocations = await capture_and_clear_agent_user_tokens(
+                session, agent_id=agent_id, cipher=self.credential_cipher
+            )
             decommissioned = await self.agent_repository.mark_decommissioning(
                 session,
                 agent_id,
@@ -431,6 +440,7 @@ class AgentOperationsRepository:
                 AgentDecommissionRequest(
                     agent=decommissioned,
                     job=job,
+                    github_user_revocations=revocations,
                 )
             )
 

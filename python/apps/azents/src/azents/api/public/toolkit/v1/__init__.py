@@ -10,7 +10,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.auth.permissions import Permissions
-from azents.core.github_user_oauth import GitHubUserRequester
 from azents.core.toolkit_errors import (
     AgentToolkitNotFound,
     DuplicateAgentToolkit,
@@ -19,7 +18,6 @@ from azents.core.toolkit_errors import (
 from azents.core.tools import ToolkitProvider
 from azents.engine.tools.deps import get_toolkit_registry
 from azents.services.agent.data import NotAdmin
-from azents.services.github_user_oauth.service import GitHubUserOAuthService
 from azents.services.toolkit import ToolkitService
 from azents.services.toolkit.data import (
     AgentNotBelongToWorkspace,
@@ -290,7 +288,6 @@ async def update_toolkit_config(
 async def delete_toolkit_config(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
     service: Annotated[ToolkitService, Depends()],
-    github_user_service: Annotated[GitHubUserOAuthService, Depends()],
     *,
     toolkit_config_id: str,
 ) -> None:
@@ -305,26 +302,6 @@ async def delete_toolkit_config(
         )
 
     with github_user_management_errors():
-        existing = await service.get_by_id(
-            toolkit_config_id, workspace_id=member.workspace_id
-        )
-        if (
-            existing.success
-            and existing.value.toolkit_type == "github"
-            and (
-                existing.value.config.get("github_auth_type")
-                in ("github_app_user", "github_app_platform_user")
-            )
-        ):
-            await github_user_service.disconnect(
-                GitHubUserRequester(
-                    user_id=member.user_id,
-                    session_id=member.session_id,
-                    workspace_id=member.workspace_id,
-                    agent_id=None,
-                    toolkit_id=toolkit_config_id,
-                )
-            )
         result = await service.delete_by_id(
             toolkit_config_id, workspace_id=member.workspace_id
         )
@@ -572,37 +549,12 @@ async def update_agent_toolkit_config(
 async def delete_agent_toolkit_config(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
     service: Annotated[ToolkitService, Depends()],
-    github_user_service: Annotated[GitHubUserOAuthService, Depends()],
     *,
     agent_id: str,
     toolkit_config_id: str,
 ) -> None:
     """Delete one ToolkitConfig owned by the path Agent."""
     with github_user_management_errors():
-        existing = await service.get_agent_owned(
-            agent_id,
-            toolkit_config_id,
-            workspace_id=member.workspace_id,
-            workspace_user_id=member.workspace_user_id,
-            role=member.role,
-        )
-        if (
-            existing.success
-            and existing.value.toolkit_type == "github"
-            and (
-                existing.value.config.get("github_auth_type")
-                in ("github_app_user", "github_app_platform_user")
-            )
-        ):
-            await github_user_service.disconnect(
-                GitHubUserRequester(
-                    user_id=member.user_id,
-                    session_id=member.session_id,
-                    workspace_id=member.workspace_id,
-                    agent_id=agent_id,
-                    toolkit_id=toolkit_config_id,
-                )
-            )
         result = await service.delete_agent_owned(
             agent_id,
             toolkit_config_id,

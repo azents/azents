@@ -17,7 +17,7 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictBool
+from pydantic import BaseModel, ConfigDict
 from typing import Any, ClassVar, Dict, Optional
 from azentspublicclient.models.git_hub_user_connection_summary import GitHubUserConnectionSummary
 from typing import Optional, Set
@@ -25,11 +25,10 @@ from typing_extensions import Self
 
 class GitHubUserStatusOutput(BaseModel):
     """
-    Current connection plus cleanup status, never retired credential data.
+    Current saved connection, with no provider-cleanup success claim.
     """ # noqa: E501
     connection: Optional[GitHubUserConnectionSummary]
-    cleanup_pending: StrictBool
-    __properties: ClassVar[List[str]] = ["connection", "cleanup_pending"]
+    __properties: ClassVar[List[str]] = ["connection"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -92,8 +91,7 @@ class GitHubUserStatusOutput(BaseModel):
         # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
             _key: _value for _key, _value in {
-            "connection": GitHubUserConnectionSummary.from_dict(obj["connection"]) if obj.get("connection") is not None else None,
-            "cleanup_pending": obj.get("cleanup_pending")
+            "connection": GitHubUserConnectionSummary.from_dict(obj["connection"]) if obj.get("connection") is not None else None
             }.items() if _key in obj
         })
         return _obj

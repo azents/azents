@@ -55,6 +55,7 @@ from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
     ResolvedPlatformGitHubApp,
 )
+from azents.services.github_user_oauth.service import GitHubUserOAuthService
 from azents.services.toolkit.credential_edits import merge_kubernetes_credentials
 from azents.services.toolkit.github_user_registration import (
     merge_github_user_registration,
@@ -188,6 +189,7 @@ class ToolkitService:
         dict[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)
     ]
     github_runtime: Annotated[PlatformGitHubAppRuntimeService, Depends()]
+    github_user_oauth: Annotated[GitHubUserOAuthService, Depends()]
 
     async def create(
         self, create: ToolkitCreateInput, *, user_id: str
@@ -430,6 +432,7 @@ class ToolkitService:
         )
         if isinstance(result, Failure):
             return Failure(self._map_toolkit_read_error(result.error))
+        await self.github_user_oauth.cleanup_revocations(result.value)
         return Success(None)
 
     async def list_available(
@@ -562,21 +565,13 @@ class ToolkitService:
     async def _attach_github_user_connection(
         self, toolkit: ToolkitOutput
     ) -> ToolkitOutput:
-        """Attach only redacted saved user identity and cleanup readiness."""
+        """Attach only redacted saved user identity."""
         if toolkit.toolkit_type != "github" or toolkit.config.get(
             "github_auth_type"
         ) not in ("github_app_user", "github_app_platform_user"):
             return toolkit
         summary = await self.operations_repository.get_github_user_summary(toolkit.id)
-        pending = await self.operations_repository.github_user_cleanup_pending(
-            toolkit.id
-        )
-        return toolkit.model_copy(
-            update={
-                "github_user_connection": summary,
-                "github_user_cleanup_pending": pending,
-            }
-        )
+        return toolkit.model_copy(update={"github_user_connection": summary})
 
     async def _attach_mcp_oauth_connection(
         self,
@@ -963,6 +958,7 @@ class ToolkitService:
         )
         if isinstance(result, Failure):
             return Failure(self._map_agent_management_error(result.error))
+        await self.github_user_oauth.cleanup_revocations(result.value)
         return Success(None)
 
     async def store_agent_oauth_connection(

@@ -164,8 +164,9 @@ Managers can distinguish reauthorizing the same account, changing the execution 
 - Disconnecting a shared Toolkit explains its impact on Agents using that Toolkit.
 - Detaching a shared Toolkit from one Agent does not disconnect other Agents' use.
 - A local Toolkit disconnection does not silently uninstall the App for an organization or disconnect unrelated user authorizations or Toolkits.
-- Disconnecting or deleting a user-account Toolkit revokes its user token at GitHub; confirmed replacement revokes the superseded token, and cancelled or rejected setup revokes any token issued for the discarded candidate. Merely removing local credential data is not sufficient cleanup.
-- Token cleanup is specific to the affected token, not cancellation of the account's entire App authorization. Provider cleanup failure is surfaced as incomplete cleanup rather than reported as successful revocation, while the retired credential remains unavailable for Agent execution.
+- Disconnecting or deleting a user-account Toolkit attempts to revoke its user token at GitHub; confirmed replacement attempts to revoke the superseded token, and cancelled or rejected setup attempts cleanup of any known issued candidate token.
+- Token cleanup is specific to the affected token, not cancellation of the account's entire App authorization. Cleanup is fail-open: provider failure does not block or undo local disconnection, replacement or deletion. The application records a sanitized failure without retaining token-cleanup state or asking the manager to retry.
+- Cleanup attempts use a bounded provider call rather than unowned fire-and-forget dispatch. Local success is not a guarantee that GitHub revoked the token; a failed cleanup may leave a copied non-expiring token valid at GitHub. OAuth validation and management/execution authorization remain fail-closed.
 - No claim is made that disconnection reverses completed GitHub writes or erases already imported conversation content.
 - The Design must state the enforceable cessation boundary for credentials already used by an in-flight external request or optional Runtime process; instant retroactive cancellation is not assumed.
 
@@ -248,3 +249,5 @@ The requester approved REQ-1 through REQ-13 on 2026-10-08 after the Platform-ava
 The requester subsequently selected non-expiring user-account tokens on 2026-10-08. REQ-8 and the related verification and constraints above replace the previous expiring-token/renewal hypothesis before implementation. The non-expiring choice applies to Platform and BYOA user mode; existing installation mode remains unchanged.
 
 The requester then explicitly required GitHub token revocation on cleanup on 2026-10-08. REQ-9 records that outcome. An unobserved possibility of token reuse does not justify substituting local-only removal for provider revocation.
+
+During implementation on 2026-10-08, the requester replaced cleanup completion/retry guarantees with fail-open cleanup and explicitly withdrew the intervening fire-and-forget suggestion. REQ-9 now requires a bounded revocation attempt with sanitized failure logging, without cleanup persistence, manager retry, or cleanup-based deletion blocking. This changes cleanup failure policy only.

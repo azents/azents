@@ -1,47 +1,87 @@
-"""Same-transaction Toolkit mutation guards and redacted read projections."""
+"""Current registration guards and transient token capture for local removal."""
+
+import dataclasses
 
 import sqlalchemy as sa
+from pydantic import ConfigDict, TypeAdapter, ValidationError
 
+from azents.core.crypto import CredentialCipher
+from azents.core.github_credentials import GitHubSecrets, GitHubSecretsAppUser
 from azents.core.github_user_oauth import (
-    GitHubUserAttemptStatus,
     GitHubUserConnectionSummary,
     GitHubUserErrorCode,
     GitHubUserOAuthError,
+    GitHubUserRegistration,
+    GitHubUserRevocation,
 )
 from azents.rdb.models.github_user_oauth import (
     RDBGitHubUserAttempt,
-    RDBGitHubUserCleanup,
     RDBGitHubUserConnection,
 )
 from azents.rdb.models.toolkit import RDBToolkitConfig
 from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.repos.github_user_oauth.payloads import attempt_from, connection_from
 
 
-async def cleanup_pending(session: ReadSession, toolkit_id: str) -> bool:
-    """Observe unfinished cleanup without decrypting any credential."""
-    retired = await session.read_session.scalar(
-        sa.select(RDBGitHubUserCleanup.id)
-        .where(RDBGitHubUserCleanup.toolkit_id == toolkit_id)
-        .limit(1)
+def same_app(left: GitHubUserRegistration, right: GitHubUserRegistration) -> bool:
+    """Identity equality does not conflate different App or OAuth clients."""
+    return (left.source, left.app_id, left.client_id) == (
+        right.source,
+        right.app_id,
+        right.client_id,
     )
-    if retired is not None:
-        return True
-    inflight = await session.read_session.scalar(
-        sa.select(RDBGitHubUserAttempt.id)
-        .where(
-            RDBGitHubUserAttempt.toolkit_id == toolkit_id,
-            RDBGitHubUserAttempt.status == GitHubUserAttemptStatus.CANCELLED,
-            RDBGitHubUserAttempt.exchange_in_flight.is_(True),
-        )
-        .limit(1)
-    )
-    return inflight is not None
+
+
+def capture_registration(
+    toolkit: RDBToolkitConfig | None,
+    original: GitHubUserRegistration,
+    supplied: GitHubUserRegistration | None,
+    cipher: CredentialCipher,
+) -> GitHubUserRegistration:
+    """Use available same-App secret material without changing captured identity."""
+    if supplied is not None and same_app(original, supplied):
+        return dataclasses.replace(original, client_secret=supplied.client_secret)
+    if (
+        original.source != "byoa_user"
+        or toolkit is None
+        or toolkit.encrypted_credentials is None
+    ):
+        return original
+    try:
+        credentials = TypeAdapter(
+            GitHubSecrets, config=ConfigDict(hide_input_in_errors=True)
+        ).validate_json(cipher.decrypt(toolkit.encrypted_credentials))
+    except ValidationError:
+        # Invalid current registration cannot substitute another App's credential.
+        return original
+    if (
+        isinstance(credentials, GitHubSecretsAppUser)
+        and credentials.app_id == original.app_id
+        and credentials.client_id == original.client_id
+    ):
+        return dataclasses.replace(original, client_secret=credentials.client_secret)
+    return original
+
+
+def distinct_revocations(
+    values: list[GitHubUserRevocation],
+) -> tuple[GitHubUserRevocation, ...]:
+    """Deduplicate only factual identical captured token/App targets."""
+    result: list[GitHubUserRevocation] = []
+    for value in values:
+        if not any(
+            same_app(value.registration, prior.registration)
+            and value.access_token == prior.access_token
+            for prior in result
+        ):
+            result.append(value)
+    return tuple(result)
 
 
 async def read_summary(
     session: ReadSession, toolkit_id: str
 ) -> GitHubUserConnectionSummary | None:
-    """Project only allowlisted account/App facts in an existing authorized read."""
+    """Read allowlisted account and source facts without exposing credentials."""
     result = (
         await session.read_session.execute(
             sa.select(RDBGitHubUserConnection, RDBToolkitConfig.config)
@@ -69,62 +109,117 @@ async def read_summary(
         source=source,
         status=row.status,
         failure_reason=row.failure_reason,
-        cleanup_pending=await cleanup_pending(session, toolkit_id),
     )
 
 
-async def assert_mutation_allowed(
-    session: WriteSession,
-    toolkit_id: str,
-    *,
-    registration_changed: bool,
-    deleting: bool,
+async def assert_registration_change_allowed(
+    session: WriteSession, toolkit_id: str
 ) -> None:
-    """Keep registration/deletion compatible with current setup and cleanup state."""
-    if not registration_changed and not deleting:
-        return
+    """Changing provider identity requires an explicit active/candidate replacement."""
     await session.write_session.scalar(
-        sa.select(RDBToolkitConfig.id)
+        sa.select(RDBToolkitConfig)
         .where(RDBToolkitConfig.id == toolkit_id)
         .with_for_update()
+        .execution_options(populate_existing=True)
     )
-    connection = await session.read_session.scalar(
+    active = await session.read_session.scalar(
         sa.select(RDBGitHubUserConnection.id)
         .where(RDBGitHubUserConnection.toolkit_id == toolkit_id)
         .limit(1)
     )
-    attempt = await session.read_session.scalar(
+    reviewed = await session.read_session.scalar(
         sa.select(RDBGitHubUserAttempt.id)
         .where(
             RDBGitHubUserAttempt.toolkit_id == toolkit_id,
-            sa.or_(
-                RDBGitHubUserAttempt.status.in_(
-                    (
-                        GitHubUserAttemptStatus.PENDING,
-                        GitHubUserAttemptStatus.EXCHANGING,
-                        GitHubUserAttemptStatus.REVIEW,
-                    )
-                ),
-                RDBGitHubUserAttempt.exchange_in_flight.is_(True),
-                RDBGitHubUserAttempt.encrypted_issued_token.is_not(None),
-                RDBGitHubUserAttempt.encrypted_candidate.is_not(None),
-            ),
+            RDBGitHubUserAttempt.encrypted_candidate.is_not(None),
         )
         .limit(1)
     )
-    if (
-        connection is not None
-        or attempt is not None
-        or await cleanup_pending(session, toolkit_id)
-    ):
+    if active is not None or reviewed is not None:
         raise GitHubUserOAuthError(
-            GitHubUserErrorCode.CLEANUP_REQUIRED,
-            "Disconnect GitHub user authorization and complete token cleanup "
-            "before changing registration or deleting this Toolkit.",
+            GitHubUserErrorCode.STALE,
+            "Disconnect the current GitHub user connection or cancel its review "
+            "before changing App registration.",
         )
-    if deleting:
-        await session.write_session.execute(
-            sa.delete(RDBGitHubUserAttempt).where(
+
+
+async def capture_and_clear_user_tokens(
+    session: WriteSession,
+    toolkit_id: str,
+    registration: GitHubUserRegistration | None,
+    *,
+    cipher: CredentialCipher,
+) -> tuple[GitHubUserRevocation, ...]:
+    """Capture known exact targets and remove local authority in the caller's write."""
+    toolkit = await session.write_session.scalar(
+        sa.select(RDBToolkitConfig)
+        .where(RDBToolkitConfig.id == toolkit_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    values: list[GitHubUserRevocation] = []
+    current = await session.read_session.scalar(
+        sa.select(RDBGitHubUserConnection).where(
+            RDBGitHubUserConnection.toolkit_id == toolkit_id
+        )
+    )
+    if current is not None:
+        saved = connection_from(current, cipher)
+        values.append(
+            GitHubUserRevocation(
+                registration=capture_registration(
+                    toolkit, saved.registration, registration, cipher
+                ),
+                access_token=saved.access_token,
+            )
+        )
+    attempts = (
+        await session.read_session.scalars(
+            sa.select(RDBGitHubUserAttempt).where(
                 RDBGitHubUserAttempt.toolkit_id == toolkit_id
             )
         )
+    ).all()
+    for row in attempts:
+        attempt = attempt_from(row, cipher)
+        if attempt.candidate is not None:
+            values.append(
+                GitHubUserRevocation(
+                    registration=attempt.registration,
+                    access_token=attempt.candidate.access_token,
+                )
+            )
+    await session.write_session.execute(
+        sa.delete(RDBGitHubUserAttempt).where(
+            RDBGitHubUserAttempt.toolkit_id == toolkit_id
+        )
+    )
+    await session.write_session.execute(
+        sa.delete(RDBGitHubUserConnection).where(
+            RDBGitHubUserConnection.toolkit_id == toolkit_id
+        )
+    )
+    return distinct_revocations(values)
+
+
+async def capture_and_clear_agent_user_tokens(
+    session: WriteSession, *, agent_id: str, cipher: CredentialCipher
+) -> tuple[GitHubUserRevocation, ...]:
+    """Remove only exact Agent-owned credentials, never shared attachments."""
+    toolkits = (
+        await session.write_session.scalars(
+            sa.select(RDBToolkitConfig)
+            .where(RDBToolkitConfig.owner_agent_id == agent_id)
+            .order_by(RDBToolkitConfig.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).all()
+    values: list[GitHubUserRevocation] = []
+    for toolkit in toolkits:
+        values.extend(
+            await capture_and_clear_user_tokens(
+                session, toolkit.id, None, cipher=cipher
+            )
+        )
+    return distinct_revocations(values)

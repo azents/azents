@@ -42,8 +42,7 @@ class TestGitHubUserConnectionSummaryResponse(unittest.TestCase):
                 app_id = '',
                 source = 'platform_user',
                 status = 'connected',
-                failure_reason = '',
-                cleanup_pending = True
+                failure_reason = ''
             )
         else:
             return GitHubUserConnectionSummaryResponse(
@@ -55,7 +54,6 @@ class TestGitHubUserConnectionSummaryResponse(unittest.TestCase):
                 source = 'platform_user',
                 status = 'connected',
                 failure_reason = '',
-                cleanup_pending = True,
         )
         """
 

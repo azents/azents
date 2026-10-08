@@ -40,13 +40,6 @@ class TestGitHubUserToolkitV1Api(unittest.TestCase):
         """
         pass
 
-    def test_github_user_toolkit_v1_agent_cleanup_retry(self) -> None:
-        """Test case for github_user_toolkit_v1_agent_cleanup_retry
-
-        Agent Cleanup Retry
-        """
-        pass
-
     def test_github_user_toolkit_v1_agent_confirm(self) -> None:
         """Test case for github_user_toolkit_v1_agent_confirm
 
@@ -107,13 +100,6 @@ class TestGitHubUserToolkitV1Api(unittest.TestCase):
         """Test case for github_user_toolkit_v1_shared_cancel
 
         Shared Cancel
-        """
-        pass
-
-    def test_github_user_toolkit_v1_shared_cleanup_retry(self) -> None:
-        """Test case for github_user_toolkit_v1_shared_cleanup_retry
-
-        Shared Cleanup Retry
         """
         pass
 

@@ -1,6 +1,6 @@
 # GitHubUserConnectionSummaryResponse
 
-Allowlisted user-account execution identity and cleanup readiness.
+Allowlisted user-account execution identity.
 
 ## Properties
 
@@ -14,7 +14,6 @@ Name | Type | Description | Notes
 **source** | **str** |  | 
 **status** | [**GitHubUserConnectionStatus**](GitHubUserConnectionStatus.md) |  | 
 **failure_reason** | **str** |  | 
-**cleanup_pending** | **bool** |  | 
 
 ## Example
 

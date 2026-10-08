@@ -1,7 +1,8 @@
-"""PostgreSQL evidence for one-use setup, activation and retirement boundaries."""
+"""PostgreSQL lifecycle evidence for staged authorization and fail-open removal."""
 
 import dataclasses
 import datetime
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -23,7 +24,6 @@ from azents.core.github_user_oauth import (
 from azents.core.system_setting_payload import SystemSettingPayloadResolver
 from azents.rdb.models.github_user_oauth import (
     RDBGitHubUserAttempt,
-    RDBGitHubUserCleanup,
     RDBGitHubUserConnection,
 )
 from azents.rdb.models.toolkit import RDBToolkitConfig
@@ -32,7 +32,11 @@ from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_admin import AgentAdminRepository
-from azents.repos.github_user_oauth.guards import assert_mutation_allowed, read_summary
+from azents.repos.github_user_oauth.guards import (
+    assert_registration_change_allowed,
+    capture_and_clear_user_tokens,
+    read_summary,
+)
 from azents.repos.github_user_oauth.operations import GitHubUserOAuthOperationRepository
 from azents.repos.session import SessionRepository
 from azents.repos.system_setting.repository import SystemSettingRepository
@@ -52,7 +56,7 @@ class _Harness:
 
 
 async def _harness(manager: SessionManager[WriteSession]) -> _Harness:
-    """Use real SQL state with detached subject collaborators for focused tests."""
+    """Real SQL state with detached current-subject collaborators."""
     cipher = CredentialCipher(Fernet.generate_key().decode())
     async with manager() as session:
         workspace = RDBWorkspace(name="OAuth test", handle="github-oauth-test")
@@ -114,36 +118,31 @@ async def _harness(manager: SessionManager[WriteSession]) -> _Harness:
     )
 
 
-async def _review(harness: _Harness, token: str) -> GitHubUserAttempt:
-    repo, requester, registration = (
-        harness.repository,
-        harness.requester,
-        harness.registration,
-    )
-    attempt = await repo.start(
-        requester=requester,
-        registration=registration,
-        redirect_uri="https://azents.test/oauth/github/callback",
-        nonce="nonce-" + token,
-        code_verifier="verifier-" + token,
+async def _start(h: _Harness, label: str) -> GitHubUserAttempt:
+    result = await h.repository.start(
+        requester=h.requester,
+        registration=h.registration,
+        redirect_uri="https://azents.test/callback",
+        nonce="nonce-" + label,
+        code_verifier="verifier-" + label,
         expires_at=datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=10),
     )
-    await repo.claim_exchange(
-        requester=requester,
+    assert result.revocations == ()
+    return result.attempt
+
+
+async def _review(h: _Harness, token: str) -> GitHubUserAttempt:
+    attempt = await _start(h, token)
+    await h.repository.claim_exchange(
+        requester=h.requester,
         attempt_id=attempt.id,
         nonce="nonce-" + token,
         redirect_uri=attempt.redirect_uri,
     )
-    assert (
-        await repo.record_exchange_token(
-            attempt_id=attempt.id, registration=registration, access_token=token
-        )
-        is None
-    )
-    return await repo.store_review(
-        requester=requester,
+    return await h.repository.store_review(
+        requester=h.requester,
         attempt_id=attempt.id,
-        registration=registration,
+        registration=h.registration,
         candidate=GitHubUserCandidate(
             access_token=token,
             account_id=42,
@@ -153,32 +152,54 @@ async def _review(harness: _Harness, token: str) -> GitHubUserAttempt:
     )
 
 
-async def test_transfer_encrypts_token_and_claim_is_one_use(
+async def _save_credentials(
+    manager: SessionManager[WriteSession],
+    h: _Harness,
+    *,
+    app_id: str = "123",
+    client_id: str = "Iv1.client",
+) -> None:
+    credentials = {
+        "type": "github_app_user",
+        "app_id": app_id,
+        "private_key": "private-key",
+        "client_id": client_id,
+        "client_secret": "current-secret",
+    }
+    async with manager() as session:
+        await session.write_session.execute(
+            sa.update(RDBToolkitConfig)
+            .where(RDBToolkitConfig.id == h.requester.toolkit_id)
+            .values(encrypted_credentials=h.cipher.encrypt(json.dumps(credentials)))
+        )
+
+
+async def test_one_use_review_and_transfer_are_encrypted_and_redacted(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
-    harness = await _harness(rdb_session_manager)
-    attempt = await _review(harness, "token-a")
+    h = await _harness(rdb_session_manager)
+    attempt = await _review(h, "token-a")
     with pytest.raises(GitHubUserOAuthError) as error:
-        await harness.repository.claim_exchange(
-            requester=harness.requester,
+        await h.repository.claim_exchange(
+            requester=h.requester,
             attempt_id=attempt.id,
             nonce="nonce-token-a",
             redirect_uri=attempt.redirect_uri,
         )
     assert error.value.code is GitHubUserErrorCode.STALE
-    review = await harness.repository.read_review(
-        requester=harness.requester, attempt_id=attempt.id
+    assert (
+        await h.repository.read_review(requester=h.requester, attempt_id=attempt.id)
+    ).candidate is not None
+    result = await h.repository.confirm(
+        requester=h.requester, attempt_id=attempt.id, registration=h.registration
     )
-    assert review.candidate is not None and review.candidate.account_id == 42
-    connection = await harness.repository.confirm(
-        requester=harness.requester,
-        attempt_id=attempt.id,
-        registration=harness.registration,
+    assert result.revocations == ()
+    connection = result.connection
+    assert (
+        connection.access_token == "token-a"
+        and connection.registration.client_secret is None
     )
-    assert connection.access_token == "token-a"
-    assert connection.registration.client_secret is None
-    assert "token-a" not in repr(connection)
-    assert await harness.repository.list_cleanup(requester=harness.requester) == ()
+    assert "token-a" not in repr(result) and "client-secret" not in repr(result)
     async with rdb_session_manager() as session:
         stored = await session.read_session.scalar(
             sa.select(RDBGitHubUserConnection).where(
@@ -186,94 +207,78 @@ async def test_transfer_encrypts_token_and_claim_is_one_use(
             )
         )
         assert stored is not None and stored.encrypted_access_token != "token-a"
-        assert harness.cipher.decrypt(stored.encrypted_access_token) == "token-a"
-        setup = await session.read_session.scalar(
-            sa.select(RDBGitHubUserAttempt).where(RDBGitHubUserAttempt.id == attempt.id)
+        assert h.cipher.decrypt(stored.encrypted_access_token) == "token-a"
+        assert (
+            await session.read_session.scalar(
+                sa.select(RDBGitHubUserAttempt.id).where(
+                    RDBGitHubUserAttempt.id == attempt.id
+                )
+            )
+            is None
         )
-        assert setup is None
-        summary = await read_summary(session, harness.requester.toolkit_id)
+        summary = await read_summary(session, h.requester.toolkit_id)
         assert summary is not None and summary.account_id == 42
         assert "token-a" not in repr(summary) and "client-secret" not in repr(summary)
+        assert not hasattr(summary, "cleanup_pending")
 
 
-async def test_replacement_retains_only_old_token_and_late_failure_is_conditional(
+async def test_confirm_returns_old_token_transiently_and_late_failure_is_conditional(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     h = await _harness(rdb_session_manager)
     first = await _review(h, "old-token")
-    before = await h.repository.confirm(
-        requester=h.requester, attempt_id=first.id, registration=h.registration
-    )
+    before = (
+        await h.repository.confirm(
+            requester=h.requester, attempt_id=first.id, registration=h.registration
+        )
+    ).connection
     second = await _review(h, "new-token")
-    after = await h.repository.confirm(
+    result = await h.repository.confirm(
         requester=h.requester, attempt_id=second.id, registration=h.registration
     )
+    after = result.connection
     assert after.id != before.id
-    cleanups = await h.repository.list_cleanup(requester=h.requester)
-    assert len(cleanups) == 1 and cleanups[0].access_token == "old-token"
-    assert cleanups[0].registration.client_secret == "client-secret"
+    assert len(result.revocations) == 1
+    assert result.revocations[0].access_token == "old-token"
+    assert result.revocations[0].registration.client_secret == "client-secret"
     await h.repository.mark_reconnect_required(
-        requester=h.requester, connection_id=before.id, reason="invalid_token"
+        requester=h.requester, connection_id=before.id, reason="authentication_failed"
     )
-    context = await h.repository.read_context(requester=h.requester)
-    assert context.connection is not None and context.connection.id == after.id
-    assert context.connection.status is GitHubUserConnectionStatus.CONNECTED
-    await h.repository.mark_retired_failure(
-        cleanup_id=cleanups[0].id, reason="provider_unavailable"
-    )
-    assert (await h.repository.list_cleanup(requester=h.requester))[
-        0
-    ].failure_reason == "provider_unavailable"
+    current = (await h.repository.read_context(requester=h.requester)).connection
+    assert current is not None and current.id == after.id
+    assert current.status is GitHubUserConnectionStatus.CONNECTED
     async with rdb_session_manager() as session:
-        with pytest.raises(GitHubUserOAuthError):
-            await assert_mutation_allowed(
-                session,
-                h.requester.toolkit_id,
-                registration_changed=True,
-                deleting=False,
+        rows = (
+            await session.read_session.scalars(
+                sa.select(RDBGitHubUserConnection).where(
+                    RDBGitHubUserConnection.toolkit_id == h.requester.toolkit_id
+                )
             )
-    await h.repository.finish_retired(cleanup_id=cleanups[0].id)
-    assert await h.repository.list_cleanup(requester=h.requester) == ()
-    assert (
-        await h.repository.read_context(requester=h.requester)
-    ).connection is not None
+        ).all()
+        assert (
+            len(rows) == 1
+            and h.cipher.decrypt(rows[0].encrypted_access_token) == "new-token"
+        )
 
 
-async def test_cancel_during_exchange_accounts_for_late_issued_token(
+async def test_cancel_returns_review_token_and_preserves_working_connection(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     h = await _harness(rdb_session_manager)
-    attempt = await h.repository.start(
-        requester=h.requester,
-        registration=h.registration,
-        redirect_uri="https://azents.test/callback",
-        nonce="nonce",
-        code_verifier="verifier",
-        expires_at=datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=5),
-    )
-    await h.repository.claim_exchange(
-        requester=h.requester,
-        attempt_id=attempt.id,
-        nonce="nonce",
-        redirect_uri=attempt.redirect_uri,
-    )
-    await h.repository.cancel(requester=h.requester, attempt_id=attempt.id)
-    with pytest.raises(GitHubUserOAuthError) as error:
-        await h.repository.disconnect(requester=h.requester, registration=None)
-    assert error.value.code is GitHubUserErrorCode.CLEANUP_REQUIRED
-    assert (await h.repository.read_context(requester=h.requester)).cleanup_pending
-    with pytest.raises(GitHubUserOAuthError):
-        await h.repository.ensure_cleanup_complete(requester=h.requester)
-    cleanup = await h.repository.record_exchange_token(
-        attempt_id=attempt.id, registration=h.registration, access_token="late-token"
-    )
-    assert cleanup is not None and cleanup.access_token == "late-token"
-    assert (await h.repository.read_context(requester=h.requester)).connection is None
-    await h.repository.finish_retired(cleanup_id=cleanup.id)
-    async with rdb_session_manager() as session:
-        await assert_mutation_allowed(
-            session, h.requester.toolkit_id, registration_changed=True, deleting=True
+    first = await _review(h, "working")
+    active = (
+        await h.repository.confirm(
+            requester=h.requester, attempt_id=first.id, registration=h.registration
         )
+    ).connection
+    reviewed = await _review(h, "discarded")
+    targets = await h.repository.cancel(requester=h.requester, attempt_id=reviewed.id)
+    assert len(targets) == 1 and targets[0].access_token == "discarded"
+    assert (await h.repository.read_context(requester=h.requester)).connection == active
+    assert (
+        await h.repository.cancel(requester=h.requester, attempt_id=reviewed.id) == ()
+    )
+    async with rdb_session_manager() as session:
         assert (
             await session.read_session.scalar(
                 sa.select(RDBGitHubUserAttempt.id).where(
@@ -284,27 +289,95 @@ async def test_cancel_during_exchange_accounts_for_late_issued_token(
         )
 
 
-async def test_lost_authority_blocks_publication_but_not_issued_token_retirement(
+async def test_supersession_returns_known_candidate_without_blocking_new_setup(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     h = await _harness(rdb_session_manager)
-    attempt = await _review(h, "candidate-token")
-    h.auth_session.get.return_value = SimpleNamespace(
-        user_id=h.requester.user_id, is_revoked=True, is_expired=False
-    )
-    with pytest.raises(GitHubUserOAuthError) as error:
-        await h.repository.confirm(
-            requester=h.requester, attempt_id=attempt.id, registration=h.registration
-        )
-    assert error.value.code is GitHubUserErrorCode.AUTHORITY
-    cleanup = await h.repository.retire_exchange_result(
-        attempt_id=attempt.id,
+    old = await _review(h, "discarded")
+    result = await h.repository.start(
+        requester=h.requester,
         registration=h.registration,
-        access_token="candidate-token",
-        reason="lost_authority",
+        redirect_uri="https://azents.test/callback",
+        nonce="new-nonce",
+        code_verifier="new-verifier",
+        expires_at=datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=5),
     )
-    assert cleanup is not None
-    await h.repository.finish_retired(cleanup_id=cleanup.id)
+    assert result.attempt.id != old.id
+    assert (
+        len(result.revocations) == 1
+        and result.revocations[0].access_token == "discarded"
+    )
+    with pytest.raises(GitHubUserOAuthError):
+        await h.repository.confirm(
+            requester=h.requester, attempt_id=old.id, registration=h.registration
+        )
+
+
+async def test_exchanging_cancel_and_parent_delete_cannot_block_or_activate_late_result(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    h = await _harness(rdb_session_manager)
+    attempt = await _start(h, "late")
+    await h.repository.claim_exchange(
+        requester=h.requester,
+        attempt_id=attempt.id,
+        nonce="nonce-late",
+        redirect_uri=attempt.redirect_uri,
+    )
+    assert await h.repository.cancel(requester=h.requester, attempt_id=attempt.id) == ()
+    assert await h.repository.disconnect(requester=h.requester, registration=None) == ()
+    async with rdb_session_manager() as session:
+        await session.write_session.execute(
+            sa.delete(RDBToolkitConfig).where(
+                RDBToolkitConfig.id == h.requester.toolkit_id
+            )
+        )
+    with pytest.raises(GitHubUserOAuthError):
+        await h.repository.store_review(
+            requester=h.requester,
+            attempt_id=attempt.id,
+            registration=h.registration,
+            candidate=GitHubUserCandidate(
+                access_token="late-known",
+                account_id=42,
+                account_login="late",
+                account_avatar_url=None,
+            ),
+        )
+    target = await h.repository.received_revocation(
+        toolkit_id=h.requester.toolkit_id,
+        registration=h.registration,
+        access_token="late-known",
+    )
+    assert target is not None and target.access_token == "late-known"
+    assert target.registration == h.registration
+    await h.repository.complete_failed_exchange(attempt_id=attempt.id)
+
+
+async def test_atomic_delete_captures_active_candidate_and_same_app_secret(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    h = await _harness(rdb_session_manager)
+    first = await _review(h, "active")
+    await h.repository.confirm(
+        requester=h.requester, attempt_id=first.id, registration=h.registration
+    )
+    await _review(h, "candidate")
+    await _save_credentials(rdb_session_manager, h)
+    async with rdb_session_manager() as session:
+        targets = await capture_and_clear_user_tokens(
+            session, h.requester.toolkit_id, None, cipher=h.cipher
+        )
+        assert {target.access_token for target in targets} == {"active", "candidate"}
+        active = next(target for target in targets if target.access_token == "active")
+        assert active.registration.client_secret == "current-secret"
+        await session.write_session.execute(
+            sa.delete(RDBToolkitConfig).where(
+                RDBToolkitConfig.id == h.requester.toolkit_id
+            )
+        )
+    # The returned facts survive parent removal, without a persistent retry row.
+    assert {target.registration.app_id for target in targets} == {"123"}
     async with rdb_session_manager() as session:
         assert (
             await session.read_session.scalar(
@@ -316,55 +389,82 @@ async def test_lost_authority_blocks_publication_but_not_issued_token_retirement
         )
         assert (
             await session.read_session.scalar(
-                sa.select(RDBGitHubUserCleanup.id).where(
-                    RDBGitHubUserCleanup.toolkit_id == h.requester.toolkit_id
+                sa.select(RDBGitHubUserAttempt.id).where(
+                    RDBGitHubUserAttempt.toolkit_id == h.requester.toolkit_id
                 )
             )
             is None
         )
 
 
-async def test_same_toolkit_actual_token_transfer_is_not_revoked_until_disconnect(
+async def test_current_different_app_secret_never_changes_captured_revocation_identity(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     h = await _harness(rdb_session_manager)
-    first = await _review(h, "same-token")
+    reviewed = await _review(h, "original")
+    await h.repository.confirm(
+        requester=h.requester, attempt_id=reviewed.id, registration=h.registration
+    )
+    await _save_credentials(
+        rdb_session_manager, h, app_id="456", client_id="other-client"
+    )
+    targets = await h.repository.disconnect(
+        requester=h.requester,
+        registration=dataclasses.replace(
+            h.registration,
+            app_id="456",
+            client_id="other-client",
+            client_secret="other-secret",
+        ),
+    )
+    assert len(targets) == 1 and targets[0].access_token == "original"
+    assert targets[0].registration.app_id == "123"
+    assert targets[0].registration.client_id == "Iv1.client"
+    assert targets[0].registration.client_secret is None
+    assert (await h.repository.read_context(requester=h.requester)).connection is None
+
+
+async def test_actual_same_toolkit_token_transfer_is_not_revoked_until_disconnect(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    h = await _harness(rdb_session_manager)
+    first = await _review(h, "same")
     await h.repository.confirm(
         requester=h.requester, attempt_id=first.id, registration=h.registration
     )
-    candidate = await _review(h, "same-token")
-    await h.repository.cancel(requester=h.requester, attempt_id=candidate.id)
-    assert await h.repository.list_cleanup(requester=h.requester) == ()
-    second = await _review(h, "same-token")
-    await h.repository.confirm(
-        requester=h.requester, attempt_id=second.id, registration=h.registration
+    second = await _review(h, "same")
+    assert await h.repository.cancel(requester=h.requester, attempt_id=second.id) == ()
+    assert (
+        await h.repository.received_revocation(
+            toolkit_id=h.requester.toolkit_id,
+            registration=h.registration,
+            access_token="same",
+        )
+        is None
     )
-    assert await h.repository.list_cleanup(requester=h.requester) == ()
-    await h.repository.disconnect(requester=h.requester, registration=None)
+    third = await _review(h, "same")
+    assert (
+        await h.repository.confirm(
+            requester=h.requester, attempt_id=third.id, registration=h.registration
+        )
+    ).revocations == ()
+    targets = await h.repository.disconnect(
+        requester=h.requester, registration=h.registration
+    )
+    assert len(targets) == 1 and targets[0].access_token == "same"
     assert (await h.repository.read_context(requester=h.requester)).connection is None
-    cleanup = await h.repository.list_cleanup(requester=h.requester)
-    assert len(cleanup) == 1 and cleanup[0].access_token == "same-token"
-    assert cleanup[0].registration.client_secret is None
 
 
-async def test_wrong_session_and_registration_revision_cannot_claim(
+async def test_context_session_revision_and_active_provider_identity_remain_fail_closed(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     h = await _harness(rdb_session_manager)
-    attempt = await h.repository.start(
-        requester=h.requester,
-        registration=h.registration,
-        redirect_uri="https://azents.test/callback",
-        nonce="nonce",
-        code_verifier="verifier",
-        expires_at=datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=5),
-    )
-    other = dataclasses.replace(h.requester, session_id="x" * 32)
+    attempt = await _start(h, "context")
     with pytest.raises(GitHubUserOAuthError):
         await h.repository.claim_exchange(
-            requester=other,
+            requester=dataclasses.replace(h.requester, session_id="x" * 32),
             attempt_id=attempt.id,
-            nonce="nonce",
+            nonce="nonce-context",
             redirect_uri=attempt.redirect_uri,
         )
     async with rdb_session_manager() as session:
@@ -377,69 +477,81 @@ async def test_wrong_session_and_registration_revision_cannot_claim(
         await h.repository.claim_exchange(
             requester=h.requester,
             attempt_id=attempt.id,
-            nonce="nonce",
+            nonce="nonce-context",
             redirect_uri=attempt.redirect_uri,
         )
     assert error.value.code is GitHubUserErrorCode.STALE
+    await h.repository.cancel(requester=h.requester, attempt_id=attempt.id)
+    async with rdb_session_manager() as session:
+        await session.write_session.execute(
+            sa.update(RDBToolkitConfig)
+            .where(RDBToolkitConfig.id == h.requester.toolkit_id)
+            .values(revision=1)
+        )
+    active = await _review(h, "active")
+    async with rdb_session_manager() as session:
+        with pytest.raises(GitHubUserOAuthError) as error:
+            await assert_registration_change_allowed(session, h.requester.toolkit_id)
+        assert error.value.code is GitHubUserErrorCode.STALE
+    await h.repository.confirm(
+        requester=h.requester, attempt_id=active.id, registration=h.registration
+    )
+    h.auth_session.get.return_value = SimpleNamespace(
+        user_id=h.requester.user_id, is_revoked=True, is_expired=False
+    )
+    with pytest.raises(GitHubUserOAuthError) as error:
+        await h.repository.disconnect(requester=h.requester, registration=None)
+    assert error.value.code is GitHubUserErrorCode.AUTHORITY
 
 
-async def test_known_token_cancel_prunes_setup_and_late_identity_cannot_republish(
+async def test_schema_has_no_cleanup_state_and_plain_pat_removal_returns_no_targets(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     h = await _harness(rdb_session_manager)
-    attempt = await h.repository.start(
-        requester=h.requester,
-        registration=h.registration,
-        redirect_uri="https://azents.test/callback",
-        nonce="nonce",
-        code_verifier="verifier",
-        expires_at=datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=5),
-    )
-    await h.repository.claim_exchange(
-        requester=h.requester,
-        attempt_id=attempt.id,
-        nonce="nonce",
-        redirect_uri=attempt.redirect_uri,
-    )
-    assert (
-        await h.repository.record_exchange_token(
-            attempt_id=attempt.id,
-            registration=h.registration,
-            access_token="received",
-        )
-        is None
-    )
     async with rdb_session_manager() as session:
-        saved = await session.read_session.scalar(
-            sa.select(RDBGitHubUserAttempt).where(RDBGitHubUserAttempt.id == attempt.id)
+        assert (
+            await capture_and_clear_user_tokens(
+                session, h.requester.toolkit_id, None, cipher=h.cipher
+            )
+            == ()
         )
-        assert saved is not None and not saved.exchange_in_flight
-        assert saved.encrypted_issued_token is not None
-    await h.repository.cancel(requester=h.requester, attempt_id=attempt.id)
-    cleanup = await h.repository.list_cleanup(requester=h.requester)
-    assert len(cleanup) == 1 and cleanup[0].access_token == "received"
-    await h.repository.finish_retired(cleanup_id=cleanup[0].id)
-    with pytest.raises(GitHubUserOAuthError):
-        await h.repository.store_review(
-            requester=h.requester,
-            attempt_id=attempt.id,
-            registration=h.registration,
-            candidate=GitHubUserCandidate(
-                access_token="received",
-                account_id=42,
-                account_login="late-identity",
-                account_avatar_url=None,
-            ),
+        await session.write_session.execute(
+            sa.update(RDBToolkitConfig)
+            .where(RDBToolkitConfig.id == h.requester.toolkit_id)
+            .values(config={"github_auth_type": "pat"})
         )
-    assert (
-        await h.repository.retire_exchange_result(
-            attempt_id=attempt.id,
-            registration=h.registration,
-            access_token="received",
-            reason="late_identity",
+        assert (
+            await capture_and_clear_user_tokens(
+                session, h.requester.toolkit_id, None, cipher=h.cipher
+            )
+            == ()
         )
-        is None
-    )
-    assert await h.repository.list_cleanup(requester=h.requester) == ()
-    assert (await h.repository.read_context(requester=h.requester)).connection is None
-    await h.repository.ensure_cleanup_complete(requester=h.requester)
+        assert (
+            await session.read_session.scalar(
+                sa.text(
+                    "SELECT count(*) FROM information_schema.tables "
+                    "WHERE table_name = 'github_user_oauth_cleanup'"
+                )
+            )
+            == 0
+        )
+        columns = (
+            await session.read_session.scalars(
+                sa.text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'github_user_oauth_attempts'"
+                )
+            )
+        ).all()
+        assert (
+            "encrypted_issued_token" not in columns
+            and "exchange_in_flight" not in columns
+        )
+        foreign_key = next(
+            iter(RDBGitHubUserConnection.__table__.c.toolkit_id.foreign_keys)
+        )
+        assert foreign_key.ondelete == "CASCADE"
+        foreign_key = next(
+            iter(RDBGitHubUserAttempt.__table__.c.toolkit_id.foreign_keys)
+        )
+        assert foreign_key.ondelete == "CASCADE"

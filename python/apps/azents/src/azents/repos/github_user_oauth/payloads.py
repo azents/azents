@@ -8,14 +8,12 @@ from azents.core.crypto import CredentialCipher
 from azents.core.github_user_oauth import (
     GitHubUserAttempt,
     GitHubUserCandidate,
-    GitHubUserCleanup,
     GitHubUserConnection,
     GitHubUserRegistration,
     GitHubUserRequester,
 )
 from azents.rdb.models.github_user_oauth import (
     RDBGitHubUserAttempt,
-    RDBGitHubUserCleanup,
     RDBGitHubUserConnection,
 )
 
@@ -28,14 +26,6 @@ class SetupPayload(BaseModel):
     redirect_uri: str
     nonce: str = Field(repr=False)
     code_verifier: str = Field(repr=False)
-
-
-class CleanupPayload(BaseModel):
-    """Retired access token and original cleanup authentication."""
-
-    model_config = ConfigDict(hide_input_in_errors=True, extra="forbid")
-    registration: GitHubUserRegistration
-    access_token: str = Field(repr=False)
 
 
 class CandidatePayload(BaseModel):
@@ -112,20 +102,4 @@ def attempt_from(
         captured_connection_id=row.captured_connection_id,
         status=row.status,
         candidate=candidate,
-    )
-
-
-def cleanup_from(
-    row: RDBGitHubUserCleanup, cipher: CredentialCipher
-) -> GitHubUserCleanup:
-    """Decode retirement data only for provider cleanup."""
-    payload = CleanupPayload.model_validate_json(cipher.decrypt(row.encrypted_payload))
-    return GitHubUserCleanup(
-        id=row.id,
-        toolkit_id=row.toolkit_id,
-        registration=payload.registration,
-        access_token=payload.access_token,
-        reason=row.reason,
-        status=row.status,
-        failure_reason=row.failure_reason,
     )

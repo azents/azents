@@ -17204,7 +17204,7 @@
           "GitHub User Toolkit v1"
         ],
         "summary": "Shared Disconnect",
-        "description": "Disconnect shared use and require provider token revocation.",
+        "description": "Disconnect local shared use and attempt bounded token revocation.",
         "operationId": "github_user_toolkit_v1_shared_disconnect",
         "security": [
           {
@@ -17307,122 +17307,13 @@
         }
       }
     },
-    "/toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/github-user/cleanup-retry": {
-      "post": {
-        "tags": [
-          "GitHub User Toolkit v1"
-        ],
-        "summary": "Shared Cleanup Retry",
-        "description": "Retry incomplete cleanup of captured retired tokens.",
-        "operationId": "github_user_toolkit_v1_shared_cleanup_retry",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "handle",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Handle"
-            }
-          },
-          {
-            "name": "toolkit_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Toolkit Id"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/github-user/cleanup-retry": {
-      "post": {
-        "tags": [
-          "GitHub User Toolkit v1"
-        ],
-        "summary": "Agent Cleanup Retry",
-        "description": "Retry retired-token cleanup after exact Agent management admission.",
-        "operationId": "github_user_toolkit_v1_agent_cleanup_retry",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "handle",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Handle"
-            }
-          },
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Agent Id"
-            }
-          },
-          {
-            "name": "toolkit_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Toolkit Id"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/github-user/status": {
       "get": {
         "tags": [
           "GitHub User Toolkit v1"
         ],
         "summary": "Shared Status",
-        "description": "Return redacted saved identity and incomplete cleanup status.",
+        "description": "Return redacted saved identity without asserting provider cleanup.",
         "operationId": "github_user_toolkit_v1_shared_status",
         "security": [
           {
@@ -26443,10 +26334,6 @@
               }
             ],
             "title": "Failure Reason"
-          },
-          "cleanup_pending": {
-            "type": "boolean",
-            "title": "Cleanup Pending"
           }
         },
         "type": "object",
@@ -26458,8 +26345,7 @@
           "app_id",
           "source",
           "status",
-          "failure_reason",
-          "cleanup_pending"
+          "failure_reason"
         ],
         "title": "GitHubUserConnectionSummary",
         "description": "Allowlisted public metadata without access or client credentials."
@@ -26514,10 +26400,6 @@
               }
             ],
             "title": "Failure Reason"
-          },
-          "cleanup_pending": {
-            "type": "boolean",
-            "title": "Cleanup Pending"
           }
         },
         "type": "object",
@@ -26529,11 +26411,10 @@
           "app_id",
           "source",
           "status",
-          "failure_reason",
-          "cleanup_pending"
+          "failure_reason"
         ],
         "title": "GitHubUserConnectionSummaryResponse",
-        "description": "Allowlisted user-account execution identity and cleanup readiness."
+        "description": "Allowlisted user-account execution identity."
       },
       "GitHubUserExchangeRequest": {
         "properties": {
@@ -26733,20 +26614,15 @@
                 "type": "null"
               }
             ]
-          },
-          "cleanup_pending": {
-            "type": "boolean",
-            "title": "Cleanup Pending"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "connection",
-          "cleanup_pending"
+          "connection"
         ],
         "title": "GitHubUserStatusOutput",
-        "description": "Current connection plus cleanup status, never retired credential data."
+        "description": "Current saved connection, with no provider-cleanup success claim."
       },
       "GitRefEntryResponse": {
         "properties": {
@@ -37465,11 +37341,6 @@
                 "type": "null"
               }
             ]
-          },
-          "github_user_cleanup_pending": {
-            "type": "boolean",
-            "title": "Github User Cleanup Pending",
-            "default": false
           },
           "created_at": {
             "type": "string",

@@ -30,11 +30,10 @@ class GitHubUserCandidateSummary(BaseModel):
 
 
 class GitHubUserStatusOutput(BaseModel):
-    """Current connection plus cleanup status, never retired credential data."""
+    """Current saved connection, with no provider-cleanup success claim."""
 
     model_config = ConfigDict(extra="forbid")
     connection: GitHubUserConnectionSummary | None
-    cleanup_pending: bool
 
 
 class GitHubSetupAvailability(BaseModel):

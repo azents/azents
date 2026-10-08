@@ -53,7 +53,7 @@ def _management_errors() -> Iterator[None]:
                 status = 403
             case GitHubUserErrorCode.NOT_FOUND:
                 status = 404
-            case GitHubUserErrorCode.STALE | GitHubUserErrorCode.CLEANUP_REQUIRED:
+            case GitHubUserErrorCode.STALE:
                 status = 409
             case GitHubUserErrorCode.INVALID:
                 status = 400
@@ -324,7 +324,7 @@ async def agent_cancel(
 async def shared_disconnect(
     member: Member, service: Service, *, handle: str, toolkit_id: str
 ) -> None:
-    """Disconnect shared use and require provider token revocation."""
+    """Disconnect local shared use and attempt bounded token revocation."""
     del handle
     with _management_errors():
         await service.disconnect(
@@ -348,43 +348,11 @@ async def agent_disconnect(
         )
 
 
-@router.post(
-    "/workspaces/{handle}/toolkit-configs/{toolkit_id}/github-user/cleanup-retry",
-    status_code=204,
-    response_class=Response,
-)
-async def shared_cleanup_retry(
-    member: Member, service: Service, *, handle: str, toolkit_id: str
-) -> None:
-    """Retry incomplete cleanup of captured retired tokens."""
-    del handle
-    with _management_errors():
-        await service.cleanup_retry(
-            _requester(member, agent_id=None, toolkit_id=toolkit_id)
-        )
-
-
-@router.post(
-    "/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/github-user/cleanup-retry",
-    status_code=204,
-    response_class=Response,
-)
-async def agent_cleanup_retry(
-    member: Member, service: Service, *, handle: str, agent_id: str, toolkit_id: str
-) -> None:
-    """Retry retired-token cleanup after exact Agent management admission."""
-    del handle
-    with _management_errors():
-        await service.cleanup_retry(
-            _requester(member, agent_id=agent_id, toolkit_id=toolkit_id)
-        )
-
-
 @router.get("/workspaces/{handle}/toolkit-configs/{toolkit_id}/github-user/status")
 async def shared_status(
     member: Member, service: Service, *, handle: str, toolkit_id: str
 ) -> GitHubUserStatusOutput:
-    """Return redacted saved identity and incomplete cleanup status."""
+    """Return redacted saved identity without asserting provider cleanup."""
     del handle
     with _management_errors():
         return await service.status(

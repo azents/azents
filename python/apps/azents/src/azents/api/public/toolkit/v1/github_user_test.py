@@ -1,4 +1,4 @@
-"""HTTP ownership symmetry and strict cleanup failure contracts."""
+"""HTTP ownership symmetry, local completion, and redacted contracts."""
 
 from unittest.mock import create_autospec
 
@@ -14,8 +14,6 @@ from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.auth.roles import get_permissions_for_role
 from azents.core.enums import WorkspaceUserRole
 from azents.core.github_user_oauth import (
-    GitHubUserErrorCode,
-    GitHubUserOAuthError,
     GitHubUserRequester,
 )
 from azents.services.github_user_oauth.data import (
@@ -69,12 +67,11 @@ def test_route_binds_current_auth_session_and_exact_ownership(
 
 
 @pytest.mark.parametrize("agent_id", [None, "exact-agent"])
-def test_cleanup_failure_is_conflict_not_success(agent_id: str | None) -> None:
+def test_disconnect_reports_local_completion_without_revocation_claim(
+    agent_id: str | None,
+) -> None:
     service = create_autospec(GitHubUserOAuthService, instance=True)
-    service.cleanup_retry.side_effect = GitHubUserOAuthError(
-        GitHubUserErrorCode.CLEANUP_REQUIRED,
-        "GitHub token cleanup is incomplete. Retry cleanup.",
-    )
+    service.disconnect.return_value = None
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[get_workspace_member] = _member
@@ -83,12 +80,13 @@ def test_cleanup_failure_is_conflict_not_success(agent_id: str | None) -> None:
     if agent_id is not None:
         base += f"/agents/{agent_id}"
     with TestClient(app) as client:
-        response = client.post(
-            base + "/toolkit-configs/toolkit/github-user/cleanup-retry"
+        response = client.delete(
+            base + "/toolkit-configs/toolkit/github-user/connection"
         )
-    assert response.status_code == 409
-    assert response.json()["detail"]["code"] == "cleanup_required"
-    assert "token" not in response.json()["detail"]
+    assert response.status_code == 204
+    assert response.content == b""
+    service.disconnect.assert_awaited_once()
+    assert all("cleanup-retry" not in path for path in app.openapi()["paths"])
 
 
 @pytest.mark.parametrize("agent_id", [None, "exact-agent"])
@@ -96,9 +94,7 @@ def test_status_response_contains_no_private_connection_data(
     agent_id: str | None,
 ) -> None:
     service = create_autospec(GitHubUserOAuthService, instance=True)
-    service.status.return_value = GitHubUserStatusOutput(
-        connection=None, cleanup_pending=True
-    )
+    service.status.return_value = GitHubUserStatusOutput(connection=None)
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[get_workspace_member] = _member
@@ -109,7 +105,7 @@ def test_status_response_contains_no_private_connection_data(
     with TestClient(app) as client:
         response = client.get(base + "/toolkit-configs/toolkit/github-user/status")
     assert response.status_code == 200
-    assert response.json() == {"connection": None, "cleanup_pending": True}
+    assert response.json() == {"connection": None}
 
 
 def test_callback_inputs_are_excluded_from_request_repr() -> None:

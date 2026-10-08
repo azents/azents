@@ -13,7 +13,7 @@ tags: [github, toolkit, oauth, backend, frontend, security, testenv]
 - Reference: `github-261008/DESIGN`
 - Baseline: main `279db5f1fb52c634570d3d5eff6a669d2becdfd3`.
 - Authority: [Requirements](../requirements/github-261008-user-account-toolkit.md) and [ADR](../adr/github-261008-user-account-toolkit.md).
-- Mode: Collaborative. Revision 3 is approved for implementation; deployment and live provider actions require separate authorization.
+- Mode: Collaborative. Revision 4 incorporates the requester's fail-open cleanup correction into the ongoing authorized implementation; deployment and live provider actions require separate authorization.
 
 ## Outcome and Scope
 
@@ -31,7 +31,7 @@ Keep PAT, BYOA installation, and Platform installation behavior intact. Each Too
 
 ## Design Authority
 
-- Design revision: `3`
+- Design revision: `4`
 
 | ID | Material mechanism | Authority | Classification |
 | --- | --- | --- | --- |
@@ -45,11 +45,11 @@ Keep PAT, BYOA installation, and Platform installation behavior intact. Each Too
 | M8 | Existing catalog/details/immediate-save UI integration, identity and readiness summaries, replacement/disconnect confirmation | REQ-2, REQ-5, REQ-6, REQ-9, REQ-11; Requirements UI baseline | derived |
 | M9 | Additive persistence/client migration with unchanged existing credentials and temporary-token flow | REQ-1, REQ-7, REQ-13; ADR-D1 | derived |
 | M10 | Provider-error classification and conditional failure publication | REQ-4, REQ-7, REQ-8, REQ-9, REQ-10; Requirements provider-failure constraint | derived |
-| M11 | Single-token GitHub revocation for retired credentials, non-executable encrypted cleanup state and explicit failure/retry | ADR-D3; clarified REQ-9, REQ-7, REQ-10; existing encryption and completed-transaction boundaries | decided |
+| M12 | Bounded single-token revocation attempt with fail-open local completion and sanitized failure logging | ADR-D4; revised REQ-9; retained REQ-7/REQ-10 and completed-transaction boundaries | decided |
 
 Connection IDs, field names, equivalent storage shapes, route suffixes and UI composition are implementation details below, not additional authority. No token version/epoch scheme or new operational mode is introduced. Any mechanism outside this exact authority set returns to technical design.
 
-Revision 3 adds M11 under the requester's accepted ADR-D3. M10 continues to own provider-error classification; M11 separately owns token revocation and its cleanup lifecycle. TD-4 is resolved.
+Revision 4 retires M11 and its persistent cleanup/retry lifecycle. M12 replaces it under ADR-D4. M1-M10 retain their approved authority; fail-open applies only to cleanup failure, not setup or execution authorization.
 
 ## Architecture and Sources of Truth
 
@@ -97,11 +97,11 @@ Replace a connection by publishing a new connection ID atomically for the same T
 
 ### Bound Setup Attempt and Pending Activation
 
-Add Toolkit-owned attempts with a distinct ID and enum state (`pending`, `exchanging`, `review`, `completed`, `cancelled`). An attempt binds the exact initiating user/auth Session, Workspace, optional owning Agent, Toolkit, selected App/configuration snapshot, fixed callback/return target, nonce, encrypted PKCE verifier and expiration. Capture the current active connection ID (or its absence) at initiation.
+Add Toolkit-owned attempts with a distinct ID and stored enum state (`pending`, `exchanging`, `review`). Confirmed, cancelled or failed setup removes its local attempt rather than retaining terminal cleanup records. An attempt binds the exact initiating user/auth Session, Workspace, optional owning Agent, Toolkit, selected App/configuration snapshot, fixed callback/return target, nonce, encrypted PKCE verifier and expiration. Capture the current active connection ID (or its absence) at initiation.
 
 After exchange, store a validated non-expiring token encrypted in the attempt with verified account metadata until confirmation. Do not expose that candidate token to runtime. Limit to one current candidate per Toolkit; a newer attempt invalidates the prior candidate without replacing a working active connection. No provider authorization code is persisted.
 
-Expiration follows the existing bounded OAuth setup policy. Expired attempts are not confirmable or credential sources. New setup, cancel, disconnect and Toolkit deletion retire stale candidate state through completed writes and revoke issued tokens under M11 outside transactions. Expired rows are retired and cleaned at these operation boundaries; no refresh scheduler or new global cleanup service is introduced. Retired encrypted token material is retained only for incomplete cleanup and never used for execution. An implementation that needs a different retention actor must return to design.
+Expiration follows the existing bounded OAuth setup policy. Expired attempts are not confirmable or credential sources. New setup, cancel, disconnect and deletion remove stale local candidate state in completed writes and attempt cleanup of known issued tokens under M12 outside transactions. No retired-token table, cleanup status, receipt tombstone for cleanup guarantees, retry service or completion actor is introduced. A late received result cannot activate a removed or superseded attempt; attempt its exact-token cleanup using the captured App binding rather than requiring the old parent row to survive.
 
 The token itself is non-expiring; the local unconfirmed setup attempt is short-lived. These are different lifetimes.
 
@@ -131,13 +131,13 @@ Regenerate Python/TypeScript Public clients from OpenAPI after implementation ch
 3. Build GitHub authorization URL from the selected App's Client ID with state and S256 PKCE. Do not request `offline_access`. Installation is a separate GitHub account/organization setup action; return to the same saved Toolkit and do not confuse the installer with the OAuth account.
 4. Callback dispatch retains the original authorized context. Server verifies current user/auth Session, attempt, source/App/configuration and management authority, then atomically changes `pending` to `exchanging`. Replay cannot claim the attempt twice.
 5. Exchange code using public GitHubKit transport. Validate a typed OAuth envelope: nonempty access token, bearer type, and absence of `expires_in`, `refresh_token`, and `refresh_token_expires_in`. A declared field is incompatible even if zero or null; do not silently discard lifetime metadata and accept the access token. Provider `error` envelopes are failures even under HTTP 200. Do not stringify secret-bearing validation inputs.
-6. Reject expiring responses with an App-configuration hint: opt out of user-to-server token expiration and reconnect. Preserve the working active connection. Revoke the issued unaccepted access token under M11; grant-wide revocation and App uninstall are prohibited as local cleanup.
+6. Reject expiring responses with an App-configuration hint: opt out of user-to-server token expiration and reconnect. Preserve the working active connection. Attempt cleanup of the issued unaccepted access token under M12; grant-wide revocation and App uninstall are prohibited as local cleanup.
 7. Verify the account through authenticated GitHub identity. Verify selected App identity using the validated registration and installation/App metadata as available. Store a review candidate only after the authority and captured registration are revalidated in a completed DB operation.
 8. Show the verified account and Toolkit sharing scope in the originating UI. A different account is an explicit replacement; failed/new setup does not modify the current active credential.
-9. Confirm atomically only if the attempt is current, in `review`, unexpired, the active connection is still the captured one, registration still matches and current management authority is valid. Publish a new encrypted connection ID and transfer the candidate out of setup state. Retire a superseded token for M11 cleanup; do not revoke the newly activated token when clearing the successful attempt. Otherwise report stale setup, retire its issued candidate and require a new attempt.
+9. Confirm atomically only if the attempt is current, in `review`, unexpired, the active connection is still the captured one, registration still matches and current management authority is valid. Publish a new encrypted connection ID and transfer the candidate out of setup state. Return the captured superseded token for M12 cleanup; do not revoke the newly activated token when clearing the successful attempt. Otherwise report stale setup, remove its local candidate state and attempt exact-token cleanup when known.
 10. Callback success notification to its opener contains only a fixed event and success/candidate identifier, never tokens/codes/state. Validate same origin and exact popup source. Invalidate the current ownership-specific queries. Parent Agent settings need no extra save.
 
-A GitHub response timeout during initial code exchange is not automatically repeated with the same one-use code. Starting a fresh authorization attempt is safe; the active connection remains unchanged. Cleanup failures surface without masking the primary programming defect/cancellation. A token never received from the provider cannot be claimed revoked by Azents.
+A GitHub response timeout during initial code exchange is not automatically repeated with the same one-use code. Starting a fresh authorization attempt is safe; the active connection remains unchanged. Expected provider cleanup failures are logged without masking the primary setup failure or blocking local completion. Cancellation propagates immediately; no dedicated cleanup-completion task owner is added. A token never received from the provider cannot be claimed revoked by Azents.
 
 ## SDK Feasibility
 
@@ -197,19 +197,17 @@ Deploy compatible backend/schema before enabling the new form branches. Old mode
 
 Platform operators and BYOA owners must turn off user-to-server token expiration in their GitHub App registration. Azents does not toggle GitHub settings remotely. Validate actual OAuth response on every candidate activation because a configured App does not prove the current token lifetime. Changing the GitHub expiration setting is not assumed to retroactively change old tokens.
 
-Disconnect removes the current credential from execution authority and revokes the exact retired token at GitHub. Other independently connected Toolkits remain local sources of truth; grant-wide provider revocation is never used as a local cleanup shortcut. Parent deletion must not cascade away the only cleanup material before provider revocation is confirmed.
+Disconnect removes the current credential from local execution authority, then attempts exact-token revocation at GitHub. Other independently connected Toolkits remain local sources of truth; grant-wide provider revocation is never a cleanup shortcut. Toolkit and Agent deletion do not wait for confirmed provider cleanup and have no cleanup-based blocker.
 
-### Single-Token Revocation and Failure Recovery — M11
+### Fail-Open Single-Token Cleanup — M12
 
-1. A completed repository operation retires the captured connection/candidate token from executable state and retains its encrypted cleanup material with Toolkit/context, original App/client binding and a sanitized cleanup status. Successful activation transfers its candidate token into active state rather than retiring that token.
-2. Call the public GitHubKit `async_delete_token` operation for `DELETE /applications/{client_id}/token` outside a transaction. Use the captured retired token, not a later lookup of the current active token. The existing `revoke_oauth_token` helper catches HTTP failures and only logs them; preserve its old installation-mode behavior, but use a failure-propagating operation for new user cleanup.
-3. On confirmed provider success, a completed repository operation removes the retired token material. An already-invalid token is complete only with provider evidence identifying the exact token/App; a generic 403/404 or wrong client secret is not evidence of successful revocation.
-4. On failure, retain encrypted non-executable cleanup material and surface an operation failure, not a success response containing an error. Ownership-gated details show incomplete cleanup and let the manager retry the same cleanup operation. Never restore the retired token for execution or roll a confirmed newer connection back to the old one.
-5. Physical Toolkit deletion or removal of registration material needed for cleanup waits for confirmed revocation. Local use remains disabled while cleanup is incomplete. Platform settings absence or invalid client credentials produces actionable incomplete cleanup, not a switch to another App or discarded retry material.
+1. Complete the local state change atomically and return only transient captured token/App facts needed for cleanup. Active and pending credentials remain encrypted while locally authorized; there is no persistent retired-token aggregate.
+2. Attempt `DELETE /applications/{client_id}/token` through the public GitHubKit operation outside the transaction, using a short bounded timeout. Use the captured affected token, not the current replacement token. Successful candidate transfer is not cleanup of that activated token.
+3. Log expected provider/registration-unavailable cleanup failure safely and continue the local operation. No token-validity probe, cleanup-success proof protocol, automatic retry, manager retry action or background fire-and-forget dispatch is added.
+4. Local deletion may cascade away local connection/attempt state. Parent deletion captures known affected credentials before local removal where available, but never waits on a retained cleanup row or unresolved setup receipt. A subsequently received stale result cannot activate and uses its already-captured App facts for best-effort cleanup without depending on a deleted FK.
+5. Preserve normal programming-error visibility and immediate cancellation propagation. Fail-open handling is specific to expected cleanup failures; it does not catch arbitrary local defects or permit invalid setup/execution authority.
 
-Cancellation before any token is issued needs no token deletion. Rejection, cancellation after issuance, candidate supersession, confirmed account/mode replacement, disconnect and Toolkit deletion all follow this cleanup contract. Retry is an explicit authorized operation at existing management boundaries; no periodic actor, token refresh, global reference hub, distributed token mutex or new Runtime protocol is introduced.
-
-Revocation at GitHub prevents later authentication even with a copied token once effective; it does not erase copies, undo completed writes or recall a provider request already admitted. A lost revocation response remains incomplete until provider evidence or retry confirms cleanup. Tests must prove cleanup targets only the captured retired token during concurrent reconnection. Unexpected shared token material, if actually observed, is reported as a concrete provider compatibility issue; it is not a default reason to omit required revocation.
+Cancellation before token issuance needs no token deletion. Rejection, candidate supersession, confirmed replacement, disconnect and deletion attempt cleanup of known affected tokens. Failed cleanup can leave a non-expiring token usable at GitHub, including copies outside Azents; it does not restore local authority. The UI reports local disconnection/replacement/deletion, not guaranteed provider revocation.
 
 Log operation identifiers, Toolkit/App source, safe reason and outcome through normal logger integration. Do not log code, state, PKCE verifier, tokens, client secrets, provider response bodies, or private repo content. No new Sentry SDK delivery path, secret diagnostics endpoint or operational settings are introduced.
 
@@ -224,7 +222,7 @@ Log operation identifiers, Toolkit/App source, safe reason and outcome through n
 | Validation fixture limited to registration checks | M4/M5/M10 | Extend successful non-expiring OAuth, rejection, multi-page access and action/error scenarios | Deterministic test fixture | Scenario completeness and production-route E2E |
 | Proposed unaccepted renewal claims and token-rotation machinery | ADR-D2 | None in this implementation | No renewal code/schema/config is introduced | No user-mode refresh grants, refresh secrets, jobs or operation tables |
 | Existing temporary discovery cleanup | Existing App-mode Spec, M9 | Retained unchanged | Installation-mode OAuth only | Existing OAuth cleanup tests |
-| Best-effort log-only revocation as a possible cleanup path for persistent user credentials | ADR-D3, M11 | Failure-propagating single-token cleanup with encrypted retry material | New user-mode cleanup only; old helper retained | Failure/status/retry tests and absence of grant deletion or App uninstall |
+| Unmerged M11 cleanup table/status/receipt tombstone, retry routes/UI, provider-invalidity probe, parent deletion blockers and exchange completion owner | ADR-D4, M12 | Transient captured-token cleanup with bounded SDK attempt and fail-open logging | Remove obsolete new-user cleanup machinery, preserve setup authorization and old modes | Absence of cleanup persistence/retry/owner/deletion barriers; provider failure completion tests |
 
 Update Living Specs only with implemented reachable behavior, not merely because this Design exists. Target `domain/toolkit.md`, `flow/mcp-oauth.md` where generic versus GitHub paths need clarification, `domain/system-settings.md` only for new reachable availability implications, and Runtime flow docs if supported environment-resolution behavior changes.
 
@@ -241,14 +239,14 @@ Use current browser/API/Worker boundaries for behavior needing independently dep
 - Wrong account, cancelled popup, callback replay, lost management authority/App change, candidate replacement and stale confirm.
 - User read-only vs App write permission, target-local denial/SSO, partial readiness, and complete paginated installations/repos.
 - Reconnect/disconnect during provider action; late old-token authentication failure cannot clear new connection.
-- Cancellation/rejection after token issuance, replacement, disconnect and deletion revoke only the affected token. Provider cleanup failure remains visible and non-executable, and authorized retry completes cleanup without damaging a newer connection.
+- Cancellation/rejection after token issuance, replacement, disconnect and deletion attempt only the affected token's cleanup. Provider cleanup failure does not block local completion, restore execution or damage a newer connection.
 - Optional Runtime injection default off; new Git/gh command receives current token, no user-token refresh or installation map required.
 
 ### Component and Repository Evidence
 
 Storybook/play owns static state matrices, modal/cancel/focus/mobile behavior, catalog availability, redaction and localized copy. Pure projection tests ensure toolsets/config values are not claimed as grants.
 
-Repository/service tests own candidate claim/activation, encrypted storage, exact-context authorization, no HTTP inside transactions, conditional error publication, disconnect/replace races and old-mode preservation. M11 tests cover captured-token cleanup during reconnect, successful-candidate transfer, failed/ambiguous revocation, encrypted retry retention and deletion ordering. Use explicit barriers/events and committed facts, not arbitrary sleeps, for race tests.
+Repository/service tests own candidate claim/activation, encrypted storage, exact-context authorization, no HTTP inside transactions, conditional error publication, disconnect/replace races and old-mode preservation. M12 tests cover the exact captured cleanup token, successful-candidate transfer, provider timeout/rejection fail-open completion, sanitized logs, late stale result and deletion without cleanup blocking. Use explicit barriers/events and committed facts, not arbitrary sleeps, for race tests.
 
 SDK MockTransport tests cover PKCE/callback forwarding, OAuth HTTP-200 errors, non-expiring/expiring envelope validation, verified identity, paginated App-bound discovery and narrow revocation. No outbound provider payload is dumped into test logs.
 
@@ -262,10 +260,10 @@ Evidence records SHA, source/authority, environment/fixture, assertions, sanitiz
 
 ## Authority and Feasibility Check
 
-- Requirements coverage: REQ-1/13 map to M1/M2/M4/M9; REQ-2 to M2/M8; REQ-3/4/6 to M5/M10; REQ-5/7/9 to M3/M8/M10/M11; REQ-8 to M2/M4/M6/M10; REQ-10 to M2/M6/M11; REQ-11 to M8 and Test Strategy; REQ-12 to M7/M8. M1-M11 have listed approved/existing authority. ADR-D3 resolves TD-4 and authorizes required revocation; no local-only cleanup option remains.
+- Requirements coverage: REQ-1/13 map to M1/M2/M4/M9; REQ-2 to M2/M8; REQ-3/4/6 to M5/M10; REQ-5/7/9 to M3/M8/M10/M12; REQ-8 to M2/M4/M6/M10; REQ-10 to M2/M6/M12; REQ-11 to M8 and Test Strategy; REQ-12 to M7/M8. M1-M10 retain their authority; ADR-D4 and revised REQ-9 authorize M12. M11 is retired.
 - Feasible by inspected contract: ownership, encryption, provider branching, additive response/client extension, current UI host, non-expiring GitHub OAuth semantics and public SDK transport.
 - Verified Runtime integration affordances: Builtin `exec_command` collects each Toolkit's environment immediately before `start_process`, and the git credential helper supports the same-token GH_TOKEN/GITHUB_TOKEN fallback. MCP wrapper accepts dynamic per-call headers. These inspected paths support M6 without a new proxy; existing processes/terminals still retain handed-off credentials.
-- Revocation feasibility: the inspected existing helper already uses the supported public single-token deletion operation with OAuth client authentication. Its log-only HTTP-error handling must be separated from the new failure-propagating path. Token retirement, encrypted retry retention and physical-deletion ordering remain implementation verification obligations.
+- Cleanup feasibility: the existing supported public single-token deletion operation and log-only cleanup precedent support a bounded fail-open attempt. No provider completion proof or persistent retry aggregate is needed. Current-row replacement safety and transient exact-token capture remain verification obligations.
 - Conditional implementation verification: wire and test the dynamic current-row providers for live and snapshot-backed MCP handlers and new command dispatch; extend the fixture through complete setup/Worker boundaries; verify actual App registration, real multi-org actions and token-specific revocation separately when live access is authorized. Prove a late cleanup cannot target a newer token. A concrete noninterference failure requires correction and evidence, not a silent no-revocation fallback. These are explicit evidence obligations, not claims of completed tests.
 - The SDK fixture spike removes the previous PKCE argument limitation as a transport blocker using a public API already in the configured SDK; no upgrade/private API/HTTP exception is required.
 - Non-expiring mode removes one-use refresh races. Candidate code exchange and publication still need one-use/context/current-connection guards under M3; they are setup correctness, not refresh/versioning mechanisms.
@@ -284,8 +282,8 @@ Keep this Design as one approved snapshot. Suggested delivery boundaries are bac
 - Mode: Collaborative.
 - Decision owner: requester.
 - Approved on: 2026-10-08.
-- Approved Design revision: `3`.
-- Approved authority IDs: `M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11`.
-- Approved scope: Toolkit-local non-expiring Platform/BYOA user authorization, current UI/availability, safe staged activation/replacement/disconnect and required single-token provider revocation with failure recovery, personal/multi-org discovery, existing MCP and opt-in Runtime credential use, retained old modes, additive schema/client delivery and stated verification obligations.
+- Approved Design revision: `4`.
+- Approved authority IDs: `M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M12`.
+- Approved scope: retained Toolkit-local non-expiring Platform/BYOA user authorization, UI/availability, staged activation/replacement/disconnect, personal/multi-org discovery, MCP and opt-in Runtime, old-mode compatibility and verification; cleanup now follows the requester's bounded fail-open correction, without retained cleanup/retry or deletion blockers.
 
-The requester asked to implement immediately after the exact revision 3 and M1-M11 approval brief. This confirms the presented Design and separately authorizes implementation. It does not authorize PR merge, deployment, live provider actions or GitHub App registration changes.
+The requester previously authorized revision 3 implementation, then explicitly requested the fail-open cleanup correction during that implementation and withdrew fire-and-forget. Revision 4 records only that requested delta, preserving the other approved mechanisms. It does not authorize PR merge, deployment, live provider actions or GitHub App registration changes.

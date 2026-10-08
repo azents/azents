@@ -12,7 +12,7 @@ tags: [github, toolkit, oauth, architecture, security]
 - Snapshot: `github-261008`
 - Requirements: [github-261008/REQ](../requirements/github-261008-user-account-toolkit.md)
 - Mode: Collaborative; the requester owns unresolved material technical decisions.
-- Toolkit-local ownership, non-expiring user tokens and single-token provider revocation are accepted as ADR-D1, ADR-D2 and ADR-D3 below. The unaccepted renewal alternatives are withdrawn. There is no implementation Design approval.
+- Toolkit-local ownership and non-expiring user tokens remain ADR-D1 and ADR-D2. ADR-D4 governs current fail-open single-token cleanup and supersedes ADR-D3's completion/retry policy. Implementation is authorized for the current scoped Design; merge and deployment are separate.
 
 ## Current-System Framing
 
@@ -264,3 +264,25 @@ Provider-confirmed revocation prevents subsequent authentication with the token,
 **Effect on the TD-4 brief**
 
 This accepted decision supersedes the brief's pending state and local-only recommendation. TD-4 is resolved; full Design approval remains separate.
+
+### ADR-D4. Fail-open token cleanup
+
+- Authority: requester-revised `github-261008/REQ-9`, retained REQ-7/REQ-10 and explicit implementation correction.
+- Decision owner: requester.
+- Accepted on: 2026-10-08.
+
+**Decision**
+
+Attempt the affected token's revocation through the supported single-token GitHub API outside database transactions, with a short bounded wait. If the provider call fails, log a sanitized warning and complete the local disconnect, replacement, cancellation or deletion. Do not restore the old credential, substitute another execution authority, or claim provider revocation succeeded.
+
+Remove durable cleanup records/status, manager cleanup retry APIs/UI, proof-of-invalidity probes used only to confirm cleanup, cleanup-based parent deletion barriers and dedicated exchange-completion machinery introduced to guarantee cleanup. Keep context binding, one-use OAuth claim, staged confirmation, current-row registration protection, encryption for active/candidate credentials and actual authentication failure handling.
+
+**Rationale and rejected alternatives**
+
+The requester explicitly chose the simpler fail-open failure policy. The intervening fire-and-forget proposal was withdrawn: the normal operation still attempts bounded revocation, but cleanup failure is not an availability or deletion gate. ADR-D3's encrypted failed-cleanup retention and explicit retry path are no longer required.
+
+**Consequences**
+
+A non-expiring token may remain valid at GitHub after failed cleanup, including a copied credential. Azents stops local credential use and removes its local state regardless; later server-managed Toolkit resolutions cannot obtain that retired credential. Process cancellation or a result never received cannot guarantee provider revocation. No background retry, actor, global credential hub, grant-wide revocation or App uninstall is introduced.
+
+This is fail-open cleanup, not fail-open authentication. Invalid OAuth/context/account authority still fails; transient provider errors during ordinary use do not authorize another account, PAT or installation fallback.

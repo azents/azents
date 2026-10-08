@@ -1,8 +1,8 @@
-"""Completed database-only GitHub user setup, activation and token retirement."""
+"""Completed database-only GitHub user setup and transient token capture."""
 
-import dataclasses
 import datetime
 import secrets
+from dataclasses import dataclass
 from typing import Annotated
 
 import sqlalchemy as sa
@@ -18,22 +18,21 @@ from azents.core.github_user_oauth import (
     GitHubUserAttempt,
     GitHubUserAttemptStatus,
     GitHubUserCandidate,
-    GitHubUserCleanup,
-    GitHubUserCleanupStatus,
-    GitHubUserConnection,
+    GitHubUserConfirmResult,
     GitHubUserConnectionStatus,
     GitHubUserContext,
     GitHubUserErrorCode,
     GitHubUserOAuthError,
     GitHubUserRegistration,
     GitHubUserRequester,
+    GitHubUserRevocation,
+    GitHubUserStartResult,
 )
 from azents.core.system_setting import SystemSettingSection
 from azents.core.system_setting_payload import SystemSettingPayloadResolver
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.github_user_oauth import (
     RDBGitHubUserAttempt,
-    RDBGitHubUserCleanup,
     RDBGitHubUserConnection,
 )
 from azents.rdb.models.toolkit import RDBToolkitConfig
@@ -42,13 +41,16 @@ from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.account_access import evaluate_active_subject
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_admin import AgentAdminRepository
-from azents.repos.github_user_oauth.guards import cleanup_pending
+from azents.repos.github_user_oauth.guards import (
+    capture_and_clear_user_tokens,
+    capture_registration,
+    distinct_revocations,
+    same_app,
+)
 from azents.repos.github_user_oauth.payloads import (
     CandidatePayload,
-    CleanupPayload,
     SetupPayload,
     attempt_from,
-    cleanup_from,
     connection_from,
     encode_registration,
 )
@@ -61,27 +63,10 @@ from azents.repos.user import UserRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 
-_CURRENT = (
-    GitHubUserAttemptStatus.PENDING,
-    GitHubUserAttemptStatus.EXCHANGING,
-    GitHubUserAttemptStatus.REVIEW,
-)
 
-
-def _error(code: GitHubUserErrorCode, message: str) -> GitHubUserOAuthError:
-    return GitHubUserOAuthError(code, message)
-
-
-def _same_registration(
-    left: GitHubUserRegistration, right: GitHubUserRegistration
-) -> bool:
-    """Compare exact setup facts without placing them in diagnostics."""
-    return left == right
-
-
-@dataclasses.dataclass(frozen=True)
+@dataclass(frozen=True)
 class GitHubUserOAuthOperationRepository:
-    """Complete narrowly locked local lifecycle writes before provider effects."""
+    """Complete local writes before service-owned bounded provider effects."""
 
     session_manager: Annotated[
         SessionManager[WriteSession], Depends(get_session_manager)
@@ -124,20 +109,22 @@ class GitHubUserOAuthOperationRepository:
             session_repository=self.session_repository,
         )
         if subject is not ActiveAccountSubjectStatus.ACTIVE:
-            raise _error(GitHubUserErrorCode.AUTHORITY, "Not authenticated.")
+            raise GitHubUserOAuthError(
+                GitHubUserErrorCode.AUTHORITY, "Not authenticated."
+            )
         workspace = await self.workspace_repository.get_by_id(session, workspace_id)
         member = await self.workspace_user_repository.get_by_workspace_and_user(
             session, workspace_id, user_id
         )
         if workspace is None or member is None:
-            raise _error(
+            raise GitHubUserOAuthError(
                 GitHubUserErrorCode.AUTHORITY, "Workspace membership required."
             )
         if agent_id is None:
             if not has_permission(
                 get_permissions_for_role(member.role), Permissions.TOOLKITS_WRITE
             ):
-                raise _error(
+                raise GitHubUserOAuthError(
                     GitHubUserErrorCode.AUTHORITY, "Toolkit write permission required."
                 )
         else:
@@ -147,14 +134,16 @@ class GitHubUserOAuthOperationRepository:
                 or agent.workspace_id != workspace_id
                 or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
             ):
-                raise _error(GitHubUserErrorCode.NOT_FOUND, "Agent not found.")
+                raise GitHubUserOAuthError(
+                    GitHubUserErrorCode.NOT_FOUND, "Agent not found."
+                )
             if (
                 member.role is not WorkspaceUserRole.OWNER
                 and not await self.agent_admin_repository.is_admin(
                     session, agent_id, member.id
                 )
             ):
-                raise _error(
+                raise GitHubUserOAuthError(
                     GitHubUserErrorCode.AUTHORITY,
                     "Agent management permission required.",
                 )
@@ -176,11 +165,12 @@ class GitHubUserOAuthOperationRepository:
         self, session: WriteSession, requester: GitHubUserRequester, *, lock: bool
     ) -> ToolkitConfig:
         if lock:
-            # Serializes only this Toolkit's local setup/mutation, never external I/O.
+            # Refresh a previously loaded ORM identity under this narrow write lock.
             await session.write_session.scalar(
-                sa.select(RDBToolkitConfig.id)
+                sa.select(RDBToolkitConfig)
                 .where(RDBToolkitConfig.id == requester.toolkit_id)
                 .with_for_update()
+                .execution_options(populate_existing=True)
             )
         await self._scope(
             session,
@@ -196,7 +186,7 @@ class GitHubUserOAuthOperationRepository:
             or toolkit.owner_agent_id != requester.agent_id
             or toolkit.toolkit_type != "github"
         ):
-            raise _error(
+            raise GitHubUserOAuthError(
                 GitHubUserErrorCode.NOT_FOUND,
                 "GitHub Toolkit not found in this ownership context.",
             )
@@ -217,7 +207,7 @@ class GitHubUserOAuthOperationRepository:
             toolkit.revision != registration.toolkit_revision
             or toolkit.config.get("github_auth_type") != auth_type
         ):
-            raise _error(
+            raise GitHubUserOAuthError(
                 GitHubUserErrorCode.STALE,
                 "Toolkit registration changed. Restart authorization.",
             )
@@ -225,14 +215,14 @@ class GitHubUserOAuthOperationRepository:
             current = await self.system_setting_repository.get_current(
                 session, section=SystemSettingSection.PLATFORM_GITHUB_APP
             )
-            definition = self.setting_payloads.registry.get(
-                SystemSettingSection.PLATFORM_GITHUB_APP
-            )
             resolved = self.setting_payloads.resolve_current(
-                definition=definition, current=current
+                definition=self.setting_payloads.registry.get(
+                    SystemSettingSection.PLATFORM_GITHUB_APP
+                ),
+                current=current,
             )
             if resolved.effective_generation != registration.platform_generation:
-                raise _error(
+                raise GitHubUserOAuthError(
                     GitHubUserErrorCode.STALE,
                     "Platform App settings changed. Restart authorization.",
                 )
@@ -241,157 +231,65 @@ class GitHubUserOAuthOperationRepository:
         self, session: ReadSession, toolkit_id: str
     ) -> RDBGitHubUserConnection | None:
         return await session.read_session.scalar(
-            sa.select(RDBGitHubUserConnection).where(
-                RDBGitHubUserConnection.toolkit_id == toolkit_id
-            )
+            sa.select(RDBGitHubUserConnection)
+            .where(RDBGitHubUserConnection.toolkit_id == toolkit_id)
+            .execution_options(populate_existing=True)
         )
 
     async def read_context(
         self, *, requester: GitHubUserRequester
     ) -> GitHubUserContext:
-        """Finish authorized preparation without holding transaction handles."""
+        """Finish current authorized preparation without database handles."""
         async with self.session_manager() as session:
             toolkit = await self._authorize(session, requester, lock=False)
-            connection = await self._connection(session, toolkit.id)
-            pending = await cleanup_pending(session, toolkit.id)
+            row = await self._connection(session, toolkit.id)
             return GitHubUserContext(
                 toolkit=toolkit,
-                connection=None
-                if connection is None
-                else connection_from(connection, self.cipher),
-                cleanup_pending=pending,
+                connection=None if row is None else connection_from(row, self.cipher),
             )
 
     async def _attempt(
         self, session: ReadSession, attempt_id: str
     ) -> RDBGitHubUserAttempt:
-        attempt = await session.read_session.scalar(
-            sa.select(RDBGitHubUserAttempt).where(RDBGitHubUserAttempt.id == attempt_id)
+        row = await session.read_session.scalar(
+            sa.select(RDBGitHubUserAttempt)
+            .where(RDBGitHubUserAttempt.id == attempt_id)
+            .execution_options(populate_existing=True)
         )
-        if attempt is None:
-            raise _error(
+        if row is None:
+            raise GitHubUserOAuthError(
                 GitHubUserErrorCode.NOT_FOUND, "Authorization attempt not found."
             )
-        return attempt
+        return row
 
     def _bound(
         self, row: RDBGitHubUserAttempt, requester: GitHubUserRequester
     ) -> GitHubUserAttempt:
         attempt = attempt_from(row, self.cipher)
         if attempt.requester != requester:
-            raise _error(
+            raise GitHubUserOAuthError(
                 GitHubUserErrorCode.STALE,
                 "Authorization attempt does not match this authenticated context.",
             )
         return attempt
 
-    async def _retire(
-        self,
-        session: WriteSession,
-        *,
-        toolkit_id: str,
-        registration: GitHubUserRegistration,
-        access_token: str,
-        reason: str,
-    ) -> GitHubUserCleanup:
-        # Deduplication is local retry safety, not a provider-account aggregate.
-        existing = (
-            await session.read_session.scalars(
-                sa.select(RDBGitHubUserCleanup).where(
-                    RDBGitHubUserCleanup.toolkit_id == toolkit_id
-                )
-            )
-        ).all()
-        for row in existing:
-            saved = cleanup_from(row, self.cipher)
-            if (
-                saved.access_token == access_token
-                and saved.registration.app_id == registration.app_id
-                and saved.registration.client_id == registration.client_id
-            ):
-                return saved
-        row = RDBGitHubUserCleanup(
-            toolkit_id=toolkit_id,
-            encrypted_payload=self.cipher.encrypt(
-                CleanupPayload(
-                    registration=registration, access_token=access_token
-                ).model_dump_json()
-            ),
-            reason=reason,
-            status=GitHubUserCleanupStatus.PENDING,
-            failure_reason=None,
-        )
-        session.write_session.add(row)
-        await session.write_session.flush()
-        return cleanup_from(row, self.cipher)
-
-    async def _retire_candidate(
-        self,
-        session: WriteSession,
-        *,
-        toolkit_id: str,
-        registration: GitHubUserRegistration,
-        access_token: str,
-        reason: str,
-    ) -> GitHubUserCleanup | None:
-        """Only retire material that is not the same Toolkit's active credential."""
-        current = await self._connection(session, toolkit_id)
+    async def _candidate_revocation(
+        self, session: ReadSession, attempt: GitHubUserAttempt
+    ) -> GitHubUserRevocation | None:
+        if attempt.candidate is None:
+            return None
+        current = await self._connection(session, attempt.requester.toolkit_id)
         if current is not None:
-            saved = connection_from(current, self.cipher)
+            active = connection_from(current, self.cipher)
             if (
-                saved.access_token == access_token
-                and saved.registration.app_id == registration.app_id
-                and saved.registration.client_id == registration.client_id
+                same_app(active.registration, attempt.registration)
+                and active.access_token == attempt.candidate.access_token
             ):
                 return None
-        return await self._retire(
-            session,
-            toolkit_id=toolkit_id,
-            registration=registration,
-            access_token=access_token,
-            reason=reason,
+        return GitHubUserRevocation(
+            registration=attempt.registration,
+            access_token=attempt.candidate.access_token,
         )
-
-    async def _cancel(
-        self, session: WriteSession, row: RDBGitHubUserAttempt, *, reason: str
-    ) -> None:
-        setup = attempt_from(row, self.cipher)
-        if row.encrypted_issued_token is not None:
-            await self._retire_candidate(
-                session,
-                toolkit_id=row.toolkit_id,
-                registration=setup.registration,
-                access_token=self.cipher.decrypt(row.encrypted_issued_token),
-                reason=reason,
-            )
-        elif setup.candidate is not None:
-            await self._retire_candidate(
-                session,
-                toolkit_id=row.toolkit_id,
-                registration=setup.registration,
-                access_token=setup.candidate.access_token,
-                reason=reason,
-            )
-        row.encrypted_issued_token = None
-        row.encrypted_candidate = None
-        row.status = GitHubUserAttemptStatus.CANCELLED
-        await self._prune_terminal(session, row)
-
-    async def _prune_terminal(
-        self, session: WriteSession, row: RDBGitHubUserAttempt
-    ) -> None:
-        """Erase setup secrets after token transfer or independent cleanup capture."""
-        if (
-            row.status
-            in (
-                GitHubUserAttemptStatus.COMPLETED,
-                GitHubUserAttemptStatus.CANCELLED,
-            )
-            and not row.exchange_in_flight
-            and row.encrypted_candidate is None
-            and row.encrypted_issued_token is None
-        ):
-            await session.write_session.delete(row)
 
     async def start(
         self,
@@ -402,31 +300,36 @@ class GitHubUserOAuthOperationRepository:
         nonce: str,
         code_verifier: str,
         expires_at: datetime.datetime,
-    ) -> GitHubUserAttempt:
-        """Reserve one current candidate while retaining the saved connection."""
+    ) -> GitHubUserStartResult:
+        """Replace stale setup locally without replacing the working connection."""
         if (
             expires_at <= datetime.datetime.now(datetime.UTC)
             or not nonce
             or not code_verifier
         ):
-            raise _error(
+            raise GitHubUserOAuthError(
                 GitHubUserErrorCode.INVALID, "Invalid authorization attempt lifetime."
             )
         async with self.session_manager() as session:
             toolkit = await self._authorize(session, requester, lock=True)
             await self._registration(session, toolkit, registration)
-            current_attempts = (
+            old_rows = (
                 await session.read_session.scalars(
                     sa.select(RDBGitHubUserAttempt).where(
-                        RDBGitHubUserAttempt.toolkit_id == toolkit.id,
-                        RDBGitHubUserAttempt.status.in_(_CURRENT),
+                        RDBGitHubUserAttempt.toolkit_id == toolkit.id
                     )
                 )
             ).all()
-            for old in current_attempts:
-                await self._cancel(session, old, reason="superseded")
+            revocations: list[GitHubUserRevocation] = []
+            for old in old_rows:
+                target = await self._candidate_revocation(
+                    session, attempt_from(old, self.cipher)
+                )
+                if target is not None:
+                    revocations.append(target)
+                await session.write_session.delete(old)
             await session.write_session.flush()
-            connection = await self._connection(session, toolkit.id)
+            current = await self._connection(session, toolkit.id)
             row = RDBGitHubUserAttempt(
                 toolkit_id=toolkit.id,
                 user_id=requester.user_id,
@@ -442,15 +345,16 @@ class GitHubUserOAuthOperationRepository:
                     ).model_dump_json()
                 ),
                 encrypted_candidate=None,
-                encrypted_issued_token=None,
-                exchange_in_flight=False,
-                captured_connection_id=None if connection is None else connection.id,
+                captured_connection_id=None if current is None else current.id,
                 status=GitHubUserAttemptStatus.PENDING,
                 expires_at=expires_at,
             )
             session.write_session.add(row)
             await session.write_session.flush()
-            return attempt_from(row, self.cipher)
+            return GitHubUserStartResult(
+                attempt=attempt_from(row, self.cipher),
+                revocations=distinct_revocations(revocations),
+            )
 
     async def claim_exchange(
         self,
@@ -460,7 +364,7 @@ class GitHubUserOAuthOperationRepository:
         nonce: str,
         redirect_uri: str,
     ) -> GitHubUserAttempt:
-        """Consume setup completion exactly once before external code exchange."""
+        """Consume one setup completion under current authority before provider I/O."""
         async with self.session_manager() as session:
             toolkit = await self._authorize(session, requester, lock=True)
             row = await self._attempt(session, attempt_id)
@@ -472,95 +376,55 @@ class GitHubUserOAuthOperationRepository:
                 or not secrets.compare_digest(attempt.nonce, nonce)
                 or attempt.redirect_uri != redirect_uri
             ):
-                raise _error(
+                raise GitHubUserOAuthError(
                     GitHubUserErrorCode.STALE,
                     "Authorization attempt is expired, consumed or mismatched.",
                 )
             row.status = GitHubUserAttemptStatus.EXCHANGING
-            row.exchange_in_flight = True
             await session.write_session.flush()
             return attempt_from(row, self.cipher)
 
-    async def record_exchange_token(
-        self,
-        *,
-        attempt_id: str,
-        registration: GitHubUserRegistration,
-        access_token: str,
-    ) -> GitHubUserCleanup | None:
-        """Retain the received token before identity I/O despite cancellation."""
-        async with self.session_manager() as session:
-            row = await self._attempt(session, attempt_id)
-            await session.write_session.scalar(
-                sa.select(RDBToolkitConfig.id)
-                .where(RDBToolkitConfig.id == row.toolkit_id)
-                .with_for_update()
-            )
-            # Refresh after the Toolkit lock so cancellation's committed state wins.
-            await session.write_session.refresh(row)
-            attempt = attempt_from(row, self.cipher)
-            if not _same_registration(attempt.registration, registration):
-                raise _error(
-                    GitHubUserErrorCode.STALE,
-                    "Exchange registration does not match the reserved attempt.",
-                )
-            row.exchange_in_flight = False
-            discarded = (
-                row.status is not GitHubUserAttemptStatus.EXCHANGING
-                or row.expires_at <= datetime.datetime.now(datetime.UTC)
-            )
-            if discarded:
-                row.exchange_in_flight = False
-                row.status = GitHubUserAttemptStatus.CANCELLED
-                cleanup = await self._retire_candidate(
-                    session,
-                    toolkit_id=row.toolkit_id,
-                    registration=registration,
-                    access_token=access_token,
-                    reason="discarded_exchange",
-                )
-                await self._prune_terminal(session, row)
-            else:
-                row.encrypted_issued_token = self.cipher.encrypt(access_token)
-                cleanup = None
-        if discarded and cleanup is None:
-            raise _error(
-                GitHubUserErrorCode.STALE,
-                "Authorization setup is no longer current.",
-            )
-        return cleanup
-
     async def complete_failed_exchange(self, *, attempt_id: str) -> None:
-        """Release a failed one-use exchange without discarding received credentials."""
+        """Clear captured failed setup locally; a late result cannot publish it."""
         async with self.session_manager() as session:
-            row = await self._attempt(session, attempt_id)
-            await session.write_session.scalar(
-                sa.select(RDBToolkitConfig.id)
-                .where(RDBToolkitConfig.id == row.toolkit_id)
-                .with_for_update()
+            before = await session.read_session.scalar(
+                sa.select(RDBGitHubUserAttempt).where(
+                    RDBGitHubUserAttempt.id == attempt_id
+                )
             )
-            await session.write_session.refresh(row)
-            row.exchange_in_flight = False
-            await self._cancel(session, row, reason="exchange_failed")
+            if before is None:
+                return
+            await session.write_session.scalar(
+                sa.select(RDBToolkitConfig)
+                .where(RDBToolkitConfig.id == before.toolkit_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            await session.write_session.execute(
+                sa.delete(RDBGitHubUserAttempt).where(
+                    RDBGitHubUserAttempt.id == attempt_id,
+                    RDBGitHubUserAttempt.status == GitHubUserAttemptStatus.EXCHANGING,
+                )
+            )
 
     async def read_review(
         self, *, requester: GitHubUserRequester, attempt_id: str
     ) -> GitHubUserAttempt:
-        """Return a verified candidate only to its current originating manager."""
+        """Read a current verified candidate only in its originating context."""
         async with self.session_manager() as session:
             toolkit = await self._authorize(session, requester, lock=False)
             row = await self._attempt(session, attempt_id)
             attempt = self._bound(row, requester)
             await self._registration(session, toolkit, attempt.registration)
             current = await self._connection(session, toolkit.id)
-            current_id = None if current is None else current.id
             if (
                 row.status is not GitHubUserAttemptStatus.REVIEW
                 or row.expires_at <= datetime.datetime.now(datetime.UTC)
-                or row.captured_connection_id != current_id
+                or row.captured_connection_id
+                != (None if current is None else current.id)
                 or attempt.candidate is None
             ):
-                raise _error(
+                raise GitHubUserOAuthError(
                     GitHubUserErrorCode.STALE,
                     "Authorization review is stale. Start a new attempt.",
                 )
@@ -574,38 +438,28 @@ class GitHubUserOAuthOperationRepository:
         candidate: GitHubUserCandidate,
         registration: GitHubUserRegistration,
     ) -> GitHubUserAttempt:
-        """Publish verified account only to the exact still-current attempt."""
+        """Stage verified account only while all captured setup facts remain valid."""
         async with self.session_manager() as session:
             toolkit = await self._authorize(session, requester, lock=True)
             row = await self._attempt(session, attempt_id)
             attempt = self._bound(row, requester)
             await self._registration(session, toolkit, registration)
             current = await self._connection(session, toolkit.id)
-            current_id = None if current is None else current.id
             if (
                 row.status is not GitHubUserAttemptStatus.EXCHANGING
                 or row.expires_at <= datetime.datetime.now(datetime.UTC)
-                or current_id != row.captured_connection_id
-                or not _same_registration(attempt.registration, registration)
+                or row.captured_connection_id
+                != (None if current is None else current.id)
+                or attempt.registration != registration
             ):
-                raise _error(
+                raise GitHubUserOAuthError(
                     GitHubUserErrorCode.STALE,
                     "Authorization setup changed. Start a new attempt.",
-                )
-            if (
-                row.encrypted_issued_token is None
-                or self.cipher.decrypt(row.encrypted_issued_token)
-                != candidate.access_token
-            ):
-                raise _error(
-                    GitHubUserErrorCode.STALE,
-                    "The verified candidate does not match the received token.",
                 )
             row.encrypted_candidate = self.cipher.encrypt(
                 CandidatePayload(candidate=candidate).model_dump_json()
             )
             row.status = GitHubUserAttemptStatus.REVIEW
-            row.exchange_in_flight = False
             await session.write_session.flush()
             return attempt_from(row, self.cipher)
 
@@ -615,49 +469,52 @@ class GitHubUserOAuthOperationRepository:
         requester: GitHubUserRequester,
         attempt_id: str,
         registration: GitHubUserRegistration,
-    ) -> GitHubUserConnection:
-        """Atomically transfer a reviewed credential and retire only the old token."""
+    ) -> GitHubUserConfirmResult:
+        """Transfer the reviewed token and return only its superseded predecessor."""
         async with self.session_manager() as session:
             toolkit = await self._authorize(session, requester, lock=True)
             row = await self._attempt(session, attempt_id)
             attempt = self._bound(row, requester)
             await self._registration(session, toolkit, registration)
             current = await self._connection(session, toolkit.id)
-            current_id = None if current is None else current.id
             if (
                 row.status is not GitHubUserAttemptStatus.REVIEW
                 or row.expires_at <= datetime.datetime.now(datetime.UTC)
-                or row.captured_connection_id != current_id
-                or not _same_registration(attempt.registration, registration)
+                or row.captured_connection_id
+                != (None if current is None else current.id)
+                or attempt.registration != registration
                 or attempt.candidate is None
             ):
-                raise _error(
+                raise GitHubUserOAuthError(
                     GitHubUserErrorCode.STALE,
                     "Authorization confirmation is stale. Start a new attempt.",
                 )
             candidate = attempt.candidate
+            revocations: list[GitHubUserRevocation] = []
             if current is not None:
                 previous = connection_from(current, self.cipher)
-                cleanup_registration = dataclasses.replace(
-                    previous.registration, client_secret=registration.client_secret
-                )
-                if (
-                    previous.registration.app_id != registration.app_id
-                    or previous.registration.client_id != registration.client_id
-                    or previous.registration.source != registration.source
-                ):
-                    raise _error(
+                if not same_app(previous.registration, registration):
+                    raise GitHubUserOAuthError(
                         GitHubUserErrorCode.STALE,
-                        "Disconnect the original App connection before changing "
+                        "Disconnect the original connection before changing "
                         "App identity.",
                     )
                 if previous.access_token != candidate.access_token:
-                    await self._retire(
-                        session,
-                        toolkit_id=toolkit.id,
-                        registration=cleanup_registration,
-                        access_token=previous.access_token,
-                        reason="replaced",
+                    toolkit_row = await session.read_session.scalar(
+                        sa.select(RDBToolkitConfig).where(
+                            RDBToolkitConfig.id == toolkit.id
+                        )
+                    )
+                    revocations.append(
+                        GitHubUserRevocation(
+                            registration=capture_registration(
+                                toolkit_row,
+                                previous.registration,
+                                registration,
+                                self.cipher,
+                            ),
+                            access_token=previous.access_token,
+                        )
                     )
                 await session.write_session.delete(current)
                 await session.write_session.flush()
@@ -673,233 +530,69 @@ class GitHubUserOAuthOperationRepository:
                 failure_reason=None,
             )
             session.write_session.add(saved)
-            row.encrypted_issued_token = None
-            row.encrypted_candidate = None
-            row.exchange_in_flight = False
-            row.status = GitHubUserAttemptStatus.COMPLETED
-            await self._prune_terminal(session, row)
+            await session.write_session.delete(row)
             await session.write_session.flush()
-            return connection_from(saved, self.cipher)
+            return GitHubUserConfirmResult(
+                connection=connection_from(saved, self.cipher),
+                revocations=tuple(revocations),
+            )
 
-    async def retire_exchange_result(
-        self,
-        *,
-        attempt_id: str,
-        registration: GitHubUserRegistration,
-        access_token: str,
-        reason: str,
-    ) -> GitHubUserCleanup | None:
-        """Retire an issued token even after management authority is lost."""
+    async def cancel(
+        self, *, requester: GitHubUserRequester, attempt_id: str
+    ) -> tuple[GitHubUserRevocation, ...]:
+        """Remove the initiating setup without modifying a saved connection."""
         async with self.session_manager() as session:
-            before = await session.read_session.scalar(
+            await self._authorize(session, requester, lock=True)
+            row = await session.read_session.scalar(
                 sa.select(RDBGitHubUserAttempt).where(
                     RDBGitHubUserAttempt.id == attempt_id
                 )
             )
-            if before is None:
-                # Terminal pruning follows successful transfer or cleanup capture.
-                return None
-            await session.write_session.scalar(
-                sa.select(RDBToolkitConfig.id)
-                .where(RDBToolkitConfig.id == before.toolkit_id)
-                .with_for_update()
-            )
-            row = await session.read_session.scalar(
-                sa.select(RDBGitHubUserAttempt)
-                .where(RDBGitHubUserAttempt.id == attempt_id)
-                .execution_options(populate_existing=True)
-            )
             if row is None:
-                return None
-            attempt = attempt_from(row, self.cipher)
-            if (
-                not _same_registration(attempt.registration, registration)
-                or row.status is GitHubUserAttemptStatus.COMPLETED
-            ):
-                raise _error(
-                    GitHubUserErrorCode.STALE,
-                    "The issued token cannot be retired through this setup.",
-                )
-            if (
-                row.encrypted_issued_token is not None
-                and self.cipher.decrypt(row.encrypted_issued_token) != access_token
-            ):
-                raise _error(
-                    GitHubUserErrorCode.STALE,
-                    "Issued token differs from the captured exchange.",
-                )
-            row.encrypted_issued_token = None
-            row.encrypted_candidate = None
-            row.exchange_in_flight = False
-            row.status = GitHubUserAttemptStatus.CANCELLED
-            cleanup = await self._retire_candidate(
-                session,
-                toolkit_id=row.toolkit_id,
-                registration=registration,
-                access_token=access_token,
-                reason=reason,
-            )
-            await self._prune_terminal(session, row)
-            return cleanup
-
-    async def retain_discarded(
-        self,
-        *,
-        requester: GitHubUserRequester,
-        registration: GitHubUserRegistration,
-        access_token: str,
-        reason: str,
-    ) -> GitHubUserCleanup | None:
-        """Retain a rejected token for authorized cleanup."""
-        async with self.session_manager() as session:
-            await self._authorize(session, requester, lock=True)
-            return await self._retire_candidate(
-                session,
-                toolkit_id=requester.toolkit_id,
-                registration=registration,
-                access_token=access_token,
-                reason=reason,
-            )
-
-    async def cancel(self, *, requester: GitHubUserRequester, attempt_id: str) -> None:
-        """Cancel only the initiating context and never clear a working connection."""
-        async with self.session_manager() as session:
-            await self._authorize(session, requester, lock=True)
-            row = await self._attempt(session, attempt_id)
-            self._bound(row, requester)
-            if row.status is GitHubUserAttemptStatus.COMPLETED:
-                return
-            await self._cancel(session, row, reason="cancelled")
+                return ()
+            attempt = self._bound(row, requester)
+            target = await self._candidate_revocation(session, attempt)
+            await session.write_session.delete(row)
+            return () if target is None else (target,)
 
     async def disconnect(
         self,
         *,
         requester: GitHubUserRequester,
         registration: GitHubUserRegistration | None,
-    ) -> None:
-        """Disable local credentials first and retain exact original cleanup facts."""
+    ) -> tuple[GitHubUserRevocation, ...]:
+        """Remove execution/setup state irrespective of provider cleanup outcome."""
         async with self.session_manager() as session:
             await self._authorize(session, requester, lock=True)
-            current = await self._connection(session, requester.toolkit_id)
+            return await capture_and_clear_user_tokens(
+                session, requester.toolkit_id, registration, cipher=self.cipher
+            )
+
+    async def received_revocation(
+        self,
+        *,
+        toolkit_id: str,
+        registration: GitHubUserRegistration,
+        access_token: str,
+    ) -> GitHubUserRevocation | None:
+        """Capture late-result cleanup facts without requiring its parent to survive."""
+        async with self.session_manager() as session:
+            current = await self._connection(session, toolkit_id)
             if current is not None:
-                before = connection_from(current, self.cipher)
-                cleanup_registration = before.registration
+                saved = connection_from(current, self.cipher)
                 if (
-                    registration is not None
-                    and registration.app_id == before.registration.app_id
-                    and registration.client_id == before.registration.client_id
-                    and registration.source == before.registration.source
+                    same_app(saved.registration, registration)
+                    and saved.access_token == access_token
                 ):
-                    cleanup_registration = registration
-                await self._retire(
-                    session,
-                    toolkit_id=requester.toolkit_id,
-                    registration=cleanup_registration,
-                    access_token=before.access_token,
-                    reason="disconnected",
-                )
-                await session.write_session.delete(current)
-            rows = (
-                await session.read_session.scalars(
-                    sa.select(RDBGitHubUserAttempt).where(
-                        RDBGitHubUserAttempt.toolkit_id == requester.toolkit_id,
-                        RDBGitHubUserAttempt.status.in_(_CURRENT),
-                    )
-                )
-            ).all()
-            for row in rows:
-                await self._cancel(session, row, reason="disconnected")
-            in_flight = await session.read_session.scalar(
-                sa.select(RDBGitHubUserAttempt.id)
-                .where(
-                    RDBGitHubUserAttempt.toolkit_id == requester.toolkit_id,
-                    RDBGitHubUserAttempt.exchange_in_flight.is_(True),
-                )
-                .limit(1)
-            )
-        if in_flight is not None:
-            raise _error(
-                GitHubUserErrorCode.CLEANUP_REQUIRED,
-                "Local use is disabled, but token cleanup is incomplete. "
-                "Retry when the original App registration is available and "
-                "pending setup has finished.",
-            )
-
-    async def ensure_cleanup_complete(self, *, requester: GitHubUserRequester) -> None:
-        """A canceled in-flight exchange cannot masquerade as completed cleanup."""
-        async with self.session_manager() as session:
-            await self._authorize(session, requester, lock=False)
-            if await cleanup_pending(session, requester.toolkit_id):
-                raise _error(
-                    GitHubUserErrorCode.CLEANUP_REQUIRED,
-                    "Token cleanup is incomplete. Retry after pending setup finishes.",
-                )
-
-    async def list_cleanup(
-        self, *, requester: GitHubUserRequester
-    ) -> tuple[GitHubUserCleanup, ...]:
-        """Return only this authorized Toolkit's retired provider-cleanup facts."""
-        async with self.session_manager() as session:
-            await self._authorize(session, requester, lock=False)
-            rows = (
-                await session.read_session.scalars(
-                    sa.select(RDBGitHubUserCleanup)
-                    .where(RDBGitHubUserCleanup.toolkit_id == requester.toolkit_id)
-                    .order_by(RDBGitHubUserCleanup.created_at, RDBGitHubUserCleanup.id)
-                )
-            ).all()
-            return tuple(cleanup_from(row, self.cipher) for row in rows)
-
-    async def finish_cleanup(
-        self, *, requester: GitHubUserRequester, cleanup_id: str
-    ) -> None:
-        """Erase only the exact manager-authorized completed retirement."""
-        async with self.session_manager() as session:
-            await self._authorize(session, requester, lock=True)
-            await session.write_session.execute(
-                sa.delete(RDBGitHubUserCleanup).where(
-                    RDBGitHubUserCleanup.id == cleanup_id,
-                    RDBGitHubUserCleanup.toolkit_id == requester.toolkit_id,
-                )
-            )
-
-    async def finish_retired(self, *, cleanup_id: str) -> None:
-        """Erase exact cleanup after provider success despite lost setup rights."""
-        async with self.session_manager() as session:
-            await session.write_session.execute(
-                sa.delete(RDBGitHubUserCleanup).where(
-                    RDBGitHubUserCleanup.id == cleanup_id
-                )
-            )
-
-    async def mark_cleanup_failure(
-        self, *, requester: GitHubUserRequester, cleanup_id: str, reason: str
-    ) -> None:
-        """Persist a safe failed-cleanup state for current management details."""
-        async with self.session_manager() as session:
-            await self._authorize(session, requester, lock=True)
-            await session.write_session.execute(
-                sa.update(RDBGitHubUserCleanup)
-                .where(
-                    RDBGitHubUserCleanup.id == cleanup_id,
-                    RDBGitHubUserCleanup.toolkit_id == requester.toolkit_id,
-                )
-                .values(status=GitHubUserCleanupStatus.FAILED, failure_reason=reason)
-            )
-
-    async def mark_retired_failure(self, *, cleanup_id: str, reason: str) -> None:
-        """Record failure for a captured cleanup without restoring use authority."""
-        async with self.session_manager() as session:
-            await session.write_session.execute(
-                sa.update(RDBGitHubUserCleanup)
-                .where(RDBGitHubUserCleanup.id == cleanup_id)
-                .values(status=GitHubUserCleanupStatus.FAILED, failure_reason=reason)
-            )
+                    return None
+        return GitHubUserRevocation(
+            registration=registration, access_token=access_token
+        )
 
     async def mark_reconnect_required(
         self, *, requester: GitHubUserRequester, connection_id: str, reason: str
     ) -> None:
-        """A late authentication failure cannot invalidate a new connection."""
+        """Late account failure can affect only the exact still-current connection."""
         async with self.session_manager() as session:
             await self._authorize(session, requester, lock=True)
             await session.write_session.execute(

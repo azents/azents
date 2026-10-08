@@ -47,7 +47,7 @@ class GitHubPlatformAuthorizationStateResponse(BaseModel):
 
 
 class GitHubUserConnectionSummaryResponse(BaseModel):
-    """Allowlisted user-account execution identity and cleanup readiness."""
+    """Allowlisted user-account execution identity."""
 
     id: str
     account_id: int
@@ -57,7 +57,6 @@ class GitHubUserConnectionSummaryResponse(BaseModel):
     source: Literal["platform_user", "byoa_user"]
     status: GitHubUserConnectionStatus
     failure_reason: str | None
-    cleanup_pending: bool
 
 
 class ToolkitConfigResponse(BaseModel):
@@ -80,7 +79,6 @@ class ToolkitConfigResponse(BaseModel):
     oauth_connection: MCPOAuthConnectionSummaryResponse | None = None
     authorization_state: GitHubPlatformAuthorizationStateResponse | None = None
     github_user_connection: GitHubUserConnectionSummaryResponse | None = None
-    github_user_cleanup_pending: bool = False
     created_at: datetime.datetime
     updated_at: datetime.datetime
 

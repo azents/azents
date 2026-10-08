@@ -14,7 +14,6 @@ Name | Type | Description | Notes
 **source** | **str** |  | 
 **status** | [**GitHubUserConnectionStatus**](GitHubUserConnectionStatus.md) |  | 
 **failure_reason** | **str** |  | 
-**cleanup_pending** | **bool** |  | 
 
 ## Example
 

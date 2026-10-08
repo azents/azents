@@ -146,9 +146,7 @@ def test_github_user_summary_redacts_all_credential_payloads() -> None:
             source="byoa_user",
             status=GitHubUserConnectionStatus.CONNECTED,
             failure_reason=None,
-            cleanup_pending=True,
         ),
-        github_user_cleanup_pending=True,
     )
     response = ToolkitConfigResponse.model_validate(toolkit, from_attributes=True)
     body = response.model_dump_json()
@@ -158,4 +156,4 @@ def test_github_user_summary_redacts_all_credential_payloads() -> None:
     assert "client_secret" not in body
     assert "private_key" not in body
     assert "access_token" not in body
-    assert response.github_user_cleanup_pending is True
+    assert "cleanup_pending" not in body

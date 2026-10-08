@@ -44,11 +44,10 @@ class ToolkitConfigResponse(BaseModel):
     oauth_connection: Optional[MCPOAuthConnectionSummaryResponse] = None
     authorization_state: Optional[GitHubPlatformAuthorizationStateResponse] = None
     github_user_connection: Optional[GitHubUserConnectionSummaryResponse] = None
-    github_user_cleanup_pending: Optional[StrictBool] = False
     created_at: datetime
     updated_at: datetime
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "workspace_id", "toolkit_type", "slug", "name", "description", "config", "prompt", "has_credentials", "enabled", "always_expose_tools", "oauth_connection", "authorization_state", "github_user_connection", "github_user_cleanup_pending", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "workspace_id", "toolkit_type", "slug", "name", "description", "config", "prompt", "has_credentials", "enabled", "always_expose_tools", "oauth_connection", "authorization_state", "github_user_connection", "created_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -158,7 +157,6 @@ class ToolkitConfigResponse(BaseModel):
             "oauth_connection": MCPOAuthConnectionSummaryResponse.from_dict(obj["oauth_connection"]) if obj.get("oauth_connection") is not None else None,
             "authorization_state": GitHubPlatformAuthorizationStateResponse.from_dict(obj["authorization_state"]) if obj.get("authorization_state") is not None else None,
             "github_user_connection": GitHubUserConnectionSummaryResponse.from_dict(obj["github_user_connection"]) if obj.get("github_user_connection") is not None else None,
-            "github_user_cleanup_pending": obj.get("github_user_cleanup_pending") if obj.get("github_user_cleanup_pending") is not None else False,
             "created_at": obj.get("created_at"),
             "updated_at": obj.get("updated_at")
             }.items() if _key in obj

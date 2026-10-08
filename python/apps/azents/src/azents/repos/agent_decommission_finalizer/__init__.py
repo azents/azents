@@ -29,7 +29,6 @@ from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.rdb.models.toolkit import RDBAgentToolkit
 from azents.rdb.models.toolkit_state import RDBToolkitState
 from azents.rdb.session_capabilities import ReadSession, WriteSession
-from azents.repos.github_user_oauth.parent_guards import assert_agent_delete_allowed
 
 
 def _terminal_delete_pending(runtime: RDBAgentRuntime) -> bool:
@@ -69,7 +68,6 @@ class AgentDecommissionFinalizerRepository:
         if job is None:
             return False
 
-        await assert_agent_delete_allowed(session, agent_id=agent_id)
         agent = await session.write_session.scalar(
             sa.select(RDBAgent)
             .where(

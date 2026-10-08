@@ -1,14 +1,13 @@
-"""Completed-operation service evidence, separate from repository atomicity tests."""
+"""Fail-closed authorization and bounded fail-open cleanup service evidence."""
 
 import asyncio
 import dataclasses
 import datetime
 import json
-from typing import NoReturn
+import logging
 from unittest.mock import Mock, create_autospec
 from urllib.parse import parse_qs, urlsplit
 
-import httpx
 import pytest
 
 from azents.core.config import Config
@@ -24,8 +23,7 @@ from azents.core.github_user_oauth import (
     GitHubUserAttempt,
     GitHubUserAttemptStatus,
     GitHubUserCandidate,
-    GitHubUserCleanup,
-    GitHubUserCleanupStatus,
+    GitHubUserConfirmResult,
     GitHubUserConnection,
     GitHubUserConnectionStatus,
     GitHubUserContext,
@@ -33,6 +31,8 @@ from azents.core.github_user_oauth import (
     GitHubUserOAuthError,
     GitHubUserRegistration,
     GitHubUserRequester,
+    GitHubUserRevocation,
+    GitHubUserStartResult,
 )
 from azents.core.system_setting import SystemSettingFieldSource
 from azents.repos.github_user_oauth.operations import GitHubUserOAuthOperationRepository
@@ -42,25 +42,14 @@ from azents.services.github_platform_system_setting.runtime import (
     ResolvedPlatformGitHubApp,
 )
 from azents.services.github_user_oauth import service as service_module
-from azents.services.github_user_oauth.exchange_owner import GitHubUserExchangeOwner
 from azents.services.github_user_oauth.provider import GitHubUserProvider
 from azents.services.github_user_oauth.service import GitHubUserOAuthService
 
 
-@pytest.fixture(autouse=True)
-def _no_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A missing collaborator fake cannot issue live provider traffic."""
-
-    def reject(*args: object, **kwargs: object) -> NoReturn:
-        raise AssertionError("No provider network is authorized in service tests.")
-
-    monkeypatch.setattr(httpx, "AsyncClient", reject)
-
-
 @dataclasses.dataclass
 class _State:
-    context: GitHubUserContext
-    retired: list[GitHubUserCleanup]
+    context: GitHubUserContext | None
+    candidate: GitHubUserCandidate | None
     events: list[str]
 
 
@@ -120,7 +109,7 @@ def _harness(*, platform: bool = False, agent_id: str | None = None) -> _Harness
     active = GitHubUserConnection(
         id="old-connection",
         toolkit_id="toolkit",
-        registration=registration,
+        registration=dataclasses.replace(registration, client_secret=None),
         access_token="old-token",
         account_id=1,
         account_login="old-account",
@@ -128,11 +117,7 @@ def _harness(*, platform: bool = False, agent_id: str | None = None) -> _Harness
         status=GitHubUserConnectionStatus.CONNECTED,
         failure_reason=None,
     )
-    state = _State(
-        GitHubUserContext(toolkit=toolkit, connection=active, cleanup_pending=False),
-        [],
-        [],
-    )
+    state = _State(GitHubUserContext(toolkit=toolkit, connection=active), None, [])
     attempt = GitHubUserAttempt(
         id="attempt",
         requester=requester,
@@ -152,61 +137,11 @@ def _harness(*, platform: bool = False, agent_id: str | None = None) -> _Harness
     async def read_context(*, requester: GitHubUserRequester) -> GitHubUserContext:
         assert requester == attempt.requester
         state.events.append("context:completed")
-        return state.context
-
-    async def list_cleanup(
-        *, requester: GitHubUserRequester
-    ) -> tuple[GitHubUserCleanup, ...]:
-        assert requester == attempt.requester
-        state.events.append("cleanup-read:completed")
-        return tuple(state.retired)
-
-    async def finish_retired(*, cleanup_id: str) -> None:
-        state.events.append("cleanup-finish:completed")
-        state.retired[:] = [row for row in state.retired if row.id != cleanup_id]
-
-    async def retire_exchange_result(
-        *,
-        attempt_id: str,
-        registration: GitHubUserRegistration,
-        access_token: str,
-        reason: str,
-    ) -> GitHubUserCleanup:
-        assert attempt_id == attempt.id
-        cleanup = GitHubUserCleanup(
-            id="cleanup",
-            toolkit_id="toolkit",
-            registration=registration,
-            access_token=access_token,
-            reason=reason,
-            status=GitHubUserCleanupStatus.PENDING,
-            failure_reason=None,
-        )
-        state.retired.append(cleanup)
-        state.events.append("retire:completed")
-        return cleanup
-
-    async def record_exchange_token(
-        *,
-        attempt_id: str,
-        registration: GitHubUserRegistration,
-        access_token: str,
-    ) -> GitHubUserCleanup | None:
-        assert attempt_id == attempt.id and registration == attempt.registration
-        assert access_token == "new-token"
-        state.events.append("issued-token:completed")
-        return None
-
-    async def identity(token: str) -> GitHubUserIdentity:
-        if token == "old-token":
-            state.events.append("cleanup-identity:provider")
-            return GitHubUserIdentity(
-                account_id=1, login="old-account", avatar_url=None
+        if state.context is None:
+            raise GitHubUserOAuthError(
+                GitHubUserErrorCode.NOT_FOUND, "Toolkit removed."
             )
-        assert token == "new-token"
-        assert "issued-token:completed" in state.events
-        state.events.append("identity:provider")
-        return GitHubUserIdentity(account_id=2, login="new-account", avatar_url=None)
+        return state.context
 
     async def store_review(
         *,
@@ -218,27 +153,64 @@ def _harness(*, platform: bool = False, agent_id: str | None = None) -> _Harness
         assert requester == attempt.requester and attempt_id == attempt.id
         assert registration == attempt.registration
         state.events.append("review:completed")
+        state.candidate = candidate
         return dataclasses.replace(
             attempt, candidate=candidate, status=GitHubUserAttemptStatus.REVIEW
+        )
+
+    async def received_revocation(
+        *,
+        toolkit_id: str,
+        registration: GitHubUserRegistration,
+        access_token: str,
+    ) -> GitHubUserRevocation | None:
+        assert toolkit_id == "toolkit"
+        current = state.context.connection if state.context is not None else None
+        if current is not None and current.access_token == access_token:
+            return None
+        return GitHubUserRevocation(
+            registration=registration, access_token=access_token
+        )
+
+    async def disconnect(
+        *,
+        requester: GitHubUserRequester,
+        registration: GitHubUserRegistration | None,
+    ) -> tuple[GitHubUserRevocation, ...]:
+        assert state.context is not None
+        current = state.context.connection
+        state.context = dataclasses.replace(state.context, connection=None)
+        state.events.append("disconnect:completed")
+        if current is None:
+            return ()
+        return (
+            GitHubUserRevocation(
+                registration=registration
+                if registration is not None
+                else current.registration,
+                access_token=current.access_token,
+            ),
         )
 
     async def revoke(*, client_id: str, client_secret: str, token: str) -> None:
         assert client_id == "client" and client_secret == "client-secret"
         state.events.append("revoke:provider")
-        assert any(row.access_token == token for row in state.retired)
 
     repository.read_context.side_effect = read_context
-    repository.list_cleanup.side_effect = list_cleanup
-    repository.finish_retired.side_effect = finish_retired
-    repository.retire_exchange_result.side_effect = retire_exchange_result
-    repository.record_exchange_token.side_effect = record_exchange_token
     repository.claim_exchange.return_value = attempt
+    repository.start.return_value = GitHubUserStartResult(
+        attempt=attempt, revocations=()
+    )
     repository.store_review.side_effect = store_review
+    repository.received_revocation.side_effect = received_revocation
     repository.complete_failed_exchange.return_value = None
     repository.authorize_scope.return_value = None
-    repository.mark_retired_failure.return_value = None
+    repository.disconnect.side_effect = disconnect
+    repository.cancel.return_value = ()
     provider.exchange.return_value = GitHubUserToken(access_token="new-token")
-    provider.identity.side_effect = identity
+    provider.identity.return_value = GitHubUserIdentity(
+        account_id=2, login="new-account", avatar_url=None
+    )
     provider.revoke.side_effect = revoke
     provider.app.return_value = GitHubUserAppIdentity(
         app_id=123, slug="selected-app", client_id="client"
@@ -256,326 +228,287 @@ def _harness(*, platform: bool = False, agent_id: str | None = None) -> _Harness
         config=Config.model_construct(web_url="https://app.test"),
         platform_runtime=runtime,
         provider=provider,
-        exchange_owner=GitHubUserExchangeOwner(),
     )
     return _Harness(
         service, repository, provider, runtime, state, requester, registration, attempt
     )
 
 
-def _cleanup(harness: _Harness, *, token: str = "old-token") -> GitHubUserCleanup:
-    return GitHubUserCleanup(
-        id="cleanup",
-        toolkit_id="toolkit",
-        registration=harness.registration,
-        access_token=token,
-        reason="disconnected",
-        status=GitHubUserCleanupStatus.PENDING,
-        failure_reason=None,
-    )
+def _revocation(h: _Harness, token: str) -> GitHubUserRevocation:
+    return GitHubUserRevocation(registration=h.registration, access_token=token)
 
 
-async def test_connect_validates_app_and_reserves_fixed_callback_pkce_without_scope(
+def _failure() -> GitHubUserProviderError:
+    return GitHubUserProviderError(reason="provider_unavailable", status_code=503)
+
+
+async def test_connect_has_pkce_fixed_callback_and_preserves_active(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    harness = _harness()
+    h = _harness()
     monkeypatch.setattr(service_module, "create_github_app_jwt", lambda *args: "jwt")
-    harness.repository.start.return_value = harness.attempt
-    output = await harness.service.connect(harness.requester)
+    output = await h.service.connect(h.requester)
     params = parse_qs(urlsplit(output.authorization_url).query)
-    assert params["client_id"] == ["client"]
     assert params["redirect_uri"] == ["https://app.test/oauth/github/callback"]
     assert params["code_challenge_method"] == ["S256"]
-    assert "scope" not in params
     assert params["state"][0].startswith("github_user.attempt.")
+    assert "scope" not in params
     assert (
         output.install_url == "https://github.com/apps/selected-app/installations/new"
     )
-    assert harness.state.context.connection is not None
-    assert harness.state.context.connection.access_token == "old-token"
-    harness.repository.confirm.assert_not_awaited()
+    assert h.state.context is not None and h.state.context.connection is not None
+    assert h.state.context.connection.access_token == "old-token"
 
 
-async def test_exchange_records_token_before_identity_without_activation() -> None:
-    harness = _harness(agent_id="agent")
-    output = await harness.service.exchange(
-        harness.requester, code="code", state="github_user.attempt.nonce"
+async def test_exchange_stages_verified_identity_without_activation() -> None:
+    h = _harness(agent_id="agent")
+    output = await h.service.exchange(
+        h.requester, code="code", state="github_user.attempt.nonce"
     )
     assert output.account_id == 2 and output.sharing_scope == "agent_only"
     assert "new-token" not in output.model_dump_json()
-    assert "client-secret" not in output.model_dump_json()
-    assert harness.state.events.index(
-        "issued-token:completed"
-    ) < harness.state.events.index("identity:provider")
-    harness.repository.confirm.assert_not_awaited()
-    harness.provider.revoke.assert_not_awaited()
-
-
-async def test_expiring_rejection_revokes_issued_token_and_preserves_active() -> None:
-    harness = _harness()
-    harness.provider.exchange.side_effect = GitHubUserTokenRejected(
-        reason="expiring_token", issued_token="issued-expiring"
+    h.repository.confirm.assert_not_awaited()
+    h.provider.revoke.assert_not_awaited()
+    assert (
+        h.state.candidate is not None and h.state.candidate.access_token == "new-token"
     )
-    with pytest.raises(GitHubUserOAuthError, match="Disable user-to-server"):
-        await harness.service.exchange(
-            harness.requester, code="code", state="github_user.attempt.nonce"
+
+
+async def test_context_failure_never_calls_provider() -> None:
+    h = _harness()
+    h.repository.claim_exchange.side_effect = GitHubUserOAuthError(
+        GitHubUserErrorCode.STALE, "Wrong session."
+    )
+    with pytest.raises(GitHubUserOAuthError):
+        await h.service.exchange(
+            h.requester, code="code", state="github_user.attempt.nonce"
         )
-    harness.provider.revoke.assert_awaited_once_with(
-        client_id="client", client_secret="client-secret", token="issued-expiring"
+    h.provider.exchange.assert_not_awaited()
+
+
+async def test_expiring_response_stays_rejected_when_cleanup_fails(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    h = _harness()
+    h.provider.exchange.side_effect = GitHubUserTokenRejected(
+        reason="expiring_token", issued_token="expiring-token"
     )
-    assert harness.state.retired == []
-    assert harness.state.context.connection is not None
-    assert harness.state.context.connection.access_token == "old-token"
-    harness.provider.identity.assert_not_awaited()
+    h.provider.revoke.side_effect = _failure()
+    with (
+        caplog.at_level(logging.WARNING),
+        pytest.raises(GitHubUserOAuthError, match="expiring user token"),
+    ):
+        await h.service.exchange(
+            h.requester, code="code", state="github_user.attempt.nonce"
+        )
+    h.provider.revoke.assert_awaited_once_with(
+        client_id="client", client_secret="client-secret", token="expiring-token"
+    )
+    h.provider.identity.assert_not_awaited()
+    assert "local completion is unchanged" in caplog.text
+    assert "expiring-token" not in caplog.text and "client-secret" not in caplog.text
+    assert h.state.context is not None and h.state.context.connection is not None
+    assert h.state.context.connection.access_token == "old-token"
 
 
-async def test_cleanup_failure_retains_token_nonexecutable_and_surfaces_failure() -> (
+async def test_disconnect_failure_still_completes_locally_without_probe(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    h = _harness()
+    h.provider.revoke.side_effect = _failure()
+    with caplog.at_level(logging.WARNING):
+        await h.service.disconnect(h.requester)
+    assert h.state.context is not None and h.state.context.connection is None
+    h.provider.revoke.assert_awaited_once()
+    h.provider.identity.assert_not_awaited()
+    assert "old-token" not in caplog.text and "client-secret" not in caplog.text
+    assert "revocation attempt failed" in caplog.text
+    assert "revoke:provider" not in h.state.events
+
+
+async def test_replacement_failure_keeps_new_connection_and_old_cleanup_target() -> (
     None
 ):
-    harness = _harness()
-    harness.state.retired.append(_cleanup(harness))
-    harness.provider.revoke.side_effect = GitHubUserProviderError(
-        reason="provider_unavailable", status_code=None
-    )
-    with pytest.raises(GitHubUserOAuthError) as error:
-        await harness.service.cleanup_retry(harness.requester)
-    assert error.value.code is GitHubUserErrorCode.CLEANUP_REQUIRED
-    assert len(harness.state.retired) == 1
-    harness.repository.finish_retired.assert_not_awaited()
-    harness.repository.mark_retired_failure.assert_awaited_once_with(
-        cleanup_id="cleanup", reason="provider_cleanup_failed"
-    )
-    assert "old-token" not in str(error.value)
-
-
-async def test_late_cleanup_only_revokes_captured_old_token_after_reconnection() -> (
-    None
-):
-    harness = _harness()
-    harness.state.retired.append(_cleanup(harness))
-    entered, release = asyncio.Event(), asyncio.Event()
-    captured: list[str] = []
-
-    async def revoke(*, client_id: str, client_secret: str, token: str) -> None:
-        captured.append(token)
-        entered.set()
-        await release.wait()
-
-    harness.provider.revoke.side_effect = revoke
-    cleanup_task = asyncio.create_task(harness.service.cleanup_retry(harness.requester))
-    await entered.wait()
-    old = harness.state.context.connection
-    assert old is not None
-    harness.state.context = dataclasses.replace(
-        harness.state.context,
-        connection=dataclasses.replace(
-            old, id="new-connection", access_token="new-token"
-        ),
-    )
-    release.set()
-    await cleanup_task
-    assert captured == ["old-token"]
-    assert harness.state.context.connection is not None
-    assert harness.state.context.connection.access_token == "new-token"
-
-
-async def test_confirm_transfers_candidate_and_revokes_only_previous_token() -> None:
-    harness = _harness()
-    old = harness.state.context.connection
-    assert old is not None
-    new = dataclasses.replace(
-        old, id="new-connection", access_token="new-token", account_id=2
-    )
+    h = _harness()
+    assert h.state.context is not None and h.state.context.connection is not None
+    before = h.state.context.connection
+    after = dataclasses.replace(before, id="new-connection", access_token="new-token")
 
     async def confirm(
         *,
         requester: GitHubUserRequester,
         attempt_id: str,
         registration: GitHubUserRegistration,
-    ) -> GitHubUserConnection:
-        harness.state.context = dataclasses.replace(
-            harness.state.context, connection=new
+    ) -> GitHubUserConfirmResult:
+        assert h.state.context is not None
+        h.state.context = dataclasses.replace(h.state.context, connection=after)
+        return GitHubUserConfirmResult(
+            connection=after, revocations=(_revocation(h, "old-token"),)
         )
-        harness.state.retired.append(_cleanup(harness))
-        return new
 
-    harness.repository.confirm.side_effect = confirm
-    output = await harness.service.confirm(harness.requester, attempt_id="attempt")
+    h.repository.confirm.side_effect = confirm
+    h.provider.revoke.side_effect = _failure()
+    output = await h.service.confirm(h.requester, attempt_id="attempt")
     assert output.id == "new-connection"
-    harness.provider.revoke.assert_awaited_once_with(
+    assert h.state.context.connection == after
+    h.provider.revoke.assert_awaited_once_with(
         client_id="client", client_secret="client-secret", token="old-token"
     )
+    h.provider.identity.assert_not_awaited()
 
 
-async def test_wrong_context_denial_precedes_any_provider_exchange() -> None:
-    harness = _harness()
-    harness.repository.claim_exchange.side_effect = GitHubUserOAuthError(
-        GitHubUserErrorCode.STALE, "Wrong initiating session."
+async def test_successful_transfer_does_not_revoke_active_candidate() -> None:
+    h = _harness()
+    assert h.state.context is not None and h.state.context.connection is not None
+    connection = dataclasses.replace(
+        h.state.context.connection, id="new", access_token="new-token"
     )
-    with pytest.raises(GitHubUserOAuthError):
-        await harness.service.exchange(
-            harness.requester, code="code", state="github_user.attempt.nonce"
+    h.repository.confirm.return_value = GitHubUserConfirmResult(
+        connection=connection, revocations=()
+    )
+    assert (await h.service.confirm(h.requester, attempt_id="attempt")).id == "new"
+    h.provider.revoke.assert_not_awaited()
+
+
+async def test_cancel_cleanup_failure_is_local_success() -> None:
+    h = _harness()
+    h.repository.cancel.return_value = (_revocation(h, "candidate-token"),)
+    h.provider.revoke.side_effect = _failure()
+    await h.service.cancel(h.requester, attempt_id="attempt")
+    h.repository.cancel.assert_awaited_once_with(
+        requester=h.requester, attempt_id="attempt"
+    )
+    h.provider.revoke.assert_awaited_once_with(
+        client_id="client", client_secret="client-secret", token="candidate-token"
+    )
+    h.provider.identity.assert_not_awaited()
+
+
+async def test_cleanup_is_awaited_and_bounded_without_background_work(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    h = _harness()
+    entered = asyncio.Event()
+    never_release = asyncio.Event()
+
+    async def revoke(*, client_id: str, client_secret: str, token: str) -> None:
+        entered.set()
+        await never_release.wait()
+
+    h.provider.revoke.side_effect = revoke
+    assert service_module._REVOCATION_TIMEOUT_SECONDS == 5.0
+    monkeypatch.setattr(service_module, "_REVOCATION_TIMEOUT_SECONDS", 0.01)
+    with caplog.at_level(logging.WARNING):
+        await h.service.cleanup_revocations((_revocation(h, "old-token"),))
+    assert entered.is_set()
+    assert any(record.__dict__.get("reason") == "timeout" for record in caplog.records)
+    h.provider.revoke.assert_awaited_once()
+    h.provider.identity.assert_not_awaited()
+
+
+async def test_cleanup_programming_defect_remains_visible() -> None:
+    h = _harness()
+    h.provider.revoke.side_effect = RuntimeError("Unexpected defect.")
+    with pytest.raises(RuntimeError, match="Unexpected defect"):
+        await h.service.cleanup_revocations((_revocation(h, "old-token"),))
+    h.provider.identity.assert_not_awaited()
+
+
+async def test_cleanup_cancellation_propagates_without_later_io() -> None:
+    h = _harness()
+    h.provider.revoke.side_effect = asyncio.CancelledError()
+    with pytest.raises(asyncio.CancelledError):
+        await h.service.cleanup_revocations(
+            (_revocation(h, "old-token"), _revocation(h, "second-token"))
         )
-    harness.provider.exchange.assert_not_awaited()
+    h.provider.revoke.assert_awaited_once()
+    h.provider.identity.assert_not_awaited()
 
 
-async def test_provider_exchange_failure_finishes_claim_without_retry() -> None:
-    harness = _harness()
-    harness.provider.exchange.side_effect = GitHubUserProviderError(
-        reason="provider_unavailable", status_code=None
-    )
-    with pytest.raises(GitHubUserProviderError):
-        await harness.service.exchange(
-            harness.requester, code="code", state="github_user.attempt.nonce"
-        )
-    harness.provider.exchange.assert_awaited_once()
-    harness.repository.complete_failed_exchange.assert_awaited_once_with(
-        attempt_id="attempt"
-    )
-    harness.repository.record_exchange_token.assert_not_awaited()
-
-
-async def test_authority_loss_after_identity_retires_and_revokes_token() -> None:
-    harness = _harness()
-    harness.repository.store_review.side_effect = GitHubUserOAuthError(
-        GitHubUserErrorCode.AUTHORITY, "Management authority changed."
-    )
-    with pytest.raises(GitHubUserOAuthError, match="Management authority changed"):
-        await harness.service.exchange(
-            harness.requester, code="code", state="github_user.attempt.nonce"
-        )
-    harness.repository.retire_exchange_result.assert_awaited_once()
-    harness.provider.revoke.assert_awaited_once_with(
-        client_id="client", client_secret="client-secret", token="new-token"
-    )
-
-
-async def test_cleanup_retry_uses_same_app_rotated_byoa_secret() -> None:
-    harness = _harness()
-    harness.state.retired.append(_cleanup(harness))
-    credentials = json.loads(harness.state.context.toolkit.credentials or "null")
-    credentials["client_secret"] = "rotated-secret"
-    harness.state.context = dataclasses.replace(
-        harness.state.context,
-        toolkit=harness.state.context.toolkit.model_copy(
-            update={"credentials": json.dumps(credentials), "revision": 2}
-        ),
-    )
-    harness.provider.revoke.side_effect = None
-    await harness.service.cleanup_retry(harness.requester)
-    harness.provider.revoke.assert_awaited_once_with(
-        client_id="client", client_secret="rotated-secret", token="old-token"
-    )
-
-
-async def test_missing_platform_registration_stops_local_use_and_retains_cleanup() -> (
-    None
-):
-    harness = _harness(platform=True)
-    harness.platform.resolve.return_value = ResolvedPlatformGitHubApp(
+async def test_missing_platform_registration_does_not_block_disconnect(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    h = _harness(platform=True)
+    h.platform.resolve.return_value = ResolvedPlatformGitHubApp(
         app_id=None,
         client_id=None,
         private_key=None,
         client_secret=None,
         app_id_source=SystemSettingFieldSource.UNSET,
-        effective_generation="missing",
+        effective_generation="absent",
     )
-    cleanup = dataclasses.replace(
-        _cleanup(harness),
-        registration=dataclasses.replace(harness.registration, client_secret=None),
+    with caplog.at_level(logging.WARNING):
+        await h.service.disconnect(h.requester)
+    assert h.state.context is not None and h.state.context.connection is None
+    h.provider.revoke.assert_not_awaited()
+    h.provider.identity.assert_not_awaited()
+    assert "registration unavailable" in caplog.text
+
+
+async def test_late_parent_removal_cannot_activate_and_uses_captured_cleanup() -> None:
+    h = _harness()
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def identity(token: str) -> GitHubUserIdentity:
+        entered.set()
+        await release.wait()
+        return GitHubUserIdentity(account_id=2, login="new-account", avatar_url=None)
+
+    h.provider.identity.side_effect = identity
+    h.provider.revoke.side_effect = _failure()
+    task = asyncio.create_task(
+        h.service.exchange(h.requester, code="code", state="github_user.attempt.nonce")
+    )
+    await entered.wait()
+    h.state.context = None
+    release.set()
+    with pytest.raises(GitHubUserOAuthError, match="Toolkit removed"):
+        await task
+    h.repository.store_review.assert_not_awaited()
+    h.provider.revoke.assert_awaited_once_with(
+        client_id="client", client_secret="client-secret", token="new-token"
     )
 
-    async def disconnect(
-        *, requester: GitHubUserRequester, registration: GitHubUserRegistration | None
-    ) -> None:
-        assert registration is None
-        harness.state.context = dataclasses.replace(
-            harness.state.context, connection=None
-        )
-        harness.state.retired.append(cleanup)
 
-    harness.repository.disconnect.side_effect = disconnect
-    with pytest.raises(GitHubUserOAuthError) as error:
-        await harness.service.disconnect(harness.requester)
-    assert error.value.code is GitHubUserErrorCode.CLEANUP_REQUIRED
-    assert harness.state.context.connection is None
-    assert harness.state.retired == [cleanup]
-    harness.provider.revoke.assert_not_awaited()
+async def test_cancelled_exchange_is_not_shielded_or_finalized() -> None:
+    h = _harness()
+    entered, release = asyncio.Event(), asyncio.Event()
 
+    async def identity(token: str) -> GitHubUserIdentity:
+        entered.set()
+        await release.wait()
+        raise AssertionError("Cancelled identity must not finish.")
 
-@pytest.mark.parametrize(
-    "reason,marks",
-    [
-        ("authentication", True),
-        ("target_denied", False),
-        ("provider_unavailable", False),
-    ],
-)
-async def test_access_failure_marks_only_confirmed_authentication(
-    reason: str, marks: bool
-) -> None:
-    harness = _harness()
-    if reason == "authentication":
-        failure = GitHubUserProviderError(reason="authentication", status_code=401)
-    elif reason == "target_denied":
-        failure = GitHubUserProviderError(reason="target_denied", status_code=403)
-    else:
-        failure = GitHubUserProviderError(
-            reason="provider_unavailable", status_code=None
-        )
-    harness.provider.access.side_effect = failure
-    with pytest.raises(GitHubUserProviderError):
-        await harness.service.access(harness.requester, cursor=None)
-    if marks:
-        harness.repository.mark_reconnect_required.assert_awaited_once_with(
-            requester=harness.requester,
-            connection_id="old-connection",
-            reason="authentication_failed",
-        )
-    else:
-        harness.repository.mark_reconnect_required.assert_not_awaited()
+    h.provider.identity.side_effect = identity
+    task = asyncio.create_task(
+        h.service.exchange(h.requester, code="code", state="github_user.attempt.nonce")
+    )
+    await entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    h.provider.revoke.assert_not_awaited()
+    h.repository.store_review.assert_not_awaited()
+    h.repository.complete_failed_exchange.assert_not_awaited()
 
 
-async def test_scope_denial_precedes_availability_settings_read() -> None:
-    harness = _harness()
-    harness.repository.authorize_scope.side_effect = GitHubUserOAuthError(
-        GitHubUserErrorCode.AUTHORITY, "Not a manager."
+async def test_received_token_equal_to_current_active_is_not_revoked() -> None:
+    h = _harness()
+    h.provider.exchange.side_effect = GitHubUserTokenRejected(
+        reason="invalid_response", issued_token="old-token"
     )
     with pytest.raises(GitHubUserOAuthError):
-        await harness.service.availability(
-            user_id="manager",
-            session_id="login",
-            workspace_id="workspace",
-            agent_id=None,
+        await h.service.exchange(
+            h.requester, code="code", state="github_user.attempt.nonce"
         )
-    harness.platform.resolve.assert_not_awaited()
+    h.provider.revoke.assert_not_awaited()
 
 
-async def test_platform_availability_is_local_not_provider_health() -> None:
-    harness = _harness()
-    output = await harness.service.availability(
-        user_id="manager", session_id="login", workspace_id="workspace", agent_id=None
-    )
-    assert output.platform == "configured"
-    assert "client-secret" not in output.model_dump_json()
-    harness.provider.app.assert_not_awaited()
-
-
-async def test_access_success_returns_observations_without_mutating_authority() -> None:
-    harness = _harness()
-    harness.provider.access.return_value = GitHubUserAccessPage(
-        installations=(), next_cursor="more"
-    )
-    output = await harness.service.access(harness.requester, cursor=None)
-    assert output.next_cursor == "more"
-    harness.repository.mark_reconnect_required.assert_not_awaited()
-    harness.repository.confirm.assert_not_awaited()
-
-
-async def test_review_reads_current_verified_account_without_popup_metadata() -> None:
-    harness = _harness()
-    harness.repository.read_review.return_value = dataclasses.replace(
-        harness.attempt,
+async def test_current_review_and_status_have_no_cleanup_contract() -> None:
+    h = _harness()
+    h.repository.read_review.return_value = dataclasses.replace(
+        h.attempt,
         status=GitHubUserAttemptStatus.REVIEW,
         candidate=GitHubUserCandidate(
             access_token="candidate-token",
@@ -584,233 +517,84 @@ async def test_review_reads_current_verified_account_without_popup_metadata() ->
             account_avatar_url=None,
         ),
     )
-    output = await harness.service.review(harness.requester, attempt_id="attempt")
-    assert output.account_login == "candidate"
-    assert "candidate-token" not in output.model_dump_json()
-    harness.provider.exchange.assert_not_awaited()
-    harness.repository.confirm.assert_not_awaited()
+    review = await h.service.review(h.requester, attempt_id="attempt")
+    status = await h.service.status(h.requester)
+    assert review.account_login == "candidate"
+    assert "candidate-token" not in review.model_dump_json()
+    assert "cleanup" not in status.model_dump_json()
+    assert "old-token" not in status.model_dump_json()
 
 
-async def test_new_setup_does_not_claim_unknown_old_exchange_cleanup_complete(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    harness = _harness()
-    harness.repository.ensure_cleanup_complete.side_effect = GitHubUserOAuthError(
-        GitHubUserErrorCode.CLEANUP_REQUIRED, "Unknown prior exchange remains."
+async def test_scope_denial_precedes_availability_settings_read() -> None:
+    h = _harness()
+    h.repository.authorize_scope.side_effect = GitHubUserOAuthError(
+        GitHubUserErrorCode.AUTHORITY, "Not a manager."
     )
-    monkeypatch.setattr(service_module, "create_github_app_jwt", lambda *args: "jwt")
-    harness.repository.start.return_value = harness.attempt
-    output = await harness.service.connect(harness.requester)
-    assert output.attempt_id == "attempt"
-    harness.repository.ensure_cleanup_complete.assert_not_awaited()
-    with pytest.raises(GitHubUserOAuthError, match="Unknown prior"):
-        await harness.service.cleanup_retry(harness.requester)
-
-
-async def test_cancellation_retains_received_token_for_explicit_later_cleanup() -> None:
-    harness = _harness()
-    entered = asyncio.Event()
-    never_release = asyncio.Event()
-
-    async def blocked_identity(token: str) -> GitHubUserIdentity:
-        entered.set()
-        await never_release.wait()
-        raise AssertionError("Cancelled identity call cannot return.")
-
-    harness.provider.identity.side_effect = blocked_identity
-    exchange_task = asyncio.create_task(
-        harness.service.exchange(
-            harness.requester, code="code", state="github_user.attempt.nonce"
+    with pytest.raises(GitHubUserOAuthError):
+        await h.service.availability(
+            user_id="manager",
+            session_id="login",
+            workspace_id="workspace",
+            agent_id=None,
         )
-    )
-    await entered.wait()
-    exchange_task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await exchange_task
-    harness.repository.record_exchange_token.assert_awaited_once_with(
-        attempt_id="attempt",
-        registration=harness.registration,
-        access_token="new-token",
-    )
-    harness.repository.store_review.assert_not_awaited()
-    harness.provider.revoke.assert_not_awaited()
-
-    async def cancel(*, requester: GitHubUserRequester, attempt_id: str) -> None:
-        harness.state.retired.append(_cleanup(harness, token="new-token"))
-
-    harness.repository.cancel.side_effect = cancel
-    await harness.service.cancel(harness.requester, attempt_id="attempt")
-    harness.provider.revoke.assert_awaited_once_with(
-        client_id="client", client_secret="client-secret", token="new-token"
-    )
+    h.platform.resolve.assert_not_awaited()
 
 
-async def test_extra_credential_token_is_rejected_without_input_disclosure() -> None:
-    harness = _harness()
-    values = json.loads(harness.state.context.toolkit.credentials or "null")
+@pytest.mark.parametrize(
+    "reason", ["authentication", "target_denied", "provider_unavailable"]
+)
+async def test_access_failures_preserve_account_classification(reason: str) -> None:
+    h = _harness()
+    if reason == "authentication":
+        failure = GitHubUserProviderError(reason="authentication", status_code=401)
+    elif reason == "target_denied":
+        failure = GitHubUserProviderError(reason="target_denied", status_code=403)
+    else:
+        failure = _failure()
+    h.provider.access.side_effect = failure
+    with pytest.raises(GitHubUserProviderError):
+        await h.service.access(h.requester, cursor=None)
+    if reason == "authentication":
+        h.repository.mark_reconnect_required.assert_awaited_once_with(
+            requester=h.requester,
+            connection_id="old-connection",
+            reason="authentication_failed",
+        )
+    else:
+        h.repository.mark_reconnect_required.assert_not_awaited()
+
+
+async def test_extra_credential_token_is_rejected_without_disclosure() -> None:
+    h = _harness()
+    assert h.state.context is not None
+    values = json.loads(h.state.context.toolkit.credentials or "null")
     values["access_token"] = "injected-secret-token"
-    harness.state.context = dataclasses.replace(
-        harness.state.context,
-        toolkit=harness.state.context.toolkit.model_copy(
+    h.state.context = dataclasses.replace(
+        h.state.context,
+        toolkit=h.state.context.toolkit.model_copy(
             update={"credentials": json.dumps(values)}
         ),
     )
     with pytest.raises(GitHubUserOAuthError) as error:
-        await harness.service.access(harness.requester, cursor=None)
+        await h.service.access(h.requester, cursor=None)
     assert "injected-secret-token" not in str(error.value)
     assert error.value.__cause__ is None
-    harness.provider.access.assert_not_awaited()
+    h.provider.access.assert_not_awaited()
 
 
-async def test_invalid_local_cursor_is_input_error_not_provider_failure() -> None:
-    harness = _harness()
-    harness.provider.access.side_effect = ValueError("Invalid cursor.")
+async def test_invalid_local_cursor_remains_an_input_error() -> None:
+    h = _harness()
+    h.provider.access.side_effect = ValueError("Invalid cursor.")
     with pytest.raises(GitHubUserOAuthError) as error:
-        await harness.service.access(harness.requester, cursor="bad-cursor")
+        await h.service.access(h.requester, cursor="bad")
     assert error.value.code is GitHubUserErrorCode.INVALID
-    harness.repository.mark_reconnect_required.assert_not_awaited()
+    h.repository.mark_reconnect_required.assert_not_awaited()
 
 
-async def test_lost_delete_response_completes_only_after_exact_token_rest_401() -> None:
-    harness = _harness()
-    harness.state.retired.append(_cleanup(harness))
-    harness.provider.revoke.side_effect = GitHubUserProviderError(
-        reason="provider_unavailable", status_code=None
+async def test_access_returns_observations_not_new_authority() -> None:
+    h = _harness()
+    h.provider.access.return_value = GitHubUserAccessPage(
+        installations=(), next_cursor="more"
     )
-    harness.provider.identity.side_effect = GitHubUserProviderError(
-        reason="authentication", status_code=401
-    )
-    await harness.service.cleanup_retry(harness.requester)
-    harness.provider.revoke.assert_awaited_once_with(
-        client_id="client", client_secret="client-secret", token="old-token"
-    )
-    harness.provider.identity.assert_awaited_once_with("old-token")
-    harness.repository.finish_retired.assert_awaited_once_with(cleanup_id="cleanup")
-    harness.repository.mark_retired_failure.assert_not_awaited()
-    assert harness.state.retired == []
-    assert harness.state.context.connection is not None
-
-
-@pytest.mark.parametrize(
-    "delete_error",
-    [
-        GitHubUserProviderError(reason="target_denied", status_code=404),
-        GitHubUserProviderError(reason="authentication", status_code=401),
-        GitHubUserProviderError(reason="provider_unavailable", status_code=422),
-    ],
-)
-async def test_delete_error_and_valid_identity_never_prove_revocation(
-    delete_error: GitHubUserProviderError,
-) -> None:
-    harness = _harness()
-    harness.state.retired.append(_cleanup(harness))
-    harness.provider.revoke.side_effect = delete_error
-    with pytest.raises(GitHubUserOAuthError) as error:
-        await harness.service.cleanup_retry(harness.requester)
-    assert error.value.code is GitHubUserErrorCode.CLEANUP_REQUIRED
-    harness.provider.identity.assert_awaited_once_with("old-token")
-    harness.repository.finish_retired.assert_not_awaited()
-    assert len(harness.state.retired) == 1
-
-
-@pytest.mark.parametrize(
-    "verification_error",
-    [
-        GitHubUserProviderError(reason="target_denied", status_code=403),
-        GitHubUserProviderError(reason="target_denied", status_code=404),
-        GitHubUserProviderError(reason="provider_unavailable", status_code=429),
-        GitHubUserProviderError(reason="provider_unavailable", status_code=500),
-        GitHubUserProviderError(reason="provider_unavailable", status_code=None),
-        GitHubUserProviderError(reason="invalid_response", status_code=None),
-        GitHubUserProviderError(reason="authentication", status_code=None),
-    ],
-)
-async def test_inconclusive_token_verification_retains_cleanup(
-    verification_error: GitHubUserProviderError,
-) -> None:
-    harness = _harness()
-    harness.state.retired.append(_cleanup(harness))
-    harness.provider.revoke.side_effect = GitHubUserProviderError(
-        reason="provider_unavailable", status_code=None
-    )
-    harness.provider.identity.side_effect = verification_error
-    with pytest.raises(GitHubUserOAuthError) as error:
-        await harness.service.cleanup_retry(harness.requester)
-    assert error.value.code is GitHubUserErrorCode.CLEANUP_REQUIRED
-    harness.repository.finish_retired.assert_not_awaited()
-    assert len(harness.state.retired) == 1
-
-
-async def test_missing_app_secret_can_complete_already_invalid_exact_token() -> None:
-    harness = _harness(platform=True)
-    cleanup = dataclasses.replace(
-        _cleanup(harness),
-        registration=dataclasses.replace(harness.registration, client_secret=None),
-    )
-    harness.state.retired.append(cleanup)
-    harness.platform.resolve.return_value = ResolvedPlatformGitHubApp(
-        app_id=None,
-        client_id=None,
-        private_key=None,
-        client_secret=None,
-        app_id_source=SystemSettingFieldSource.UNSET,
-        effective_generation="missing",
-    )
-    harness.provider.identity.side_effect = GitHubUserProviderError(
-        reason="authentication", status_code=401
-    )
-    await harness.service.cleanup_retry(harness.requester)
-    harness.provider.revoke.assert_not_awaited()
-    harness.provider.identity.assert_awaited_once_with("old-token")
-    assert harness.state.retired == []
-
-
-async def test_invalidity_probe_never_tests_or_clears_new_active_token() -> None:
-    harness = _harness()
-    harness.state.retired.append(_cleanup(harness))
-    old = harness.state.context.connection
-    assert old is not None
-    new = dataclasses.replace(old, id="new-connection", access_token="new-token")
-    harness.state.context = dataclasses.replace(harness.state.context, connection=new)
-    harness.provider.revoke.side_effect = GitHubUserProviderError(
-        reason="provider_unavailable", status_code=None
-    )
-    harness.provider.identity.side_effect = GitHubUserProviderError(
-        reason="authentication", status_code=401
-    )
-    await harness.service.cleanup_retry(harness.requester)
-    harness.provider.identity.assert_awaited_once_with("old-token")
-    harness.repository.mark_reconnect_required.assert_not_awaited()
-    assert harness.state.context.connection == new
-    assert harness.state.retired == []
-
-
-async def test_invalidity_probe_programming_failure_remains_visible() -> None:
-    harness = _harness()
-    harness.state.retired.append(_cleanup(harness))
-    harness.provider.revoke.side_effect = GitHubUserProviderError(
-        reason="provider_unavailable", status_code=None
-    )
-    harness.provider.identity.side_effect = RuntimeError("Unexpected local defect.")
-    with pytest.raises(RuntimeError, match="Unexpected local defect"):
-        await harness.service.cleanup_retry(harness.requester)
-    harness.repository.finish_retired.assert_not_awaited()
-    assert len(harness.state.retired) == 1
-
-
-async def test_exchange_timeout_never_claims_unknown_token_revoked() -> None:
-    harness = _harness()
-    harness.provider.exchange.side_effect = TimeoutError()
-    with pytest.raises(GitHubUserProviderError) as caught:
-        await harness.service.exchange(
-            harness.requester, code="one-use-code", state="github_user.attempt.nonce"
-        )
-    assert caught.value.reason == "provider_unavailable"
-    harness.provider.exchange.assert_awaited_once()
-    harness.repository.complete_failed_exchange.assert_awaited_once_with(
-        attempt_id="attempt"
-    )
-    harness.repository.record_exchange_token.assert_not_awaited()
-    harness.provider.revoke.assert_not_awaited()
-    await harness.service.exchange_owner.drain()
-    assert harness.service.exchange_owner.operations == set()
+    assert (await h.service.access(h.requester, cursor=None)).next_cursor == "more"
+    h.repository.confirm.assert_not_awaited()

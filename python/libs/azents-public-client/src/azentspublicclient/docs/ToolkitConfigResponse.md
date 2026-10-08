@@ -20,7 +20,6 @@ Name | Type | Description | Notes
 **oauth_connection** | [**MCPOAuthConnectionSummaryResponse**](MCPOAuthConnectionSummaryResponse.md) |  | [optional] 
 **authorization_state** | [**GitHubPlatformAuthorizationStateResponse**](GitHubPlatformAuthorizationStateResponse.md) |  | [optional] 
 **github_user_connection** | [**GitHubUserConnectionSummaryResponse**](GitHubUserConnectionSummaryResponse.md) |  | [optional] 
-**github_user_cleanup_pending** | **bool** |  | [optional] [default to False]
 **created_at** | **datetime** |  | 
 **updated_at** | **datetime** |  | 
 

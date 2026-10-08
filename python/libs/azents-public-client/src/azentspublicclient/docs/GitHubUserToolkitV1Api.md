@@ -6,7 +6,6 @@ Method | HTTP request | Description
 ------------- | ------------- | -------------
 [**github_user_toolkit_v1_agent_access**](GitHubUserToolkitV1Api.md#github_user_toolkit_v1_agent_access) | **GET** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/github-user/access | Agent Access
 [**github_user_toolkit_v1_agent_cancel**](GitHubUserToolkitV1Api.md#github_user_toolkit_v1_agent_cancel) | **DELETE** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/github-user/attempt | Agent Cancel
-[**github_user_toolkit_v1_agent_cleanup_retry**](GitHubUserToolkitV1Api.md#github_user_toolkit_v1_agent_cleanup_retry) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/github-user/cleanup-retry | Agent Cleanup Retry
 [**github_user_toolkit_v1_agent_confirm**](GitHubUserToolkitV1Api.md#github_user_toolkit_v1_agent_confirm) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/github-user/confirm | Agent Confirm
 [**github_user_toolkit_v1_agent_connect**](GitHubUserToolkitV1Api.md#github_user_toolkit_v1_agent_connect) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/github-user/connect | Agent Connect
 [**github_user_toolkit_v1_agent_disconnect**](GitHubUserToolkitV1Api.md#github_user_toolkit_v1_agent_disconnect) | **DELETE** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/github-user/connection | Agent Disconnect
@@ -16,7 +15,6 @@ Method | HTTP request | Description
 [**github_user_toolkit_v1_agent_status**](GitHubUserToolkitV1Api.md#github_user_toolkit_v1_agent_status) | **GET** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/github-user/status | Agent Status
 [**github_user_toolkit_v1_shared_access**](GitHubUserToolkitV1Api.md#github_user_toolkit_v1_shared_access) | **GET** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/github-user/access | Shared Access
 [**github_user_toolkit_v1_shared_cancel**](GitHubUserToolkitV1Api.md#github_user_toolkit_v1_shared_cancel) | **DELETE** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/github-user/attempt | Shared Cancel
-[**github_user_toolkit_v1_shared_cleanup_retry**](GitHubUserToolkitV1Api.md#github_user_toolkit_v1_shared_cleanup_retry) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/github-user/cleanup-retry | Shared Cleanup Retry
 [**github_user_toolkit_v1_shared_confirm**](GitHubUserToolkitV1Api.md#github_user_toolkit_v1_shared_confirm) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/github-user/confirm | Shared Confirm
 [**github_user_toolkit_v1_shared_connect**](GitHubUserToolkitV1Api.md#github_user_toolkit_v1_shared_connect) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/github-user/connect | Shared Connect
 [**github_user_toolkit_v1_shared_disconnect**](GitHubUserToolkitV1Api.md#github_user_toolkit_v1_shared_disconnect) | **DELETE** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/github-user/connection | Shared Disconnect
@@ -183,86 +181,6 @@ void (empty response body)
 ### HTTP request headers
 
  - **Content-Type**: application/json
- - **Accept**: application/json
-
-### HTTP response details
-
-| Status code | Description | Response headers |
-|-------------|-------------|------------------|
-**204** | Successful Response |  -  |
-**422** | Validation Error |  -  |
-
-[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
-
-# **github_user_toolkit_v1_agent_cleanup_retry**
-> github_user_toolkit_v1_agent_cleanup_retry(handle, agent_id, toolkit_id)
-
-Agent Cleanup Retry
-
-Retry retired-token cleanup after exact Agent management admission.
-
-### Example
-
-* Bearer Authentication (HTTPBearer):
-
-```python
-import azentspublicclient
-from azentspublicclient.rest import ApiException
-from pprint import pprint
-
-# Defining the host is optional and defaults to http://localhost
-# See configuration.py for a list of all supported configuration parameters.
-configuration = azentspublicclient.Configuration(
-    host = "http://localhost"
-)
-
-# The client must configure the authentication and authorization parameters
-# in accordance with the API server security policy.
-# Examples for each auth method are provided below, use the example that
-# satisfies your auth use case.
-
-# Configure Bearer authorization: HTTPBearer
-configuration = azentspublicclient.Configuration(
-    access_token = os.environ["BEARER_TOKEN"]
-)
-
-# Enter a context with an instance of the API client
-with azentspublicclient.ApiClient(configuration) as api_client:
-    # Create an instance of the API class
-    api_instance = azentspublicclient.GitHubUserToolkitV1Api(api_client)
-    handle = 'handle_example' # str | 
-    agent_id = 'agent_id_example' # str | 
-    toolkit_id = 'toolkit_id_example' # str | 
-
-    try:
-        # Agent Cleanup Retry
-        api_instance.github_user_toolkit_v1_agent_cleanup_retry(handle, agent_id, toolkit_id)
-    except Exception as e:
-        print("Exception when calling GitHubUserToolkitV1Api->github_user_toolkit_v1_agent_cleanup_retry: %s\n" % e)
-```
-
-
-
-### Parameters
-
-
-Name | Type | Description  | Notes
-------------- | ------------- | ------------- | -------------
- **handle** | **str**|  | 
- **agent_id** | **str**|  | 
- **toolkit_id** | **str**|  | 
-
-### Return type
-
-void (empty response body)
-
-### Authorization
-
-[HTTPBearer](../README.md#HTTPBearer)
-
-### HTTP request headers
-
- - **Content-Type**: Not defined
  - **Accept**: application/json
 
 ### HTTP response details
@@ -1022,84 +940,6 @@ void (empty response body)
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **github_user_toolkit_v1_shared_cleanup_retry**
-> github_user_toolkit_v1_shared_cleanup_retry(handle, toolkit_id)
-
-Shared Cleanup Retry
-
-Retry incomplete cleanup of captured retired tokens.
-
-### Example
-
-* Bearer Authentication (HTTPBearer):
-
-```python
-import azentspublicclient
-from azentspublicclient.rest import ApiException
-from pprint import pprint
-
-# Defining the host is optional and defaults to http://localhost
-# See configuration.py for a list of all supported configuration parameters.
-configuration = azentspublicclient.Configuration(
-    host = "http://localhost"
-)
-
-# The client must configure the authentication and authorization parameters
-# in accordance with the API server security policy.
-# Examples for each auth method are provided below, use the example that
-# satisfies your auth use case.
-
-# Configure Bearer authorization: HTTPBearer
-configuration = azentspublicclient.Configuration(
-    access_token = os.environ["BEARER_TOKEN"]
-)
-
-# Enter a context with an instance of the API client
-with azentspublicclient.ApiClient(configuration) as api_client:
-    # Create an instance of the API class
-    api_instance = azentspublicclient.GitHubUserToolkitV1Api(api_client)
-    handle = 'handle_example' # str | 
-    toolkit_id = 'toolkit_id_example' # str | 
-
-    try:
-        # Shared Cleanup Retry
-        api_instance.github_user_toolkit_v1_shared_cleanup_retry(handle, toolkit_id)
-    except Exception as e:
-        print("Exception when calling GitHubUserToolkitV1Api->github_user_toolkit_v1_shared_cleanup_retry: %s\n" % e)
-```
-
-
-
-### Parameters
-
-
-Name | Type | Description  | Notes
-------------- | ------------- | ------------- | -------------
- **handle** | **str**|  | 
- **toolkit_id** | **str**|  | 
-
-### Return type
-
-void (empty response body)
-
-### Authorization
-
-[HTTPBearer](../README.md#HTTPBearer)
-
-### HTTP request headers
-
- - **Content-Type**: Not defined
- - **Accept**: application/json
-
-### HTTP response details
-
-| Status code | Description | Response headers |
-|-------------|-------------|------------------|
-**204** | Successful Response |  -  |
-**422** | Validation Error |  -  |
-
-[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
-
 # **github_user_toolkit_v1_shared_confirm**
 > GitHubUserConnectionSummary github_user_toolkit_v1_shared_confirm(handle, toolkit_id, git_hub_user_attempt_request)
 
@@ -1270,7 +1110,7 @@ Name | Type | Description  | Notes
 
 Shared Disconnect
 
-Disconnect shared use and require provider token revocation.
+Disconnect local shared use and attempt bounded token revocation.
 
 ### Example
 
@@ -1594,7 +1434,7 @@ Name | Type | Description  | Notes
 
 Shared Status
 
-Return redacted saved identity and incomplete cleanup status.
+Return redacted saved identity without asserting provider cleanup.
 
 ### Example
 

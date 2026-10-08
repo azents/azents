@@ -8,10 +8,17 @@ from azents.core.github_credentials import (
     GitHubSecretsAppPlatformUser,
     GitHubSecretsAppUser,
 )
-from azents.core.github_user_oauth import GitHubUserErrorCode, GitHubUserOAuthError
+from azents.core.github_user_oauth import (
+    GitHubUserErrorCode,
+    GitHubUserOAuthError,
+    GitHubUserRevocation,
+)
 from azents.rdb.models.toolkit import RDBToolkitConfig
 from azents.rdb.session_capabilities import WriteSession
-from azents.repos.github_user_oauth.guards import assert_mutation_allowed
+from azents.repos.github_user_oauth.guards import (
+    assert_registration_change_allowed,
+    capture_and_clear_user_tokens,
+)
 from azents.repos.toolkit import ToolkitRepository
 from azents.repos.toolkit.data import ToolkitConfig, ToolkitUpdate
 
@@ -80,23 +87,21 @@ async def guard_user_registration_update(
         changed = changed or _registration_identity(
             update["credentials"]
         ) != _registration_identity(current.credentials)
-    await assert_mutation_allowed(
-        session, current.id, registration_changed=changed, deleting=False
-    )
+    if changed:
+        await assert_registration_change_allowed(session, current.id)
 
 
-async def guard_user_toolkit_delete(
+async def capture_user_toolkit_delete(
     session: WriteSession,
     toolkit: ToolkitConfig,
     *,
     repository: ToolkitRepository,
-) -> None:
-    """Prevent a stale old-mode delete from cascading new user credentials."""
+) -> tuple[GitHubUserRevocation, ...]:
+    """Capture current affected tokens atomically with the authorized deletion."""
     if toolkit.toolkit_type != "github":
-        return
+        return ()
     current = await _current_github_toolkit(session, toolkit, repository)
-    if current.config.get("github_auth_type") not in _USER_MODES:
-        return
-    await assert_mutation_allowed(
-        session, current.id, registration_changed=False, deleting=True
-    )
+    cipher = repository.cipher
+    if cipher is None:
+        raise RuntimeError("GitHub user token capture requires credential encryption.")
+    return await capture_and_clear_user_tokens(session, current.id, None, cipher=cipher)

@@ -1,4 +1,4 @@
-"""Toolkit-owned GitHub user credentials, one-use setup and retired cleanup."""
+"""Toolkit-owned GitHub user connections and staged one-use setup."""
 
 import datetime
 
@@ -9,7 +9,6 @@ from uuid6 import uuid7
 
 from azents.core.github_user_oauth import (
     GitHubUserAttemptStatus,
-    GitHubUserCleanupStatus,
     GitHubUserConnectionStatus,
 )
 from azents.rdb.models.base import RDBModel
@@ -25,23 +24,17 @@ connection_status_enum = ENUM(
     name="github_user_connection_status",
     values_callable=lambda enum_type: [value.value for value in enum_type],
 )
-cleanup_status_enum = ENUM(
-    GitHubUserCleanupStatus,
-    name="github_user_cleanup_status",
-    values_callable=lambda enum_type: [value.value for value in enum_type],
-)
 
 
 class RDBGitHubUserConnection(RDBModel):
     """Only the current credential is eligible for execution."""
 
     __tablename__ = "github_user_oauth_connections"
-
     id: Mapped[str] = mapped_column(
         sa.String(32), primary_key=True, init=False, default_factory=lambda: uuid7().hex
     )
     toolkit_id: Mapped[str] = mapped_column(
-        sa.String(32), sa.ForeignKey("toolkit_configs.id", ondelete="RESTRICT")
+        sa.String(32), sa.ForeignKey("toolkit_configs.id", ondelete="CASCADE")
     )
     app_id: Mapped[str] = mapped_column(sa.String(64))
     account_id: Mapped[int] = mapped_column(sa.BigInteger)
@@ -60,7 +53,6 @@ class RDBGitHubUserConnection(RDBModel):
         server_default=sa.func.now(),
         onupdate=sa.func.now(),
     )
-
     UQ_TOOLKIT = sa.UniqueConstraint(
         "toolkit_id", name="uq_github_user_oauth_connections_toolkit"
     )
@@ -69,15 +61,14 @@ class RDBGitHubUserConnection(RDBModel):
 
 
 class RDBGitHubUserAttempt(RDBModel):
-    """Bound setup authority and encrypted candidate until transfer or cleanup."""
+    """Bound setup authority and encrypted candidate until confirmation."""
 
     __tablename__ = "github_user_oauth_attempts"
-
     id: Mapped[str] = mapped_column(
         sa.String(32), primary_key=True, init=False, default_factory=lambda: uuid7().hex
     )
     toolkit_id: Mapped[str] = mapped_column(
-        sa.String(32), sa.ForeignKey("toolkit_configs.id", ondelete="RESTRICT")
+        sa.String(32), sa.ForeignKey("toolkit_configs.id", ondelete="CASCADE")
     )
     user_id: Mapped[str] = mapped_column(sa.String(32))
     session_id: Mapped[str] = mapped_column(sa.String(32))
@@ -87,10 +78,6 @@ class RDBGitHubUserAttempt(RDBModel):
     encrypted_candidate: Mapped[str | None] = mapped_column(
         sa.Text, nullable=True, repr=False
     )
-    encrypted_issued_token: Mapped[str | None] = mapped_column(
-        sa.Text, nullable=True, repr=False
-    )
-    exchange_in_flight: Mapped[bool] = mapped_column(sa.Boolean)
     captured_connection_id: Mapped[str | None] = mapped_column(
         sa.String(32), nullable=True
     )
@@ -99,35 +86,10 @@ class RDBGitHubUserAttempt(RDBModel):
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime, init=False, server_default=sa.func.now()
     )
-
     IX_TOOLKIT = sa.Index("ix_github_user_oauth_attempts_toolkit", "toolkit_id")
     UQ_CURRENT = sa.Index(
         "uq_github_user_oauth_attempts_current",
         "toolkit_id",
         unique=True,
-        postgresql_where=sa.text("status IN ('pending', 'exchanging', 'review')"),
     )
     __table_args__ = (IX_TOOLKIT, UQ_CURRENT)
-
-
-class RDBGitHubUserCleanup(RDBModel):
-    """Encrypted retired token material cannot supply execution credentials."""
-
-    __tablename__ = "github_user_oauth_cleanup"
-
-    id: Mapped[str] = mapped_column(
-        sa.String(32), primary_key=True, init=False, default_factory=lambda: uuid7().hex
-    )
-    toolkit_id: Mapped[str] = mapped_column(
-        sa.String(32), sa.ForeignKey("toolkit_configs.id", ondelete="RESTRICT")
-    )
-    encrypted_payload: Mapped[str] = mapped_column(sa.Text, repr=False)
-    reason: Mapped[str] = mapped_column(sa.String(64))
-    status: Mapped[GitHubUserCleanupStatus] = mapped_column(cleanup_status_enum)
-    failure_reason: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        TimeZoneDateTime, init=False, server_default=sa.func.now()
-    )
-
-    IX_TOOLKIT = sa.Index("ix_github_user_oauth_cleanup_toolkit", "toolkit_id")
-    __table_args__ = (IX_TOOLKIT,)

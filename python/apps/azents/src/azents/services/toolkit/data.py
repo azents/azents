@@ -43,10 +43,6 @@ class ToolkitOutput(ToolkitConfig):
     github_user_connection: GitHubUserConnectionSummary | None = Field(
         default=None, description="Redacted GitHub user-account connection metadata"
     )
-    github_user_cleanup_pending: bool = Field(
-        default=False,
-        description="Whether retired GitHub user token cleanup is incomplete",
-    )
 
     # The type checker cannot infer the Pydantic computed_field/property combination.
     @computed_field

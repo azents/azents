@@ -1,13 +1,12 @@
 # GitHubUserStatusOutput
 
-Current connection plus cleanup status, never retired credential data.
+Current saved connection, with no provider-cleanup success claim.
 
 ## Properties
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **connection** | [**GitHubUserConnectionSummary**](GitHubUserConnectionSummary.md) |  | 
-**cleanup_pending** | **bool** |  | 
 
 ## Example
 

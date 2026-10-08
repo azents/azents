@@ -14,8 +14,6 @@ class GitHubUserAttemptStatus(enum.StrEnum):
     PENDING = "pending"
     EXCHANGING = "exchanging"
     REVIEW = "review"
-    COMPLETED = "completed"
-    CANCELLED = "cancelled"
 
 
 class GitHubUserConnectionStatus(enum.StrEnum):
@@ -25,13 +23,6 @@ class GitHubUserConnectionStatus(enum.StrEnum):
     RECONNECT_REQUIRED = "reconnect_required"
 
 
-class GitHubUserCleanupStatus(enum.StrEnum):
-    """Non-executable retired credential cleanup status."""
-
-    PENDING = "pending"
-    FAILED = "failed"
-
-
 class GitHubUserErrorCode(enum.StrEnum):
     """Safe management failures without provider credential payloads."""
 
@@ -39,7 +30,6 @@ class GitHubUserErrorCode(enum.StrEnum):
     NOT_FOUND = "not_found"
     STALE = "stale"
     INVALID = "invalid"
-    CLEANUP_REQUIRED = "cleanup_required"
 
 
 class GitHubUserOAuthError(ValueError):
@@ -63,7 +53,7 @@ class GitHubUserRequester:
 
 @dataclasses.dataclass(frozen=True)
 class GitHubUserRegistration:
-    """Selected App binding captured for setup or exact-token cleanup."""
+    """Selected App binding captured for setup or a bounded revocation attempt."""
 
     source: Literal["platform_user", "byoa_user"]
     app_id: str
@@ -104,7 +94,6 @@ class GitHubUserContext:
 
     toolkit: ToolkitConfig = dataclasses.field(repr=False)
     connection: GitHubUserConnection | None
-    cleanup_pending: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -124,16 +113,27 @@ class GitHubUserAttempt:
 
 
 @dataclasses.dataclass(frozen=True)
-class GitHubUserCleanup:
-    """Retired credential material usable only for single-token revocation."""
+class GitHubUserRevocation:
+    """Transient exact-token facts for cleanup after the local transaction."""
 
-    id: str
-    toolkit_id: str
     registration: GitHubUserRegistration
     access_token: str = dataclasses.field(repr=False)
-    reason: str
-    status: GitHubUserCleanupStatus
-    failure_reason: str | None
+
+
+@dataclasses.dataclass(frozen=True)
+class GitHubUserStartResult:
+    """New setup and tokens discarded by its completed local reservation."""
+
+    attempt: GitHubUserAttempt
+    revocations: tuple[GitHubUserRevocation, ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class GitHubUserConfirmResult:
+    """Committed active connection and its captured superseded credential."""
+
+    connection: GitHubUserConnection
+    revocations: tuple[GitHubUserRevocation, ...]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -148,4 +148,3 @@ class GitHubUserConnectionSummary:
     source: Literal["platform_user", "byoa_user"]
     status: GitHubUserConnectionStatus
     failure_reason: str | None
-    cleanup_pending: bool
