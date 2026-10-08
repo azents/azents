@@ -33,6 +33,14 @@ _OPENAI_IMAGE_PROMPT = "A deterministic OpenAI image"
 _OPENAI_IMAGE_CALL_ID = "call_openai_image_generation"
 _BRAVE_PROMPT_PREFIX = "Brave Search E2E "
 _BRAVE_KINDS = ("web", "context", "news", "images", "videos")
+
+
+@dataclass(frozen=True)
+class _GitHubUserScriptStep:
+    name: str
+    arguments: dict[str, object]
+
+
 _SEMANTIC_PROMPT = "Provider semantic web search handoff"
 _SEMANTIC_SAME_NATIVE_PROMPT = "Provider semantic same-native follow-up"
 _SEMANTIC_CROSS_NATIVE_PROMPT = "Provider semantic cross-native follow-up"
@@ -2703,6 +2711,96 @@ class _Handler(BaseHTTPRequestHandler):
                 arguments={"q": "Brave Search E2E external_channel", "count": 2},
             )
             return
+        if self.path == "/v1/responses":
+            for kind in (
+                "mcp",
+                "replacement",
+                "runtime-off",
+                "runtime-on",
+                "runtime-replacement",
+            ):
+                prefix = f"call_github_user_{kind}"
+                search_id = prefix + "_search"
+                if user_text != f"GitHub User Toolkit E2E {kind}" and not (
+                    user_text is None
+                    and any(
+                        request_has_tool_output(request, prefix + suffix)
+                        for suffix in ("_search", "_0", "_1", "_2", "_3", "_4")
+                    )
+                ):
+                    continue
+                if kind.startswith("runtime-"):
+                    command = (
+                        'if [ -z "$GH_TOKEN" ] && [ -z "$GITHUB_TOKEN" ]; then '
+                        'printf "GITHUB_USER_ENV_ABSENT"; '
+                        'elif [ "$GH_TOKEN" = "$GITHUB_TOKEN" ]; then '
+                        'case "$GH_TOKEN" in *replacement*) '
+                        'printf "GITHUB_USER_ENV_REPLACEMENT";; '
+                        '*) printf "GITHUB_USER_ENV_CONNECTED";; esac; '
+                        'else printf "GITHUB_USER_ENV_MISMATCH"; fi'
+                    )
+                    steps = [
+                        _GitHubUserScriptStep("exec_command", {"command": command})
+                    ]
+                else:
+                    steps = [_GitHubUserScriptStep("github_user__get_me", {})]
+                    if kind == "mcp":
+                        steps.extend(
+                            _GitHubUserScriptStep(
+                                "github_user__get_file_contents",
+                                {
+                                    "owner": owner,
+                                    "repo": "fixture-repo",
+                                    "path": "README.md",
+                                },
+                            )
+                            for owner in (
+                                "connected-user",
+                                "research-team",
+                                "ops-team",
+                                "restricted-team",
+                            )
+                        )
+                for index, step in enumerate(steps):
+                    name, arguments = step.name, step.arguments
+                    call_id = prefix + f"_{index}"
+                    if request_has_tool_output(request, call_id):
+                        continue
+                    if not _request_has_named_tool(request, name):
+                        if _request_has_named_tool(
+                            request, "tool_search"
+                        ) and not request_has_tool_output(request, search_id):
+                            self._write_function_call_response(
+                                request,
+                                call_id=search_id,
+                                name="tool_search",
+                                arguments={
+                                    "query": "github account repository"
+                                    if kind == "mcp"
+                                    else name,
+                                    "limit": 8,
+                                },
+                            )
+                            return
+                        self._write_json(
+                            409,
+                            {
+                                "error": {
+                                    "message": "GitHub user E2E tool is unavailable."
+                                }
+                            },
+                        )
+                        return
+                    self._write_function_call_response(
+                        request, call_id=call_id, name=name, arguments=arguments
+                    )
+                    return
+                self._write_text_response(
+                    request,
+                    f"GITHUB_USER_E2E_COMPLETED_{kind}",
+                    response_id=f"resp_github_user_{kind}_completed",
+                )
+                return
         disabled_search_id = "call_brave_e2e_disabled_tool_search"
         if self.path == "/v1/responses" and (
             user_text == f"{_BRAVE_PROMPT_PREFIX}disabled"

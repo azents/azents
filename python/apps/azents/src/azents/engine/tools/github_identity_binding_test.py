@@ -57,7 +57,9 @@ def _context() -> ResolveContext:
 async def test_platform_credentials_validation_is_database_free() -> None:
     """Provider validation accepts a server-bound local credential shape."""
     runtime = Mock()
-    provider = GitHubToolkitProvider(platform_runtime=runtime)
+    provider = GitHubToolkitProvider(
+        platform_runtime=runtime, user_runtime=None, user_mcp_server_url=None
+    )
     credentials: dict[str, object] = {
         "type": "github_app_platform",
         "app_id": "123",
@@ -99,7 +101,9 @@ async def test_platform_token_issuance_rechecks_app_identity(
     )
     exchange = AsyncMock(return_value="token")
     monkeypatch.setattr(github_module, "_exchange_app_token", exchange)
-    provider = GitHubToolkitProvider(platform_runtime=runtime)
+    provider = GitHubToolkitProvider(
+        platform_runtime=runtime, user_runtime=None, user_mcp_server_url=None
+    )
     toolkit = await provider.resolve(
         GitHubToolkitConfig(
             github_auth_type="github_app_platform",
@@ -135,7 +139,9 @@ async def test_platform_token_issuance_uses_rotated_key_for_same_app(
     )
     exchange = AsyncMock(return_value="token")
     monkeypatch.setattr(github_module, "_exchange_app_token", exchange)
-    provider = GitHubToolkitProvider(platform_runtime=runtime)
+    provider = GitHubToolkitProvider(
+        platform_runtime=runtime, user_runtime=None, user_mcp_server_url=None
+    )
     toolkit = await provider.resolve(
         GitHubToolkitConfig(
             github_auth_type="github_app_platform",

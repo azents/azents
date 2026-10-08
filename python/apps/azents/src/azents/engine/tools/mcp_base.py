@@ -16,7 +16,7 @@ import logging
 import mimetypes
 import time
 from abc import ABC
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Generic, NamedTuple, TypeVar, assert_never
 from urllib.parse import urlparse
 
@@ -67,6 +67,7 @@ from azents.repos.session_execution import (
 )
 from azents.repos.toolkit_state.engine import McpToolSnapshotStore
 from azents.services.artifact import ArtifactService
+from azents.utils.logging import sanitized_exception_info
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,38 @@ class McpCredentials(NamedTuple):
     secret: str | None
     auth_scheme: None
     proxy_url: str | None
+
+
+@dataclasses.dataclass(frozen=True)
+class McpRequestAuthorization:
+    """One call's headers and optional exact-credential failure publication."""
+
+    headers: dict[str, str] = dataclasses.field(repr=False)
+    on_authentication_failure: Callable[[], Awaitable[None]] | None
+    auth: httpx.Auth | None
+
+
+class McpAuthenticationFailureObserver(httpx.Auth):
+    """Observe an admitted HTTP 401 before MCP normalizes transport failures."""
+
+    def __init__(self) -> None:
+        self.authentication_failed = False
+
+    async def async_auth_flow(
+        self, request: httpx.Request
+    ) -> AsyncGenerator[httpx.Request, httpx.Response]:
+        response = yield request
+        if response.status_code == 401:
+            self.authentication_failed = True
+
+
+def _authorization_is_401(
+    authorization: McpRequestAuthorization, error: Exception
+) -> bool:
+    return _is_http_401(error) or (
+        isinstance(authorization.auth, McpAuthenticationFailureObserver)
+        and authorization.auth.authentication_failed
+    )
 
 
 def build_mcp_artifact_sink(
@@ -442,6 +475,7 @@ def wrap_mcp_tool(
     proxy_url: str | None = None,
     auth: httpx.Auth | None = None,
     headers_provider: Callable[[], Awaitable[dict[str, str]]] | None = None,
+    authorization_provider: Callable[[], Awaitable[McpRequestAuthorization]] | None,
     artifact_sink_getter: ArtifactSinkGetter | None = None,
 ) -> FunctionTool:
     """Wrap MCP tool as azents Tool.
@@ -461,6 +495,9 @@ def wrap_mcp_tool(
         Optional async header provider evaluated when the tool is called.
         Useful when a cached tool snapshot can be exposed before credentials are
         available during turn preparation.
+    :param authorization_provider:
+        Resolve call-local headers and exact-credential failure publication.
+        Its failure callback observes authentication failure without token reissue.
     :return: azents Tool instance
     """
     spec = FunctionToolSpec(
@@ -477,8 +514,15 @@ def wrap_mcp_tool(
             )
         except json.JSONDecodeError as exc:
             raise FunctionToolError(f"Invalid JSON in tool arguments: {exc}") from None
+        call_authorization = (
+            await authorization_provider()
+            if authorization_provider is not None
+            else None
+        )
         call_headers = (
-            await headers_provider() if headers_provider is not None else headers
+            call_authorization.headers
+            if call_authorization is not None
+            else (await headers_provider() if headers_provider is not None else headers)
         )
         try:
             result = await mcp_call_tool(
@@ -489,9 +533,20 @@ def wrap_mcp_tool(
                 args,
                 use_streamable_http=use_streamable_http,
                 proxy_url=proxy_url,
-                auth=auth,
+                auth=(
+                    call_authorization.auth
+                    if call_authorization is not None
+                    and call_authorization.auth is not None
+                    else auth
+                ),
             )
         except (httpx.HTTPStatusError, MCPError, ExceptionGroup) as exc:
+            if (
+                call_authorization is not None
+                and call_authorization.on_authentication_failure is not None
+                and _authorization_is_401(call_authorization, exc)
+            ):
+                await call_authorization.on_authentication_failure()
             if on_auth_failure is not None and _is_http_401(exc):
                 new_token = await on_auth_failure()
                 if new_token is not None:
@@ -530,8 +585,26 @@ def wrap_mcp_tool(
                     )
             message = _mcp_transport_tool_error_message(exc)
             if message is not None:
+                if (
+                    call_authorization is not None
+                    and call_authorization.on_authentication_failure is not None
+                    and _find_mcp_error(exc) is not None
+                    and _find_http_status_error(exc) is None
+                ):
+                    message = (
+                        "MCP tool call failed. Check the connected account "
+                        "and target access."
+                    )
                 raise FunctionToolError(message) from None
             raise
+        if (
+            call_authorization is not None
+            and call_authorization.on_authentication_failure is not None
+            and result.is_error
+        ):
+            raise FunctionToolError(
+                "MCP tool action failed. Check the connected account and target access."
+            )
         return await _extract_tool_result(
             result,
             tool_name=mcp_tool.name,
@@ -649,6 +722,14 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
             proxy_url=self._proxy_url,
         )
 
+    async def _request_authorization(self) -> McpRequestAuthorization:
+        """Retain static credentials unless a derived Toolkit resolves each call."""
+        return McpRequestAuthorization(
+            headers=_build_auth_headers(self._config, self._secret),
+            on_authentication_failure=None,
+            auth=None,
+        )
+
     async def __aenter__(self) -> McpBasedToolkit[McpConfigT]:
         """Start MCP server connection in background."""
         self._entered = True
@@ -698,12 +779,20 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
         Store a successful deterministic snapshot atomically in Toolkit State.
         """
         config = self._config
-        headers = _build_auth_headers(config, self._secret)
         started = time.monotonic()
-
+        try:
+            authorization = await self._request_authorization()
+        except FunctionToolError as exc:
+            self._bg_error = str(exc)
+            return
+        headers = authorization.headers
         try:
             discovery = await mcp_list_tools(
-                config.server_url, headers, config.timeout, proxy_url=self._proxy_url
+                config.server_url,
+                headers,
+                config.timeout,
+                proxy_url=self._proxy_url,
+                auth=authorization.auth,
             )
         except (
             httpx.HTTPError,
@@ -727,19 +816,41 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
                 )
                 if remainder is not None:
                     raise
-            if _is_http_auth_error(exc):
+            if (
+                authorization.on_authentication_failure is not None
+                and _authorization_is_401(authorization, exc)
+            ):
+                await authorization.on_authentication_failure()
+            if _is_http_auth_error(exc) or _authorization_is_401(authorization, exc):
                 logger.warning(
                     "MCP server auth failed",
                     extra={"server_url": config.server_url},
-                    exc_info=True,
+                    exc_info=(
+                        sanitized_exception_info(
+                            exc, message="MCP server authentication failed."
+                        )
+                        if authorization.on_authentication_failure is not None
+                        else True
+                    ),
                 )
                 self._bg_error = f"MCP server auth failed: {config.server_url}"
             else:
-                logger.exception(
+                logger.error(
                     "Failed to connect to MCP server",
                     extra={"server_url": config.server_url},
+                    exc_info=(
+                        sanitized_exception_info(
+                            exc, message="MCP server connection failed."
+                        )
+                        if authorization.on_authentication_failure is not None
+                        else True
+                    ),
                 )
-                self._bg_error = f"MCP server connection failed: {exc}"
+                self._bg_error = (
+                    "MCP server connection failed."
+                    if authorization.on_authentication_failure is not None
+                    else f"MCP server connection failed: {exc}"
+                )
             return
 
         snapshot = _build_mcp_tool_snapshot(
@@ -824,6 +935,7 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
                 config.timeout,
                 use_streamable_http=item.use_streamable_http,
                 on_auth_failure=self.on_auth_failure,
+                authorization_provider=self._request_authorization,
                 proxy_url=self._proxy_url,
                 artifact_sink_getter=self._current_artifact_sink,
             )

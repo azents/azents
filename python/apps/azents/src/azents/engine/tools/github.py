@@ -32,6 +32,8 @@ from azents.core.github_credentials import (
     GitHubSecretsAppUser,
     GitHubSecretsPAT,
 )
+from azents.core.github_user_oauth import GitHubUserOAuthError
+from azents.core.github_user_runtime import GitHubUserExecutionContext
 from azents.core.mcp_transport import test_mcp_transport
 from azents.core.session_resource_authority import (
     SessionExecutionOwner,
@@ -56,7 +58,11 @@ from azents.engine.tools.background_discovery import (
     require_expected_discovery_failure,
 )
 from azents.engine.tools.mcp import McpToolkit
-from azents.engine.tools.mcp_base import wrap_mcp_tool
+from azents.engine.tools.mcp_base import (
+    McpAuthenticationFailureObserver,
+    McpRequestAuthorization,
+    wrap_mcp_tool,
+)
 from azents.repos.engine_tool_repositories import EngineMcpSnapshotFactory
 from azents.repos.toolkit_state.engine import (
     GitHubSelectedInstallationStore,
@@ -65,6 +71,7 @@ from azents.repos.toolkit_state.engine import (
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
 )
+from azents.services.github_user_oauth.runtime import GitHubUserRuntimeService
 from azents.utils.logging import sanitized_exception_info
 
 logger = logging.getLogger(__name__)
@@ -694,6 +701,7 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
                 on_auth_failure=binding.lazy_mcp_secret_provider,
                 proxy_url=binding.lazy_mcp_proxy_url,
                 headers_provider=headers_provider,
+                authorization_provider=None,
             )
             if item.model_name != item.raw_name:
                 tool = replace(
@@ -859,12 +867,101 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
 # ---------------------------------------------------------------------------
 
 
+class GitHubUserMcpToolkit(McpToolkit):
+    """Resolve the current user connection for discovery and every MCP call."""
+
+    def __init__(
+        self,
+        *,
+        config: McpToolkitConfig,
+        context: GitHubUserExecutionContext,
+        runtime: GitHubUserRuntimeService,
+        proxy_url: str | None,
+        snapshot_factory: EngineMcpSnapshotFactory | None,
+    ) -> None:
+        super().__init__(
+            config=config,
+            secret=None,
+            on_auth_failure=None,
+            proxy_url=proxy_url,
+            snapshot_factory=snapshot_factory,
+            agent_id=context.agent_id,
+            session_id=context.session_id,
+            state_name=_github_snapshot_state_name(
+                toolkit_id=context.toolkit_id, suffix="user"
+            ),
+        )
+        self.user_context = context
+        self.user_runtime = runtime
+
+    async def _request_authorization(self) -> McpRequestAuthorization:
+        try:
+            connection = await self.user_runtime.current_connection(self.user_context)
+        except GitHubUserOAuthError as exc:
+            raise FunctionToolError(str(exc)) from None
+
+        published = False
+
+        async def failed() -> None:
+            nonlocal published
+            if published:
+                return
+            published = True
+            await self.user_runtime.authentication_failed(
+                self.user_context, connection_id=connection.id
+            )
+
+        return McpRequestAuthorization(
+            headers={"Authorization": f"Bearer {connection.access_token}"},
+            on_authentication_failure=failed,
+            auth=McpAuthenticationFailureObserver(),
+        )
+
+
+class GitHubUserToolkit(GitHubToolkit):
+    """Delegate user authority without installation maps or credential TTL cache."""
+
+    def __init__(
+        self,
+        *,
+        config: GitHubToolkitConfig,
+        mcp_toolkit: GitHubUserMcpToolkit,
+        context: GitHubUserExecutionContext,
+        runtime: GitHubUserRuntimeService,
+    ) -> None:
+        super().__init__(
+            config=config,
+            mcp_toolkit=mcp_toolkit,
+            toolsets=config.toolsets,
+        )
+        self.user_context = context
+        self.user_runtime = runtime
+
+    async def expose_env(self) -> dict[str, str]:
+        if not self._config.inject_runtime_environment:
+            return {}
+        try:
+            return await self.user_runtime.runtime_environment(self.user_context)
+        except GitHubUserOAuthError as exc:
+            raise FunctionToolError(str(exc)) from None
+
+    async def get_static_prompt(self, context: TurnContext) -> str:
+        del context
+        return (
+            "GitHub tools use this Toolkit's connected GitHub user account, "
+            "not each participant's account. The same account can access its "
+            "permitted personal and organization repositories. Toolset selection "
+            "does not grant permission, and target-specific permission or SSO "
+            "errors do not imply another account or installation is available."
+        )
+
+
 class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
     """GitHub Toolkit Provider.
 
-    Supports three auth types (PAT, GitHub App BYOA, GitHub App Platform), and creates
-    appropriate GitHubToolkit in resolve() based on auth type. Builds and uses
-    McpToolkitConfig internally at resolve time.
+    Supports PAT plus BYOA and Platform Apps with installation or user-account
+    authority. Creates the selected GitHubToolkit and its McpToolkitConfig at
+    resolve time without switching between execution authorities.
     """
 
     slug = "github"
@@ -880,6 +977,8 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
         self,
         *,
         platform_runtime: PlatformGitHubAppRuntimeService,
+        user_runtime: GitHubUserRuntimeService | None,
+        user_mcp_server_url: str | None,
         snapshot_factory: EngineMcpSnapshotFactory | None = None,
     ) -> None:
         """Initialize GitHubToolkitProvider.
@@ -888,6 +987,8 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
         :param snapshot_factory: DB session manager for Toolkit State
         """
         self.platform_runtime = platform_runtime
+        self.user_runtime = user_runtime
+        self.user_mcp_server_url = user_mcp_server_url
         self.snapshot_factory = snapshot_factory
 
     def to_mcp_config(self, config: GitHubToolkitConfig) -> McpToolkitConfig:
@@ -1022,7 +1123,7 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
             "github_app_user",
             "github_app_platform_user",
         ):
-            raise ValueError("GitHub user-account execution is not yet available.")
+            return await self._resolve_user(config, context)
         mcp_config = _build_mcp_config(config)
 
         proxy_url = context.mcp_proxy_url
@@ -1113,6 +1214,59 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
             mcp_toolkit=mcp_toolkit,
             toolsets=config.toolsets,
             runtime_environment_token_provider=runtime_environment_token_provider,
+        )
+
+    async def _resolve_user(
+        self, config: GitHubToolkitConfig, context: ResolveContext
+    ) -> GitHubUserToolkit:
+        """Use the saved Toolkit App identity, not an initiating manager session."""
+        runtime = self.user_runtime
+        if runtime is None:
+            raise FunctionToolError("GitHub user credential resolution is unavailable.")
+        if context.credentials_json is None:
+            raise FunctionToolError("GitHub App user registration is required.")
+        try:
+            secrets = _github_secrets_adapter.validate_json(context.credentials_json)
+        except ValidationError:
+            raise FunctionToolError(
+                "GitHub App user registration is invalid."
+            ) from None
+        match secrets:
+            case GitHubSecretsAppUser():
+                source = "byoa_user"
+                client_id = secrets.client_id
+            case GitHubSecretsAppPlatformUser():
+                source = "platform_user"
+                client_id = None
+            case _:
+                raise FunctionToolError("GitHub App user registration is incompatible.")
+        execution = GitHubUserExecutionContext(
+            workspace_id=context.workspace_id,
+            agent_id=context.agent_id,
+            session_id=context.session_id,
+            toolkit_id=context.toolkit_id,
+            source=source,
+            app_id=secrets.app_id,
+            client_id=client_id,
+        )
+        try:
+            await runtime.current_connection(execution)
+        except GitHubUserOAuthError as exc:
+            raise FunctionToolError(str(exc)) from None
+        mcp_config = _build_mcp_config(config)
+        if self.user_mcp_server_url is not None:
+            mcp_config = mcp_config.model_copy(
+                update={"server_url": self.user_mcp_server_url}
+            )
+        mcp = GitHubUserMcpToolkit(
+            config=mcp_config,
+            context=execution,
+            runtime=runtime,
+            proxy_url=context.mcp_proxy_url,
+            snapshot_factory=self.snapshot_factory,
+        )
+        return GitHubUserToolkit(
+            config=config, mcp_toolkit=mcp, context=execution, runtime=runtime
         )
 
     def _make_selected_installation_store(

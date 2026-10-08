@@ -1,6 +1,7 @@
 ---
 title: "GitHub User Account Toolkit Requirements"
 created: 2026-10-08
+implemented: 2026-10-09
 document_role: primary
 document_type: requirements
 snapshot_id: github-261008
@@ -11,7 +12,7 @@ tags: [github, toolkit, oauth, security]
 
 - Snapshot: `github-261008`
 - Document reference: `github-261008/REQ`
-- Confirmed by the requester on 2026-10-08 before material technical decisions. Implementation still requires approved ADR/Design and a separate implementation request.
+- Confirmed by the requester on 2026-10-08 before material technical decisions. Implementation was separately authorized against the accepted ADR and approved Design.
 
 ## Problem
 

@@ -2,6 +2,7 @@
 title: "GitHub User Account Toolkit Implementation Design"
 created: 2026-10-08
 updated: 2026-10-08
+implemented: 2026-10-09
 document_role: primary
 document_type: design
 snapshot_id: github-261008
@@ -287,3 +288,12 @@ Keep this Design as one approved snapshot. Suggested delivery boundaries are bac
 - Approved scope: retained Toolkit-local non-expiring Platform/BYOA user authorization, UI/availability, staged activation/replacement/disconnect, personal/multi-org discovery, MCP and opt-in Runtime, old-mode compatibility and verification; cleanup now follows the requester's bounded fail-open correction, without retained cleanup/retry or deletion blockers.
 
 The requester previously authorized revision 3 implementation, then explicitly requested the fail-open cleanup correction during that implementation and withdrew fire-and-forget. Revision 4 records only that requested delta, preserving the other approved mechanisms. It does not authorize PR merge, deployment, live provider actions or GitHub App registration changes.
+
+## Implementation Verification
+
+- Implemented against revision 4 and M1-M10/M12 without an additional material mechanism. Current behavior is promoted to the Toolkit Living Spec; temporary implementation and phase plans are removed.
+- Root-owned backend validation passed whole-app Ruff, formatting and Ty checks. The full backend run passed 11,808 tests with three skips; the later testenv-only browser authorization-origin delta passed its 25 service tests. Commit hooks also regenerated OpenAPI and checked the complete affected Python/E2E trees.
+- Root-owned testenv support validation passed 630 tests. The final assembled-product run passed four tests: actual browser popup/callback/review/explicit sharing confirmation and fail-open disconnect; Platform/BYOA staged setup and delegated Worker/MCP actions across personal/two-organization targets; current replacement, target-denial isolation and exact 401 publication; actual Runtime command injection off/on/replacement; and the existing Agent Toolkit browser regression.
+- The same independent reviewer, `/root/github-user-reviewer`, reviewed each integrated phase. The execution phase had no implementation findings; its sole retained-429 Spec wording correction is applied. Existing bounded transport rate-limit handling is distinct from user-authentication reissue, authority fallback or uncertain-mutation replay.
+- A Session-isolated development environment passed all readiness checks, authenticated product API/browser access and real Runtime Terminal file write/read and Shell execution. After stop/start, the same product Session and file/Shell result were verified through current Runtime/Terminal admission. Redundant folder-repreparation encountered a ten-second manifest-read timeout; that observation is not counted as success or represented as a product fix.
+- Platform/BYOA provider traffic, accounts and credentials in feature E2E are synthetic. No live GitHub credential issuance/action, App registration mutation, merge or production deployment was performed. Non-expiring App registration and live provider acceptance remain explicit rollout prerequisites, not synthetic-test claims.

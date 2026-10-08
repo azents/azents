@@ -386,7 +386,12 @@ async def test_mixed_tool_exception_group_preserves_unrelated_failure(
     refresh = AsyncMock(return_value="new-token")
     monkeypatch.setattr(mcp_base_module, "mcp_call_tool", call)
     tool = mcp_base_module.wrap_mcp_tool(
-        _tool("alpha"), "https://mcp.example.test", {}, 30.0, on_auth_failure=refresh
+        _tool("alpha"),
+        "https://mcp.example.test",
+        {},
+        30.0,
+        on_auth_failure=refresh,
+        authorization_provider=None,
     )
     with pytest.raises(ExceptionGroup) as caught:
         await tool.handler("{}")
@@ -410,7 +415,12 @@ async def test_known_auth_group_refreshes_once(
     refresh = AsyncMock(return_value="new-token")
     monkeypatch.setattr(mcp_base_module, "mcp_call_tool", call)
     tool = mcp_base_module.wrap_mcp_tool(
-        _tool("alpha"), "https://mcp.example.test", {}, 30.0, on_auth_failure=refresh
+        _tool("alpha"),
+        "https://mcp.example.test",
+        {},
+        30.0,
+        on_auth_failure=refresh,
+        authorization_provider=None,
     )
     assert await tool.handler("{}") == "ok"
     assert call.await_count == 2
@@ -429,7 +439,12 @@ async def test_mixed_retry_group_is_not_replaced_by_a_tool_error(
     refresh = AsyncMock(return_value="new-token")
     monkeypatch.setattr(mcp_base_module, "mcp_call_tool", call)
     tool = mcp_base_module.wrap_mcp_tool(
-        _tool("alpha"), "https://mcp.example.test", {}, 30.0, on_auth_failure=refresh
+        _tool("alpha"),
+        "https://mcp.example.test",
+        {},
+        30.0,
+        on_auth_failure=refresh,
+        authorization_provider=None,
     )
     with pytest.raises(ExceptionGroup) as caught:
         await tool.handler("{}")
@@ -447,7 +462,12 @@ async def test_non_auth_http_sibling_does_not_trigger_auth_retry(
     refresh = AsyncMock(return_value="new-token")
     monkeypatch.setattr(mcp_base_module, "mcp_call_tool", call)
     tool = mcp_base_module.wrap_mcp_tool(
-        _tool("alpha"), "https://mcp.example.test", {}, 30.0, on_auth_failure=refresh
+        _tool("alpha"),
+        "https://mcp.example.test",
+        {},
+        30.0,
+        on_auth_failure=refresh,
+        authorization_provider=None,
     )
     with pytest.raises(FunctionToolError, match="HTTP 401"):
         await tool.handler("{}")

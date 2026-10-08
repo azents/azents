@@ -11,6 +11,8 @@ code_paths:
   - python/apps/azents/src/azents/core/exchange_file_errors.py
   - python/apps/azents/src/azents/core/github_auth.py
   - python/apps/azents/src/azents/core/github_installation.py
+  - python/apps/azents/src/azents/core/github_credentials.py
+  - python/apps/azents/src/azents/core/github_user_*.py
   - python/apps/azents/src/azents/core/historical_memory_settings.py
   - python/apps/azents/src/azents/core/historical_memory_context.py
   - python/apps/azents/src/azents/core/mailbox_errors.py
@@ -40,6 +42,9 @@ code_paths:
   - python/apps/azents/src/azents/repos/toolkit_oauth_operations.py
   - python/apps/azents/src/azents/repos/toolkit_oauth_data.py
   - python/apps/azents/src/azents/repos/github_user_installation/**
+  - python/apps/azents/src/azents/repos/github_user_oauth/**
+  - python/apps/azents/src/azents/services/github_user_oauth/**
+  - python/apps/azents/src/azents/rdb/models/github_user_oauth.py
   - python/apps/azents/src/azents/services/toolkit/**
   - python/apps/azents/src/azents/services/toolkit_oauth/**
   - python/apps/azents/src/azents/services/vfs.py
@@ -99,6 +104,7 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - typescript/apps/azents-web/src/app/(app)/oauth/mcp/callback/**
+  - typescript/apps/azents-web/src/app/(app)/oauth/github/callback/**
   - typescript/apps/azents-web/src/features/agents/agentToolkitManagementState.ts
   - typescript/apps/azents-web/src/features/agents/components/AgentToolkitSection.tsx
   - typescript/apps/azents-web/src/features/agents/components/ManagedAgentToolkitSection.tsx
@@ -108,9 +114,10 @@ code_paths:
   - typescript/apps/azents-web/src/shared/lib/redacted-credentials.ts
   - typescript/apps/azents-web/src/shared/lib/toolkit-identifiers.ts
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
+  - typescript/apps/azents-web/src/trpc/routers/github-user.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-10-08
+last_verified_at: 2026-10-09
 spec_version: 140
 ---
 
@@ -520,6 +527,93 @@ The catalog, form and details share a responsive dialog while the parent Agent f
 
 The Agent-only form uses the existing provider-specific config, credential, test, GitHub, and MCP OAuth controls. The callback return target is the owning Agent's capabilities Toolkit section. The callback's opener notification contains only its fixed event type and success boolean; credentials, tokens, codes, and state plaintext are never rendered or posted.
 The Agent card reserves an OAuth popup before requesting an authorization URL, verifies callback origin and popup source, and invalidates the Agent management projection on callback success. Failure leaves readiness unchanged and displays an error. The existing ownership-specific OAuth endpoints and backend permission checks remain authoritative.
+
+### GitHub User Account Authority
+
+GitHub has five explicit authentication modes: `pat`, BYOA installation
+`github_app`, Platform installation `github_app_platform`, BYOA user account
+`github_app_user`, and Platform user account `github_app_platform_user`. Existing
+installation and PAT credentials are not converted. Public setup availability
+is management-authorized and reports the Platform registration as absent,
+incomplete, or configured without exposing its credentials. The form omits
+unavailable Platform options while retaining PAT and BYOA.
+
+A user-account connection belongs to the Toolkit, not the current participant.
+Workspace-shared managers and the exact Agent's authorized administrators use
+their existing management boundaries to connect it. Authorized participants,
+including other Workspace members, execute under that saved account without
+connecting their own GitHub account. Connection creates no new participation
+authority. The form and confirmation identify the account, selected App/source
+and Agent-only or Workspace-shared scope, including use by existing automatic
+execution and ordinary conversation disclosure.
+
+Setup reserves a ten-minute, one-use attempt bound to the exact active Azents
+User/Auth Session, Workspace, Toolkit, owning Agent when applicable, callback,
+registration and current connection. It verifies the App/client binding before
+issuing a PKCE S256 authorization URL with random state. GitHub authorization
+and App installation are separate provider actions; opening an installation or
+request link is not an approval/request-submission claim. Callback exchanges the
+code and verifies `/user`, then stages an encrypted candidate. An explicit
+account-and-sharing confirmation alone activates it. Cancellation, callback
+failure and unconfirmed replacement preserve the saved account.
+
+Only GitHub App user tokens without scheduled expiration are accepted. The App
+must opt out of expiring user-to-server tokens; expiring/refresh envelopes are
+rejected with configuration guidance. There is no token refresh actor. Saved
+connection and candidate/setup payloads are encrypted at rest. Public status,
+review and access DTOs expose allowlisted identity/readiness only, not
+credentials. The popup is reserved before asynchronous preparation; callbacks
+notify only the exact same-origin opener with attempt identity and return to
+the originating Toolkit. Codes, state and credentials are not posted to it.
+
+Access observations paginate App installations and their repositories for the
+connected user. Personal and multiple organization owners remain independently
+usable. Missing/denied/SSO targets have bounded failure observations and recheck
+or GitHub handoff actions, not an exclusive selected organization or an Azents
+repository allowlist. GitHub enforces the intersection of user permission, App
+permission and repository policy. A target-specific 403 or 404 does not
+invalidate the whole account.
+
+Worker admission resolves the current Toolkit/Workspace/Agent/AgentSession and
+shared attachment or Agent ownership. Disabled/detached/foreign contexts, missing
+connections and changed App/source/client identity fail closed. Platform App
+credentials resolve from current System Settings; same-identity key/secret
+rotation remains distinct from App replacement. Every MCP discovery and call,
+including a retained tool-snapshot handler, resolves the current connection
+immediately before provider I/O. Tool schemas may be cached; user credentials
+are not installation-token TTL cached. Definitive HTTP 401 is observed at
+the MCP transport boundary before SDK normalization and conditionally marks only
+the admitted connection ID `reconnect_required`. A late failure cannot mark a
+replacement connection. Authentication failure does not reissue credentials,
+substitute PAT/installation/another account authority, or replay an uncertain
+mutation result. Existing bounded HTTP 429 transport handling remains unchanged.
+
+Runtime integration is opt-in and off by default. New command dispatch resolves
+the current user token for `GH_TOKEN` and `GITHUB_TOKEN` under the existing
+environment merge/disclosure contract, with no installation map or default
+installation selector. Disconnect/replacement blocks later resolution or supplies
+the new token; an already-admitted request, running process, terminal environment
+or copied token cannot be recalled.
+
+Disconnect, confirmed replacement, cancelled/rejected candidates, authentication
+mode changes and Toolkit/Agent deletion capture exact token/App cleanup facts.
+After local repository completion, orchestration awaits a bounded exact-token
+GitHub revocation attempt outside the transaction. Expected provider, timeout
+or current-registration failures produce sanitized warnings and do not undo or
+block local completion. No cleanup state, proof probe, retry API/UI or deletion
+barrier is retained. Local success is not proof of GitHub revocation: a provider
+failure may leave a copied non-expiring token valid. Cancellation and unexpected
+defects remain visible. Disconnect neither uninstalls the App nor erases earlier
+external writes or conversation content; detaching one shared attachment does
+not disconnect other Agents.
+
+Credential-free required E2E exercises Platform/BYOA setup, staged activation,
+another participant's MCP actions across personal/two-org targets, denied-target
+isolation, replacement, exact 401 publication, fail-open cleanup and new Runtime
+opt-in/off/on/replacement command injection. The testenv-only SDK/MCP/browser
+fixture is enabled only by explicit testenv configuration; normal deployments
+continue using GitHub endpoints and no synthetic credentials or provider
+registration changes are required.
 
 ### GitHub Multi-Installation Routing
 
@@ -1030,7 +1124,7 @@ Goal and Todo auto-bound toolkits expose fixed tool definitions independent of c
 | `runtime` | auto-bound only when the Agent is `managed`; every declared Runtime capability is granted at the captured/current capability version. Network authority comes from the current Workspace Runtime Profile configuration. | — |
 | `claude_rules` | auto-bound only when managed filesystem capability is granted; exposes hooks only, no model-visible tools | — |
 | `mcp` | ToolkitConfig.enabled=True and `auth_type` satisfied (`none`/`header`/`bearer`/`oauth2`) | `encrypted_credentials` for static auth or `MCPOAuthConnection` for OAuth2 |
-| `github` | depends on `github_auth_type` — `pat`: workspace ToolkitConfig credentials, `github_app`: installation ID, `github_app_platform`: System Settings-resolved platform App JWT with App-ID binding checks | ToolkitConfig `encrypted_credentials` plus the current effective Platform GitHub App Section |
+| `github` | depends on `github_auth_type` — `pat`: ToolkitConfig credentials; `github_app` / `github_app_platform`: bound installation authority; `github_app_user` / `github_app_platform_user`: the current Toolkit-owned user-account connection with App/source/client binding checks | ToolkitConfig `encrypted_credentials`, encrypted GitHub user connection/attempt payloads, and the current effective Platform GitHub App Section |
 | `notion`, `sentry` | MCP + toolkit-level OAuth2 connection exists | `MCPOAuthConnection` |
 | `gcp`, `aws` | Cloud-provider native auth (IRSA / workload identity) | — (no config) |
 | `kubernetes` | depends on `clusters[].auth_type` — kubeconfig / token / EKS / GKE | kubeconfig secret |
@@ -1197,6 +1291,16 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 - `GET /github/platform-install-url` — GitHub Platform App installation URL
 - `GET /github/platform-oauth-url` — GitHub Platform OAuth URL
 - `POST /github/platform-installations` — OAuth code → user's installation list
+- `GET /github/setup-availability` — management-authorized, redacted Platform registration/callback availability (shared and exact Agent scope)
+- `POST /toolkit-configs/{id}/github-user/connect` — reserve bound setup and return authorization/install URLs
+- `POST /toolkit-configs/{id}/github-user/exchange` — exchange once and stage a verified account without activation
+- `GET /toolkit-configs/{id}/github-user/attempts/{attempt_id}` — read the exact setup candidate
+- `POST /toolkit-configs/{id}/github-user/confirm` — explicitly activate the reviewed account/sharing scope
+- `DELETE /toolkit-configs/{id}/github-user/attempt` — cancel a known attempt using its bound ID
+- `DELETE /toolkit-configs/{id}/github-user/connection` — finish local disconnect with bounded fail-open provider cleanup
+- `GET /toolkit-configs/{id}/github-user/status` — redacted current saved account or null
+- `GET /toolkit-configs/{id}/github-user/access` — paginated current-account personal/organization observations
+- Every `github-user` operation also has an ownership-exact `/agents/{agent_id}/toolkit-configs/{id}/github-user/...` counterpart; shared routes reject Agent-owned items.
 
 **Catalog**
 - `GET /toolkits` — (unauthenticated) platform ToolkitProvider catalog + config schema
@@ -1319,6 +1423,8 @@ an admitted trigger/cycle with its Task. Channel registration and deletion
 notification execute only after the operation returns.
 
 ## Changelog
+
+- **2026-10-09** — Added Toolkit-owned GitHub App user-account authority for Platform and BYOA, staged account/sharing confirmation, current-connection MCP/Runtime admission, exact late-401 fencing, multi-owner readiness and bounded fail-open token cleanup. Existing PAT and installation modes retain their authority and defaults.
 
 - **2026-10-08** (spec_version 140) — Removed Toolkit visibility-scope management, contracts, and storage. Enabled shared availability now follows Workspace membership and canonical ownership, preserving Agent-only isolation, OAuth scopes, and existing Toolkit resources.
 
