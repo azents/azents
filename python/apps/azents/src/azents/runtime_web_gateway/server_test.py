@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import NamedTuple
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from aiohttp import WSMessage, WSMsgType, WSServerHandshakeError, web
@@ -1408,7 +1409,10 @@ async def test_broker_auto_post_preserves_only_its_origin() -> None:
                 "Host": "auth.services.example.net",
                 "Origin": "https://app.example.com",
             },
-            data={"initiation_id": "i" * 32},
+            data={
+                "initiation_id": "i" * 32,
+                "return_target": "/catalog/item?tag=one&tag=two#details",
+            },
         )
         assert response.status == 200
         assert response.headers["Referrer-Policy"] == "strict-origin"
@@ -1417,6 +1421,10 @@ async def test_broker_auto_post_preserves_only_its_origin() -> None:
         assert "frame-ancestors 'none'" in content_security_policy
         assert "script-src 'nonce-runtime-web'" in content_security_policy
         assert "https://app.example.com/runtime-web/auth/bound" in await response.text()
+        assert (
+            'name="return_target" value="/catalog/item?tag=one&amp;tag=two#details"'
+            in await response.text()
+        )
         assert not proxy.opened
     finally:
         await client.close()
@@ -1617,9 +1625,58 @@ async def test_duplicate_broker_binding_cookie_is_rejected_before_ticket_redeem(
         response = await client.post(
             "/redeem",
             headers=headers,
-            data={"ticket": "ticket-secret"},
+            data={"ticket": "ticket-secret", "return_target": "/"},
         )
         assert response.status == 400
         assert not proxy.opened
+    finally:
+        await client.close()
+
+
+async def test_authentication_navigation_preserves_original_path_and_query() -> None:
+    client = await _client(_ControlSessions())
+    target = "/catalog/item?tag=one&tag=two"
+    try:
+        response = await client.get(
+            target,
+            headers={
+                "Host": "endpoint.services.example.net",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Dest": "document",
+            },
+            allow_redirects=False,
+        )
+        assert response.status == 303
+        location = urlsplit(response.headers["Location"])
+        assert location.scheme == "https"
+        assert location.netloc == "app.example.com"
+        assert location.path == "/runtime-web/auth"
+        assert parse_qs(location.query) == {
+            "service_id": [_SERVICE.id],
+            "return_to": [target],
+        }
+        assert location.fragment == ""
+    finally:
+        await client.close()
+
+
+@pytest.mark.parametrize(
+    "target", ["https://evil.test/", "//evil.test/", "/\\evil.test/", "/\nfoo"]
+)
+async def test_broker_rejects_unsafe_target_before_ticket_redemption(
+    target: str,
+) -> None:
+    client = await _client(_ControlSessions())
+    try:
+        response = await client.post(
+            "/redeem",
+            headers={
+                "Host": "auth.services.example.net",
+                "Origin": "https://app.example.com",
+                "Cookie": "__Host-Azents-Runtime-Web-Broker-Binding=broker-secret",
+            },
+            data={"ticket": "ticket-secret", "return_target": target},
+        )
+        assert response.status == 400
     finally:
         await client.close()

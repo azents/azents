@@ -1,5 +1,6 @@
 "use client";
 
+import { useHash } from "@mantine/hooks";
 /**
  * Login step container
  *
@@ -14,6 +15,7 @@ import {
   getPostLoginRedirect,
   getSafeLoginNext,
 } from "@/shared/lib/login-redirect";
+import { runtimeWebLoginNextWithFragment } from "@/shared/lib/runtime-web-return-target";
 import { trpc } from "@/trpc/client";
 import type { LoginState } from "../types";
 
@@ -33,7 +35,11 @@ export function useLoginStep({
 }): LoginStepContainerProps {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const next = getSafeLoginNext(searchParams.get("next"));
+  const [fragment] = useHash();
+  const next = runtimeWebLoginNextWithFragment(
+    getSafeLoginNext(searchParams.get("next")),
+    fragment,
+  );
   const utils = trpc.useUtils();
   const signupStatusQuery = trpc.auth.getSignupStatus.useQuery();
 

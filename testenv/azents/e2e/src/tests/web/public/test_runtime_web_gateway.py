@@ -1359,6 +1359,7 @@ async def websocket(request):
 
 application = web.Application()
 application.router.add_get('/', index)
+application.router.add_get('/catalog/{item}', index)
 application.router.add_post('/echo', echo)
 application.router.add_route('*', '/framing', framing)
 application.router.add_post('/app-login', app_login)
@@ -1504,8 +1505,14 @@ def _browser(
 
 def _login(driver: WebDriver, *, email: str) -> None:
     """Authenticate through the exact configured Main Web origin."""
-    wait = WebDriverWait(driver, 30)
     driver.get(f"{_MAIN_ORIGIN}/login")
+    _submit_password_login(driver, email=email)
+    WebDriverWait(driver, 30).until(ec.url_contains("/workspaces"))
+
+
+def _submit_password_login(driver: WebDriver, *, email: str) -> None:
+    """Submit the current login form without changing its return destination."""
+    wait = WebDriverWait(driver, 30)
     email_input = wait.until(ec.element_to_be_clickable((By.NAME, "email")))
     email_input.send_keys(email)
     if not driver.find_elements(By.NAME, "password"):
@@ -1513,7 +1520,6 @@ def _login(driver: WebDriver, *, email: str) -> None:
         wait.until(ec.url_contains("/login/password"))
     password = wait.until(ec.element_to_be_clickable((By.NAME, "password")))
     password.send_keys(_SIGNUP_PASSWORD, Keys.ENTER)
-    wait.until(ec.url_contains("/workspaces"))
 
 
 def _activate_in_browser(driver: WebDriver, *, service_url: str) -> None:
@@ -2301,9 +2307,25 @@ def test_runtime_web_authentication_without_next_assets(
                     "Network.setBlockedURLs",
                     {"urls": [f"{_MAIN_ORIGIN}/_next/static/*"]},
                 )
-                _open_application_in_browser(driver, endpoint_url=service.url)
-                assert driver.current_url == service.url
+                destination = (
+                    f"{service.url}catalog/%E2%9C%93?"
+                    "view=grid&tag=one&tag=two&next=%2Fbasket#details"
+                )
+                _open_application_in_browser(driver, endpoint_url=destination)
+                assert driver.current_url == destination
                 assert driver.get_cookie("__Http-Azents-Runtime-Web") is not None
+                # Main Web login must carry the inherited browser fragment too.
+                driver.execute_cdp_cmd("Network.setBlockedURLs", {"urls": []})
+                driver.execute_cdp_cmd("Network.clearBrowserCookies", {})
+                # Leaving the current document avoids a same-document hash navigation.
+                driver.get("about:blank")
+                driver.get(destination)
+                WebDriverWait(driver, 30).until(ec.url_contains("/login"))
+                _submit_password_login(driver, email=workspace.email)
+                WebDriverWait(driver, 60).until(
+                    ec.visibility_of_element_located((By.ID, "ready"))
+                )
+                assert driver.current_url == destination
             finally:
                 driver.execute_cdp_cmd("Network.setBlockedURLs", {"urls": []})
                 driver.quit()

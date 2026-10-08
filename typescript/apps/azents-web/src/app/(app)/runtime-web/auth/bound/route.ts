@@ -10,6 +10,7 @@ import {
   RUNTIME_WEB_MAIN_BINDING_COOKIE,
   runtimeWebConfiguration,
 } from "@/shared/lib/runtime-web-auth";
+import { runtimeWebReturnTarget } from "@/shared/lib/runtime-web-return-target";
 import {
   createApiClientWithAccessToken,
   getFreshAccessToken,
@@ -65,6 +66,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
   const form = await request.formData();
   const initiationId = form.get("initiation_id");
+  const returnTarget = runtimeWebReturnTarget(form.get("return_target"));
+  if (returnTarget === null) {
+    return errorResponse("Invalid Runtime Web return target.", 400);
+  }
   const encodedBinding = request.cookies.get(
     RUNTIME_WEB_MAIN_BINDING_COOKIE,
   )?.value;
@@ -112,6 +117,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       '<!doctype html><meta charset="utf-8"><title>Runtime Web</title>',
       `<form id="continue" method="post" action="${escapeHtml(brokerDestination)}">`,
       `<input type="hidden" name="ticket" value="${escapeHtml(ticket.ticket_secret)}">`,
+      `<input type="hidden" name="return_target" value="${escapeHtml(returnTarget)}">`,
       "</form>",
       '<script nonce="runtime-web">document.getElementById("continue").submit()</script>',
     ].join(""),

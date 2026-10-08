@@ -31,6 +31,9 @@ class Browser {
   window = {
     location: {
       origin: "https://main.test",
+      pathname: "/",
+      search: "",
+      hash: "",
       replace: (destination: string): void => {
         this.destination = destination;
       },
@@ -44,6 +47,7 @@ class Browser {
     this.response = response;
     this.root.dataset = {
       serviceId: "s".repeat(32),
+      returnTarget: "/",
       invalidResponse: "Invalid authentication response.",
       failedMessage: "Authentication failed.",
     };
@@ -88,7 +92,10 @@ void test("serialized bootstrap authenticates without any application imports", 
           method: "POST",
           credentials: "same-origin",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ serviceId: "s".repeat(32) }),
+          body: JSON.stringify({
+            serviceId: "s".repeat(32),
+            returnTarget: "/",
+          }),
         },
       },
     ]),
@@ -116,6 +123,10 @@ void test("separate-domain authentication retains the native broker POST", async
   assert.equal(input.type, "hidden");
   assert.equal(input.name, "initiation_id");
   assert.equal(input.value, "initiation-id");
+  const target = form.children[1];
+  assert.ok(target);
+  assert.equal(target.name, "return_target");
+  assert.equal(target.value, "/");
   assert.equal(browser.destination, null);
 });
 
@@ -162,6 +173,7 @@ for (const result of [
     assert.equal(browser.body.children.length, 0);
     assert.deepEqual(browser.root.dataset, {
       serviceId: "s".repeat(32),
+      returnTarget: "/",
       invalidResponse: "Invalid authentication response.",
       failedMessage: "Authentication failed.",
     });
@@ -175,6 +187,7 @@ void test("a new authentication screen starts its own operation", async () => {
   await executeAndSettle(browser);
   browser.root = new Element();
   browser.root.dataset.serviceId = "t".repeat(32);
+  browser.root.dataset.returnTarget = "/";
   await executeAndSettle(browser);
   assert.equal(browser.calls.length, 2);
 });
@@ -185,10 +198,49 @@ void test("an authentication document restored at the service origin navigates t
   );
   browser.root.dataset.mainWebOrigin = "https://main.test";
   browser.window.location.origin = "https://service.test";
+  browser.window.location.pathname = "/catalog/item";
+  browser.window.location.search = "?tag=one&tag=two";
+  browser.window.location.hash = "#details";
   await executeAndSettle(browser);
   assert.equal(
     browser.destination,
-    `https://main.test/runtime-web/auth?service_id=${"s".repeat(32)}`,
+    `https://main.test/runtime-web/auth?service_id=${"s".repeat(32)}&return_to=${encodeURIComponent("/catalog/item?tag=one&tag=two#details")}`,
   );
   assert.equal(browser.calls.length, 0);
+});
+
+void test("bootstrap carries the original query and inherited fragment into authentication", async () => {
+  const browser = new Browser(
+    Promise.resolve(Response.json({ mode: "unknown" })),
+  );
+  browser.root.dataset.returnTarget =
+    "/catalog/item?tag=one&tag=two&next=%2Fbasket";
+  browser.window.location.hash = "#details";
+  await executeAndSettle(browser);
+  assert.equal(
+    browser.calls[0]?.options.body,
+    JSON.stringify({
+      serviceId: "s".repeat(32),
+      returnTarget: "/catalog/item?tag=one&tag=two&next=%2Fbasket#details",
+    }),
+  );
+});
+
+void test("a fragment already carried through login is not appended twice", async () => {
+  const browser = new Browser(
+    Promise.resolve(
+      Response.json({
+        mode: "separate_domain",
+        brokerDestination: "https://broker.test/bind",
+        initiationId: "initiation-id",
+      }),
+    ),
+  );
+  browser.root.dataset.returnTarget = "/catalog/item?view=grid#details";
+  browser.window.location.hash = "#details";
+  await executeAndSettle(browser);
+  assert.equal(
+    browser.body.children[0]?.children[1]?.value,
+    "/catalog/item?view=grid#details",
+  );
 });

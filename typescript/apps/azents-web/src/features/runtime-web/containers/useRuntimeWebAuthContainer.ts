@@ -5,11 +5,13 @@ import type { RuntimeWebAuthState } from "../types";
 interface RuntimeWebAuthContainerInput {
   serviceId: string;
   mainWebOrigin: string | null;
+  returnTarget: string;
 }
 
 interface RuntimeWebAuthContainerOutput {
   serviceId: string;
   mainWebOrigin: string | null;
+  returnTarget: string;
   state: RuntimeWebAuthState;
   onRetry: () => void;
 }
@@ -17,6 +19,7 @@ interface RuntimeWebAuthContainerOutput {
 export function useRuntimeWebAuthContainer({
   serviceId,
   mainWebOrigin,
+  returnTarget,
 }: RuntimeWebAuthContainerInput): RuntimeWebAuthContainerOutput {
   const [state, setState] = useState<RuntimeWebAuthState>({ type: "CHECKING" });
   useEffect(() => {
@@ -29,10 +32,11 @@ export function useRuntimeWebAuthContainer({
     return () => {
       active = false;
     };
-  }, [serviceId, mainWebOrigin]);
+  }, [serviceId, mainWebOrigin, returnTarget]);
   return {
     serviceId,
     mainWebOrigin,
+    returnTarget,
     state,
     onRetry: (): void => window.location.reload(),
   };
