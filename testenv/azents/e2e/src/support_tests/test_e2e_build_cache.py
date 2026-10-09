@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from support.ci_observability import parse_image_build_timings
 from support.consts import REPOSITORY_ROOT
 from tests import conftest as e2e_conftest
 
@@ -376,6 +377,11 @@ def test_image_build_observability_excludes_runtime_cache_credentials(
         '"duration_seconds": 12.346, "finished_at_monotonic": 112.34567, '
         '"image": "azents-server", "started_at_monotonic": 100.0}\n'
     )
+    records = parse_image_build_timings(tmp_path / "image-build-timings.jsonl")
+    assert len(records) == 1
+    assert records[0]["started_at_monotonic"] == 100.0
+    assert records[0]["finished_at_monotonic"] == 112.34567
+    assert records[0]["duration_seconds"] == 12.346
 
 
 def test_web_profile_submits_each_selected_current_worktree_build_once(
