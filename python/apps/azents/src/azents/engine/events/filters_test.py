@@ -47,7 +47,11 @@ from azents.engine.events.types import (
     UserMessagePayload,
     build_native_compat_key,
 )
-from azents.engine.run.errors import CompactionFailedError, CompactionPlanStaleError
+from azents.engine.run.errors import (
+    CompactionFailedError,
+    CompactionPlanStaleError,
+    NativeRequestSizeExceededError,
+)
 from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.compaction_operation import (
@@ -1965,6 +1969,52 @@ async def test_auto_compaction_uses_explicit_threshold_override() -> None:
     assert [event.kind for event in result] == [EventKind.COMPACTION_SUMMARY]
 
 
+async def test_forced_compaction_bypasses_token_threshold() -> None:
+    """Native-size recovery uses the shared atomic compactor below threshold."""
+    events = [
+        _event(
+            "1",
+            EventKind.USER_MESSAGE,
+            UserMessagePayload(sender_user_id=None, content="short"),
+        )
+    ]
+    transcript_repo = _TranscriptRepo(events)
+    session_repo = _SessionRepo()
+    started: list[str] = []
+
+    async def summarize(old_events: Sequence[Event], summary_budget: object) -> str:
+        assert list(old_events) == events
+        return "summary"
+
+    async def on_started() -> None:
+        started.append("started")
+
+    filter_ = EventAutoCompactionFilter(
+        session_id="session-1",
+        compactor=_compactor(
+            transcript_repo=transcript_repo,
+            session_repo=session_repo,
+        ),
+        summarize=summarize,
+        max_input_tokens=1000,
+        auto_compaction_threshold_tokens=None,
+        compaction_id_factory=lambda: "compact-1",
+    )
+    assert await filter_.compact(events) == events
+    assert not filter_.was_compacted
+    result = await filter_.force_compact(
+        events, reason="native_request_size_exceeded", on_started=on_started
+    )
+    assert filter_.was_compacted
+    assert started == ["started"]
+    assert len(result) == 1
+    assert result[0].kind == EventKind.COMPACTION_SUMMARY
+    assert session_repo.head_event_id == result[0].id
+    marker = transcript_repo.events[-2]
+    assert isinstance(marker.payload, CompactionMarkerPayload)
+    assert marker.payload.reason == "native_request_size_exceeded"
+
+
 async def test_auto_compaction_uses_latest_turn_marker_usage() -> None:
     """Large tool output before latest turn marker is not counted again."""
     events = [
@@ -2059,8 +2109,10 @@ async def test_native_request_guard_and_post_lower_pipeline() -> None:
     )
     try:
         guard.apply(request)
-    except ValueError as exc:
+    except NativeRequestSizeExceededError as exc:
         assert "size guard" in str(exc)
+        assert exc.actual_chars == request.native_request_input_chars()
+        assert exc.limit_chars == 4
     else:
         raise AssertionError("guard must reject oversized request")
 
@@ -2073,7 +2125,7 @@ async def test_native_request_guard_and_post_lower_pipeline() -> None:
     )
     try:
         NativeRequestSizeGuard(max_input_chars=50).apply(tool_schema_request)
-    except ValueError as exc:
+    except NativeRequestSizeExceededError as exc:
         assert "size guard" in str(exc)
     else:
         raise AssertionError("guard must count tools and instructions")

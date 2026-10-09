@@ -577,6 +577,7 @@ async def test_public_stop_releases_all_partial_rows_for_child_terminal_delivery
             await AgentSessionRepository().mark_running(setup, session_id)
     child_fenced = asyncio.Event()
     release_terminal = asyncio.Event()
+    winner_committed = asyncio.Event()
     pids: dict[str, int] = {}
     attempts: dict[str, int] = {}
     aborts: list[str] = []
@@ -597,6 +598,11 @@ async def test_public_stop_releases_all_partial_rows_for_child_terminal_delivery
         @asynccontextmanager
         async def manager() -> AsyncIterator[WriteSession]:
             attempts[role] = attempts.get(role, 0) + 1
+            if role == victim and attempts[role] > 1:
+                # This scenario induces exactly one cycle. Admit the loser
+                # retry only after the winner commits, so it cannot reacquire
+                # the released root/child rows and manufacture a second cycle.
+                await winner_committed.wait()
             try:
                 async with writes() as scope:
                     pid = await scope.write_session.scalar(
@@ -615,6 +621,9 @@ async def test_public_stop_releases_all_partial_rows_for_child_terminal_delivery
                 if isinstance(error.orig, DeadlockDetected):
                     aborts.append(role)
                 raise
+            else:
+                if role != victim:
+                    winner_committed.set()
 
         return manager
 

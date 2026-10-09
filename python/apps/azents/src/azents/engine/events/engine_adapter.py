@@ -54,6 +54,7 @@ from azents.engine.events.engine_events import (
     ProviderToolActivityChanged,
     ReasoningDelta,
     RunComplete,
+    RunModelAttemptDiscarded,
     RunPhaseChanged,
     RunStopped,
 )
@@ -1230,6 +1231,9 @@ class AgentEngineAdapter:
             output_operation_repository=repositories.output,
             run_finalization_operation_repository=repositories.finalization,
             model_operation_completion=context.model_operation_completion,
+            input_recovery_sink=lambda: emit_queue.put(
+                ephemeral(RunModelAttemptDiscarded(run_id=context.run_id))
+            ),
             post_lower_filter=PostLowerFilterPipeline(
                 [
                     NativeRequestSizeGuard(

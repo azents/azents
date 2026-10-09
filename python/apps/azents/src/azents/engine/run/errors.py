@@ -41,6 +41,22 @@ class NonRetryableModelCallError(ModelCallError):
     failure_code: str
 
 
+class NativeRequestSizeExceededError(RuntimeError):
+    """A lowered logical request exceeds the local input-size budget."""
+
+    def __init__(self, *, actual_chars: int, limit_chars: int) -> None:
+        """Capture safe request-size diagnostics without request content."""
+        super().__init__("Native model request input exceeds size guard")
+        self.actual_chars = actual_chars
+        self.limit_chars = limit_chars
+
+
+class ModelInputTooLargeError(NonRetryableModelCallError):
+    """Input cannot fit after the bounded compaction recovery."""
+
+    failure_code = "model_input_too_large"
+
+
 class ModelStreamTimeoutError(TransientModelCallError):
     """Azents-owned timeout for one streaming model provider attempt."""
 

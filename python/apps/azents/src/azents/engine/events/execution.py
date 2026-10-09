@@ -47,7 +47,15 @@ from azents.engine.events.types import (
 )
 from azents.engine.model_stream import ModelStreamCallContext, ModelStreamWatchdog
 from azents.engine.run.contracts import ToolAdmissionBarrier
-from azents.engine.run.errors import ModelCallError
+from azents.engine.run.errors import (
+    ModelCallError,
+    ModelInputTooLargeError,
+    NativeRequestSizeExceededError,
+)
+from azents.engine.run.provider_failure import (
+    ModelProviderFailure,
+    ModelProviderFailureCategory,
+)
 from azents.engine.run.turn_action_bridge import TurnActionBridgeBoundary
 from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE
 from azents.repos.engine_execution_operation import (
@@ -210,6 +218,16 @@ class AutoCompactionFilter(Protocol):
         """Compact model input outside a caller-owned DB session."""
         ...
 
+    async def force_compact(
+        self,
+        transcript: Sequence[Event],
+        *,
+        reason: str,
+        on_started: Callable[[], Awaitable[None]] | None,
+    ) -> list[Event]:
+        """Compact independently of the automatic token threshold."""
+        ...
+
 
 @dataclass(frozen=True)
 class AgentRunExecutionRequest:
@@ -252,6 +270,7 @@ class AgentRunExecution[
         output_operation_repository: EngineOutputOperationRepository,
         run_finalization_operation_repository: EngineRunFinalizationOperationRepository,
         model_operation_completion: ModelOperationCompletion | None,
+        input_recovery_sink: Callable[[], Awaitable[None]] | None,
         post_lower_filter: PostLowerFilter[TNativeRequest],
         model_adapter: ModelAdapter[TNativeRequest, TNativeStreamEvent],
         model_stream_watchdog: ModelStreamWatchdog,
@@ -270,6 +289,7 @@ class AgentRunExecution[
     ) -> None:
         """Inject loop dependencies."""
         self.operation_repository = execution_operation_repository
+        self.input_recovery_sink = input_recovery_sink
         self.model_input_operation_repository = model_input_operation_repository
         self.tool_result_operation_repository = tool_result_operation_repository
         self.output_repository = output_operation_repository
@@ -710,6 +730,15 @@ class ForegroundIterationHost[
         IterationValue[ForegroundPreparedTurn[TNativeRequest]]
         | IterationFinished[AgentRunStatus]
     ):
+        """Prepare an ordinary model turn with token-threshold compaction."""
+        return await self._prepare_turn(force_compaction_reason=None)
+
+    async def _prepare_turn(
+        self, *, force_compaction_reason: str | None
+    ) -> (
+        IterationValue[ForegroundPreparedTurn[TNativeRequest]]
+        | IterationFinished[AgentRunStatus]
+    ):
         """Recover durable input and honor foreground stop/mailbox boundaries."""
         execution = self.execution
         request = self.request
@@ -754,9 +783,20 @@ class ForegroundIterationHost[
                 compaction_started = True
                 await execution._update_phase(request.run_id, AgentRunPhase.COMPACTING)
 
-            transcript = await execution.auto_compaction_filter.compact(
-                transcript, on_started=on_compaction_started
-            )
+            if force_compaction_reason is None:
+                transcript = await execution.auto_compaction_filter.compact(
+                    transcript, on_started=on_compaction_started
+                )
+            else:
+                transcript = await execution.auto_compaction_filter.force_compact(
+                    transcript,
+                    reason=force_compaction_reason,
+                    on_started=on_compaction_started,
+                )
+                if not execution.auto_compaction_filter.was_compacted:
+                    raise ModelInputTooLargeError(
+                        "The model input is too large and could not be compacted."
+                    )
             compacted = execution.auto_compaction_filter.was_compacted
             if compaction_started:
                 await execution._update_phase(
@@ -785,24 +825,73 @@ class ForegroundIterationHost[
         """Stream through the unchanged provider/normalizer foreground adapters."""
         execution = self.execution
         request = self.request
-        native_request = execution.post_lower_filter.apply(prepared.call.native_request)
-        await execution._update_phase(request.run_id, AgentRunPhase.WAITING_FOR_MODEL)
-        try:
-            stream = await execution._stream_model(
-                request.run_id,
-                request.session_id,
-                native_request,
-                check_stop=self.check_stop,
-            )
-        except _ModelStreamUserInterrupted as exc:
-            await self.finish_turn(prepared, "cancelled")
-            status = await execution._complete_user_interrupted_model_stream(
-                request, exc.normalized
-            )
-            return IterationFinished(status, "cancelled")
-        await execution._update_phase(request.run_id, AgentRunPhase.NORMALIZING_OUTPUT)
+        recovered = False
+        while True:
+            try:
+                native_request = execution.post_lower_filter.apply(
+                    prepared.call.native_request
+                )
+                await execution._update_phase(
+                    request.run_id, AgentRunPhase.WAITING_FOR_MODEL
+                )
+                stream = await execution._stream_model(
+                    request.run_id,
+                    request.session_id,
+                    native_request,
+                    check_stop=self.check_stop,
+                )
+                await execution._update_phase(
+                    request.run_id, AgentRunPhase.NORMALIZING_OUTPUT
+                )
+                normalized = stream.complete()
+                break
+            except _ModelStreamUserInterrupted as exc:
+                await self.finish_turn(prepared, "cancelled")
+                status = await execution._complete_user_interrupted_model_stream(
+                    request, exc.normalized
+                )
+                return IterationFinished(status, "cancelled")
+            except (NativeRequestSizeExceededError, ModelProviderFailure) as exc:
+                if (
+                    isinstance(exc, ModelProviderFailure)
+                    and exc.category is not ModelProviderFailureCategory.CONTEXT_LIMIT
+                ):
+                    raise
+                if recovered or execution.auto_compaction_filter is None:
+                    raise ModelInputTooLargeError(
+                        "The model input is too large after compaction. "
+                        "Reduce the current input or attached image sizes."
+                    ) from exc
+                reason = (
+                    "native_request_size_exceeded"
+                    if isinstance(exc, NativeRequestSizeExceededError)
+                    else "provider_context_limit"
+                )
+                diagnostics: dict[str, object] = {
+                    "session_id": request.session_id,
+                    "run_id": request.run_id,
+                    "compaction_reason": reason,
+                }
+                if isinstance(exc, NativeRequestSizeExceededError):
+                    diagnostics.update(
+                        native_request_actual_chars=exc.actual_chars,
+                        native_request_limit_chars=exc.limit_chars,
+                    )
+                logger.info(
+                    "Compacting model input after input limit exceeded",
+                    extra=diagnostics,
+                )
+                if execution.input_recovery_sink is not None:
+                    await execution.input_recovery_sink()
+                await self.finish_turn(prepared, "error")
+                recovery = await self._prepare_turn(force_compaction_reason=reason)
+                if isinstance(recovery, IterationFinished):
+                    return recovery
+                prepared.call = recovery.value.call
+                prepared.ended = False
+                recovered = True
         normalized = _enrich_client_tool_calls(
-            stream.complete(), prepared.call.enrich_client_tool_call
+            normalized, prepared.call.enrich_client_tool_call
         )
         _log_model_token_usage(request=request, usage=normalized.usage)
         materialized = (

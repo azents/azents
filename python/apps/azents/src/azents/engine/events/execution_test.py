@@ -32,6 +32,7 @@ from azents.engine.events.protocols import (
     ModelAdapter,
     NativeEvent,
     NativeModelRequest,
+    NativeRequestInspection,
     NormalizedAdapterOutput,
     OutputSink,
     PostLowerFilter,
@@ -535,6 +536,17 @@ class _CompactedInput:
         await on_started()
         return list(self._events)
 
+    async def force_compact(
+        self,
+        transcript: Sequence[Event],
+        *,
+        reason: str,
+        on_started: Callable[[], Awaitable[None]] | None,
+    ) -> list[Event]:
+        """Return the same completed summary for forced recovery."""
+        del reason
+        return await self.compact(transcript, on_started=on_started)
+
 
 class _AutoCompactionFilter:
     """Auto-compaction filter with controllable start and failure behavior."""
@@ -565,6 +577,18 @@ class _AutoCompactionFilter:
             raise self.failure
         self.was_compacted = True
         return list(transcript)
+
+    async def force_compact(
+        self,
+        transcript: Sequence[Event],
+        *,
+        reason: str,
+        on_started: Callable[[], Awaitable[None]] | None,
+    ) -> list[Event]:
+        """Start the configured compaction independently of its threshold."""
+        del reason
+        self.starts = True
+        return await self.compact(transcript, on_started=on_started)
 
 
 class _PostFilter:
@@ -914,21 +938,21 @@ def _metadata_admission() -> ProviderOutputMetadataAdmission:
     )
 
 
-def _execution(
+def _execution[TNativeRequest: NativeRequestInspection](
     *,
     session_manager: SessionManager[WriteSession],
     input_projection_repository: EngineInputProjectionRepository | None,
     terminal_finalization_repository: TerminalRunFinalizationRepository | None,
     metadata_repository: _OutputMetadataRepository,
     model_operation_completion: ModelOperationCompletion | None,
-    post_lower_filter: PostLowerFilter[NativeModelRequest],
-    model_adapter: ModelAdapter[NativeModelRequest, NativeEvent],
+    post_lower_filter: PostLowerFilter[TNativeRequest],
+    model_adapter: ModelAdapter[TNativeRequest, NativeEvent],
     model_stream_watchdog: ModelStreamWatchdog,
     model_stream_provider: str,
     model_stream_provider_integration_id: str | None,
     model_stream_inference_profile: str | None,
     output_normalizer: AdapterOutputNormalizer[NativeEvent],
-    model_call_preparer: ModelCallPreparer[NativeModelRequest],
+    model_call_preparer: ModelCallPreparer[TNativeRequest],
     run_repo: RunStateRepository,
     transcript_repo: TranscriptRepository,
     auto_compaction_filter: AutoCompactionFilter | None = None,
@@ -939,7 +963,8 @@ def _execution(
     pre_model_lower_hook: PreModelLowerHook | None = None,
     session_repo: SessionHeadRepository | None = None,
     system_prompt_snapshot_repo: OutputSystemPromptRepository | None = None,
-) -> AgentRunExecution[NativeModelRequest, NativeEvent]:
+    input_recovery_sink: Callable[[], Awaitable[None]] | None = None,
+) -> AgentRunExecution[TNativeRequest, NativeEvent]:
     """Wire real completed repositories over each test's recording DB primitives."""
     mutations = EngineEventMutationRepository(transcript_repository=transcript_repo)
     results = EngineToolResultOperationRepository(
@@ -984,6 +1009,7 @@ def _execution(
             model_file_pin_repository=None,
         ),
         model_operation_completion=model_operation_completion,
+        input_recovery_sink=input_recovery_sink,
         post_lower_filter=post_lower_filter,
         model_adapter=model_adapter,
         model_stream_watchdog=model_stream_watchdog,

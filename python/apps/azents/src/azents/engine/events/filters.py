@@ -57,7 +57,11 @@ from azents.engine.events.types import (
     UserContentPart,
     UserMessagePayload,
 )
-from azents.engine.run.errors import CompactionFailedError, CompactionPlanStaleError
+from azents.engine.run.errors import (
+    CompactionFailedError,
+    CompactionPlanStaleError,
+    NativeRequestSizeExceededError,
+)
 from azents.repos.compaction_operation import (
     CompactionCommitContext,
     CompactionOperationRepository,
@@ -122,6 +126,22 @@ class EventAutoCompactionFilter:
         events = list(transcript)
         if _compaction_input_tokens(events) <= self._threshold_tokens:
             return events
+        return await self.force_compact(
+            events,
+            reason="auto_threshold_exceeded",
+            on_started=on_started,
+        )
+
+    async def force_compact(
+        self,
+        transcript: Sequence[Event],
+        *,
+        reason: str,
+        on_started: Callable[[], Awaitable[None]] | None,
+    ) -> list[Event]:
+        """Use the ordinary compactor without the automatic token threshold."""
+        self.was_compacted = False
+        events = list(transcript)
 
         async def notify_started() -> None:
             if on_started is not None:
@@ -136,7 +156,7 @@ class EventAutoCompactionFilter:
             summarize=self.summarize,
             on_started=notify_started,
             summary_context_window_tokens=self._max_input_tokens,
-            reason="auto_threshold_exceeded",
+            reason=reason,
             summary_enricher=self.summary_enricher,
             commit_context=self.commit_context,
         )
@@ -154,8 +174,12 @@ class NativeRequestSizeGuard[TNativeRequest: NativeRequestInspection]:
 
     def apply(self, request: TNativeRequest) -> TNativeRequest:
         """Fail when the complete logical request exceeds the character budget."""
-        if request.native_request_input_chars() > self._max_input_chars:
-            raise ValueError("Native model request input exceeds size guard")
+        actual_chars = request.native_request_input_chars()
+        if actual_chars > self._max_input_chars:
+            raise NativeRequestSizeExceededError(
+                actual_chars=actual_chars,
+                limit_chars=self._max_input_chars,
+            )
         return request
 
 

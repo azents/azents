@@ -84,6 +84,15 @@ class RunComplete(BaseModel):
     run_id: str
 
 
+class RunModelAttemptDiscarded(BaseModel):
+    """Internal ordered instruction to remove a failed model stream's partials."""
+
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal["run_model_attempt_discarded"] = "run_model_attempt_discarded"
+    run_id: str
+
+
 class RunStopped(BaseModel):
     """User stopped event."""
 
@@ -198,6 +207,7 @@ EngineEvent: TypeAlias = Annotated[
     | RunStarted
     | RunPhaseChanged
     | RunComplete
+    | RunModelAttemptDiscarded
     | RunStopped
     | RuntimeInitializingEvent
     | RuntimeReadyEvent

@@ -192,8 +192,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-10-08
-spec_version: 219
+last_verified_at: 2026-10-09
+spec_version: 220
 ---
 
 # Agent Execution Loop
@@ -260,6 +260,15 @@ Main steps:
    model options into a complete adapter-owned logical request. OpenAI API-key and ChatGPT OAuth use
    `OpenAIResponsesLowerer`; other providers use `PydanticAILowerer`.
 7. `PostLowerFilterPipeline` applies adapter-native request guards to that complete logical request.
+   Foreground native-size overflow or classified sampling `context_limit` forces
+   one ordinary compaction independently of the automatic token threshold and
+   rebuilds the request in the same model turn. Completed tools are not replayed;
+   image pixels may leave context through ordinary compaction and be reread by
+   the Agent later. Failed-preparation hooks end once before fresh preparation.
+   An ordered internal `RunModelAttemptDiscarded` emit removes the failed
+   stream's live partials through Worker authority before recovery output.
+   If compaction is unavailable/skipped or the rebuilt request is still too
+   large, `model_input_too_large` terminates without generic backoff retries.
 8. OpenAI API-key and ChatGPT OAuth primary sampling selects a persistent Responses WebSocket or
    streaming HTTP through the official OpenAI SDK after the complete request is validated;
    the other eight provider identities use `PydanticAIModelAdapter` with supported official SDKs,
@@ -684,7 +693,9 @@ attempt 1 with a fresh retry budget. WebSocket and REST live projections keep `r
 retry is active and remove it after successful output admission or terminal transition.
 Known non-provider deterministic failures, including fixture strict-mode `no_fixture_match`, may
 retain `retryability = non_retryable`, receive `backoff_seconds = 0`, and finalize on the first failed
-attempt. A classified provider failure always consumes the standard backoff and complete configured
+attempt. Native-size and sampling context-limit recovery first follow the bounded
+compaction path above; persistent overflow is a non-provider deterministic failure.
+Other classified provider failures consume the standard backoff and complete configured
 retry budget even when its diagnostic retryability is `non_retryable` or `user_action_required`.
 Unclassified provider outcomes follow internal-error handling rather than provider retry handling. When
 retry is exhausted, or when a non-provider non-retryable failure is observed, `FailedRunErrorFinalizer`
@@ -1999,6 +2010,10 @@ projections retain the dedicated kind, and the UI labels it with a channel/messa
 icon.
 
 ## Changelog
+
+- **2026-10-09** (spec_version 220) — Recover sampling input overflow through
+  one forced shared compaction across all provider lowerers, and finalize
+  unrecoverable input size without unchanged-input retries.
 
 - **2026-10-07** (spec_version 219) — Bind summary-only explicit Memory submission to common Worker Session/Run/Event ownership, native physical admission, compaction and audit retention; select aggregates by current scope.
 

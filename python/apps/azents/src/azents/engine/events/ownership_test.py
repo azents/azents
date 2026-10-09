@@ -170,6 +170,7 @@ def _execution(
         transcript_repository=transcript,
     )
     return AgentRunExecution(
+        input_recovery_sink=None,
         execution_operation_repository=EngineExecutionOperationRepository(
             owner=state.owner,
             session_manager=state.session_manager,
