@@ -1,4 +1,4 @@
-import { normalizeCredentialEdits } from "../../shared/lib/redacted-credentials.ts";
+import { normalizeCredentialEdits } from "../lib/redacted-credentials.ts";
 
 /** Blank write-only inputs mean omitted; explicit null remains an explicit edit. */
 export function normalizeGitHubUserCredentialEdits(

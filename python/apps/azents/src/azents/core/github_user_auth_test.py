@@ -48,9 +48,7 @@ async def _exchange(factory: GitHubClientFactory) -> str:
     return result.access_token
 
 
-def _installation(
-    identifier: int, owner: str, *, app_id: int = 11
-) -> dict[str, object]:
+def _installation(identifier: int, owner: str, *, app_id: int) -> dict[str, object]:
     return {
         "id": identifier,
         "app_id": app_id,
@@ -227,9 +225,9 @@ async def test_access_personal_two_orgs_filter_app_and_partial_denial() -> None:
                 200,
                 json={
                     "installations": [
-                        _installation(1, "personal"),
-                        _installation(2, "org-one"),
-                        _installation(3, "org-two"),
+                        _installation(1, "personal", app_id=11),
+                        _installation(2, "org-one", app_id=11),
+                        _installation(3, "org-two", app_id=11),
                         _installation(4, "other-app", app_id=99),
                     ]
                 },
@@ -273,7 +271,7 @@ async def test_repository_traversal_is_bounded_and_continues_past_page_one() -> 
         requests.append(request)
         if request.url.path == "/user/installations":
             return httpx.Response(
-                200, json={"installations": [_installation(1, "personal")]}
+                200, json={"installations": [_installation(1, "personal", app_id=11)]}
             )
         assert request.url.path == "/user/installations/1/repositories"
         number = int(request.url.params["page"])
@@ -325,7 +323,7 @@ async def test_installation_page_continues_after_filtered_first_page() -> None:
                 )
             assert request.url.params["page"] == "2"
             return httpx.Response(
-                200, json={"installations": [_installation(2, "org-one")]}
+                200, json={"installations": [_installation(2, "org-one", app_id=11)]}
             )
         assert request.url.path == "/user/installations/2/repositories"
         return httpx.Response(200, json={"repositories": []})
@@ -348,7 +346,7 @@ async def test_account_authentication_failure_is_not_partial_readiness() -> None
     def handle(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/user/installations":
             return httpx.Response(
-                200, json={"installations": [_installation(1, "personal")]}
+                200, json={"installations": [_installation(1, "personal", app_id=11)]}
             )
         return httpx.Response(401, json={"message": "Bad credentials"})
 

@@ -1,6 +1,7 @@
 import { Box, rem } from "@mantine/core";
 import { expect, fireEvent, userEvent, waitFor, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
+import { ToolCallCardContainer } from "../containers/ToolCallCardContainer";
 import {
   attachmentToolCall,
   completedToolCall,
@@ -9,11 +10,10 @@ import {
   preparingToolCall,
   runningToolCall,
 } from "../story-fixtures";
-import { ToolCallCard } from "./ToolCallCard";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const meta = {
-  component: ToolCallCard,
+  component: ToolCallCardContainer,
   decorators: [
     (Story) => (
       <StorybookCanvas>
@@ -21,7 +21,7 @@ const meta = {
       </StorybookCanvas>
     ),
   ],
-} satisfies Meta<typeof ToolCallCard>;
+} satisfies Meta<typeof ToolCallCardContainer>;
 
 export default meta;
 
@@ -369,7 +369,7 @@ export const MultilineFailureVariants = {
         { name: "custom_tool", arguments: "{}" },
         { name: "exec_command", arguments: '{"command":"run-job"}' },
       ].map((input) => (
-        <ToolCallCard
+        <ToolCallCardContainer
           key={input.name}
           toolCall={{
             ...input,
@@ -694,7 +694,7 @@ export const KnownPatch = {
       callId: "known-patch-story",
       name: "apply_patch",
       arguments:
-        '{"base_path":"/workspace/agent/azents","patch":"*** Begin Patch\\n*** Update File: src/features/chat/components/ToolCallCard.tsx\\n@@\\n-old value\\n+new value\\n*** Add File: src/features/chat/components/PatchPreview.tsx\\n+export const patchPreview = true;\\n*** Delete File: src/features/chat/components/LegacyPatchPreview.tsx\\n*** End Patch"}',
+        '{"base_path":"/workspace/agent/azents","patch":"*** Begin Patch\\n*** Update File: src/features/chat/components/ToolCallCardContainer.tsx\\n@@\\n-old value\\n+new value\\n*** Add File: src/features/chat/components/PatchPreview.tsx\\n+export const patchPreview = true;\\n*** Delete File: src/features/chat/components/LegacyPatchPreview.tsx\\n*** End Patch"}',
       status: "completed",
       result: "Applied patch under /workspace/agent/azents.",
       resultMetadata: {
@@ -702,7 +702,7 @@ export const KnownPatch = {
         changes: [
           {
             action: "update",
-            path: "/workspace/agent/azents/src/features/chat/ToolCallCard.tsx",
+            path: "/workspace/agent/azents/src/features/chat/ToolCallCardContainer.tsx",
             added_lines: 12,
             removed_lines: 4,
           },
@@ -724,7 +724,9 @@ export const KnownPatch = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByText("ToolCallCard.tsx +2")).toBeVisible();
+    await expect(
+      canvas.getByText("ToolCallCardContainer.tsx +2"),
+    ).toBeVisible();
     await expect(canvas.queryByText(/file\(s\) changed/)).toBeNull();
     await userEvent.click(
       canvas.getByRole("button", { name: /Applied patch/ }),
@@ -745,7 +747,7 @@ export const KnownEdit = {
       callId: "known-edit-story",
       name: "edit",
       arguments:
-        '{"path":"/workspace/agent/azents/src/features/chat/components/ToolCallCard.tsx","old_string":"fw={600}","new_string":"c=\\"dimmed\\" fw={500}"}',
+        '{"path":"/workspace/agent/azents/src/features/chat/components/ToolCallCardContainer.tsx","old_string":"fw={600}","new_string":"c=\\"dimmed\\" fw={500}"}',
       status: "completed",
     },
   },
@@ -764,7 +766,7 @@ export const KnownEditHorizontalScroll = {
       callId: "known-edit-horizontal-scroll-story",
       name: "edit",
       arguments: JSON.stringify({
-        path: "/workspace/agent/azents/src/features/chat/components/ToolCallCard.tsx",
+        path: "/workspace/agent/azents/src/features/chat/components/ToolCallCardContainer.tsx",
         old_string: `const previousValue = "${"old-value-".repeat(32)}";`,
         new_string: `const nextValue = "${"new-value-".repeat(32)}";`,
       }),
@@ -777,7 +779,7 @@ export const KnownEditHorizontalScroll = {
 
     const actionLabel = canvas.getByText("Update");
     const filePath = canvas.getByText(
-      "/workspace/agent/azents/src/features/chat/components/ToolCallCard.tsx",
+      "/workspace/agent/azents/src/features/chat/components/ToolCallCardContainer.tsx",
     );
     await expect(
       actionLabel.getBoundingClientRect().bottom,

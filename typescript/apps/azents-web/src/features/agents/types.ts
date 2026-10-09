@@ -3,8 +3,11 @@
 import type {
   AgentAdminResponse,
   AgentResponse,
+  AgentToolkitManagementItemResponse,
+  AgentToolkitResponse,
   HistoricalMemoryResponse,
   MemoryResponse,
+  ToolkitConfigResponse,
 } from "@azents/public-client";
 
 /** Agent list state */
@@ -76,3 +79,52 @@ export type HistoricalMemoryListState =
       memories: HistoricalMemoryResponse[];
       hasMore: boolean;
     };
+
+export type AgentToolkitEditorState =
+  | { type: "CLOSED" }
+  | { type: "CATALOG"; tab: "new" | "workspace" }
+  | { type: "CREATE"; toolkitType: string }
+  | { type: "DETAIL"; toolkitConfigId: string }
+  | { type: "EDIT"; toolkitConfigId: string };
+
+export type AgentToolkitMutationState =
+  { type: "IDLE" } | { type: "ERROR"; message: string };
+
+export interface AgentToolkitSharedOption {
+  value: string;
+  label: string;
+  toolkitType: string;
+  description?: string | null;
+}
+
+export type AgentToolkitManagementState =
+  | { type: "LOADING" }
+  | { type: "ERROR"; message: string }
+  | {
+      type: "READY";
+      items: AgentToolkitManagementItemResponse[];
+      toolkitTypes: Array<{ value: string; label: string }>;
+      availableShared: AgentToolkitSharedOption[];
+    };
+
+export interface AgentToolkitSectionIdentity {
+  handle: string;
+  agentId: string;
+}
+export interface LegacyAgentToolkitSnapshot {
+  agentToolkits: AgentToolkitResponse[];
+  availableToolkits: ToolkitConfigResponse[];
+  selectOptions: Array<{ value: string; label: string }>;
+}
+export type LegacyAgentToolkitState =
+  | ({ type: "LOADING" } & LegacyAgentToolkitSnapshot)
+  | ({ type: "ERROR" } & LegacyAgentToolkitSnapshot)
+  | ({ type: "LOADING_ERROR" } & LegacyAgentToolkitSnapshot)
+  | ({ type: "READY" } & LegacyAgentToolkitSnapshot);
+export interface LegacyAgentToolkitSectionProps {
+  state: LegacyAgentToolkitState;
+  selectedToolkitId: string | null;
+  onSelectionChange: (value: string | null) => void;
+  onAttach: (toolkitId: string) => void;
+  onDetach: (agentToolkitId: string) => void;
+}

@@ -64,6 +64,8 @@ class ImageBuildTiming(TypedDict):
     cache_scope: str | None
     cache_export_enabled: bool
     build_mode: Literal["full", "source-overlay"]
+    started_at_monotonic: float
+    finished_at_monotonic: float
 
 
 _TEST_PHASE_RECORD_KEYS = frozenset(
@@ -89,6 +91,8 @@ _IMAGE_BUILD_TIMING_KEYS = frozenset(
         "cache_scope",
         "cache_export_enabled",
         "build_mode",
+        "started_at_monotonic",
+        "finished_at_monotonic",
     }
 )
 
@@ -326,6 +330,8 @@ def _parse_image_build_timing(line: str) -> ImageBuildTiming:
         cache_scope=_optional_string(payload, "cache_scope"),
         cache_export_enabled=_required_bool(payload, "cache_export_enabled"),
         build_mode=build_mode,
+        started_at_monotonic=_required_float(payload, "started_at_monotonic"),
+        finished_at_monotonic=_required_float(payload, "finished_at_monotonic"),
     )
 
 

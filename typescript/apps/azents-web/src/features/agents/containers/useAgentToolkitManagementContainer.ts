@@ -1,5 +1,4 @@
 "use client";
-
 import {
   readSessionStorageValue,
   useSessionStorage,
@@ -11,25 +10,27 @@ import {
   creationReturnPath,
   deserializeGitHubUserCreation,
   GITHUB_USER_CREATION_KEY,
-} from "@/features/toolkits/github-user-creation-state";
+} from "@/shared/toolkits/github-user-creation-state";
 import {
   consumeGitHubUserPopupHandoff,
   deserializeGitHubUserContext,
   GITHUB_USER_CONTEXT_KEY,
   isGitHubUserMode,
-} from "@/features/toolkits/github-user-oauth-state";
+} from "@/shared/toolkits/github-user-oauth-state";
 import { trpc } from "@/trpc/client";
 import {
-  type AgentToolkitEditorState,
-  type AgentToolkitManagementState,
-  type AgentToolkitMutationState,
   canAuthorizeAgentToolkitOAuth,
   completedToolkitEditor,
   decodeAgentToolkitOAuthCallback,
   projectAgentToolkitManagementState,
 } from "../agentToolkitManagementState";
-import type { GitHubUserCreationContext } from "@/features/toolkits/github-user-creation-state";
-import type { GitHubUserContext } from "@/features/toolkits/github-user-oauth-state";
+import type {
+  AgentToolkitEditorState,
+  AgentToolkitManagementState,
+  AgentToolkitMutationState,
+} from "../types";
+import type { GitHubUserCreationContext } from "@/shared/toolkits/github-user-creation-state";
+import type { GitHubUserContext } from "@/shared/toolkits/github-user-oauth-state";
 import type { AgentToolkitManagementItemResponse } from "@azents/public-client";
 
 export interface AgentToolkitManagementContainerProps {

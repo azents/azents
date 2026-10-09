@@ -1,12 +1,12 @@
 import { Box, rem } from "@mantine/core";
 import { expect, userEvent, waitFor, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
+import { ProviderToolCallCardContainer } from "../containers/ProviderToolCallCardContainer";
 import { binaryAttachment, imageAttachment } from "../story-fixtures";
-import { ProviderToolCallCard } from "./ProviderToolCallCard";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const meta = {
-  component: ProviderToolCallCard,
+  component: ProviderToolCallCardContainer,
   decorators: [
     (Story) => (
       <StorybookCanvas>
@@ -14,7 +14,7 @@ const meta = {
       </StorybookCanvas>
     ),
   ],
-} satisfies Meta<typeof ProviderToolCallCard>;
+} satisfies Meta<typeof ProviderToolCallCardContainer>;
 
 export default meta;
 

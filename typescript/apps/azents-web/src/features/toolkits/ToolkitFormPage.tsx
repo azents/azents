@@ -7,8 +7,8 @@
  */
 
 import { createReactContainer } from "@/shared/lib/createReactContainer";
-import { ToolkitForm } from "./components/ToolkitForm";
-import { useToolkitFormContainer } from "./containers/useToolkitFormContainer";
+import { ToolkitForm } from "../../shared/toolkits/components/ToolkitForm";
+import { useToolkitFormContainer } from "../../shared/toolkits/containers/useToolkitFormContainer";
 
 export const ToolkitFormPage = createReactContainer(
   "ToolkitFormPage",

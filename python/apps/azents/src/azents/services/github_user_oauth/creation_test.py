@@ -39,7 +39,7 @@ class CreationHarness(NamedTuple):
 
 
 def _creation(*, platform: bool) -> CreationHarness:
-    h = _harness(platform=platform)
+    h = _harness(platform=platform, agent_id=None)
     assert h.state.context is not None
     original = h.attempt
     attempt = GitHubUserCreationAttempt(

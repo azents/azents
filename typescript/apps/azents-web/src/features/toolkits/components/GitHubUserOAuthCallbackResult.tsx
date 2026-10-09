@@ -1,13 +1,10 @@
 import { Alert, Anchor, Loader, Stack, Text } from "@mantine/core";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import type { GitHubUserUiError } from "../github-user-oauth-state";
+import type { GitHubUserOAuthCallbackState } from "../../../shared/toolkits/types";
 
 export interface GitHubUserOAuthCallbackResultProps {
-  state:
-    | { type: "LOADING" }
-    | { type: "COMPLETE" }
-    | { type: "ERROR"; reason: GitHubUserUiError };
+  state: GitHubUserOAuthCallbackState;
   returnPath: string | null;
 }
 export function GitHubUserOAuthCallbackResult({

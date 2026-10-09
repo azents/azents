@@ -10,8 +10,8 @@ import {
 } from "../github-user-creation-state";
 import { githubUserErrorReason } from "../github-user-oauth-state";
 import type { GitHubUserCreationContext } from "../github-user-creation-state";
-import type { GitHubUserSetupState } from "../github-user-oauth-state";
 import type { ToolkitFormValues } from "../schemas";
+import type { GitHubUserSetupState } from "../types";
 import type { GitHubUserCreationReview } from "@azents/public-client";
 
 export interface GitHubUserCreationControl {

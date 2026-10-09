@@ -332,13 +332,15 @@ def test_parse_and_render_image_build_timings(tmp_path: Path) -> None:
                     '{"build_mode":"source-overlay","cache_backend":"gha",'
                     '"cache_export_enabled":false,'
                     '"cache_scope":"e2e-server","completed":true,'
-                    '"duration_seconds":80.5,"image":"azents-server"}'
+                    '"duration_seconds":80.5,"image":"azents-server",'
+                    '"started_at_monotonic":100,"finished_at_monotonic":180.5}'
                 ),
                 (
                     '{"build_mode":"full","cache_backend":"gha",'
                     '"cache_export_enabled":false,'
                     '"cache_scope":"e2e-runner","completed":true,'
-                    '"duration_seconds":50.25,"image":"azents-runtime-runner"}'
+                    '"duration_seconds":50.25,"image":"azents-runtime-runner",'
+                    '"started_at_monotonic":100,"finished_at_monotonic":150.25}'
                 ),
             ]
         )
@@ -355,6 +357,8 @@ def test_parse_and_render_image_build_timings(tmp_path: Path) -> None:
     )
 
     assert len(records) == 2
+    assert records[0]["started_at_monotonic"] == 100.0
+    assert records[0]["finished_at_monotonic"] == 180.5
     assert "azents-server" in rendered
     assert "source-overlay" in rendered
     assert "80.50s" in rendered
@@ -368,13 +372,32 @@ def test_parse_and_render_image_build_timings(tmp_path: Path) -> None:
             '{"build_mode":"full","cache_backend":"gha",'
             '"cache_export_enabled":false,'
             '"cache_scope":"e2e-server","completed":true,'
-            '"duration_seconds":80.5,"image":"azents-server","unknown":true}'
+            '"duration_seconds":80.5,"image":"azents-server","unknown":true,'
+            '"started_at_monotonic":100,"finished_at_monotonic":180.5}'
         ),
         (
             '{"build_mode":"full","cache_backend":"gha",'
             '"cache_export_enabled":false,'
             '"cache_scope":"e2e-server","completed":"true",'
-            '"duration_seconds":80.5,"image":"azents-server"}'
+            '"duration_seconds":80.5,"image":"azents-server",'
+            '"started_at_monotonic":100,"finished_at_monotonic":180.5}'
+        ),
+        (
+            '{"build_mode":"full","cache_backend":"gha",'
+            '"cache_export_enabled":false,"cache_scope":"e2e-server",'
+            '"completed":true,"duration_seconds":80.5,"image":"azents-server",'
+            '"started_at_monotonic":true,"finished_at_monotonic":180.5}'
+        ),
+        (
+            '{"build_mode":"full","cache_backend":"gha",'
+            '"cache_export_enabled":false,"cache_scope":"e2e-server",'
+            '"completed":true,"duration_seconds":80.5,"image":"azents-server",'
+            '"started_at_monotonic":100,"finished_at_monotonic":"180.5"}'
+        ),
+        (
+            '{"build_mode":"full","cache_backend":"gha",'
+            '"cache_export_enabled":false,"cache_scope":"e2e-server",'
+            '"completed":true,"duration_seconds":80.5,"image":"azents-server"}'
         ),
     ],
 )
@@ -399,7 +422,8 @@ def test_parse_image_build_timings_rejects_unknown_build_mode(
         (
             '{"build_mode":"incremental","cache_backend":"gha",'
             '"cache_export_enabled":false,"cache_scope":"e2e-server",'
-            '"completed":true,"duration_seconds":80.5,"image":"azents-server"}\n'
+            '"completed":true,"duration_seconds":80.5,"image":"azents-server",'
+            '"started_at_monotonic":100,"finished_at_monotonic":180.5}\n'
         ),
         encoding="utf-8",
     )

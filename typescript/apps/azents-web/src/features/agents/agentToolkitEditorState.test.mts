@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { completedToolkitEditor } from "./agentToolkitManagementState.ts";
-import type { AgentToolkitEditorState } from "./agentToolkitManagementState.ts";
+import type { AgentToolkitEditorState } from "./types";
 
 void test("a completed write cannot close another editor, even for the same type", () => {
   const submitted: AgentToolkitEditorState = {

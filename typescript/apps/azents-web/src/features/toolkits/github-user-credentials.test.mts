@@ -4,7 +4,7 @@ import {
   gitHubUserRegistrationDirty,
   missingNewGitHubUserRegistration,
   normalizeGitHubUserCredentialEdits,
-} from "./github-user-credentials.ts";
+} from "../../shared/toolkits/github-user-credentials.ts";
 
 void test("untouched saved Platform user authorization is inherited, not dirty", () => {
   assert.equal(

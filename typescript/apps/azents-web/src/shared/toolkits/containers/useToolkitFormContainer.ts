@@ -37,10 +37,10 @@ import {
   toolkitProjectionUsesOauth,
 } from "../toolkit-config-projection";
 import { useGitHubUserCreationContainer } from "./useGitHubUserCreationContainer";
-import type { GitHubUserSetupState } from "../github-user-oauth-state";
 import type { ToolkitFormValues } from "../schemas";
 import type { ToolkitConfigProjection } from "../toolkit-config-projection";
 import type {
+  GitHubUserSetupState,
   MutationState,
   ToolkitConfigFormState,
   ToolkitListState,

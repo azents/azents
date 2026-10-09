@@ -14,6 +14,8 @@ import { useDisclosure } from "@mantine/hooks";
 import { IconCheck, IconChevronRight } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
+import { ProviderToolCallCardContainer } from "../containers/ProviderToolCallCardContainer";
+import { ToolCallCardContainer } from "../containers/ToolCallCardContainer";
 import { ActivityMessageRow } from "./ActivityMessageRow";
 import {
   activityRowChevronSize,
@@ -30,10 +32,8 @@ import {
   startElapsedDurationTimer,
   visibleElapsedDurationSeconds,
 } from "./elapsedDuration";
-import { ProviderToolCallCard } from "./ProviderToolCallCard";
 import { ReasoningActivityRow } from "./ReasoningActivityRow";
 import { SkillLoadedActivityRow } from "./SkillLoadedActivityRow";
-import { ToolCallCard } from "./ToolCallCard";
 import type {
   ActivityCategory,
   ActivityEvent,
@@ -142,9 +142,9 @@ function categoryLabel(
 function eventDetail(event: ActivityEvent): React.ReactElement | null {
   if (event.kind === "tool" && event.toolCall) {
     return event.toolCall.type === "client" ? (
-      <ToolCallCard toolCall={event.toolCall.toolCall} />
+      <ToolCallCardContainer toolCall={event.toolCall.toolCall} />
     ) : (
-      <ProviderToolCallCard toolCall={event.toolCall.toolCall} />
+      <ProviderToolCallCardContainer toolCall={event.toolCall.toolCall} />
     );
   }
   if (event.kind === "reasoning") {

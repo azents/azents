@@ -8,7 +8,7 @@ import {
   Text,
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
-import type { GitHubUserSetupState } from "../github-user-oauth-state";
+import type { GitHubUserSetupState } from "../types";
 
 export interface GitHubUserCreationProps {
   state: GitHubUserSetupState;

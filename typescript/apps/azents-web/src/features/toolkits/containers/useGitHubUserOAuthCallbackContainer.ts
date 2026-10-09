@@ -3,22 +3,22 @@ import { readSessionStorageValue, useSessionStorage } from "@mantine/hooks";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { isWindowMessageTarget } from "@/shared/lib/window-message-target";
-import { trpc } from "@/trpc/client";
 import {
   deserializeGitHubUserCreation,
   GITHUB_USER_CREATION_KEY,
   parseGitHubCreationState,
-} from "../github-user-creation-state";
+} from "@/shared/toolkits/github-user-creation-state";
+import { trpc } from "@/trpc/client";
 import {
   deserializeGitHubUserContext,
   GITHUB_USER_COMPLETION_EVENT,
   GITHUB_USER_CONTEXT_KEY,
   githubUserErrorReason,
   parseGitHubUserState,
-} from "../github-user-oauth-state";
+} from "../../../shared/toolkits/github-user-oauth-state";
+import type { GitHubUserContext } from "../../../shared/toolkits/github-user-oauth-state";
 import type { GitHubUserOAuthCallbackResultProps } from "../components/GitHubUserOAuthCallbackResult";
-import type { GitHubUserCreationContext } from "../github-user-creation-state";
-import type { GitHubUserContext } from "../github-user-oauth-state";
+import type { GitHubUserCreationContext } from "@/shared/toolkits/github-user-creation-state";
 
 export interface GitHubUserOAuthCallbackContainerProps {
   code: string | null;

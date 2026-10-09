@@ -18,14 +18,12 @@ import {
 import { IconArrowLeft, IconLock, IconPlus } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { ToolkitTypeIcon } from "@/features/toolkits/components/ToolkitTypeIcon";
-import { isGitHubUserMode } from "@/features/toolkits/github-user-oauth-state";
-import { GitHubUserAuthorizationPage } from "@/features/toolkits/GitHubUserAuthorizationPage";
-import { projectToolkitDetails } from "@/features/toolkits/toolkit-detail-projection";
-import { ToolkitFormPage } from "@/features/toolkits/ToolkitFormPage";
-import { createReactContainer } from "@/shared/lib/createReactContainer";
+import { ToolkitTypeIcon } from "@/shared/toolkits/components/ToolkitTypeIcon";
+import { isGitHubUserMode } from "@/shared/toolkits/github-user-oauth-state";
+import { GitHubUserAuthorizationContainer } from "@/shared/toolkits/GitHubUserAuthorizationContainer";
+import { projectToolkitDetails } from "@/shared/toolkits/toolkit-detail-projection";
+import { ToolkitFormContainer } from "@/shared/toolkits/ToolkitFormContainer";
 import { canAuthorizeAgentToolkitOAuth } from "../agentToolkitManagementState";
-import { useAgentToolkitManagementContainer } from "../containers/useAgentToolkitManagementContainer";
 import type { AgentToolkitManagementContainerOutput } from "../containers/useAgentToolkitManagementContainer";
 import type { AgentToolkitManagementItemResponse } from "@azents/public-client";
 import type { ReactNode } from "react";
@@ -159,7 +157,9 @@ export function ManagedToolkitCard(
           justify="flex-end"
           mt="xs"
           pt="xs"
-          style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}
+          style={{
+            borderTop: `${rem(1)} solid var(--mantine-color-default-border)`,
+          }}
         >
           <Button
             variant="subtle"
@@ -360,7 +360,7 @@ export function ManagedAgentToolkitSectionView(
         editor.type === "DETAIL" &&
         editor.toolkitConfigId === item.toolkit.id
           ? (props.githubUserView ?? (
-              <GitHubUserAuthorizationPage
+              <GitHubUserAuthorizationContainer
                 key={item.toolkit.id}
                 toolkit={item.toolkit}
                 context={{
@@ -576,7 +576,7 @@ export function ManagedAgentToolkitSectionView(
                 {t("toolkitManagement.catalog.back")}
               </Button>
               {props.setupView ?? (
-                <ToolkitFormPage
+                <ToolkitFormContainer
                   handle={props.handle}
                   agentId={props.agentId}
                   embedded
@@ -646,9 +646,3 @@ export function ManagedAgentToolkitSectionView(
     </Stack>
   );
 }
-
-export const ManagedAgentToolkitSection = createReactContainer(
-  "ManagedAgentToolkitSection",
-  useAgentToolkitManagementContainer,
-  ManagedAgentToolkitSectionView,
-);

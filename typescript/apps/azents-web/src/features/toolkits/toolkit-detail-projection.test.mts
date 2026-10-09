@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   projectToolkitDetails,
   safeToolkitResourceUrl,
-} from "./toolkit-detail-projection.ts";
+} from "../../shared/toolkits/toolkit-detail-projection.ts";
 import type { ToolkitConfigResponse } from "@azents/public-client";
 
 function toolkit(

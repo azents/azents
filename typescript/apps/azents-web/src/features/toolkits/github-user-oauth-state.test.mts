@@ -10,7 +10,8 @@ import {
   isGitHubUserMode,
   mergeGitHubUserAccess,
   parseGitHubUserState,
-} from "./github-user-oauth-state.ts";
+} from "../../shared/toolkits/github-user-oauth-state.ts";
+import type { GitHubUserPopupHandoff } from "../../shared/toolkits/github-user-oauth-state.ts";
 
 void test("returned review inherits only the exact original Toolkit context", () => {
   const current = {
@@ -19,7 +20,7 @@ void test("returned review inherits only the exact original Toolkit context", ()
     agentId: "agent",
     returnPath: "/w/team/agents/agent/settings/capabilities#agent-toolkits",
     returnView: "DETAIL",
-  } satisfies import("./github-user-oauth-state.ts").GitHubUserContext;
+  } satisfies import("../../shared/toolkits/github-user-oauth-state.ts").GitHubUserContext;
   const saved = { ...current, reviewAttemptId: "attempt" };
   assert.equal(gitHubUserResumeMatches(saved, current), true);
   for (const different of [
@@ -39,7 +40,6 @@ void test("returned review inherits only the exact original Toolkit context", ()
     null,
   );
 });
-import type { GitHubUserPopupHandoff } from "./github-user-oauth-state.ts";
 import type {
   GitHubUserInstallation,
   GitHubUserRepository,

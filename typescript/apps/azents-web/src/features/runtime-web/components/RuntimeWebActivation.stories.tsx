@@ -1,6 +1,8 @@
-import { rem } from "@mantine/core";
+import { Button, rem } from "@mantine/core";
+import { useState } from "react";
 import { expect, fn, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
+import { useRuntimeWebActivationDuration } from "../containers/useRuntimeWebActivationDuration";
 import { RuntimeWebActivation } from "./RuntimeWebActivation";
 import type { RuntimeWebActivationContainerOutput } from "../containers/useRuntimeWebActivationContainer";
 import type { RuntimeWebServiceResponse } from "@azents/public-client";
@@ -21,7 +23,19 @@ const offService: RuntimeWebServiceResponse = {
   observed_at: "2026-09-15T08:30:00Z",
 };
 
-const baseArgs: RuntimeWebActivationContainerOutput = {
+type RuntimeWebActivationStoryProps = Omit<
+  RuntimeWebActivationContainerOutput,
+  "duration" | "onDurationChange"
+>;
+
+function RuntimeWebActivationStory(
+  props: RuntimeWebActivationStoryProps,
+): React.ReactElement {
+  const duration = useRuntimeWebActivationDuration(props.state);
+  return <RuntimeWebActivation {...props} {...duration} />;
+}
+
+const baseArgs: RuntimeWebActivationStoryProps = {
   applicationUrl: offService.url,
   state: {
     type: "READY",
@@ -34,7 +48,7 @@ const baseArgs: RuntimeWebActivationContainerOutput = {
 };
 
 const meta = {
-  component: RuntimeWebActivation,
+  component: RuntimeWebActivationStory,
   decorators: [
     (Story) => (
       <StorybookCanvas maxWidth={rem(720)}>
@@ -43,7 +57,7 @@ const meta = {
     ),
   ],
   args: baseArgs,
-} satisfies Meta<typeof RuntimeWebActivation>;
+} satisfies Meta<typeof RuntimeWebActivationStory>;
 
 export default meta;
 
@@ -55,6 +69,71 @@ export const Off = {
     await expect(canvas.getByText("Turn on web service")).toBeVisible();
     await userEvent.click(canvas.getByRole("button", { name: "Turn On" }));
     await expect(args.onTurnOn).toHaveBeenCalledWith(3600);
+  },
+} satisfies Story;
+
+export const DurationSelection = {
+  args: { onTurnOn: fn() },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement);
+    const duration = canvas.getByLabelText("Exposure duration");
+    await userEvent.click(duration);
+    await userEvent.click(
+      within(document.body).getByRole("option", { name: "6 hours" }),
+    );
+    await expect(duration).toHaveValue("6 hours");
+    await userEvent.click(canvas.getByRole("button", { name: "Turn On" }));
+    await expect(args.onTurnOn).toHaveBeenCalledWith(21_600);
+  },
+} satisfies Story;
+
+function RuntimeWebActivationResetStory(
+  props: RuntimeWebActivationStoryProps,
+): React.ReactElement {
+  const [state, setState] = useState(props.state);
+  const duration = useRuntimeWebActivationDuration(state);
+  return (
+    <>
+      <RuntimeWebActivation {...props} state={state} {...duration} />
+      <Button
+        onClick={() =>
+          setState((current) =>
+            current.type === "READY"
+              ? {
+                  ...current,
+                  service: {
+                    ...current.service,
+                    selected_duration_seconds: 86_400,
+                    revision: current.service.revision + 1,
+                  },
+                }
+              : current,
+          )
+        }
+      >
+        Refresh service observation
+      </Button>
+    </>
+  );
+}
+
+export const ObservedDurationReset = {
+  args: { onTurnOn: fn() },
+  render: (args) => <RuntimeWebActivationResetStory {...args} />,
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement);
+    const duration = canvas.getByLabelText("Exposure duration");
+    await userEvent.click(duration);
+    await userEvent.click(
+      within(document.body).getByRole("option", { name: "6 hours" }),
+    );
+    await expect(duration).toHaveValue("6 hours");
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Refresh service observation" }),
+    );
+    await expect(duration).toHaveValue("24 hours");
+    await userEvent.click(canvas.getByRole("button", { name: "Turn On" }));
+    await expect(args.onTurnOn).toHaveBeenCalledWith(86_400);
   },
 } satisfies Story;
 

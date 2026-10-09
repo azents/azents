@@ -29,9 +29,8 @@ const meta = {
         callback_url: "https://azents.example/oauth/github/callback",
       },
     },
-    installations: [],
     selectedInstallations: [],
-    installationState: "IDLE",
+    installationState: { type: "IDLE", installations: [] },
     testState: { type: "IDLE" },
     runtimeAcknowledged: false,
     canTest: true,
@@ -192,21 +191,23 @@ export const ByoaInstallationUnchanged = {
 export const PlatformInstallations = {
   args: {
     config: { github_auth_type: "github_app_platform" },
-    installationState: "READY",
-    installations: [
-      {
-        id: 10,
-        account_login: "personal",
-        account_type: "User",
-        account_avatar_url: "",
-      },
-      {
-        id: 20,
-        account_login: "org",
-        account_type: "Organization",
-        account_avatar_url: "",
-      },
-    ],
+    installationState: {
+      type: "READY",
+      installations: [
+        {
+          id: 10,
+          account_login: "personal",
+          account_type: "User",
+          account_avatar_url: "",
+        },
+        {
+          id: 20,
+          account_login: "org",
+          account_type: "Organization",
+          account_avatar_url: "",
+        },
+      ],
+    },
     selectedInstallations: [
       {
         installation_id: "10",

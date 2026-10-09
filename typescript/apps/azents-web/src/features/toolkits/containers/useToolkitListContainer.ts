@@ -8,7 +8,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { trpc } from "@/trpc/client";
-import type { ToolkitConfigListState } from "../types";
+import type { ToolkitConfigListState } from "../../../shared/toolkits/types";
 import type { ToolkitConfigResponse } from "@azents/public-client";
 
 export interface ToolkitListContainerProps {

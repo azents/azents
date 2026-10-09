@@ -10,7 +10,7 @@ import {
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
 import { GitHubUserConnectionDetails } from "./GitHubUserConnectionDetails";
-import type { GitHubUserSetupState } from "../github-user-oauth-state";
+import type { GitHubUserSetupState } from "../types";
 import type { GitHubUserConnectionDetailsProps } from "./GitHubUserConnectionDetails";
 import type { GitHubUserConnectionSummary } from "@azents/public-client";
 

@@ -156,8 +156,8 @@ async def _save_credentials(
     manager: SessionManager[WriteSession],
     h: _Harness,
     *,
-    app_id: str = "123",
-    client_id: str = "Iv1.client",
+    app_id: str,
+    client_id: str,
 ) -> None:
     credentials = {
         "type": "github_app_user",
@@ -363,7 +363,9 @@ async def test_atomic_delete_captures_active_candidate_and_same_app_secret(
         requester=h.requester, attempt_id=first.id, registration=h.registration
     )
     await _review(h, "candidate")
-    await _save_credentials(rdb_session_manager, h)
+    await _save_credentials(
+        rdb_session_manager, h, app_id="123", client_id="Iv1.client"
+    )
     async with rdb_session_manager() as session:
         targets = await capture_and_clear_user_tokens(
             session, h.requester.toolkit_id, None, cipher=h.cipher

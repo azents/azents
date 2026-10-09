@@ -7,6 +7,7 @@ import {
   runtimeWebReturnTargetWithFragment,
 } from "@/shared/lib/runtime-web-return-target";
 import { trpc } from "@/trpc/client";
+import { useRuntimeWebActivationDuration } from "./useRuntimeWebActivationDuration";
 import type {
   RuntimeWebActivationState,
   RuntimeWebDurationSeconds,
@@ -20,6 +21,8 @@ export interface RuntimeWebActivationContainerProps {
 export interface RuntimeWebActivationContainerOutput {
   state: RuntimeWebActivationState;
   applicationUrl: string | null;
+  duration: RuntimeWebDurationSeconds;
+  onDurationChange: (duration: RuntimeWebDurationSeconds) => void;
   onTurnOn: (duration: RuntimeWebDurationSeconds) => void;
   onRetry: () => void;
 }
@@ -82,6 +85,8 @@ export function useRuntimeWebActivationContainer({
     turnOn.isPending,
   ]);
 
+  const durationProps = useRuntimeWebActivationDuration(state);
+
   const onTurnOn = useCallback(
     (duration: RuntimeWebDurationSeconds): void => {
       const service = query.data;
@@ -100,6 +105,7 @@ export function useRuntimeWebActivationContainer({
 
   return {
     state,
+    ...durationProps,
     applicationUrl: query.data?.url
       ? runtimeWebReturnDestination(
           query.data.url,

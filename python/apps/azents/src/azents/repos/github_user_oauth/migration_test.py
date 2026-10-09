@@ -13,6 +13,10 @@ from sqlalchemy.engine import Connection
 from azents.consts import PROJECT_ROOT
 from azents.core.config import Config
 from azents.core.github_user_auth import GitHubUserProviderError
+from azents.rdb.models.github_user_oauth import (
+    attempt_status_enum,
+    connection_status_enum,
+)
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.github_user_oauth.operations import GitHubUserOAuthOperationRepository
@@ -22,6 +26,16 @@ from azents.services.github_platform_system_setting.runtime import (
 )
 from azents.services.github_user_oauth.provider import GitHubUserProvider
 from azents.services.github_user_oauth.service import GitHubUserOAuthService
+
+
+def test_status_enum_creation_is_owned_by_migrations() -> None:
+    """ORM metadata must reference, not create, the migrated status types."""
+    assert attempt_status_enum.create_type is False
+    assert connection_status_enum.create_type is False
+    assert attempt_status_enum.name == "github_user_attempt_status"
+    assert connection_status_enum.name == "github_user_connection_status"
+    assert attempt_status_enum.enums == ["pending", "exchanging", "review"]
+    assert connection_status_enum.enums == ["connected", "reconnect_required"]
 
 
 def _downgrade(connection: Connection) -> None:

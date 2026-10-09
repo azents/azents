@@ -1,16 +1,16 @@
 import { Stack } from "@mantine/core";
 import { expect, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
-import { ProviderToolCallCard } from "./ProviderToolCallCard";
+import { ProviderToolCallCardContainer } from "../containers/ProviderToolCallCardContainer";
+import { ToolCallCardContainer } from "../containers/ToolCallCardContainer";
 import { ReasoningActivityRow } from "./ReasoningActivityRow";
 import { SkillLoadedActivityRow } from "./SkillLoadedActivityRow";
-import { ToolCallCard } from "./ToolCallCard";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 function CanonicalActivityRows(): React.ReactElement {
   return (
     <Stack gap={0}>
-      <ToolCallCard
+      <ToolCallCardContainer
         toolCall={{
           id: "read-row",
           callId: "read-row",
@@ -20,7 +20,7 @@ function CanonicalActivityRows(): React.ReactElement {
           status: "completed",
         }}
       />
-      <ToolCallCard
+      <ToolCallCardContainer
         toolCall={{
           id: "generic-row",
           callId: "generic-row",
@@ -34,7 +34,7 @@ function CanonicalActivityRows(): React.ReactElement {
         name="UI review"
         content="# UI review\n\nCheck alignment."
       />
-      <ProviderToolCallCard
+      <ProviderToolCallCardContainer
         toolCall={{
           id: "provider-row",
           callId: "provider-row",

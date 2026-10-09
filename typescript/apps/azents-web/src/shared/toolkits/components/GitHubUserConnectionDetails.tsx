@@ -13,7 +13,7 @@ import type {
   GitHubUserAccessState,
   GitHubUserOperationState,
   GitHubUserStatusState,
-} from "../github-user-oauth-state";
+} from "../types";
 
 export interface GitHubUserConnectionDetailsProps {
   status: GitHubUserStatusState;

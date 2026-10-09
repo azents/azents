@@ -26,6 +26,8 @@ import {
 } from "@tabler/icons-react";
 import { useLocale, useTranslations } from "next-intl";
 import { memo } from "react";
+import { ProviderToolCallCardContainer } from "../containers/ProviderToolCallCardContainer";
+import { ToolCallCardContainer } from "../containers/ToolCallCardContainer";
 import { continuationPresentation } from "../continuationPresentation";
 import { externalChannelMessagePresentation } from "../externalChannelMessage";
 import {
@@ -41,10 +43,8 @@ import { MarkdownContent } from "./MarkdownContent";
 import { MessageActionRow } from "./MessageActionRow";
 import classes from "./MessageBubble.module.css";
 import { MessageMetadataSurface } from "./MessageMetadataFooter";
-import { ProviderToolCallCard } from "./ProviderToolCallCard";
 import { RunRetryCard } from "./RunRetryCard";
 import { ScheduledTaskMessageDisclosure } from "./ScheduledTaskMessageDisclosure";
-import { ToolCallCard } from "./ToolCallCard";
 import type { ChatMessage } from "../types";
 
 interface FailedRunRetryAction {
@@ -508,10 +508,10 @@ function AssistantToolCallMessage({
     <Box mb="md" w="100%" style={{ minWidth: 0 }}>
       <Box style={{ maxWidth: "100%", minWidth: 0 }}>
         {message.toolCalls?.map((tc) => (
-          <ToolCallCard key={tc.id} toolCall={tc} />
+          <ToolCallCardContainer key={tc.id} toolCall={tc} />
         ))}
         {message.providerToolCalls?.map((tc) => (
-          <ProviderToolCallCard key={tc.id} toolCall={tc} />
+          <ProviderToolCallCardContainer key={tc.id} toolCall={tc} />
         ))}
         {message.attachments && message.attachments.length > 0 && (
           <FileAttachmentList files={message.attachments} />

@@ -11,7 +11,6 @@ import {
 } from "@mantine/core";
 import { IconDots, IconTool, IconWorld } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
 import { ActivityRow } from "./ActivityRow";
 import {
   activityDetailScrollAreaProps,
@@ -31,11 +30,6 @@ import { ToolFailureOutput } from "./ToolFailureOutput";
 import { ToolInputContent } from "./ToolInputContent";
 import type { ProviderToolCall } from "../types";
 import type { ReactElement } from "react";
-
-interface ProviderToolCallCardProps {
-  toolCall: ProviderToolCall;
-  hiddenAttachmentUris?: readonly string[];
-}
 
 function RawProviderToolDetails({
   toolCall,
@@ -90,9 +84,11 @@ function RawProviderToolDetails({
 export function ProviderToolCallCard({
   toolCall,
   hiddenAttachmentUris = [],
-}: ProviderToolCallCardProps): ReactElement {
+  rawOpened,
+  onOpenRaw,
+  onCloseRaw,
+}: ProviderToolCallCardViewProps): ReactElement {
   const t = useTranslations("chat.toolCall");
-  const [rawOpened, setRawOpened] = useState(false);
   const displayName = providerToolDisplayName(toolCall.name);
   const activityLabel = providerToolActivityLabel(toolCall);
   const webSearch = providerWebSearchPresentation(toolCall);
@@ -220,7 +216,7 @@ export function ProviderToolCallCard({
               variant="subtle"
               color="gray"
               aria-label={t("viewRawDataFor", { action: displayName })}
-              onClick={() => setRawOpened(true)}
+              onClick={onOpenRaw}
             >
               <IconDots size={activityRowIconSize} />
             </ActionIcon>
@@ -246,7 +242,7 @@ export function ProviderToolCallCard({
       ) : null}
       <Modal
         opened={rawOpened}
-        onClose={() => setRawOpened(false)}
+        onClose={onCloseRaw}
         title={t("rawData")}
         centered
         size="lg"
@@ -256,3 +252,5 @@ export function ProviderToolCallCard({
     </>
   );
 }
+
+import type { ProviderToolCallCardViewProps } from "../types";

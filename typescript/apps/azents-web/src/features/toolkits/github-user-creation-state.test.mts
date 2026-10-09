@@ -4,7 +4,7 @@ import {
   creationReturnPath,
   deserializeGitHubUserCreation,
   parseGitHubCreationState,
-} from "./github-user-creation-state.ts";
+} from "../../shared/toolkits/github-user-creation-state.ts";
 
 void test("only nonsecret exact creation context is persisted", () => {
   const context = {
