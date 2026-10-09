@@ -963,6 +963,7 @@ def _execution[TNativeRequest: NativeRequestInspection](
     pre_model_lower_hook: PreModelLowerHook | None = None,
     session_repo: SessionHeadRepository | None = None,
     system_prompt_snapshot_repo: OutputSystemPromptRepository | None = None,
+    input_recovery_sink: Callable[[], Awaitable[None]] | None = None,
 ) -> AgentRunExecution[TNativeRequest, NativeEvent]:
     """Wire real completed repositories over each test's recording DB primitives."""
     mutations = EngineEventMutationRepository(transcript_repository=transcript_repo)
@@ -1008,6 +1009,7 @@ def _execution[TNativeRequest: NativeRequestInspection](
             model_file_pin_repository=None,
         ),
         model_operation_completion=model_operation_completion,
+        input_recovery_sink=input_recovery_sink,
         post_lower_filter=post_lower_filter,
         model_adapter=model_adapter,
         model_stream_watchdog=model_stream_watchdog,

@@ -9,6 +9,12 @@ import pytest
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities, ModelModalities, ModelModality
+from azents.engine.events.engine_adapter import _AsyncEventEmitQueue
+from azents.engine.events.engine_events import (
+    ContentDelta,
+    ReasoningDelta,
+    RunModelAttemptDiscarded,
+)
 from azents.engine.events.execution import AgentRunExecutionRequest, PreparedModelCall
 from azents.engine.events.execution_test import (
     _artifact,
@@ -34,7 +40,12 @@ from azents.engine.events.openai_responses import (
     OpenAIResponsesLowerer,
     OpenAIResponsesRequest,
 )
-from azents.engine.events.protocols import NativeEvent, NormalizedAdapterOutput
+from azents.engine.events.protocols import (
+    ContentDeltaProjection,
+    NativeEvent,
+    NormalizedAdapterOutput,
+    ReasoningDeltaProjection,
+)
 from azents.engine.events.pydantic_ai_lowering import PydanticAILowerer
 from azents.engine.events.pydantic_ai_types import PydanticAIRequest
 from azents.engine.events.types import (
@@ -44,6 +55,7 @@ from azents.engine.events.types import (
     Event,
     FileOutputPart,
 )
+from azents.engine.run.emit import ephemeral
 from azents.engine.run.errors import CompactionPlanStaleError, ModelInputTooLargeError
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
@@ -174,6 +186,31 @@ class _TerminalContextStream(_StaticOutputStream):
     def complete(self) -> NormalizedAdapterOutput:
         raise _provider_failure(ModelProviderFailureCategory.CONTEXT_LIMIT)
 
+    def process_event(self, native_event: NativeEvent) -> NormalizedAdapterOutput:
+        """Publish a prefix before the provider's terminal failure."""
+        return NormalizedAdapterOutput(
+            needs_follow_up=False,
+            projections=[
+                ContentDeltaProjection(delta="failed"),
+                ReasoningDeltaProjection(
+                    delta="failed-reasoning",
+                    item_id=None,
+                    output_index=None,
+                    summary_index=None,
+                ),
+            ],
+        )
+
+
+class _ReplacementStream(_StaticOutputStream):
+    """Publish only the replacement attempt's text."""
+
+    def process_event(self, native_event: NativeEvent) -> NormalizedAdapterOutput:
+        return NormalizedAdapterOutput(
+            needs_follow_up=False,
+            projections=[ContentDeltaProjection(delta="replacement")],
+        )
+
 
 class _TerminalContextNormalizer(_Normalizer):
     """Exercise response.failed errors raised after the iterator has ended."""
@@ -190,6 +227,13 @@ class _TerminalContextNormalizer(_Normalizer):
         ):
             return _TerminalContextStream(
                 NormalizedAdapterOutput(needs_follow_up=False)
+            )
+        if self.mode == "terminal_context":
+            return _ReplacementStream(
+                NormalizedAdapterOutput(
+                    needs_follow_up=False,
+                    events=[_assistant_event()],
+                )
             )
         return super().start(session_id)
 
@@ -322,12 +366,17 @@ async def test_overflow_recovery_through_every_lowerer(
     compactor = _ForcedCompactor(mode)
     adapter = _Adapter(mode)
     run_repo = _RunRepo()
+    emit_queue = _AsyncEventEmitQueue()
     execution = _execution(
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
         metadata_repository=_OutputMetadataRepository(failure=None),
         model_operation_completion=None,
+        input_recovery_sink=lambda: emit_queue.put(
+            ephemeral(RunModelAttemptDiscarded(run_id="run-1"))
+        ),
+        output_sink=emit_queue.extend_from_output,
         post_lower_filter=NativeRequestSizeGuard[Request](
             max_input_chars=1_000_000
             if mode
@@ -438,3 +487,26 @@ async def test_overflow_recovery_through_every_lowerer(
     )
     assert adapter.closed
     assert tool_executor.executed_calls == []
+    projection_order: list[str] = []
+    live_text = ""
+    live_reasoning = ""
+    while not emit_queue.empty():
+        emit = await emit_queue.get()
+        if isinstance(emit.event, ContentDelta):
+            projection_order.append(emit.event.delta)
+            live_text += emit.event.delta
+        elif isinstance(emit.event, ReasoningDelta):
+            projection_order.append(emit.event.delta)
+            live_reasoning += emit.event.delta
+        elif isinstance(emit.event, RunModelAttemptDiscarded):
+            projection_order.append("discard")
+            live_text = live_reasoning = ""
+    if mode == "terminal_context":
+        assert projection_order == [
+            "failed",
+            "failed-reasoning",
+            "discard",
+            "replacement",
+        ]
+        assert live_text == "replacement"
+        assert live_reasoning == ""

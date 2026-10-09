@@ -265,6 +265,8 @@ Main steps:
    rebuilds the request in the same model turn. Completed tools are not replayed;
    image pixels may leave context through ordinary compaction and be reread by
    the Agent later. Failed-preparation hooks end once before fresh preparation.
+   An ordered internal `RunModelAttemptDiscarded` emit removes the failed
+   stream's live partials through Worker authority before recovery output.
    If compaction is unavailable/skipped or the rebuilt request is still too
    large, `model_input_too_large` terminates without generic backoff retries.
 8. OpenAI API-key and ChatGPT OAuth primary sampling selects a persistent Responses WebSocket or

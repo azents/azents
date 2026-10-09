@@ -47,7 +47,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-10-09
-spec_version: 85
+spec_version: 86
 ---
 
 # E2E Primary Test Strategy
@@ -99,6 +99,19 @@ lifecycle/scope/attachment and owner/member persistence flows remain in E2E,
 along with Runtime Web navigation and service lifecycle evidence. Component
 interaction passes do not establish accessibility conformance; accessibility
 diagnostics remain separate evidence.
+
+## Login Browser Readiness
+
+The invalid-refresh-cookie login journey checks the email input's visibility
+and enabled state in one synchronous browser script over the current document.
+It returns only a Boolean observation, never a WebElement retained across
+separate find/display/enabled commands while auth-driven navigation or hydration
+can replace the document. A missing, hidden, transparent or disabled input is
+not ready; unrelated WebDriver failures still propagate.
+
+The journey retains its real invalid-cookie navigation, 20-second readiness
+deadline and login URL assertion. Docker-free tests protect the single-command
+observation boundary; actual browser E2E remains the product evidence.
 
 ## Direct File Transfer Evidence
 
@@ -732,6 +745,9 @@ External substrate features such as Agent Runtime Provider are recorded in two l
 Local/PR environment without live substrate does not fake live PASS. Instead, separate prerequisite snapshot state and deterministic evidence in PR body and design QA record. If primary E2E substrate such as Browser runner or Docker/testcontainers is unavailable and product path cannot be executed, do not replace it with PASS. Track scenario, blocker category, observed error, expected verification target, and next action in GitHub Issue, and leave blocked evidence plus issue link in design QA record.
 
 ## Changelog
+
+- **2026-10-09** (spec_version 86) — Remove stale-document login readiness
+  races with an atomic current-document visibility/enabled observation.
 
 - **2026-10-04** (spec_version 82) — Added isolated multi-turn consolidation
   product verification and production-service sampling with ordinary leases and

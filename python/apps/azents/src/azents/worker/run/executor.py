@@ -88,6 +88,7 @@ from azents.engine.events.builders import make_system_error_event
 from azents.engine.events.engine_adapter import AgentEngineAdapter
 from azents.engine.events.engine_events import (
     RunComplete,
+    RunModelAttemptDiscarded,
     RunPhaseChanged,
     RunStarted,
     RunStopped,
@@ -1783,6 +1784,14 @@ class RunExecutor:
             nonlocal terminal_run_status, terminal_state_persisted
             match item.event:
                 case RunStarted():
+                    return
+                case RunModelAttemptDiscarded(run_id=event_run_id):
+                    if event_run_id != run_id:
+                        raise RuntimeError("RunModelAttemptDiscarded run ID mismatch")
+                    await self.live_event_projector.discard_failed_attempt(
+                        snapshot.session_id,
+                        owner_generation=owner_generation,
+                    )
                     return
                 case RunComplete(run_id=event_run_id):
                     if event_run_id != run_id:

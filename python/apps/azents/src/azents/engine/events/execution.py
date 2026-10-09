@@ -270,6 +270,7 @@ class AgentRunExecution[
         output_operation_repository: EngineOutputOperationRepository,
         run_finalization_operation_repository: EngineRunFinalizationOperationRepository,
         model_operation_completion: ModelOperationCompletion | None,
+        input_recovery_sink: Callable[[], Awaitable[None]] | None,
         post_lower_filter: PostLowerFilter[TNativeRequest],
         model_adapter: ModelAdapter[TNativeRequest, TNativeStreamEvent],
         model_stream_watchdog: ModelStreamWatchdog,
@@ -288,6 +289,7 @@ class AgentRunExecution[
     ) -> None:
         """Inject loop dependencies."""
         self.operation_repository = execution_operation_repository
+        self.input_recovery_sink = input_recovery_sink
         self.model_input_operation_repository = model_input_operation_repository
         self.tool_result_operation_repository = tool_result_operation_repository
         self.output_repository = output_operation_repository
@@ -879,6 +881,8 @@ class ForegroundIterationHost[
                     "Compacting model input after input limit exceeded",
                     extra=diagnostics,
                 )
+                if execution.input_recovery_sink is not None:
+                    await execution.input_recovery_sink()
                 await self.finish_turn(prepared, "error")
                 recovery = await self._prepare_turn(force_compaction_reason=reason)
                 if isinstance(recovery, IterationFinished):

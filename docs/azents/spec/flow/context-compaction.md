@@ -108,6 +108,12 @@ One model turn may recover once: end the failed preparation's turn hook, honor
 stop/mailbox and ownership boundaries, compact the current durable transcript,
 then rebuild the native request and request-local dependencies from the summary.
 The retry stays in the same Run and does not rerun completed client tools.
+Before compaction, the Engine queues an internal `RunModelAttemptDiscarded`
+instruction after any failed stream deltas and before recovery phase/output
+events. Worker consumption validates the Run identity and invokes its existing
+owner-fenced failed-attempt partial removal. The instruction is not published
+to participants; old text/reasoning/tool partials cannot concatenate into the
+replacement stream.
 Ordinary compaction may remove image pixels; the Agent may read their source
 files again in subsequent turns. No pending-image retention or automatic reread
 is performed, and the original events/files are not deleted by compaction.

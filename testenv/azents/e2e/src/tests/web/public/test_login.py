@@ -1,10 +1,25 @@
 """Login entrypoint browser regressions."""
 
-from selenium.common.exceptions import StaleElementReferenceException
-from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
-from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
+
+
+def _login_email_ready(driver: WebDriver) -> bool:
+    """Inspect current-document visibility and enabled state in one command."""
+    return (
+        driver.execute_script(
+            """
+        const email = document.querySelector('input[name="email"]');
+        return email !== null
+          && email.checkVisibility({
+            visibilityProperty: true,
+            opacityProperty: true,
+          })
+          && !email.matches(':disabled');
+        """
+        )
+        is True
+    )
 
 
 def test_login_renders_with_invalid_refresh_cookie(
@@ -30,8 +45,7 @@ def test_login_renders_with_invalid_refresh_cookie(
             browser_driver,
             20,
             poll_frequency=0.1,
-            ignored_exceptions=(StaleElementReferenceException,),
-        ).until(ec.element_to_be_clickable((By.NAME, "email")))
+        ).until(_login_email_ready)
         assert "/login" in browser_driver.current_url
     finally:
         browser_driver.delete_all_cookies()

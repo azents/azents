@@ -100,7 +100,9 @@ from azents.engine.events.action_messages import (
     CreateGitWorktreeAction,
 )
 from azents.engine.events.engine_events import (
+    ContentDelta,
     RunComplete,
+    RunModelAttemptDiscarded,
     RunPhaseChanged,
     RunStopped,
     SubagentTreeChanged,
@@ -6511,6 +6513,85 @@ async def test_active_heartbeat_owner_loss_cancels_execution_without_retry_or_cl
     assert lifecycle.terminal_runs == []
     assert live_event_projector.flushed_session_ids == []
     assert live_event_projector.live_run_clears == []
+
+
+async def test_context_recovery_discards_queued_prefix_before_replacement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Internal recovery clears old deltas through Worker-owned ordered handling."""
+
+    class _RecoveryEngine(_Engine):
+        def run(
+            self,
+            request: RunRequest,
+            context: object,
+            *,
+            poll_messages: PollMessages | None = None,
+            check_stop: object = None,
+        ) -> AsyncIterator[Emit]:
+            assert isinstance(context, RunContext)
+
+            async def iterator() -> AsyncIterator[Emit]:
+                yield ephemeral(ContentDelta(delta="failed", content_index=0))
+                yield ephemeral(RunModelAttemptDiscarded(run_id=context.run_id))
+                yield ephemeral(ContentDelta(delta="replacement", content_index=0))
+                yield ephemeral(RunComplete(run_id=context.run_id))
+
+            return iterator()
+
+    lifecycle = _SessionLifecycle()
+    projector = _LiveEventProjector()
+    executor = _executor(
+        lifecycle, engine=_RecoveryEngine(), live_event_projector=projector
+    )
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        return RunInputPollResult(
+            context_invalidated=False,
+            complete_run=False,
+            suppress_parent_result=False,
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            has_actionable_work=True,
+        )
+
+    async def resolve_success(*args: object, **kwargs: object) -> object:
+        return await _resolve_success()
+
+    async def resolve_tools(*args: object, **kwargs: object) -> object:
+        return []
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input_with_resolved_profile",
+        resolve_success,
+    )
+    monkeypatch.setattr(run_executor_module, "resolve_agent_tools", resolve_tools)
+    dispatched: list[PublishedEvent] = []
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        if isinstance(event, ContentDelta):
+            projector.projection_operations.append(event.delta)
+        dispatched.append(event)
+
+    result = await executor.execute(
+        _message(),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
+    )
+    assert result.terminal_run_status == AgentRunStatus.COMPLETED
+    assert projector.projection_operations == ["failed", "discard", "replacement"]
+    assert projector.discarded_session_ids == ["session-001"]
+    assert lifecycle.retry_states == []
+    assert not any(isinstance(event, RunModelAttemptDiscarded) for event in dispatched)
 
 
 def test_failed_run_attempt_classifies_typed_non_retryable_model_error() -> None:
