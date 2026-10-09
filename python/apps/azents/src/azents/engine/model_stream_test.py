@@ -22,12 +22,13 @@ from azents.engine.model_stream import (
     ModelStreamTimeoutPolicyResolver,
     ModelStreamWatchdog,
     _consume_task,
+    admit_model_dispatch,
     close_stream_response,
     connect_only_http_timeout,
     model_stream_timeout_policy_resolver,
 )
 from azents.engine.run.errors import ModelStreamTimeoutError
-from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE
+from azents.engine.run.types import SHUTDOWN_CANCEL_MESSAGE, USER_STOP_CANCEL_MESSAGE
 
 T = TypeVar("T")
 
@@ -522,6 +523,49 @@ async def test_user_stop_preempts_simultaneous_idle_timeout() -> None:
         await task
 
     assert captured.value.args == (USER_STOP_CANCEL_MESSAGE,)
+    await stream.closed_event.wait()
+    await _wait_for_registry_cleanup(watchdog.cleanup_registry)
+
+
+async def test_dispatch_admission_preserves_shutdown_cancellation() -> None:
+    """A handover reason from the Worker must pass through physical dispatch."""
+
+    async def check_stop() -> bool:
+        raise asyncio.CancelledError(SHUTDOWN_CANCEL_MESSAGE)
+
+    with pytest.raises(asyncio.CancelledError) as captured:
+        await admit_model_dispatch(_context(check_stop=check_stop))
+
+    assert captured.value.args == (SHUTDOWN_CANCEL_MESSAGE,)
+
+
+async def test_shutdown_stop_check_preempts_idle_timeout_without_user_stop() -> None:
+    """Watchdog stop preference propagates handover and cleans the blocked stream."""
+    clock = ControlledClock()
+    policy = _policy(idle=5, absolute=30)
+    watchdog = _watchdog(clock, policy=policy)
+    stream = BlockingStream(suppress_cancellation=False)
+
+    async def check_stop() -> bool:
+        raise asyncio.CancelledError(SHUTDOWN_CANCEL_MESSAGE)
+
+    async def consume() -> None:
+        async for _ in watchdog.watch_iterable(
+            stream,
+            parsed_event_activity=None,
+            policy=policy,
+            context=_context(check_stop=check_stop),
+        ):
+            pass
+
+    task = asyncio.create_task(consume())
+    await clock.wait_until(lambda: clock.sleeper_count == 2)
+    clock.advance(5)
+
+    with pytest.raises(asyncio.CancelledError) as captured:
+        await task
+
+    assert captured.value.args == (SHUTDOWN_CANCEL_MESSAGE,)
     await stream.closed_event.wait()
     await _wait_for_registry_cleanup(watchdog.cleanup_registry)
 

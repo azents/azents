@@ -23,7 +23,12 @@ from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.run.contracts import ToolkitBinding
 from azents.engine.run.errors import UserVisibleRuntimeError
 from azents.engine.run.model_transport import ModelTransportState
-from azents.engine.run.types import CheckStop, PollMessages, PollMessagesResult
+from azents.engine.run.types import (
+    SHUTDOWN_CANCEL_MESSAGE,
+    CheckStop,
+    PollMessages,
+    PollMessagesResult,
+)
 from azents.repos.historical_memory_consolidation.execution import (
     MemoryExecutionRepository,
 )
@@ -249,7 +254,7 @@ class SessionRunner:
             if self.shutdown_event.is_set():
                 self.stop_controller.request_handover_stop()
                 await self.stop_controller.tool_admission_barrier.close()
-                return True
+                raise asyncio.CancelledError(SHUTDOWN_CANCEL_MESSAGE)
 
             await self.session_lifecycle.assert_current_owner_generation(
                 session_id,

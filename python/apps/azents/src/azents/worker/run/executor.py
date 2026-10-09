@@ -328,7 +328,7 @@ def _operation_cancellation_reason(exc: asyncio.CancelledError) -> str:
     if reason == USER_STOP_CANCEL_MESSAGE:
         return "Operation cancelled by user stop."
     if reason == SHUTDOWN_CANCEL_MESSAGE:
-        return "Operation cancelled after the worker shutdown wait expired."
+        return "Operation cancelled during worker shutdown."
     return "Operation cancelled because the worker processing boundary ended."
 
 

@@ -2504,7 +2504,7 @@ def _pending_command(name: str = "compact") -> PendingSessionCommand:
         (USER_STOP_CANCEL_MESSAGE, "Operation cancelled by user stop."),
         (
             SHUTDOWN_CANCEL_MESSAGE,
-            "Operation cancelled after the worker shutdown wait expired.",
+            "Operation cancelled during worker shutdown.",
         ),
     ],
 )
