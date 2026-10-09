@@ -70,7 +70,7 @@ from support.runtime_profiles import (
     start_and_wait_for_agent_runtime,
 )
 from support.system_bootstrap import SystemBootstrapEvidence
-from support.utils import authenticate_user, unique, wait_until
+from support.utils import AgentSetup, authenticate_user, unique, wait_until
 
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 _LEGACY_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
@@ -120,18 +120,18 @@ def _response_model[Observation: BaseModel](
     return model.model_validate(response.json())
 
 
-def _setup_profile_agent(
+def _create_profile_agent(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     server_url: str,
     *,
-    user_email: str | None = None,
-    workspace_handle: str | None = None,
-    speed_targets: bool = False,
-) -> ProfileAgentSetup:
+    user_email: str | None,
+    workspace_handle: str | None,
+    speed_targets: bool,
+) -> AgentSetup:
     """Create a workspace and Agent with deterministic Quality/Fast targets."""
     uniq = unique()
-    token, _, _ = authenticate_user(
+    token, _, email = authenticate_user(
         public_api_client,
         admin_api_client,
         email=user_email or f"per-prompt-profile-{uniq}@example.com",
@@ -306,21 +306,74 @@ def _setup_profile_agent(
             for definition in definitions:
                 assert definition.exclusive_group == "processing_speed"
                 assert definition.cost_hint
-    start_and_wait_for_agent_runtime(
-        public_api_client,
-        token=token,
+    return AgentSetup(
+        access_token=token,
+        email=email,
         workspace_handle=handle,
         agent_id=agent_id,
     )
+
+
+def _profile_primary_session(
+    server_url: str,
+    setup: AgentSetup,
+) -> ProfileAgentSetup:
+    """Read the Agent's primary Session through the public API."""
     session = _response_model(
         requests.get(
-            f"{server_url}/chat/v1/agents/{agent_id}/team-primary-session",
-            headers=_headers(token),
+            f"{server_url}/chat/v1/agents/{setup.agent_id}/team-primary-session",
+            headers=_headers(setup.access_token),
             timeout=10,
         ),
         AgentSessionResponse,
     )
-    return ProfileAgentSetup(token, agent_id, session.id)
+    return ProfileAgentSetup(setup.access_token, setup.agent_id, session.id)
+
+
+def setup_profile_api_agent(
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    server_url: str,
+    *,
+    speed_targets: bool,
+) -> ProfileAgentSetup:
+    """Prepare configured model targets and a primary Session for profile APIs."""
+    setup = _create_profile_agent(
+        public_api_client,
+        admin_api_client,
+        server_url,
+        user_email=None,
+        workspace_handle=None,
+        speed_targets=speed_targets,
+    )
+    return _profile_primary_session(server_url, setup)
+
+
+def _setup_profile_agent(
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    server_url: str,
+    *,
+    user_email: str | None = None,
+    workspace_handle: str | None = None,
+    speed_targets: bool = False,
+) -> ProfileAgentSetup:
+    """Prepare model targets, a ready managed Runtime, and a primary Session."""
+    setup = _create_profile_agent(
+        public_api_client,
+        admin_api_client,
+        server_url,
+        user_email=user_email,
+        workspace_handle=workspace_handle,
+        speed_targets=speed_targets,
+    )
+    start_and_wait_for_agent_runtime(
+        public_api_client,
+        token=setup.access_token,
+        workspace_handle=setup.workspace_handle,
+        agent_id=setup.agent_id,
+    )
+    return _profile_primary_session(server_url, setup)
 
 
 def _create_profile_session(
