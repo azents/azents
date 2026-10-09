@@ -24,7 +24,6 @@ import {
 } from "@tabler/icons-react";
 import { useCallback, useMemo } from "react";
 import { getArray, isOneOf } from "@/shared/lib/unknown-value";
-import { trpc } from "@/trpc/client";
 
 /** Sentry skill group definition */
 const SKILL_GROUPS = [
@@ -59,34 +58,19 @@ const SKILL_VALUES = ["inspect", "seer", "docs", "triage", "manage"] as const;
 
 type SentrySkill = (typeof SKILL_VALUES)[number];
 
-type SentryConfig = Record<string, unknown>;
-type SentryCredentials = Record<string, unknown> | null;
-
 function isSentrySkill(value: unknown): value is SentrySkill {
   return isOneOf(value, SKILL_VALUES);
 }
 
-interface SentryConfigFieldsProps {
-  config: SentryConfig;
-  onConfigChange: (config: SentryConfig) => void;
-  credentials: SentryCredentials;
-  onCredentialsChange: (credentials: SentryCredentials) => void;
-  /** Existing credentials existence in edit mode */
-  hasCredentials: boolean;
-  handle: string;
-  agentId?: string;
-  /** Existing toolkit config ID in edit mode */
-  toolkitConfigId?: string;
-}
+import type { SimpleProviderFieldsProps } from "../types";
 
 export function SentryConfigFields({
   config,
   onConfigChange,
-  credentials,
-  handle,
-  agentId,
   toolkitConfigId,
-}: SentryConfigFieldsProps): React.ReactElement {
+  testState,
+  onTestConnection,
+}: SimpleProviderFieldsProps): React.ReactElement {
   const timeoutValue = typeof config.timeout === "number" ? config.timeout : 30;
   const enabledSkills = useMemo(
     () =>
@@ -97,25 +81,6 @@ export function SentryConfigFields({
   );
 
   // Connection test
-  const testConnectionMutation = trpc.toolkit.testConnection.useMutation();
-
-  const handleTestConnection = useCallback((): void => {
-    testConnectionMutation.mutate({
-      handle,
-      ...(agentId != null && { agentId }),
-      toolkitType: "sentry",
-      toolkitConfigId: toolkitConfigId ?? null,
-      config,
-      credentials,
-    });
-  }, [
-    agentId,
-    handle,
-    toolkitConfigId,
-    config,
-    credentials,
-    testConnectionMutation,
-  ]);
 
   const handleSkillToggle = useCallback(
     (skill: SentrySkill, checked: boolean): void => {
@@ -175,26 +140,26 @@ export function SentryConfigFields({
           <Button
             variant="light"
             leftSection={<IconPlugConnected size={16} />}
-            onClick={handleTestConnection}
-            loading={testConnectionMutation.isPending}
-            disabled={testConnectionMutation.isPending}
+            onClick={onTestConnection}
+            loading={testState.type === "TESTING"}
+            disabled={testState.type === "TESTING"}
           >
             Connection test
           </Button>
 
-          {testConnectionMutation.isSuccess && (
+          {testState.type === "RESULT" && (
             <Alert
               variant="light"
-              color={testConnectionMutation.data.success ? "green" : "red"}
+              color={testState.result.success ? "green" : "red"}
               icon={
-                testConnectionMutation.data.success ? (
+                testState.result.success ? (
                   <IconCheck size={16} />
                 ) : (
                   <IconAlertTriangle size={16} />
                 )
               }
             >
-              {testConnectionMutation.data.message}
+              {testState.result.message}
             </Alert>
           )}
         </Stack>

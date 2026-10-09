@@ -11,8 +11,8 @@ import {
 } from "@/shared/lib/toolkit-identifiers";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { trpc } from "@/trpc/client";
+import { GithubConfigFieldsContainer } from "../GithubConfigFieldsContainer";
 import { projectToolkitConfig } from "../toolkit-config-projection";
-import { GithubConfigFields } from "./GithubConfigFields";
 import { ToolkitForm } from "./ToolkitForm";
 import type { ToolkitFormValues } from "../schemas";
 import type { ToolkitFormProps } from "./ToolkitForm";
@@ -362,7 +362,7 @@ export const MobileEmbeddedGithub = {
     namePlaceholder: "GitHub",
     slugPlaceholder: "github",
     configurationFields: (
-      <GithubConfigFields
+      <GithubConfigFieldsContainer
         config={{ github_auth_type: "pat" }}
         credentials={null}
         hasCredentials={false}

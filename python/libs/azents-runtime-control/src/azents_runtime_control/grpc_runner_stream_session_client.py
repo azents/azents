@@ -222,7 +222,6 @@ class GrpcRunnerStreamSessionClient:
         except asyncio.CancelledError:
             raise
         except Exception as error:
-            _LOGGER.exception("Runtime Web Runner session receive failed")
             if self.accepted is not None and not self.accepted.done():
                 self.accepted.set_exception(error)
             raise

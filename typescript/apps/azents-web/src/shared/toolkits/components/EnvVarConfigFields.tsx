@@ -22,7 +22,7 @@ import {
 } from "@mantine/core";
 import { IconAlertTriangle, IconPlus, IconTrash } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import { getArray, isRecord } from "@/shared/lib/unknown-value";
 
 /** POSIX environment variable name regex (both cases allowed) */
@@ -42,15 +42,6 @@ interface EnvVarConfig {
 
 interface EnvVarCredentials {
   values: Record<string, string>;
-}
-
-interface EnvVarConfigFieldsProps {
-  config: Record<string, unknown>;
-  onConfigChange: (config: Record<string, unknown>) => void;
-  credentials: Record<string, unknown> | null;
-  onCredentialsChange: (credentials: Record<string, unknown> | null) => void;
-  /** Existing credentials existence in edit mode */
-  hasCredentials: boolean;
 }
 
 /** Parse config type-safely (guard unknown) */
@@ -79,12 +70,16 @@ function parseCredentials(
   return { values: typedValues };
 }
 
+import type { EnvVarConfigFieldsProps } from "../types";
+
 export function EnvVarConfigFields({
   config,
   onConfigChange,
   credentials,
   onCredentialsChange,
   hasCredentials,
+  acknowledged,
+  onAcknowledgedChange,
 }: EnvVarConfigFieldsProps): React.ReactElement {
   const t = useTranslations("workspace.toolkits.envvar");
 
@@ -93,8 +88,6 @@ export function EnvVarConfigFields({
     () => parseCredentials(credentials),
     [credentials],
   );
-
-  const [acknowledged, setAcknowledged] = useState(false);
 
   const updateEntry = useCallback(
     (index: number, patch: Partial<{ name: string; value: string }>) => {
@@ -183,7 +176,7 @@ export function EnvVarConfigFields({
           <Text size="sm">{t("warningBody")}</Text>
           <Checkbox
             checked={acknowledged}
-            onChange={(e) => setAcknowledged(e.currentTarget.checked)}
+            onChange={(e) => onAcknowledgedChange(e.currentTarget.checked)}
             label={t("acknowledgeLabel")}
           />
         </Stack>

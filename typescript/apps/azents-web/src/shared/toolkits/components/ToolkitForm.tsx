@@ -26,20 +26,20 @@ import {
 import { IconArrowLeft } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
+import { AwsConfigFieldsContainer } from "../AwsConfigFieldsContainer";
+import { BraveSearchConfigFieldsContainer } from "../BraveSearchConfigFieldsContainer";
+import { EnvVarConfigFieldsContainer } from "../EnvVarConfigFieldsContainer";
+import { GcpConfigFieldsContainer } from "../GcpConfigFieldsContainer";
 import { gitHubUserRegistrationDirty } from "../github-user-credentials";
 import { isGitHubUserMode } from "../github-user-oauth-state";
+import { GithubConfigFieldsContainer } from "../GithubConfigFieldsContainer";
 import { GitHubUserAuthorizationContainer } from "../GitHubUserAuthorizationContainer";
-import { AwsConfigFields } from "./AwsConfigFields";
-import { BraveSearchConfigFields } from "./BraveSearchConfigFields";
-import { EnvVarConfigFields } from "./EnvVarConfigFields";
-import { GcpConfigFields } from "./GcpConfigFields";
-import { GithubConfigFields } from "./GithubConfigFields";
+import { GoogleAnalyticsConfigFieldsContainer } from "../GoogleAnalyticsConfigFieldsContainer";
+import { KubernetesConfigFieldsContainer } from "../KubernetesConfigFieldsContainer";
+import { McpConfigFieldsContainer } from "../McpConfigFieldsContainer";
+import { NotionConfigFieldsContainer } from "../NotionConfigFieldsContainer";
+import { SentryConfigFieldsContainer } from "../SentryConfigFieldsContainer";
 import { GitHubUserCreation } from "./GitHubUserCreation";
-import { GoogleAnalyticsConfigFields } from "./GoogleAnalyticsConfigFields";
-import { KubernetesConfigFields } from "./KubernetesConfigFields";
-import { McpConfigFields } from "./McpConfigFields";
-import { NotionConfigFields } from "./NotionConfigFields";
-import { SentryConfigFields } from "./SentryConfigFields";
 import { ShellConfigFields } from "./ShellConfigFields";
 import type { ToolkitFormValues } from "../schemas";
 import type { ToolkitConfigProjection } from "../toolkit-config-projection";
@@ -265,7 +265,7 @@ export function ToolkitForm({
                 )}
 
                 {currentToolSlug === "mcp" && (
-                  <McpConfigFields
+                  <McpConfigFieldsContainer
                     config={form.getValues().config}
                     onConfigChange={onConfigChange}
                     credentials={form.getValues().credentials ?? null}
@@ -283,7 +283,7 @@ export function ToolkitForm({
                 )}
 
                 {currentToolSlug === "github" && (
-                  <GithubConfigFields
+                  <GithubConfigFieldsContainer
                     savedAuthType={
                       formState.type === "EDIT"
                         ? String(formState.config.config.github_auth_type)
@@ -337,7 +337,7 @@ export function ToolkitForm({
                   )}
 
                 {currentToolSlug === "notion" && (
-                  <NotionConfigFields
+                  <NotionConfigFieldsContainer
                     config={form.getValues().config}
                     onConfigChange={onConfigChange}
                     credentials={form.getValues().credentials ?? null}
@@ -355,7 +355,7 @@ export function ToolkitForm({
                 )}
 
                 {currentToolSlug === "sentry" && (
-                  <SentryConfigFields
+                  <SentryConfigFieldsContainer
                     config={form.getValues().config}
                     onConfigChange={onConfigChange}
                     credentials={form.getValues().credentials ?? null}
@@ -373,7 +373,7 @@ export function ToolkitForm({
                 )}
 
                 {currentToolSlug === "gcp" && (
-                  <GcpConfigFields
+                  <GcpConfigFieldsContainer
                     config={form.getValues().config}
                     onConfigChange={onConfigChange}
                     credentials={form.getValues().credentials ?? null}
@@ -391,7 +391,7 @@ export function ToolkitForm({
                 )}
 
                 {currentToolSlug === "aws" && (
-                  <AwsConfigFields
+                  <AwsConfigFieldsContainer
                     config={form.getValues().config}
                     onConfigChange={onConfigChange}
                     credentials={form.getValues().credentials ?? null}
@@ -409,7 +409,7 @@ export function ToolkitForm({
                 )}
 
                 {currentToolSlug === "google_analytics" && (
-                  <GoogleAnalyticsConfigFields
+                  <GoogleAnalyticsConfigFieldsContainer
                     config={form.getValues().config}
                     onConfigChange={onConfigChange}
                     credentials={form.getValues().credentials ?? null}
@@ -427,7 +427,7 @@ export function ToolkitForm({
                 )}
 
                 {currentToolSlug === "brave_search" && (
-                  <BraveSearchConfigFields
+                  <BraveSearchConfigFieldsContainer
                     config={form.getValues().config}
                     onConfigChange={onConfigChange}
                     credentials={form.getValues().credentials ?? null}
@@ -445,7 +445,7 @@ export function ToolkitForm({
                 )}
 
                 {currentToolSlug === "kubernetes" && (
-                  <KubernetesConfigFields
+                  <KubernetesConfigFieldsContainer
                     config={form.getValues().config}
                     onConfigChange={onConfigChange}
                     credentials={form.getValues().credentials ?? null}
@@ -463,7 +463,7 @@ export function ToolkitForm({
                 )}
 
                 {currentToolSlug === "envvar" && (
-                  <EnvVarConfigFields
+                  <EnvVarConfigFieldsContainer
                     config={form.getValues().config}
                     onConfigChange={onConfigChange}
                     credentials={form.getValues().credentials ?? null}

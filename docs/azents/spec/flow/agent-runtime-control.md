@@ -109,8 +109,8 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
-last_verified_at: 2026-10-08
-spec_version: 103
+last_verified_at: 2026-10-10
+spec_version: 104
 ---
 
 # Agent Runtime Control
@@ -344,6 +344,13 @@ Owner registry and credit accounting under local hard limits; recovery publishes
 new backend epoch rather than trusting stale keys. Gateway and Runner also enforce
 independent hard stream, queue, application-buffer, scheduler-waiter, and resident
 memory ceilings.
+
+Redis capacity restoration validates the exact serialized object and nested
+stream, buffer, and token-bucket fields before constructing immutable state.
+Required strings, integer bounds, booleans, protocol values, and unknown-field
+rejection preserve the current emitted wire shape without coercion. Corrupt
+records propagate as failures before persistence; they do not trigger a
+successful capacity reset or a Redis-unavailable fallback.
 
 The independent Gateway synchronizes the current Runtime Web configuration,
 explicitly invalidates browser identities, bindings, and tickets when security

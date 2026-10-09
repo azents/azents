@@ -33,30 +33,12 @@ import {
   IconSettings,
   IconUpload,
 } from "@tabler/icons-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import {
   getOptionalString,
   getStringArray,
-  isRecord,
   parseJsonRecord,
 } from "@/shared/lib/unknown-value";
-import { trpc } from "@/trpc/client";
-
-type GcpConfig = Record<string, unknown>;
-type GcpCredentials = Record<string, unknown> | null;
-
-interface GcpConfigFieldsProps {
-  config: GcpConfig;
-  onConfigChange: (config: GcpConfig) => void;
-  credentials: GcpCredentials;
-  onCredentialsChange: (credentials: GcpCredentials) => void;
-  /** Existing credentials existence in edit mode */
-  hasCredentials: boolean;
-  handle: string;
-  agentId?: string;
-  /** Existing toolkit config ID in edit mode */
-  toolkitConfigId?: string;
-}
 
 // ---------------------------------------------------------------------------
 // Service metadata
@@ -175,17 +157,12 @@ function getConfiguredServices(value: unknown, fallback: string[]): string[] {
   ];
 }
 
-function getServiceAccountKey(value: unknown): Record<string, unknown> | null {
-  if (!isRecord(value) || !getOptionalString(value.client_email)) {
-    return null;
-  }
-
-  return value;
-}
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
+
+import { getServiceAccountKey } from "../service-account-fields";
+import type { ServiceAccountProviderFieldsProps } from "../types";
 
 export function GcpConfigFields({
   config,
@@ -193,10 +170,12 @@ export function GcpConfigFields({
   credentials,
   onCredentialsChange,
   hasCredentials,
-  handle,
-  agentId,
-  toolkitConfigId,
-}: GcpConfigFieldsProps): React.ReactElement {
+  testState,
+  onTestConnection,
+  showKeyInput,
+  onShowKeyInput,
+  onKeyFileUpload,
+}: ServiceAccountProviderFieldsProps): React.ReactElement {
   const projectId =
     typeof config.project_id === "string" ? config.project_id : "";
   const selectedServices = useMemo(
@@ -210,7 +189,7 @@ export function GcpConfigFields({
   const timeoutValue = typeof config.timeout === "number" ? config.timeout : 30;
 
   // SA Key state
-  const [showKeyInput, setShowKeyInput] = useState(!hasCredentials);
+
   const clientEmail = useMemo(() => {
     if (!credentials) {
       return null;
@@ -224,25 +203,6 @@ export function GcpConfigFields({
   }, [credentials]);
 
   // Connection test
-  const testConnectionMutation = trpc.toolkit.testConnection.useMutation();
-
-  const handleTestConnection = useCallback((): void => {
-    testConnectionMutation.mutate({
-      handle,
-      ...(agentId != null && { agentId }),
-      toolkitType: "gcp",
-      toolkitConfigId: toolkitConfigId ?? null,
-      config,
-      credentials,
-    });
-  }, [
-    agentId,
-    handle,
-    toolkitConfigId,
-    config,
-    credentials,
-    testConnectionMutation,
-  ]);
 
   // Service toggle
   const handleServiceToggle = useCallback(
@@ -290,25 +250,6 @@ export function GcpConfigFields({
   );
 
   // SA Key file upload
-  const handleFileUpload = useCallback(
-    (file: File | null): void => {
-      if (!file) {
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = (): void => {
-        const text = reader.result;
-        if (typeof text === "string") {
-          const serviceAccountKey = getServiceAccountKey(parseJsonRecord(text));
-          if (serviceAccountKey) {
-            onCredentialsChange({ service_account_key: serviceAccountKey });
-          }
-        }
-      };
-      reader.readAsText(file);
-    },
-    [onCredentialsChange],
-  );
 
   // Calculate required IAM roles by selected service
   const requiredRoles = useMemo(() => {
@@ -450,7 +391,7 @@ export function GcpConfigFields({
               <Button
                 size="xs"
                 variant="subtle"
-                onClick={() => setShowKeyInput(true)}
+                onClick={() => onShowKeyInput()}
               >
                 Replace Key
               </Button>
@@ -471,7 +412,7 @@ export function GcpConfigFields({
               placeholder="Or upload .json file"
               accept=".json"
               leftSection={<IconUpload size={16} />}
-              onChange={handleFileUpload}
+              onChange={onKeyFileUpload}
             />
           </Stack>
         )}
@@ -508,19 +449,19 @@ export function GcpConfigFields({
         <Button
           variant="light"
           leftSection={<IconPlugConnected size={16} />}
-          onClick={handleTestConnection}
-          loading={testConnectionMutation.isPending}
+          onClick={onTestConnection}
+          loading={testState.type === "TESTING"}
           disabled={!projectId || (!credentials && !hasCredentials)}
         >
           Test Connection
         </Button>
 
-        {testConnectionMutation.isSuccess && (
+        {testState.type === "RESULT" && (
           <Alert
             variant="light"
-            color={testConnectionMutation.data.success ? "green" : "red"}
+            color={testState.result.success ? "green" : "red"}
             icon={
-              testConnectionMutation.data.success ? (
+              testState.result.success ? (
                 <IconCheck size={16} />
               ) : (
                 <IconAlertTriangle size={16} />
@@ -528,7 +469,7 @@ export function GcpConfigFields({
             }
           >
             <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
-              {testConnectionMutation.data.message}
+              {testState.result.message}
             </Text>
           </Alert>
         )}

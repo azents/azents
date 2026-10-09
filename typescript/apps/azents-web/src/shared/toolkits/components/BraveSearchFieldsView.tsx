@@ -14,6 +14,8 @@ import {
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
 
+import type { BraveSearchTestState } from "../types";
+
 export interface BraveSearchFieldsViewProps {
   config: Record<string, unknown>;
   onConfigChange: (config: Record<string, unknown>) => void;
@@ -23,11 +25,7 @@ export interface BraveSearchFieldsViewProps {
   replacingKey: boolean;
   onReplaceKey: () => void;
   onTestConnection: () => void;
-  testState:
-    | { type: "IDLE" }
-    | { type: "TESTING" }
-    | { type: "SUCCESS"; message: string }
-    | { type: "FAILURE"; message: string };
+  testState: BraveSearchTestState;
 }
 
 export function BraveSearchFieldsView({

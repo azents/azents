@@ -963,7 +963,7 @@ def _execution[TNativeRequest: NativeRequestInspection](
     pre_model_lower_hook: PreModelLowerHook | None = None,
     session_repo: SessionHeadRepository | None = None,
     system_prompt_snapshot_repo: OutputSystemPromptRepository | None = None,
-    input_recovery_sink: Callable[[], Awaitable[None]] | None = None,
+    input_recovery_sink: Callable[[], Awaitable[None]] | None,
 ) -> AgentRunExecution[TNativeRequest, NativeEvent]:
     """Wire real completed repositories over each test's recording DB primitives."""
     mutations = EngineEventMutationRepository(transcript_repository=transcript_repo)
@@ -1402,6 +1402,7 @@ async def test_text_run_completes() -> None:
         emitted_phases.append((phase, model_call_started_at))
 
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -1472,6 +1473,7 @@ async def test_dialect_follow_up_continues_without_tool_call() -> None:
         ]
     )
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -1579,6 +1581,7 @@ async def test_external_run_callbacks_observe_no_open_db_session() -> None:
         assert open_sessions == 0
 
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=session_manager,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -1631,6 +1634,7 @@ async def test_model_delta_reaches_output_sink_before_stream_completion() -> Non
         sink_outputs.append(normalized)
 
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -1693,6 +1697,7 @@ async def test_text_run_commits_durable_events_before_output_sink() -> None:
         committed_event_counts_at_sink.append(session.commits[-1])
 
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_manager_for(session),
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -1733,6 +1738,7 @@ async def test_provider_output_shares_event_admission_transaction() -> None:
     transcript_repo = _TranscriptRepo()
     materializer = _ProviderOutputMaterializer()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -1776,6 +1782,7 @@ async def test_provider_output_cleans_up_after_event_admission_failure() -> None
     transcript_repo = _FailingTranscriptRepo()
     materializer = _ProviderOutputMaterializer()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -1820,6 +1827,7 @@ async def test_provider_output_admits_terminal_turn_without_durable_event() -> N
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -1875,6 +1883,7 @@ async def test_output_without_usage_clears_retry_state_before_publish() -> None:
         retry_updates_at_sink.append(list(run_repo.retry_states))
 
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -1927,6 +1936,7 @@ async def test_text_run_output_sink_receives_run_marker() -> None:
         sink_kinds.append([event.kind for event in appended])
 
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -2005,6 +2015,7 @@ async def test_model_usage_is_appended_as_turn_marker(
         ),
     )
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -2093,6 +2104,7 @@ async def test_model_output_without_system_prompt_clears_session_snapshot() -> N
     )
     system_prompt_snapshot_repo = _SystemPromptSnapshotRepo(previous_prompt)
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -2133,6 +2145,7 @@ async def test_model_input_uses_session_head_event_id() -> None:
     """After compaction, model input is fetched from session head."""
     transcript_repo = _TranscriptRepo()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -2173,6 +2186,7 @@ async def test_closed_admission_barrier_prevents_call_and_handler_start() -> Non
     transcript_repo = _TranscriptRepo()
     tool_executor = _ToolExecutor()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -2215,6 +2229,7 @@ async def test_tool_run_with_turn_limit_interrupts_after_tool_result() -> None:
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -2280,6 +2295,7 @@ async def test_terminal_tool_completes_run_without_another_model_turn() -> None:
     )
     tool_executor = _TerminalToolExecutor(run_repo)
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -2353,6 +2369,7 @@ async def test_terminal_tool_recovery_finalizes_result_before_model_dispatch() -
     lowerer = _RecordingLowerer()
     normalizer = _OutputSequenceNormalizer([])
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -2428,6 +2445,7 @@ async def test_bridge_tool_batch_forces_post_tool_poll(
         return poll_results.pop(0)
 
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -2501,6 +2519,7 @@ async def test_multiple_bridge_calls_in_one_batch_force_one_post_tool_poll() -> 
         return poll_results.pop(0)
 
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -2566,6 +2585,7 @@ async def test_pre_model_bridge_recovery_suppresses_parent_result() -> None:
         )
 
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -2606,6 +2626,7 @@ async def test_parallel_calls_finalize_independently() -> None:
     transcript_repo = _TranscriptRepo()
     tool_executor = _OrderedToolExecutor()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -2671,6 +2692,7 @@ async def test_term_after_admission_keeps_normal_result_and_run_recoverable() ->
     tool_executor = _OrderedToolExecutor()
     barrier = _MutableToolAdmissionBarrier()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -2730,6 +2752,7 @@ async def test_unlimited_tool_run_executes_tool_then_completes() -> None:
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -2792,6 +2815,7 @@ async def test_tool_run_completes_after_empty_terminal_model_turn() -> None:
         ]
     )
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -2850,6 +2874,7 @@ async def test_final_tool_turn_executes_tool_then_completes() -> None:
         ]
     )
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -2906,6 +2931,7 @@ async def test_client_tool_source_snapshot_is_shared_by_durable_and_active() -> 
     transcript_repo = _TranscriptRepo()
     tool_executor = _ToolExecutor()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -2962,6 +2988,7 @@ async def test_generated_client_result_materializes_in_result_transaction() -> N
     transcript_repo = _TranscriptRepo()
     materializer = _ClientToolOutputMaterializer()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -3035,6 +3062,7 @@ async def test_generated_client_result_cleans_up_after_admission_failure() -> No
         failure=RuntimeError("generated-file admission failed")
     )
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -3098,6 +3126,7 @@ async def test_generated_client_result_without_materializer_fails_safely(
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -3184,6 +3213,7 @@ async def test_model_call_preparer_runs_for_each_model_turn() -> None:
         )
 
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -3257,6 +3287,7 @@ async def test_model_call_preparer_turn_end_receives_error_reason() -> None:
         )
 
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -3294,6 +3325,7 @@ async def test_provider_tool_call_completes_without_next_model_turn() -> None:
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -3343,6 +3375,7 @@ async def test_provider_tool_call_with_message_completes_one_turn() -> None:
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -3394,6 +3427,7 @@ async def test_auto_compaction_does_not_publish_phase_when_threshold_is_not_met(
     """Ordinary turns do not flash the context-preparation live operation."""
     run_repo = _RunRepo()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -3431,6 +3465,7 @@ async def test_auto_compaction_restores_preparing_phase_after_success() -> None:
     """Successful compaction closes the live operation before model lowering."""
     run_repo = _RunRepo()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -3469,6 +3504,7 @@ async def test_auto_compaction_keeps_compacting_phase_after_failure() -> None:
     """Failed compaction keeps one live operation while retry owns the error."""
     run_repo = _RunRepo()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -3530,6 +3566,7 @@ async def test_compacted_run_continues_with_summary_without_terminal_marker() ->
     )
 
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -3606,6 +3643,7 @@ async def test_tool_turn_polls_input_before_next_model_call() -> None:
         )
 
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -3681,6 +3719,7 @@ async def test_context_invalidation_yields_for_request_refresh() -> None:
         )
 
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -3735,6 +3774,7 @@ async def test_orphan_tool_call_without_state_is_cancelled_before_lowering() -> 
     transcript_repo.events.append(_tool_call_event())
     lowerer = _RecordingLowerer()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -3796,6 +3836,7 @@ async def test_active_unresolved_tool_call_is_cancelled_before_lowering() -> Non
     transcript_repo.events.append(_tool_call_event())
     lowerer = _RecordingLowerer()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -3855,6 +3896,7 @@ async def test_stale_active_entry_with_result_is_removed_without_replacement() -
     transcript_repo = _TranscriptRepo()
     transcript_repo.events.extend([_tool_call_event(), _tool_result_event()])
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -3910,6 +3952,7 @@ async def test_active_entry_without_call_event_fails_invariant() -> None:
         )
     ]
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -3954,6 +3997,7 @@ async def test_shutdown_during_model_admission_keeps_run_recoverable() -> None:
         raise asyncio.CancelledError(SHUTDOWN_CANCEL_MESSAGE)
 
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -4007,6 +4051,7 @@ async def test_model_stream_user_stop_appends_only_assistant_text() -> None:
         ReasoningPayload(text="hidden", native_artifact=_artifact()),
     )
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -4053,6 +4098,7 @@ async def test_model_stream_user_stop_without_text_appends_only_marker() -> None
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -4095,6 +4141,7 @@ async def test_shutdown_tool_cancellation_repairs_before_reraising() -> None:
     transcript_repo = _TranscriptRepo()
     tool_executor = _CancellingToolExecutor()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -4145,6 +4192,7 @@ async def test_tool_user_stop_preserves_settled_terminal_result() -> None:
     transcript_repo = _TranscriptRepo()
     tool_executor = _SettlingToolExecutor()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -4202,6 +4250,7 @@ async def test_tool_user_stop_appends_cancelled_result_and_interrupts() -> None:
     transcript_repo = _TranscriptRepo()
     tool_executor = _CancellingToolExecutor(user_stop=True)
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -4264,6 +4313,7 @@ async def test_tool_result_output_sink_receives_tool_result() -> None:
         sink_kinds.append([event.kind for event in appended])
 
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -4305,6 +4355,7 @@ async def test_tool_failure_appends_failed_tool_result() -> None:
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -4354,6 +4405,7 @@ async def test_tool_failure_appends_failed_tool_result() -> None:
 async def test_run_input_preparation_does_not_run_lifecycle_cleanup() -> None:
     """File lifecycle cleanup is scheduler-owned, not run-loop-owned."""
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -4405,6 +4457,7 @@ async def test_pre_model_lower_hook_runs_before_lowerer() -> None:
     lowerer = _RecordingLowerer()
     hook = _PreModelLowerHook()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -4448,6 +4501,7 @@ async def test_model_completion_error_propagates_for_retry() -> None:
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -4489,6 +4543,7 @@ async def test_empty_terminal_model_output_completes_run() -> None:
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -4539,6 +4594,7 @@ async def test_blank_terminal_assistant_message_completes_run() -> None:
         AssistantMessagePayload(content=" ", native_artifact=_artifact()),
     )
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -4599,6 +4655,7 @@ async def test_empty_dialect_follow_up_continues_to_terminal_response() -> None:
         ]
     )
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -4644,6 +4701,7 @@ async def test_model_call_error_propagates_for_retry() -> None:
     run_repo = _RunRepo()
     transcript_repo = _TranscriptRepo()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
@@ -4685,6 +4743,7 @@ async def test_execution_closes_operation_scoped_adapter() -> None:
     transcript_repo = _TranscriptRepo()
     model_adapter = _ClosableModelAdapter()
     execution = _execution(
+        input_recovery_sink=None,
         session_manager=_session_context,
         input_projection_repository=None,
         terminal_finalization_repository=None,
