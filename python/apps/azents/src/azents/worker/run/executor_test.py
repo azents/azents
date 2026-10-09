@@ -127,6 +127,7 @@ from azents.engine.run.emit import Emit, PublishedEvent, durable, ephemeral
 from azents.engine.run.errors import (
     CompactionModelStreamTimeoutError,
     ModelCallError,
+    ModelInputTooLargeError,
     ModelStreamTimeoutError,
     NonRetryableModelCallError,
     TransientModelCallError,
@@ -7568,13 +7569,19 @@ async def test_execute_preserves_retry_attempt_history_after_live_retry_clear(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("input_too_large", [False, True])
 async def test_execute_finalizes_non_retryable_failed_run_without_waiting(
     monkeypatch: pytest.MonkeyPatch,
+    input_too_large: bool,
 ) -> None:
     """Known non-retryable model failures are finalized on the first attempt."""
     lifecycle = _SessionLifecycle()
-    engine = _AlwaysFailingEngine(
-        'Model call failed (503): {"error":{"code":"no_fixture_match"}}'
+    engine = (
+        _FlakyEngine(ModelInputTooLargeError("The model input is too large."))
+        if input_too_large
+        else _AlwaysFailingEngine(
+            'Model call failed (503): {"error":{"code":"no_fixture_match"}}'
+        )
     )
     finalizer = _FailedRunFinalizer()
     executor = _executor(
@@ -7634,7 +7641,9 @@ async def test_execute_finalizes_non_retryable_failed_run_without_waiting(
     retry_state = lifecycle.retry_states[0]
     assert retry_state is not None
     assert retry_state.retryability == "non_retryable"
-    assert retry_state.failure_code == "no_fixture_match"
+    assert retry_state.failure_code == (
+        "model_input_too_large" if input_too_large else "no_fixture_match"
+    )
     assert retry_state.backoff_seconds == 0
     assert len(finalizer.inputs) == 1
     assert finalizer.inputs[0].reason == "non_retryable"

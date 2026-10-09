@@ -52,8 +52,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-10-07
-spec_version: 55
+last_verified_at: 2026-10-09
+spec_version: 56
 ---
 
 # Context Compaction
@@ -93,6 +93,31 @@ runtime compaction. Automatic compaction threshold is then computed by
 `compute_auto_compaction_threshold_tokens()` as `int(effective_max_input_tokens * 0.9)`. Both values are stored in the current `AgentSession` inference snapshot and remain fixed for one model-call attempt. After an automatic retry backoff, the next model attempt freshly resolves the current Session-applied profile and may replace both values before execution; recovered retry state follows the same boundary. A later prepared profile may also replace them at the next ordinary turn boundary, including within the same active run. The event runtime uses this Session-owned calculation as the compaction trigger source of truth and compares the threshold against the latest turn marker `usage.prompt_tokens` plus the
 model-visible token estimate for events appended after that marker. If no turn marker exists, it falls
 back to estimating the full selected transcript.
+
+## Input Limit Recovery
+
+Foreground execution also forces ordinary append-only compaction when the
+complete lowered request exceeds the local 16,000,000-character guard or the
+sampling provider reports a classified `context_limit`. This recovery bypasses
+the automatic token threshold, with reasons `native_request_size_exceeded` and
+`provider_context_limit`. Request-size inspection includes materialized image
+data, tool definitions and model options; it is distinct from token estimation.
+Both OpenAI Responses and Pydantic AI lowerers use the same foreground recovery.
+
+One model turn may recover once: end the failed preparation's turn hook, honor
+stop/mailbox and ownership boundaries, compact the current durable transcript,
+then rebuild the native request and request-local dependencies from the summary.
+The retry stays in the same Run and does not rerun completed client tools.
+Ordinary compaction may remove image pixels; the Agent may read their source
+files again in subsequent turns. No pending-image retention or automatic reread
+is performed, and the original events/files are not deleted by compaction.
+
+If compaction cannot produce a summary, is unavailable, or the rebuilt request
+still exceeds either input limit, execution raises a user-visible
+`model_input_too_large` non-provider failure. Worker finalization does not back
+off or repeatedly send the same oversized input. Compaction provider failures,
+stale plans, ownership loss and cancellation retain their existing handling.
+Other sampling provider failures do not trigger this recovery.
 
 ## Behavior
 
@@ -421,6 +446,10 @@ not remove a preserved started cycle from the summary until that cycle
 terminalizes.
 
 ## Changelog
+
+- **2026-10-09** (spec_version 56) — Force bounded foreground compaction on
+  native request-size or provider context overflow across both lowerers,
+  terminating persistent overflow without unchanged-input retries.
 
 - **2026-10-07** (spec_version 55) — Describe common internal Memory Session
   compaction, persistent files/correction continuity and scope-only aggregate
