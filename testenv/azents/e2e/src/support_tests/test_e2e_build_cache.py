@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from support.consts import REPOSITORY_ROOT
+from tests import conftest as e2e_conftest
 
 _CONFTEST_PATH = REPOSITORY_ROOT / "testenv/azents/e2e/src/tests/conftest.py"
 _CONFTEST_SPEC = importlib.util.spec_from_file_location(
@@ -247,7 +248,8 @@ def test_required_profile_builds_independent_images_concurrently(
 
     monkeypatch.setattr(_CONFTEST_MODULE, "_build_e2e_image", fake_build)
 
-    images = _CONFTEST_MODULE._prepare_e2e_images("required")
+    with _CONFTEST_MODULE._e2e_image_preparation("required") as preparation:
+        images = preparation.join(preparation.selected_images)
 
     assert set(images) == {
         "azents-server",
@@ -312,7 +314,8 @@ def test_parallel_profile_reuses_preconfigured_images(
 
     monkeypatch.setattr(_CONFTEST_MODULE, "_build_e2e_image", fake_build)
 
-    images = _CONFTEST_MODULE._prepare_e2e_images("required")
+    with _CONFTEST_MODULE._e2e_image_preparation("required") as preparation:
+        images = preparation.join(preparation.selected_images)
 
     assert images["azents-server"] == "registry/azents-server:test"
     assert set(calls) == {
@@ -331,7 +334,8 @@ def test_parallel_profile_accepts_fully_preconfigured_images(
             f"registry/{image_build.cache_repository}:test",
         )
 
-    images = _CONFTEST_MODULE._prepare_e2e_images("required")
+    with _CONFTEST_MODULE._e2e_image_preparation("required") as preparation:
+        images = preparation.join(preparation.selected_images)
 
     assert images == {
         image_build.cache_repository: (f"registry/{image_build.cache_repository}:test")
@@ -345,7 +349,7 @@ def test_parallel_profile_rejects_unknown_suite() -> None:
         RuntimeError,
         match="Unsupported AZENTS_E2E_IMAGE_BUILD_PROFILE",
     ):
-        _CONFTEST_MODULE._prepare_e2e_images("unknown")
+        _CONFTEST_MODULE._e2e_image_preparation("unknown")
 
 
 def test_image_build_observability_excludes_runtime_cache_credentials(
@@ -361,11 +365,100 @@ def test_image_build_observability_excludes_runtime_cache_credentials(
         cache_export_enabled=True,
         completed=True,
         duration_seconds=12.34567,
+        started_at_monotonic=100.0,
+        finished_at_monotonic=112.34567,
     )
 
     assert (tmp_path / "image-build-timings.jsonl").read_text(encoding="utf-8") == (
         '{"build_mode": "full", "cache_backend": "gha", '
         '"cache_export_enabled": true, '
         '"cache_scope": "azents-e2e-v1-azents-server", "completed": true, '
-        '"duration_seconds": 12.346, "image": "azents-server"}\n'
+        '"duration_seconds": 12.346, "finished_at_monotonic": 112.34567, '
+        '"image": "azents-server", "started_at_monotonic": 100.0}\n'
     )
+
+
+def test_web_profile_submits_each_selected_current_worktree_build_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Web portfolio retains its five-way concurrency without duplicate builds."""
+    builds = _CONFTEST_MODULE._E2E_IMAGE_BUILD_PROFILES["web"]
+    barrier = threading.Barrier(5, timeout=5)
+    calls: list[tuple[str, str]] = []
+    lock = threading.Lock()
+    for image in builds:
+        monkeypatch.delenv(image.environment_variable, raising=False)
+
+    def build(image: e2e_conftest._E2EImageBuild, tag: str) -> None:
+        with lock:
+            calls.append((image.cache_repository, tag))
+        barrier.wait()
+
+    monkeypatch.setattr(_CONFTEST_MODULE, "_build_configured_e2e_image", build)
+    with _CONFTEST_MODULE._e2e_image_preparation("web") as preparation:
+        images = preparation.join(preparation.selected_images)
+        assert preparation.join(preparation.selected_images) == images
+    assert len(calls) == len(images) == 5
+    assert dict(calls) == images
+
+
+def test_unprofiled_image_resolution_remains_focused_and_lazy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No selected portfolio exists locally until an image is explicitly requested."""
+    monkeypatch.delenv("AZENTS_E2E_WEB_IMAGE", raising=False)
+    calls: list[str] = []
+
+    def build(image: e2e_conftest._E2EImageBuild, tag: str) -> None:
+        calls.append(tag)
+
+    monkeypatch.setattr(_CONFTEST_MODULE, "_build_configured_e2e_image", build)
+    with _CONFTEST_MODULE._e2e_image_preparation(None) as preparation:
+        assert preparation.join(preparation.selected_images) == {}
+        assert calls == []
+        image = _CONFTEST_MODULE._resolve_e2e_image(
+            _CONFTEST_MODULE._WEB_IMAGE_BUILD, {}
+        )
+        assert calls == [image]
+    assert preparation.futures == {}
+
+
+def test_preparation_captures_environment_before_build_submission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prepared image references do not drift if the environment changes later."""
+    for image in _CONFTEST_MODULE._CORE_E2E_IMAGE_BUILDS:
+        monkeypatch.setenv(
+            image.environment_variable, f"verified-{image.cache_repository}"
+        )
+    preparation = _CONFTEST_MODULE._e2e_image_preparation("required")
+    monkeypatch.setenv("AZENTS_E2E_SERVER_IMAGE", "unverified-later")
+    with preparation:
+        assert preparation.join(["azents-server"]) == {
+            "azents-server": "verified-azents-server"
+        }
+        assert preparation.futures == {}
+
+
+def test_image_observability_io_failure_preserves_failed_build(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Diagnostic filesystem failures cannot replace the authoritative build error."""
+    blocked = tmp_path / "blocked"
+    blocked.write_text("not a directory")
+    monkeypatch.setenv(_CONFTEST_MODULE._E2E_ARTIFACT_DIR_ENV, str(blocked))
+    primary = ValueError("authoritative build failure")
+
+    def failed_build(**kwargs: object) -> None:
+        raise primary
+
+    monkeypatch.setattr(_CONFTEST_MODULE.pow_docker, "build", failed_build)
+    with pytest.warns(UserWarning, match="Failed to write E2E image observability"):
+        with pytest.raises(ValueError) as captured:
+            _CONFTEST_MODULE._build_e2e_image(
+                image_tag="current-server:test",
+                dockerfile=REPOSITORY_ROOT / "azents.Dockerfile",
+                cache_repository=None,
+            )
+    assert captured.value is primary

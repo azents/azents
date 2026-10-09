@@ -1667,8 +1667,8 @@
     "github": {
       "authTypeLabel": "認証方式",
       "authTypePat": "Personal Access Token",
-      "authTypeApp": "GitHub App（自前登録）",
-      "authTypePlatform": "GitHub App（プラットフォーム提供）",
+      "authTypeApp": "GitHub App（自前登録）· インストール権限",
+      "authTypePlatform": "GitHub App（プラットフォーム提供）· インストール権限",
       "authTypeOauth": "OAuth App（ユーザー別認証）",
       "patTokenLabel": "Personal Access Token",
       "patTokenDescription": "必要な権限が付与されたFine-grained PATまたはClassic PAT",
@@ -1781,7 +1781,7 @@
         "revocationLimit": "GitHub でトークンの失効に失敗しても、Azents 内の接続解除は完了します。コピーされたトークンは、GitHub で引き続き使用できる場合があります。接続解除では、完了済みの操作を元に戻したり、認証情報のコピーを消去したり、GitHub が既に受け付けたリクエストを取り消したりすることはできません。",
         "cancel": "キャンセル",
         "callbackLoading": "GitHub の認証を確認しています…",
-        "callbackReview": "アカウントは確認できる状態になりましたが、まだ有効化されていません。元のウィンドウに戻り、アカウントと共有範囲を確定してください。",
+        "callbackReview": "GitHub 認証が完了しました。アカウントと共有範囲を確認する Toolkit 画面に移動します…",
         "return": "Toolkit に戻る",
         "errors": {
           "popupBlocked": "ブラウザーが GitHub のポップアップをブロックしました。ポップアップを許可して再試行してください。アカウントは置き換えられていません。",

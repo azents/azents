@@ -21,7 +21,10 @@ export async function GitHubOAuthCallbackPage({
   const t = await getTranslations("oauth");
 
   let content: React.ReactElement;
-  if (state?.startsWith("github_user.") === true) {
+  if (
+    state?.startsWith("github_user.") === true ||
+    state?.startsWith("github_user_create.") === true
+  ) {
     content = (
       <GitHubUserOAuthCallbackPage
         code={code}

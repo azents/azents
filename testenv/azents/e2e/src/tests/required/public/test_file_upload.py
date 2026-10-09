@@ -20,6 +20,7 @@ from websockets.sync.connection import Connection
 from support.consts import E2E_GENERAL_FILE_MAXIMUM_BYTES
 from support.utils import (
     PNG_1X1,
+    create_agent_setup,
     create_chat_session_with_agent,
     create_second_user_token,
     unique,
@@ -278,11 +279,13 @@ class TestFileUpload:
         azents_public_server_url: str,
     ) -> None:
         """A successful file upload returns URI, media type, and size."""
-        token, _, agent_id = create_chat_session_with_agent(
+        setup = create_agent_setup(
             public_api_client,
             admin_api_client,
             azents_public_server_url,
         )
+        token = setup.access_token
+        agent_id = setup.agent_id
 
         content = PNG_1X1
         response = upload_file(
@@ -325,9 +328,10 @@ class TestFileUpload:
         azents_public_server_url: str,
     ) -> None:
         """Uploading to a nonexistent Agent returns 404."""
-        token, _, _ = create_chat_session_with_agent(
+        setup = create_agent_setup(
             public_api_client, admin_api_client, azents_public_server_url
         )
+        token = setup.access_token
 
         response = upload_file(
             azents_public_server_url,
@@ -346,11 +350,12 @@ class TestFileUpload:
         azents_public_server_url: str,
     ) -> None:
         """Uploading to another user's Agent returns 403."""
-        _, _, agent_id = create_chat_session_with_agent(
+        setup = create_agent_setup(
             public_api_client,
             admin_api_client,
             azents_public_server_url,
         )
+        agent_id = setup.agent_id
 
         other_token = create_second_user_token(public_api_client, admin_api_client)
 
@@ -371,9 +376,11 @@ class TestFileUpload:
         azents_public_server_url: str,
     ) -> None:
         """The current upload limit rejects metadata before any object PUT."""
-        token, _, agent_id = create_chat_session_with_agent(
+        setup = create_agent_setup(
             public_api_client, admin_api_client, azents_public_server_url
         )
+        token = setup.access_token
+        agent_id = setup.agent_id
 
         response = requests.post(
             f"{azents_public_server_url}/chat/v1/agents/{agent_id}/uploads",
@@ -405,11 +412,13 @@ class TestExchangeFiles:
         azents_public_server_url: str,
     ) -> None:
         """Authorize metadata only; direct storage GET preserves safe response data."""
-        token, _, agent_id = create_chat_session_with_agent(
+        setup = create_agent_setup(
             public_api_client,
             admin_api_client,
             azents_public_server_url,
         )
+        token = setup.access_token
+        agent_id = setup.agent_id
         filename = "download.txt"
         content = b"download test content"
         upload_response = upload_file(
@@ -461,11 +470,13 @@ class TestExchangeFiles:
         azents_public_server_url: str,
     ) -> None:
         """An uploaded Exchange file can be deleted."""
-        token, _, agent_id = create_chat_session_with_agent(
+        setup = create_agent_setup(
             public_api_client,
             admin_api_client,
             azents_public_server_url,
         )
+        token = setup.access_token
+        agent_id = setup.agent_id
 
         content = b"delete me"
         upload_response = upload_file(

@@ -1,7 +1,13 @@
 "use client";
-import { readSessionStorageValue } from "@mantine/hooks";
+import { readSessionStorageValue, useSessionStorage } from "@mantine/hooks";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { isWindowMessageTarget } from "@/shared/lib/window-message-target";
+import {
+  deserializeGitHubUserCreation,
+  GITHUB_USER_CREATION_KEY,
+  parseGitHubCreationState,
+} from "@/shared/toolkits/github-user-creation-state";
 import { trpc } from "@/trpc/client";
 import {
   deserializeGitHubUserContext,
@@ -12,6 +18,7 @@ import {
 } from "../../../shared/toolkits/github-user-oauth-state";
 import type { GitHubUserContext } from "../../../shared/toolkits/github-user-oauth-state";
 import type { GitHubUserOAuthCallbackResultProps } from "../components/GitHubUserOAuthCallbackResult";
+import type { GitHubUserCreationContext } from "@/shared/toolkits/github-user-creation-state";
 
 export interface GitHubUserOAuthCallbackContainerProps {
   code: string | null;
@@ -24,6 +31,20 @@ export function useGitHubUserOAuthCallbackContainer({
   providerError,
 }: GitHubUserOAuthCallbackContainerProps): GitHubUserOAuthCallbackResultProps {
   const exchange = trpc.toolkit.githubUser.exchange.useMutation();
+  const creationExchange =
+    trpc.toolkit.githubUserCreation.exchange.useMutation();
+  const creationCancel = trpc.toolkit.githubUserCreation.cancel.useMutation();
+  const [, saveCreation] = useSessionStorage<GitHubUserCreationContext | null>({
+    key: GITHUB_USER_CREATION_KEY,
+    defaultValue: null,
+    deserialize: deserializeGitHubUserCreation,
+  });
+  const router = useRouter();
+  const [, saveContext] = useSessionStorage<GitHubUserContext | null>({
+    key: GITHUB_USER_CONTEXT_KEY,
+    defaultValue: null,
+    deserialize: deserializeGitHubUserContext,
+  });
   const cancel = trpc.toolkit.githubUser.cancel.useMutation();
   const started = useRef(false);
   const [result, setResult] = useState<GitHubUserOAuthCallbackResultProps>({
@@ -35,6 +56,45 @@ export function useGitHubUserOAuthCallbackContainer({
       return;
     }
     started.current = true;
+    window.history.replaceState(null, "", window.location.pathname);
+    const creationId = parseGitHubCreationState(state);
+    if (creationId != null) {
+      const creation =
+        readSessionStorageValue<GitHubUserCreationContext | null>({
+          key: GITHUB_USER_CREATION_KEY,
+          deserialize: deserializeGitHubUserCreation,
+        });
+      if (
+        creation == null ||
+        creation.attemptId !== creationId ||
+        creation.phase !== "AUTHORIZING"
+      ) {
+        setResult({
+          state: { type: "ERROR", reason: "stale" },
+          returnPath: null,
+        });
+        return;
+      }
+      const scope = { handle: creation.handle, agentId: creation.agentId };
+      const operation =
+        providerError != null || code == null || state == null
+          ? creationCancel
+              .mutateAsync({ ...scope, attemptId: creationId })
+              .then<"ERROR">(() => "ERROR")
+          : creationExchange
+              .mutateAsync({ ...scope, code, state })
+              .then<"REVIEW">(() => "REVIEW");
+      void operation
+        .then((phase) => {
+          saveCreation({ ...creation, phase });
+          router.replace(creation.returnPath);
+        })
+        .catch(() => {
+          saveCreation({ ...creation, phase: "ERROR" });
+          router.replace(creation.returnPath);
+        });
+      return;
+    }
     const context = readSessionStorageValue<GitHubUserContext | null>({
       key: GITHUB_USER_CONTEXT_KEY,
       deserialize: deserializeGitHubUserContext,
@@ -85,10 +145,13 @@ export function useGitHubUserOAuthCallbackContainer({
     void exchange
       .mutateAsync({ ...apiContext, code, state })
       .then(() => {
+        saveContext({ ...context, reviewAttemptId: attemptId });
         setResult({
           state: { type: "COMPLETE" },
           returnPath: context.returnPath,
         });
+        notify();
+        router.replace(context.returnPath);
       })
       .catch((error: unknown) => {
         setResult({
@@ -98,8 +161,19 @@ export function useGitHubUserOAuthCallbackContainer({
           },
           returnPath: context.returnPath,
         });
-      })
-      .finally(notify);
-  }, [cancel, code, exchange, providerError, state]);
+        notify();
+      });
+  }, [
+    cancel,
+    code,
+    creationCancel,
+    creationExchange,
+    exchange,
+    providerError,
+    router,
+    saveContext,
+    saveCreation,
+    state,
+  ]);
   return result;
 }

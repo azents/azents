@@ -78,7 +78,9 @@ export const PlatformAbsent = {
     const page = within(canvasElement.ownerDocument.body);
     await expect(page.getAllByRole("option")).toHaveLength(3);
     await expect(
-      page.getByRole("option", { name: "Your GitHub App · user account" }),
+      page.getByRole("option", {
+        name: "GitHub App (self-managed) · user account",
+      }),
     ).toBeVisible();
   },
 } satisfies Story;

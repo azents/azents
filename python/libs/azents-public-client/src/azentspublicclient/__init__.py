@@ -24,6 +24,7 @@ __all__ = [
     "ChatGPTOAuthV1Api",
     "ChatV1Api",
     "ExternalChannelV1Api",
+    "GitHubUserCreationV1Api",
     "GitHubUserToolkitV1Api",
     "HealthV1Api",
     "InvitationV1Api",
@@ -270,6 +271,8 @@ __all__ = [
     "GitHubUserConnectionStatus",
     "GitHubUserConnectionSummary",
     "GitHubUserConnectionSummaryResponse",
+    "GitHubUserCreatedOutput",
+    "GitHubUserCreationReview",
     "GitHubUserExchangeRequest",
     "GitHubUserInstallation",
     "GitHubUserRepository",
@@ -622,6 +625,7 @@ from azentspublicclient.api.auth_v1_api import AuthV1Api as AuthV1Api
 from azentspublicclient.api.chat_gpto_auth_v1_api import ChatGPTOAuthV1Api as ChatGPTOAuthV1Api
 from azentspublicclient.api.chat_v1_api import ChatV1Api as ChatV1Api
 from azentspublicclient.api.external_channel_v1_api import ExternalChannelV1Api as ExternalChannelV1Api
+from azentspublicclient.api.git_hub_user_creation_v1_api import GitHubUserCreationV1Api as GitHubUserCreationV1Api
 from azentspublicclient.api.git_hub_user_toolkit_v1_api import GitHubUserToolkitV1Api as GitHubUserToolkitV1Api
 from azentspublicclient.api.health_v1_api import HealthV1Api as HealthV1Api
 from azentspublicclient.api.invitation_v1_api import InvitationV1Api as InvitationV1Api
@@ -872,6 +876,8 @@ from azentspublicclient.models.git_hub_user_connect_output import GitHubUserConn
 from azentspublicclient.models.git_hub_user_connection_status import GitHubUserConnectionStatus as GitHubUserConnectionStatus
 from azentspublicclient.models.git_hub_user_connection_summary import GitHubUserConnectionSummary as GitHubUserConnectionSummary
 from azentspublicclient.models.git_hub_user_connection_summary_response import GitHubUserConnectionSummaryResponse as GitHubUserConnectionSummaryResponse
+from azentspublicclient.models.git_hub_user_created_output import GitHubUserCreatedOutput as GitHubUserCreatedOutput
+from azentspublicclient.models.git_hub_user_creation_review import GitHubUserCreationReview as GitHubUserCreationReview
 from azentspublicclient.models.git_hub_user_exchange_request import GitHubUserExchangeRequest as GitHubUserExchangeRequest
 from azentspublicclient.models.git_hub_user_installation import GitHubUserInstallation as GitHubUserInstallation
 from azentspublicclient.models.git_hub_user_repository import GitHubUserRepository as GitHubUserRepository

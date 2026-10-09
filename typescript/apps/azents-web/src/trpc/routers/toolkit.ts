@@ -44,6 +44,7 @@ import { normalizeExplicitToolkitSlug } from "@/shared/lib/toolkit-identifiers";
 import { mapExpectedError } from "../api-error";
 import { publicProcedure, router } from "../init";
 import { githubUserRouter } from "./github-user";
+import { githubUserCreationRouter } from "./github-user-creation";
 
 const toolkitSlugInput = z.string().refine((value) => {
   const normalized = normalizeExplicitToolkitSlug(value);
@@ -52,6 +53,7 @@ const toolkitSlugInput = z.string().refine((value) => {
 
 export const toolkitRouter = router({
   githubUser: githubUserRouter,
+  githubUserCreation: githubUserCreationRouter,
   /**
    * Platform-provided Toolkit list
    */

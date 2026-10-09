@@ -433,6 +433,13 @@ Always-on required CI does not depend on external credentials.
   on-demand Runtime lifecycle and retain their existing observable completion,
   recovery, delivery, and typing boundaries; management-only journeys avoid unrelated
   Runtime startup entirely.
+  API-only upload/Exchange, saved model-profile, empty archived-Session and
+  primary-first Team list scenarios likewise create isolated configured managed
+  Agents without starting an unused Runtime or submitting an initialization turn.
+  Their managed Runtime Profile, model catalog, primary Session and public
+  authorization/storage/archive/scheduler assertions remain intact. Scenarios
+  that submit messages or verify Runtime behavior retain their original
+  Runtime preparation and execution path.
 - Each lane upgrades the shared database to the tested Server image revision through
   one bounded migration container before product services start. Public API, Admin API,
   and Engine Worker then start concurrently through the launchers' underlying
@@ -443,12 +450,25 @@ Always-on required CI does not depend on external credentials.
   current-revision validation.
 - E2E image preparation and the independent PostgreSQL, RustFS, Valkey, deterministic
   model, GitHub validation, and Slack provider prerequisites start concurrently within
-  one session fixture. Real dependencies remain ordered: the OpenAI proxy starts only
-  after the deterministic model service is healthy, database migration still waits for
-  PostgreSQL and storage readiness, and product services still wait for migration.
-  Existing health checks and setup failure propagation remain authoritative. Each lane
-  records prerequisite task duration, wall time, and overlap in
-  `core-prerequisite-timings.json`.
+  one session-owned preparation lifetime. Selected image builds are submitted once;
+  ready Server, Runtime Runner and Docker Runtime Provider images allow migration,
+  core services and the independent Runtime backend substrate to prepare while
+  selected Main/Admin Web images continue building. The full selected-image join
+  explicitly follows Runtime Provider readiness; every Web test body is gated on
+  that full join, including tests that do not otherwise consume an Admin image.
+  Real dependencies remain ordered: the OpenAI proxy starts only after the
+  deterministic model service is healthy, migration waits for core images,
+  PostgreSQL and storage, and product services still wait for migration. The
+  session owner drains all selected builds before prerequisite teardown and
+  surfaces unreported build failures even when a downstream setup failed before
+  joining the full image view. Planned tags are not image readiness, and failed
+  or cancelled builds are not rebuilt as a successful lazy fallback.
+  Existing health checks and failure propagation remain authoritative.
+  `core-prerequisite-timings.json` identifies core readiness separately from the
+  image-owner lifetime and records same-clock readiness boundaries for backend,
+  full-image join and final drain. Per-image timing records retain actual
+  monotonic start/end boundaries. Durations or nested fixture sums alone do not
+  establish within-run overlap.
 - Function-scoped local provider and proxy servers use a bounded short
   `serve_forever` polling interval so `shutdown()` observes termination promptly.
   Tests still complete both `shutdown()` and thread `join()` before releasing the

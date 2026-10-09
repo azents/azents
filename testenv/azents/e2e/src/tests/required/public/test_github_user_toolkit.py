@@ -22,6 +22,7 @@ from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.toolkit_config_create_request import (
     ToolkitConfigCreateRequest,
 )
+from azentspublicclient.models.toolkit_config_response import ToolkitConfigResponse
 from azentspublicclient.models.toolkit_config_update_request import (
     ToolkitConfigUpdateRequest,
 )
@@ -92,6 +93,47 @@ def _status(base: str, token: str) -> dict[str, object]:
     response = requests.get(base + "/status", headers=auth_headers(token), timeout=10)
     response.raise_for_status()
     return json_object_payload(response.json(), label="GitHub user status")
+
+
+def _create_confirmed(
+    client: azentspublicclient.ApiClient,
+    server: str,
+    handle: str,
+    token: str,
+    body: ToolkitConfigCreateRequest,
+) -> ToolkitConfigResponse:
+    """Exercise unpublished authorization and explicit atomic creation via API."""
+    base = f"{server}/toolkit/v1/workspaces/{handle}/github-user-creations"
+    prepared = _operation(base, token, "connect", body=body.to_dict())
+    authorization_url = prepared["authorization_url"]
+    assert isinstance(authorization_url, str)
+    state = parse_qs(urlsplit(authorization_url).query)["state"][0]
+    review = _operation(
+        base,
+        token,
+        "exchange",
+        body={
+            "code": "e2e-user-create-" + unique(),
+            "state": state,
+        },
+    )
+    api = ToolkitV1Api(client)
+    assert not any(
+        item.slug == body.slug
+        for item in api.toolkit_v1_list_toolkit_configs(
+            handle, _headers=auth_headers(token)
+        ).items
+    )
+    candidate = json_object_payload(review["candidate"], label="creation candidate")
+    assert candidate["account_login"] == "connected-user"
+    created = _operation(
+        base, token, "confirm", body={"attempt_id": candidate["attempt_id"]}
+    )
+    toolkit_id = created["toolkit_id"]
+    assert isinstance(toolkit_id, str)
+    return api.toolkit_v1_get_toolkit_config(
+        handle=handle, toolkit_config_id=toolkit_id, _headers=auth_headers(token)
+    )
 
 
 def _run(
@@ -206,8 +248,11 @@ def test_staged_account_delegated_worker_and_fail_open_disconnect(
             client_secret="synthetic-client-secret",
         )
     toolkits = ToolkitV1Api(public_api_client)
-    toolkit = toolkits.toolkit_v1_create_toolkit_config(
+    toolkit = _create_confirmed(
+        public_api_client,
+        azents_public_server_url,
         workspace.handle,
+        workspace.token,
         ToolkitConfigCreateRequest(
             toolkit_type="github",
             slug="github_user",
@@ -217,7 +262,6 @@ def test_staged_account_delegated_worker_and_fail_open_disconnect(
             enabled=True,
             always_expose_tools=True,
         ),
-        _headers=headers,
     )
     toolkits.toolkit_v1_attach_toolkit_to_agent(
         handle=workspace.handle,
@@ -229,11 +273,8 @@ def test_staged_account_delegated_worker_and_fail_open_disconnect(
         f"{azents_public_server_url}/toolkit/v1/workspaces/{workspace.handle}"
         f"/toolkit-configs/{toolkit.id}/github-user"
     )
-    assert _status(base, workspace.token) == {"connection": None}
-    reviewed = _connect(base, workspace.token, "main")
-    assert _status(base, workspace.token) == {"connection": None}
-    connected = _operation(
-        base, workspace.token, "confirm", body={"attempt_id": reviewed["attempt_id"]}
+    connected = json_object_payload(
+        _status(base, workspace.token)["connection"], label="Confirmed connection"
     )
     assert connected["account_login"] == "connected-user"
     assert "access_token" not in json.dumps(connected)

@@ -8,6 +8,7 @@ import requests
 from pydantic import TypeAdapter, ValidationError
 
 from support.utils import (
+    create_agent_setup,
     create_chat_session_with_agent,
     create_two_member_team_session,
     unique,
@@ -283,10 +284,31 @@ def test_agent_scoped_team_session_list_has_primary_first(
     azents_public_server_url: str,
 ) -> None:
     """Agent session list exposes primary first and non-primary metadata."""
-    setup = _setup_team_sessions(
-        public_api_client=public_api_client,
-        admin_api_client=admin_api_client,
-        public_url=azents_public_server_url,
+    agent = create_agent_setup(
+        public_api_client,
+        admin_api_client,
+        azents_public_server_url,
+    )
+    primary_session = _get_json(
+        server_url=azents_public_server_url,
+        token=agent.access_token,
+        path=f"/chat/v1/agents/{agent.agent_id}/team-primary-session",
+    )
+    primary_session_id = primary_session.get("id")
+    if not isinstance(primary_session_id, str):
+        raise AssertionError(
+            f"Team primary session response did not include id: {primary_session!r}"
+        )
+    secondary_session_id = _create_secondary_session(
+        server_url=azents_public_server_url,
+        token=agent.access_token,
+        agent_id=agent.agent_id,
+    )
+    setup = _TeamSessionSetup(
+        token=agent.access_token,
+        primary_session_id=primary_session_id,
+        secondary_session_id=secondary_session_id,
+        agent_id=agent.agent_id,
     )
 
     items = _session_items(

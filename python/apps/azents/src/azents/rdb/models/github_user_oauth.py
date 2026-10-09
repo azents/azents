@@ -95,3 +95,35 @@ class RDBGitHubUserAttempt(RDBModel):
         unique=True,
     )
     __table_args__ = (IX_TOOLKIT, UQ_CURRENT)
+
+
+class RDBGitHubUserCreation(RDBModel):
+    """Encrypted, short-lived new creation without a published Toolkit."""
+
+    __tablename__ = "github_user_oauth_creations"
+    id: Mapped[str] = mapped_column(
+        sa.String(32), primary_key=True, init=False, default_factory=lambda: uuid7().hex
+    )
+    user_id: Mapped[str] = mapped_column(sa.String(32))
+    session_id: Mapped[str] = mapped_column(sa.String(32))
+    workspace_id: Mapped[str] = mapped_column(
+        sa.String(32), sa.ForeignKey("workspaces.id", ondelete="CASCADE")
+    )
+    agent_id: Mapped[str | None] = mapped_column(
+        sa.String(32), sa.ForeignKey("agents.id", ondelete="CASCADE"), nullable=True
+    )
+    encrypted_setup: Mapped[str] = mapped_column(sa.Text, repr=False)
+    encrypted_candidate: Mapped[str | None] = mapped_column(
+        sa.Text, nullable=True, repr=False
+    )
+    status: Mapped[GitHubUserAttemptStatus] = mapped_column(attempt_status_enum)
+    expires_at: Mapped[datetime.datetime] = mapped_column(TimeZoneDateTime)
+    UQ_SUBJECT = sa.Index(
+        "uq_github_user_oauth_creations_subject",
+        "session_id",
+        "workspace_id",
+        "agent_id",
+        unique=True,
+        postgresql_nulls_not_distinct=True,
+    )
+    __table_args__ = (UQ_SUBJECT,)

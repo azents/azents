@@ -29,15 +29,18 @@ import {
   missingNewGitHubUserRegistration,
   normalizeGitHubUserCredentialEdits,
 } from "../github-user-credentials";
+import { isGitHubUserMode } from "../github-user-oauth-state";
 import { toolkitFormSchema } from "../schemas";
 import {
   hydrateToolkitConfig,
   projectToolkitConfig,
   toolkitProjectionUsesOauth,
 } from "../toolkit-config-projection";
+import { useGitHubUserCreationContainer } from "./useGitHubUserCreationContainer";
 import type { ToolkitFormValues } from "../schemas";
 import type { ToolkitConfigProjection } from "../toolkit-config-projection";
 import type {
+  GitHubUserSetupState,
   MutationState,
   ToolkitConfigFormState,
   ToolkitListState,
@@ -54,6 +57,11 @@ export interface ToolkitFormContainerProps {
 }
 
 export interface ToolkitFormContainerOutput {
+  githubCreation: {
+    state: GitHubUserSetupState;
+    onCancel: () => void;
+    onConfirm: () => void;
+  };
   configProjection: ToolkitConfigProjection;
   handle: string;
   agentId?: string;
@@ -201,6 +209,27 @@ export function useToolkitFormContainer(
   const [mutationState, setMutationState] = useState<MutationState>({
     type: "IDLE",
     error: null,
+  });
+  const creation = useGitHubUserCreationContainer({
+    handle,
+    agentId,
+    enabled: !isEditMode,
+    onComplete,
+    onPendingChange,
+    onReview: (review) => {
+      const hydrated = hydrateToolkitConfig("github", review.config);
+      form.setValues({
+        toolkitType: "github",
+        name: review.name,
+        slug: review.slug,
+        description: review.description ?? "",
+        prompt: review.prompt ?? "",
+        config: hydrated.config,
+        credentials: hydrated.credentials,
+        enabled: review.enabled,
+        alwaysExposeTools: review.always_expose_tools,
+      });
+    },
   });
   useEffect(() => {
     onPendingChange?.(mutationState.type === "SUBMITTING");
@@ -401,6 +430,16 @@ export function useToolkitFormContainer(
         return;
       }
 
+      if (
+        !isEditMode &&
+        values.toolkitType === "github" &&
+        isGitHubUserMode(values.config.github_auth_type)
+      ) {
+        setMutationState({ type: "IDLE", error: null });
+        creation.start(values, credentials);
+        return;
+      }
+
       if (agentId) {
         if (isEditMode && toolkitId) {
           updateAgentMutation.mutate({
@@ -467,6 +506,7 @@ export function useToolkitFormContainer(
       agentId,
       createAgentMutation,
       createMutation,
+      creation,
       formState,
       handle,
       isEditMode,
@@ -673,6 +713,11 @@ export function useToolkitFormContainer(
     formState.type === "EDIT" && toolkitProjectionUsesOauth(configProjection);
 
   return {
+    githubCreation: {
+      state: creation.state,
+      onCancel: creation.cancel,
+      onConfirm: creation.confirm,
+    },
     configProjection,
     handle,
     ...(agentId != null && { agentId }),

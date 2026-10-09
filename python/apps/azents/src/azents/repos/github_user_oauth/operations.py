@@ -92,7 +92,7 @@ class GitHubUserOAuthOperationRepository:
         SystemSettingPayloadResolver, Depends(SystemSettingPayloadResolver)
     ]
 
-    async def _scope(
+    async def authorize_scope_in_session(
         self,
         session: ReadSession,
         *,
@@ -153,7 +153,7 @@ class GitHubUserOAuthOperationRepository:
     ) -> None:
         """Authorize availability before a Toolkit has been saved."""
         async with self.session_manager() as session:
-            await self._scope(
+            await self.authorize_scope_in_session(
                 session,
                 user_id=user_id,
                 session_id=session_id,
@@ -172,7 +172,7 @@ class GitHubUserOAuthOperationRepository:
                 .with_for_update()
                 .execution_options(populate_existing=True)
             )
-        await self._scope(
+        await self.authorize_scope_in_session(
             session,
             user_id=requester.user_id,
             session_id=requester.session_id,
@@ -211,6 +211,12 @@ class GitHubUserOAuthOperationRepository:
                 GitHubUserErrorCode.STALE,
                 "Toolkit registration changed. Restart authorization.",
             )
+        await self.validate_platform_registration(session, registration)
+
+    async def validate_platform_registration(
+        self, session: ReadSession, registration: GitHubUserRegistration
+    ) -> None:
+        """Revalidate the captured current Platform generation without I/O."""
         if registration.source == "platform_user":
             current = await self.system_setting_repository.get_current(
                 session, section=SystemSettingSection.PLATFORM_GITHUB_APP

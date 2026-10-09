@@ -6,11 +6,40 @@ import {
   deserializeGitHubUserContext,
   GITHUB_USER_COMPLETION_EVENT,
   githubUserErrorReason,
+  gitHubUserResumeMatches,
   isGitHubUserMode,
   mergeGitHubUserAccess,
   parseGitHubUserState,
 } from "../../shared/toolkits/github-user-oauth-state.ts";
 import type { GitHubUserPopupHandoff } from "../../shared/toolkits/github-user-oauth-state.ts";
+
+void test("returned review inherits only the exact original Toolkit context", () => {
+  const current = {
+    handle: "team",
+    toolkitId: "toolkit",
+    agentId: "agent",
+    returnPath: "/w/team/agents/agent/settings/capabilities#agent-toolkits",
+    returnView: "DETAIL",
+  } satisfies import("../../shared/toolkits/github-user-oauth-state.ts").GitHubUserContext;
+  const saved = { ...current, reviewAttemptId: "attempt" };
+  assert.equal(gitHubUserResumeMatches(saved, current), true);
+  for (const different of [
+    { ...saved, handle: "other" },
+    { ...saved, toolkitId: "other" },
+    { ...saved, agentId: "other" },
+    { ...saved, returnPath: "/w/other/toolkits" },
+    current,
+    null,
+  ]) {
+    assert.equal(gitHubUserResumeMatches(different, current), false);
+  }
+  assert.equal(
+    deserializeGitHubUserContext(
+      JSON.stringify({ ...saved, reviewAttemptId: "a/b" }),
+    ),
+    null,
+  );
+});
 import type {
   GitHubUserInstallation,
   GitHubUserRepository,

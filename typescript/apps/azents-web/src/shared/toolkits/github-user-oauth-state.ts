@@ -10,9 +10,27 @@ const contextSchema = z
     agentId: z.string().min(1).optional(),
     returnPath: z.string().startsWith("/w/"),
     returnView: z.enum(["DETAIL", "EDIT"]),
+    reviewAttemptId: z
+      .string()
+      .regex(/^[a-zA-Z0-9_-]{1,64}$/)
+      .optional(),
   })
   .strict();
 export type GitHubUserContext = z.infer<typeof contextSchema>;
+
+/** Resume only the exact Toolkit ownership context; the server admits review. */
+export function gitHubUserResumeMatches(
+  saved: GitHubUserContext | null,
+  current: GitHubUserContext,
+): saved is GitHubUserContext & { reviewAttemptId: string } {
+  return (
+    saved?.reviewAttemptId != null &&
+    saved.handle === current.handle &&
+    saved.toolkitId === current.toolkitId &&
+    saved.agentId === current.agentId &&
+    saved.returnPath === current.returnPath
+  );
+}
 
 export interface GitHubUserPopupHandoff<Popup> {
   toolkitId: string;

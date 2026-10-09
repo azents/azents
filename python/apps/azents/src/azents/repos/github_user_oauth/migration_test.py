@@ -40,9 +40,16 @@ def test_status_enum_creation_is_owned_by_migrations() -> None:
 
 def _downgrade(connection: Connection) -> None:
     config = AlembicConfig(PROJECT_ROOT / "db-schemas" / "rdb" / "alembic.ini")
-    revision = ScriptDirectory.from_config(config).get_revision("8c432dfdd6c6")
+    scripts = ScriptDirectory.from_config(config)
+    creation = scripts.get_revision("e89fba791b40")
+    revision = scripts.get_revision("8c432dfdd6c6")
+    assert creation is not None
     assert revision is not None
-    with Operations.context(MigrationContext.configure(connection)):
+    with (
+        connection.begin_nested(),
+        Operations.context(MigrationContext.configure(connection)),
+    ):
+        creation.module.downgrade()
         revision.module.downgrade()
 
 

@@ -17,6 +17,7 @@ import warnings
 from collections.abc import Callable, Generator
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import AbstractContextManager, contextmanager, suppress
+from functools import partial
 from pathlib import Path
 from typing import NamedTuple, TypeVar
 
@@ -47,6 +48,7 @@ from support.container_logs import (
     emit_container_logs,
     read_container_logs,
 )
+from support.e2e_image_preparation import E2EImagePreparation as _E2EImagePreparation
 from support.model_stream_fixture_policy import ordinary_model_stream_environment
 from support.observations import (
     DockerNetworkObservation,
@@ -115,7 +117,6 @@ _MAIN_WEB_BROWSER_URL = "https://azents-web-gateway:8443"
 _ADMIN_WEB_GATEWAY_URL = "https://azents-web-gateway:8444/console"
 _ADMIN_WEB_BROWSER_URL = "https://azents-web-gateway:8445"
 _DOCKER_NETWORKS_ADAPTER = TypeAdapter(dict[str, DockerNetworkObservation])
-_STRING_MAPPING_ADAPTER = TypeAdapter(dict[str, str])
 _BROWSER_CALL_REPORT = pytest.StashKey[pytest.TestReport]()
 _IMAGE_BUILD_OBSERVABILITY_LOCK = threading.Lock()
 _T = TypeVar("_T")
@@ -161,7 +162,9 @@ class _CoreServiceContainers:
 class _CorePrerequisites:
     """Hold independently prepared images and infrastructure services."""
 
-    e2e_images: dict[str, str]
+    core_e2e_images: dict[str, str]
+    image_preparation: _E2EImagePreparation
+    readiness_timings: dict[str, float]
     postgres: PostgresContainer
     rustfs: DockerContainer
     valkey: DockerContainer
@@ -416,6 +419,7 @@ def _write_core_prerequisite_observability(
     completed: bool,
     wall_seconds: float,
     task_timings: dict[str, dict[str, object]],
+    readiness_timings: dict[str, float],
 ) -> None:
     """Write safe evidence for concurrent prerequisite preparation."""
     artifact_root = os.environ.get(_E2E_ARTIFACT_DIR_ENV)
@@ -435,6 +439,11 @@ def _write_core_prerequisite_observability(
                 {
                     "completed": completed,
                     "wall_seconds": round(wall_seconds, 3),
+                    "readiness_scope": "core",
+                    "readiness_timings": {
+                        name: round(timestamp, 6)
+                        for name, timestamp in sorted(readiness_timings.items())
+                    },
                     "task_seconds": round(task_seconds, 3),
                     "overlap_seconds": round(max(task_seconds - wall_seconds, 0.0), 3),
                     "tasks": dict(sorted(task_timings.items())),
@@ -587,6 +596,8 @@ def core_prerequisites(
     task_timings: dict[str, dict[str, object]] = {}
     task_timings_lock = threading.Lock()
     started_at = time.monotonic()
+    readiness_timings: dict[str, float] = {}
+    image_preparation: _E2EImagePreparation | None = None
     completed = False
 
     def timed_task(name: str, operation: Callable[[], _T]) -> _T:
@@ -643,67 +654,88 @@ def core_prerequisites(
         )
 
     try:
-        with ThreadPoolExecutor(max_workers=7) as executor:
-            image_future = executor.submit(
-                timed_task,
-                "e2e_images",
-                lambda: _prepare_e2e_images(
-                    os.environ.get(_E2E_IMAGE_BUILD_PROFILE_ENV)
-                ),
+        image_preparation = _e2e_image_preparation(
+            os.environ.get(_E2E_IMAGE_BUILD_PROFILE_ENV)
+        )
+        with image_preparation:
+            readiness_timings["images_submitted_at_monotonic"] = time.monotonic()
+            with ThreadPoolExecutor(max_workers=6) as executor:
+                futures = [
+                    executor.submit(start_container, "postgres", postgres),
+                    executor.submit(start_container, "rustfs", rustfs),
+                    executor.submit(start_container, "valkey", valkey),
+                    executor.submit(start_openai_services),
+                    executor.submit(
+                        start_container,
+                        "github_validation_proxy",
+                        github_validation_proxy,
+                        lambda container: _wait_for_fixture_health(
+                            container,
+                            port=8082,
+                            name="GitHub validation proxy",
+                        ),
+                    ),
+                    executor.submit(
+                        start_container,
+                        "slack_provider_fake",
+                        slack_provider_fake,
+                        lambda container: _wait_for_fixture_health(
+                            container,
+                            port=8083,
+                            name="Slack provider fake",
+                        ),
+                    ),
+                ]
+                infrastructure_errors: list[BaseException] = []
+                for future in futures:
+                    try:
+                        future.result()
+                    except BaseException as error:
+                        infrastructure_errors.append(error)
+                if infrastructure_errors:
+                    raise BaseExceptionGroup(
+                        "E2E infrastructure preparation failed", infrastructure_errors
+                    )
+            core_images = image_preparation.join(
+                image.cache_repository
+                for image in _CORE_E2E_IMAGE_BUILDS
+                if image.cache_repository in image_preparation.selected_images
             )
-            futures = [
-                executor.submit(start_container, "postgres", postgres),
-                executor.submit(start_container, "rustfs", rustfs),
-                executor.submit(start_container, "valkey", valkey),
-                executor.submit(start_openai_services),
-                executor.submit(
-                    start_container,
-                    "github_validation_proxy",
-                    github_validation_proxy,
-                    lambda container: _wait_for_fixture_health(
-                        container,
-                        port=8082,
-                        name="GitHub validation proxy",
-                    ),
-                ),
-                executor.submit(
-                    start_container,
-                    "slack_provider_fake",
-                    slack_provider_fake,
-                    lambda container: _wait_for_fixture_health(
-                        container,
-                        port=8083,
-                        name="Slack provider fake",
-                    ),
-                ),
-            ]
-            for future in futures:
-                future.result()
-            e2e_images = _STRING_MAPPING_ADAPTER.validate_python(image_future.result())
-        completed = True
-        _write_core_prerequisite_observability(
-            completed=True,
-            wall_seconds=time.monotonic() - started_at,
-            task_timings=task_timings,
-        )
-        yield _CorePrerequisites(
-            e2e_images=e2e_images,
-            postgres=postgres,
-            rustfs=rustfs,
-            valkey=valkey,
-            mock_openai=mock_openai,
-            openai_proxy=openai_proxy,
-            github_validation_proxy=github_validation_proxy,
-            slack_provider_fake=slack_provider_fake,
-        )
+            readiness_timings["core_prerequisites_ready_at_monotonic"] = (
+                time.monotonic()
+            )
+            completed = True
+            _write_core_prerequisite_observability(
+                completed=True,
+                wall_seconds=time.monotonic() - started_at,
+                task_timings=task_timings,
+                readiness_timings=readiness_timings,
+            )
+            yield _CorePrerequisites(
+                core_e2e_images=core_images,
+                image_preparation=image_preparation,
+                readiness_timings=readiness_timings,
+                postgres=postgres,
+                rustfs=rustfs,
+                valkey=valkey,
+                mock_openai=mock_openai,
+                openai_proxy=openai_proxy,
+                github_validation_proxy=github_validation_proxy,
+                slack_provider_fake=slack_provider_fake,
+            )
     finally:
         try:
-            if not completed:
-                _write_core_prerequisite_observability(
-                    completed=False,
-                    wall_seconds=time.monotonic() - started_at,
-                    task_timings=task_timings,
-                )
+            if image_preparation is not None and image_preparation.closed:
+                readiness_timings["image_owner_drained_at_monotonic"] = time.monotonic()
+            readiness_finished_at = readiness_timings.get(
+                "core_prerequisites_ready_at_monotonic", time.monotonic()
+            )
+            _write_core_prerequisite_observability(
+                completed=completed,
+                wall_seconds=readiness_finished_at - started_at,
+                task_timings=task_timings,
+                readiness_timings=readiness_timings,
+            )
         finally:
             with ThreadPoolExecutor(
                 max_workers=max(len(started_containers), 1)
@@ -712,8 +744,19 @@ def core_prerequisites(
                     executor.submit(container.stop)
                     for container in reversed(started_containers)
                 ]
+                cleanup_errors: list[BaseException] = []
+                primary = sys.exception()
                 for future in stop_futures:
-                    future.result()
+                    try:
+                        future.result()
+                    except BaseException as error:
+                        cleanup_errors.append(error)
+                if cleanup_errors:
+                    if primary is not None:
+                        cleanup_errors.insert(0, primary)
+                    raise BaseExceptionGroup(
+                        "E2E prerequisite cleanup failed", cleanup_errors
+                    )
 
 
 @pytest.fixture(scope="session")
@@ -956,10 +999,16 @@ def _build_configured_e2e_image(
     )
 
 
-def _prepare_e2e_images(profile: str | None) -> dict[str, str]:
-    """Build one CI lane's independent product images concurrently."""
+def _build_prepared_e2e_image(image_build: _E2EImageBuild, image_tag: str) -> str:
+    """Return a ready tag only after its complete build and load succeeds."""
+    _build_configured_e2e_image(image_build, image_tag)
+    return image_tag
+
+
+def _e2e_image_preparation(profile: str | None) -> _E2EImagePreparation:
+    """Capture one lane's selected images and independent build operations."""
     if profile is None:
-        return {}
+        return _E2EImagePreparation({}, {})
     try:
         image_builds = _E2E_IMAGE_BUILD_PROFILES[profile]
     except KeyError:
@@ -970,32 +1019,41 @@ def _prepare_e2e_images(profile: str | None) -> dict[str, str]:
         ) from None
 
     images: dict[str, str] = {}
-    pending_builds: list[tuple[_E2EImageBuild, str]] = []
+    build_operations: dict[str, Callable[[], str]] = {}
     for image_build in image_builds:
         if image := os.environ.get(image_build.environment_variable):
             images[image_build.cache_repository] = image
             continue
         image_tag = f"{image_build.tag_prefix}:{random_secret(8)}"
-        images[image_build.cache_repository] = image_tag
-        pending_builds.append((image_build, image_tag))
-
-    if not pending_builds:
-        return images
-
-    with ThreadPoolExecutor(max_workers=len(pending_builds)) as executor:
-        futures = [
-            executor.submit(_build_configured_e2e_image, image_build, image_tag)
-            for image_build, image_tag in pending_builds
-        ]
-        for future in futures:
-            future.result()
-    return images
+        build_operations[image_build.cache_repository] = partial(
+            _build_prepared_e2e_image, image_build, image_tag
+        )
+    return _E2EImagePreparation(images, build_operations)
 
 
 @pytest.fixture(scope="session")
-def e2e_images(core_prerequisites: _CorePrerequisites) -> dict[str, str]:
-    """Return CI-prepared images, leaving focused local builds lazy by default."""
-    return core_prerequisites.e2e_images
+def core_e2e_images(core_prerequisites: _CorePrerequisites) -> dict[str, str]:
+    """Return core-ready images without waiting for selected Web builds."""
+    return core_prerequisites.core_e2e_images
+
+
+@pytest.fixture(scope="session")
+def e2e_images(
+    core_prerequisites: _CorePrerequisites,
+    azents_runtime_provider_docker_container: DockerContainer,
+) -> dict[str, str]:
+    """Join all selected images after the independent backend substrate is ready."""
+    del azents_runtime_provider_docker_container
+    preparation = core_prerequisites.image_preparation
+    timings = core_prerequisites.readiness_timings
+    timings["backend_ready_at_monotonic"] = time.monotonic()
+    try:
+        images = preparation.join(preparation.selected_images)
+    except BaseException:
+        timings["full_images_join_failed_at_monotonic"] = time.monotonic()
+        raise
+    timings["full_images_ready_at_monotonic"] = time.monotonic()
+    return images
 
 
 def _resolve_e2e_image(
@@ -1014,8 +1072,8 @@ def _resolve_e2e_image(
 
 
 @pytest.fixture(scope="session")
-def azents_server_image(e2e_images: dict[str, str]) -> str:
-    return _resolve_e2e_image(_SERVER_IMAGE_BUILD, e2e_images)
+def azents_server_image(core_e2e_images: dict[str, str]) -> str:
+    return _resolve_e2e_image(_SERVER_IMAGE_BUILD, core_e2e_images)
 
 
 @pytest.fixture(scope="session")
@@ -1031,13 +1089,13 @@ def azents_admin_web_image(e2e_images: dict[str, str]) -> str:
 
 
 @pytest.fixture(scope="session")
-def azents_runtime_runner_image(e2e_images: dict[str, str]) -> str:
-    return _resolve_e2e_image(_RUNTIME_RUNNER_IMAGE_BUILD, e2e_images)
+def azents_runtime_runner_image(core_e2e_images: dict[str, str]) -> str:
+    return _resolve_e2e_image(_RUNTIME_RUNNER_IMAGE_BUILD, core_e2e_images)
 
 
 @pytest.fixture(scope="session")
-def azents_runtime_provider_docker_image(e2e_images: dict[str, str]) -> str:
-    return _resolve_e2e_image(_RUNTIME_PROVIDER_DOCKER_IMAGE_BUILD, e2e_images)
+def azents_runtime_provider_docker_image(core_e2e_images: dict[str, str]) -> str:
+    return _resolve_e2e_image(_RUNTIME_PROVIDER_DOCKER_IMAGE_BUILD, core_e2e_images)
 
 
 def _build_e2e_image(
@@ -1076,13 +1134,16 @@ def _build_e2e_image(
         )
         completed = True
     finally:
+        finished_at = time.monotonic()
         _write_e2e_image_build_observability(
             cache_repository=observability_image or cache_repository or "unknown",
             cache_backend=cache_backend_override or cache_options.cache_backend,
             cache_scope=cache_options.cache_scope,
             cache_export_enabled=cache_options.cache_to is not None,
             completed=completed,
-            duration_seconds=time.monotonic() - started_at,
+            duration_seconds=finished_at - started_at,
+            started_at_monotonic=started_at,
+            finished_at_monotonic=finished_at,
             build_mode=build_mode,
         )
 
@@ -1143,6 +1204,8 @@ def _write_e2e_image_build_observability(
     cache_export_enabled: bool,
     completed: bool,
     duration_seconds: float,
+    started_at_monotonic: float,
+    finished_at_monotonic: float,
     build_mode: str = "full",
 ) -> None:
     """Append safe per-image build timing evidence to the CI artifact directory."""
@@ -1151,7 +1214,6 @@ def _write_e2e_image_build_observability(
         return
 
     artifact_path = Path(artifact_root) / "image-build-timings.jsonl"
-    artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact_record = {
         "image": cache_repository,
         "cache_backend": cache_backend,
@@ -1159,11 +1221,20 @@ def _write_e2e_image_build_observability(
         "cache_export_enabled": cache_export_enabled,
         "completed": completed,
         "duration_seconds": round(duration_seconds, 3),
+        "started_at_monotonic": round(started_at_monotonic, 6),
+        "finished_at_monotonic": round(finished_at_monotonic, 6),
         "build_mode": build_mode,
     }
-    with _IMAGE_BUILD_OBSERVABILITY_LOCK:
-        with artifact_path.open("a", encoding="utf-8") as artifact_file:
-            artifact_file.write(json.dumps(artifact_record, sort_keys=True) + "\n")
+    try:
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        with _IMAGE_BUILD_OBSERVABILITY_LOCK:
+            with artifact_path.open("a", encoding="utf-8") as artifact_file:
+                artifact_file.write(json.dumps(artifact_record, sort_keys=True) + "\n")
+    except OSError as error:
+        warnings.warn(
+            f"Failed to write E2E image observability ({type(error).__name__}).",
+            stacklevel=2,
+        )
 
 
 @pytest.fixture(scope="session")

@@ -26,7 +26,7 @@ import {
 import { IconArrowLeft } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { normalizeGitHubUserCredentialEdits } from "../github-user-credentials";
+import { gitHubUserRegistrationDirty } from "../github-user-credentials";
 import { isGitHubUserMode } from "../github-user-oauth-state";
 import { GitHubUserAuthorizationContainer } from "../GitHubUserAuthorizationContainer";
 import { AwsConfigFields } from "./AwsConfigFields";
@@ -34,6 +34,7 @@ import { BraveSearchConfigFields } from "./BraveSearchConfigFields";
 import { EnvVarConfigFields } from "./EnvVarConfigFields";
 import { GcpConfigFields } from "./GcpConfigFields";
 import { GithubConfigFields } from "./GithubConfigFields";
+import { GitHubUserCreation } from "./GitHubUserCreation";
 import { GoogleAnalyticsConfigFields } from "./GoogleAnalyticsConfigFields";
 import { KubernetesConfigFields } from "./KubernetesConfigFields";
 import { McpConfigFields } from "./McpConfigFields";
@@ -43,10 +44,12 @@ import { ShellConfigFields } from "./ShellConfigFields";
 import type { ToolkitFormValues } from "../schemas";
 import type { ToolkitConfigProjection } from "../toolkit-config-projection";
 import type { MutationState, ToolkitConfigFormState } from "../types";
+import type { GitHubUserCreationProps } from "./GitHubUserCreation";
 import type { UseFormReturnType } from "@mantine/form";
 import type { FormEventHandler, ReactNode } from "react";
 
 export interface ToolkitFormProps {
+  githubCreation?: GitHubUserCreationProps;
   configProjection: ToolkitConfigProjection;
   configurationFields?: ReactNode;
   handle: string;
@@ -98,6 +101,7 @@ function oauthConnectionStatusTranslationKey(
 }
 
 export function ToolkitForm({
+  githubCreation,
   configProjection,
   configurationFields,
   handle,
@@ -145,6 +149,24 @@ export function ToolkitForm({
     return (
       <Container size="md" py="xl">
         <Alert color="red">{t("notFound")}</Alert>
+      </Container>
+    );
+  }
+
+  if (
+    githubCreation != null &&
+    githubCreation.state.type !== "IDLE" &&
+    !(
+      githubCreation.state.type === "ERROR" &&
+      githubCreation.state.attemptId == null
+    )
+  ) {
+    return (
+      <Container size="md" py={embedded ? 0 : "xl"}>
+        <Stack gap="lg">
+          <Title order={3}>{t("createTitle")}</Title>
+          <GitHubUserCreation {...githubCreation} />
+        </Stack>
       </Container>
     );
   }
@@ -306,13 +328,11 @@ export function ToolkitForm({
                             ? `/w/${handle}/toolkits/${formState.config.id}/edit`
                             : `/w/${handle}/agents/${agentId}/settings/capabilities#agent-toolkits`,
                       }}
-                      registrationDirty={
-                        form.getValues().config.github_auth_type !==
-                          formState.config.config.github_auth_type ||
-                        normalizeGitHubUserCredentialEdits(
-                          form.getValues().credentials ?? null,
-                        ) != null
-                      }
+                      registrationDirty={gitHubUserRegistrationDirty(
+                        formState.config.config.github_auth_type,
+                        form.getValues().config.github_auth_type,
+                        form.getValues().credentials ?? null,
+                      )}
                     />
                   )}
 
@@ -539,6 +559,9 @@ export function ToolkitForm({
             {mutationState.type === "IDLE" && mutationState.error && (
               <Alert color="red">{mutationState.error}</Alert>
             )}
+            {githubCreation?.state.type === "ERROR" && (
+              <GitHubUserCreation {...githubCreation} />
+            )}
 
             <Group justify="flex-end">
               <Button
@@ -553,7 +576,12 @@ export function ToolkitForm({
                 type="submit"
                 loading={mutationState.type === "SUBMITTING"}
               >
-                {isEdit ? t("save") : t("create")}
+                {isEdit
+                  ? t("save")
+                  : currentToolSlug === "github" &&
+                      isGitHubUserMode(form.getValues().config.github_auth_type)
+                    ? t("github.user.authorize")
+                    : t("create")}
               </Button>
             </Group>
           </Stack>
