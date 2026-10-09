@@ -1,7 +1,10 @@
 """Runtime Control server settings tests."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Literal
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from azents_runtime_control.runtime_stream_session import (
@@ -12,13 +15,117 @@ from azents_runtime_control.runtime_stream_session import (
 from cryptography.fernet import Fernet
 from pydantic import ValidationError
 
+from azents.repos.runtime_web.session_route_repository import (
+    RuntimeWebSessionRouteConflict,
+)
 from azents.runtime.control_server import (
     RuntimeControlSettings,
     _owner_offer_blocks_reissue,
+    _OwnerRuntimeStreamSessionOfferProvider,
+    _RuntimeWebRunnerGenerationGate,
     runtime_control_transport,
     runtime_web_trusted_transport,
     validate_runtime_control_web_settings,
 )
+from azents.runtime.stream_session_owner import RuntimeStreamSessionOwnerManager
+
+
+class _ObservedGenerationEvent(asyncio.Event):
+    """Expose entry into the real generation wait without scheduler delays."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.wait_entered = asyncio.Event()
+
+    async def wait(self) -> Literal[True]:
+        self.wait_entered.set()
+        return await super().wait()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mark_before_wait", [False, True])
+async def test_runner_generation_readiness_remains_available_after_wait(
+    mark_before_wait: bool,
+) -> None:
+    """Owner route acquisition may repeat for the same persisted generation."""
+    gate = _RuntimeWebRunnerGenerationGate()
+    event = _ObservedGenerationEvent()
+    gate.events[("runtime", 3)] = event
+    if mark_before_wait:
+        await gate.mark(runtime_id="runtime", runner_generation=3)
+    waiting = asyncio.create_task(
+        gate.wait(runtime_id="runtime", runner_generation=3, timeout_seconds=1)
+    )
+    try:
+        if not mark_before_wait:
+            await asyncio.wait_for(event.wait_entered.wait(), timeout=1)
+            await gate.mark(runtime_id="runtime", runner_generation=3)
+        assert await waiting
+        assert await gate.wait(
+            runtime_id="runtime", runner_generation=3, timeout_seconds=0
+        )
+        assert not await gate.wait(
+            runtime_id="runtime", runner_generation=4, timeout_seconds=0
+        )
+        assert not await gate.wait(
+            runtime_id="other", runner_generation=3, timeout_seconds=0
+        )
+    finally:
+        waiting.cancel()
+        await asyncio.gather(waiting, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_owner_route_conflict_retains_persisted_generation_readiness() -> None:
+    """A live previous Owner lease cannot consume the new generation signal."""
+    gate = _RuntimeWebRunnerGenerationGate()
+    event = _ObservedGenerationEvent()
+    gate.events[("runtime", 3)] = event
+    repository = Mock()
+    repository.get_runtime = AsyncMock(
+        return_value=Mock(desired_generation=2, runner_generation=3)
+    )
+    owned = Mock()
+    owned.offer = _web_offer(deadline_at=datetime.now(UTC) + timedelta(seconds=5))
+    manager = Mock(spec=RuntimeStreamSessionOwnerManager)
+    manager.acquire = AsyncMock(
+        side_effect=[RuntimeWebSessionRouteConflict("Previous lease is live"), owned]
+    )
+    provider = _OwnerRuntimeStreamSessionOfferProvider(
+        read_repository=repository,
+        owner_manager=manager,
+        generation_gate=gate,
+    )
+    first = asyncio.create_task(
+        provider.offer_for_runner(runtime_id="runtime", runner_generation=3)
+    )
+    try:
+        await asyncio.wait_for(event.wait_entered.wait(), timeout=1)
+        await gate.mark(runtime_id="runtime", runner_generation=3)
+        assert await first is None
+        assert await gate.wait(
+            runtime_id="runtime", runner_generation=3, timeout_seconds=0
+        )
+        assert (
+            await provider.offer_for_runner(runtime_id="runtime", runner_generation=3)
+            == owned.offer
+        )
+        assert manager.acquire.await_count == 2
+        assert repository.get_runtime.await_count == 2
+        # A fresh acquisition still requires the authoritative generation fence.
+        provider.owned.clear()
+        repository.get_runtime.return_value = Mock(
+            desired_generation=2, runner_generation=4
+        )
+        assert (
+            await provider.offer_for_runner(runtime_id="runtime", runner_generation=3)
+            is None
+        )
+        assert repository.get_runtime.await_count == 3
+        assert manager.acquire.await_count == 2
+    finally:
+        first.cancel()
+        await asyncio.gather(first, return_exceptions=True)
 
 
 def _settings() -> RuntimeControlSettings:
