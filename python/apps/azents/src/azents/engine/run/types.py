@@ -336,7 +336,7 @@ PollMessages: TypeAlias = Callable[[], Awaitable[PollMessagesResult]]
 """Poll callback injected into engine.run(); returns turn-boundary input."""
 
 CheckStop: TypeAlias = Callable[[], Awaitable[bool]]
-"""Stop check callback injected into engine.run(). Stops execution when True."""
+"""Return True for User stop; raise reasoned cancellation for Worker handover."""
 
 USER_STOP_CANCEL_MESSAGE = "azents:user_stop"
 """asyncio task cancel message identifying user stop cancellation."""

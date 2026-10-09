@@ -46,11 +46,14 @@ from azents.engine.events.types import (
     SystemErrorPayload,
 )
 from azents.engine.events.user_messages import make_run_user_message
+from azents.engine.model_stream import ModelStreamCallContext, admit_model_dispatch
 from azents.engine.run.contracts import ToolkitBinding
 from azents.engine.run.emit import PublishedEvent
 from azents.engine.run.errors import CompactionFailedError, UserVisibleRuntimeError
 from azents.engine.run.model_transport import InMemoryModelTransportState
 from azents.engine.run.types import (
+    SHUTDOWN_CANCEL_MESSAGE,
+    USER_STOP_CANCEL_MESSAGE,
     CheckStop,
     PollMessages,
 )
@@ -2374,6 +2377,75 @@ async def test_user_stop_waits_for_engine_cleanup_before_session_boundary() -> N
     finally:
         host.cancel_cleanup_release.set()
         await runner.shutdown()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model_dispatch", [False, True])
+async def test_shutdown_stop_check_preserves_handover_reason(
+    model_dispatch: bool,
+) -> None:
+    """A shutdown observed at a turn or physical dispatch never becomes User stop."""
+    host = _Host()
+    runner = _make_session_runner(host)
+    runner.owner_generation = 1
+    host.shutdown_event.set()
+    check_stop = runner._make_check_stop_fn("session-001")
+
+    with pytest.raises(asyncio.CancelledError) as captured:
+        if model_dispatch:
+            await admit_model_dispatch(
+                ModelStreamCallContext(
+                    call_kind="sampling",
+                    provider="test",
+                    provider_integration_id=None,
+                    model="test-model",
+                    session_id="session-001",
+                    run_id="run-001",
+                    attempt_number=None,
+                    check_stop=check_stop,
+                )
+            )
+        else:
+            await check_stop()
+
+    assert captured.value.args == (SHUTDOWN_CANCEL_MESSAGE,)
+    assert runner.stop_controller.handover_stop_requested
+    assert runner.stop_controller.tool_admission_barrier.closed
+    assert not runner.stop_controller.user_stop_requested
+    assert host.finalized_user_stop_session_ids == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("durable_stop", [False, True])
+async def test_user_stop_check_takes_precedence_over_shutdown(
+    durable_stop: bool,
+) -> None:
+    """Queued and durable explicit User stop retain their terminal disposition."""
+    host = _Host()
+    runner = _make_session_runner(host)
+    host.shutdown_event.set()
+    if durable_stop:
+        host.stop_request_session_ids.add("session-001")
+    else:
+        runner.enqueue(SessionStopSignal(session_id="session-001"))
+
+    with pytest.raises(asyncio.CancelledError) as captured:
+        await admit_model_dispatch(
+            ModelStreamCallContext(
+                call_kind="sampling",
+                provider="test",
+                provider_integration_id=None,
+                model="test-model",
+                session_id="session-001",
+                run_id="run-001",
+                attempt_number=None,
+                check_stop=runner._make_check_stop_fn("session-001"),
+            )
+        )
+
+    assert captured.value.args == (USER_STOP_CANCEL_MESSAGE,)
+    assert runner.stop_controller.user_stop_requested
+    assert not runner.stop_controller.handover_stop_requested
 
 
 @pytest.mark.asyncio

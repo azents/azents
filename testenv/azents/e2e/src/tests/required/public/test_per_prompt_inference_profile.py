@@ -24,6 +24,7 @@ from azentspublicclient.models.agent_session_response import AgentSessionRespons
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
 from azentspublicclient.models.chat_event_response import ChatEventResponse
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest
+from azentspublicclient.models.live_event_list_response import LiveEventListResponse
 from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
@@ -48,11 +49,13 @@ from azentspublicclient.models.workspace_model_settings_response import (
     WorkspaceModelSettingsResponse,
 )
 from pydantic import BaseModel, TypeAdapter, ValidationError
+from testcontainers.core.container import DockerContainer
 
 from support.image_generation_openai_proxy import is_inference_profile_title_request
 from support.observations import (
     InputMessageObservation,
     RequestedProfileObservation,
+    RunMarkerObservation,
     ToolResultObservation,
     TurnMarkerObservation,
 )
@@ -1516,6 +1519,88 @@ class TestPerPromptInferenceProfile:
             model_id="gpt-6-astra",
             expected_tier="default",
         )
+
+    def test_worker_shutdown_during_model_wait_resumes_same_run(
+        self,
+        azents_public_server_url: str,
+        openai_proxy_url: str,
+        profile_agent_setup: ProfileAgentSetup,
+        ordinary_model_stream_worker: DockerContainer,
+    ) -> None:
+        """A real Worker TERM at a blocked provider request preserves recovery."""
+        token, agent_id, _ = profile_agent_setup
+        session_id = _create_profile_session(
+            server_url=azents_public_server_url, token=token, agent_id=agent_id
+        )
+        barrier_url = f"{openai_proxy_url}/v1/_inference_profile_barrier"
+        requests.post(barrier_url, timeout=10).raise_for_status()
+        message = f"Ultrafast E2E prepared shutdown {unique()}"
+        worker = ordinary_model_stream_worker.get_wrapped_container()
+        try:
+            _write_profile(
+                server_url=azents_public_server_url,
+                token=token,
+                agent_id=agent_id,
+                session_id=session_id,
+                message=message,
+                target="Astra",
+                effort="high",
+                enabled_execution_options=["ultrafast"],
+            )
+            wait_until(
+                lambda: (
+                    _response_model(
+                        requests.get(barrier_url, timeout=10), ProfileBarrierObservation
+                    ).reached
+                ),
+                timeout=30,
+                interval=0.1,
+                message="Provider request did not reach the shutdown barrier",
+            )
+            live_url = f"{azents_public_server_url}/chat/v1/sessions/{session_id}/live"
+            before = _response_model(
+                requests.get(live_url, headers=_headers(token), timeout=10),
+                LiveEventListResponse,
+            )
+            assert before.run is not None
+            run_id = before.run.run_id
+            assert before.run.status == "running"
+
+            worker.stop(timeout=35)
+
+            stopped = _response_model(
+                requests.get(live_url, headers=_headers(token), timeout=10),
+                LiveEventListResponse,
+            )
+            assert stopped.session_run_state == "running"
+            assert stopped.run is not None
+            assert stopped.run.run_id == run_id
+            assert stopped.run.status == "running"
+            assert not any(
+                event.kind == "run_marker"
+                for event in _typed_history(azents_public_server_url, token, session_id)
+            )
+        finally:
+            requests.post(f"{barrier_url}/release", timeout=10).raise_for_status()
+            worker.start()
+
+        _wait_for_session_idle(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+        history = _typed_history(azents_public_server_url, token, session_id)
+        terminals = [
+            RunMarkerObservation.model_validate(event.payload)
+            for event in history
+            if event.kind == "run_marker"
+        ]
+        assert [(marker.run_id, marker.status) for marker in terminals] == [
+            (run_id, "completed")
+        ]
+        assert "INFERENCE_PROFILE_COMPLETED prepared" in _serialized_history(history)
+        assert not any(event.kind == "system_error" for event in history)
 
     def test_subagent_spawn_override_continuation(
         self,

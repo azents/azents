@@ -53,7 +53,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_execution/cutover_replay_operations.py
   - python/apps/azents/src/azents/repos/session_execution/cutover_replay_data.py
   - python/apps/azents/src/azents/cli/team_session_cutover.py
-last_verified_at: 2026-10-05
+last_verified_at: 2026-10-09
 spec_version: 42
 ---
 
@@ -218,8 +218,12 @@ message is left for broker redelivery or ownership takeover.
 If shutdown is observed while a foreground run is active, the run boundary is a worker handover
 boundary until its durable idle outcome commits. The current worker closes foreground tool and
 operation admission, then allows already-admitted work up to 30 seconds to finish cleanly. Timeout
-cancels the supervised task and lets its cancellation finalizers persist terminal state before the
-worker releases the ownership lease and heartbeat. A clean completed Run atomically records
+cancels the supervised task and lets its cancellation finalizers settle tool and operation results
+before the worker releases the ownership lease and heartbeat. Stop checks return `True` only for
+explicit User stop. A shutdown observed at a turn, physical model dispatch, or watchdog stop check
+raises `CancelledError("azents:shutdown")`, preserving the active Run for handover rather than
+writing an `interrupted` User-stop marker. Explicit User stop takes precedence when both are
+observed. A clean completed Run atomically records
 `AgentSession.pending_idle_continuation_run_id`; shutdown does not run idle hooks in the departing
 Worker, but it releases ownership with a handover wake-up while that pointer remains. A new Worker
 drains ordinary pending work first, re-resolves the idle hooks, and conditionally consumes the pointer

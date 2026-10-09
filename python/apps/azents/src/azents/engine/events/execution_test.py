@@ -60,10 +60,14 @@ from azents.engine.events.types import (
     UserMessagePayload,
     build_native_compat_key,
 )
-from azents.engine.model_stream import ModelStreamWatchdog
+from azents.engine.model_stream import (
+    ModelStreamCallContext,
+    ModelStreamWatchdog,
+    admit_model_dispatch,
+)
 from azents.engine.run.errors import ModelCallError
 from azents.engine.run.turn_action_bridge import TurnActionBridgeBoundary
-from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE
+from azents.engine.run.types import SHUTDOWN_CANCEL_MESSAGE, USER_STOP_CANCEL_MESSAGE
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_execution.data import EventCreate
@@ -630,6 +634,22 @@ class _CancellingModelAdapter:
         )
         yield NativeEvent(type="response.output_text.delta", item={"delta": "lo"})
         raise asyncio.CancelledError(USER_STOP_CANCEL_MESSAGE)
+
+
+class _HandoverModelAdapter(_ModelAdapter):
+    """Observe shutdown at dispatch admission after foreground preparation."""
+
+    async def stream(
+        self,
+        request: NativeModelRequest,
+        **kwargs: object,
+    ) -> AsyncIterator[NativeEvent]:
+        """Propagate the captured stop check through shared physical admission."""
+        del request
+        context = kwargs["call_context"]
+        assert isinstance(context, ModelStreamCallContext)
+        await admit_model_dispatch(context)
+        yield NativeEvent(type="done", item={})
 
 
 class _FailingModelAdapter:
@@ -3892,6 +3912,58 @@ async def test_active_entry_without_call_event_fails_invariant() -> None:
                 model="gpt-5.1",
             ),
         )
+
+
+async def test_shutdown_during_model_admission_keeps_run_recoverable() -> None:
+    """Dispatch cancellation must leave no terminal marker or partial output."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    checks = 0
+
+    async def check_stop() -> bool:
+        nonlocal checks
+        checks += 1
+        if checks == 1:
+            return False
+        raise asyncio.CancelledError(SHUTDOWN_CANCEL_MESSAGE)
+
+    execution = _execution(
+        session_manager=_session_context,
+        input_projection_repository=None,
+        terminal_finalization_repository=None,
+        metadata_repository=_OutputMetadataRepository(failure=None),
+        model_operation_completion=None,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_provider_integration_id=None,
+        model_stream_inference_profile=None,
+        model_adapter=_HandoverModelAdapter(),
+        output_normalizer=_Normalizer([]),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(), tool_executor=_ToolExecutor()
+        ),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    with pytest.raises(asyncio.CancelledError) as captured:
+        await execution.run(
+            AgentRunExecutionRequest(
+                owner_generation=1,
+                tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                turn_action_bridge_boundary=TurnActionBridgeBoundary(),
+                run_id="run-1",
+                session_id="session-1",
+                model="gpt-5.1",
+            ),
+            check_stop=check_stop,
+        )
+
+    assert captured.value.args == (SHUTDOWN_CANCEL_MESSAGE,)
+    assert checks == 2
+    assert run_repo.terminal is None
+    assert transcript_repo.events == []
 
 
 async def test_model_stream_user_stop_appends_only_assistant_text() -> None:
