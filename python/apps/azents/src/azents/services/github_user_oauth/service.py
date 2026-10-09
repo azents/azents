@@ -155,10 +155,19 @@ class GitHubUserOAuthService:
             raise GitHubUserOAuthError(
                 GitHubUserErrorCode.INVALID, "Toolkit is not a GitHub Toolkit."
             )
+        return await self.prepare_registration(
+            credentials_json=context.toolkit.credentials,
+            revision=context.toolkit.revision,
+        )
+
+    async def prepare_registration(
+        self, *, credentials_json: str | None, revision: int
+    ) -> _PreparedRegistration:
+        """Resolve a selected registration for admitted creation or reconnect."""
         try:
             credentials = TypeAdapter(
                 GitHubSecrets, config=ConfigDict(hide_input_in_errors=True)
-            ).validate_json(context.toolkit.credentials or "null")
+            ).validate_json(credentials_json or "null")
         except ValidationError:
             raise GitHubUserOAuthError(
                 GitHubUserErrorCode.INVALID,
@@ -183,7 +192,7 @@ class GitHubUserOAuthService:
                     app_id=credentials.app_id,
                     client_id=platform.client_id,
                     client_secret=platform.client_secret,
-                    toolkit_revision=context.toolkit.revision,
+                    toolkit_revision=revision,
                     platform_generation=platform.effective_generation,
                 ),
                 private_key=platform.private_key,
@@ -195,7 +204,7 @@ class GitHubUserOAuthService:
                     app_id=credentials.app_id,
                     client_id=credentials.client_id,
                     client_secret=credentials.client_secret,
-                    toolkit_revision=context.toolkit.revision,
+                    toolkit_revision=revision,
                     platform_generation=None,
                 ),
                 private_key=credentials.private_key,

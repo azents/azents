@@ -1,5 +1,10 @@
 "use client";
-import { useInterval, useSessionStorage, useWindowEvent } from "@mantine/hooks";
+import {
+  readSessionStorageValue,
+  useInterval,
+  useSessionStorage,
+  useWindowEvent,
+} from "@mantine/hooks";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
 import {
@@ -7,6 +12,7 @@ import {
   deserializeGitHubUserContext,
   GITHUB_USER_CONTEXT_KEY,
   githubUserErrorReason,
+  gitHubUserResumeMatches,
   mergeGitHubUserAccess,
 } from "../github-user-oauth-state";
 import type { GitHubUserAuthorizationProps } from "../components/GitHubUserAuthorization";
@@ -61,6 +67,45 @@ export function useGitHubUserAuthorizationContainer({
     setAccess({ type: "IDLE" });
   }, [currentConnectionId]);
   const connect = trpc.toolkit.githubUser.connect.useMutation();
+  const resumed = useRef(false);
+  useEffect(() => {
+    if (resumed.current) {
+      return;
+    }
+    resumed.current = true;
+    const saved =
+      readSessionStorageValue<GitHubUserContext | null>({
+        key: GITHUB_USER_CONTEXT_KEY,
+        deserialize: deserializeGitHubUserContext,
+      }) ?? null;
+    if (!gitHubUserResumeMatches(saved, context)) {
+      return;
+    }
+    const id = saved.reviewAttemptId;
+    attempt.current = id;
+    setSetup({ type: "REVIEW_LOADING", attemptId: id });
+    void utils.toolkit.githubUser.review
+      .fetch({
+        handle: context.handle,
+        toolkitId: context.toolkitId,
+        agentId: context.agentId,
+        attemptId: id,
+      })
+      .then((candidate) => {
+        if (attempt.current === id) {
+          setSetup({ type: "REVIEW", candidate });
+        }
+      })
+      .catch((error: unknown) => {
+        if (attempt.current === id) {
+          setSetup({
+            type: "ERROR",
+            reason: githubUserErrorReason(error, "reviewFailed"),
+            attemptId: id,
+          });
+        }
+      });
+  }, [context, utils.toolkit.githubUser.review]);
   async function invalidate(): Promise<void> {
     accessRequest.current += 1;
     setAccess({ type: "IDLE" });

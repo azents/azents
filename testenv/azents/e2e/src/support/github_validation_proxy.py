@@ -50,7 +50,7 @@ class Handler(BaseHTTPRequestHandler):
                 not self.scenario.startswith("user_")
                 or callback.scheme not in {"http", "https"}
                 or callback.path != "/oauth/github/callback"
-                or not state.startswith("github_user.")
+                or not state.startswith(("github_user.", "github_user_create."))
             ):
                 self._json_response(400, {"error": "invalid_synthetic_authorization"})
                 return

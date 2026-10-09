@@ -1,9 +1,44 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  gitHubUserRegistrationDirty,
   missingNewGitHubUserRegistration,
   normalizeGitHubUserCredentialEdits,
 } from "./github-user-credentials.ts";
+
+void test("untouched saved Platform user authorization is inherited, not dirty", () => {
+  assert.equal(
+    gitHubUserRegistrationDirty(
+      "github_app_platform_user",
+      "github_app_platform_user",
+      { type: "github_app_platform_user" },
+    ),
+    false,
+  );
+  assert.equal(
+    gitHubUserRegistrationDirty("github_app_user", "github_app_user", {
+      type: "github_app_user",
+      app_id: "",
+      client_id: "",
+      private_key: "",
+      client_secret: "",
+    }),
+    false,
+  );
+  assert.equal(
+    gitHubUserRegistrationDirty("github_app_user", "github_app_user", {
+      type: "github_app_user",
+      client_id: "changed",
+    }),
+    true,
+  );
+  assert.equal(
+    gitHubUserRegistrationDirty("github_app_user", "github_app_platform_user", {
+      type: "github_app_platform_user",
+    }),
+    true,
+  );
+});
 void test("blank write-only registration inputs are omitted individually", () => {
   assert.deepEqual(
     normalizeGitHubUserCredentialEdits({

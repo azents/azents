@@ -1667,8 +1667,8 @@
     "github": {
       "authTypeLabel": "인증 방식",
       "authTypePat": "Personal Access Token",
-      "authTypeApp": "GitHub App (직접 등록)",
-      "authTypePlatform": "GitHub App (플랫폼 제공)",
+      "authTypeApp": "GitHub App (직접 등록) · 설치 권한",
+      "authTypePlatform": "GitHub App (플랫폼 제공) · 설치 권한",
       "authTypeOauth": "OAuth App (사용자별 인증)",
       "patTokenLabel": "Personal Access Token",
       "patTokenDescription": "필요한 권한이 부여된 Fine-grained PAT 또는 Classic PAT",
@@ -1729,8 +1729,8 @@
       "userRuntimeDescription": "기본값은 비활성입니다. Git 및 gh 명령에 원본 인증 정보가 노출되는 위험을 감수할 때만 활성화하세요.",
       "user": {
         "executionAccount": "실행 계정: {account}",
-        "byoa": "직접 등록한 GitHub App",
-        "platform": "플랫폼 제공 GitHub App",
+        "byoa": "GitHub App (직접 등록)",
+        "platform": "GitHub App (플랫폼 제공)",
         "app": "App ID: {id}",
         "connected": "계정 연결됨",
         "reconnectRequired": "재인증 필요",
@@ -1781,7 +1781,7 @@
         "revocationLimit": "GitHub에서 토큰 폐기에 실패해도 로컬 연결은 해제됩니다. 복사된 토큰은 GitHub에서 여전히 유효할 수 있습니다. 연결을 해제해도 이미 완료된 작업을 되돌리거나, 복사된 인증 정보를 지우거나, GitHub가 이미 받아들인 요청을 취소할 수는 없습니다.",
         "cancel": "취소",
         "callbackLoading": "GitHub 인증 확인 중…",
-        "callbackReview": "계정을 확인할 준비가 되었지만 아직 활성화되지는 않았습니다. 원래 창으로 돌아가 계정과 공유 범위를 확정하세요.",
+        "callbackReview": "GitHub 인증이 완료됐습니다. 계정과 공유 범위를 확인할 툴킷 화면으로 이동합니다…",
         "return": "툴킷으로 돌아가기",
         "errors": {
           "popupBlocked": "브라우저에서 GitHub 팝업을 차단했습니다. 팝업을 허용한 뒤 다시 시도하세요. 기존 계정은 교체되지 않았습니다.",

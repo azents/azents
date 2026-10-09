@@ -16,7 +16,11 @@ from azents.core.github_credentials import (
     GitHubSecretsAppPlatformUser,
 )
 from azents.core.github_installation import GitHubInstallationSnapshot
-from azents.core.github_user_oauth import GitHubUserConnectionStatus
+from azents.core.github_user_oauth import (
+    GitHubUserConnectionStatus,
+    GitHubUserErrorCode,
+    GitHubUserOAuthError,
+)
 from azents.core.mcp_credentials import McpSecrets
 from azents.core.toolkit_errors import (
     AgentToolkitNotFound,
@@ -191,6 +195,61 @@ class ToolkitService:
     github_runtime: Annotated[PlatformGitHubAppRuntimeService, Depends()]
     github_user_oauth: Annotated[GitHubUserOAuthService, Depends()]
 
+    @staticmethod
+    def _requires_user_creation(create: ToolkitCreateInput) -> bool:
+        return create.toolkit_type == "github" and (
+            create.config.get("github_auth_type")
+            in ("github_app_user", "github_app_platform_user")
+            or (create.credentials or {}).get("type")
+            in ("github_app_user", "github_app_platform_user")
+        )
+
+    async def prepare_user_creation(
+        self, create: ToolkitCreateInput, *, owner_agent_id: str | None
+    ) -> ToolkitCreate:
+        """Validate desired GitHub settings without publishing a Toolkit."""
+        if not self._requires_user_creation(create):
+            raise GitHubUserOAuthError(
+                GitHubUserErrorCode.INVALID,
+                "GitHub user-account configuration required.",
+            )
+        identifiers = self._resolve_create_identifiers(create)
+        if isinstance(identifiers, InvalidIdentifier):
+            raise GitHubUserOAuthError(
+                GitHubUserErrorCode.INVALID, "Invalid Toolkit name or slug."
+            )
+        if self._validate_config(create.toolkit_type, create.config) is not None:
+            raise GitHubUserOAuthError(
+                GitHubUserErrorCode.INVALID, "Invalid GitHub Toolkit configuration."
+            )
+        prepared = await self._prepare_credentials(create.credentials)
+        if isinstance(prepared, InvalidCredentials) or (
+            self._validate_credentials("github", prepared.credentials) is not None
+        ):
+            raise GitHubUserOAuthError(
+                GitHubUserErrorCode.INVALID, "GitHub App registration is incomplete."
+            )
+        if prepared.credentials is None or prepared.credentials.get(
+            "type"
+        ) != create.config.get("github_auth_type"):
+            raise GitHubUserOAuthError(
+                GitHubUserErrorCode.INVALID,
+                "GitHub App source does not match configuration.",
+            )
+        return ToolkitCreate(
+            workspace_id=create.workspace_id,
+            owner_agent_id=owner_agent_id,
+            toolkit_type="github",
+            slug=identifiers.slug,
+            name=identifiers.name,
+            description=create.description,
+            config=create.config,
+            prompt=create.prompt,
+            credentials=json.dumps(prepared.credentials),
+            enabled=create.enabled,
+            always_expose_tools=create.always_expose_tools,
+        )
+
     async def create(
         self, create: ToolkitCreateInput, *, user_id: str
     ) -> Result[
@@ -198,6 +257,13 @@ class ToolkitService:
         InvalidToolkitType | InvalidConfig | InvalidIdentifier | InvalidCredentials,
     ]:
         """Create a Workspace-shared Toolkit with validated configuration."""
+        if self._requires_user_creation(create):
+            return Failure(
+                InvalidCredentials(
+                    "Authorize and confirm the GitHub account "
+                    "before creating this Toolkit."
+                )
+            )
         type_error = self._validate_toolkit_type(create.toolkit_type)
         if type_error is not None:
             return Failure(type_error)
@@ -738,7 +804,18 @@ class ToolkitService:
         if "config" in update and "credentials" not in update:
             old_auth = existing.config.get("auth_type") if existing.config else None
             new_auth = update["config"].get("auth_type") if update["config"] else None
-            if old_auth != new_auth and new_auth is not None:
+            same_user_registration = (
+                existing.toolkit_type == "github"
+                and existing.config.get("github_auth_type")
+                in ("github_app_user", "github_app_platform_user")
+                and update["config"].get("github_auth_type")
+                == existing.config.get("github_auth_type")
+            )
+            if (
+                old_auth != new_auth
+                and new_auth is not None
+                and not same_user_registration
+            ):
                 repo_update["credentials"] = None
         return repo_update
 
@@ -1141,6 +1218,13 @@ class ToolkitService:
         | InvalidCredentials,
     ]:
         """Create an Agent-owned ToolkitConfig without a scope or attachment."""
+        if self._requires_user_creation(create):
+            return Failure(
+                InvalidCredentials(
+                    "Authorize and confirm the GitHub account "
+                    "before creating this Toolkit."
+                )
+            )
         access = await self.owned_operations.authorize_agent_management(
             agent_id,
             workspace_id=workspace_id,
@@ -1329,32 +1413,9 @@ class ToolkitService:
             if provider_error is not None:
                 return Failure(provider_error)
 
-        repo_update = ToolkitUpdate()
-        if "slug" in update:
-            repo_update["slug"] = update["slug"]
-        if "name" in update:
-            repo_update["name"] = update["name"]
-        if "description" in update:
-            repo_update["description"] = update["description"]
-        if "config" in update:
-            repo_update["config"] = update["config"]
-        if "prompt" in update:
-            repo_update["prompt"] = update["prompt"]
-        if "enabled" in update:
-            repo_update["enabled"] = update["enabled"]
-        if "always_expose_tools" in update:
-            repo_update["always_expose_tools"] = update["always_expose_tools"]
-        if "credentials" in update or normalized_credentials is not None:
-            repo_update["credentials"] = (
-                json.dumps(normalized_credentials)
-                if normalized_credentials is not None
-                else None
-            )
-        if "config" in update and "credentials" not in update:
-            old_auth = existing.config.get("auth_type") if existing.config else None
-            new_auth = update["config"].get("auth_type") if update["config"] else None
-            if old_auth != new_auth and new_auth is not None:
-                repo_update["credentials"] = None
+        repo_update = self._build_repo_update(
+            update, existing=existing, normalized_credentials=normalized_credentials
+        )
 
         result = await self.owned_operations.update_agent_owned(
             agent_id,

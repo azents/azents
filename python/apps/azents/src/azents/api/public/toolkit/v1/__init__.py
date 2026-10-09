@@ -49,6 +49,7 @@ from .data import (
 )
 from .github_user import _management_errors as github_user_management_errors
 from .github_user import router as github_user_router
+from .github_user_creation import router as github_creation_router
 from .oauth import router as oauth_router
 
 router = APIRouter()
@@ -769,4 +770,10 @@ def mount(mounter: RouteMounter) -> None:
         prefix="/toolkit/v1",
         tag="GitHub User Toolkit v1",
         description="GitHub user-account authorization and token cleanup.",
+    )
+    mounter(
+        github_creation_router,
+        prefix="/toolkit/v1",
+        tag="GitHub User Creation v1",
+        description="GitHub authorization before Toolkit creation.",
     )
