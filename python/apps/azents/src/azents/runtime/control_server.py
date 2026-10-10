@@ -528,7 +528,8 @@ class _RuntimeWebRunnerGenerationGate:
                     self.events.pop(key)
             return False
         async with self.lock:
-            self.ready.discard(key)
+            # Persistence readiness is retained for subsequent Owner acquisition.
+            # Every offer still validates the current Runtime generation in SQL.
             if self.events.get(key) is event:
                 self.events.pop(key)
         return True
