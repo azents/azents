@@ -11,10 +11,12 @@ export function ProviderFieldStoryTransport({
   children,
   response,
   onRequest,
+  errorMessage = null,
 }: {
   children: ReactNode;
   response: TestConnectionResponse;
   onRequest: (input: unknown) => void;
+  errorMessage?: string | null;
 }): ReactElement {
   const [queryClient] = useState(
     () =>
@@ -39,12 +41,16 @@ export function ProviderFieldStoryTransport({
                   return;
                 }
                 onRequest(op.input);
+                if (errorMessage !== null) {
+                  observer.error(new TRPCClientError(errorMessage));
+                  return;
+                }
                 observer.next({ result: { data: response } });
                 observer.complete();
               }),
         ],
       }),
-    [onRequest, response],
+    [errorMessage, onRequest, response],
   );
   return (
     <trpc.Provider client={client} queryClient={queryClient}>

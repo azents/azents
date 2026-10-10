@@ -374,14 +374,14 @@ class RunnerRunLoop:
             max_pending_operations=max_pending_operations,
             max_concurrent_control_operations=max_concurrent_control_operations,
         )
-        self._client = client
-        self._operations = operations
+        self.client = client
+        self.operations = operations
         self._registration = registration
         self._connection_id = connection_id
         self._consumer_id = consumer_id
-        self._system_metrics_collector = system_metrics_collector
-        self._clock = clock or _utc_now
-        self._monotonic = monotonic or time.monotonic
+        self.system_metrics_collector = system_metrics_collector
+        self.clock = clock or _utc_now
+        self.monotonic = monotonic or time.monotonic
         self._accepted: RunnerRegistrationAccepted | None = None
         self._last_heartbeat_at: float | None = None
         self._last_system_metrics_at: float | None = None
@@ -406,8 +406,8 @@ class RunnerRunLoop:
         self._queue_rejection_count = 0
         self._pre_execution_timeout_count = 0
         self._scheduler_wake = asyncio.Event()
-        self._client.set_operation_handler(self._receive_operation)
-        self._client.set_operation_cancel_handler(self._cancel_operation)
+        self.client.set_operation_handler(self._receive_operation)
+        self.client.set_operation_cancel_handler(self._cancel_operation)
 
     @property
     def accepted(self) -> RunnerRegistrationAccepted | None:
@@ -416,10 +416,10 @@ class RunnerRunLoop:
 
     async def start(self) -> RunnerRegistrationAccepted:
         """Register the Runner and publish an initial ready report."""
-        accepted = await self._client.register_runner(
+        accepted = await self.client.register_runner(
             self._registration,
             connection_id=self._connection_id,
-            registered_at=self._clock(),
+            registered_at=self.clock(),
         )
         self._accepted = accepted
         _LOGGER.info(
@@ -444,7 +444,7 @@ class RunnerRunLoop:
         has_pending = bool(
             self._pending_operation_count or self._pending_control_operations
         )
-        operation = await self._client.claim_next_runner_operation(
+        operation = await self.client.claim_next_runner_operation(
             runtime_id=accepted.runtime_id,
             generation=accepted.generation,
             consumer_id=self._consumer_id,
@@ -476,7 +476,7 @@ class RunnerRunLoop:
                 await self._report_state()
             else:
                 self._pending_control_operations.append(
-                    _PendingOperation(operation, self._monotonic())
+                    _PendingOperation(operation, self.monotonic())
                 )
         else:
             await self._admit_operation(operation)
@@ -497,7 +497,7 @@ class RunnerRunLoop:
         pending = self._pop_pending_operation(cancel.operation_id)
         if pending is None:
             return
-        await self._operations.cancel(pending.operation)
+        await self.operations.cancel(pending.operation)
         await self._report_state()
         self._scheduler_wake.set()
 
@@ -565,7 +565,7 @@ class RunnerRunLoop:
         if pending is None:
             pending = deque()
             self._pending_by_owner[owner] = pending
-        pending.append(_PendingOperation(operation, self._monotonic()))
+        pending.append(_PendingOperation(operation, self.monotonic()))
         self._pending_operation_count += 1
         self._add_owner_to_rotation(owner)
         _LOGGER.info(
@@ -614,16 +614,16 @@ class RunnerRunLoop:
                 )
                 await self._report_state()
                 return True
-            if not await self._client.start_runner_operation(queued.operation):
-                await self._operations.cancel(queued.operation)
+            if not await self.client.start_runner_operation(queued.operation):
+                await self.operations.cancel(queued.operation)
                 _LOGGER.info(
                     "Runtime Runner pending operation canceled before execution",
                     extra=self._operation_log_extra(queued.operation),
                 )
                 await self._report_state()
                 return True
-            started_at = self._monotonic()
-            task = asyncio.create_task(self._operations.handle(queued.operation))
+            started_at = self.monotonic()
+            task = asyncio.create_task(self.operations.handle(queued.operation))
             self._active_operation_tasks[task] = _ActiveOperation(
                 queued.operation,
                 owner,
@@ -660,15 +660,15 @@ class RunnerRunLoop:
             )
             await self._report_state()
             return True
-        if not await self._client.start_runner_operation(queued.operation):
+        if not await self.client.start_runner_operation(queued.operation):
             _LOGGER.info(
                 "Runtime Runner pending control operation canceled before execution",
                 extra=self._operation_log_extra(queued.operation),
             )
             await self._report_state()
             return True
-        started_at = self._monotonic()
-        task = asyncio.create_task(self._operations.handle(queued.operation))
+        started_at = self.monotonic()
+        task = asyncio.create_task(self.operations.handle(queued.operation))
         self._active_control_tasks[task] = _ActiveOperation(
             queued.operation,
             queued.operation.owner_session_id,
@@ -702,17 +702,17 @@ class RunnerRunLoop:
             await asyncio.gather(wake_task, return_exceptions=True)
 
     async def _heartbeat_if_due(self, accepted: RunnerRegistrationAccepted) -> None:
-        now = self._monotonic()
+        now = self.monotonic()
         heartbeat_interval = max(accepted.heartbeat_interval_seconds / 2, 1.0)
         if (
             self._last_heartbeat_at is not None
             and now - self._last_heartbeat_at < heartbeat_interval
         ):
             return
-        acknowledgement = await self._client.heartbeat_runner(
+        acknowledgement = await self.client.heartbeat_runner(
             runtime_id=accepted.runtime_id,
             generation=accepted.generation,
-            heartbeat_at=self._clock(),
+            heartbeat_at=self.clock(),
         )
         if not acknowledgement.accepted:
             _LOGGER.warning(
@@ -747,6 +747,7 @@ class RunnerRunLoop:
                 except ValueError:
                     _LOGGER.warning(
                         "Runtime Runner heartbeat configuration rejected",
+                        exc_info=True,
                         extra={
                             "runtime_id": accepted.runtime_id,
                             "runner_generation": accepted.generation,
@@ -765,10 +766,10 @@ class RunnerRunLoop:
         *,
         force: bool,
     ) -> None:
-        collector = self._system_metrics_collector
+        collector = self.system_metrics_collector
         if collector is None:
             return
-        now = self._monotonic()
+        now = self.monotonic()
         if (
             not force
             and self._last_system_metrics_at is not None
@@ -788,7 +789,7 @@ class RunnerRunLoop:
             )
             return
         self._system_metrics_sequence += 1
-        await self._client.report_runner_system_metrics(
+        await self.client.report_runner_system_metrics(
             RunnerSystemMetricsReport(
                 runtime_id=accepted.runtime_id,
                 sequence=self._system_metrics_sequence,
@@ -835,7 +836,7 @@ class RunnerRunLoop:
                 extra={
                     **self._operation_log_extra(active.operation),
                     "execution_ms": round(
-                        (self._monotonic() - active.started_at) * 1000,
+                        (self.monotonic() - active.started_at) * 1000,
                         3,
                     ),
                     "owner_active_operations": self._active_by_owner[active.owner],
@@ -856,7 +857,7 @@ class RunnerRunLoop:
             or self._pending_control_operations
             or active_operations
         )
-        await self._client.report_runner_state(
+        await self.client.report_runner_state(
             RunnerStateReport(
                 runtime_id=accepted.runtime_id,
                 runner_id=accepted.runner_id,
@@ -872,7 +873,7 @@ class RunnerRunLoop:
                 health=self._registration.health,
                 diagnostic=self._state_diagnostic(),
                 workspace_path=self._registration.workspace_path,
-                reported_at=self._clock(),
+                reported_at=self.clock(),
                 runtime_configuration=self._runtime_configuration,
             )
         )
@@ -919,7 +920,7 @@ class RunnerRunLoop:
         error_code: str,
         error_message: str,
     ) -> None:
-        await self._client.append_runner_event(
+        await self.client.append_runner_event(
             RunnerOperationEvent(
                 request_id=operation.request_id,
                 runtime_id=operation.runtime_id,
@@ -929,14 +930,14 @@ class RunnerRunLoop:
                     "error_code": error_code,
                     "error_message": error_message,
                 },
-                created_at=self._clock(),
+                created_at=self.clock(),
                 final=True,
             )
         )
 
     def _deadline_expired(self, operation: RunnerOperationEnvelope) -> bool:
         return (
-            operation.deadline_at is not None and self._clock() >= operation.deadline_at
+            operation.deadline_at is not None and self.clock() >= operation.deadline_at
         )
 
     def _owner_active_limit(self, owner: OwnerKey) -> int:

@@ -31,6 +31,35 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const Idle: Story = {};
+export const TransportError: Story = {
+  args: { testState: { type: "ERROR", message: "Fixture transport failed." } },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByText("Fixture transport failed."),
+    ).toBeVisible();
+  },
+};
+export const ContainerTransportError: Story = {
+  render: (args) => (
+    <ProviderFieldStoryTransport
+      response={{ success: true, message: "Unused fixture response." }}
+      errorMessage="Fixture transport failed."
+      onRequest={args.onRequest}
+    >
+      <NotionConfigFieldsContainer {...args} />
+    </ProviderFieldStoryTransport>
+  ),
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: /connection test|test connection/i }),
+    );
+    await expect(
+      canvas.findByText("Fixture transport failed."),
+    ).resolves.toBeVisible();
+    await expect(args.onRequest).toHaveBeenCalledTimes(1);
+  },
+};
 export const Testing: Story = {
   args: { testState: { type: "TESTING" } },
   play: async ({ canvasElement }) => {
