@@ -109,8 +109,8 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
-last_verified_at: 2026-10-10
-spec_version: 104
+last_verified_at: 2026-10-11
+spec_version: 105
 ---
 
 # Agent Runtime Control
@@ -140,6 +140,18 @@ independent API/Worker/Scheduler roots and reload mode likewise reject unsupport
 memory composition. Redis remains the default for distributed deployments, with
 no automatic memory fallback. Restart loses ephemeral coordination, not durable
 Runtime existence, authorization or recovery authority.
+
+## Provider Command Authentication Ingress
+
+The Provider client validates the command's JSON authentication envelope once before
+constructing typed Runtime container authentication. The Runner credential identifier
+is required. Omitted CA configuration remains `None`; an explicit CA must be `null`
+or a string, with blank strings normalized to `None`. The omitted insecure-Control
+option remains `False`, and a supplied value must be a boolean. Malformed primitive
+types and unknown envelope or authentication fields fail instead of becoming default
+authentication settings. Identity, image, and endpoint values already carried in
+authoritative protobuf fields remain authoritative; redundant known JSON values do
+not replace them. The emitted command wire shape and generated protobufs are unchanged.
 
 ## Planes
 
@@ -1403,6 +1415,9 @@ Required deterministic coverage:
 Live/provider evidence belongs in the testenv prerequisite system and must redact tokens, credential ids, auth headers, rendered secrets, and raw Runtime tokens.
 
 ## Changelog
+
+- **2026-10-11** (spec_version 105) — Recorded strict Provider command
+  authentication ingress with preserved optional settings and protobuf authority.
 
 - **2026-10-08** — Made identity completion replace transient authentication
   entries, including the initial separate-domain native POST handoff.

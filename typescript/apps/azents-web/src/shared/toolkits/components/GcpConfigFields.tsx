@@ -25,8 +25,6 @@ import {
   TextInput,
 } from "@mantine/core";
 import {
-  IconAlertTriangle,
-  IconCheck,
   IconCloudComputing,
   IconInfoCircle,
   IconPlugConnected,
@@ -39,6 +37,7 @@ import {
   getStringArray,
   parseJsonRecord,
 } from "@/shared/lib/unknown-value";
+import { ProviderConnectionTestFeedback } from "./ProviderConnectionTestFeedback";
 
 // ---------------------------------------------------------------------------
 // Service metadata
@@ -456,23 +455,7 @@ export function GcpConfigFields({
           Test Connection
         </Button>
 
-        {testState.type === "RESULT" && (
-          <Alert
-            variant="light"
-            color={testState.result.success ? "green" : "red"}
-            icon={
-              testState.result.success ? (
-                <IconCheck size={16} />
-              ) : (
-                <IconAlertTriangle size={16} />
-              )
-            }
-          >
-            <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
-              {testState.result.message}
-            </Text>
-          </Alert>
-        )}
+        <ProviderConnectionTestFeedback state={testState} preWrap />
       </Stack>
 
       {/* Advanced settings */}

@@ -21,9 +21,7 @@ import {
   TextInput,
 } from "@mantine/core";
 import {
-  IconAlertTriangle,
   IconBrandGoogleAnalytics,
-  IconCheck,
   IconInfoCircle,
   IconPlugConnected,
   IconSettings,
@@ -31,8 +29,8 @@ import {
 } from "@tabler/icons-react";
 import { useCallback, useMemo } from "react";
 import { getOptionalString, parseJsonRecord } from "@/shared/lib/unknown-value";
-
 import { getServiceAccountKey } from "../service-account-fields";
+import { ProviderConnectionTestFeedback } from "./ProviderConnectionTestFeedback";
 import type { ServiceAccountProviderFieldsProps } from "../types";
 
 export function GoogleAnalyticsConfigFields({
@@ -186,23 +184,7 @@ export function GoogleAnalyticsConfigFields({
           Test Connection
         </Button>
 
-        {testState.type === "RESULT" && (
-          <Alert
-            variant="light"
-            color={testState.result.success ? "green" : "red"}
-            icon={
-              testState.result.success ? (
-                <IconCheck size={16} />
-              ) : (
-                <IconAlertTriangle size={16} />
-              )
-            }
-          >
-            <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
-              {testState.result.message}
-            </Text>
-          </Alert>
-        )}
+        <ProviderConnectionTestFeedback state={testState} preWrap />
       </Stack>
 
       {/* Advanced */}

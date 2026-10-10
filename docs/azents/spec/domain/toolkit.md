@@ -118,8 +118,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/github-user.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-10-10
-spec_version: 142
+last_verified_at: 2026-10-11
+spec_version: 143
 ---
 
 # Toolkit
@@ -259,7 +259,7 @@ erDiagram
 
 ### Enum / Type
 
-- `ToolkitType` (code-level) — one of `shell`, `mcp`, `github`, `notion`, `gcp`, `aws`, `sentry`, `google_analytics`, `kubernetes`, `envvar`. DB column is free string but runtime must match key registered in `get_toolkit_registry`. `shell` remains the internal built-in Provider slug; Public API creation of a persisted Shell ToolkitConfig is rejected. ([`core/tools.py` L71-88](../../../../python/apps/azents/src/azents/core/tools.py))
+- `ToolkitType` (code-level) — one of `shell`, `mcp`, `github`, `notion`, `gcp`, `aws`, `sentry`, `google_analytics`, `kubernetes`, `envvar`, `brave_search`. DB column is free string but runtime must match key registered in `get_toolkit_registry`. `shell` remains the internal built-in Provider slug; Public API creation of a persisted Shell ToolkitConfig is rejected. ([`core/tools.py`](../../../../python/apps/azents/src/azents/core/tools.py))
 
   `envvar` is a generic environment variable injection toolkit. Long-lived API tokens (Notion / OpenAI / Sentry, etc.) can be stored and injected as child process env during agent shell execution. It implements `Toolkit.expose_env()` protocol. Unlike MCP-based toolkit, credentials are exposed inside Runtime. See [sandbox-credential-injection design (archived)](../../design/sandbox-260421-sandbox-credential-injection-2026.md).
 
@@ -332,7 +332,7 @@ Auto-bound single-instance toolkits use `use_prefix=False`; names are exposed as
 This includes Saved Memory writes, generic readable-storage tools, Runtime mutation/
 process tools, Subagent collaboration, and Session Goal/Todo tools. For example,
 `save_memory`, `delete_memory`, `read`, `grep`, `glob`, `exec_command`,
-`write_stdin`, `run_tool_to_file`, `spawn_agent`, `wait_agent`, `get_goal`, and
+`write_stdin`, `run_tool_to_file`, `spawn_agent`, `wait`, `get_goal`, and
 `update_todo` are not prefixed. Memory context is a prompt-only binding.
 
 Some toolkits may add their own internal segment before the outer effective namespace is applied. GitHub multi-installation routing does this by prefixing each installation's MCP tools with a safe account-login segment. With effective namespace `github`, installation `azents`, and MCP tool `get_file_contents`, the final model-visible name becomes:
@@ -511,9 +511,11 @@ azents-web provides Workspace-shared Toolkit management screens and an authority
 - `/w/[handle]/toolkits/[toolkitId]/edit` — edit existing ToolkitConfig.
 - `/w/[handle]/toolkit/[toolkitId]/setup` — connection status check and authorize redirect for toolkit requiring per-user OAuth/setup.
 
-`shared/toolkits` owns the reusable form and authorization containers, props-driven views, projections, and shared state types used by Toolkit and Agent management. Feature route pages retain their entry wiring and import the shared defining modules directly. The form branches config fields per toolkit type for GitHub, Kubernetes, MCP, Google Analytics, Notion, Sentry, GCP, AWS, Shell, and EnvVar. `features/toolkit-setup` executes setup action returned by backend, and if account link must come first it follows `next_toolkit` handoff from [`../flow/account-linking.md`](../../design/account-260315-account-linking.md).
+`shared/toolkits` owns the reusable form and authorization containers, props-driven views, projections, and shared state types used by Toolkit and Agent management. Feature route pages retain their entry wiring and import the shared defining modules directly. The form branches config fields per toolkit type for GitHub, Kubernetes, MCP, Google Analytics, Notion, Sentry, GCP, AWS, Brave Search, Shell, and EnvVar. `features/toolkit-setup` executes setup action returned by backend, and if account link must come first it follows `next_toolkit` handoff from [`../flow/account-linking.md`](../../design/account-260315-account-linking.md).
 
 Provider-field container hooks own transient credential replacement, acknowledgement, connection-test mutations, and MCP discovery updates. Their views receive shared typed lifecycle states and callbacks; API-free stories exercise the same container input projection without live provider requests. Provider-specific copy, form clearing, test-result visibility, and discovered OAuth field handling remain unchanged.
+
+AWS, GCP, Google Analytics, Kubernetes, Notion, and Sentry Connection tests display transport-error feedback alongside successful or rejected test-result feedback, preserving existing copy, button gates, and credential replacement policy.
 
 The AWS Toolkit form describes the current AWS Managed MCP authorization model for its Access Key + SigV4 connection. It directs managers to grant only the downstream AWS service API permissions the Agent needs. It does not require the deprecated `aws-mcp:InvokeMcp`, `aws-mcp:CallReadOnlyTool`, or `aws-mcp:CallReadWriteTool` actions, which have no effect. MCP-specific restrictions use the `aws:ViaAWSMCPService` or `aws:CalledViaAWSMCP` IAM condition context keys.
 
@@ -1028,9 +1030,11 @@ and subagent execution modes and exposes the coherent collaboration bundle as un
 - `spawn_agent`
 - `send_message`
 - `followup_task`
-- `wait_agent`
 - `interrupt_agent`
 - `list_agents`
+
+The independent auto-bound `WaitToolkit` exposes the unprefixed `wait` tool in
+root and subagent execution modes alongside this collaboration bundle.
 
 `list_agents` is a read-only PostgreSQL projection over the caller's complete root
 `SessionAgent` tree. Its exact result is
@@ -1129,7 +1133,7 @@ next model boundary performs FIFO promotion.
 projected status; it does not close, delete, or recursively stop descendants. The toolkit emits
 non-durable `subagent_tree_changed` invalidations for durable tree changes. Terminal unread state
 clears only after validated `agent_result` promotion advances the direct child's observation cursor;
-`wait_agent` observation by itself does not acknowledge the result.
+`wait` observation by itself does not acknowledge the result.
 
 ### Goal/Todo Prompt and Result Stability
 
@@ -1143,7 +1147,8 @@ Goal and Todo auto-bound toolkits expose fixed tool definitions independent of c
 |---|---|---|
 | `memory_context` | prompt-only boundary snapshot and VFS guidance when Memory is enabled; root and subagent | — |
 | `readable_storage` | generic `read`/`grep`/`glob` for root and subagent, independently of Runtime; backend/absolute-path authority applies at execution | — |
-| `subagent` | auto-bound collaboration toolkit; eligible for root and subagent execution modes | `spawn_agent`, `send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, `list_agents` |
+| `subagent` | auto-bound collaboration toolkit; eligible for root and subagent execution modes | `spawn_agent`, `send_message`, `followup_task`, `interrupt_agent`, `list_agents` |
+| `wait` | independent auto-bound Wait Toolkit; eligible for root and subagent execution modes | — |
 | `memory_write` | auto-bound when Agent memory is enabled and execution mode is root | — |
 | `runtime` | auto-bound only when the Agent is `managed`; every declared Runtime capability is granted at the captured/current capability version. Network authority comes from the current Workspace Runtime Profile configuration. | — |
 | `claude_rules` | auto-bound only when managed filesystem capability is granted; exposes hooks only, no model-visible tools | — |
@@ -1153,6 +1158,7 @@ Goal and Todo auto-bound toolkits expose fixed tool definitions independent of c
 | `gcp`, `aws` | Cloud-provider native auth (IRSA / workload identity) | — (no config) |
 | `kubernetes` | depends on `clusters[].auth_type` — kubeconfig / token / EKS / GKE | kubeconfig secret |
 | `google_analytics` | service account / ADC | — |
+| `brave_search` | enabled attached ToolkitConfig with a valid non-empty API key | ToolkitConfig `encrypted_credentials` |
 
 ### Runtime-Only Toolkit Boundary
 
@@ -1447,6 +1453,10 @@ an admitted trigger/cycle with its Task. Channel registration and deletion
 notification execute only after the operation returns.
 
 ## Changelog
+
+- **2026-10-11** (spec_version 143) — Aligned current collaboration guidance with
+  the independent `wait` Toolkit, completed Brave Search Provider enumeration,
+  and recorded visible Provider Connection test transport-error feedback.
 
 - **2026-10-09** — Added Toolkit-owned GitHub App user-account authority for Platform and BYOA, staged account/sharing confirmation, current-connection MCP/Runtime admission, exact late-401 fencing, multi-owner readiness and bounded fail-open token cleanup. Existing PAT and installation modes retain their authority and defaults.
 

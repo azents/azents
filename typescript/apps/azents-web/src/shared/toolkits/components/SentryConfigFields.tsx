@@ -9,21 +9,16 @@
 
 import {
   Accordion,
-  Alert,
   Button,
   Checkbox,
   NumberInput,
   Stack,
   Text,
 } from "@mantine/core";
-import {
-  IconAlertTriangle,
-  IconCheck,
-  IconPlugConnected,
-  IconSettings,
-} from "@tabler/icons-react";
+import { IconPlugConnected, IconSettings } from "@tabler/icons-react";
 import { useCallback, useMemo } from "react";
 import { getArray, isOneOf } from "@/shared/lib/unknown-value";
+import { ProviderConnectionTestFeedback } from "./ProviderConnectionTestFeedback";
 
 /** Sentry skill group definition */
 const SKILL_GROUPS = [
@@ -147,21 +142,7 @@ export function SentryConfigFields({
             Connection test
           </Button>
 
-          {testState.type === "RESULT" && (
-            <Alert
-              variant="light"
-              color={testState.result.success ? "green" : "red"}
-              icon={
-                testState.result.success ? (
-                  <IconCheck size={16} />
-                ) : (
-                  <IconAlertTriangle size={16} />
-                )
-              }
-            >
-              {testState.result.message}
-            </Alert>
-          )}
+          <ProviderConnectionTestFeedback state={testState} preWrap={false} />
         </Stack>
       )}
     </Stack>

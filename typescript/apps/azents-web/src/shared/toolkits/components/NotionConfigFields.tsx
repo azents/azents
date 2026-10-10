@@ -7,14 +7,10 @@
  * so they are not exposed to user.
  */
 
-import { Accordion, Alert, Button, NumberInput, Stack } from "@mantine/core";
-import {
-  IconAlertTriangle,
-  IconCheck,
-  IconPlugConnected,
-  IconSettings,
-} from "@tabler/icons-react";
+import { Accordion, Button, NumberInput, Stack } from "@mantine/core";
+import { IconPlugConnected, IconSettings } from "@tabler/icons-react";
 
+import { ProviderConnectionTestFeedback } from "./ProviderConnectionTestFeedback";
 import type { SimpleProviderFieldsProps } from "../types";
 
 export function NotionConfigFields({
@@ -62,21 +58,7 @@ export function NotionConfigFields({
             Connection test
           </Button>
 
-          {testState.type === "RESULT" && (
-            <Alert
-              variant="light"
-              color={testState.result.success ? "green" : "red"}
-              icon={
-                testState.result.success ? (
-                  <IconCheck size={16} />
-                ) : (
-                  <IconAlertTriangle size={16} />
-                )
-              }
-            >
-              {testState.result.message}
-            </Alert>
-          )}
+          <ProviderConnectionTestFeedback state={testState} preWrap={false} />
         </Stack>
       )}
     </Stack>

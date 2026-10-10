@@ -19,7 +19,11 @@ import boto3
 import grpc
 from aiohttp import web
 from azcommon.infra.s3.service import S3Service
-from azcommon.logging import RuntimeEnvironment, configure_logging_for_runtime
+from azcommon.logging import (
+    RuntimeEnvironment,
+    bind_extra,
+    configure_logging_for_runtime,
+)
 from azents_runtime_control.proto import (
     runtime_stream_session_pb2,
     runtime_stream_session_pb2_grpc,
@@ -374,16 +378,16 @@ class _OwnerRuntimeStreamSessionOfferProvider:
             timeout_seconds=_RUNTIME_STREAM_SESSION_OFFER_WAIT_SECONDS,
         )
         runtime = await self.read_repository.get_runtime(runtime_id)
+        L = bind_extra(_LOGGER, {"runner_generation": runner_generation})
         if (
             not ready
             or runtime is None
             or runtime.desired_generation <= 0
             or runtime.runner_generation != runner_generation
         ):
-            _LOGGER.warning(
+            L.warning(
                 "Runtime Web session offer unavailable",
                 extra={
-                    "runner_generation": runner_generation,
                     "reason": "runner_generation_not_current",
                 },
             )
@@ -400,20 +404,18 @@ class _OwnerRuntimeStreamSessionOfferProvider:
                     runner_generation=runner_generation,
                 )
             except RuntimeWebSessionRouteConflict:
-                _LOGGER.warning(
+                L.warning(
                     "Runtime Web session offer unavailable",
                     exc_info=True,
                     extra={
-                        "runner_generation": runner_generation,
                         "reason": "owner_route_conflict",
                     },
                 )
                 return None
             self.owned[runtime_id] = owned
-            _LOGGER.info(
+            L.info(
                 "Runtime Web session offer issued",
                 extra={
-                    "runner_generation": runner_generation,
                     "owner_replica_id": owned.route.owner_replica_id,
                     "lease_generation": owned.route.lease_generation,
                 },

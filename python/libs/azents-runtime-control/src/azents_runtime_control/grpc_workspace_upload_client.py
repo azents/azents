@@ -304,9 +304,9 @@ class GrpcRuntimeWorkspaceUploadCoordinatorClient:
         credential_supplier: WorkspaceUploadCredentialSupplier,
         channel: grpc.aio.Channel | None = None,
     ) -> None:
-        self._stub = stub
-        self._credential_supplier = credential_supplier
-        self._channel = channel
+        self.stub = stub
+        self.credential_supplier = credential_supplier
+        self.channel = channel
 
     @classmethod
     def from_endpoint(
@@ -330,15 +330,15 @@ class GrpcRuntimeWorkspaceUploadCoordinatorClient:
 
     async def close(self) -> None:
         """Close the endpoint-owned channel."""
-        if self._channel is not None:
-            await self._channel.close()
+        if self.channel is not None:
+            await self.channel.close()
 
     async def create(
         self,
         request: WorkspaceUploadCreateRequest,
     ) -> WorkspaceUploadStatus:
         message = create_workspace_upload_request_to_message(request)
-        response = await self._stub.CreateWorkspaceUpload(
+        response = await self.stub.CreateWorkspaceUpload(
             message,
             metadata=await self._metadata(
                 WORKSPACE_UPLOAD_OPERATION_CREATE,
@@ -357,7 +357,7 @@ class GrpcRuntimeWorkspaceUploadCoordinatorClient:
             identity=workspace_upload_identity_to_message(identity),
             expected_revision=expected_revision,
         )
-        response = await self._stub.IssueWorkspaceUploadTicket(
+        response = await self.stub.IssueWorkspaceUploadTicket(
             message,
             metadata=await self._metadata(
                 WORKSPACE_UPLOAD_OPERATION_ISSUE_TICKET,
@@ -376,7 +376,7 @@ class GrpcRuntimeWorkspaceUploadCoordinatorClient:
             identity=workspace_upload_identity_to_message(identity),
             expected_revision=expected_revision,
         )
-        response = await self._stub.FinalizeWorkspaceUpload(
+        response = await self.stub.FinalizeWorkspaceUpload(
             message,
             metadata=await self._metadata(
                 WORKSPACE_UPLOAD_OPERATION_FINALIZE,
@@ -389,7 +389,7 @@ class GrpcRuntimeWorkspaceUploadCoordinatorClient:
         message = pb.GetWorkspaceUploadRequest(
             identity=workspace_upload_identity_to_message(identity)
         )
-        response = await self._stub.GetWorkspaceUpload(
+        response = await self.stub.GetWorkspaceUpload(
             message,
             metadata=await self._metadata(WORKSPACE_UPLOAD_OPERATION_GET, message),
         )
@@ -400,7 +400,7 @@ class GrpcRuntimeWorkspaceUploadCoordinatorClient:
         request: WorkspaceUploadCancelRequest,
     ) -> WorkspaceUploadStatus:
         message = cancel_workspace_upload_request_to_message(request)
-        response = await self._stub.CancelWorkspaceUpload(
+        response = await self.stub.CancelWorkspaceUpload(
             message,
             metadata=await self._metadata(
                 WORKSPACE_UPLOAD_OPERATION_CANCEL,
@@ -414,7 +414,7 @@ class GrpcRuntimeWorkspaceUploadCoordinatorClient:
         request: WorkspaceUploadRetryRequest,
     ) -> WorkspaceUploadStatus:
         message = retry_workspace_upload_request_to_message(request)
-        response = await self._stub.RetryWorkspaceUpload(
+        response = await self.stub.RetryWorkspaceUpload(
             message,
             metadata=await self._metadata(
                 WORKSPACE_UPLOAD_OPERATION_RETRY,
@@ -428,7 +428,7 @@ class GrpcRuntimeWorkspaceUploadCoordinatorClient:
         operation: str,
         message: WorkspaceUploadCredentialRequestMessage,
     ) -> tuple[tuple[str, str]]:
-        credential = await self._credential_supplier.issue(
+        credential = await self.credential_supplier.issue(
             workspace_upload_credential_request(operation, message)
         )
         if not credential or credential != credential.strip():

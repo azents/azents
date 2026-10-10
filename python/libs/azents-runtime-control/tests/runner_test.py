@@ -3,6 +3,7 @@
 import asyncio
 import dataclasses
 import json
+import logging
 from collections import Counter
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextvars import ContextVar
@@ -364,7 +365,9 @@ async def test_heartbeat_rejects_mismatched_configuration_generation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_heartbeat_rejects_invalid_configuration_evidence() -> None:
+async def test_heartbeat_rejects_invalid_configuration_evidence(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Malformed exact evidence never mutates Runner state."""
     client = FakeRunnerControlClient()
     loop = _loop(client, BlockingOperations())
@@ -379,6 +382,18 @@ async def test_heartbeat_rejects_invalid_configuration_evidence() -> None:
     await loop.run_once(block_ms=0)
 
     assert client.reports[-1].runtime_configuration == original
+    warnings = [
+        record
+        for record in caplog.records
+        if record.getMessage() == "Runtime Runner heartbeat configuration rejected"
+    ]
+    assert len(warnings) == 1
+    warning = warnings[0]
+    assert warning.levelno == logging.WARNING
+    assert warning.exc_info is not None
+    assert warning.exc_info[0] is ValueError
+    assert warning.exc_info[2] is not None
+    assert "runtime_configuration_invalid" in warning.__dict__.values()
 
 
 @pytest.mark.asyncio
