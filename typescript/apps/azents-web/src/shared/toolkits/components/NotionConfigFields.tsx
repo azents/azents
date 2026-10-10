@@ -14,55 +14,19 @@ import {
   IconPlugConnected,
   IconSettings,
 } from "@tabler/icons-react";
-import { useCallback } from "react";
-import { trpc } from "@/trpc/client";
 
-type NotionConfig = Record<string, unknown>;
-type NotionCredentials = Record<string, unknown> | null;
-
-interface NotionConfigFieldsProps {
-  config: NotionConfig;
-  onConfigChange: (config: NotionConfig) => void;
-  credentials: NotionCredentials;
-  onCredentialsChange: (credentials: NotionCredentials) => void;
-  /** Existing credentials existence in edit mode */
-  hasCredentials: boolean;
-  handle: string;
-  agentId?: string;
-  /** Existing toolkit config ID in edit mode */
-  toolkitConfigId?: string;
-}
+import type { SimpleProviderFieldsProps } from "../types";
 
 export function NotionConfigFields({
   config,
   onConfigChange,
-  credentials,
-  handle,
-  agentId,
   toolkitConfigId,
-}: NotionConfigFieldsProps): React.ReactElement {
+  testState,
+  onTestConnection,
+}: SimpleProviderFieldsProps): React.ReactElement {
   const timeoutValue = typeof config.timeout === "number" ? config.timeout : 30;
 
   // Connection test
-  const testConnectionMutation = trpc.toolkit.testConnection.useMutation();
-
-  const handleTestConnection = useCallback(() => {
-    testConnectionMutation.mutate({
-      handle,
-      ...(agentId != null && { agentId }),
-      toolkitType: "notion",
-      toolkitConfigId: toolkitConfigId ?? null,
-      config,
-      credentials,
-    });
-  }, [
-    agentId,
-    handle,
-    toolkitConfigId,
-    config,
-    credentials,
-    testConnectionMutation,
-  ]);
 
   return (
     <Stack gap="md">
@@ -91,26 +55,26 @@ export function NotionConfigFields({
           <Button
             variant="light"
             leftSection={<IconPlugConnected size={16} />}
-            onClick={handleTestConnection}
-            loading={testConnectionMutation.isPending}
-            disabled={testConnectionMutation.isPending}
+            onClick={onTestConnection}
+            loading={testState.type === "TESTING"}
+            disabled={testState.type === "TESTING"}
           >
             Connection test
           </Button>
 
-          {testConnectionMutation.isSuccess && (
+          {testState.type === "RESULT" && (
             <Alert
               variant="light"
-              color={testConnectionMutation.data.success ? "green" : "red"}
+              color={testState.result.success ? "green" : "red"}
               icon={
-                testConnectionMutation.data.success ? (
+                testState.result.success ? (
                   <IconCheck size={16} />
                 ) : (
                   <IconAlertTriangle size={16} />
                 )
               }
             >
-              {testConnectionMutation.data.message}
+              {testState.result.message}
             </Alert>
           )}
         </Stack>

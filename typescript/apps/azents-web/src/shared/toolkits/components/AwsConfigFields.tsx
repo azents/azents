@@ -27,22 +27,7 @@ import {
   IconPlugConnected,
   IconSettings,
 } from "@tabler/icons-react";
-import { useCallback, useMemo, useState } from "react";
-import { trpc } from "@/trpc/client";
-
-type AwsConfig = Record<string, unknown>;
-type AwsCredentials = Record<string, unknown> | null;
-
-interface AwsConfigFieldsProps {
-  config: AwsConfig;
-  onConfigChange: (config: AwsConfig) => void;
-  credentials: AwsCredentials;
-  onCredentialsChange: (credentials: AwsCredentials) => void;
-  hasCredentials: boolean;
-  handle: string;
-  agentId?: string;
-  toolkitConfigId?: string;
-}
+import { useMemo } from "react";
 
 const AWS_REGIONS = [
   { value: "us-east-1", label: "US East (N. Virginia)" },
@@ -64,16 +49,19 @@ const AWS_REGIONS = [
   { value: "ca-central-1", label: "Canada (Central)" },
 ];
 
+import type { CredentialProviderFieldsProps } from "../types";
+
 export function AwsConfigFields({
   config,
   onConfigChange,
   credentials,
   onCredentialsChange,
   hasCredentials,
-  handle,
-  agentId,
-  toolkitConfigId,
-}: AwsConfigFieldsProps): React.ReactElement {
+  testState,
+  onTestConnection,
+  showKeyInput,
+  onShowKeyInput,
+}: CredentialProviderFieldsProps): React.ReactElement {
   const region =
     typeof config.region === "string" ? config.region : "us-east-1";
   const roleArn = typeof config.role_arn === "string" ? config.role_arn : "";
@@ -88,28 +76,6 @@ export function AwsConfigFields({
         : "",
     [credentials],
   );
-
-  const [showKeyInput, setShowKeyInput] = useState(!hasCredentials);
-
-  const testConnectionMutation = trpc.toolkit.testConnection.useMutation();
-
-  const handleTestConnection = useCallback((): void => {
-    testConnectionMutation.mutate({
-      handle,
-      ...(agentId != null && { agentId }),
-      toolkitType: "aws",
-      toolkitConfigId: toolkitConfigId ?? null,
-      config,
-      credentials,
-    });
-  }, [
-    agentId,
-    handle,
-    toolkitConfigId,
-    config,
-    credentials,
-    testConnectionMutation,
-  ]);
 
   return (
     <Stack gap="md">
@@ -131,11 +97,7 @@ export function AwsConfigFields({
             <Text size="sm">
               Access Key ID: <Code>{accessKeyId}</Code>
             </Text>
-            <Button
-              size="xs"
-              variant="subtle"
-              onClick={() => setShowKeyInput(true)}
-            >
+            <Button size="xs" variant="subtle" onClick={() => onShowKeyInput()}>
               Replace Credentials
             </Button>
           </Stack>
@@ -240,19 +202,19 @@ export function AwsConfigFields({
         <Button
           variant="light"
           leftSection={<IconPlugConnected size={16} />}
-          onClick={handleTestConnection}
-          loading={testConnectionMutation.isPending}
+          onClick={onTestConnection}
+          loading={testState.type === "TESTING"}
           disabled={!credentials && !hasCredentials}
         >
           Test Connection
         </Button>
 
-        {testConnectionMutation.isSuccess && (
+        {testState.type === "RESULT" && (
           <Alert
             variant="light"
-            color={testConnectionMutation.data.success ? "green" : "red"}
+            color={testState.result.success ? "green" : "red"}
             icon={
-              testConnectionMutation.data.success ? (
+              testState.result.success ? (
                 <IconCheck size={16} />
               ) : (
                 <IconAlertTriangle size={16} />
@@ -260,7 +222,7 @@ export function AwsConfigFields({
             }
           >
             <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
-              {testConnectionMutation.data.message}
+              {testState.result.message}
             </Text>
           </Alert>
         )}

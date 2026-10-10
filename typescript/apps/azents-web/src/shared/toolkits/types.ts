@@ -113,3 +113,69 @@ export type GithubInstallationState =
   | { type: "LOADING"; installations: InstallationItem[] }
   | { type: "READY"; installations: InstallationItem[] }
   | { type: "ERROR"; installations: InstallationItem[] };
+
+/** Inputs supplied by the owning Toolkit form to provider fields. */
+export interface ToolkitConfigFieldsInput {
+  config: Record<string, unknown>;
+  onConfigChange: (config: Record<string, unknown>) => void;
+  credentials: Record<string, unknown> | null;
+  onCredentialsChange: (credentials: Record<string, unknown> | null) => void;
+  hasCredentials: boolean;
+  handle: string;
+  agentId?: string;
+  toolkitConfigId?: string;
+}
+export interface ProviderConnectionTestResult {
+  success: boolean;
+  message: string;
+  discoveredAuthUrl?: string;
+  discoveredTokenUrl?: string;
+  supportsDcr?: boolean;
+}
+export type ProviderConnectionTestState =
+  | { type: "IDLE" }
+  | { type: "TESTING" }
+  | { type: "RESULT"; result: ProviderConnectionTestResult }
+  | { type: "ERROR"; message: string };
+export interface ProviderConnectionTestControl {
+  testState: ProviderConnectionTestState;
+  onTestConnection: () => void;
+}
+export type CredentialProviderFieldsProps = ToolkitConfigFieldsInput &
+  ProviderConnectionTestControl & {
+    showKeyInput: boolean;
+    onShowKeyInput: () => void;
+  };
+export type SimpleProviderFieldsProps = ToolkitConfigFieldsInput &
+  ProviderConnectionTestControl;
+export type EnvVarConfigFieldsInput = Omit<
+  ToolkitConfigFieldsInput,
+  "handle" | "agentId" | "toolkitConfigId"
+>;
+export type EnvVarConfigFieldsProps = EnvVarConfigFieldsInput & {
+  acknowledged: boolean;
+  onAcknowledgedChange: (value: boolean) => void;
+};
+export type McpConfigFieldsInput = Omit<ToolkitConfigFieldsInput, "handle"> & {
+  handle?: string;
+};
+export type McpConfigFieldsProps = McpConfigFieldsInput &
+  ProviderConnectionTestControl;
+export type ClusterAuthType = "kubeconfig" | "token" | "eks" | "gke";
+export type KubernetesConfigFieldsProps = ToolkitConfigFieldsInput &
+  ProviderConnectionTestControl & {
+    replacingCreds: ReadonlySet<string>;
+    storedClusterAuthTypes: ReadonlyMap<string, ClusterAuthType>;
+    onReplaceCluster: (name: string) => void;
+  };
+export type BraveSearchTestState =
+  | { type: "IDLE" }
+  | { type: "TESTING" }
+  | { type: "SUCCESS"; message: string }
+  | { type: "FAILURE"; message: string };
+
+export interface ServiceAccountKeyUploadControl {
+  onKeyFileUpload: (file: File | null) => void;
+}
+export type ServiceAccountProviderFieldsProps = CredentialProviderFieldsProps &
+  ServiceAccountKeyUploadControl;

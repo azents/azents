@@ -27,12 +27,9 @@ import {
 } from "@mantine/core";
 import { IconPlugConnected } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
-import { getString, getStringArray, isOneOf } from "@/shared/lib/unknown-value";
-import { trpc } from "@/trpc/client";
 
-type McpConfig = Record<string, unknown>;
-type McpCredentials = Record<string, unknown> | null;
+import { getString, getStringArray, isOneOf } from "@/shared/lib/unknown-value";
+
 type McpAuthType = "none" | "header" | "bearer" | "oauth2";
 
 const AUTH_TYPE_OPTIONS = ["none", "header", "bearer", "oauth2"] as const;
@@ -47,28 +44,7 @@ function getMcpAuthType(value: unknown): McpAuthType {
   return isOneOf(value, MCP_AUTH_TYPES) ? value : "none";
 }
 
-interface McpConfigFieldsProps {
-  config: McpConfig;
-  onConfigChange: (config: McpConfig) => void;
-  credentials: McpCredentials;
-  onCredentialsChange: (credentials: McpCredentials) => void;
-  /** Existing credentials existence in edit mode */
-  hasCredentials: boolean;
-  /** Workspace handle for connection test API call */
-  handle?: string;
-  agentId?: string;
-  /** Stored toolkit ID (edit mode) */
-  toolkitConfigId?: string;
-}
-
-/** Connection test result type */
-interface TestResult {
-  success: boolean;
-  message: string;
-  discoveredAuthUrl?: string;
-  discoveredTokenUrl?: string;
-  supportsDcr?: boolean;
-}
+import type { McpConfigFieldsProps } from "../types";
 
 export function McpConfigFields({
   config,
@@ -77,63 +53,12 @@ export function McpConfigFields({
   onCredentialsChange,
   hasCredentials,
   handle,
-  agentId,
-  toolkitConfigId,
+  testState,
+  onTestConnection,
 }: McpConfigFieldsProps): React.ReactElement {
   const t = useTranslations("workspace.toolkits.mcp");
 
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<TestResult | null>(null);
-
-  const testConnectionMutation = trpc.toolkit.testConnection.useMutation();
-
-  /** Connection test: common for all auth types */
-  const handleTestConnection = async (): Promise<void> => {
-    if (!handle) {
-      return;
-    }
-
-    setTesting(true);
-    setTestResult(null);
-
-    try {
-      const result = await testConnectionMutation.mutateAsync({
-        handle,
-        ...(agentId != null && { agentId }),
-        toolkitType: "mcp",
-        toolkitConfigId: toolkitConfigId ?? null,
-        config,
-        credentials,
-      });
-
-      const nextResult: TestResult = {
-        success: result.success,
-        message: result.success
-          ? t("testConnectionSuccess")
-          : t("testConnectionFailed", { message: result.message }),
-      };
-      if (result.discovered_auth_url != null) {
-        nextResult.discoveredAuthUrl = result.discovered_auth_url;
-      }
-      if (result.discovered_token_url != null) {
-        nextResult.discoveredTokenUrl = result.discovered_token_url;
-      }
-      if (result.supports_dcr != null) {
-        nextResult.supportsDcr = result.supports_dcr;
-      }
-      setTestResult(nextResult);
-    } catch (error) {
-      setTestResult({
-        success: false,
-        message: t("testConnectionFailed", {
-          message: error instanceof Error ? error.message : "Unknown error",
-        }),
-      });
-    } finally {
-      setTesting(false);
-    }
-  };
-
+  const testResult = testState.type === "RESULT" ? testState.result : null;
   const authType = getMcpAuthType(config.auth_type);
 
   const setConfig = (key: string, value: unknown): void => {
@@ -252,8 +177,8 @@ export function McpConfigFields({
         <Button
           variant="light"
           leftSection={<IconPlugConnected size={16} />}
-          onClick={() => void handleTestConnection()}
-          loading={testing}
+          onClick={() => onTestConnection()}
+          loading={testState.type === "TESTING"}
           w="fit-content"
         >
           {t("testConnection")}

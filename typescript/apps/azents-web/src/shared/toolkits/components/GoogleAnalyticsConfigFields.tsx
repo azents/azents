@@ -29,35 +29,11 @@ import {
   IconSettings,
   IconUpload,
 } from "@tabler/icons-react";
-import { useCallback, useMemo, useState } from "react";
-import {
-  getOptionalString,
-  isRecord,
-  parseJsonRecord,
-} from "@/shared/lib/unknown-value";
-import { trpc } from "@/trpc/client";
+import { useCallback, useMemo } from "react";
+import { getOptionalString, parseJsonRecord } from "@/shared/lib/unknown-value";
 
-type GaConfig = Record<string, unknown>;
-type GaCredentials = Record<string, unknown> | null;
-
-function getServiceAccountKey(value: unknown): Record<string, unknown> | null {
-  if (!isRecord(value) || !getOptionalString(value.client_email)) {
-    return null;
-  }
-
-  return value;
-}
-
-interface GoogleAnalyticsConfigFieldsProps {
-  config: GaConfig;
-  onConfigChange: (config: GaConfig) => void;
-  credentials: GaCredentials;
-  onCredentialsChange: (credentials: GaCredentials) => void;
-  hasCredentials: boolean;
-  handle: string;
-  agentId?: string;
-  toolkitConfigId?: string;
-}
+import { getServiceAccountKey } from "../service-account-fields";
+import type { ServiceAccountProviderFieldsProps } from "../types";
 
 export function GoogleAnalyticsConfigFields({
   config,
@@ -65,17 +41,18 @@ export function GoogleAnalyticsConfigFields({
   credentials,
   onCredentialsChange,
   hasCredentials,
-  handle,
-  agentId,
-  toolkitConfigId,
-}: GoogleAnalyticsConfigFieldsProps): React.ReactElement {
+  testState,
+  onTestConnection,
+  showKeyInput,
+  onShowKeyInput,
+  onKeyFileUpload,
+}: ServiceAccountProviderFieldsProps): React.ReactElement {
   const propertyId =
     typeof config.default_property_id === "string"
       ? config.default_property_id
       : "";
   const timeoutValue = typeof config.timeout === "number" ? config.timeout : 30;
 
-  const [showKeyInput, setShowKeyInput] = useState(!hasCredentials);
   const clientEmail = useMemo(() => {
     if (!credentials) {
       return null;
@@ -88,26 +65,6 @@ export function GoogleAnalyticsConfigFields({
       : null;
   }, [credentials]);
 
-  const testConnectionMutation = trpc.toolkit.testConnection.useMutation();
-
-  const handleTestConnection = useCallback((): void => {
-    testConnectionMutation.mutate({
-      handle,
-      ...(agentId != null && { agentId }),
-      toolkitType: "google_analytics",
-      toolkitConfigId: toolkitConfigId ?? null,
-      config,
-      credentials,
-    });
-  }, [
-    agentId,
-    handle,
-    toolkitConfigId,
-    config,
-    credentials,
-    testConnectionMutation,
-  ]);
-
   const handleKeyPaste = useCallback(
     (value: string): void => {
       if (!value.trim()) {
@@ -118,26 +75,6 @@ export function GoogleAnalyticsConfigFields({
       if (serviceAccountKey) {
         onCredentialsChange({ service_account_key: serviceAccountKey });
       }
-    },
-    [onCredentialsChange],
-  );
-
-  const handleFileUpload = useCallback(
-    (file: File | null): void => {
-      if (!file) {
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = (): void => {
-        const text = reader.result;
-        if (typeof text === "string") {
-          const serviceAccountKey = getServiceAccountKey(parseJsonRecord(text));
-          if (serviceAccountKey) {
-            onCredentialsChange({ service_account_key: serviceAccountKey });
-          }
-        }
-      };
-      reader.readAsText(file);
     },
     [onCredentialsChange],
   );
@@ -180,7 +117,7 @@ export function GoogleAnalyticsConfigFields({
               <Button
                 size="xs"
                 variant="subtle"
-                onClick={() => setShowKeyInput(true)}
+                onClick={() => onShowKeyInput()}
               >
                 Replace Key
               </Button>
@@ -199,7 +136,7 @@ export function GoogleAnalyticsConfigFields({
               placeholder="Or upload .json file"
               accept=".json"
               leftSection={<IconUpload size={16} />}
-              onChange={handleFileUpload}
+              onChange={onKeyFileUpload}
             />
           </Stack>
         )}
@@ -242,19 +179,19 @@ export function GoogleAnalyticsConfigFields({
         <Button
           variant="light"
           leftSection={<IconPlugConnected size={16} />}
-          onClick={handleTestConnection}
-          loading={testConnectionMutation.isPending}
+          onClick={onTestConnection}
+          loading={testState.type === "TESTING"}
           disabled={!credentials && !hasCredentials}
         >
           Test Connection
         </Button>
 
-        {testConnectionMutation.isSuccess && (
+        {testState.type === "RESULT" && (
           <Alert
             variant="light"
-            color={testConnectionMutation.data.success ? "green" : "red"}
+            color={testState.result.success ? "green" : "red"}
             icon={
-              testConnectionMutation.data.success ? (
+              testState.result.success ? (
                 <IconCheck size={16} />
               ) : (
                 <IconAlertTriangle size={16} />
@@ -262,7 +199,7 @@ export function GoogleAnalyticsConfigFields({
             }
           >
             <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
-              {testConnectionMutation.data.message}
+              {testState.result.message}
             </Text>
           </Alert>
         )}

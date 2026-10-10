@@ -269,7 +269,9 @@ async def test_close_fails_sender_blocked_on_full_queue() -> None:
     release.set()
 
 
-async def test_close_cleans_up_before_propagating_handler_failure() -> None:
+async def test_close_cleans_up_before_propagating_handler_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     handled = asyncio.Event()
 
     async def stream(
@@ -308,6 +310,12 @@ async def test_close_cleans_up_before_propagating_handler_failure() -> None:
 
     assert client.receiver_task is None
     assert not client.outbound
+    assert not [
+        record
+        for record in caplog.records
+        if record.name == "azents_runtime_control.grpc_runner_stream_session_client"
+        and record.exc_info is not None
+    ]
 
 
 async def test_start_failure_cleans_up_without_receiver_task() -> None:

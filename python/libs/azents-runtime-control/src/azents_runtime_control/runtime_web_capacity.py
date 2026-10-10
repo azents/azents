@@ -568,26 +568,101 @@ def _encode_state(state: CapacityState) -> dict[str, object]:
 
 
 def _decode_state(raw: bytes | str) -> CapacityState:
-    data = json.loads(raw)
-    if not isinstance(data, dict):
-        raise ValueError("Runtime Web Redis capacity state must be an object")
+    """Validate exact Redis wire fields before constructing immutable state."""
+    value: object = json.loads(raw)
+    data = _capacity_object(
+        value,
+        {
+            "epoch",
+            "pending_stream_ids",
+            "active_streams",
+            "buffer_grants",
+            "inbound",
+            "outbound",
+            "degraded",
+        },
+    )
+    degraded = data["degraded"]
+    if not isinstance(degraded, bool):
+        raise ValueError("Runtime Web Redis capacity degraded must be a boolean")
     return CapacityState(
-        epoch=str(data["epoch"]),
-        pending_stream_ids=tuple(int(value) for value in data["pending_stream_ids"]),
+        epoch=_capacity_string(data["epoch"]),
+        pending_stream_ids=tuple(
+            _capacity_positive_integer(item)
+            for item in _capacity_list(data["pending_stream_ids"])
+        ),
         active_streams=tuple(
-            ActiveCapacityStream(
-                stream_id=int(value["stream_id"]),
-                protocol=CapacityProtocol(str(value["protocol"])),
-            )
-            for value in data["active_streams"]
+            _decode_active_stream(item)
+            for item in _capacity_list(data["active_streams"])
         ),
         buffer_grants=tuple(
-            BufferGrant(
-                grant_id=str(value["grant_id"]), size_bytes=int(value["size_bytes"])
-            )
-            for value in data["buffer_grants"]
+            _decode_buffer_grant(item) for item in _capacity_list(data["buffer_grants"])
         ),
-        inbound=TokenBucketState(**data["inbound"]),
-        outbound=TokenBucketState(**data["outbound"]),
-        degraded=bool(data["degraded"]),
+        inbound=_decode_token_bucket(data["inbound"]),
+        outbound=_decode_token_bucket(data["outbound"]),
+        degraded=degraded,
+    )
+
+
+def _capacity_object(value: object, fields: set[str]) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise ValueError("Runtime Web Redis capacity value must be an object")
+    result: dict[str, object] = {}
+    for key, item in value.items():
+        if not isinstance(key, str) or key not in fields:
+            raise ValueError("Runtime Web Redis capacity fields are invalid")
+        result[key] = item
+    if result.keys() != fields:
+        raise ValueError("Runtime Web Redis capacity fields are invalid")
+    return result
+
+
+def _capacity_list(value: object) -> list[object]:
+    if not isinstance(value, list):
+        raise ValueError("Runtime Web Redis capacity value must be an array")
+    return list(value)
+
+
+def _capacity_string(value: object) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError("Runtime Web Redis capacity value must be a nonempty string")
+    return value
+
+
+def _capacity_integer(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(
+            "Runtime Web Redis capacity value must be a nonnegative integer"
+        )
+    return value
+
+
+def _capacity_positive_integer(value: object) -> int:
+    result = _capacity_integer(value)
+    if result == 0:
+        raise ValueError("Runtime Web Redis capacity value must be a positive integer")
+    return result
+
+
+def _decode_active_stream(value: object) -> ActiveCapacityStream:
+    data = _capacity_object(value, {"stream_id", "protocol"})
+    return ActiveCapacityStream(
+        stream_id=_capacity_positive_integer(data["stream_id"]),
+        protocol=CapacityProtocol(_capacity_string(data["protocol"])),
+    )
+
+
+def _decode_buffer_grant(value: object) -> BufferGrant:
+    data = _capacity_object(value, {"grant_id", "size_bytes"})
+    return BufferGrant(
+        grant_id=_capacity_string(data["grant_id"]),
+        size_bytes=_capacity_positive_integer(data["size_bytes"]),
+    )
+
+
+def _decode_token_bucket(value: object) -> TokenBucketState:
+    data = _capacity_object(value, {"tokens_milli_bytes", "updated_at_milliseconds"})
+    return TokenBucketState(
+        tokens_milli_bytes=_capacity_integer(data["tokens_milli_bytes"]),
+        updated_at_milliseconds=_capacity_integer(data["updated_at_milliseconds"]),
     )

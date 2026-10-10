@@ -5,10 +5,10 @@
 import { useState } from "react";
 import { normalizeCredentialEdits } from "@/shared/lib/redacted-credentials";
 import { trpc } from "@/trpc/client";
-import { BraveSearchFieldsView } from "./BraveSearchFieldsView";
-import type { BraveSearchFieldsViewProps } from "./BraveSearchFieldsView";
 
-interface BraveSearchConfigFieldsProps {
+import type { BraveSearchFieldsViewProps } from "../components/BraveSearchFieldsView";
+
+export interface BraveSearchConfigFieldsProps {
   config: Record<string, unknown>;
   onConfigChange: (config: Record<string, unknown>) => void;
   credentials: Record<string, unknown> | null;
@@ -19,7 +19,7 @@ interface BraveSearchConfigFieldsProps {
   toolkitConfigId?: string;
 }
 
-export function BraveSearchConfigFields({
+export function useBraveSearchConfigFieldsContainer({
   config,
   onConfigChange,
   credentials,
@@ -28,7 +28,7 @@ export function BraveSearchConfigFields({
   handle,
   agentId,
   toolkitConfigId,
-}: BraveSearchConfigFieldsProps): React.ReactElement {
+}: BraveSearchConfigFieldsProps): BraveSearchFieldsViewProps {
   const [replacingKey, setReplacingKey] = useState(false);
   const testConnection = trpc.toolkit.testConnection.useMutation();
   const testState: BraveSearchFieldsViewProps["testState"] =
@@ -42,32 +42,29 @@ export function BraveSearchConfigFields({
           ? { type: "FAILURE", message: testConnection.error.message }
           : { type: "IDLE" };
 
-  return (
-    <BraveSearchFieldsView
-      config={config}
-      onConfigChange={(nextConfig) => {
-        testConnection.reset();
-        onConfigChange(nextConfig);
-      }}
-      credentials={credentials}
-      onCredentialsChange={(nextCredentials) => {
-        testConnection.reset();
-        onCredentialsChange(nextCredentials);
-      }}
-      hasCredentials={hasCredentials}
-      replacingKey={replacingKey}
-      onReplaceKey={() => setReplacingKey(true)}
-      onTestConnection={() =>
-        testConnection.mutate({
-          handle,
-          ...(agentId != null && { agentId }),
-          toolkitType: "brave_search",
-          toolkitConfigId: toolkitConfigId ?? null,
-          config,
-          credentials: normalizeCredentialEdits(credentials),
-        })
-      }
-      testState={testState}
-    />
-  );
+  return {
+    config,
+    onConfigChange: (nextConfig) => {
+      testConnection.reset();
+      onConfigChange(nextConfig);
+    },
+    credentials,
+    onCredentialsChange: (nextCredentials) => {
+      testConnection.reset();
+      onCredentialsChange(nextCredentials);
+    },
+    hasCredentials,
+    replacingKey,
+    onReplaceKey: () => setReplacingKey(true),
+    onTestConnection: () =>
+      testConnection.mutate({
+        handle,
+        ...(agentId != null && { agentId }),
+        toolkitType: "brave_search",
+        toolkitConfigId: toolkitConfigId ?? null,
+        config,
+        credentials: normalizeCredentialEdits(credentials),
+      }),
+    testState,
+  };
 }

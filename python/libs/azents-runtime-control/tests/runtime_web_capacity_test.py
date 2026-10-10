@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Awaitable, Callable
 
 import pytest
@@ -19,6 +20,8 @@ from azents_runtime_control.runtime_web_capacity import (
     RedisRuntimeWebCapacityCoordinator,
     RuntimeWebCapacityCoordinator,
     TokenBucketState,
+    _decode_state,
+    _encode_state,
 )
 
 
@@ -342,3 +345,160 @@ async def test_redis_backend_serializes_mutation_snapshot_and_set() -> None:
         recoverable_errors=(RedisStoreUnavailable,),
     )
     assert (await restored.export_state()).pending_stream_ids == (1, 2)
+
+
+@pytest.mark.parametrize("protocol", list(CapacityProtocol))
+@pytest.mark.parametrize("degraded", [False, True])
+def test_capacity_codec_preserves_current_typed_wire_state(
+    protocol: CapacityProtocol, degraded: bool
+) -> None:
+    state = CapacityState(
+        epoch="epoch-1",
+        pending_stream_ids=(2,),
+        active_streams=(ActiveCapacityStream(1, protocol),),
+        buffer_grants=(BufferGrant("grant-1", 10),),
+        inbound=TokenBucketState(0, 0),
+        outbound=TokenBucketState(75_000, 500),
+        degraded=degraded,
+    )
+    encoded = json.dumps(_encode_state(state), sort_keys=True, separators=(",", ":"))
+    assert _decode_state(encoded) == state
+    assert _decode_state(encoded.encode()) == state
+
+
+def _wire_state() -> dict[str, object]:
+    return _encode_state(
+        CapacityState(
+            epoch="epoch-1",
+            pending_stream_ids=(2,),
+            active_streams=(ActiveCapacityStream(1, CapacityProtocol.HTTP),),
+            buffer_grants=(BufferGrant("grant-1", 10),),
+            inbound=TokenBucketState(0, 0),
+            outbound=TokenBucketState(75_000, 500),
+            degraded=False,
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("epoch", None),
+        ("epoch", 1),
+        ("epoch", ""),
+        ("degraded", "false"),
+        ("degraded", None),
+        ("degraded", 0),
+        ("pending_stream_ids", None),
+        ("pending_stream_ids", "2"),
+        ("pending_stream_ids", [True]),
+        ("pending_stream_ids", ["2"]),
+        ("pending_stream_ids", [0]),
+        ("pending_stream_ids", [-1]),
+        ("active_streams", None),
+        ("active_streams", [None]),
+        ("active_streams", [{"stream_id": 1, "protocol": "http", "extra": 1}]),
+        ("active_streams", [{"stream_id": True, "protocol": "http"}]),
+        ("active_streams", [{"stream_id": 1, "protocol": None}]),
+        ("active_streams", [{"stream_id": 1, "protocol": "unknown"}]),
+        ("active_streams", [{"stream_id": 1}]),
+        ("buffer_grants", None),
+        ("buffer_grants", [{"grant_id": None, "size_bytes": 10}]),
+        ("buffer_grants", [{"grant_id": "grant", "size_bytes": True}]),
+        ("buffer_grants", [{"grant_id": "grant", "size_bytes": 0}]),
+        ("buffer_grants", [{"grant_id": "grant", "size_bytes": 10, "extra": 1}]),
+        ("inbound", None),
+        ("inbound", {"tokens_milli_bytes": True, "updated_at_milliseconds": 0}),
+        ("inbound", {"tokens_milli_bytes": 0, "updated_at_milliseconds": "0"}),
+        ("inbound", {"tokens_milli_bytes": 0, "updated_at_milliseconds": -1}),
+        ("outbound", {"tokens_milli_bytes": 0}),
+        (
+            "outbound",
+            {"tokens_milli_bytes": 0, "updated_at_milliseconds": 0, "extra": 1},
+        ),
+        ("unknown", 1),
+    ],
+)
+def test_capacity_codec_rejects_coercion_and_unknown_shapes(
+    field: str, value: object
+) -> None:
+    payload = _wire_state()
+    payload[field] = value
+    with pytest.raises(ValueError):
+        _decode_state(json.dumps(payload))
+
+
+@pytest.mark.parametrize("field", list(_wire_state()))
+def test_capacity_codec_requires_each_emitted_field(field: str) -> None:
+    payload = _wire_state()
+    del payload[field]
+    with pytest.raises(ValueError):
+        _decode_state(json.dumps(payload))
+
+
+async def test_corrupt_capacity_restore_propagates_without_overwriting_store() -> None:
+    redis = MemoryRedisStore()
+    payload = _wire_state()
+    payload["degraded"] = "false"
+    original = json.dumps(payload).encode()
+    redis.values["runtime-web:capacity:corrupt"] = original
+
+    with pytest.raises(ValueError, match="degraded"):
+        await RedisRuntimeWebCapacityCoordinator.create(
+            redis=redis,
+            key="runtime-web:capacity:corrupt",
+            epoch="epoch-1",
+            profile=_profile(),
+            monotonic_clock_milliseconds=Clock(),
+            ttl_seconds=60,
+            recoverable_errors=(RedisStoreUnavailable,),
+        )
+    assert redis.values["runtime-web:capacity:corrupt"] == original
+
+
+@pytest.mark.parametrize("raw", ["null", "[]", "true", "{}", "not-json"])
+def test_capacity_codec_rejects_invalid_root(raw: str) -> None:
+    with pytest.raises(ValueError):
+        _decode_state(raw)
+
+
+async def test_capacity_codec_roundtrips_empty_owner_snapshot() -> None:
+    memory = InMemoryRuntimeWebCapacityCoordinator(
+        epoch="epoch-1",
+        profile=_profile(),
+        monotonic_clock_milliseconds=Clock(),
+    )
+    empty = await memory.export_state()
+    assert _decode_state(json.dumps(_encode_state(empty))) == empty
+
+
+async def test_capacity_redis_restores_complete_current_wire_snapshot() -> None:
+    clock = Clock()
+    clock.value = 500
+    memory = InMemoryRuntimeWebCapacityCoordinator(
+        epoch="epoch-1",
+        profile=_profile(),
+        monotonic_clock_milliseconds=clock,
+    )
+    assert await memory.begin_open(1)
+    assert await memory.accept_open(ActiveCapacityStream(1, CapacityProtocol.WEBSOCKET))
+    assert await memory.begin_open(2)
+    assert await memory.reserve_buffer(BufferGrant("grant-1", 10))
+    assert await memory.acquire_bandwidth(CapacityDirection.INBOUND, 25)
+    expected = await memory.export_state()
+    redis = MemoryRedisStore()
+    redis.values["runtime-web:capacity:complete"] = json.dumps(
+        _encode_state(expected), sort_keys=True, separators=(",", ":")
+    ).encode()
+    original = redis.values["runtime-web:capacity:complete"]
+    restored = await RedisRuntimeWebCapacityCoordinator.create(
+        redis=redis,
+        key="runtime-web:capacity:complete",
+        epoch="epoch-1",
+        profile=_profile(),
+        monotonic_clock_milliseconds=clock,
+        ttl_seconds=60,
+        recoverable_errors=(RedisStoreUnavailable,),
+    )
+    assert await restored.export_state() == expected
+    assert redis.values["runtime-web:capacity:complete"] == original

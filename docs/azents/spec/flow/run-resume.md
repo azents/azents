@@ -33,7 +33,6 @@ code_paths:
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/services/agent_session_input.py
   - python/apps/azents/src/azents/services/session_git_worktree/**
-  - python/apps/azents/src/azents/services/action_execution.py
   - python/apps/azents/src/azents/services/vfs.py
   - python/apps/azents/src/azents/repos/action_execution/**
   - python/apps/azents/src/azents/repos/agent_execution/**
@@ -53,8 +52,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_execution/cutover_replay_operations.py
   - python/apps/azents/src/azents/repos/session_execution/cutover_replay_data.py
   - python/apps/azents/src/azents/cli/team_session_cutover.py
-last_verified_at: 2026-10-09
-spec_version: 42
+last_verified_at: 2026-10-10
+spec_version: 43
 ---
 
 # Run Resume
@@ -461,6 +460,9 @@ run to observe `check_stop()` as true.
 
 
 ## Changelog
+
+- **2026-10-10** (spec_version 43) — Removed a deleted action-execution service
+  from source discovery; current repository and Worker ownership paths remain.
 
 - **2026-10-05** (spec_version 41) — Moved cutover preflight and exact batch
   fencing into completed repository operations, preserving candidate checks,
