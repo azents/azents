@@ -493,19 +493,17 @@ def _owner_offer_blocks_reissue(
 
 
 class _RuntimeWebRunnerGenerationGate:
-    """Signal exact Runner-generation persistence without polling."""
+    """Wait for persisted Runner evidence with only active-waiter state."""
 
-    def __init__(self) -> None:
-        self.ready: set[tuple[str, int]] = set()
-        self.events: dict[tuple[str, int], asyncio.Event] = {}
+    def __init__(self, *, read_repository: RuntimeControlReadRepository) -> None:
+        self.read_repository = read_repository
+        self.events: dict[tuple[str, int], set[asyncio.Event]] = {}
         self.lock = asyncio.Lock()
 
     async def mark(self, *, runtime_id: str, runner_generation: int) -> None:
         key = (runtime_id, runner_generation)
         async with self.lock:
-            self.ready.add(key)
-            event = self.events.get(key)
-            if event is not None:
+            for event in self.events.get(key, ()):
                 event.set()
 
     async def wait(
@@ -516,23 +514,26 @@ class _RuntimeWebRunnerGenerationGate:
         timeout_seconds: float,
     ) -> bool:
         key = (runtime_id, runner_generation)
+        event = asyncio.Event()
         async with self.lock:
-            if key in self.ready:
-                return True
-            event = self.events.setdefault(key, asyncio.Event())
+            self.events.setdefault(key, set()).add(event)
         try:
-            await asyncio.wait_for(event.wait(), timeout=timeout_seconds)
-        except TimeoutError:
+            # Subscribe before reading so a concurrent report cannot be missed.
+            # Durable evidence also serves retries without retaining past keys.
+            runtime = await self.read_repository.get_runtime(runtime_id)
+            if runtime is not None and runtime.runner_generation == runner_generation:
+                return True
+            try:
+                await asyncio.wait_for(event.wait(), timeout=timeout_seconds)
+            except TimeoutError:
+                return False
+            return True
+        finally:
             async with self.lock:
-                if self.events.get(key) is event:
+                events = self.events[key]
+                events.remove(event)
+                if not events:
                     self.events.pop(key)
-            return False
-        async with self.lock:
-            # Persistence readiness is retained for subsequent Owner acquisition.
-            # Every offer still validates the current Runtime generation in SQL.
-            if self.events.get(key) is event:
-                self.events.pop(key)
-        return True
 
 
 class _RuntimeWebRunnerStateSink:
@@ -965,7 +966,9 @@ async def runtime_control_server_lifespan(
         session_manager=session_manager,
     )
     provider_sink = RuntimeProviderReportRepositorySink(repository=report_operations)
-    web_runner_generation_gate = _RuntimeWebRunnerGenerationGate()
+    web_runner_generation_gate = _RuntimeWebRunnerGenerationGate(
+        read_repository=control_read_repository,
+    )
     runner_sink = _RuntimeWebRunnerStateSink(
         delegate=RuntimeRunnerStateRepositorySink(
             repository=report_operations,

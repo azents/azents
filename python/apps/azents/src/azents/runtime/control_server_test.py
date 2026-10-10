@@ -23,6 +23,7 @@ from azents.runtime.control_server import (
     _owner_offer_blocks_reissue,
     _OwnerRuntimeStreamSessionOfferProvider,
     _RuntimeWebRunnerGenerationGate,
+    _RuntimeWebRunnerStateSink,
     runtime_control_transport,
     runtime_web_trusted_transport,
     validate_runtime_control_web_settings,
@@ -30,35 +31,51 @@ from azents.runtime.control_server import (
 from azents.runtime.stream_session_owner import RuntimeStreamSessionOwnerManager
 
 
-class _ObservedGenerationEvent(asyncio.Event):
-    """Expose entry into the real generation wait without scheduler delays."""
+def _observe_generation_wait(
+    gate: _RuntimeWebRunnerGenerationGate,
+    repository: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> asyncio.Event:
+    """Observe the subscribed wait from the completed-read boundary."""
+    entered = asyncio.Event()
+    observed: set[asyncio.Event] = set()
 
-    def __init__(self) -> None:
-        super().__init__()
-        self.wait_entered = asyncio.Event()
+    async def read(runtime_id: str) -> Mock:
+        event = next(iter(gate.events[(runtime_id, 3)] - observed))
+        observed.add(event)
+        original_wait = event.wait
 
-    async def wait(self) -> Literal[True]:
-        self.wait_entered.set()
-        return await super().wait()
+        async def wait() -> Literal[True]:
+            entered.set()
+            return await original_wait()
+
+        monkeypatch.setattr(event, "wait", wait)
+        return Mock(runner_generation=2)
+
+    repository.get_runtime.side_effect = read
+    return entered
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mark_before_wait", [False, True])
 async def test_runner_generation_readiness_remains_available_after_wait(
     mark_before_wait: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Owner route acquisition may repeat for the same persisted generation."""
-    gate = _RuntimeWebRunnerGenerationGate()
-    event = _ObservedGenerationEvent()
-    gate.events[("runtime", 3)] = event
+    repository = Mock(get_runtime=AsyncMock(return_value=Mock(runner_generation=3)))
+    gate = _RuntimeWebRunnerGenerationGate(read_repository=repository)
     if mark_before_wait:
         await gate.mark(runtime_id="runtime", runner_generation=3)
+    else:
+        entered = _observe_generation_wait(gate, repository, monkeypatch)
     waiting = asyncio.create_task(
         gate.wait(runtime_id="runtime", runner_generation=3, timeout_seconds=1)
     )
     try:
         if not mark_before_wait:
-            await asyncio.wait_for(event.wait_entered.wait(), timeout=1)
+            await asyncio.wait_for(entered.wait(), timeout=1)
+            repository.get_runtime.side_effect = None
             await gate.mark(runtime_id="runtime", runner_generation=3)
         assert await waiting
         assert await gate.wait(
@@ -67,24 +84,29 @@ async def test_runner_generation_readiness_remains_available_after_wait(
         assert not await gate.wait(
             runtime_id="runtime", runner_generation=4, timeout_seconds=0
         )
+        repository.get_runtime.return_value = None
         assert not await gate.wait(
             runtime_id="other", runner_generation=3, timeout_seconds=0
         )
+        assert not gate.events
     finally:
         waiting.cancel()
         await asyncio.gather(waiting, return_exceptions=True)
 
 
 @pytest.mark.asyncio
-async def test_owner_route_conflict_retains_persisted_generation_readiness() -> None:
+@pytest.mark.parametrize("runtime_deleted", [False, True])
+async def test_owner_route_conflict_retains_persisted_generation_readiness(
+    monkeypatch: pytest.MonkeyPatch,
+    runtime_deleted: bool,
+) -> None:
     """A live previous Owner lease cannot consume the new generation signal."""
-    gate = _RuntimeWebRunnerGenerationGate()
-    event = _ObservedGenerationEvent()
-    gate.events[("runtime", 3)] = event
     repository = Mock()
     repository.get_runtime = AsyncMock(
         return_value=Mock(desired_generation=2, runner_generation=3)
     )
+    gate = _RuntimeWebRunnerGenerationGate(read_repository=repository)
+    entered = _observe_generation_wait(gate, repository, monkeypatch)
     owned = Mock()
     owned.offer = _web_offer(deadline_at=datetime.now(UTC) + timedelta(seconds=5))
     manager = Mock(spec=RuntimeStreamSessionOwnerManager)
@@ -100,7 +122,8 @@ async def test_owner_route_conflict_retains_persisted_generation_readiness() -> 
         provider.offer_for_runner(runtime_id="runtime", runner_generation=3)
     )
     try:
-        await asyncio.wait_for(event.wait_entered.wait(), timeout=1)
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        repository.get_runtime.side_effect = None
         await gate.mark(runtime_id="runtime", runner_generation=3)
         assert await first is None
         assert await gate.wait(
@@ -111,21 +134,175 @@ async def test_owner_route_conflict_retains_persisted_generation_readiness() -> 
             == owned.offer
         )
         assert manager.acquire.await_count == 2
-        assert repository.get_runtime.await_count == 2
+        assert repository.get_runtime.await_count == 5
         # A fresh acquisition still requires the authoritative generation fence.
         provider.owned.clear()
-        repository.get_runtime.return_value = Mock(
-            desired_generation=2, runner_generation=4
-        )
+        repository.get_runtime.side_effect = [
+            Mock(desired_generation=2, runner_generation=3),
+            None
+            if runtime_deleted
+            else Mock(desired_generation=2, runner_generation=4),
+        ]
         assert (
             await provider.offer_for_runner(runtime_id="runtime", runner_generation=3)
             is None
         )
-        assert repository.get_runtime.await_count == 3
+        assert repository.get_runtime.await_count == 7
         assert manager.acquire.await_count == 2
+        assert not gate.events
     finally:
         first.cancel()
         await asyncio.gather(first, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_runner_generation_mark_during_read_is_not_lost() -> None:
+    """A subscribed waiter observes a mark even with an old SQL snapshot."""
+    read_entered = asyncio.Event()
+    read_release = asyncio.Event()
+
+    async def read(runtime_id: str) -> Mock:
+        read_entered.set()
+        await read_release.wait()
+        return Mock(runner_generation=2)
+
+    repository = Mock(get_runtime=AsyncMock(side_effect=read))
+    gate = _RuntimeWebRunnerGenerationGate(read_repository=repository)
+    waiting = asyncio.create_task(
+        gate.wait(runtime_id="runtime", runner_generation=3, timeout_seconds=1)
+    )
+    try:
+        await asyncio.wait_for(read_entered.wait(), timeout=1)
+        await gate.mark(runtime_id="runtime", runner_generation=3)
+        read_release.set()
+        assert await waiting
+        assert not gate.events
+    finally:
+        waiting.cancel()
+        await asyncio.gather(waiting, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_runner_generation_history_retains_no_state() -> None:
+    """Deleted/superseded Runtime generations never accumulate in memory."""
+    repository = Mock(get_runtime=AsyncMock())
+    gate = _RuntimeWebRunnerGenerationGate(read_repository=repository)
+    for generation in range(1, 101):
+        runtime_id = f"runtime-{generation}"
+        await gate.mark(runtime_id=runtime_id, runner_generation=generation)
+        assert not gate.events
+        repository.get_runtime.return_value = Mock(runner_generation=generation)
+        assert await gate.wait(
+            runtime_id=runtime_id,
+            runner_generation=generation,
+            timeout_seconds=0,
+        )
+        assert not gate.events
+        for runtime in (None, Mock(runner_generation=generation + 1)):
+            repository.get_runtime.return_value = runtime
+            assert not await gate.wait(
+                runtime_id=runtime_id,
+                runner_generation=generation,
+                timeout_seconds=0,
+            )
+            assert not gate.events
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("during_read", [False, True])
+async def test_runner_generation_cancel_cleans_only_its_waiter(
+    during_read: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cancellation cannot detach another waiter subscribed to the same key."""
+    repository = Mock(get_runtime=AsyncMock())
+    gate = _RuntimeWebRunnerGenerationGate(read_repository=repository)
+    entered = _observe_generation_wait(gate, repository, monkeypatch)
+    survivor = asyncio.create_task(
+        gate.wait(runtime_id="runtime", runner_generation=3, timeout_seconds=1)
+    )
+    cancelled: asyncio.Task[bool] | None = None
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        entered.clear()
+        if during_read:
+
+            async def blocked_read(runtime_id: str) -> None:
+                entered.set()
+                await asyncio.Event().wait()
+
+            repository.get_runtime.side_effect = blocked_read
+        cancelled = asyncio.create_task(
+            gate.wait(runtime_id="runtime", runner_generation=3, timeout_seconds=1)
+        )
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        cancelled.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await cancelled
+        assert len(gate.events[("runtime", 3)]) == 1
+        await gate.mark(runtime_id="other", runner_generation=3)
+        await gate.mark(runtime_id="runtime", runner_generation=4)
+        assert not survivor.done()
+        await gate.mark(runtime_id="runtime", runner_generation=3)
+        assert await survivor
+        assert not gate.events
+    finally:
+        survivor.cancel()
+        if cancelled is not None:
+            cancelled.cancel()
+            await asyncio.gather(cancelled, return_exceptions=True)
+        await asyncio.gather(survivor, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_runner_generation_timeout_keeps_other_waiter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One timeout cannot remove another caller's notification subscription."""
+    repository = Mock(get_runtime=AsyncMock(return_value=Mock(runner_generation=2)))
+    gate = _RuntimeWebRunnerGenerationGate(read_repository=repository)
+    entered = _observe_generation_wait(gate, repository, monkeypatch)
+    survivor = asyncio.create_task(
+        gate.wait(runtime_id="runtime", runner_generation=3, timeout_seconds=1)
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        repository.get_runtime.side_effect = None
+        assert not await gate.wait(
+            runtime_id="runtime", runner_generation=3, timeout_seconds=0
+        )
+        assert len(gate.events[("runtime", 3)]) == 1
+        await gate.mark(runtime_id="runtime", runner_generation=3)
+        assert await survivor
+        assert not gate.events
+    finally:
+        survivor.cancel()
+        await asyncio.gather(survivor, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_runner_generation_read_failure_cleans_waiter() -> None:
+    """Database failures propagate after removing the registered event."""
+    repository = Mock(get_runtime=AsyncMock(side_effect=RuntimeError("read failed")))
+    gate = _RuntimeWebRunnerGenerationGate(read_repository=repository)
+    with pytest.raises(RuntimeError, match="read failed"):
+        await gate.wait(runtime_id="runtime", runner_generation=3, timeout_seconds=1)
+    assert not gate.events
+
+
+@pytest.mark.asyncio
+async def test_runner_state_failure_does_not_signal_generation() -> None:
+    """Only successfully completed report operations may notify waiters."""
+    gate = Mock(mark=AsyncMock())
+    sink = _RuntimeWebRunnerStateSink(
+        delegate=Mock(
+            record_runner_state=AsyncMock(side_effect=RuntimeError("report"))
+        ),
+        generation_gate=gate,
+    )
+    with pytest.raises(RuntimeError, match="report"):
+        await sink.record_runner_state(Mock(runtime_id="runtime", runner_generation=3))
+    gate.mark.assert_not_awaited()
 
 
 def _settings() -> RuntimeControlSettings:
