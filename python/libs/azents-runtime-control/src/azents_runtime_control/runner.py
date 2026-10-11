@@ -714,13 +714,19 @@ class RunnerRunLoop:
             generation=accepted.generation,
             heartbeat_at=self.clock(),
         )
+        L = logging.LoggerAdapter(
+            _LOGGER,
+            {
+                "runtime_id": accepted.runtime_id,
+                "runner_generation": accepted.generation,
+            },
+            merge_extra=True,
+        )
         if not acknowledgement.accepted:
-            _LOGGER.warning(
+            L.warning(
                 "Runtime Runner heartbeat rejected",
                 extra={
-                    "runtime_id": accepted.runtime_id,
                     "runner_id": accepted.runner_id,
-                    "runner_generation": accepted.generation,
                 },
             )
             raise RunnerConnectionRejected(
@@ -732,11 +738,9 @@ class RunnerRunLoop:
                 evidence.desired_generation
                 != self._runtime_configuration.desired_generation
             ):
-                _LOGGER.warning(
+                L.warning(
                     "Runtime Runner heartbeat configuration rejected",
                     extra={
-                        "runtime_id": accepted.runtime_id,
-                        "runner_generation": accepted.generation,
                         "configuration_sequence": evidence.configuration_sequence,
                         "error_code": "desired_generation_mismatch",
                     },
@@ -745,12 +749,10 @@ class RunnerRunLoop:
                 try:
                     validate_runtime_configuration_evidence(evidence)
                 except ValueError:
-                    _LOGGER.warning(
+                    L.warning(
                         "Runtime Runner heartbeat configuration rejected",
                         exc_info=True,
                         extra={
-                            "runtime_id": accepted.runtime_id,
-                            "runner_generation": accepted.generation,
                             "configuration_sequence": evidence.configuration_sequence,
                             "error_code": "runtime_configuration_invalid",
                         },
