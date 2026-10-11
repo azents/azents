@@ -291,6 +291,67 @@ async def test_runner_generation_read_failure_cleans_waiter() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runner_generation_deadline_cancels_stalled_read() -> None:
+    """The caller's elapsed-time budget includes database/pool waiting."""
+    read_cancelled = asyncio.Event()
+
+    async def read(runtime_id: str) -> None:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            read_cancelled.set()
+
+    gate = _RuntimeWebRunnerGenerationGate(
+        read_repository=Mock(get_runtime=AsyncMock(side_effect=read)),
+    )
+    assert not await asyncio.wait_for(
+        gate.wait(runtime_id="runtime", runner_generation=3, timeout_seconds=0.01),
+        timeout=1,
+    )
+    assert read_cancelled.is_set()
+    assert not gate.events
+
+
+@pytest.mark.asyncio
+async def test_runner_generation_uses_one_deadline_before_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The notification wait must not receive a fresh budget after the read."""
+    deadline = asyncio.timeout(None)
+    create_deadline = Mock(return_value=deadline)
+    monkeypatch.setattr(asyncio, "timeout", create_deadline)
+
+    async def read(runtime_id: str) -> Mock:
+        create_deadline.assert_called_once_with(10)
+        assert asyncio.current_task() is not None
+        deadline.reschedule(asyncio.get_running_loop().time())
+        return Mock(runner_generation=2)
+
+    gate = _RuntimeWebRunnerGenerationGate(
+        read_repository=Mock(get_runtime=AsyncMock(side_effect=read)),
+    )
+    assert not await gate.wait(
+        runtime_id="runtime", runner_generation=3, timeout_seconds=10
+    )
+    assert deadline.expired()
+    create_deadline.assert_called_once_with(10)
+    assert not gate.events
+
+
+@pytest.mark.asyncio
+async def test_runner_generation_repository_timeout_propagates() -> None:
+    """An unrelated database timeout remains an error, not gate unavailability."""
+    gate = _RuntimeWebRunnerGenerationGate(
+        read_repository=Mock(
+            get_runtime=AsyncMock(side_effect=TimeoutError("database timeout")),
+        ),
+    )
+    with pytest.raises(TimeoutError, match="database timeout"):
+        await gate.wait(runtime_id="runtime", runner_generation=3, timeout_seconds=1)
+    assert not gate.events
+
+
+@pytest.mark.asyncio
 async def test_runner_state_failure_does_not_signal_generation() -> None:
     """Only successfully completed report operations may notify waiters."""
     gate = Mock(mark=AsyncMock())

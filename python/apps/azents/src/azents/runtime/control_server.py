@@ -517,17 +517,23 @@ class _RuntimeWebRunnerGenerationGate:
         event = asyncio.Event()
         async with self.lock:
             self.events.setdefault(key, set()).add(event)
+        deadline = asyncio.timeout(timeout_seconds)
         try:
-            # Subscribe before reading so a concurrent report cannot be missed.
-            # Durable evidence also serves retries without retaining past keys.
-            runtime = await self.read_repository.get_runtime(runtime_id)
-            if runtime is not None and runtime.runner_generation == runner_generation:
+            async with deadline:
+                # Subscribe before reading so a concurrent report cannot be missed.
+                # Durable evidence also serves retries without retaining past keys.
+                runtime = await self.read_repository.get_runtime(runtime_id)
+                if (
+                    runtime is not None
+                    and runtime.runner_generation == runner_generation
+                ):
+                    return True
+                await event.wait()
                 return True
-            try:
-                await asyncio.wait_for(event.wait(), timeout=timeout_seconds)
-            except TimeoutError:
-                return False
-            return True
+        except TimeoutError:
+            if not deadline.expired():
+                raise
+            return False
         finally:
             async with self.lock:
                 events = self.events[key]
