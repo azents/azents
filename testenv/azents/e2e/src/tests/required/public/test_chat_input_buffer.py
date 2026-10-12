@@ -18,6 +18,7 @@ from azentspublicclient.models.agent_create_request import AgentCreateRequest
 from azentspublicclient.models.agent_model_selection_input import (
     AgentModelSelectionInput,
 )
+from azentspublicclient.models.agent_session_run_state import AgentSessionRunState
 from azentspublicclient.models.agent_toolkit_attach_request import (
     AgentToolkitAttachRequest,
 )
@@ -34,11 +35,12 @@ from azentspublicclient.models.secrets import Secrets
 from azentspublicclient.models.toolkit_config_create_request import (
     ToolkitConfigCreateRequest,
 )
-from pydantic import ConfigDict, StrictStr, TypeAdapter, ValidationError
+from pydantic import StrictStr, TypeAdapter, ValidationError, model_validator
 from testcontainers.core.container import DockerContainer
 
 from support.observations import (
     ExtensionObservation,
+    HistoryEventObservation,
     HistoryPageObservation,
     InputMessageObservation,
     MailboxObservation,
@@ -84,15 +86,46 @@ class _PendingBuffer:
     content: str
 
 
-class _BufferLive(LiveEventListResponse):
-    """Validate native mailbox identities before interpreting pending content."""
+class _BufferPartialHistory(ExtensionObservation):
+    """Retain canonical events and opaque extensions in the live history envelope."""
 
-    model_config = ConfigDict(extra="allow")
+    items: list[HistoryEventObservation]
+
+
+class _BufferRun(ExtensionObservation):
+    """Interpret run status while retaining the validated wire context unchanged."""
+
+    status: StrictStr
+
+
+class _BufferLive(ExtensionObservation):
+    """Project interpreted live fields without altering the generated SDK contract."""
+
+    partial_history: _BufferPartialHistory
     mailbox_items: list[MailboxObservation]
+    run: _BufferRun | None = None
+    session_run_state: AgentSessionRunState
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_wire_contract(cls, value: object) -> object:
+        """Validate the complete SDK envelope before interpreting mailbox fields."""
+        payload = _JSON_OBJECT.validate_python(value)
+        if LiveEventListResponse.from_dict(payload) is None:
+            raise ValueError("Expected a REST live projection object")
+        return value
 
 
 class _PrimarySession(ExtensionObservation):
     id: StrictStr
+
+
+@dataclass(frozen=True)
+class _BufferRestState:
+    """Typed history and live observations shared by predicates and diagnostics."""
+
+    history: HistoryPageObservation
+    live: _BufferLive
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -508,14 +541,14 @@ def _wait_for_history_user_message_id(
 ) -> str:
     """Wait until REST history contains the requested user message."""
     deadline = time.monotonic() + timeout
-    last_payload: dict[str, object] | None = None
+    last_payload: HistoryPageObservation | None = None
     while time.monotonic() < deadline:
         history_payload = _list_history(
             server_url=server_url,
             token=token,
             session_id=session_id,
         )
-        last_payload = history_payload.to_dict()
+        last_payload = history_payload
         message_id = _find_user_message_id(history_payload, content)
         if message_id is not None:
             return message_id
@@ -532,7 +565,7 @@ def _wait_for_interrupted_idle_state(
 ) -> HistoryPageObservation:
     """Wait for a durable interruption and the finalized idle live state."""
     deadline = time.monotonic() + timeout
-    last_payload: dict[str, object] | None = None
+    last_payload: _BufferRestState | None = None
     while time.monotonic() < deadline:
         history_payload = _list_history(
             server_url=server_url,
@@ -544,10 +577,7 @@ def _wait_for_interrupted_idle_state(
             token=token,
             session_id=session_id,
         )
-        last_payload = {
-            "history": history_payload.to_dict(),
-            "live": live_payload.to_dict(),
-        }
+        last_payload = _BufferRestState(history=history_payload, live=live_payload)
         if (
             "interrupted" in _run_marker_statuses(history_payload)
             and live_payload.run is None
@@ -568,7 +598,7 @@ def _wait_for_idle_rest_state(
 ) -> None:
     """Wait until REST history/live both expose the completed idle state."""
     deadline = time.monotonic() + timeout
-    last_payload: dict[str, object] | None = None
+    last_payload: _BufferRestState | None = None
     while time.monotonic() < deadline:
         history_payload = _list_history(
             server_url=server_url,
@@ -580,10 +610,7 @@ def _wait_for_idle_rest_state(
             token=token,
             session_id=session_id,
         )
-        last_payload = {
-            "history": history_payload.to_dict(),
-            "live": live_payload.to_dict(),
-        }
+        last_payload = _BufferRestState(history=history_payload, live=live_payload)
         _assert_split_rest_contract(history_payload, live_payload)
         if (
             expected_message in _message_contents(history_payload)
@@ -605,7 +632,7 @@ def _wait_for_running_rest_state(
 ) -> None:
     """Wait until REST history and live state expose a running message."""
     deadline = time.monotonic() + timeout
-    last_payload: dict[str, object] | None = None
+    last_payload: _BufferRestState | None = None
     while time.monotonic() < deadline:
         history_payload = _list_history(
             server_url=server_url,
@@ -617,10 +644,7 @@ def _wait_for_running_rest_state(
             token=token,
             session_id=session_id,
         )
-        last_payload = {
-            "history": history_payload.to_dict(),
-            "live": live_payload.to_dict(),
-        }
+        last_payload = _BufferRestState(history=history_payload, live=live_payload)
         _assert_split_rest_contract(history_payload, live_payload)
         run_status = live_payload.run.status if live_payload.run is not None else None
         if (
@@ -640,10 +664,10 @@ def _wait_for_rest_state(
     expected_message: str | None = None,
     expected_pending: list[str] | None = None,
     timeout: float = 120,
-) -> dict[str, object]:
+) -> _BufferRestState:
     """Poll REST history and live projections until the target state appears."""
     deadline = time.monotonic() + timeout
-    last_payload: dict[str, object] | None = None
+    last_payload: _BufferRestState | None = None
     while time.monotonic() < deadline:
         history_payload = _list_history(
             server_url=server_url,
@@ -656,10 +680,7 @@ def _wait_for_rest_state(
             session_id=session_id,
         )
         _assert_split_rest_contract(history_payload, live_payload)
-        payload: dict[str, object] = {
-            "history": history_payload.to_dict(),
-            "live": live_payload.to_dict(),
-        }
+        payload = _BufferRestState(history=history_payload, live=live_payload)
         last_payload = payload
         messages_match = expected_message is None or (
             expected_message in _message_contents(history_payload)
@@ -928,8 +949,8 @@ class TestChatInputBuffer:
             expected_pending=[],
         )
 
-        final_live = _BufferLive.model_validate(final_payload["live"])
-        final_history = HistoryPageObservation.model_validate(final_payload["history"])
+        final_live = final_payload.live
+        final_history = final_payload.history
         assert follow_up_buffer.mailbox_item_id not in final_live.model_dump_json()
         assert (
             second_follow_up_buffer.mailbox_item_id not in final_live.model_dump_json()
