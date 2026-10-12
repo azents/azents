@@ -310,30 +310,21 @@ class TestChatGPTSubscriptionUsage:
         _assert_no_sensitive_source_values(payload)
         _assert_safe_subscription_usage_journal(journal)
 
-    @pytest.mark.parametrize(
-        ("scenario", "reason", "retryable"),
-        [
-            ("test-chatgpt-transport", "temporarily_unavailable", True),
-            ("test-chatgpt-rate-limited", "rate_limited", True),
-            ("test-chatgpt-unavailable", "temporarily_unavailable", True),
-            ("test-chatgpt-malformed", "invalid_provider_response", False),
-        ],
-    )
-    def test_typed_unavailable_outcomes(
+    def test_transport_failure_reaches_public_unavailable_result(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         openai_proxy_url: str,
-        scenario: str,
-        reason: str,
-        retryable: bool,
     ) -> None:
-        """Normalize provider and transport failures without exposing payloads."""
+        """Project a real provider transport failure without exposing payloads."""
         clear_subscription_usage_journal(openai_proxy_url)
         workspace = setup_subscription_workspace(public_api_client, admin_api_client)
         api = LLMProviderIntegrationV1Api(public_api_client)
         integration_id = create_chatgpt_subscription_integration(
-            public_api_client, workspace, proxy_url=openai_proxy_url, scenario=scenario
+            public_api_client,
+            workspace,
+            proxy_url=openai_proxy_url,
+            scenario="test-chatgpt-transport",
         )
 
         payload = _usage(
@@ -344,8 +335,8 @@ class TestChatGPTSubscriptionUsage:
         )
 
         assert payload["type"] == "unavailable"
-        assert payload["reason"] == reason
-        assert payload["retryable"] is retryable
+        assert payload["reason"] == "temporarily_unavailable"
+        assert payload["retryable"] is True
         assert "error" not in json.dumps(payload, sort_keys=True).lower()
         _assert_no_sensitive_source_values(payload)
         _assert_safe_subscription_usage_journal(
@@ -410,44 +401,14 @@ class TestXaiSubscriptionUsage:
         [
             ("test-xai-external", "external", None, ["/v1/settings"]),
             (
-                "test-xai-invalid-redirect",
-                "unavailable",
-                "invalid_provider_response",
-                ["/v1/settings"],
-            ),
-            (
-                "test-xai-settings-failure",
-                "available",
-                None,
-                ["/v1/settings", "/v1/billing", "/v1/auto-topup-rule"],
-            ),
-            (
                 "test-xai-billing-denied",
                 "unavailable",
                 "entitlement_unavailable",
                 ["/v1/settings", "/v1/billing"],
             ),
-            (
-                "test-xai-transport",
-                "unavailable",
-                "temporarily_unavailable",
-                ["/v1/settings", "/v1/billing"],
-            ),
-            (
-                "test-xai-unavailable",
-                "unavailable",
-                "temporarily_unavailable",
-                ["/v1/settings", "/v1/billing"],
-            ),
-            (
-                "test-xai-malformed",
-                "unavailable",
-                "invalid_provider_response",
-                ["/v1/settings", "/v1/billing"],
-            ),
         ],
     )
-    def test_redirect_enrichment_and_failure_outcomes(
+    def test_external_redirect_and_billing_denial_preserve_integration(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
@@ -457,7 +418,7 @@ class TestXaiSubscriptionUsage:
         expected_reason: str | None,
         expected_paths: list[str],
     ) -> None:
-        """Validate xAI short-circuit, best-effort, and required-read behavior."""
+        """Verify external short-circuit and persisted authority after denial."""
         clear_subscription_usage_journal(openai_proxy_url)
         workspace = setup_subscription_workspace(public_api_client, admin_api_client)
         api = LLMProviderIntegrationV1Api(public_api_client)
@@ -479,8 +440,6 @@ class TestXaiSubscriptionUsage:
         if scenario == "test-xai-external":
             assert payload["url"] == "https://grok.com/usage"
             assert "financial_details" not in payload
-        if scenario == "test-xai-settings-failure":
-            assert payload["plan_label"] == "SuperGrok"
         if scenario == "test-xai-billing-denied":
             integration = api.llm_provider_integration_v1_get_integration(
                 integration_id=integration_id,

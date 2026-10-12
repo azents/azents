@@ -315,9 +315,86 @@ async def test_required_billing_status_classification(
     result = await _read(handler)
 
     assert isinstance(result, outcome_type)
+    assert result.http_status == status
     if isinstance(result, XaiUsageUnavailable):
         assert result.reason == reason
         assert result.retryable is retryable
+
+
+@pytest.mark.parametrize("error_type", [httpx.ReadTimeout, httpx.ConnectError])
+async def test_required_billing_transport_failure(
+    error_type: type[httpx.TransportError],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Return a retryable failure without enrichment or transport detail."""
+    caplog.set_level(logging.INFO)
+    paths: list[str] = []
+    private_detail = "private-provider-transport-detail"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path == "/v1/settings":
+            return httpx.Response(200, json={})
+        assert request.url.path == "/v1/billing"
+        assert request.url.params["format"] == "credits"
+        raise error_type(private_detail, request=request)
+
+    result = await _read(handler)
+
+    assert isinstance(result, XaiUsageUnavailable)
+    assert result.reason == SubscriptionUsageUnavailableReason.TEMPORARILY_UNAVAILABLE
+    assert result.retryable is True
+    assert result.http_status is None
+    assert paths == ["/v1/settings", "/v1/billing"]
+    rendered = repr(result) + "\n".join(
+        record.getMessage() for record in caplog.records
+    )
+    for secret in [
+        private_detail,
+        "secret-access-token",
+        "secret-refresh-token",
+        "account-secret",
+        "private@example.com",
+    ]:
+        assert secret not in rendered
+
+
+async def test_malformed_billing_config_stops_optional_enrichment(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Reject a list config as safe, nonretryable contract drift."""
+    caplog.set_level(logging.INFO)
+    paths: list[str] = []
+    private_detail = "private-provider-billing-detail"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path == "/v1/settings":
+            return httpx.Response(200, json={})
+        assert request.url.path == "/v1/billing"
+        assert request.url.params["format"] == "credits"
+        return httpx.Response(
+            200, json={"config": [], "provider_detail": private_detail}
+        )
+
+    result = await _read(handler)
+
+    assert isinstance(result, XaiUsageUnavailable)
+    assert result.reason == SubscriptionUsageUnavailableReason.INVALID_PROVIDER_RESPONSE
+    assert result.retryable is False
+    assert result.http_status == 200
+    assert paths == ["/v1/settings", "/v1/billing"]
+    rendered = repr(result) + "\n".join(
+        record.getMessage() for record in caplog.records
+    )
+    for secret in [
+        private_detail,
+        "secret-access-token",
+        "secret-refresh-token",
+        "account-secret",
+        "private@example.com",
+    ]:
+        assert secret not in rendered
 
 
 @pytest.mark.parametrize("percentage", [-4, 125])

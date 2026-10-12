@@ -9,6 +9,7 @@ from typing import ClassVar
 import pytest
 
 from support import discord_provider_fake as fake
+from support.discord_provider_fake import _settings_control_evidence
 
 
 class _Handler(fake.DiscordHTTPHandler):
@@ -478,3 +479,83 @@ def test_oauth_invalid_form_decodes_to_rejection_not_coerced_credentials() -> No
     assert result.status == 400
     assert result.payload == {"error": "invalid_grant"}
     assert _mapping(_list(oauth.evidence()["requests"])[0])["client_valid"] is False
+
+
+def test_discord_fake_records_only_safe_settings_select_evidence() -> None:
+    """Expose control roles, defaults, and relative Session navigation only."""
+    assert _settings_control_evidence(
+        {
+            "components": [
+                {
+                    "type": 1,
+                    "components": [
+                        {
+                            "type": 3,
+                            "custom_id": "signed-location",
+                            "placeholder": "Where to respond",
+                            "options": [
+                                {
+                                    "label": "This channel",
+                                    "value": "channel",
+                                    "default": False,
+                                },
+                                {
+                                    "label": "Threads",
+                                    "value": "threads",
+                                    "default": True,
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "type": 1,
+                    "components": [
+                        {
+                            "type": 3,
+                            "custom_id": "signed-response-mode",
+                            "placeholder": "When to respond",
+                            "options": [
+                                {
+                                    "label": "When mentioned",
+                                    "value": "mention_only",
+                                    "default": True,
+                                },
+                                {
+                                    "label": "Every message",
+                                    "value": "all_messages",
+                                    "default": False,
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "type": 1,
+                    "components": [
+                        {
+                            "type": 2,
+                            "style": 5,
+                            "label": "View session",
+                            "url": (
+                                "https://azents.example/w/workspace/agents/"
+                                "agent-1/sessions/session-1"
+                            ),
+                        }
+                    ],
+                },
+            ]
+        }
+    ) == [
+        {"kind": "select", "setting": "location", "default": "threads"},
+        {
+            "kind": "select",
+            "setting": "response_mode",
+            "default": "mention_only",
+        },
+        {
+            "kind": "link",
+            "target": "session",
+            "path": "/w/workspace/agents/agent-1/sessions/session-1",
+        },
+    ]
