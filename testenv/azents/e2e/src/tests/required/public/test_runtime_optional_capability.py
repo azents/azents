@@ -22,8 +22,11 @@ from azentspublicclient.models.agent_model_selection_input import (
 )
 from azentspublicclient.models.agent_runtime_capability import AgentRuntimeCapability
 from azentspublicclient.models.agent_runtime_response import AgentRuntimeResponse
+from azentspublicclient.models.agent_session_response import AgentSessionResponse
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
+from azentspublicclient.models.chat_event_page_response import ChatEventPageResponse
+from azentspublicclient.models.chat_write_response import ChatWriteResponse
 from azentspublicclient.models.create_invitation_request import (
     CreateInvitationRequest,
 )
@@ -32,10 +35,13 @@ from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
 )
+from azentspublicclient.models.project_browser_manifest_response import (
+    ProjectBrowserManifestResponse,
+)
 from azentspublicclient.models.secrets import Secrets
-from pydantic import TypeAdapter, ValidationError
 from testcontainers.core.container import DockerContainer
 
+from support.observations import decode_history_page
 from support.runtime_profiles import create_workspace_runtime_profile
 from support.utils import (
     authenticate_user,
@@ -52,8 +58,6 @@ class _InvitedMember(NamedTuple):
     email: str
 
 
-_JSON_OBJECT = TypeAdapter(dict[str, object])
-_JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 _RUNTIME_PROVIDER_ID = "system-docker"
 _DETERMINISTIC_MODEL_MESSAGE = "Event durable hello"
 
@@ -72,22 +76,6 @@ class _Workspace:
 def _headers(token: str) -> dict[str, str]:
     """Return bearer authentication headers."""
     return {"Authorization": f"Bearer {token}"}
-
-
-def _response_object(response: requests.Response, *, label: str) -> dict[str, object]:
-    """Validate a JSON object response."""
-    try:
-        return _JSON_OBJECT.validate_json(response.text)
-    except ValidationError as exc:
-        raise AssertionError(f"{label} is not an object: {response.text!r}") from exc
-
-
-def _object_items(raw_items: object, *, label: str) -> list[dict[str, object]]:
-    """Validate a JSON object list."""
-    try:
-        return _JSON_OBJECT_LIST.validate_python(raw_items)
-    except ValidationError as exc:
-        raise AssertionError(f"{label} is not an object list: {raw_items!r}") from exc
 
 
 def _create_workspace(
@@ -186,15 +174,7 @@ def _primary_session_id(
         timeout=10,
     )
     response.raise_for_status()
-    session_id = _response_object(
-        response,
-        label="Team primary session response",
-    ).get("id")
-    if not isinstance(session_id, str):
-        raise AssertionError(
-            f"Team primary session response did not include id: {response.text!r}"
-        )
-    return session_id
+    return AgentSessionResponse.model_validate(response.json()).id
 
 
 def _write_session_message(
@@ -222,13 +202,7 @@ def _write_session_message(
         timeout=10,
     )
     response.raise_for_status()
-    observed_session_id = _response_object(
-        response,
-        label="Session input response",
-    ).get("session_id")
-    if not isinstance(observed_session_id, str):
-        raise AssertionError(f"Session input response omitted id: {response.text!r}")
-    return observed_session_id
+    return ChatWriteResponse.model_validate(response.json()).session_id
 
 
 def _wait_for_assistant_message(
@@ -237,10 +211,10 @@ def _wait_for_assistant_message(
     token: str,
     session_id: str,
     timeout: float = 60,
-) -> dict[str, object]:
+) -> ChatEventPageResponse:
     """Wait for one durable assistant message in Session history."""
     deadline = time.monotonic() + timeout
-    last_payload: dict[str, object] | None = None
+    last_payload: ChatEventPageResponse | None = None
     while time.monotonic() < deadline:
         response = requests.get(
             f"{server_url}/chat/v1/sessions/{session_id}/history?limit=100",
@@ -248,10 +222,10 @@ def _wait_for_assistant_message(
             timeout=10,
         )
         response.raise_for_status()
-        payload = _response_object(response, label="Session history response")
+        payload = decode_history_page(response.json())
         last_payload = payload
-        events = _object_items(payload.get("items"), label="Session history items")
-        if any(event.get("kind") == "assistant_message" for event in events):
+        events = payload.items
+        if any(event.kind == "assistant_message" for event in events):
             return payload
         time.sleep(0.5)
     raise AssertionError(f"Assistant response did not become durable: {last_payload!r}")
@@ -378,10 +352,7 @@ def _create_team_session(
         timeout=10,
     )
     response.raise_for_status()
-    session_id = _response_object(response, label="Create Session response").get("id")
-    if not isinstance(session_id, str):
-        raise AssertionError(f"Create Session response omitted id: {response.text!r}")
-    return session_id
+    return AgentSessionResponse.model_validate(response.json()).id
 
 
 def _prepare_session_folder(
@@ -410,7 +381,7 @@ def _wait_for_manifest(
     token: str,
     agent_id: str,
     session_id: str,
-) -> dict[str, object]:
+) -> ProjectBrowserManifestResponse:
     """Wait for a newly managed Session to bind to current Runner evidence."""
     path = (
         f"/chat/v1/agents/{agent_id}/sessions/{session_id}"
@@ -426,7 +397,7 @@ def _wait_for_manifest(
         )
         last_response = response
         if response.ok:
-            return _response_object(response, label="Project browser manifest")
+            return ProjectBrowserManifestResponse.model_validate(response.json())
         if response.status_code != 400:
             response.raise_for_status()
         time.sleep(1)
@@ -489,12 +460,7 @@ def _create_user_session(
         timeout=10,
     )
     response.raise_for_status()
-    session_id = _response_object(response, label="User Session response").get(
-        "session_id"
-    )
-    if not isinstance(session_id, str):
-        raise AssertionError(f"User Session response omitted id: {response.text!r}")
-    return session_id
+    return ChatWriteResponse.model_validate(response.json()).session_id
 
 
 def _stop_runtime_provider(container: DockerContainer) -> None:

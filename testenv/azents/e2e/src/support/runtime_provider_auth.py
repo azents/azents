@@ -1,13 +1,39 @@
 """Runtime Provider authentication helpers for deterministic E2E fixtures."""
 
 import datetime
-from typing import cast
 
 import requests
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, ValidationError
 
 
 class RuntimeProviderAuthenticationError(RuntimeError):
     """The supported Runtime Provider authentication flow failed."""
+
+
+class _AuthenticationResponse(BaseModel):
+    """Project interpreted fields while accepting forward-compatible API fields."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+
+class _BindingResponse(_AuthenticationResponse):
+    """The safe identity and optimistic version needed for the next API request."""
+
+    id: StrictStr
+    admin_version: StrictInt = Field(gt=0)
+
+
+class _RotationResponse(_AuthenticationResponse):
+    """The one-time grant fields issued by the rotation operation."""
+
+    grant_id: StrictStr
+    secret: StrictStr
+
+
+class _CredentialResponse(_AuthenticationResponse):
+    """The enrolled credential issued by the public exchange operation."""
+
+    credential: StrictStr
 
 
 def issue_runtime_provider_credential(
@@ -39,30 +65,21 @@ def issue_runtime_provider_credential(
             "Runtime Provider authentication binding creation failed with HTTP "
             f"{binding_response.status_code}"
         )
-    binding_payload = _response_object(
+    binding = _decode_response(
         binding_response,
+        _BindingResponse,
         operation="Runtime Provider authentication binding creation",
+        incomplete="Runtime Provider authentication binding response was incomplete",
     )
-    binding_id = binding_payload.get("id")
-    admin_version = binding_payload.get("admin_version")
-    if (
-        not isinstance(binding_id, str)
-        or not isinstance(admin_version, int)
-        or isinstance(admin_version, bool)
-        or admin_version < 1
-    ):
-        raise RuntimeProviderAuthenticationError(
-            "Runtime Provider authentication binding response was incomplete"
-        )
 
     rotation_response = requests.post(
         (
             f"{admin_server_url}/runtime-provider/v1/authentication-bindings/"
-            f"{binding_id}/rotate"
+            f"{binding.id}/rotate"
         ),
         headers=authorization,
         json={
-            "expected_admin_version": admin_version,
+            "expected_admin_version": binding.admin_version,
             "expires_at": expires_at.isoformat(),
         },
         timeout=10,
@@ -72,20 +89,18 @@ def issue_runtime_provider_credential(
             "Runtime Provider authentication binding rotation failed with HTTP "
             f"{rotation_response.status_code}"
         )
-    rotation_payload = _response_object(
+    rotation = _decode_response(
         rotation_response,
+        _RotationResponse,
         operation="Runtime Provider authentication binding rotation",
-    )
-    grant_id = rotation_payload.get("grant_id")
-    grant_secret = rotation_payload.get("secret")
-    if not isinstance(grant_id, str) or not isinstance(grant_secret, str):
-        raise RuntimeProviderAuthenticationError(
+        incomplete=(
             "Runtime Provider authentication binding rotation response was incomplete"
-        )
+        ),
+    )
 
     credential_response = requests.post(
         f"{public_server_url}/runtime-provider-enrollment/v1/credentials/exchange",
-        json={"grant_id": grant_id, "secret": grant_secret},
+        json={"grant_id": rotation.grant_id, "secret": rotation.secret},
         timeout=10,
     )
     if credential_response.status_code != 200:
@@ -93,27 +108,34 @@ def issue_runtime_provider_credential(
             "Runtime Provider credential exchange failed with HTTP "
             f"{credential_response.status_code}"
         )
-    credential_payload = _response_object(
+    credential = _decode_response(
         credential_response,
+        _CredentialResponse,
         operation="Runtime Provider credential exchange",
+        incomplete="Runtime Provider credential exchange response was incomplete",
     )
-    credential = credential_payload.get("credential")
-    if not isinstance(credential, str):
-        raise RuntimeProviderAuthenticationError(
-            "Runtime Provider credential exchange response was incomplete"
-        )
-    return credential
+    return credential.credential
 
 
-def _response_object(
+def _decode_response[ResponseT: BaseModel](
     response: requests.Response,
+    model: type[ResponseT],
     *,
     operation: str,
-) -> dict[str, object]:
-    """Validate an HTTP response payload without retaining secret-bearing bodies."""
-    payload = cast(object, response.json())
+    incomplete: str,
+) -> ResponseT:
+    """Validate an operation projection without exposing secret-bearing errors."""
+    try:
+        payload: object = response.json()
+    except ValueError:
+        raise RuntimeProviderAuthenticationError(
+            f"{operation} response was not valid JSON"
+        ) from None
     if not isinstance(payload, dict):
         raise RuntimeProviderAuthenticationError(
             f"{operation} response was not an object"
         )
-    return cast(dict[str, object], payload)
+    try:
+        return model.model_validate(payload)
+    except ValidationError:
+        raise RuntimeProviderAuthenticationError(incomplete) from None

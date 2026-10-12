@@ -5,8 +5,15 @@ from dataclasses import dataclass
 import azentsadminclient
 import azentspublicclient
 import requests
-from pydantic import TypeAdapter, ValidationError
+from azentspublicclient.models.agent_session_response import AgentSessionResponse
+from pydantic import JsonValue, StrictStr, TypeAdapter, ValidationError
 
+from support.observations import (
+    ExtensionObservation,
+    InputMessageObservation,
+    MailboxObservation,
+    decode_history_page,
+)
 from support.utils import (
     create_agent_setup,
     create_chat_session_with_agent,
@@ -16,7 +23,28 @@ from support.utils import (
 )
 
 _JSON_OBJECT = TypeAdapter(dict[str, object])
-_JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
+
+
+class _SessionList(ExtensionObservation):
+    items: list[AgentSessionResponse]
+
+
+class _UserMessage(InputMessageObservation):
+    content: StrictStr | list[dict[str, JsonValue]]
+    sender_user_id: StrictStr | None = None
+
+
+class _Snapshot(ExtensionObservation):
+    mailbox_items: list[MailboxObservation]
+
+
+class _Write(ExtensionObservation):
+    session_id: StrictStr
+    snapshot: _Snapshot
+
+
+class _Live(ExtensionObservation):
+    mailbox_items: list[MailboxObservation]
 
 
 @dataclass(frozen=True)
@@ -44,24 +72,6 @@ def _response_object(
         return _JSON_OBJECT.validate_json(response.text)
     except ValidationError as exc:
         raise AssertionError(f"{label} is not an object: {response.text!r}") from exc
-
-
-def _object_items(raw_items: object, *, label: str) -> list[dict[str, object]]:
-    """Validate a JSON object list."""
-    try:
-        return _JSON_OBJECT_LIST.validate_python(raw_items)
-    except ValidationError as exc:
-        raise AssertionError(f"{label} is not an object list: {raw_items!r}") from exc
-
-
-def _response_payload(raw_payload: object) -> dict[str, object]:
-    """Validate an event payload JSON object."""
-    try:
-        return _JSON_OBJECT.validate_python(raw_payload)
-    except ValidationError as exc:
-        raise AssertionError(
-            f"Event payload is not an object: {raw_payload!r}"
-        ) from exc
 
 
 def _get_json(
@@ -103,14 +113,14 @@ def _session_items(
     server_url: str,
     token: str,
     agent_id: str,
-) -> list[dict[str, object]]:
+) -> list[AgentSessionResponse]:
     """Fetch agent-scoped session list items."""
     payload = _get_json(
         server_url=server_url,
         token=token,
         path=f"/chat/v1/agents/{agent_id}/sessions",
     )
-    return _object_items(payload.get("items"), label="session list items")
+    return _SessionList.model_validate(payload).items
 
 
 def _create_secondary_session(
@@ -126,12 +136,10 @@ def _create_secondary_session(
         path=f"/chat/v1/agents/{agent_id}/sessions",
         payload={"existing_project_paths": [], "setup_actions": []},
     )
-    session_id = payload.get("id")
-    if not isinstance(session_id, str):
-        raise AssertionError(f"Create session response did not include id: {payload!r}")
-    if payload.get("primary_kind") is not None:
+    session = AgentSessionResponse.model_validate(payload)
+    if session.primary_kind is not None:
         raise AssertionError(f"Created session must be non-primary: {payload!r}")
-    return session_id
+    return session.id
 
 
 def _write_message(
@@ -142,22 +150,24 @@ def _write_message(
     agent_id: str,
     message: str,
     client_request_id: str,
-) -> dict[str, object]:
+) -> _Write:
     """Write a message to an explicit session."""
-    return _post_json(
-        server_url=server_url,
-        token=token,
-        path=f"/chat/v1/sessions/{session_id}/inputs",
-        payload={
-            "agent_id": agent_id,
-            "client_request_id": client_request_id,
-            "message": message,
-            "inference_profile": {
-                "model_target_label": "default",
-                "reasoning_effort": None,
-                "enabled_execution_options": [],
+    return _Write.model_validate(
+        _post_json(
+            server_url=server_url,
+            token=token,
+            path=f"/chat/v1/sessions/{session_id}/inputs",
+            payload={
+                "agent_id": agent_id,
+                "client_request_id": client_request_id,
+                "message": message,
+                "inference_profile": {
+                    "model_target_label": "default",
+                    "reasoning_effort": None,
+                    "enabled_execution_options": [],
+                },
             },
-        },
+        )
     )
 
 
@@ -168,46 +178,48 @@ def _write_first_session_message(
     agent_id: str,
     message: str,
     client_request_id: str,
-) -> dict[str, object]:
+) -> _Write:
     """Create a non-primary session with its first message."""
-    return _post_json(
-        server_url=server_url,
-        token=token,
-        path=f"/chat/v1/agents/{agent_id}/sessions/messages",
-        payload={
-            "client_request_id": client_request_id,
-            "message": message,
-            "inference_profile": {
-                "model_target_label": "default",
-                "reasoning_effort": None,
-                "enabled_execution_options": [],
+    return _Write.model_validate(
+        _post_json(
+            server_url=server_url,
+            token=token,
+            path=f"/chat/v1/agents/{agent_id}/sessions/messages",
+            payload={
+                "client_request_id": client_request_id,
+                "message": message,
+                "inference_profile": {
+                    "model_target_label": "default",
+                    "reasoning_effort": None,
+                    "enabled_execution_options": [],
+                },
+                "existing_project_paths": [],
+                "setup_actions": [],
             },
-            "existing_project_paths": [],
-            "setup_actions": [],
-        },
+        )
     )
 
 
-def _mailbox_item_contents(raw_items: object, *, label: str) -> list[str]:
+def _mailbox_item_contents(
+    raw_items: list[MailboxObservation], *, label: str
+) -> list[str]:
     """Return content strings from pending mailbox item presentations."""
     contents: list[str] = []
-    for envelope in _object_items(raw_items, label=label):
-        items = _object_items(envelope.get("items"), label=f"{label} items")
-        for item in items:
-            presentation = _response_payload(item.get("presentation"))
-            if presentation.get("type") != "user_message":
+    for envelope in raw_items:
+        for item in envelope.items:
+            presentation = item.presentation
+            if presentation.type != "user_message":
                 continue
-            content = presentation.get("content")
-            if isinstance(content, str):
-                contents.append(content)
+            if isinstance(presentation.content, str):
+                contents.append(presentation.content)
     return contents
 
 
-def _snapshot_input_contents(write_response: dict[str, object]) -> list[str]:
+def _snapshot_input_contents(write_response: _Write) -> list[str]:
     """Return input contents from the write response snapshot."""
-    snapshot = _response_payload(write_response.get("snapshot"))
+    snapshot = write_response.snapshot
     return _mailbox_item_contents(
-        snapshot.get("mailbox_items"),
+        snapshot.mailbox_items,
         label="snapshot mailbox items",
     )
 
@@ -218,19 +230,18 @@ def _history_user_message_payload(
     token: str,
     session_id: str,
     content: str,
-) -> dict[str, object]:
+) -> _UserMessage:
     """Return one durable UserMessage payload from Session history."""
     history = _get_json(
         server_url=server_url,
         token=token,
         path=f"/chat/v1/sessions/{session_id}/history?limit=100",
     )
-    events = _object_items(history.get("items"), label="history items")
-    for event in events:
-        if event.get("kind") != "user_message":
+    for event in decode_history_page(history).items:
+        if event.kind != "user_message":
             continue
-        payload = _response_payload(event.get("payload"))
-        if payload.get("content") == content:
+        payload = _UserMessage.model_validate(event.payload)
+        if payload.content == content:
             return payload
     raise AssertionError(f"History did not include UserMessage: {content!r}")
 
@@ -248,7 +259,7 @@ def _live_input_contents(
         path=f"/chat/v1/sessions/{session_id}/live",
     )
     return _mailbox_item_contents(
-        payload.get("mailbox_items"),
+        _Live.model_validate(payload).mailbox_items,
         label="live mailbox items",
     )
 
@@ -294,7 +305,7 @@ def test_agent_scoped_team_session_list_has_primary_first(
         token=agent.access_token,
         path=f"/chat/v1/agents/{agent.agent_id}/team-primary-session",
     )
-    primary_session_id = primary_session.get("id")
+    primary_session_id = AgentSessionResponse.model_validate(primary_session).id
     if not isinstance(primary_session_id, str):
         raise AssertionError(
             f"Team primary session response did not include id: {primary_session!r}"
@@ -318,11 +329,11 @@ def test_agent_scoped_team_session_list_has_primary_first(
     )
 
     assert len(items) >= 2
-    assert items[0].get("id") == setup.primary_session_id
-    assert items[0].get("primary_kind") == "team_primary"
-    assert items[1].get("id") == setup.secondary_session_id
-    assert items[1].get("primary_kind") is None
-    assert all(item.get("agent_id") == setup.agent_id for item in items)
+    assert items[0].id == setup.primary_session_id
+    assert items[0].primary_kind == "team_primary"
+    assert items[1].id == setup.secondary_session_id
+    assert items[1].primary_kind is None
+    assert all(item.agent_id == setup.agent_id for item in items)
 
 
 def test_first_message_creates_non_primary_team_session(
@@ -351,7 +362,7 @@ def test_first_message_creates_non_primary_team_session(
         client_request_id=f"team-session-first-message-{unique()}",
     )
 
-    created_session_id = response.get("session_id")
+    created_session_id = response.session_id
     if not isinstance(created_session_id, str):
         raise AssertionError(f"Write response did not include session_id: {response!r}")
     assert created_session_id != primary_session_id
@@ -362,14 +373,12 @@ def test_first_message_creates_non_primary_team_session(
         token=token,
         agent_id=agent_id,
     )
-    before_ids = {item.get("id") for item in before_items}
-    created_items = [
-        item for item in after_items if item.get("id") == created_session_id
-    ]
+    before_ids = {item.id for item in before_items}
+    created_items = [item for item in after_items if item.id == created_session_id]
     assert len(created_items) == 1
     assert created_session_id not in before_ids
-    assert created_items[0].get("primary_kind") is None
-    assert created_items[0].get("agent_id") == agent_id
+    assert created_items[0].primary_kind is None
+    assert created_items[0].agent_id == agent_id
 
 
 def test_secondary_team_session_write_is_session_isolated(
@@ -394,7 +403,7 @@ def test_secondary_team_session_write_is_session_isolated(
         client_request_id=f"team-session-e2e-{unique()}",
     )
 
-    assert response.get("session_id") == setup.secondary_session_id
+    assert response.session_id == setup.secondary_session_id
     assert message in _snapshot_input_contents(response)
     assert message not in _live_input_contents(
         server_url=azents_public_server_url,
@@ -434,8 +443,8 @@ def test_two_members_retain_independent_sender_provenance_in_one_team_session(
         client_request_id=f"team-session-member-{unique()}",
     )
 
-    assert owner_write.get("session_id") == setup.session_id
-    assert member_write.get("session_id") == setup.session_id
+    assert owner_write.session_id == setup.session_id
+    assert member_write.session_id == setup.session_id
     owner_payload = wait_until(
         lambda: _history_user_message_payload(
             server_url=azents_public_server_url,
@@ -458,13 +467,13 @@ def test_two_members_retain_independent_sender_provenance_in_one_team_session(
         interval=0.2,
         message="Member message did not reach durable history",
     )
-    assert owner_payload.get("sender_user_id") == setup.owner_user_id
-    assert member_payload.get("sender_user_id") == setup.member_user_id
-    assert owner_payload.get("sender_user_id") != member_payload.get("sender_user_id")
+    assert owner_payload.sender_user_id == setup.owner_user_id
+    assert member_payload.sender_user_id == setup.member_user_id
+    assert owner_payload.sender_user_id != member_payload.sender_user_id
 
     member_sessions = _session_items(
         server_url=azents_public_server_url,
         token=setup.member_access_token,
         agent_id=setup.agent_id,
     )
-    assert any(item.get("id") == setup.session_id for item in member_sessions)
+    assert any(item.id == setup.session_id for item in member_sessions)

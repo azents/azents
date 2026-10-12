@@ -25,6 +25,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
+from pydantic import BaseModel, ConfigDict, Field
+
 logger = logging.getLogger(__name__)
 
 STATE_ENV = "STATE_FILE"
@@ -217,6 +219,65 @@ def new_state(run_id: str | None = None, workdir: Path | None = None) -> State:
     return State(path=path, run_id=rid, started_at=started)
 
 
+class _PersistedMetadata(BaseModel):
+    """Validated identity fields of persisted private setup state."""
+
+    model_config = ConfigDict(strict=True, extra="forbid", hide_input_in_errors=True)
+
+    run_id: str
+    started_at: str
+
+
+class _PersistedFinalizer(BaseModel):
+    """Validated cleanup entry with the existing legacy omission defaults."""
+
+    model_config = ConfigDict(strict=True, extra="forbid", hide_input_in_errors=True)
+
+    setup_id: str = "?"
+    cmd: str = ""
+    registered_at: str = ""
+    scope: str = "run"
+
+
+class _PersistedState(BaseModel):
+    """Private state envelope; seed bucket contents remain intentionally opaque."""
+
+    model_config = ConfigDict(strict=True, extra="forbid", hide_input_in_errors=True)
+
+    meta: _PersistedMetadata = Field(alias="_meta")
+    run: dict[str, Any] = Field(default_factory=dict)
+    tc: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    finalizers: list[_PersistedFinalizer] = Field(default_factory=list, alias="_finalizers")
+    verified_at: dict[str, str] = Field(default_factory=dict, alias="_verified_at")
+
+
+def _decode_persisted_state(text: str, path: Path) -> _PersistedState:
+    """Validate structural fields once, retaining legacy omitted/null containers."""
+    raw: object = json.loads(text)
+    if not isinstance(raw, dict):
+        raise ValueError("Setup state JSON root must be an object")
+    metadata = raw.get("_meta")
+    if metadata is None:
+        metadata = {}
+    if not isinstance(metadata, dict):
+        raise ValueError("Setup state metadata must be an object")
+    metadata = dict(metadata)
+    metadata.setdefault("run_id", path.parent.name)
+    metadata.setdefault("started_at", dt.datetime.now(dt.UTC).isoformat())
+    payload = dict(raw)
+    payload["_meta"] = metadata
+    # Older state writers used null for absent containers; other types are invalid.
+    for key, empty in (
+        ("run", {}),
+        ("tc", {}),
+        ("_finalizers", []),
+        ("_verified_at", {}),
+    ):
+        if payload.get(key) is None:
+            payload[key] = empty
+    return _PersistedState.model_validate(payload)
+
+
 def load_state(path: Path) -> State:
     """Load state.json, or return an empty state when the file is missing."""
     if not path.exists():
@@ -224,28 +285,24 @@ def load_state(path: Path) -> State:
         rid = path.parent.name if path.parent != path.parent.parent else default_run_id()
         return State(path=path, run_id=rid, started_at=dt.datetime.now(dt.UTC).isoformat())
 
-    raw = cast(dict[str, Any], json.loads(path.read_text()))
-    meta = cast(dict[str, Any], raw.get("_meta") or {})
-    rid = cast(str, meta.get("run_id", path.parent.name))
-    started = cast(str, meta.get("started_at", dt.datetime.now(dt.UTC).isoformat()))
-    fins_raw = cast(list[dict[str, Any]], raw.get("_finalizers") or [])
+    payload = _decode_persisted_state(path.read_text(), path)
     fins = [
         Finalizer(
-            setup_id=cast(str, f.get("setup_id", "?")),
-            cmd=cast(str, f.get("cmd", "")),
-            registered_at=cast(str, f.get("registered_at", "")),
-            scope=cast(str, f.get("scope", "run")),
+            setup_id=f.setup_id,
+            cmd=f.cmd,
+            registered_at=f.registered_at,
+            scope=f.scope,
         )
-        for f in fins_raw
+        for f in payload.finalizers
     ]
     return State(
         path=path,
-        run_id=rid,
-        started_at=started,
-        run=cast(dict[str, Any], raw.get("run") or {}),
-        tc=cast(dict[str, dict[str, Any]], raw.get("tc") or {}),
+        run_id=payload.meta.run_id,
+        started_at=payload.meta.started_at,
+        run=payload.run,
+        tc=payload.tc,
         finalizers=fins,
-        verified_at=cast(dict[str, str], raw.get("_verified_at") or {}),
+        verified_at=payload.verified_at,
     )
 
 

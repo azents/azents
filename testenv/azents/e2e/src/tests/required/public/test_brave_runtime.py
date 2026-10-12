@@ -15,8 +15,11 @@ from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.toolkit_config_create_request import (
     ToolkitConfigCreateRequest,
 )
+from pydantic import TypeAdapter
 from testcontainers.core.container import DockerContainer
 
+from support.image_watchdog_observations import ImageOutputObservation
+from support.observations import ToolCallObservation, ToolResultObservation
 from support.runtime_profiles import start_and_wait_for_agent_runtime
 from support.utils import (
     single_candidate_model_options,
@@ -24,7 +27,6 @@ from support.utils import (
 )
 from tests.required.public.test_agent_execution_persistence import (
     auth_headers,
-    json_object_payload,
 )
 from tests.required.public.test_brave_search import (
     _completed_success_sessions,
@@ -35,6 +37,7 @@ from tests.required.public.test_runtime_optional_capability import (
 )
 
 E2E_PLANNER_FALLBACK_WEIGHT = 30.0
+_IMAGE_PARTS = TypeAdapter(list[ImageOutputObservation])
 
 
 def test_brave_five_tools_with_managed_runtime(
@@ -106,36 +109,38 @@ def test_brave_five_tools_with_managed_runtime(
             session_id=session_id,
         )
         calls = [
-            json_object_payload(event.get("payload"), label="Managed Brave call")
+            ToolCallObservation.model_validate(event.payload)
             for event in events
-            if event.get("kind") == "client_tool_call"
+            if event.kind == "client_tool_call"
         ]
         results = [
-            json_object_payload(event.get("payload"), label="Managed Brave result")
+            ToolResultObservation.model_validate(event.payload)
             for event in events
-            if event.get("kind") == "client_tool_result"
+            if event.kind == "client_tool_result"
         ]
-        assert [call.get("name") for call in calls] == [
+        assert [call.name for call in calls] == [
             "tool_search",
             f"brave__search_{kind}",
         ]
         assert len(results) == 2
         result = results[1]
-        assert result.get("call_id") == calls[1].get("call_id")
-        assert result.get("status") == "completed"
-        serialized = json.dumps(result, ensure_ascii=False)
+        assert result.call_id == calls[1].call_id
+        assert result.status == "completed"
+        serialized = json.dumps(
+            result.model_dump(mode="json", exclude_unset=True), ensure_ascii=False
+        )
         assert (
             "https://example.org/brave/image-page-1"
             if kind == "images"
             else f"https://example.org/brave/{kind}"
         ) in serialized
         if kind == "images":
-            output = result.get("output")
+            output = result.output
             assert isinstance(output, list)
             assert (
                 sum(
-                    isinstance(part, dict) and part.get("type") == "attachment"
-                    for part in output
+                    part.type == "attachment"
+                    for part in _IMAGE_PARTS.validate_python(output)
                 )
                 == 2
             )

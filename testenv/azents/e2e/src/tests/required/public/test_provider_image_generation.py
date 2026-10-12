@@ -14,17 +14,29 @@ from azentspublicclient.api.llm_provider_integration_v1_api import (
     LLMProviderIntegrationV1Api,
 )
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
-from pydantic import TypeAdapter
+from azentspublicclient.models.agent_response import AgentResponse
+from azentspublicclient.models.agent_session_response import AgentSessionResponse
+from azentspublicclient.models.image_generation_model_catalog_response import (
+    ImageGenerationModelCatalogResponse,
+)
 
 from support.consts import REPOSITORY_ROOT
 from support.exchange_download import download_fixture_exchange_file
+from support.image_watchdog_observations import (
+    AssistantContentObservation,
+    ImageRequestObservation,
+    ImageResultObservation,
+    RequestNodeObservation,
+    RequestToolObservation,
+    WatchdogActionObservation,
+    decode_image_requests,
+)
+from support.observations import HistoryEventObservation, ToolResultObservation
 from support.utils import unique, wait_until
 from tests.required.public.test_agent_execution_persistence import (
     auth_headers,
     connect_chat,
     history_events,
-    json_object_list_payload,
-    json_object_payload,
     list_history,
 )
 from tests.required.public.test_per_prompt_inference_profile import setup_profile_agent
@@ -50,7 +62,6 @@ _IMAGE_PATH = (
 _IMAGE_BYTES = _IMAGE_PATH.read_bytes()
 _IMAGE_BASE64 = base64.b64encode(_IMAGE_BYTES).decode()
 _IMAGE_SHA256 = hashlib.sha256(_IMAGE_BYTES).hexdigest()
-_JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 
 
 def _submit(
@@ -99,36 +110,33 @@ def _wait_for_idle(
             timeout=10,
         )
         response.raise_for_status()
-        payload = json_object_payload(response.json(), label="session response")
-        last_state = payload.get("run_state")
+        payload = AgentSessionResponse.model_validate(response.json())
+        last_state = payload.run_state
         if last_state == "idle":
             return
         time.sleep(0.2)
     raise TimeoutError(f"image generation session did not become idle: {last_state!r}")
 
 
-def _client_result(
-    events: list[dict[str, object]],
-) -> dict[str, object] | None:
-    """Return the completed image-generation client result."""
-    for event in events:
-        if event.get("kind") != "client_tool_result":
+def _client_result(events: list[dict[str, object]]) -> dict[str, object] | None:
+    """Select a validated image-result event, preserving legacy egress shape."""
+    for raw in events:
+        event = HistoryEventObservation.model_validate(raw)
+        if event.kind != "client_tool_result":
             continue
-        payload = json_object_payload(event.get("payload"), label="client result")
-        if (
-            payload.get("name") == "image_generation"
-            and payload.get("status") == "completed"
-        ):
-            return event
+        payload = ToolResultObservation.model_validate(event.payload)
+        if payload.name == "image_generation" and payload.status == "completed":
+            ImageResultObservation.model_validate(event.payload)
+            return raw
     return None
 
 
-def _assistant_content(event: dict[str, object]) -> str | None:
-    """Return plain assistant content from one history event."""
-    if event.get("kind") != "assistant_message":
+def _assistant_content(raw: dict[str, object]) -> str | None:
+    """Return selected typed assistant text while preserving opaque other events."""
+    event = HistoryEventObservation.model_validate(raw)
+    if event.kind != "assistant_message":
         return None
-    payload = json_object_payload(event.get("payload"), label="assistant payload")
-    content = payload.get("content")
+    content = AssistantContentObservation.model_validate(event.payload).content
     return content if isinstance(content, str) else None
 
 
@@ -158,77 +166,61 @@ def _wait_for_history(
     )
 
 
-def _proxy_journal(openai_proxy_url: str) -> list[dict[str, object]]:
-    """Return raw Responses requests captured by the deterministic proxy."""
-    response = requests.get(
-        f"{openai_proxy_url}{_PROXY_JOURNAL_PATH}",
-        timeout=10,
-    )
+def _proxy_journal(openai_proxy_url: str) -> list[ImageRequestObservation]:
+    """Decode provider request decision fields before journal selection."""
+    response = requests.get(f"{openai_proxy_url}{_PROXY_JOURNAL_PATH}", timeout=10)
     response.raise_for_status()
-    return _JSON_OBJECT_LIST.validate_python(response.json())
+    return decode_image_requests(response.json())
 
 
-def _image_api_journal(openai_proxy_url: str) -> list[dict[str, object]]:
-    """Return Images API requests captured by the deterministic proxy."""
-    response = requests.get(
-        f"{openai_proxy_url}{_IMAGE_API_JOURNAL_PATH}",
-        timeout=10,
-    )
+def _image_api_journal(openai_proxy_url: str) -> list[ImageRequestObservation]:
+    """Decode Images API request identities from synthetic journal evidence."""
+    response = requests.get(f"{openai_proxy_url}{_IMAGE_API_JOURNAL_PATH}", timeout=10)
     response.raise_for_status()
-    return _JSON_OBJECT_LIST.validate_python(response.json())
+    return decode_image_requests(response.json())
 
 
-def _last_user_text(request: dict[str, object]) -> str | None:
-    """Return the last user input text from one raw Responses request."""
-    input_value = request.get("input")
+def _last_user_text(request: ImageRequestObservation) -> str | None:
+    """Select the last user text from a validated Responses input projection."""
+    input_value = request.input
     if isinstance(input_value, str):
         return input_value
-    if not isinstance(input_value, list):
+    if input_value is None:
         return None
-    for raw_item in reversed(input_value):
-        if not isinstance(raw_item, dict):
+    for item in reversed(input_value):
+        if item.role != "user":
             continue
-        item = json_object_payload(raw_item, label="Responses input item")
-        if item.get("role") != "user":
-            continue
-        content = item.get("content")
+        content = item.content
         if isinstance(content, str):
             return content
-        if not isinstance(content, list):
+        if content is None:
             return None
-        text_parts: list[str] = []
-        for raw_part in content:
-            if not isinstance(raw_part, dict):
-                continue
-            part = json_object_payload(raw_part, label="Responses input content")
-            text = part.get("text")
-            if part.get("type") == "input_text" and isinstance(text, str):
-                text_parts.append(text)
-        return "".join(text_parts)
+        return "".join(
+            part.text
+            for part in content
+            if part.type == "input_text" and part.text is not None
+        )
     return None
 
 
 def _request_for_prompt(
-    requests_: list[dict[str, object]],
-    prompt: str,
-) -> dict[str, object]:
-    """Return the captured request whose last user input matches the prompt."""
+    requests_: list[ImageRequestObservation], prompt: str
+) -> ImageRequestObservation:
+    """Return the typed request whose last user input matches the prompt."""
     for request in requests_:
         if _last_user_text(request) == prompt:
             return request
     raise AssertionError(f"proxy request was not captured for prompt: {prompt!r}")
 
 
-def _image_tool(request: dict[str, object]) -> dict[str, object]:
-    """Return the client image-generation function in a model request."""
-    tools = json_object_list_payload(
-        request.get("tools"),
-        label="provider request tools",
-    )
+def _image_tool(request: ImageRequestObservation) -> RequestToolObservation:
+    """Return the client image-generation function in a validated request."""
+    tools = request.tools
+    assert tools is not None
     image_tools = [
         tool
         for tool in tools
-        if tool.get("type") == "function" and tool.get("name") == "image_generation"
+        if tool.type == "function" and tool.name == "image_generation"
     ]
     assert len(image_tools) == 1, tools
     return image_tools[0]
@@ -265,7 +257,7 @@ def _wait_for_image_catalog(
     token: str,
     handle: str,
     integration_id: str,
-) -> dict[str, object]:
+) -> ImageGenerationModelCatalogResponse:
     """Wait for the initial exact-registry image catalog projection."""
     catalog_url = (
         f"{server_url}/llm-provider-integration/v1/workspaces/{handle}/"
@@ -273,7 +265,7 @@ def _wait_for_image_catalog(
         "image-generation-model-catalog"
     )
 
-    def current_catalog() -> dict[str, object] | None:
+    def current_catalog() -> ImageGenerationModelCatalogResponse | None:
         response = requests.get(
             catalog_url,
             headers=auth_headers(token),
@@ -282,15 +274,8 @@ def _wait_for_image_catalog(
         if response.status_code == 404:
             return None
         response.raise_for_status()
-        payload = json_object_payload(
-            response.json(),
-            label="image generation catalog",
-        )
-        entries = json_object_list_payload(
-            payload.get("entries"),
-            label="image generation catalog entries",
-        )
-        identifiers = [entry.get("provider_model_identifier") for entry in entries]
+        payload = ImageGenerationModelCatalogResponse.model_validate(response.json())
+        identifiers = [entry.provider_model_identifier for entry in payload.entries]
         if identifiers != [
             "gpt-image-2.5-flare",
             "gpt-image-2.5-sunburst",
@@ -325,7 +310,7 @@ def _count_typed_items(value: object, item_type: str) -> int:
         return sum(_count_typed_items(item, item_type) for item in value)
     if not isinstance(value, dict):
         return 0
-    current = 1 if value.get("type") == item_type else 0
+    current = 1 if RequestNodeObservation.model_validate(value).type == item_type else 0
     return current + sum(_count_typed_items(item, item_type) for item in value.values())
 
 
@@ -357,10 +342,10 @@ class TestProviderImageGeneration:
             handle=handle,
             integration_id=integration_id,
         )
-        assert catalog.get("default_available") is True
-        assert catalog.get("explicit_selection_supported") is True
-        assert catalog.get("usable") is True
-        assert catalog.get("total") == 2
+        assert catalog.default_available is True
+        assert catalog.explicit_selection_supported is True
+        assert catalog.usable is True
+        assert catalog.total == 2
 
         requests.delete(
             f"{openai_proxy_url}{_PROXY_JOURNAL_PATH}",
@@ -388,10 +373,10 @@ class TestProviderImageGeneration:
             _proxy_journal(openai_proxy_url),
             _PROMPT,
         )
-        assert _image_tool(default_request)["name"] == "image_generation"
-        assert [
-            request.get("model") for request in _image_api_journal(openai_proxy_url)
-        ] == ["gpt-image-2"]
+        assert _image_tool(default_request).name == "image_generation"
+        assert [request.model for request in _image_api_journal(openai_proxy_url)] == [
+            "gpt-image-2"
+        ]
 
         update = requests.patch(
             f"{azents_public_server_url}/agent/v1/workspaces/{handle}/"
@@ -451,35 +436,20 @@ class TestProviderImageGeneration:
             timeout=10,
         )
         update.raise_for_status()
-        updated_agent = json_object_payload(
-            update.json(),
-            label="updated explicit image model Agent",
-        )
+        updated_agent = AgentResponse.model_validate(update.json())
+        assert updated_agent.selectable_model_options is not None
         quality_option = next(
             option
-            for option in json_object_list_payload(
-                updated_agent.get("selectable_model_options"),
-                label="updated selectable model options",
-            )
-            if option.get("label") == "Quality"
+            for option in updated_agent.selectable_model_options
+            if option.label == "Quality"
         )
-        quality_candidates = json_object_list_payload(
-            quality_option.get("candidates"),
-            label="updated Quality candidates",
+        quality_settings = quality_option.candidates[0].settings
+        assert (
+            quality_settings is not None and quality_settings.builtin_tools is not None
         )
-        quality_settings = json_object_payload(
-            quality_candidates[0].get("settings"),
-            label="updated Quality settings",
-        )
-        assert json_object_list_payload(
-            quality_settings.get("builtin_tools"),
-            label="updated Quality built-in tools",
-        )[1] == {
+        assert quality_settings.builtin_tools[1].to_dict() == {
             "name": "image_generation",
-            "config": {
-                "model": "gpt-image-2.5-flare",
-                "quality": "high",
-            },
+            "config": {"model": "gpt-image-2.5-flare", "quality": "high"},
         }
 
         requests.delete(
@@ -508,10 +478,10 @@ class TestProviderImageGeneration:
             _proxy_journal(openai_proxy_url),
             _EXPLICIT_IMAGE_PROMPT,
         )
-        assert _image_tool(explicit_request)["name"] == "image_generation"
-        assert [
-            request.get("model") for request in _image_api_journal(openai_proxy_url)
-        ] == ["gpt-image-2.5-flare"]
+        assert _image_tool(explicit_request).name == "image_generation"
+        assert [request.model for request in _image_api_journal(openai_proxy_url)] == [
+            "gpt-image-2.5-flare"
+        ]
 
     def test_materializes_downloads_and_replays_generated_image(
         self,
@@ -563,11 +533,8 @@ class TestProviderImageGeneration:
                     break
                 raw_text = raw.decode() if isinstance(raw, bytes) else raw
                 assert _IMAGE_BASE64 not in raw_text
-                action = json_object_payload(
-                    json.loads(raw_text),
-                    label="WebSocket action",
-                )
-                action_type = action.get("type")
+                action = WatchdogActionObservation.model_validate_json(raw_text)
+                action_type = action.type
                 observed_action_types.append(action_type)
                 if action_type == "live_run_cleared":
                     run_cleared = True
@@ -600,28 +567,24 @@ class TestProviderImageGeneration:
             if _client_result([event]) is not None
         ]
         assert len(results) == 1, serialized_history
-        result_payload = json_object_payload(
-            results[0].get("payload"),
-            label="durable client result payload",
+        result_payload = ImageResultObservation.model_validate(
+            HistoryEventObservation.model_validate(results[0]).payload
         )
-        output = json_object_list_payload(
-            result_payload.get("output"),
-            label="client result output",
-        )
-        assert "attachments" not in result_payload
+        output = result_payload.output
+        assert "attachments" not in (result_payload.model_extra or {})
         assert len(output) == 2
-        assert isinstance(output[0].get("model_file_id"), str)
-        assert output[0].get("kind") == "image"
-        assert output[0].get("media_type") == "image/jpeg"
+        assert isinstance(output[0].model_file_id, str)
+        assert output[0].kind == "image"
+        assert output[0].media_type == "image/jpeg"
         attachment = output[1]
-        assert attachment.get("type") == "attachment"
-        assert attachment.get("availability") == "available"
-        assert attachment.get("media_type") == "image/png"
-        assert attachment.get("size") == len(_IMAGE_BYTES)
-        attachment_uri = attachment.get("uri")
+        assert attachment.type == "attachment"
+        assert attachment.availability == "available"
+        assert attachment.media_type == "image/png"
+        assert attachment.size == len(_IMAGE_BYTES)
+        attachment_uri = attachment.uri
         assert isinstance(attachment_uri, str)
         assert attachment_uri.startswith("exchange://")
-        attachment_id = attachment.get("attachment_id")
+        attachment_id = attachment.attachment_id
         assert isinstance(attachment_id, str)
 
         download = download_fixture_exchange_file(
@@ -637,18 +600,16 @@ class TestProviderImageGeneration:
             _proxy_journal(openai_proxy_url),
             _PROMPT,
         )
-        tools = json_object_list_payload(
-            initial_request.get("tools"),
-            label="initial provider tools",
-        )
+        tools = initial_request.tools
+        assert tools is not None
         assert any(
-            tool.get("type") == "function" and tool.get("name") == "image_generation"
+            tool.type == "function" and tool.name == "image_generation"
             for tool in tools
         )
-        assert all(tool.get("type") != "image_generation" for tool in tools)
-        assert [
-            request.get("model") for request in _image_api_journal(openai_proxy_url)
-        ] == ["gpt-image-2"]
+        assert all(tool.type != "image_generation" for tool in tools)
+        assert [request.model for request in _image_api_journal(openai_proxy_url)] == [
+            "gpt-image-2"
+        ]
 
         _submit(
             server_url=azents_public_server_url,
@@ -675,10 +636,11 @@ class TestProviderImageGeneration:
             _proxy_journal(openai_proxy_url),
             _FOLLOW_UP_PROMPT,
         )
-        input_items = json_object_list_payload(
-            follow_up_request.get("input"),
-            label="follow-up input",
-        )
+        assert isinstance(follow_up_request.input, list)
+        input_items = [
+            item.model_dump(mode="json", exclude_unset=True)
+            for item in follow_up_request.input
+        ]
         assert _count_typed_items(input_items, "image_generation_call") == 0
         assert _count_typed_items(input_items, "function_call_output") >= 1
         assert _count_string_occurrences(input_items, attachment_uri) == 1

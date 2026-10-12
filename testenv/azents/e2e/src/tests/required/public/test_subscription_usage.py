@@ -1,6 +1,5 @@
 """Credential-free subscription usage product-path E2E coverage."""
 
-import datetime
 import json
 from dataclasses import dataclass
 
@@ -15,20 +14,19 @@ from azentspublicclient.api.llm_provider_integration_v1_api import (
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
 from azentspublicclient.models.create_invitation_request import CreateInvitationRequest
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest
-from azentspublicclient.models.subscription_usage_unavailable_reason import (
-    SubscriptionUsageUnavailableReason,
-)
-from azentspublicclient.models.subscription_usage_unavailable_response import (
-    SubscriptionUsageUnavailableResponse,
-)
 from pydantic import TypeAdapter
 from testcontainers.core.container import DockerContainer
 
 from support.oauth_connections import connect_chatgpt_oauth, connect_xai_oauth
+from support.subscription_usage_evidence import (
+    json_object as _json_object,
+)
+from support.subscription_usage_evidence import (
+    subscription_usage_log_records as _subscription_usage_log_records,
+)
 from support.utils import authenticate_user, unique
 
 _SUBSCRIPTION_USAGE_JOURNAL_PATH = "/v1/_subscription_usage_requests"
-_JSON_OBJECT = TypeAdapter(dict[str, object])
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 
 
@@ -45,34 +43,6 @@ class SubscriptionWorkspace:
 def _headers(token: str) -> dict[str, str]:
     """Build bearer headers."""
     return {"Authorization": f"Bearer {token}"}
-
-
-def _json_object(value: dict[str, object]) -> dict[str, object]:
-    """Convert generated-client dictionaries into JSON-compatible values."""
-    return _JSON_OBJECT.validate_python(_JSON_OBJECT.dump_python(value, mode="json"))
-
-
-def test_json_object_normalizes_generated_datetime_values() -> None:
-    """Serialize generated-client datetime fields without using broken to_json."""
-    response = SubscriptionUsageUnavailableResponse(
-        type="unavailable",
-        integration_id="integration-id",
-        provider="chatgpt_oauth",
-        fetched_at=datetime.datetime(2026, 7, 19, tzinfo=datetime.UTC),
-        reason=SubscriptionUsageUnavailableReason.DISABLED,
-        message="Enable this integration to refresh subscription usage.",
-        retryable=False,
-    )
-
-    assert _json_object(response.to_dict()) == {
-        "type": "unavailable",
-        "integration_id": "integration-id",
-        "provider": "chatgpt_oauth",
-        "fetched_at": "2026-07-19T00:00:00Z",
-        "reason": "disabled",
-        "message": "Enable this integration to refresh subscription usage.",
-        "retryable": False,
-    }
 
 
 def setup_subscription_workspace(
@@ -217,46 +187,6 @@ def _assert_no_sensitive_source_values(value: object) -> None:
         "test-xai-normal",
     ):
         assert forbidden not in serialized
-
-
-def _subscription_usage_log_records(logs: str) -> list[dict[str, object]]:
-    """Return structured log records emitted by subscription usage services."""
-    records: list[dict[str, object]] = []
-    for line in logs.splitlines():
-        try:
-            record = _JSON_OBJECT.validate_python(json.loads(line))
-        except ValueError:
-            continue
-        name = record.get("name")
-        if isinstance(name, str) and name.startswith(
-            "azents.services.subscription_usage"
-        ):
-            records.append(record)
-    assert records
-    return records
-
-
-def test_subscription_usage_log_records_ignore_unrelated_service_logs() -> None:
-    """Scope source-value checks to the subscription usage logging boundary."""
-    usage_record = {
-        "name": "azents.services.subscription_usage.service",
-        "operation": "subscription_usage_read",
-        "outcome": "available",
-    }
-    logs = "\n".join(
-        [
-            json.dumps(
-                {
-                    "name": "azents.core.email.service",
-                    "to_email": "unrelated@example.com",
-                }
-            ),
-            json.dumps(usage_record),
-            "non-json process output",
-        ]
-    )
-
-    assert _subscription_usage_log_records(logs) == [usage_record]
 
 
 def _assert_safe_subscription_usage_journal(journal: list[dict[str, object]]) -> None:

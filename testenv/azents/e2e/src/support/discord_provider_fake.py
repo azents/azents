@@ -9,6 +9,7 @@ import socket
 import threading
 import time
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock
 from typing import ClassVar, NamedTuple
@@ -111,7 +112,7 @@ class _HistoryPage(NamedTuple):
 
 
 class _GatewayStart(NamedTuple):
-    dispatches: list[dict[str, object]]
+    dispatches: list[_GatewayDispatch]
     scenario: str
 
 
@@ -136,6 +137,742 @@ class _OAuthResponse(NamedTuple):
     status: int
     payload: dict[str, object] | None
     redirect: str | None
+
+
+@dataclass(frozen=True)
+class _OAuthConfiguration:
+    """Validated optional OAuth fixture settings; null retains the current value."""
+
+    client_id: str | None
+    client_secret: str | None
+    redirect_uri: str | None
+    user_id: str | None
+    username: str | None
+    global_name: str | None
+    authorize_scenario: str | None
+    token_scenario: str | None
+    userinfo_scenario: str | None
+    delay_seconds: int | None
+
+
+@dataclass(frozen=True)
+class _ScenarioConfiguration:
+    """Validated scenario updates, independent of provider state and evidence."""
+
+    api_scenarios: dict[str, str] | None
+    api_scenario_sequences: dict[str, list[str]] | None
+    retry_after_sequences: dict[str, list[int]] | None
+    history_scenario: str | None
+
+
+@dataclass(frozen=True)
+class _FakeConfiguration:
+    """Complete configuration projection; provider message bodies remain opaque."""
+
+    oauth: _OAuthConfiguration | None
+    application_id: str | None
+    guild_id: str | None
+    bot_user_id: str | None
+    scenarios: _ScenarioConfiguration
+    guild_commands: dict[str, _GuildCommand]
+    history_pages: dict[str, list[list[_ConfiguredMessage]]] | None
+    root_messages: dict[tuple[str, str], _ConfiguredMessage] | None
+    allow_synthetic_roots: bool | None
+    gateway_dispatches: list[_GatewayDispatch] | None
+    gateway_scenarios: list[str] | None
+
+
+@dataclass(frozen=True)
+class _DeliveryBarrier:
+    operation: str
+    occurrence: int
+
+
+@dataclass(frozen=True)
+class _SdkIdentity:
+    application_id: str
+    guild_id: str
+
+
+@dataclass(frozen=True)
+class _SdkCommandUpdate:
+    command_id: str
+    name: str
+    command_type: int
+    description: str | None
+
+
+@dataclass(frozen=True)
+class _SdkCommandDelete:
+    command_id: str
+
+
+@dataclass(frozen=True)
+class _SdkRoot:
+    guild_id: str
+    parent_channel_id: str
+    root_message_id: str
+
+
+@dataclass(frozen=True)
+class _SdkCreateThread:
+    guild_id: str
+    parent_channel_id: str
+    root_message_id: str
+    name: str
+
+
+@dataclass(frozen=True)
+class _SdkThreadTitle:
+    guild_id: str
+    channel_id: str
+    name: str | None
+
+
+@dataclass(frozen=True)
+class _MessageProjection:
+    """Sanitized interpreted message fields decoded before fixture dispatch."""
+
+    session_path: str | None
+    safe_category: str | None
+    action_ids: list[str]
+    controls: tuple[tuple[str, str], ...]
+    handoff: dict[str, object] | None
+
+
+@dataclass(frozen=True)
+class _SdkMessage:
+    guild_id: str
+    channel_id: str
+    message_id: str | None
+    nonce: str | None
+    suppress_embeds: bool | None
+    projection: _MessageProjection
+
+
+@dataclass(frozen=True)
+class _SdkMessageIdentity:
+    guild_id: str
+    channel_id: str
+    message_id: str
+
+
+@dataclass(frozen=True)
+class _SdkAttachment:
+    guild_id: str
+    channel_id: str
+    message_id: str
+    attachment_id: str
+
+
+@dataclass(frozen=True)
+class _SdkHistory:
+    guild_id: str
+    channel_id: str
+    before_message_id: str
+    limit: int
+
+
+@dataclass(frozen=True)
+class _SdkEmpty:
+    pass
+
+
+@dataclass(frozen=True)
+class _SdkRequest:
+    operation: str
+    arguments: _SdkArguments
+
+
+@dataclass(frozen=True)
+class _GatewayRequest:
+    target_guild_id: str
+    resumed: bool
+
+
+@dataclass(frozen=True)
+class _DeferredInteraction:
+    application_id: str
+    interaction_token: str
+    response: dict[str, object]
+
+
+@dataclass(frozen=True)
+class _EndpointUpdate:
+    endpoint_url: str | None
+
+
+@dataclass(frozen=True)
+class _MultipartMessage:
+    nonce: str | None
+    file_count: int
+    file_bytes: int
+    projection: _MessageProjection
+
+
+@dataclass(frozen=True)
+class _OAuthAuthorization:
+    client_id: str | None
+    redirect_uri: str | None
+    state: str | None
+    challenge: str | None
+    scope: str | None
+    challenge_method: str | None
+    response_type: str | None
+
+
+@dataclass(frozen=True)
+class _OAuthExchange:
+    client_id: str | None
+    client_secret: str | None
+    code: str | None
+    verifier: str | None
+    redirect_uri: str | None
+
+
+@dataclass(frozen=True)
+class _TypingTarget:
+    guild_id: str
+    channel_id: str
+    work_cycle_count: int
+
+    def wire(self) -> dict[str, object]:
+        return {
+            "guild_id": self.guild_id,
+            "channel_id": self.channel_id,
+            "work_cycle_count": self.work_cycle_count,
+        }
+
+
+@dataclass(frozen=True)
+class _GatewayDispatch:
+    sequence: int
+    event_type: str
+    payload: dict[str, object]
+
+    def wire(self) -> dict[str, object]:
+        return {
+            "sequence": self.sequence,
+            "event_type": self.event_type,
+            "payload": self.payload,
+        }
+
+
+@dataclass(frozen=True)
+class _GuildCommand:
+    identifier: str
+    name: str
+    command_type: int
+    description: str | None
+
+    def wire(self) -> dict[str, object]:
+        return {
+            "id": self.identifier,
+            "name": self.name,
+            "type": self.command_type,
+            **({} if self.description is None else {"description": self.description}),
+        }
+
+
+@dataclass(frozen=True)
+class _AttachmentProjection:
+    """Interpret the lookup identity and relay malformed provider fields."""
+
+    identifier: str | None
+    filename: object
+    size: object
+    content_type: object
+    download_url: object
+
+
+@dataclass(frozen=True)
+class _ConfiguredMessage:
+    """Typed selection metadata around an intentionally opaque provider message."""
+
+    identifier: str | None
+    channel_id: str
+    thread_id: str | None
+    attachments: tuple[_AttachmentProjection, ...]
+    wire: dict[str, object]
+
+
+def _decode_configured_message(
+    wire: dict[str, object], *, channel_id: str
+) -> _ConfiguredMessage:
+    identifier = wire.get("id")
+    thread = wire.get("thread")
+    thread_id = thread.get("id") if isinstance(thread, dict) else None
+    attachments: list[_AttachmentProjection] = []
+    values = wire.get("attachments")
+    if isinstance(values, list):
+        for value in values:
+            if isinstance(value, dict):
+                attachment_id = value.get("id")
+                attachments.append(
+                    _AttachmentProjection(
+                        attachment_id if isinstance(attachment_id, str) else None,
+                        value.get("filename"),
+                        value.get("size"),
+                        value.get("content_type"),
+                        value.get("url"),
+                    )
+                )
+    return _ConfiguredMessage(
+        identifier if isinstance(identifier, str) else None,
+        channel_id,
+        thread_id if isinstance(thread_id, str) and thread_id else None,
+        tuple(attachments),
+        wire,
+    )
+
+
+@dataclass(frozen=True)
+class _InteractionDelivery:
+    identifier: str
+    interaction_type: int
+    token: str | None
+    channel_id: str | None
+    wire: dict[str, object]
+
+
+@dataclass(frozen=True)
+class _InteractionEvidence:
+    response_type: int | None
+    ephemeral: bool | None
+    has_content: bool | None
+    component_count: int | None
+    modal_input_count: int | None
+    settings_controls: list[dict[str, str]]
+    settings_error_kind: str | None
+    projection: _MessageProjection
+
+
+type _SdkArguments = (
+    _SdkEmpty
+    | _SdkIdentity
+    | _SdkCommandUpdate
+    | _SdkCommandDelete
+    | _SdkRoot
+    | _SdkCreateThread
+    | _SdkThreadTitle
+    | _SdkMessage
+    | _SdkMessageIdentity
+    | _SdkAttachment
+    | _SdkHistory
+)
+
+
+def _decode_interaction_delivery(payload: dict[str, object]) -> _InteractionDelivery:
+    identifier = payload.get("id")
+    interaction_type = payload.get("type")
+    token = payload.get("token")
+    channel = payload.get("channel_id")
+    if not isinstance(identifier, str) or not isinstance(interaction_type, int):
+        raise ValueError("Interaction requires an ID and integer type.")
+    if channel is not None and not isinstance(channel, str):
+        raise ValueError("Interaction channel identity must be a string.")
+    return _InteractionDelivery(
+        identifier,
+        interaction_type,
+        token if isinstance(token, str) and token else None,
+        channel,
+        payload,
+    )
+
+
+def _decode_interaction_evidence(value: object) -> _InteractionEvidence:
+    """Project safe response evidence, retaining malformed provider bodies as opaque."""
+    response_type = None
+    ephemeral = None
+    has_content = None
+    component_count = None
+    modal_count = None
+    controls: list[dict[str, str]] = []
+    error_kind = None
+    if isinstance(value, dict):
+        raw_type = value.get("type")
+        if isinstance(raw_type, int):
+            response_type = raw_type
+        data = value.get("data")
+        if isinstance(data, dict):
+            flags = data.get("flags")
+            if isinstance(flags, int) and not isinstance(flags, bool):
+                ephemeral = bool(flags & 64)
+            has_content = isinstance(data.get("content"), str)
+            error_kind = _settings_error_kind(data)
+            components = data.get("components")
+            if isinstance(components, list):
+                component_count = len(components)
+                if response_type == 9:
+                    modal_count = _discord_text_input_count(data)
+                controls = _settings_control_evidence(data)
+    return _InteractionEvidence(
+        response_type,
+        ephemeral,
+        has_content,
+        component_count,
+        modal_count,
+        controls,
+        error_kind,
+        _decode_message_projection(value),
+    )
+
+
+def _decode_sdk_request(payload: Mapping[str, object]) -> _SdkRequest:
+    operation = payload.get("operation")
+    arguments = payload.get("arguments")
+    if not isinstance(operation, str) or not isinstance(arguments, dict):
+        raise ValueError("SDK fixture requires operation and arguments.")
+    return _SdkRequest(operation, _decode_sdk_arguments(operation, arguments))
+
+
+def _decode_gateway_request(payload: Mapping[str, object]) -> _GatewayRequest:
+    guild = payload.get("target_guild_id")
+    resumed = payload.get("resumed")
+    if not isinstance(guild, str) or not isinstance(resumed, bool):
+        raise ValueError("Gateway fixture request is invalid.")
+    return _GatewayRequest(guild, resumed)
+
+
+def _decode_deferred_interaction(payload: Mapping[str, object]) -> _DeferredInteraction:
+    application = payload.get("application_id")
+    token = payload.get("interaction_token")
+    response = payload.get("response")
+    if (
+        not isinstance(application, str)
+        or not isinstance(token, str)
+        or not isinstance(response, dict)
+    ):
+        raise ValueError("Deferred interaction response request is invalid.")
+    return _DeferredInteraction(application, token, response)
+
+
+def _decode_endpoint_update(payload: Mapping[str, object]) -> _EndpointUpdate:
+    endpoint = payload.get("interactions_endpoint_url")
+    return _EndpointUpdate(endpoint if isinstance(endpoint, str) and endpoint else None)
+
+
+def _decode_multipart_message(raw: bytes) -> _MultipartMessage:
+    body = _multipart_or_json_object(raw)
+    nonce = body.get("nonce")
+    files = _multipart_file_evidence(raw)
+    return _MultipartMessage(
+        nonce if isinstance(nonce, str) else None,
+        files.file_count,
+        files.file_bytes,
+        _decode_message_projection(body),
+    )
+
+
+def _decode_oauth_authorization(query: dict[str, list[str]]) -> _OAuthAuthorization:
+    return _OAuthAuthorization(
+        _query_one(query, "client_id"),
+        _query_one(query, "redirect_uri"),
+        _query_one(query, "state"),
+        _query_one(query, "code_challenge"),
+        _query_one(query, "scope"),
+        _query_one(query, "code_challenge_method"),
+        _query_one(query, "response_type"),
+    )
+
+
+def _decode_oauth_exchange(
+    body: dict[str, object], authorization: str
+) -> _OAuthExchange:
+    credentials = _oauth_client_credentials(body, authorization)
+    code = body.get("code")
+    verifier = body.get("code_verifier")
+    redirect = body.get("redirect_uri")
+    return _OAuthExchange(
+        credentials.client_id,
+        credentials.client_secret,
+        code if isinstance(code, str) else None,
+        verifier if isinstance(verifier, str) else None,
+        redirect if isinstance(redirect, str) else None,
+    )
+
+
+def _decode_message_projection(body: object) -> _MessageProjection:
+    """Interpret controls once while keeping provider extensions out of decisions."""
+    controls: list[tuple[str, str]] = []
+
+    def visit(value: object) -> None:
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                if key == "custom_id" and isinstance(nested, str):
+                    for prefix, scope in (
+                        ("azents-selector:", "selector"),
+                        ("a:", "settings"),
+                        ("ms1:", "model"),
+                    ):
+                        if nested.startswith(prefix):
+                            controls.append((scope, nested))
+                            break
+                else:
+                    visit(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                visit(nested)
+
+    visit(body)
+    handoff = _discord_control_handoff(body)
+    ids = handoff.get("custom_ids")
+    return _MessageProjection(
+        session_path=_session_path(body) if isinstance(body, dict) else None,
+        safe_category=_session_navigation_category(body)
+        if isinstance(body, dict)
+        else None,
+        action_ids=_session_action_ids(body) if isinstance(body, dict) else [],
+        controls=tuple(controls),
+        handoff=handoff if isinstance(ids, list) and ids else None,
+    )
+
+
+def _decode_sdk_arguments(
+    operation: str, arguments: dict[str, object]
+) -> _SdkArguments:
+    """Project credential-free SDK inputs; provider extensions remain compatible."""
+    match operation:
+        case "login" | "fetch_application":
+            return _SdkEmpty()
+        case "list_guild_commands":
+            return _SdkIdentity(
+                _sdk_string(arguments, "application_id"),
+                _sdk_string(arguments, "guild_id"),
+            )
+        case "update_guild_command":
+            description = arguments.get("description")
+            if description is not None and not isinstance(description, str):
+                raise ValueError("Invalid Discord command payload.")
+            return _SdkCommandUpdate(
+                _sdk_string(arguments, "command_id"),
+                _sdk_string(arguments, "name"),
+                _sdk_int(arguments, "command_type"),
+                description,
+            )
+        case "delete_guild_command":
+            return _SdkCommandDelete(_sdk_string(arguments, "command_id"))
+        case "fetch_root_thread":
+            return _SdkRoot(
+                _sdk_string(arguments, "guild_id"),
+                _sdk_string(arguments, "parent_channel_id"),
+                _sdk_string(arguments, "root_message_id"),
+            )
+        case "create_thread":
+            return _SdkCreateThread(
+                _sdk_string(arguments, "guild_id"),
+                _sdk_string(arguments, "parent_channel_id"),
+                _sdk_string(arguments, "root_message_id"),
+                _sdk_string(arguments, "name"),
+            )
+        case "fetch_thread" | "update_thread_name":
+            return _SdkThreadTitle(
+                _sdk_string(arguments, "guild_id"),
+                _sdk_string(arguments, "channel_id"),
+                _sdk_string(arguments, "name")
+                if operation == "update_thread_name"
+                else None,
+            )
+        case "create_message" | "update_message" | "delete_message":
+            suppress = arguments.get("suppress_embeds")
+            if operation != "delete_message" and "suppress_embeds" in arguments:
+                if not isinstance(suppress, bool):
+                    raise ValueError("Discord SDK suppress_embeds is invalid.")
+            else:
+                suppress = None
+            return _SdkMessage(
+                _sdk_string(arguments, "guild_id"),
+                _sdk_string(arguments, "channel_id"),
+                _sdk_string(arguments, "message_id")
+                if operation != "create_message"
+                else None,
+                _sdk_string(arguments, "nonce")
+                if operation == "create_message"
+                else None,
+                suppress,
+                _decode_message_projection(arguments),
+            )
+        case "fetch_attachment":
+            return _SdkAttachment(
+                _sdk_string(arguments, "guild_id"),
+                _sdk_string(arguments, "channel_id"),
+                _sdk_string(arguments, "message_id"),
+                _sdk_string(arguments, "attachment_id"),
+            )
+        case "fetch_message_projection":
+            return _SdkMessageIdentity(
+                _sdk_string(arguments, "guild_id"),
+                _sdk_string(arguments, "channel_id"),
+                _sdk_string(arguments, "message_id"),
+            )
+        case "fetch_history_projections":
+            return _SdkHistory(
+                _sdk_string(arguments, "guild_id"),
+                _sdk_string(arguments, "channel_id"),
+                _sdk_string(arguments, "before_message_id"),
+                _sdk_int(arguments, "limit"),
+            )
+        case _:
+            raise ValueError("Unsupported SDK fixture operation.")
+
+
+def _configuration_string(
+    payload: Mapping[str, object], name: str, *, oauth: bool = False
+) -> str | None:
+    value = payload.get(name)
+    if value is not None and (not isinstance(value, str) or not value):
+        prefix = "OAuth " if oauth else ""
+        raise ValueError(f"{prefix}{name} must be a non-empty string.")
+    return value
+
+
+def _decode_oauth_configuration(payload: Mapping[str, object]) -> _OAuthConfiguration:
+    allowed = {
+        "client_id",
+        "client_secret",
+        "redirect_uri",
+        "authorize_scenario",
+        "token_scenario",
+        "userinfo_scenario",
+        "delay_seconds",
+        "user_id",
+        "username",
+        "global_name",
+    }
+    if set(payload) - allowed:
+        raise ValueError("Unsupported Discord OAuth configuration field.")
+    authorize = payload.get("authorize_scenario")
+    if authorize is not None and (
+        not isinstance(authorize, str)
+        or authorize
+        not in {"success", "cancel", "provider_error", "delay", "malformed"}
+    ):
+        raise ValueError("Unsupported Discord OAuth authorize scenario.")
+    token = payload.get("token_scenario")
+    userinfo = payload.get("userinfo_scenario")
+    for name, value in (("token_scenario", token), ("userinfo_scenario", userinfo)):
+        if value is not None and (
+            not isinstance(value, str)
+            or value not in {"success", "rejected", "malformed"}
+        ):
+            raise ValueError(f"Unsupported Discord OAuth {name}.")
+    delay = payload.get("delay_seconds")
+    if delay is not None and (
+        not isinstance(delay, int) or isinstance(delay, bool) or not 0 <= delay <= 5
+    ):
+        raise ValueError("OAuth delay_seconds must be from 0 to 5.")
+    return _OAuthConfiguration(
+        client_id=_configuration_string(payload, "client_id", oauth=True),
+        client_secret=_configuration_string(payload, "client_secret", oauth=True),
+        redirect_uri=_configuration_string(payload, "redirect_uri", oauth=True),
+        user_id=_configuration_string(payload, "user_id", oauth=True),
+        username=_configuration_string(payload, "username", oauth=True),
+        global_name=_configuration_string(payload, "global_name", oauth=True),
+        authorize_scenario=authorize if isinstance(authorize, str) else None,
+        token_scenario=token if isinstance(token, str) else None,
+        userinfo_scenario=userinfo if isinstance(userinfo, str) else None,
+        delay_seconds=delay,
+    )
+
+
+def _decode_scenario_configuration(
+    payload: Mapping[str, object], *, complete: bool = False
+) -> _ScenarioConfiguration:
+    if not complete and set(payload) - {
+        "api_scenarios",
+        "api_scenario_sequences",
+        "retry_after_sequences",
+        "history_scenario",
+    }:
+        raise ValueError("Unsupported Discord fake scenario field.")
+    scenarios = payload.get("api_scenarios")
+    values: dict[str, str] | None = None
+    if scenarios is not None:
+        if not isinstance(scenarios, dict):
+            raise ValueError("api_scenarios must be an object of strings.")
+        values = _string_mapping(scenarios)
+        _validate_api_scenarios(values)
+    sequences = payload.get("api_scenario_sequences")
+    retries = payload.get("retry_after_sequences")
+    history = payload.get("history_scenario")
+    if history is not None:
+        if not isinstance(history, str):
+            raise ValueError("history_scenario must be a string.")
+        _validate_api_scenarios({"history_messages": history})
+    return _ScenarioConfiguration(
+        values,
+        _scenario_sequences(sequences) if sequences is not None else None,
+        _retry_after_sequences(retries) if retries is not None else None,
+        history,
+    )
+
+
+def _decode_fake_configuration(payload: Mapping[str, object]) -> _FakeConfiguration:
+    allowed = {
+        "oauth",
+        "application_id",
+        "guild_id",
+        "bot_user_id",
+        "api_scenarios",
+        "api_scenario_sequences",
+        "retry_after_sequences",
+        "guild_commands",
+        "history_scenario",
+        "history_pages",
+        "root_messages",
+        "allow_synthetic_roots",
+        "gateway_dispatches",
+        "gateway_scenarios",
+    }
+    if set(payload) - allowed:
+        raise ValueError("Unsupported Discord fake configuration field.")
+    oauth = payload.get("oauth")
+    if oauth is not None and (
+        not isinstance(oauth, dict) or not all(isinstance(key, str) for key in oauth)
+    ):
+        raise ValueError("Discord OAuth configuration must be an object.")
+    allow_roots = payload.get("allow_synthetic_roots")
+    if allow_roots is not None and not isinstance(allow_roots, bool):
+        raise ValueError("allow_synthetic_roots must be a boolean.")
+    history = payload.get("history_pages")
+    roots = payload.get("root_messages")
+    dispatches = payload.get("gateway_dispatches")
+    gateways = payload.get("gateway_scenarios")
+    return _FakeConfiguration(
+        oauth=_decode_oauth_configuration(oauth) if oauth is not None else None,
+        application_id=_configuration_string(payload, "application_id"),
+        guild_id=_configuration_string(payload, "guild_id"),
+        bot_user_id=_configuration_string(payload, "bot_user_id"),
+        scenarios=_decode_scenario_configuration(payload, complete=True),
+        guild_commands=_configured_guild_commands(payload.get("guild_commands")),
+        history_pages=_object_pages(history) if history is not None else None,
+        root_messages=_root_messages(roots) if roots is not None else None,
+        allow_synthetic_roots=allow_roots,
+        gateway_dispatches=_gateway_dispatches(dispatches)
+        if dispatches is not None
+        else None,
+        gateway_scenarios=_gateway_scenarios(gateways)
+        if gateways is not None
+        else None,
+    )
+
+
+def _decode_delivery_barrier(payload: Mapping[str, object]) -> _DeliveryBarrier:
+    # Existing barrier callers may supply extension fields; only these two select it.
+    operation = payload.get("operation")
+    occurrence = payload.get("occurrence")
+    if (
+        not isinstance(operation, str)
+        or operation
+        not in {"create_message", "create_thread", "get_message", "get_history"}
+        or not isinstance(occurrence, int)
+        or isinstance(occurrence, bool)
+        or occurrence < 1
+    ):
+        raise ValueError(
+            "Barrier requires a supported provider operation and positive occurrence."
+        )
+    return _DeliveryBarrier(operation, occurrence)
 
 
 class DiscordOAuthState:
@@ -167,61 +904,32 @@ class DiscordOAuthState:
             self._sequence = 0
 
     def configure(self, payload: dict[str, object]) -> None:
-        """Apply one bounded test-only OAuth configuration."""
-        allowed = {
-            "client_id",
-            "client_secret",
-            "redirect_uri",
-            "authorize_scenario",
-            "token_scenario",
-            "userinfo_scenario",
-            "delay_seconds",
-            "user_id",
-            "username",
-            "global_name",
-        }
-        if set(payload) - allowed:
-            raise ValueError("Unsupported Discord OAuth configuration field.")
+        """Decode the public fixture entry before applying OAuth state."""
+        self.apply_configuration(_decode_oauth_configuration(payload))
+
+    def apply_configuration(self, configuration: _OAuthConfiguration) -> None:
+        """Apply validated settings without interpreting wire primitives."""
         with self.lock:
-            for name in (
-                "client_id",
-                "client_secret",
-                "redirect_uri",
-                "user_id",
-                "username",
-                "global_name",
-            ):
-                value = payload.get(name)
-                if value is not None:
-                    if not isinstance(value, str) or not value:
-                        raise ValueError(f"OAuth {name} must be a non-empty string.")
-                    setattr(self, name, value)
-            authorize_scenario = payload.get("authorize_scenario")
-            if authorize_scenario is not None:
-                if authorize_scenario not in {
-                    "success",
-                    "cancel",
-                    "provider_error",
-                    "delay",
-                    "malformed",
-                }:
-                    raise ValueError("Unsupported Discord OAuth authorize scenario.")
-                self.authorize_scenario = str(authorize_scenario)
-            for name in ("token_scenario", "userinfo_scenario"):
-                value = payload.get(name)
-                if value is not None:
-                    if value not in {"success", "rejected", "malformed"}:
-                        raise ValueError(f"Unsupported Discord OAuth {name}.")
-                    setattr(self, name, str(value))
-            delay_seconds = payload.get("delay_seconds")
-            if delay_seconds is not None:
-                if (
-                    not isinstance(delay_seconds, int)
-                    or isinstance(delay_seconds, bool)
-                    or not 0 <= delay_seconds <= 5
-                ):
-                    raise ValueError("OAuth delay_seconds must be from 0 to 5.")
-                self.delay_seconds = delay_seconds
+            if configuration.client_id is not None:
+                self.client_id = configuration.client_id
+            if configuration.client_secret is not None:
+                self.client_secret = configuration.client_secret
+            if configuration.redirect_uri is not None:
+                self.redirect_uri = configuration.redirect_uri
+            if configuration.user_id is not None:
+                self.user_id = configuration.user_id
+            if configuration.username is not None:
+                self.username = configuration.username
+            if configuration.global_name is not None:
+                self.global_name = configuration.global_name
+            if configuration.authorize_scenario is not None:
+                self.authorize_scenario = configuration.authorize_scenario
+            if configuration.token_scenario is not None:
+                self.token_scenario = configuration.token_scenario
+            if configuration.userinfo_scenario is not None:
+                self.userinfo_scenario = configuration.userinfo_scenario
+            if configuration.delay_seconds is not None:
+                self.delay_seconds = configuration.delay_seconds
             self.requests = []
             self._codes = {}
             self._tokens = set()
@@ -230,24 +938,24 @@ class DiscordOAuthState:
 
     def authorize(self, query: dict[str, list[str]]) -> _OAuthResponse:
         """Validate Discord authorize input and issue one PKCE-bound callback."""
-        client_id = _query_one(query, "client_id")
-        redirect_uri = _query_one(query, "redirect_uri")
-        state = _query_one(query, "state")
-        challenge = _query_one(query, "code_challenge")
-        client_valid = client_id == self.client_id
+        request = _decode_oauth_authorization(query)
+        redirect_uri = request.redirect_uri
+        state = request.state
+        challenge = request.challenge
+        client_valid = request.client_id == self.client_id
         redirect_valid = redirect_uri == self.redirect_uri
-        scope_valid = _query_one(query, "scope") == "identify"
+        scope_valid = request.scope == "identify"
         pkce_valid = (
             isinstance(challenge, str)
             and bool(challenge)
-            and _query_one(query, "code_challenge_method") == "S256"
+            and request.challenge_method == "S256"
         )
         valid = (
             client_valid
             and redirect_valid
             and scope_valid
             and pkce_valid
-            and _query_one(query, "response_type") == "code"
+            and request.response_type == "code"
             and isinstance(state, str)
             and bool(state)
         )
@@ -316,14 +1024,14 @@ class DiscordOAuthState:
         authorization: str,
     ) -> _OAuthResponse:
         """Consume one code only when client, redirect, and PKCE all match."""
-        client_id, client_secret = _oauth_client_credentials(body, authorization)
-        code = body.get("code")
-        verifier = body.get("code_verifier")
-        client_valid = client_id == self.client_id
-        secret_valid = client_secret == self.client_secret
-        redirect_valid = body.get("redirect_uri") == self.redirect_uri
+        request = _decode_oauth_exchange(body, authorization)
+        code = request.code
+        verifier = request.verifier
+        client_valid = request.client_id == self.client_id
+        secret_valid = request.client_secret == self.client_secret
+        redirect_valid = request.redirect_uri == self.redirect_uri
         with self.lock:
-            record = self._codes.pop(code, None) if isinstance(code, str) else None
+            record = self._codes.pop(code, None) if code is not None else None
         expected_challenge = record[1] if record is not None else None
         pkce_valid = (
             isinstance(verifier, str)
@@ -331,7 +1039,7 @@ class DiscordOAuthState:
             and _pkce_challenge(verifier) == expected_challenge
         )
         code_valid = (
-            record is not None and record[0] == body.get("redirect_uri") and pkce_valid
+            record is not None and record[0] == request.redirect_uri and pkce_valid
         )
         valid = client_valid and secret_valid and redirect_valid and code_valid
         if not valid or self.token_scenario == "rejected":
@@ -505,10 +1213,10 @@ class FakeState:
             self.api_scenario_sequences: dict[str, list[str]] = {}
             self.retry_after_sequences: dict[str, list[int]] = {}
             self.history_scenario = "ok"
-            self.history_pages: dict[str, list[list[dict[str, object]]]] = {}
-            self.root_messages: dict[tuple[str, str], dict[str, object]] = {}
+            self.history_pages: dict[str, list[list[_ConfiguredMessage]]] = {}
+            self.root_messages: dict[tuple[str, str], _ConfiguredMessage] = {}
             self.allow_synthetic_roots = False
-            self.gateway_dispatches: list[dict[str, object]] = []
+            self.gateway_dispatches: list[_GatewayDispatch] = []
             self.gateway_scenarios: list[str] = ["open"]
             self.request_counts: dict[str, int] = {}
             self.requests: list[dict[str, object]] = []
@@ -525,7 +1233,7 @@ class FakeState:
                 "model": [],
             }
             self._transient_interactions: dict[str, dict[str, object]] = {}
-            self.guild_commands: dict[str, dict[str, object]] = {}
+            self.guild_commands: dict[str, _GuildCommand] = {}
             self._command_sequence = 500000000000000000
             self.deliveries: list[dict[str, object]] = []
             self.gateway_connections = 0
@@ -550,90 +1258,39 @@ class FakeState:
             self.operation_evidence: list[dict[str, object]] = []
 
     def configure(self, payload: dict[str, object]) -> None:
-        """Apply bounded fake configuration without retaining evidence bodies."""
-        allowed = {
-            "oauth",
-            "application_id",
-            "guild_id",
-            "bot_user_id",
-            "api_scenarios",
-            "api_scenario_sequences",
-            "retry_after_sequences",
-            "guild_commands",
-            "history_scenario",
-            "history_pages",
-            "root_messages",
-            "allow_synthetic_roots",
-            "gateway_dispatches",
-            "gateway_scenarios",
-        }
-        if set(payload) - allowed:
-            raise ValueError("Unsupported Discord fake configuration field.")
-        oauth = payload.get("oauth")
-        if oauth is not None:
-            if not isinstance(oauth, dict) or not all(
-                isinstance(key, str) for key in oauth
-            ):
-                raise ValueError("Discord OAuth configuration must be an object.")
-            self.oauth.configure(oauth)
-        configured_guild_commands = _configured_guild_commands(
-            payload.get("guild_commands")
-        )
+        """Validate the complete configuration before mutating fake state."""
+        configuration = _decode_fake_configuration(payload)
+        if configuration.oauth is not None:
+            self.oauth.apply_configuration(configuration.oauth)
         with self.lock:
-            for name in ("application_id", "guild_id", "bot_user_id"):
-                value = payload.get(name)
-                if value is not None:
-                    if not isinstance(value, str) or not value:
-                        raise ValueError(f"{name} must be a non-empty string.")
-                    if name == "application_id":
-                        self.application_id = value
-                    elif name == "guild_id":
-                        self.guild_id = value
-                    else:
-                        self.bot_user_id = value
-            scenarios = payload.get("api_scenarios")
-            if scenarios is not None:
-                if not isinstance(scenarios, dict):
-                    raise ValueError("api_scenarios must be an object of strings.")
-                raw_scenarios = scenarios
-                if not all(
-                    isinstance(key, str) and isinstance(value, str)
-                    for key, value in raw_scenarios.items()
-                ):
-                    raise ValueError("api_scenarios must be an object of strings.")
-                self.api_scenarios = _string_mapping(raw_scenarios)
-                _validate_api_scenarios(self.api_scenarios)
-            sequences = payload.get("api_scenario_sequences")
-            if sequences is not None:
-                self.api_scenario_sequences = _scenario_sequences(sequences)
-            retry_after_sequences = payload.get("retry_after_sequences")
-            if retry_after_sequences is not None:
-                self.retry_after_sequences = _retry_after_sequences(
-                    retry_after_sequences
+            if configuration.application_id is not None:
+                self.application_id = configuration.application_id
+            if configuration.guild_id is not None:
+                self.guild_id = configuration.guild_id
+            if configuration.bot_user_id is not None:
+                self.bot_user_id = configuration.bot_user_id
+            if configuration.scenarios.api_scenarios is not None:
+                self.api_scenarios = configuration.scenarios.api_scenarios
+            if configuration.scenarios.api_scenario_sequences is not None:
+                self.api_scenario_sequences = (
+                    configuration.scenarios.api_scenario_sequences
                 )
-            history_scenario = payload.get("history_scenario")
-            if history_scenario is not None:
-                if not isinstance(history_scenario, str):
-                    raise ValueError("history_scenario must be a string.")
-                _validate_api_scenarios({"history_messages": history_scenario})
-                self.history_scenario = history_scenario
-            history_pages = payload.get("history_pages")
-            if history_pages is not None:
-                self.history_pages = _object_pages(history_pages)
-            root_messages = payload.get("root_messages")
-            if root_messages is not None:
-                self.root_messages = _root_messages(root_messages)
-            allow_synthetic_roots = payload.get("allow_synthetic_roots")
-            if allow_synthetic_roots is not None:
-                if not isinstance(allow_synthetic_roots, bool):
-                    raise ValueError("allow_synthetic_roots must be a boolean.")
-                self.allow_synthetic_roots = allow_synthetic_roots
-            dispatches = payload.get("gateway_dispatches")
-            if dispatches is not None:
-                self.gateway_dispatches = _gateway_dispatches(dispatches)
-            gateway_scenarios = payload.get("gateway_scenarios")
-            if gateway_scenarios is not None:
-                self.gateway_scenarios = _gateway_scenarios(gateway_scenarios)
+            if configuration.scenarios.retry_after_sequences is not None:
+                self.retry_after_sequences = (
+                    configuration.scenarios.retry_after_sequences
+                )
+            if configuration.scenarios.history_scenario is not None:
+                self.history_scenario = configuration.scenarios.history_scenario
+            if configuration.history_pages is not None:
+                self.history_pages = configuration.history_pages
+            if configuration.root_messages is not None:
+                self.root_messages = configuration.root_messages
+            if configuration.allow_synthetic_roots is not None:
+                self.allow_synthetic_roots = configuration.allow_synthetic_roots
+            if configuration.gateway_dispatches is not None:
+                self.gateway_dispatches = configuration.gateway_dispatches
+            if configuration.gateway_scenarios is not None:
+                self.gateway_scenarios = configuration.gateway_scenarios
             self.request_counts = {}
             self.requests = []
             self.interaction_configurations = []
@@ -647,11 +1304,11 @@ class FakeState:
                 "model": [],
             }
             self._transient_interactions = {}
-            self.guild_commands = configured_guild_commands
+            self.guild_commands = configuration.guild_commands
             self._command_sequence = max(
                 (
                     int(command_id)
-                    for command_id in configured_guild_commands
+                    for command_id in configuration.guild_commands
                     if command_id.isdigit()
                 ),
                 default=500000000000000000,
@@ -680,42 +1337,16 @@ class FakeState:
 
     def configure_scenarios(self, payload: dict[str, object]) -> None:
         """Change failure controls without resetting provider identities or evidence."""
-        allowed = {
-            "api_scenarios",
-            "api_scenario_sequences",
-            "retry_after_sequences",
-            "history_scenario",
-        }
-        if set(payload) - allowed:
-            raise ValueError("Unsupported Discord fake scenario field.")
+        configuration = _decode_scenario_configuration(payload)
         with self.lock:
-            scenarios = payload.get("api_scenarios")
-            if scenarios is not None:
-                if not isinstance(scenarios, dict):
-                    raise ValueError("api_scenarios must be an object of strings.")
-                raw_scenarios = scenarios
-                if not all(
-                    isinstance(key, str) and isinstance(value, str)
-                    for key, value in raw_scenarios.items()
-                ):
-                    raise ValueError("api_scenarios must be an object of strings.")
-                values = _string_mapping(raw_scenarios)
-                _validate_api_scenarios(values)
-                self.api_scenarios.update(values)
-            sequences = payload.get("api_scenario_sequences")
-            if sequences is not None:
-                self.api_scenario_sequences.update(_scenario_sequences(sequences))
-            retry_after_sequences = payload.get("retry_after_sequences")
-            if retry_after_sequences is not None:
-                self.retry_after_sequences.update(
-                    _retry_after_sequences(retry_after_sequences)
-                )
-            history_scenario = payload.get("history_scenario")
-            if history_scenario is not None:
-                if not isinstance(history_scenario, str):
-                    raise ValueError("history_scenario must be a string.")
-                _validate_api_scenarios({"history_messages": history_scenario})
-                self.history_scenario = history_scenario
+            if configuration.api_scenarios is not None:
+                self.api_scenarios.update(configuration.api_scenarios)
+            if configuration.api_scenario_sequences is not None:
+                self.api_scenario_sequences.update(configuration.api_scenario_sequences)
+            if configuration.retry_after_sequences is not None:
+                self.retry_after_sequences.update(configuration.retry_after_sequences)
+            if configuration.history_scenario is not None:
+                self.history_scenario = configuration.history_scenario
 
     def record_request(
         self,
@@ -772,16 +1403,18 @@ class FakeState:
 
     def create_guild_command(self, body: Mapping[str, object]) -> dict[str, object]:
         """Create one bounded Discord command with a deterministic ID."""
-        command_fields = _guild_command_fields(body)
+        command_fields = _guild_command_fields(body, identifier="")
         with self.lock:
             if len(self.guild_commands) >= _MAX_CONFIGURED_GUILD_COMMANDS:
                 raise ValueError("Discord command state exceeds its bounded size.")
             self._command_sequence += 1
             command_id = str(self._command_sequence)
-            command: dict[str, object] = {
-                "id": command_id,
-                **command_fields,
-            }
+            command = _GuildCommand(
+                command_id,
+                command_fields.name,
+                command_fields.command_type,
+                command_fields.description,
+            )
             self.guild_commands[command_id] = command
             return _guild_command_response(
                 command,
@@ -799,11 +1432,10 @@ class FakeState:
             existing = self.guild_commands.get(command_id)
             if existing is None:
                 return None
-            command_fields = _guild_command_fields({**existing, **body})
-            updated: dict[str, object] = {
-                "id": command_id,
-                **command_fields,
-            }
+            updated = _guild_command_fields(
+                {**existing.wire(), **body},
+                identifier=command_id,
+            )
             self.guild_commands[command_id] = updated
             return _guild_command_response(
                 updated,
@@ -824,34 +1456,16 @@ class FakeState:
         name, command_type = contract
         with self.lock:
             for command_id, command in self.guild_commands.items():
-                if command.get("name") == name and command.get("type") == command_type:
+                if command.name == name and command.command_type == command_type:
                     return command_id
         return None
 
     def configure_delivery_barrier(self, payload: Mapping[str, object]) -> None:
         """Arm one bounded provider delivery barrier for deterministic E2E ordering."""
-        operation = payload.get("operation")
-        occurrence = payload.get("occurrence")
-        if (
-            not isinstance(operation, str)
-            or operation
-            not in {
-                "create_message",
-                "create_thread",
-                "get_message",
-                "get_history",
-            }
-            or not isinstance(occurrence, int)
-            or isinstance(occurrence, bool)
-            or occurrence < 1
-        ):
-            raise ValueError(
-                "Barrier requires a supported provider operation and positive "
-                "occurrence."
-            )
+        barrier = _decode_delivery_barrier(payload)
         with self.lock:
-            self._delivery_barrier_operation = operation
-            self._delivery_barrier_occurrence = occurrence
+            self._delivery_barrier_operation = barrier.operation
+            self._delivery_barrier_occurrence = barrier.occurrence
             self._delivery_barrier_reached.clear()
             self._delivery_barrier_release.clear()
 
@@ -926,24 +1540,19 @@ class FakeState:
         payload: dict[str, object],
     ) -> DiscordInteractionDeliveryResult:
         """Sign and send one interaction without retaining its body or signature."""
-        interaction_id = payload.get("id")
-        interaction_type = payload.get("type")
-        interaction_token = payload.get("token")
-        channel_id = payload.get("channel_id")
-        if not isinstance(interaction_id, str) or not isinstance(interaction_type, int):
-            raise ValueError("Interaction requires an ID and integer type.")
-        if channel_id is not None and not isinstance(channel_id, str):
-            raise ValueError("Interaction channel identity must be a string.")
+        delivery = _decode_interaction_delivery(payload)
+        interaction_id = delivery.identifier
+        channel_id = delivery.channel_id
         with self.lock:
             endpoint_url = self._interaction_endpoint_url
-            if isinstance(interaction_token, str) and interaction_token:
-                self._interaction_tokens[interaction_token] = (
+            if delivery.token is not None:
+                self._interaction_tokens[delivery.token] = (
                     interaction_id,
                     channel_id,
                 )
         if endpoint_url is None:
             raise ValueError("Discord interaction endpoint is not configured.")
-        raw_body = json.dumps(payload, separators=(",", ":")).encode()
+        raw_body = json.dumps(delivery.wire, separators=(",", ":")).encode()
         timestamp = str(int(time.time()))
         signature = Ed25519PrivateKey.from_private_bytes(
             bytes.fromhex(_SIGNING_PRIVATE_KEY)
@@ -965,47 +1574,35 @@ class FakeState:
         except OSError:
             response_status = 0
             response_payload = None
+        observation = _decode_interaction_evidence(response_payload)
         with self.lock:
             self._capture_transient_component_custom_ids(
-                response_payload,
+                observation.projection,
                 channel_id=channel_id,
             )
             self._capture_transient_interaction(
-                response_payload,
+                observation.projection,
                 channel_id=channel_id,
             )
             evidence: dict[str, object] = {
                 "interaction_id": interaction_id,
-                "interaction_type": interaction_type,
+                "interaction_type": delivery.interaction_type,
                 "response_status": response_status,
             }
-            if isinstance(response_payload, dict):
-                response_object = response_payload
-                response_type = response_object.get("type")
-                if isinstance(response_type, int):
-                    evidence["response_type"] = response_type
-                data = response_object.get("data")
-                if isinstance(data, dict):
-                    data_object = data
-                    flags = data_object.get("flags")
-                    if isinstance(flags, int) and not isinstance(flags, bool):
-                        evidence["ephemeral"] = bool(flags & 64)
-                    settings_error_kind = _settings_error_kind(data_object)
-                    if settings_error_kind is not None:
-                        evidence["settings_error_kind"] = settings_error_kind
-                    components = data_object.get("components")
-                    if isinstance(components, list):
-                        evidence["component_count"] = len(components)
-                        if response_type == 9:
-                            evidence["modal_input_count"] = _discord_text_input_count(
-                                data_object
-                            )
-                        settings_controls = _settings_control_evidence(data_object)
-                        if settings_controls:
-                            evidence["settings_controls"] = settings_controls
-                    evidence["has_content"] = isinstance(
-                        data_object.get("content"), str
-                    )
+            if observation.response_type is not None:
+                evidence["response_type"] = observation.response_type
+            if observation.ephemeral is not None:
+                evidence["ephemeral"] = observation.ephemeral
+            if observation.settings_error_kind is not None:
+                evidence["settings_error_kind"] = observation.settings_error_kind
+            if observation.component_count is not None:
+                evidence["component_count"] = observation.component_count
+            if observation.modal_input_count is not None:
+                evidence["modal_input_count"] = observation.modal_input_count
+            if observation.settings_controls:
+                evidence["settings_controls"] = observation.settings_controls
+            if observation.has_content is not None:
+                evidence["has_content"] = observation.has_content
             completion = self._interaction_completions.pop(interaction_id, None)
             if completion is not None:
                 evidence.update(completion)
@@ -1023,6 +1620,7 @@ class FakeState:
         response: dict[str, object],
     ) -> None:
         """Record one deferred completion without retaining its request-local token."""
+        observation = _decode_interaction_evidence(response)
         with self.lock:
             if application_id != self.application_id:
                 raise ValueError("Discord interaction Application identity mismatch.")
@@ -1034,32 +1632,26 @@ class FakeState:
                 raise ValueError("Discord interaction token is unavailable.")
             interaction_id, channel_id = interaction_context
             self._capture_transient_component_custom_ids(
-                response,
+                observation.projection,
                 channel_id=channel_id,
             )
             self._capture_transient_interaction(
-                response,
+                observation.projection,
                 channel_id=channel_id,
             )
             completion: dict[str, object] = {}
-            response_type = response.get("type")
-            if isinstance(response_type, int):
-                completion["completed_response_type"] = response_type
-            data = response.get("data")
-            if isinstance(data, dict):
-                data_object = data
-                flags = data_object.get("flags")
-                if isinstance(flags, int) and not isinstance(flags, bool):
-                    completion["completed_ephemeral"] = bool(flags & 64)
-                completion["completed_has_content"] = isinstance(
-                    data_object.get("content"), str
+            if observation.response_type is not None:
+                completion["completed_response_type"] = observation.response_type
+            if observation.ephemeral is not None:
+                completion["completed_ephemeral"] = observation.ephemeral
+            if observation.has_content is not None:
+                completion["completed_has_content"] = observation.has_content
+            if observation.component_count is not None:
+                completion["completed_component_count"] = observation.component_count
+            if observation.settings_controls:
+                completion["completed_settings_controls"] = (
+                    observation.settings_controls
                 )
-                components = data_object.get("components")
-                if isinstance(components, list):
-                    completion["completed_component_count"] = len(components)
-                    settings_controls = _settings_control_evidence(data_object)
-                    if settings_controls:
-                        completion["completed_settings_controls"] = settings_controls
             for evidence in reversed(self.interactions):
                 if evidence.get("interaction_id") == interaction_id:
                     evidence.update(completion)
@@ -1091,13 +1683,18 @@ class FakeState:
         channel_id: str | None,
     ) -> None:
         """Capture signed component IDs from one delivered provider body."""
+        projection = (
+            value
+            if isinstance(value, _MessageProjection)
+            else _decode_message_projection(value)
+        )
         with self.lock:
             self._capture_transient_component_custom_ids(
-                value,
+                projection,
                 channel_id=channel_id,
             )
             self._capture_transient_interaction(
-                value,
+                projection,
                 channel_id=channel_id,
             )
 
@@ -1108,32 +1705,15 @@ class FakeState:
         channel_id: str | None,
     ) -> None:
         """Retain typed component IDs only transiently for the next interaction."""
-        if isinstance(value, dict):
-            for key, nested in value.items():
-                if key == "custom_id" and isinstance(nested, str):
-                    if nested.startswith("azents-selector:"):
-                        self._transient_component_custom_ids["selector"].append(
-                            _TransientComponent(nested, channel_id)
-                        )
-                    elif nested.startswith("a:"):
-                        self._transient_component_custom_ids["settings"].append(
-                            _TransientComponent(nested, channel_id)
-                        )
-                    elif nested.startswith("ms1:"):
-                        self._transient_component_custom_ids["model"].append(
-                            _TransientComponent(nested, channel_id)
-                        )
-                else:
-                    self._capture_transient_component_custom_ids(
-                        nested,
-                        channel_id=channel_id,
-                    )
-        elif isinstance(value, list):
-            for nested in value:
-                self._capture_transient_component_custom_ids(
-                    nested,
-                    channel_id=channel_id,
-                )
+        projection = (
+            value
+            if isinstance(value, _MessageProjection)
+            else _decode_message_projection(value)
+        )
+        for scope, custom_id in projection.controls:
+            self._transient_component_custom_ids[scope].append(
+                _TransientComponent(custom_id, channel_id)
+            )
 
     def _capture_transient_interaction(
         self,
@@ -1142,11 +1722,14 @@ class FakeState:
         channel_id: str | None,
     ) -> None:
         """Retain one content-free private control handoff for the next callback."""
-        handoff = _discord_control_handoff(value)
-        custom_ids = handoff.get("custom_ids")
-        if not isinstance(custom_ids, list) or not custom_ids:
+        projection = (
+            value
+            if isinstance(value, _MessageProjection)
+            else _decode_message_projection(value)
+        )
+        if projection.handoff is None:
             return
-        self._transient_interactions[channel_id or ""] = handoff
+        self._transient_interactions[channel_id or ""] = projection.handoff
 
     def transient_interaction(
         self,
@@ -1282,13 +1865,7 @@ class FakeState:
             if thread_id is not None:
                 return thread_id
             message = self.root_messages.get((parent_channel_id, root_message_id))
-            thread = message.get("thread") if message is not None else None
-            if isinstance(thread, dict):
-                thread_object = thread
-                configured_thread = thread_object.get("id")
-                if isinstance(configured_thread, str) and configured_thread:
-                    return configured_thread
-            return None
+            return message.thread_id if message is not None else None
 
     def mark_thread_reconciliation(
         self, *, parent_channel_id: str, root_message_id: str
@@ -1318,7 +1895,26 @@ class FakeState:
             if (parent_channel_id, root_message_id) in self._deleted_message_ids:
                 return None
             message = self.root_messages.get((parent_channel_id, root_message_id))
-            return dict(message) if message is not None else None
+            return dict(message.wire) if message is not None else None
+
+    def attachment_projection(
+        self, *, channel_id: str, message_id: str, attachment_id: str
+    ) -> _AttachmentProjection | None:
+        """Select a decoded identity while relaying other provider fields."""
+        with self.lock:
+            if (channel_id, message_id) in self._deleted_message_ids:
+                return None
+            message = self.root_messages.get((channel_id, message_id))
+            if message is None:
+                return None
+            return next(
+                (
+                    item
+                    for item in message.attachments
+                    if item.identifier == attachment_id
+                ),
+                None,
+            )
 
     def history_page(
         self, *, channel_id: str, before: str | None, limit: int
@@ -1330,7 +1926,7 @@ class FakeState:
             start = 0
             if before is not None:
                 for index, item in enumerate(messages):
-                    if item.get("id") == before:
+                    if item.identifier == before:
                         start = index + 1
                         break
                 else:
@@ -1340,16 +1936,16 @@ class FakeState:
                 return _HistoryPage(messages=[], next_cursor=None)
             oldest_value = next(
                 (
-                    item.get("id")
+                    item.identifier
                     for item in reversed(page)
-                    if isinstance(item.get("id"), str)
+                    if item.identifier is not None
                 ),
                 None,
             )
             oldest = oldest_value if isinstance(oldest_value, str) else None
             next_cursor = oldest if start + limit < len(messages) else None
             return _HistoryPage(
-                messages=[dict(item) for item in page],
+                messages=[dict(item.wire) for item in page],
                 next_cursor=next_cursor,
             )
 
@@ -1383,8 +1979,7 @@ class FakeState:
                 if thread_id == channel_id:
                     return parent_channel_id
             for (parent_channel_id, _), message in self.root_messages.items():
-                thread = message.get("thread")
-                if isinstance(thread, dict) and thread.get("id") == channel_id:
+                if message.thread_id == channel_id:
                     return parent_channel_id
             return None
 
@@ -1415,13 +2010,13 @@ class FakeState:
         with self.lock:
             self.gateway_heartbeats.append(sequence)
 
-    def gateway_dispatch_sent(self, dispatch: dict[str, object]) -> None:
+    def gateway_dispatch_sent(self, dispatch: _GatewayDispatch) -> None:
         """Record only event identity and sequence, never the dispatch payload."""
         with self.lock:
             self.gateway_dispatch_evidence.append(
                 {
-                    "event_type": dispatch["event_type"],
-                    "sequence": dispatch["sequence"],
+                    "event_type": dispatch.event_type,
+                    "sequence": dispatch.sequence,
                 }
             )
 
@@ -1430,18 +2025,18 @@ class FakeState:
         with self.lock:
             self.gateway_terminal_events.append(scenario)
 
-    def record_typing_snapshot(self, targets: list[dict[str, object]]) -> None:
+    def record_typing_snapshot(self, targets: list[_TypingTarget]) -> None:
         """Record one redacted typing snapshot and its active channel pulses."""
         with self.lock:
-            if any(target["guild_id"] != self.guild_id for target in targets):
+            if any(target.guild_id != self.guild_id for target in targets):
                 raise ValueError(
                     "Typing target Guild identity does not match authority."
                 )
             snapshot: dict[str, object] = {
-                "targets": [dict(target) for target in targets]
+                "targets": [target.wire() for target in targets]
             }
             self.typing_snapshots.append(snapshot)
-            self.typing_pulses.extend(dict(target) for target in targets)
+            self.typing_pulses.extend(target.wire() for target in targets)
 
     def evidence(self) -> dict[str, object]:
         """Return test-assertable evidence with tokens, bodies, and URLs excluded."""
@@ -1568,17 +2163,17 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
         )
         if self._controlled_response(scenario):
             return
-        endpoint_url = self._json_body_or_empty().get("interactions_endpoint_url")
-        if not isinstance(endpoint_url, str) or not endpoint_url:
+        request = _decode_endpoint_update(self._json_body_or_empty())
+        if request.endpoint_url is None:
             self._json_response(400, {"message": "Missing callback URL."})
             return
         self.state.configure_interaction_endpoint(
             self.state.application_id,
-            endpoint_url,
+            request.endpoint_url,
         )
         self._json_response(
             200,
-            {"interactions_endpoint_url": endpoint_url},
+            {"interactions_endpoint_url": request.endpoint_url},
         )
 
     def do_POST(self) -> None:
@@ -1642,22 +2237,11 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/__testenv/interaction-response":
             try:
-                body = self._json_body()
-                application_id = body.get("application_id")
-                interaction_token = body.get("interaction_token")
-                response = body.get("response")
-                if (
-                    not isinstance(application_id, str)
-                    or not isinstance(interaction_token, str)
-                    or not isinstance(response, dict)
-                ):
-                    raise ValueError(
-                        "Deferred interaction response request is invalid."
-                    )
+                request = _decode_deferred_interaction(self._json_body())
                 self.state.complete_interaction_response(
-                    application_id=application_id,
-                    interaction_token=interaction_token,
-                    response=response,
+                    application_id=request.application_id,
+                    interaction_token=request.interaction_token,
+                    response=request.response,
                 )
             except ValueError as error:
                 self._json_response(400, {"message": str(error)})
@@ -1677,28 +2261,20 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/__testenv/sdk":
             try:
-                body = self._json_body()
-                operation = body.get("operation")
-                arguments = body.get("arguments")
-                if not isinstance(operation, str) or not isinstance(arguments, dict):
-                    raise ValueError("SDK fixture requires operation and arguments.")
-                self._sdk_operation(operation, arguments)
+                request = _decode_sdk_request(self._json_body())
+                self._dispatch_sdk_operation(request.operation, request.arguments)
             except ValueError as error:
                 self._json_response(400, {"message": str(error)})
             return
         if parsed.path == "/__testenv/gateway":
             try:
-                body = self._json_body()
-                target_guild_id = body.get("target_guild_id")
-                resumed = body.get("resumed")
-                if not isinstance(target_guild_id, str) or not isinstance(
-                    resumed, bool
-                ):
-                    raise ValueError("Gateway fixture request is invalid.")
-                if target_guild_id != self.state.guild_id:
+                request = _decode_gateway_request(self._json_body())
+                if request.target_guild_id != self.state.guild_id:
                     self._json_response(400, {"message": "Guild identity mismatch."})
                     return
-                dispatches, scenario = self.state.gateway_start(6 if resumed else 2)
+                dispatches, scenario = self.state.gateway_start(
+                    6 if request.resumed else 2
+                )
                 if scenario == "reconnect":
                     self.state.gateway_terminal(scenario)
                     dispatches = []
@@ -1709,7 +2285,10 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                         self.state.gateway_terminal(scenario)
                 self._json_response(
                     200,
-                    {"scenario": scenario, "dispatches": dispatches},
+                    {
+                        "scenario": scenario,
+                        "dispatches": [dispatch.wire() for dispatch in dispatches],
+                    },
                 )
             except ValueError as error:
                 self._json_response(400, {"message": str(error)})
@@ -1733,10 +2312,9 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 self._json_response(404, {"message": "Unknown fake endpoint."})
                 return
             channel_id = parsed.path.split("/")[-2]
-            raw_body = self._read_body()
-            body = _multipart_or_json_object(raw_body)
-            nonce = body.get("nonce")
-            file_count, file_bytes = _multipart_file_evidence(raw_body)
+            request = _decode_multipart_message(self._read_body())
+            file_count = request.file_count
+            file_bytes = request.file_bytes
             if file_count < 1:
                 self._json_response(400, {"message": "G2 requires file content."})
                 return
@@ -1759,7 +2337,7 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 return
             message_id, nonce_outcome = self.state.create_message(
                 channel_id=channel_id,
-                nonce=nonce if isinstance(nonce, str) else None,
+                nonce=request.nonce,
                 file_count=file_count,
                 file_bytes=file_bytes,
             )
@@ -1816,7 +2394,7 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 "0" if scenario == "response_channel_mismatch" else channel_id
             )
             self.state.capture_transient_component_custom_ids(
-                body,
+                request.projection,
                 channel_id=channel_id,
             )
             self.state.record_delivery(
@@ -1826,8 +2404,8 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 outcome=nonce_outcome,
                 file_count=file_count,
                 file_bytes=file_bytes,
-                safe_category=_session_navigation_category(body),
-                session_path=_session_path(body),
+                safe_category=request.projection.safe_category,
+                session_path=request.projection.session_path,
             )
             self.state.record_operation(
                 "message",
@@ -1852,6 +2430,11 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
         arguments: dict[str, object],
     ) -> None:
         """Serve one SDK-facing operation without provider routes or credentials."""
+        request = _decode_sdk_arguments(operation, arguments)
+        self._dispatch_sdk_operation(operation, request)
+
+    def _dispatch_sdk_operation(self, operation: str, request: _SdkArguments) -> None:
+        """Execute an already decoded SDK fixture operation."""
         if operation == "login":
             if self._controlled_response(self._operation("get_current_bot_user")):
                 return
@@ -1870,8 +2453,11 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             )
             return
         if operation == "list_guild_commands":
-            _sdk_identity(arguments, "application_id", self.state.application_id)
-            _sdk_identity(arguments, "guild_id", self.state.guild_id)
+            assert isinstance(request, _SdkIdentity)
+            _require_sdk_identity(
+                request.application_id, "application_id", self.state.application_id
+            )
+            _require_sdk_identity(request.guild_id, "guild_id", self.state.guild_id)
             if self._controlled_response(self._operation(operation)):
                 return
             self._json_response(
@@ -1880,15 +2466,15 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             )
             return
         if operation == "update_guild_command":
-            command_id = _sdk_string(arguments, "command_id")
+            assert isinstance(request, _SdkCommandUpdate)
             if self._controlled_response(self._operation(operation)):
                 return
             command = self.state.update_guild_command(
-                command_id,
+                request.command_id,
                 {
-                    "name": _sdk_string(arguments, "name"),
-                    "type": _sdk_int(arguments, "command_type"),
-                    "description": arguments.get("description"),
+                    "name": request.name,
+                    "type": request.command_type,
+                    "description": request.description,
                 },
             )
             if command is None:
@@ -1897,41 +2483,54 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 self._json_response(200, command)
             return
         if operation == "delete_guild_command":
-            command_id = _sdk_string(arguments, "command_id")
+            assert isinstance(request, _SdkCommandDelete)
             if self._controlled_response(self._operation(operation)):
                 return
-            if not self.state.delete_guild_command(command_id):
+            if not self.state.delete_guild_command(request.command_id):
                 self._json_response(404, {"message": "Not found."})
             else:
                 self._json_response(200, {})
             return
         if operation == "fetch_root_thread":
-            self._sdk_fetch_root_thread(arguments)
+            assert isinstance(request, _SdkRoot)
+            self._sdk_fetch_root_thread(request)
             return
         if operation == "create_thread":
-            self._sdk_create_thread(arguments)
+            assert isinstance(request, _SdkCreateThread)
+            self._sdk_create_thread(request)
             return
         if operation in {"fetch_thread", "update_thread_name"}:
-            self._sdk_thread_title(operation, arguments)
+            assert isinstance(request, _SdkThreadTitle)
+            self._sdk_thread_title(operation, request)
             return
         if operation in {"create_message", "update_message", "delete_message"}:
-            self._sdk_message_mutation(operation, arguments)
+            assert isinstance(request, _SdkMessage)
+            self._sdk_message_mutation(operation, request)
             return
         if operation == "fetch_attachment":
-            self._sdk_fetch_attachment(arguments)
+            assert isinstance(request, _SdkAttachment)
+            self._sdk_fetch_attachment(request)
             return
         if operation == "fetch_message_projection":
-            self._sdk_message_projection(arguments)
+            assert isinstance(request, _SdkMessageIdentity)
+            self._sdk_message_projection(request)
             return
         if operation == "fetch_history_projections":
-            self._sdk_history_projections(arguments)
+            assert isinstance(request, _SdkHistory)
+            self._sdk_history_projections(request)
             return
         raise ValueError("Unsupported SDK fixture operation.")
 
-    def _sdk_fetch_root_thread(self, arguments: dict[str, object]) -> None:
-        _sdk_identity(arguments, "guild_id", self.state.guild_id)
-        parent_channel_id = _sdk_string(arguments, "parent_channel_id")
-        root_message_id = _sdk_string(arguments, "root_message_id")
+    def _sdk_fetch_root_thread(self, arguments: _SdkRoot | dict[str, object]) -> None:
+        request = (
+            _decode_sdk_arguments("fetch_root_thread", arguments)
+            if isinstance(arguments, dict)
+            else arguments
+        )
+        assert isinstance(request, _SdkRoot)
+        _require_sdk_identity(request.guild_id, "guild_id", self.state.guild_id)
+        parent_channel_id = request.parent_channel_id
+        root_message_id = request.root_message_id
         scenario = self._operation(
             "get_message",
             metadata={
@@ -1982,11 +2581,19 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             },
         )
 
-    def _sdk_create_thread(self, arguments: dict[str, object]) -> None:
-        _sdk_identity(arguments, "guild_id", self.state.guild_id)
-        parent_channel_id = _sdk_string(arguments, "parent_channel_id")
-        root_message_id = _sdk_string(arguments, "root_message_id")
-        name = _sdk_string(arguments, "name")
+    def _sdk_create_thread(
+        self, arguments: _SdkCreateThread | dict[str, object]
+    ) -> None:
+        request = (
+            _decode_sdk_arguments("create_thread", arguments)
+            if isinstance(arguments, dict)
+            else arguments
+        )
+        assert isinstance(request, _SdkCreateThread)
+        _require_sdk_identity(request.guild_id, "guild_id", self.state.guild_id)
+        parent_channel_id = request.parent_channel_id
+        root_message_id = request.root_message_id
+        name = request.name
         scenario = self._operation(
             "create_thread",
             metadata={
@@ -2054,10 +2661,16 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
     def _sdk_thread_title(
         self,
         operation: str,
-        arguments: dict[str, object],
+        arguments: _SdkThreadTitle | dict[str, object],
     ) -> None:
-        _sdk_identity(arguments, "guild_id", self.state.guild_id)
-        channel_id = _sdk_string(arguments, "channel_id")
+        request = (
+            _decode_sdk_arguments(operation, arguments)
+            if isinstance(arguments, dict)
+            else arguments
+        )
+        assert isinstance(request, _SdkThreadTitle)
+        _require_sdk_identity(request.guild_id, "guild_id", self.state.guild_id)
+        channel_id = request.channel_id
         provider_operation = (
             "get_channel" if operation == "fetch_thread" else "update_channel"
         )
@@ -2068,7 +2681,8 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
         if self._controlled_response(scenario):
             return
         if operation == "update_thread_name":
-            name = _sdk_string(arguments, "name")
+            name = request.name
+            assert name is not None
             if not self.state.update_thread_name(channel_id=channel_id, name=name):
                 self._json_response(404, {"message": "Unknown Channel", "code": 10003})
                 return
@@ -2100,29 +2714,18 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
     def _sdk_message_mutation(
         self,
         operation: str,
-        arguments: dict[str, object],
+        arguments: _SdkMessage | dict[str, object],
     ) -> None:
-        _sdk_identity(arguments, "guild_id", self.state.guild_id)
-        channel_id = _sdk_string(arguments, "channel_id")
-        message_id = (
-            _sdk_string(arguments, "message_id")
-            if operation != "create_message"
-            else None
+        request = (
+            _decode_sdk_arguments(operation, arguments)
+            if isinstance(arguments, dict)
+            else arguments
         )
-        suppress_embeds_value = arguments.get("suppress_embeds")
-        suppress_embeds = (
-            suppress_embeds_value
-            if operation != "delete_message"
-            and "suppress_embeds" in arguments
-            and isinstance(suppress_embeds_value, bool)
-            else None
-        )
-        if (
-            operation != "delete_message"
-            and "suppress_embeds" in arguments
-            and suppress_embeds is None
-        ):
-            raise ValueError("Discord SDK suppress_embeds is invalid.")
+        assert isinstance(request, _SdkMessage)
+        _require_sdk_identity(request.guild_id, "guild_id", self.state.guild_id)
+        channel_id = request.channel_id
+        message_id = request.message_id
+        suppress_embeds = request.suppress_embeds
         scenario = self._operation(
             operation,
             metadata={
@@ -2132,7 +2735,8 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
         )
         safe_category = _safe_category(scenario)
         if operation == "create_message":
-            nonce = _sdk_string(arguments, "nonce")
+            nonce = request.nonce
+            assert nonce is not None
             if scenario in _CONFIRMED_CREATE_FAILURE_SCENARIOS:
                 self.state.record_message_failure(
                     operation=operation,
@@ -2209,7 +2813,7 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             )
         else:
             self.state.capture_transient_component_custom_ids(
-                arguments,
+                request.projection,
                 channel_id=channel_id,
             )
         self.state.record_delivery(
@@ -2218,17 +2822,17 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             message_id=message_id,
             outcome=outcome,
             safe_category=(
-                _session_navigation_category(arguments)
+                request.projection.safe_category
                 if operation != "delete_message"
                 else None
             ),
             session_path=(
-                _session_path(arguments) if operation != "delete_message" else None
-            ),
-            action_ids=(
-                _session_action_ids(arguments)
+                request.projection.session_path
                 if operation != "delete_message"
                 else None
+            ),
+            action_ids=(
+                request.projection.action_ids if operation != "delete_message" else None
             ),
             suppress_embeds=suppress_embeds,
         )
@@ -2253,11 +2857,19 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             ),
         )
 
-    def _sdk_fetch_attachment(self, arguments: dict[str, object]) -> None:
-        _sdk_identity(arguments, "guild_id", self.state.guild_id)
-        channel_id = _sdk_string(arguments, "channel_id")
-        message_id = _sdk_string(arguments, "message_id")
-        attachment_id = _sdk_string(arguments, "attachment_id")
+    def _sdk_fetch_attachment(
+        self, arguments: _SdkAttachment | dict[str, object]
+    ) -> None:
+        request = (
+            _decode_sdk_arguments("fetch_attachment", arguments)
+            if isinstance(arguments, dict)
+            else arguments
+        )
+        assert isinstance(request, _SdkAttachment)
+        _require_sdk_identity(request.guild_id, "guild_id", self.state.guild_id)
+        channel_id = request.channel_id
+        message_id = request.message_id
+        attachment_id = request.attachment_id
         if self._controlled_response(
             self._operation(
                 "get_message",
@@ -2265,35 +2877,37 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             )
         ):
             return
-        message = self.state.root_message(
-            parent_channel_id=channel_id,
-            root_message_id=message_id,
+        attachment = self.state.attachment_projection(
+            channel_id=channel_id,
+            message_id=message_id,
+            attachment_id=attachment_id,
         )
-        attachments = message.get("attachments") if message is not None else None
-        if isinstance(attachments, list):
-            for raw_attachment in attachments:
-                if not isinstance(raw_attachment, dict):
-                    continue
-                attachment = raw_attachment
-                if attachment.get("id") != attachment_id:
-                    continue
-                self._json_response(
-                    200,
-                    {
-                        "attachment_id": attachment_id,
-                        "filename": attachment.get("filename"),
-                        "size": attachment.get("size"),
-                        "content_type": attachment.get("content_type"),
-                        "download_url": attachment.get("url"),
-                    },
-                )
-                return
+        if attachment is not None:
+            self._json_response(
+                200,
+                {
+                    "attachment_id": attachment_id,
+                    "filename": attachment.filename,
+                    "size": attachment.size,
+                    "content_type": attachment.content_type,
+                    "download_url": attachment.download_url,
+                },
+            )
+            return
         self._json_response(404, {"message": "Not found."})
 
-    def _sdk_message_projection(self, arguments: dict[str, object]) -> None:
-        _sdk_identity(arguments, "guild_id", self.state.guild_id)
-        channel_id = _sdk_string(arguments, "channel_id")
-        message_id = _sdk_string(arguments, "message_id")
+    def _sdk_message_projection(
+        self, arguments: _SdkMessageIdentity | dict[str, object]
+    ) -> None:
+        request = (
+            _decode_sdk_arguments("fetch_message_projection", arguments)
+            if isinstance(arguments, dict)
+            else arguments
+        )
+        assert isinstance(request, _SdkMessageIdentity)
+        _require_sdk_identity(request.guild_id, "guild_id", self.state.guild_id)
+        channel_id = request.channel_id
+        message_id = request.message_id
         scenario = self._operation(
             "get_message",
             metadata={"channel_id": channel_id, "message_id": message_id},
@@ -2309,11 +2923,19 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             return
         self._json_response(200, message)
 
-    def _sdk_history_projections(self, arguments: dict[str, object]) -> None:
-        _sdk_identity(arguments, "guild_id", self.state.guild_id)
-        channel_id = _sdk_string(arguments, "channel_id")
-        before = _sdk_string(arguments, "before_message_id")
-        limit = _sdk_int(arguments, "limit")
+    def _sdk_history_projections(
+        self, arguments: _SdkHistory | dict[str, object]
+    ) -> None:
+        request = (
+            _decode_sdk_arguments("fetch_history_projections", arguments)
+            if isinstance(arguments, dict)
+            else arguments
+        )
+        assert isinstance(request, _SdkHistory)
+        _require_sdk_identity(request.guild_id, "guild_id", self.state.guild_id)
+        channel_id = request.channel_id
+        before = request.before_message_id
+        limit = request.limit
         metadata: dict[str, object] = {
             "channel_id": channel_id,
             "limit": limit,
@@ -2480,14 +3102,14 @@ def _validate_api_scenarios(scenarios: Mapping[str, str]) -> None:
         raise ValueError("api_scenarios contains an unsupported value.")
 
 
-def _typing_targets(payload: Mapping[str, object]) -> list[dict[str, object]]:
+def _typing_targets(payload: Mapping[str, object]) -> list[_TypingTarget]:
     """Validate a redacted complete typing snapshot without retaining its body."""
     if set(payload) != {"targets"}:
         raise ValueError("Typing fixture request requires only targets.")
     value = payload.get("targets")
     if not isinstance(value, list) or len(value) > _MAX_TYPING_TARGETS:
         raise ValueError("Typing fixture targets are invalid.")
-    targets: list[dict[str, object]] = []
+    targets: list[_TypingTarget] = []
     channel_ids: set[str] = set()
     for raw_target in value:
         if not isinstance(raw_target, dict):
@@ -2512,13 +3134,7 @@ def _typing_targets(payload: Mapping[str, object]) -> list[dict[str, object]]:
         ):
             raise ValueError("Typing fixture target is invalid.")
         channel_ids.add(channel_id)
-        targets.append(
-            {
-                "guild_id": guild_id,
-                "channel_id": channel_id,
-                "work_cycle_count": work_cycle_count,
-            }
-        )
+        targets.append(_TypingTarget(guild_id, channel_id, work_cycle_count))
     return targets
 
 
@@ -2540,13 +3156,13 @@ def _sdk_int(arguments: Mapping[str, object], key: str) -> int:
     return value
 
 
-def _sdk_identity(
-    arguments: Mapping[str, object],
+def _require_sdk_identity(
+    value: str,
     key: str,
     expected: str,
 ) -> None:
     """Reject deterministic fixture calls that cross configured authority."""
-    if _sdk_string(arguments, key) != expected:
+    if value != expected:
         raise ValueError(f"SDK fixture field '{key}' does not match authority.")
 
 
@@ -2602,21 +3218,21 @@ def _retry_after_sequences(value: object) -> dict[str, list[int]]:
     return result
 
 
-def _object_pages(value: object) -> dict[str, list[list[dict[str, object]]]]:
+def _object_pages(value: object) -> dict[str, list[list[_ConfiguredMessage]]]:
     """Validate bounded history pages while retaining payloads only in fake memory."""
     if not isinstance(value, list):
         raise ValueError("history_pages must be a list.")
     raw_pages = value
     if len(raw_pages) > _MAX_HISTORY_PAGES:
         raise ValueError("history_pages exceeds the configured page bound.")
-    pages: dict[str, list[list[dict[str, object]]]] = {}
+    pages: dict[str, list[list[_ConfiguredMessage]]] = {}
     for raw_page in raw_pages:
         if not isinstance(raw_page, list):
             raise ValueError("history_pages items must be lists.")
         raw_items = raw_page
         if not raw_items or len(raw_items) > _MAX_HISTORY_MESSAGES_PER_PAGE:
             raise ValueError("history_pages contains an invalid page size.")
-        page: list[dict[str, object]] = []
+        page: list[_ConfiguredMessage] = []
         for raw_item in raw_items:
             if not isinstance(raw_item, dict):
                 raise ValueError("history_pages messages must be objects.")
@@ -2626,26 +3242,22 @@ def _object_pages(value: object) -> dict[str, list[list[dict[str, object]]]]:
                 raise ValueError("history messages require channel_id.")
             if _serialized_size(item) > _MAX_CONFIGURED_OBJECT_BYTES:
                 raise ValueError("history message exceeds the configured size bound.")
-            page.append(item)
-        channel_ids = {
-            channel_id
-            for item in page
-            if isinstance((channel_id := item.get("channel_id")), str)
-        }
+            page.append(_decode_configured_message(item, channel_id=channel_id))
+        channel_ids = {item.channel_id for item in page}
         if len(channel_ids) != 1:
             raise ValueError("history pages must contain one channel.")
         pages.setdefault(next(iter(channel_ids)), []).append(page)
     return pages
 
 
-def _root_messages(value: object) -> dict[tuple[str, str], dict[str, object]]:
+def _root_messages(value: object) -> dict[tuple[str, str], _ConfiguredMessage]:
     """Index configured root messages without exposing their content in evidence."""
     if not isinstance(value, list):
         raise ValueError("root_messages must be a list.")
     raw_items = value
     if len(raw_items) > _MAX_CONFIGURED_ROOT_MESSAGES:
         raise ValueError("root_messages exceeds the configured message bound.")
-    result: dict[tuple[str, str], dict[str, object]] = {}
+    result: dict[tuple[str, str], _ConfiguredMessage] = {}
     for raw_item in raw_items:
         if not isinstance(raw_item, dict):
             raise ValueError("root_messages items must be objects.")
@@ -2656,7 +3268,10 @@ def _root_messages(value: object) -> dict[tuple[str, str], dict[str, object]]:
             raise ValueError("root_messages require string id and channel_id.")
         if _serialized_size(item) > _MAX_CONFIGURED_OBJECT_BYTES:
             raise ValueError("root message exceeds the configured size bound.")
-        result[(channel_id, message_id)] = item
+        result[(channel_id, message_id)] = _decode_configured_message(
+            item,
+            channel_id=channel_id,
+        )
     return result
 
 
@@ -2699,10 +3314,10 @@ def _safe_category(scenario: str, *, thread: bool = False) -> str | None:
     return None
 
 
-def _gateway_dispatches(value: object) -> list[dict[str, object]]:
+def _gateway_dispatches(value: object) -> list[_GatewayDispatch]:
     if not isinstance(value, list):
         raise ValueError("gateway_dispatches must be a list.")
-    result: list[dict[str, object]] = []
+    result: list[_GatewayDispatch] = []
     raw_dispatches = value
     for item in raw_dispatches:
         if not isinstance(item, dict):
@@ -2720,9 +3335,7 @@ def _gateway_dispatches(value: object) -> list[dict[str, object]]:
             or not isinstance(payload, dict)
         ):
             raise ValueError("gateway dispatch is invalid.")
-        result.append(
-            {"sequence": sequence, "event_type": event_type, "payload": payload}
-        )
+        result.append(_GatewayDispatch(sequence, event_type, payload))
     return result
 
 
@@ -3055,7 +3668,7 @@ def _guild_command_item(path: str) -> str | None:
     return parts[7]
 
 
-def _configured_guild_commands(value: object) -> dict[str, dict[str, object]]:
+def _configured_guild_commands(value: object) -> dict[str, _GuildCommand]:
     """Validate bounded initial Guild command state for reconciliation tests."""
     if value is None:
         return {}
@@ -3064,7 +3677,7 @@ def _configured_guild_commands(value: object) -> dict[str, dict[str, object]]:
     raw_commands = value
     if len(raw_commands) > _MAX_CONFIGURED_GUILD_COMMANDS:
         raise ValueError("guild_commands exceeds its bounded size.")
-    commands: dict[str, dict[str, object]] = {}
+    commands: dict[str, _GuildCommand] = {}
     for raw_command in raw_commands:
         if not isinstance(raw_command, dict):
             raise ValueError("guild_commands entries must be objects.")
@@ -3077,15 +3690,13 @@ def _configured_guild_commands(value: object) -> dict[str, dict[str, object]]:
             or command_id in commands
         ):
             raise ValueError("guild_commands entry is invalid.")
-        command_fields = _guild_command_fields(command)
-        commands[command_id] = {
-            "id": command_id,
-            **command_fields,
-        }
+        commands[command_id] = _guild_command_fields(command, identifier=command_id)
     return commands
 
 
-def _guild_command_fields(body: Mapping[str, object]) -> dict[str, object]:
+def _guild_command_fields(
+    body: Mapping[str, object], *, identifier: str
+) -> _GuildCommand:
     """Validate one bounded Discord command body without retaining extra fields."""
     name = body.get("name")
     command_type = body.get("type")
@@ -3104,49 +3715,43 @@ def _guild_command_fields(body: Mapping[str, object]) -> dict[str, object]:
         )
     ):
         raise ValueError("Invalid Discord command payload.")
-    return {
-        "name": name,
-        "type": command_type,
-        **({} if description is None else {"description": description}),
-    }
+    return _GuildCommand(identifier, name, command_type, description)
 
 
 def _guild_command_response(
-    command: Mapping[str, object],
+    command: _GuildCommand,
     *,
     application_id: str,
     guild_id: str,
 ) -> dict[str, object]:
     """Return the complete provider shape required by discord.py AppCommand."""
     return {
-        **command,
+        **command.wire(),
         "application_id": application_id,
         "guild_id": guild_id,
-        "description": command.get("description", ""),
+        "description": command.description if command.description is not None else "",
     }
 
 
 def _guild_command_evidence(
-    commands: list[dict[str, object]],
+    commands: list[_GuildCommand],
 ) -> list[dict[str, object]]:
     """Project command roles without retaining provider identifiers or names."""
-    evidence = [
+    return [
         {
             "role": _guild_command_role(command),
-            "type": command["type"],
+            "type": command.command_type,
         }
-        for command in commands
+        for command in sorted(
+            commands, key=lambda item: (_guild_command_role(item), item.command_type)
+        )
     ]
-    return sorted(
-        evidence,
-        key=lambda item: (str(item["role"]), _sdk_int(item, "type")),
-    )
 
 
-def _guild_command_role(command: Mapping[str, object]) -> str:
+def _guild_command_role(command: _GuildCommand) -> str:
     """Classify one command into a required role or an unrelated category."""
     for role, (name, command_type) in _COMMAND_ROLE_CONTRACTS.items():
-        if command.get("name") == name and command.get("type") == command_type:
+        if command.name == name and command.command_type == command_type:
             return role
     return "unrelated"
 

@@ -23,12 +23,14 @@ from azentspublicclient.models.slack_connection_credentials import (
 from azentspublicclient.models.slack_connection_setup_request import (
     SlackConnectionSetupRequest,
 )
+from pydantic import StrictBool, StrictInt, StrictStr
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
 
+from support.observations import ExtensionObservation
 from support.utils import authenticate_user, unique, wait_until
 from tests.required.public import external_channel_scenarios as external_scenarios
 from tests.required.public.test_security import _elevate_user
@@ -48,6 +50,63 @@ _PROVIDER_CLIENT_SECRETS = {
 }
 
 
+class _OAuthSection(ExtensionObservation):
+    admin_version: StrictInt
+    callback_url: StrictStr | None
+
+
+class _ProviderAvailability(ExtensionObservation):
+    provider: StrictStr
+    available: StrictBool
+
+
+class _ProviderAvailabilityList(ExtensionObservation):
+    items: list[_ProviderAvailability]
+
+
+class _OAuthStart(ExtensionObservation):
+    authorization_url: StrictStr
+
+
+class _GlobalLink(ExtensionObservation):
+    id: StrictStr
+    identity_scope: StrictStr
+    provider_user_id: StrictStr
+
+
+class _LinkList(ExtensionObservation):
+    items: list[_GlobalLink]
+
+
+class _Unlinked(ExtensionObservation):
+    state: StrictStr
+
+
+class _ErrorDetail(ExtensionObservation):
+    code: StrictStr | None = None
+
+
+class _ErrorResponse(ExtensionObservation):
+    detail: _ErrorDetail | StrictStr | None = None
+
+
+class _RequestCounts(ExtensionObservation):
+    request_counts: dict[str, StrictInt]
+
+
+class _SettingsView(ExtensionObservation):
+    view_hash: StrictStr
+    action_ids: list[StrictStr]
+    link_paths: list[StrictStr]
+
+
+def _decode_settings_view(payload: object) -> _SettingsView | None:
+    """The fake's exact empty object means no transient view has been recorded."""
+    if payload == {}:
+        return None
+    return _SettingsView.model_validate(payload)
+
+
 class _OAuthCallback(NamedTuple):
     """One request-local provider callback handoff."""
 
@@ -58,7 +117,7 @@ class _OAuthCallback(NamedTuple):
 class _LinkedAccount(NamedTuple):
     """One completed global link and its consumed callback."""
 
-    link: dict[str, object]
+    link: _GlobalLink
     callback: _OAuthCallback
 
 
@@ -84,13 +143,6 @@ def _object(value: object) -> dict[str, object]:
     return value
 
 
-def _list(value: object) -> list[object]:
-    """Validate one JSON list."""
-    if not isinstance(value, list):
-        raise AssertionError("Expected a JSON list.")
-    return value
-
-
 def _json(response: requests.Response) -> dict[str, object]:
     """Require one successful JSON object response."""
     response.raise_for_status()
@@ -106,14 +158,8 @@ def _public_url(server_url: str, path: str) -> str:
 
 
 def _error_code(response: requests.Response) -> str | None:
-    payload = response.json()
-    if not isinstance(payload, dict):
-        return None
-    detail = payload.get("detail")
-    if not isinstance(detail, dict):
-        return None
-    code = detail.get("code")
-    return code if isinstance(code, str) else None
+    payload = _ErrorResponse.model_validate(response.json())
+    return payload.detail.code if isinstance(payload.detail, _ErrorDetail) else None
 
 
 def _require_sanitized_evidence(rendered: str, secrets: tuple[str, ...]) -> None:
@@ -126,12 +172,10 @@ def _require_sanitized_evidence(rendered: str, secrets: tuple[str, ...]) -> None
 
 def _request_count(fake_url: str, operation: str) -> int:
     """Return one sanitized provider request count."""
-    state = _json(requests.get(f"{fake_url}/__testenv/state", timeout=5))
-    counts = state.get("request_counts")
-    if not isinstance(counts, dict):
-        return 0
-    value = counts.get(operation)
-    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+    response = requests.get(f"{fake_url}/__testenv/state", timeout=5)
+    response.raise_for_status()
+    state = _RequestCounts.model_validate(response.json())
+    return state.request_counts.get(operation, 0)
 
 
 def _admin_token(admin_api_client: azentsadminclient.ApiClient) -> str:
@@ -158,7 +202,7 @@ def _configure_provider_oauth(
     )
     headers = _auth(_admin_token(admin_api_client))
     current = _json(requests.get(section_url, headers=headers, timeout=10))
-    version = current.get("admin_version")
+    version = _OAuthSection.model_validate(current).admin_version
     assert isinstance(version, int)
     identifier_field = "client_id" if provider == "slack" else "application_id"
     configured = _json(
@@ -176,7 +220,7 @@ def _configure_provider_oauth(
             timeout=10,
         )
     )
-    callback_url = configured.get("callback_url")
+    callback_url = _OAuthSection.model_validate(configured).callback_url
     assert isinstance(callback_url, str) and callback_url
     fake_configuration = {
         "client_id": _PROVIDER_CLIENT_IDS[provider],
@@ -198,11 +242,11 @@ def _configure_provider_oauth(
     )
     matching = [
         item
-        for item in _list(providers["items"])
-        if isinstance(item, dict) and item.get("provider") == provider
+        for item in _ProviderAvailabilityList.model_validate(providers).items
+        if item.provider == provider
     ]
     assert len(matching) == 1
-    assert matching[0].get("available") is True
+    assert matching[0].available is True
     return callback_url
 
 
@@ -223,7 +267,7 @@ def _start_oauth(*, server_url: str, token: str, provider: str) -> str:
             timeout=10,
         )
     )
-    authorization_url = result.get("authorization_url")
+    authorization_url = _OAuthStart.model_validate(result).authorization_url
     assert isinstance(authorization_url, str) and authorization_url
     return authorization_url
 
@@ -266,19 +310,21 @@ def _complete_oauth(
         fake_url,
     )
     return _LinkedAccount(
-        link=_json(
-            _exchange(
-                server_url=server_url,
-                token=token,
-                provider=provider,
-                callback=callback,
+        link=_GlobalLink.model_validate(
+            _json(
+                _exchange(
+                    server_url=server_url,
+                    token=token,
+                    provider=provider,
+                    callback=callback,
+                )
             )
         ),
         callback=callback,
     )
 
 
-def _list_links(server_url: str, token: str) -> list[dict[str, object]]:
+def _list_links(server_url: str, token: str) -> list[_GlobalLink]:
     payload = _json(
         requests.get(
             _public_url(server_url, "account-links"),
@@ -286,7 +332,7 @@ def _list_links(server_url: str, token: str) -> list[dict[str, object]]:
             timeout=10,
         )
     )
-    return [item for item in _list(payload["items"]) if isinstance(item, dict)]
+    return _LinkList.model_validate(payload).items
 
 
 def _setup_slack_workspace(
@@ -337,7 +383,7 @@ def _setup_slack_workspace(
 
 def _transient_slack_view(
     fake_url: str, *, scope: str, after_hash: str | None = None
-) -> dict[str, object] | None:
+) -> _SettingsView | None:
     payload = _json(
         requests.get(
             f"{fake_url}/__testenv/transient-view",
@@ -345,10 +391,10 @@ def _transient_slack_view(
             timeout=5,
         )
     )
-    view_hash = payload.get("view_hash")
-    if not isinstance(view_hash, str) or view_hash == after_hash:
+    view = _decode_settings_view(payload)
+    if view is None or view.view_hash == after_hash:
         return None
-    return payload
+    return view
 
 
 def _session_binding(
@@ -439,20 +485,19 @@ def _seed_connected_slack_channel(
         channel_id=_SLACK_CHANNEL_ID,
         user_id=user_id,
     )
-    setup_view = _object(
-        wait_until(
-            lambda: _transient_slack_view(fake_url, scope="setup"),
-            timeout=15,
-            interval=0.2,
-            message="Slack setup modal was not rendered",
-        )
+    setup_view = wait_until(
+        lambda: _transient_slack_view(fake_url, scope="setup"),
+        timeout=15,
+        interval=0.2,
+        message="Slack setup modal was not rendered",
     )
+    assert setup_view is not None
     external_scenarios._submit_slack_setup_location(
         callback_url=callback_url,
         app_id=_SLACK_APP_ID,
         team_id=_SLACK_TEAM_ID,
         user_id=user_id,
-        setup_view=setup_view,
+        setup_view=setup_view.model_dump(mode="json", exclude_unset=True),
         location="channel",
     )
     binding = wait_until(
@@ -470,10 +515,10 @@ def _seed_connected_slack_channel(
 
 def _open_slack_settings(
     *, server_url: str, fake_url: str, user_id: str
-) -> dict[str, object]:
+) -> _SettingsView:
     """Open one current private settings view for the target channel."""
     previous = _transient_slack_view(fake_url, scope="settings")
-    previous_hash = previous.get("view_hash") if previous is not None else None
+    previous_hash = previous.view_hash if previous is not None else None
     assert previous_hash is None or isinstance(previous_hash, str)
     external_scenarios._open_slack_setup_modal(
         callback_url=f"{server_url}/external-channel/v1/slack/events",
@@ -482,18 +527,18 @@ def _open_slack_settings(
         channel_id=_SLACK_CHANNEL_ID,
         user_id=user_id,
     )
-    return _object(
-        wait_until(
-            lambda: _transient_slack_view(
-                fake_url,
-                scope="settings",
-                after_hash=previous_hash,
-            ),
-            timeout=15,
-            interval=0.2,
-            message="Slack settings view was not rendered",
-        )
+    view = wait_until(
+        lambda: _transient_slack_view(
+            fake_url,
+            scope="settings",
+            after_hash=previous_hash,
+        ),
+        timeout=15,
+        interval=0.2,
+        message="Slack settings view was not rendered",
     )
+    assert view is not None
+    return view
 
 
 def test_slack_web_oauth_global_reuse_unlink_and_target_fence(
@@ -528,8 +573,8 @@ def test_slack_web_oauth_global_reuse_unlink_and_target_fence(
         provider="slack",
         fake_url=slack_provider_fake_url,
     )
-    assert linked.link["identity_scope"] == _SLACK_TEAM_ID
-    assert linked.link["provider_user_id"] == "U-GLOBAL-LINK"
+    assert linked.link.identity_scope == _SLACK_TEAM_ID
+    assert linked.link.provider_user_id == "U-GLOBAL-LINK"
 
     target = _setup_slack_workspace(
         request,
@@ -549,10 +594,10 @@ def test_slack_web_oauth_global_reuse_unlink_and_target_fence(
         fake_url=slack_provider_fake_url,
         user_id="U-GLOBAL-LINK",
     )
-    action_ids = settings.get("action_ids")
+    action_ids = settings.action_ids
     assert isinstance(action_ids, list)
     assert "azents_model_open" not in action_ids
-    link_paths = settings.get("link_paths")
+    link_paths = settings.link_paths
     assert isinstance(link_paths, list)
     assert "/account/external-accounts" in link_paths
     assert "/account/external-accounts/connect/slack" not in link_paths
@@ -567,22 +612,22 @@ def test_slack_web_oauth_global_reuse_unlink_and_target_fence(
         requests.delete(
             _public_url(
                 azents_public_server_url,
-                f"account-links/{linked.link['id']}",
+                f"account-links/{linked.link.id}",
             ),
             headers=_auth(elevated),
             timeout=10,
         )
     )
-    assert unlinked["state"] == "revoked"
+    assert _Unlinked.model_validate(unlinked).state == "revoked"
     reopened = _open_slack_settings(
         server_url=azents_public_server_url,
         fake_url=slack_provider_fake_url,
         user_id="U-GLOBAL-LINK",
     )
-    reopened_paths = reopened.get("link_paths")
+    reopened_paths = reopened.link_paths
     assert isinstance(reopened_paths, list)
     assert "/account/external-accounts/connect/slack" in reopened_paths
-    reopened_actions = reopened.get("action_ids")
+    reopened_actions = reopened.action_ids
     assert isinstance(reopened_actions, list)
     assert "azents_conversation_response_mode" in reopened_actions
 
@@ -615,8 +660,8 @@ def test_discord_web_oauth_global_link_replay_and_unlink(
         provider="discord",
         fake_url=discord_provider_fake_url,
     )
-    assert linked.link["identity_scope"] == "global"
-    assert linked.link["provider_user_id"] == "730000000000000001"
+    assert linked.link.identity_scope == "global"
+    assert linked.link.provider_user_id == "730000000000000001"
     assert _list_links(azents_public_server_url, token) == [linked.link]
     replay = _exchange(
         server_url=azents_public_server_url,
@@ -631,13 +676,13 @@ def test_discord_web_oauth_global_link_replay_and_unlink(
         requests.delete(
             _public_url(
                 azents_public_server_url,
-                f"account-links/{linked.link['id']}",
+                f"account-links/{linked.link.id}",
             ),
             headers=_auth(elevated),
             timeout=10,
         )
     )
-    assert unlinked["state"] == "revoked"
+    assert _Unlinked.model_validate(unlinked).state == "revoked"
     assert _list_links(azents_public_server_url, token) == []
 
 
@@ -804,7 +849,7 @@ def run_web_external_account_oauth_management(
     assert "Web OAuth User" in root.text
     links = _list_links(azents_public_server_url, created.token)
     assert len(links) == 1
-    link_id = links[0]["id"]
+    link_id = links[0].id
     assert isinstance(link_id, str)
     row_selector = f'[data-testid="external-account-link-{link_id}"]'
     row = wait.until(ec.visibility_of_element_located((By.CSS_SELECTOR, row_selector)))

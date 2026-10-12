@@ -5,8 +5,17 @@ import hashlib
 import azentsadminclient
 import azentspublicclient
 import requests
+from azentspublicclient.models.chat_event_page_response import ChatEventPageResponse
+from azentspublicclient.models.chat_event_response import ChatEventResponse
+from azentspublicclient.models.live_event_list_response import LiveEventListResponse
 from docker.models.containers import Container
 
+from support.observations import (
+    InputMessageObservation,
+    ToolCallObservation,
+    ToolResultObservation,
+    decode_history_page,
+)
 from support.utils import create_agent_session_setup, wait_until
 
 _PROMPT = "Run tool to file E2E"
@@ -29,7 +38,7 @@ def _history(
     server_url: str,
     token: str,
     session_id: str,
-) -> dict[str, object]:
+) -> ChatEventPageResponse:
     response = requests.get(
         f"{server_url}/chat/v1/sessions/{session_id}/history",
         headers=_headers(token),
@@ -37,10 +46,7 @@ def _history(
         timeout=10,
     )
     response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, dict):
-        raise AssertionError(f"Session history was not an object: {payload!r}")
-    return {str(key): value for key, value in payload.items()}
+    return decode_history_page(response.json())
 
 
 def _live_idle(
@@ -55,26 +61,14 @@ def _live_idle(
         timeout=10,
     )
     response.raise_for_status()
-    payload = response.json()
-    return isinstance(payload, dict) and payload.get("session_run_state") == "idle"
+    return (
+        LiveEventListResponse.model_validate(response.json()).session_run_state
+        == "idle"
+    )
 
 
-def _history_items(payload: dict[str, object]) -> list[dict[str, object]]:
-    raw_items = payload.get("items")
-    if not isinstance(raw_items, list):
-        raise AssertionError(f"History items were not a list: {payload!r}")
-    return [
-        {str(key): value for key, value in raw_item.items()}
-        for raw_item in raw_items
-        if isinstance(raw_item, dict)
-    ]
-
-
-def _event_payload(item: dict[str, object]) -> dict[str, object] | None:
-    raw_payload = item.get("payload")
-    if not isinstance(raw_payload, dict):
-        return None
-    return {str(key): value for key, value in raw_payload.items()}
+def _history_items(payload: ChatEventPageResponse) -> list[ChatEventResponse]:
+    return payload.items
 
 
 def _completed_history(
@@ -82,7 +76,7 @@ def _completed_history(
     server_url: str,
     token: str,
     session_id: str,
-) -> dict[str, object] | None:
+) -> ChatEventPageResponse | None:
     payload = _history(
         server_url=server_url,
         token=token,
@@ -90,11 +84,10 @@ def _completed_history(
     )
     completed = False
     for item in _history_items(payload):
-        event_payload = _event_payload(item)
         if (
-            item.get("kind") == "assistant_message"
-            and event_payload is not None
-            and event_payload.get("content") == _FINAL_RESPONSE
+            item.kind == "assistant_message"
+            and InputMessageObservation.model_validate(item.payload).content
+            == _FINAL_RESPONSE
         ):
             completed = True
             break
@@ -121,7 +114,7 @@ def _initialized(
         session_id=session_id,
     )
     has_assistant = any(
-        item.get("kind") == "assistant_message" for item in _history_items(payload)
+        item.kind == "assistant_message" for item in _history_items(payload)
     )
     return has_assistant and _live_idle(
         server_url=server_url,
@@ -131,19 +124,17 @@ def _initialized(
 
 
 def _tool_result_output(
-    payload: dict[str, object],
+    payload: ChatEventPageResponse,
     *,
     call_id: str,
 ) -> str:
     for item in _history_items(payload):
-        if item.get("kind") != "client_tool_result":
+        if item.kind != "client_tool_result":
             continue
-        event_payload = _event_payload(item)
-        if event_payload is None:
+        event_payload = ToolResultObservation.model_validate(item.payload)
+        if event_payload.call_id != call_id:
             continue
-        if event_payload.get("call_id") != call_id:
-            continue
-        output = event_payload.get("output")
+        output = event_payload.output
         if not isinstance(output, str):
             raise AssertionError(f"Tool result output was not text: {output!r}")
         return output
@@ -212,9 +203,8 @@ def test_run_tool_to_file_stores_full_read_output_without_model_body(
     assert _EXPECTED_SHA256 in inspect_output
     assert '"target_tool_name":"read"' in inspect_output
 
-    call_ids: set[object] = set()
+    call_ids: set[str] = set()
     for item in _history_items(history):
-        event_payload = _event_payload(item)
-        if item.get("kind") == "client_tool_call" and event_payload is not None:
-            call_ids.add(event_payload.get("call_id"))
+        if item.kind == "client_tool_call":
+            call_ids.add(ToolCallObservation.model_validate(item.payload).call_id)
     assert {_CREATE_CALL_ID, _STORE_CALL_ID, _INSPECT_CALL_ID} <= call_ids

@@ -7,7 +7,6 @@ services, but do not start containers with `docker compose up`.
 
 from __future__ import annotations
 
-import json
 import socket
 import subprocess
 import textwrap
@@ -15,6 +14,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from .base import Check, CheckResult, RunContext, Status
 
@@ -25,6 +26,28 @@ _COMPOSE_FILE = str(_TESTENV_DIR / "docker-compose.yaml")
 _COMPOSE_PROJECT = "azents-testenv"
 # Fix hints are written as commands users can run from the repository root.
 _COMPOSE_UP_HINT = "docker compose -f testenv/azents/docker-compose.yaml up -d"
+
+
+class _ComposeContainerStatus(BaseModel):
+    """Docker owns additional fields; State must be a string when present."""
+
+    model_config = ConfigDict(strict=True, extra="ignore")
+
+    state: str = Field(default="", alias="State")
+
+
+_COMPOSE_STATUSES = TypeAdapter(list[_ComposeContainerStatus])
+
+
+def _decode_compose_statuses(stdout: str) -> list[_ComposeContainerStatus]:
+    """Decode Docker Compose array or JSON-lines output at ingress."""
+    if stdout.startswith("["):
+        return _COMPOSE_STATUSES.validate_json(stdout, strict=True)
+    return [
+        _ComposeContainerStatus.model_validate_json(line, strict=True)
+        for line in stdout.splitlines()
+        if line.strip()
+    ]
 
 
 class PostgresContainerHealthy(Check):
@@ -69,16 +92,12 @@ class PostgresContainerHealthy(Check):
                 message="db service not found in compose project",
                 fix_hint=_COMPOSE_UP_HINT + " db",
             )
-        # Docker Compose v2 may return JSON lines or a JSON array. Handle both.
         try:
-            if stdout.startswith("["):
-                rows = json.loads(stdout)
-            else:
-                rows = [json.loads(line) for line in stdout.splitlines() if line.strip()]
-        except json.JSONDecodeError as exc:
+            rows = _decode_compose_statuses(stdout)
+        except ValidationError:
             return CheckResult(
                 status=Status.FAIL,
-                message=f"failed to parse compose ps output: {exc}",
+                message="failed to parse compose ps output: invalid container status",
                 fix_hint="Check docker compose version (v2 required)",
             )
         if not rows:
@@ -87,7 +106,7 @@ class PostgresContainerHealthy(Check):
                 message="db container not present",
                 fix_hint=_COMPOSE_UP_HINT + " db",
             )
-        state = rows[0].get("State", "").lower()
+        state = rows[0].state.lower()
         if state == "running":
             return CheckResult(status=Status.PASS)
         return CheckResult(

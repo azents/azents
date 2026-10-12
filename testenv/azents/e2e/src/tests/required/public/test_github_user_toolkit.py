@@ -19,6 +19,7 @@ from azentspublicclient.models.agent_toolkit_attach_request import (
     AgentToolkitAttachRequest,
 )
 from azentspublicclient.models.agent_type import AgentType
+from azentspublicclient.models.chat_event_response import ChatEventResponse
 from azentspublicclient.models.toolkit_config_create_request import (
     ToolkitConfigCreateRequest,
 )
@@ -27,6 +28,7 @@ from azentspublicclient.models.toolkit_config_update_request import (
     ToolkitConfigUpdateRequest,
 )
 
+from support.observations import ToolResultObservation
 from support.runtime_profiles import start_and_wait_for_agent_runtime
 from support.utils import single_candidate_model_options, unique
 from tests.required.admin.test_03_system_settings import (
@@ -138,7 +140,7 @@ def _create_confirmed(
 
 def _run(
     server: str, token: str, agent_id: str, *, kind: str, session_id: str | None
-) -> list[dict[str, object]]:
+) -> list[ChatEventResponse]:
     session_id = session_id or _create_profile_session(
         server_url=server, token=token, agent_id=agent_id
     )
@@ -165,20 +167,20 @@ def _run(
 
 
 def _assert_runtime_result(
-    events: list[dict[str, object]], *, kind: str, marker: str
+    events: list[ChatEventResponse], *, kind: str, marker: str
 ) -> None:
     """Inspect command results rather than markers contained in command input."""
     results = [
-        json_object_payload(event.get("payload"), label="Runtime command result")
+        ToolResultObservation.model_validate(event.payload)
         for event in events
-        if event.get("kind") == "client_tool_result"
+        if event.kind == "client_tool_result"
     ]
     result = next(
-        item for item in results if item.get("call_id") == f"call_github_user_{kind}_0"
+        item for item in results if item.call_id == f"call_github_user_{kind}_0"
     )
-    assert result["status"] == "completed"
-    assert marker in json.dumps(result)
-    assert "GITHUB_USER_ENV_MISMATCH" not in json.dumps(result)
+    assert result.status == "completed"
+    assert marker in result.model_dump_json(exclude_unset=True)
+    assert "GITHUB_USER_ENV_MISMATCH" not in result.model_dump_json(exclude_unset=True)
 
 
 @pytest.mark.parametrize("platform", [False, True])
@@ -324,26 +326,26 @@ def test_staged_account_delegated_worker_and_fail_open_disconnect(
         kind="mcp",
         session_id=None,
     )
-    serialized = json.dumps(events)
+    serialized = json.dumps(
+        [event.model_dump(mode="json", exclude_unset=True) for event in events]
+    )
     assert "GITHUB_USER_E2E_COMPLETED_mcp" in serialized
     assert "connected-user" in serialized
     assert "research-team" in serialized and "ops-team" in serialized
     results = [
-        json_object_payload(event.get("payload"), label="GitHub user tool result")
+        ToolResultObservation.model_validate(event.payload)
         for event in events
-        if event.get("kind") == "client_tool_result"
+        if event.kind == "client_tool_result"
     ]
-    denied = next(
-        item for item in results if item.get("call_id") == "call_github_user_mcp_4"
-    )
+    denied = next(item for item in results if item.call_id == "call_github_user_mcp_4")
     assert {f"call_github_user_mcp_{index}" for index in range(5)} <= {
-        item.get("call_id") for item in results
+        item.call_id for item in results
     }
-    assert denied["status"] == "failed"
+    assert denied.status == "failed"
     assert all(
-        item["status"] == "completed"
+        item.status == "completed"
         for item in results
-        if item.get("call_id")
+        if item.call_id
         in {
             "call_github_user_mcp_0",
             "call_github_user_mcp_1",
@@ -411,7 +413,9 @@ def test_staged_account_delegated_worker_and_fail_open_disconnect(
         kind="replacement",
         session_id=None,
     )
-    assert "replacement-user" in json.dumps(replaced_events)
+    assert "replacement-user" in json.dumps(
+        [event.model_dump(mode="json", exclude_unset=True) for event in replaced_events]
+    )
     if platform:
         runtime_replaced = _run(
             azents_public_server_url,

@@ -23,7 +23,9 @@ from azentspublicclient.models.agent_toolkit_attach_request import (
 )
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
+from azentspublicclient.models.chat_write_response import ChatWriteResponse
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest
+from azentspublicclient.models.live_event_list_response import LiveEventListResponse
 from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
@@ -32,9 +34,16 @@ from azentspublicclient.models.secrets import Secrets
 from azentspublicclient.models.toolkit_config_create_request import (
     ToolkitConfigCreateRequest,
 )
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ConfigDict, StrictStr, TypeAdapter, ValidationError
 from testcontainers.core.container import DockerContainer
 
+from support.observations import (
+    ExtensionObservation,
+    HistoryPageObservation,
+    InputMessageObservation,
+    MailboxObservation,
+    RunMarkerObservation,
+)
 from support.runtime_profiles import (
     create_workspace_runtime_profile,
     start_and_wait_for_agent_runtime,
@@ -53,7 +62,6 @@ _SECOND_FOLLOW_UP_MESSAGE = "Second buffered follow-up should preserve FIFO orde
 _DELETED_MESSAGE = "Deleted pending message must not reach the model"
 _EDITED_MESSAGE = "Edited user message via REST"
 _JSON_OBJECT = TypeAdapter(dict[str, object])
-_JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 
 
 @dataclass(frozen=True)
@@ -74,6 +82,17 @@ class _PendingBuffer:
     mailbox_item_id: str
     item_key: str
     content: str
+
+
+class _BufferLive(LiveEventListResponse):
+    """Validate native mailbox identities before interpreting pending content."""
+
+    model_config = ConfigDict(extra="allow")
+    mailbox_items: list[MailboxObservation]
+
+
+class _PrimarySession(ExtensionObservation):
+    id: StrictStr
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -186,22 +205,6 @@ def _create_agent(
     return agent.id
 
 
-def _object_item(raw_item: object, *, label: str) -> dict[str, object]:
-    """Validate and return one JSON object."""
-    try:
-        return _JSON_OBJECT.validate_python(raw_item)
-    except ValidationError as exc:
-        raise AssertionError(f"{label} is not an object: {raw_item!r}") from exc
-
-
-def _object_items(raw_items: object, *, label: str) -> list[dict[str, object]]:
-    """Validate and return a list of JSON objects."""
-    try:
-        return _JSON_OBJECT_LIST.validate_python(raw_items)
-    except ValidationError as exc:
-        raise AssertionError(f"{label} is not an object list: {raw_items!r}") from exc
-
-
 def _response_object(
     response: requests.Response,
     *,
@@ -247,15 +250,7 @@ def _write_new_session_message(
         timeout=10,
     )
     session_response.raise_for_status()
-    session_payload = _response_object(
-        session_response,
-        label="GET team primary session response",
-    )
-    session_id = session_payload.get("id")
-    if not isinstance(session_id, str):
-        raise AssertionError(
-            f"Team primary response did not include id: {session_payload!r}"
-        )
+    session_id = _PrimarySession.model_validate(session_response.json()).id
     return _post_json(
         server_url=server_url,
         token=token,
@@ -369,18 +364,13 @@ def _write_command(
 
 
 def _session_id_from_write(response: dict[str, object]) -> str:
-    """Extract the session ID from a REST write response."""
-    session_id = response.get("session_id")
-    if not isinstance(session_id, str):
-        raise AssertionError(
-            f"REST write response did not include session_id: {response!r}"
-        )
-    return session_id
+    """Decode the write contract before selecting its Session identity."""
+    return ChatWriteResponse.model_validate(response).session_id
 
 
 def _accepted_write(response: dict[str, object]) -> dict[str, object]:
-    """Extract the accepted item from a REST write response."""
-    return _object_item(response.get("accepted"), label="write accepted")
+    """Serialize the validated accepted target for literal wire assertions."""
+    return ChatWriteResponse.model_validate(response).accepted.to_dict()
 
 
 def _list_history(
@@ -388,7 +378,7 @@ def _list_history(
     server_url: str,
     token: str,
     session_id: str,
-) -> dict[str, object]:
+) -> HistoryPageObservation:
     """Fetch one REST history event page."""
     response = requests.get(
         f"{server_url}/chat/v1/sessions/{session_id}/history",
@@ -396,7 +386,7 @@ def _list_history(
         timeout=10,
     )
     response.raise_for_status()
-    return _response_object(response, label="list history response")
+    return HistoryPageObservation.model_validate(response.json())
 
 
 def _list_live(
@@ -404,7 +394,7 @@ def _list_live(
     server_url: str,
     token: str,
     session_id: str,
-) -> dict[str, object]:
+) -> _BufferLive:
     """Fetch the REST live-event projection."""
     response = requests.get(
         f"{server_url}/chat/v1/sessions/{session_id}/live",
@@ -412,7 +402,7 @@ def _list_live(
         timeout=10,
     )
     response.raise_for_status()
-    return _response_object(response, label="list live response")
+    return _BufferLive.model_validate(response.json())
 
 
 def _assert_legacy_messages_get_removed(
@@ -434,112 +424,77 @@ def _assert_legacy_messages_get_removed(
 
 
 def _assert_split_rest_contract(
-    history_payload: dict[str, object],
-    live_payload: dict[str, object],
+    history_payload: HistoryPageObservation, live_payload: _BufferLive
 ) -> None:
-    """Verify the split history and live response contracts.
-
-    The legacy aggregate bootstrap shape must remain absent.
-    """
-    assert isinstance(history_payload.get("items"), list)
-    assert isinstance(history_payload.get("has_more"), bool)
-    assert "next_cursor" in history_payload
-    live_partial_history = _object_item(
-        live_payload.get("partial_history"), label="live partial_history"
-    )
-    assert isinstance(live_partial_history.get("items"), list)
-    assert isinstance(live_payload.get("mailbox_items"), list)
-    assert "input_buffers" not in live_payload
-    assert "items" not in live_payload
-    legacy_fields = {"run_state"}
-    assert legacy_fields.isdisjoint(history_payload)
-    assert legacy_fields.isdisjoint(live_payload)
+    """Preserve split-contract absence and presence assertions after validation."""
+    assert isinstance(history_payload.items, list)
+    assert isinstance(history_payload.has_more, bool)
+    assert "next_cursor" in history_payload.model_fields_set
+    assert isinstance(live_payload.partial_history.items, list)
+    assert isinstance(live_payload.mailbox_items, list)
+    assert "input_buffers" not in live_payload.model_fields_set
+    assert "items" not in live_payload.model_fields_set
+    assert "run_state" not in history_payload.model_fields_set
+    assert "run_state" not in live_payload.model_fields_set
 
 
-def _pending_buffers(payload: dict[str, object]) -> list[_PendingBuffer]:
-    """Return pending user-message items from native mailbox envelopes."""
-    raw_envelopes = payload.get("mailbox_items")
+def _pending_buffers(payload: _BufferLive) -> list[_PendingBuffer]:
+    """Return pending user-message items from validated mailbox envelopes."""
     buffers: list[_PendingBuffer] = []
-    for envelope in _object_items(raw_envelopes, label="live mailbox_items"):
-        envelope_id = envelope.get("mailbox_item_id")
-        if not isinstance(envelope_id, str):
-            raise AssertionError(f"invalid mailbox envelope identity: {envelope!r}")
-        if envelope.get("kind") != "user_message":
+    for envelope in payload.mailbox_items:
+        if envelope.kind != "user_message":
             continue
-        for item in _object_items(
-            envelope.get("items"),
-            label="mailbox envelope items",
-        ):
-            item_id = item.get("id")
-            item_key = item.get("item_key")
-            if not isinstance(item_id, str) or not isinstance(item_key, str):
-                raise AssertionError(f"invalid mailbox item identity: {item!r}")
-            presentation = _object_item(
-                item.get("presentation"),
-                label="mailbox item presentation",
-            )
-            if presentation.get("type") != "user_message":
+        for item in envelope.items:
+            presentation = item.presentation
+            if presentation.type != "user_message":
                 continue
-            content = presentation.get("content")
-            if not isinstance(content, str):
+            if not isinstance(presentation.content, str):
                 raise AssertionError(f"invalid user mailbox presentation: {item!r}")
             buffers.append(
                 _PendingBuffer(
-                    id=item_id,
-                    mailbox_item_id=envelope_id,
-                    item_key=item_key,
-                    content=content,
+                    id=item.id,
+                    mailbox_item_id=envelope.mailbox_item_id,
+                    item_key=item.item_key,
+                    content=presentation.content,
                 )
             )
     return buffers
 
 
-def _input_buffer_contents(payload: dict[str, object]) -> list[str]:
+def _input_buffer_contents(payload: _BufferLive) -> list[str]:
     """Return pending input-buffer contents from the live projection."""
     return [buffer.content for buffer in _pending_buffers(payload)]
 
 
-def _run_marker_statuses(payload: dict[str, object]) -> list[str]:
-    """Return run-marker statuses from a history response."""
-    raw_items = payload.get("items")
-    statuses: list[str] = []
-    for raw_item in _object_items(raw_items, label="history items"):
-        if raw_item.get("kind") != "run_marker":
-            continue
-        event_payload = _object_item(raw_item.get("payload"), label="history payload")
-        status = event_payload.get("status")
-        if isinstance(status, str):
-            statuses.append(status)
-    return statuses
+def _run_marker_statuses(payload: HistoryPageObservation) -> list[str]:
+    """Return validated terminal marker statuses."""
+    return [
+        RunMarkerObservation.model_validate(event.payload).status
+        for event in payload.items
+        if event.kind == "run_marker"
+    ]
 
 
-def _message_contents(payload: dict[str, object]) -> list[str]:
-    """Return user and assistant message contents from history."""
-    raw_items = payload.get("items")
+def _message_contents(payload: HistoryPageObservation) -> list[str]:
+    """Return text content while preserving non-text payload compatibility."""
     contents: list[str] = []
-    for raw_item in _object_items(raw_items, label="history items"):
-        if raw_item.get("kind") not in {"user_message", "assistant_message"}:
+    for event in payload.items:
+        if event.kind not in {"user_message", "assistant_message"}:
             continue
-        event_payload = _object_item(raw_item.get("payload"), label="history payload")
-        content = event_payload.get("content")
+        content = InputMessageObservation.model_validate(event.payload).content
         if isinstance(content, str):
             contents.append(content)
     return contents
 
 
-def _find_user_message_id(payload: dict[str, object], content: str) -> str | None:
-    """Find a user-message ID by content in a history response."""
-    raw_items = payload.get("items")
-    for raw_item in _object_items(raw_items, label="history items"):
-        if raw_item.get("kind") != "user_message":
-            continue
-        event_payload = _object_item(raw_item.get("payload"), label="history payload")
-        if event_payload.get("content") != content:
-            continue
-        event_id = raw_item.get("id")
-        if not isinstance(event_id, str):
-            raise AssertionError(f"user_message id is not a string: {raw_item!r}")
-        return event_id
+def _find_user_message_id(payload: HistoryPageObservation, content: str) -> str | None:
+    """Find a validated user-message identity by its interpreted content."""
+    for event in payload.items:
+        if (
+            event.kind == "user_message"
+            and InputMessageObservation.model_validate(event.payload).content == content
+        ):
+            return event.id
     return None
 
 
@@ -560,7 +515,7 @@ def _wait_for_history_user_message_id(
             token=token,
             session_id=session_id,
         )
-        last_payload = history_payload
+        last_payload = history_payload.to_dict()
         message_id = _find_user_message_id(history_payload, content)
         if message_id is not None:
             return message_id
@@ -574,7 +529,7 @@ def _wait_for_interrupted_idle_state(
     token: str,
     session_id: str,
     timeout: float = 120,
-) -> dict[str, object]:
+) -> HistoryPageObservation:
     """Wait for a durable interruption and the finalized idle live state."""
     deadline = time.monotonic() + timeout
     last_payload: dict[str, object] | None = None
@@ -589,11 +544,14 @@ def _wait_for_interrupted_idle_state(
             token=token,
             session_id=session_id,
         )
-        last_payload = {"history": history_payload, "live": live_payload}
+        last_payload = {
+            "history": history_payload.to_dict(),
+            "live": live_payload.to_dict(),
+        }
         if (
             "interrupted" in _run_marker_statuses(history_payload)
-            and live_payload.get("run") is None
-            and live_payload.get("session_run_state") == "idle"
+            and live_payload.run is None
+            and live_payload.session_run_state == "idle"
         ):
             return history_payload
         time.sleep(0.5)
@@ -622,12 +580,15 @@ def _wait_for_idle_rest_state(
             token=token,
             session_id=session_id,
         )
-        last_payload = {"history": history_payload, "live": live_payload}
+        last_payload = {
+            "history": history_payload.to_dict(),
+            "live": live_payload.to_dict(),
+        }
         _assert_split_rest_contract(history_payload, live_payload)
         if (
             expected_message in _message_contents(history_payload)
-            and live_payload.get("run") is None
-            and live_payload.get("session_run_state") == "idle"
+            and live_payload.run is None
+            and live_payload.session_run_state == "idle"
         ):
             return
         time.sleep(0.5)
@@ -656,14 +617,12 @@ def _wait_for_running_rest_state(
             token=token,
             session_id=session_id,
         )
-        last_payload = {"history": history_payload, "live": live_payload}
+        last_payload = {
+            "history": history_payload.to_dict(),
+            "live": live_payload.to_dict(),
+        }
         _assert_split_rest_contract(history_payload, live_payload)
-        raw_run = live_payload.get("run")
-        run_status = (
-            _object_item(raw_run, label="live run").get("status")
-            if raw_run is not None
-            else None
-        )
+        run_status = live_payload.run.status if live_payload.run is not None else None
         if (
             expected_message in _message_contents(history_payload)
             and run_status == "running"
@@ -697,7 +656,10 @@ def _wait_for_rest_state(
             session_id=session_id,
         )
         _assert_split_rest_contract(history_payload, live_payload)
-        payload: dict[str, object] = {"history": history_payload, "live": live_payload}
+        payload: dict[str, object] = {
+            "history": history_payload.to_dict(),
+            "live": live_payload.to_dict(),
+        }
         last_payload = payload
         messages_match = expected_message is None or (
             expected_message in _message_contents(history_payload)
@@ -966,13 +928,12 @@ class TestChatInputBuffer:
             expected_pending=[],
         )
 
-        final_live = _object_item(final_payload.get("live"), label="final live")
-        final_history = _object_item(
-            final_payload.get("history"),
-            label="final history",
+        final_live = _BufferLive.model_validate(final_payload["live"])
+        final_history = HistoryPageObservation.model_validate(final_payload["history"])
+        assert follow_up_buffer.mailbox_item_id not in final_live.model_dump_json()
+        assert (
+            second_follow_up_buffer.mailbox_item_id not in final_live.model_dump_json()
         )
-        assert follow_up_buffer.mailbox_item_id not in json.dumps(final_live)
-        assert second_follow_up_buffer.mailbox_item_id not in json.dumps(final_live)
         assert _input_buffer_contents(final_live) == []
         final_contents = _message_contents(final_history)
         first_follow_up_index = final_contents.index(_FOLLOW_UP_MESSAGE)
@@ -1063,7 +1024,9 @@ class TestChatInputBuffer:
                 session_id=session_id,
             )
             assert _pending_buffers(pending_payload) == []
-            assert deleted_buffer.mailbox_item_id not in json.dumps(pending_payload)
+            assert (
+                deleted_buffer.mailbox_item_id not in pending_payload.model_dump_json()
+            )
         finally:
             _set_release_file(
                 azents_engine_worker_container,

@@ -3,7 +3,7 @@
 import json
 import time
 from dataclasses import dataclass, replace
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 import azentsadminclient
 import azentspublicclient
@@ -19,12 +19,14 @@ from azentspublicclient.models.agent_create_request import AgentCreateRequest
 from azentspublicclient.models.agent_model_selection_input import (
     AgentModelSelectionInput,
 )
+from azentspublicclient.models.agent_session_response import AgentSessionResponse
 from azentspublicclient.models.agent_toolkit_attach_request import (
     AgentToolkitAttachRequest,
 )
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.agent_update_request import AgentUpdateRequest
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
+from azentspublicclient.models.chat_event_response import ChatEventResponse
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest
 from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
@@ -35,9 +37,16 @@ from azentspublicclient.models.subagent_settings import SubagentSettings
 from azentspublicclient.models.toolkit_config_create_request import (
     ToolkitConfigCreateRequest,
 )
-from pydantic import TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, StrictStr, TypeAdapter, ValidationError
 from testcontainers.core.container import DockerContainer
 
+from support.observations import (
+    ExtensionObservation,
+    InputMessageObservation,
+    RunMarkerObservation,
+    ToolResultObservation,
+    decode_history_page,
+)
 from support.runtime_profiles import (
     create_workspace_runtime_profile,
     start_and_wait_for_agent_runtime,
@@ -119,6 +128,42 @@ _OVERFLOW_CONTRACTED_LIST_CALL_ID = "call_subagent_active_overflow_contracted_li
 _OVERFLOW_CONTRACTED_LIST_RESPONSE = "Subagent contracted list observed."
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
+
+
+class _AgentMessageObservation(ExtensionObservation):
+    message_kind: Literal[
+        "spawn_agent", "send_message", "followup_task", "agent_result"
+    ]
+    source_path: StrictStr
+    run_status: StrictStr | None = None
+    content: StrictStr
+
+
+class _OutputPartObservation(ExtensionObservation):
+    text: StrictStr | None = None
+
+
+class _WaitOutcomeObservation(ExtensionObservation):
+    outcome: StrictStr
+    reason: StrictStr | None = None
+
+
+class _ListedAgentObservation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    agent_name: StrictStr
+    agent_status: StrictStr
+
+
+class _ListedAgentsObservation(ExtensionObservation):
+    agents: list[_ListedAgentObservation]
+
+
+class _SessionIdObservation(ExtensionObservation):
+    id: StrictStr
+
+
+class _SessionIdsObservation(ExtensionObservation):
+    items: list[_SessionIdObservation]
 
 
 @dataclass(frozen=True)
@@ -324,11 +369,7 @@ def _team_primary_session(
         timeout=10,
     )
     response.raise_for_status()
-    payload = _json_object(response)
-    session_id = payload.get("id")
-    if not isinstance(session_id, str):
-        raise AssertionError(f"Team primary response did not include id: {payload!r}")
-    return session_id
+    return _SessionIdObservation.model_validate(response.json()).id
 
 
 def _create_root_session(
@@ -345,11 +386,7 @@ def _create_root_session(
         timeout=10,
     )
     response.raise_for_status()
-    payload = _json_object(response)
-    session_id = payload.get("id")
-    if not isinstance(session_id, str):
-        raise AssertionError(f"Session response did not include id: {payload!r}")
-    return session_id
+    return _SessionIdObservation.model_validate(response.json()).id
 
 
 def _run_message(
@@ -384,29 +421,20 @@ def _history(
     public_url: str,
     token: str,
     session_id: str,
-) -> list[dict[str, object]]:
-    """Fetch raw REST history events."""
+) -> list[ChatEventResponse]:
+    """Decode REST history before interpreting event decision fields."""
     response = requests.get(
         f"{public_url}/chat/v1/sessions/{session_id}/history?limit=100",
         headers=_headers(token),
         timeout=10,
     )
     response.raise_for_status()
-    payload = _json_object(response)
-    return _json_object_list_payload(payload.get("items"), label="history items")
-
-
-def _event_payload(event: dict[str, object]) -> dict[str, object]:
-    """Return a validated event payload."""
-    return _json_object_payload(event.get("payload"), label="event payload")
+    return decode_history_page(response.json()).items
 
 
 def _event_order_key(event: dict[str, object]) -> str:
     """Return the UUIDv7 ordering key for a persisted event."""
-    event_id = event.get("id")
-    if not isinstance(event_id, str):
-        raise AssertionError(f"history event is missing an ID: {event!r}")
-    return event_id
+    return ChatEventResponse.model_validate(event).id
 
 
 def _history_contents(
@@ -418,14 +446,13 @@ def _history_contents(
     """Return model-visible text contents from history."""
     contents: list[str] = []
     for event in _history(public_url=public_url, token=token, session_id=session_id):
-        if event.get("kind") not in {
+        if event.kind not in {
             "user_message",
             "agent_message",
             "assistant_message",
         }:
             continue
-        payload = _event_payload(event)
-        content = payload.get("content")
+        content = InputMessageObservation.model_validate(event.payload).content
         if isinstance(content, str):
             contents.append(content)
     return contents
@@ -436,16 +463,16 @@ def _agent_message_payloads(
     public_url: str,
     token: str,
     session_id: str,
-) -> list[dict[str, object]]:
+) -> list[_AgentMessageObservation]:
     """Return durable agent-message payloads from session history."""
     return [
-        _event_payload(event)
+        _AgentMessageObservation.model_validate(event.payload)
         for event in _history(
             public_url=public_url,
             token=token,
             session_id=session_id,
         )
-        if event.get("kind") == "agent_message"
+        if event.kind == "agent_message"
     ]
 
 
@@ -460,7 +487,7 @@ def _wait_for_agent_result(
 ) -> dict[str, object]:
     """Wait for one terminal result from the expected source and status."""
     deadline = time.monotonic() + timeout
-    last_payloads: list[dict[str, object]] = []
+    last_payloads: list[_AgentMessageObservation] = []
     while time.monotonic() < deadline:
         last_payloads = _agent_message_payloads(
             public_url=public_url,
@@ -470,12 +497,12 @@ def _wait_for_agent_result(
         matches = [
             payload
             for payload in last_payloads
-            if payload.get("message_kind") == "agent_result"
-            and payload.get("source_path") == source_path
-            and payload.get("run_status") == run_status
+            if payload.message_kind == "agent_result"
+            and payload.source_path == source_path
+            and payload.run_status == run_status
         ]
         if len(matches) == 1:
-            return matches[0]
+            return matches[0].model_dump(exclude_unset=True)
         if len(matches) > 1:
             raise AssertionError(
                 f"duplicate terminal results for {source_path}: {matches!r}"
@@ -566,12 +593,11 @@ def _set_release_file(
         )
 
 
-def _tool_result_output_text(event: dict[str, object]) -> str | None:
+def _tool_result_output_text(event: ChatEventResponse) -> str | None:
     """Return persisted client tool result text for a history event."""
-    if event.get("kind") != "client_tool_result":
+    if event.kind != "client_tool_result":
         return None
-    payload = _event_payload(event)
-    output = payload.get("output")
+    output = ToolResultObservation.model_validate(event.payload).output
     if isinstance(output, str):
         return output
     if isinstance(output, list):
@@ -579,8 +605,7 @@ def _tool_result_output_text(event: dict[str, object]) -> str | None:
         for part in output:
             if not isinstance(part, dict):
                 continue
-            part_dict = _json_object_payload(part, label="tool result output part")
-            text = part_dict.get("text")
+            text = _OutputPartObservation.model_validate(part).text
             if isinstance(text, str):
                 texts.append(text)
         return "\n".join(texts)
@@ -606,15 +631,17 @@ def _wait_for_tool_result_content(
         for event in _history(
             public_url=public_url, token=token, session_id=session_id
         ):
-            payload = _event_payload(event)
-            if payload.get("call_id") != call_id:
+            if event.kind != "client_tool_result":
+                continue
+            payload = ToolResultObservation.model_validate(event.payload)
+            if payload.call_id != call_id:
                 continue
             output = _tool_result_output_text(event)
             if output is None:
                 continue
             last_outputs.append(output)
             if expected in output:
-                return event
+                return event.model_dump(mode="json", exclude_unset=True)
         time.sleep(0.5)
     raise TimeoutError(
         f"tool result content not observed: {call_id}, {expected}, {last_outputs!r}"
@@ -632,9 +659,6 @@ def _wait_for_tool_result_outcome(
     timeout: float = 120,
 ) -> dict[str, object]:
     """Wait until a WaitToolkit result contains the expected JSON outcome."""
-    expected = {"outcome": outcome}
-    if reason is not None:
-        expected["reason"] = reason
     deadline = time.monotonic() + timeout
     last_outputs: list[str] = []
     while time.monotonic() < deadline:
@@ -642,8 +666,10 @@ def _wait_for_tool_result_outcome(
         for event in _history(
             public_url=public_url, token=token, session_id=session_id
         ):
-            payload = _event_payload(event)
-            if payload.get("call_id") != call_id:
+            if event.kind != "client_tool_result":
+                continue
+            payload = ToolResultObservation.model_validate(event.payload)
+            if payload.call_id != call_id:
                 continue
             output = _tool_result_output_text(event)
             if output is None:
@@ -654,14 +680,15 @@ def _wait_for_tool_result_outcome(
             except json.JSONDecodeError:
                 continue
             if isinstance(parsed, dict):
-                parsed_dict = _json_object_payload(parsed, label="tool result outcome")
-                if all(
-                    parsed_dict.get(key) == value for key, value in expected.items()
+                parsed_outcome = _WaitOutcomeObservation.model_validate(parsed)
+                if parsed_outcome.outcome == outcome and (
+                    reason is None or parsed_outcome.reason == reason
                 ):
-                    return event
+                    return event.model_dump(mode="json", exclude_unset=True)
         time.sleep(0.5)
     raise TimeoutError(
-        f"tool result outcome not observed: {call_id}, {expected}, {last_outputs!r}"
+        f"tool result outcome not observed: {call_id}, {(outcome, reason)!r}, "
+        f"{last_outputs!r}"
     )
 
 
@@ -683,8 +710,10 @@ def _wait_for_tool_result_json(
             token=token,
             session_id=session_id,
         ):
-            payload = _event_payload(event)
-            if payload.get("call_id") != call_id:
+            if event.kind != "client_tool_result":
+                continue
+            payload = ToolResultObservation.model_validate(event.payload)
+            if payload.call_id != call_id:
                 continue
             output = _tool_result_output_text(event)
             if output is None:
@@ -703,24 +732,19 @@ def _wait_for_tool_result_json(
     raise TimeoutError(f"JSON tool result not observed: {call_id}, {last_outputs!r}")
 
 
-def _listed_agents(payload: dict[str, object]) -> list[dict[str, object]]:
+def _listed_agents(payload: object) -> list[dict[str, object]]:
     """Validate the exact canonical list_agents item contract."""
-    agents = _json_object_list_payload(
-        payload.get("agents"),
-        label="list_agents agents",
-    )
-    for agent in agents:
-        assert set(agent) == {"agent_name", "agent_status"}
-        assert isinstance(agent.get("agent_name"), str)
-        assert isinstance(agent.get("agent_status"), str)
-    return agents
+    return [
+        agent.model_dump()
+        for agent in _ListedAgentsObservation.model_validate(payload).agents
+    ]
 
 
-def _run_marker_completed(event: dict[str, object]) -> bool:
+def _run_marker_completed(event: ChatEventResponse) -> bool:
     """Return whether a history event is a completed run marker."""
-    if event.get("kind") != "run_marker":
+    if event.kind != "run_marker":
         return False
-    return _event_payload(event).get("status") == "completed"
+    return RunMarkerObservation.model_validate(event.payload).status == "completed"
 
 
 def _wait_for_run_complete(
@@ -737,8 +761,8 @@ def _wait_for_run_complete(
         events = _history(public_url=public_url, token=token, session_id=session_id)
         for event in events:
             if _run_marker_completed(event):
-                return event
-        last_kinds = [event.get("kind") for event in events]
+                return event.model_dump(mode="json", exclude_unset=True)
+        last_kinds = [event.kind for event in events]
         time.sleep(0.5)
     raise TimeoutError(f"completed run marker not observed: {last_kinds!r}")
 
@@ -899,11 +923,7 @@ def _session_run_state(
         timeout=10,
     )
     response.raise_for_status()
-    payload = _json_object(response)
-    run_state = payload.get("run_state")
-    if not isinstance(run_state, str):
-        raise AssertionError(f"Session response did not include run_state: {payload!r}")
-    return run_state
+    return AgentSessionResponse.model_validate(response.json()).run_state
 
 
 def _wait_for_session_run_state(
@@ -946,14 +966,8 @@ def _session_ids(
         timeout=10,
     )
     response.raise_for_status()
-    payload = _json_object(response)
-    items = _json_object_list_payload(payload.get("items"), label="session items")
-    ids: set[str] = set()
-    for item in items:
-        session_id = item.get("id")
-        if isinstance(session_id, str):
-            ids.add(session_id)
-    return ids
+    payload = _SessionIdsObservation.model_validate(response.json())
+    return {item.id for item in payload.items}
 
 
 @pytest.fixture(scope="class")
@@ -1215,9 +1229,9 @@ class TestSubagents:
                 token=workspace.token,
                 session_id=root_session_id,
             )
-            if payload.get("message_kind") == "agent_result"
-            and payload.get("source_path") == "/root/child_qa"
-            and payload.get("run_status") == "completed"
+            if payload.message_kind == "agent_result"
+            and payload.source_path == "/root/child_qa"
+            and payload.run_status == "completed"
         ]
         assert len(completed_results) == 1
 
@@ -1923,9 +1937,9 @@ class SubagentCapacityScenarios:
                 token=workspace.token,
                 session_id=root_session_id,
             )
-            if payload.get("message_kind") == "agent_result"
-            and payload.get("source_path") == "/root/bounded_oldest"
-            and payload.get("content") == _BOUNDED_FOLLOWUP_RESPONSE
+            if payload.message_kind == "agent_result"
+            and payload.source_path == "/root/bounded_oldest"
+            and payload.content == _BOUNDED_FOLLOWUP_RESPONSE
         ]
         assert len(reused_results) == 1
         final_nodes = _tree_nodes(
