@@ -10,10 +10,16 @@ tags: [google, toolkit, oauth, architecture, security, frontend, testing]
 
 This is a concrete engineering draft for the original Google connection scope,
 not an approved primary Design or an accepted ADR. The corresponding
-[Requirements draft](../requirements/google-261013-connection.md) has been
-corrected to exclude a separate additional-consent feature. Requirements snapshot
-confirmation and the consequential choices identified below remain outstanding.
+[Requirements](../requirements/google-261013-connection.md) record the confirmed
+original scope and exclude a separate additional-consent feature. The requester
+directed technical design to proceed on that basis. The consequential choices
+identified below remain outstanding.
 No implementation, account authorization, migration, or deployment has occurred.
+
+The snapshot's [ADR](../adr/google-261013-connection.md) now owns the material
+decision map, and its [primary Design](google-261013-connection.md) owns the
+implementation-contract draft. This supporting record preserves research evidence;
+it is not a second source of decision or Design authority.
 
 Repository baseline: `210f4f0be2065f1ecf3f0c8bca952c8d8216d1a4`.
 

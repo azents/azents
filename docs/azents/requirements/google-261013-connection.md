@@ -11,7 +11,7 @@ tags: [google, toolkit, oauth, integration, frontend, security]
 
 - Snapshot: `google-261013`
 - Document reference: `google-261013/REQ`
-- Confirmation: pending requester confirmation of this repository snapshot.
+- Confirmation: original scope confirmed; proceed to technical design.
 
 ## Problem
 
@@ -239,13 +239,13 @@ The following remain unresolved and are not implementation authority:
 
 ## Confirmation
 
-The requester asked to proceed to technical design on 2026-10-13 after selecting
-the unified Google experience and requiring partial-consent handling. This request
-starts requirements translation and technical investigation; explicit confirmation
-of this repository Requirements snapshot is pending. No ADR decisions or primary
-Design approval have been recorded, and implementation has not started.
+On 2026-10-13 the requester confirmed the original Google connection scope,
+including truthful partial-consent handling, and explicitly directed technical
+design to proceed without changing or repeatedly reconfirming that scope. This
+document records that scope; the instruction is not authorization to resolve its
+listed open boundaries silently.
 
-The requester subsequently clarified that the original scope is Google connection
-setup with truthful partial-consent handling, not a new additional-consent feature,
-and affirmed that correction on 2026-10-13. This clarification removes the
-assistant-added per-capability consent workflow; it is not a scope reduction.
+The earlier correction removed an assistant-added per-capability consent
+workflow. It did not reduce the requested Google connection feature. Technical
+decisions and revision-bound Design approval remain separate from Requirements
+confirmation. Implementation has not started.
