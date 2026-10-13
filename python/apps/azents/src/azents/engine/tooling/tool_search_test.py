@@ -249,8 +249,8 @@ def test_search_excludes_direct_tools_and_handles_empty_query() -> None:
     index = DeferredToolSearchIndex(
         [
             _entry(
-                "exec_command",
-                "Run a shell command.",
+                "search_sessions",
+                "Search original Session conversations.",
                 exposure=ToolExposure.DIRECT,
                 toolkit_type=None,
             ),
@@ -258,7 +258,7 @@ def test_search_excludes_direct_tools_and_handles_empty_query() -> None:
         ]
     )
 
-    assert index.search("shell command", limit=5) == []
+    assert index.search("original session conversations", limit=5) == []
     assert index.search("", limit=5) == []
 
 

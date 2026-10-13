@@ -52,6 +52,8 @@ code_paths:
   - python/apps/azents/src/azents/engine/events/historical_memory_projection.py
   - python/apps/azents/src/azents/engine/events/sensitive_text.py
   - python/apps/azents/src/azents/engine/tools/memory.py
+  - python/apps/azents/src/azents/engine/tools/session_history.py
+  - python/apps/azents/src/azents/repos/session_history/**
   - python/apps/azents/src/azents/engine/tools/builtin.py
   - python/apps/azents/src/azents/engine/tools/readable_storage.py
   - python/apps/azents/src/azents/engine/run/resolve.py
@@ -83,8 +85,8 @@ api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id}
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/consolidated-memory
-last_verified_at: 2026-10-07
-spec_version: 23
+last_verified_at: 2026-10-13
+spec_version: 24
 ---
 
 # Memory
@@ -429,10 +431,21 @@ replacing description/content/type or creating an entry. Delete remains exact
 scope/name deletion with an explicit missing-entry error. Team execution rejects
 User mutation; User execution binds its associated User.
 
-All reads use generic VFS tools. Dedicated `list_memories`, `get_memory`,
-`search_memories`, `search_sessions`, `read_session_history`, and
-`read_session_tool_result` factories/exposure are removed without aliases. The
-canonical Session event store and repositories remain source evidence.
+Saved Memory and Session-summary lookup use generic VFS tools. Dedicated
+`list_memories`, `get_memory`, and `search_memories` remain removed.
+
+Original Session conversations retain `search_sessions`, `read_session_history`,
+and `read_session_tool_result`. Memory-enabled root and subagent execution expose
+these unprefixed tools directly through the auto-bound readable-storage Toolkit;
+they are always visible without Tool Search activation and are excluded from its
+deferred index. Memory-disabled execution omits them.
+
+The tools use the canonical Session event store with active root authorization.
+Team execution can inspect permitted Team Sessions for the same Agent; User
+execution is restricted to its associated User's Sessions. Scoped search can
+target the current concrete execution or a known permitted Session. Search and
+history pages contain at most ten entries, and exact tool-result reads return
+bounded text with continuation rather than raw payloads or hidden artifacts.
 
 ## Public API and Settings UI
 
