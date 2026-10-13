@@ -7,6 +7,7 @@ import common from "../../messages/ja-JP/common.json";
 import elevation from "../../messages/ja-JP/elevation.json";
 import externalAccountLinks from "../../messages/ja-JP/externalAccountLinks.json";
 import externalChannelApproval from "../../messages/ja-JP/externalChannelApproval.json";
+import githubAppGuide from "../../messages/ja-JP/githubAppGuide.json";
 import memberProfile from "../../messages/ja-JP/memberProfile.json";
 import metadata from "../../messages/ja-JP/metadata.json";
 import oauth from "../../messages/ja-JP/oauth.json";
@@ -31,6 +32,7 @@ const messages = composeMessages([
   ["elevation", elevation],
   ["externalAccountLinks", externalAccountLinks],
   ["externalChannelApproval", externalChannelApproval],
+  ["githubAppGuide", githubAppGuide],
   ["memberProfile", memberProfile],
   ["metadata", metadata],
   ["oauth", oauth],

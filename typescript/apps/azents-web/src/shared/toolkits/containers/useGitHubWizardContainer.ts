@@ -8,7 +8,7 @@ import {
 } from "@mantine/hooks";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { trimToolkitWhitespace } from "@/shared/lib/toolkit-identifiers";
 import { isRecord } from "@/shared/lib/unknown-value";
 import { trpc } from "@/trpc/client";
@@ -21,17 +21,21 @@ import {
   acceptGitHubCreationResult,
   GitHubWizardOperations,
 } from "../github-wizard-operations";
+import { soleGitHubChoice, soleGitHubMethod } from "../github-wizard-selection";
 import {
   DEFAULT_GITHUB_WIZARD_SETTINGS,
   finalWizardSettings,
+  gitHubWizardConnectionReady,
   isWizardMode,
   wizardCandidateRequiresRestart,
   wizardIdentity,
 } from "../github-wizard-state";
+import { useGitHubWizardProgression } from "./useGitHubWizardProgression";
 import type { GitHubWizardProps } from "../components/GitHubWizard";
 import type { GitHubUserCreationContext } from "../github-user-creation-state";
 import type {
   GitHubWizardAppState,
+  GitHubWizardAvailability,
   GitHubWizardConnection,
   GitHubWizardCredentials,
   GitHubWizardIdentity,
@@ -147,7 +151,8 @@ export function useGitHubWizardContainer({
   const popup = useRef<Window | null>(null);
   const popupPurpose = useRef<"AUTHORIZE" | "INSTALL">("AUTHORIZE");
   const popupEpoch = useRef(0);
-  const headingRef = useRef<HTMLHeadingElement>(null);
+  const progression = useGitHubWizardProgression();
+  const installationSelectionTouched = useRef(false);
   const mode = selection.type === "METHOD" ? selection.mode : null;
   const identity =
     selection.type === "EMPTY"
@@ -197,6 +202,7 @@ export function useGitHubWizardContainer({
     setCredentials(EMPTY_CREDENTIALS);
     setConnection({ type: "INPUT" });
     setInstallationState({ type: "IDLE" });
+    installationSelectionTouched.current = false;
     setStage("CONNECTION");
     setPublication({ type: "IDLE" });
     setSettings((current) => ({ ...current, runtimeRiskAcknowledged: false }));
@@ -215,11 +221,27 @@ export function useGitHubWizardContainer({
       closed.current = true;
     };
   }, []);
+  const availabilityState = useMemo<GitHubWizardAvailability>(
+    () =>
+      availability.isError
+        ? { type: "ERROR" }
+        : availability.data
+          ? {
+              type: "READY",
+              userAccount: availability.data.platform_modes.user_account,
+              installation: availability.data.platform_modes.installation,
+              callbackUrl: availability.data.callback_url,
+            }
+          : { type: "LOADING" },
+    [availability.isError, availability.data],
+  );
   useEffect(() => {
-    if (identity != null) {
-      headingRef.current?.focus();
+    const sole = soleGitHubMethod(identity, availabilityState);
+    if (selection.type === "IDENTITY" && sole != null) {
+      setSelection({ type: "METHOD", mode: sole });
     }
-  }, [identity, mode, stage]);
+    // Selection may finish when availability arrives; refresh never requests focus or scroll.
+  }, [identity, selection.type, availabilityState]);
 
   async function loadPlatformApp(): Promise<void> {
     const operation = metadataEpoch.current.next();
@@ -565,6 +587,18 @@ export function useGitHubWizardContainer({
           type: "READY",
           installations: result.installations,
         });
+        const sole = soleGitHubChoice(
+          "READY",
+          result.installations.map((item) => String(item.id)),
+          installationSelectionTouched.current,
+        );
+        if (sole != null) {
+          setCredentials((current) =>
+            current.installationIds.length === 0
+              ? { ...current, installationIds: [sole] }
+              : current,
+          );
+        }
       })
       .catch(() => {
         if (epoch.current.isCurrent(operation) && !closed.current) {
@@ -572,15 +606,7 @@ export function useGitHubWizardContainer({
         }
       });
   });
-  const ready =
-    connection.type === "CANDIDATE"
-      ? connection.app.type === "READY"
-      : connection.type === "VERIFIED" &&
-        connection.transport === "CURRENT" &&
-        connection.verification.connectivity.status === "ready" &&
-        connection.verification.installations.every(
-          (target) => target.status === "ready",
-        );
+  const ready = gitHubWizardConnectionReady(connection);
   async function publish(): Promise<void> {
     if (
       !ready ||
@@ -672,25 +698,22 @@ export function useGitHubWizardContainer({
     stage,
     publication,
     installationState,
-    headingRef,
+    rootRef: progression.rootRef,
     candidate: connection.type === "CANDIDATE" ? connection.candidate : null,
-    availability: availability.isError
-      ? { type: "ERROR" }
-      : availability.data
-        ? {
-            type: "READY",
-            userAccount: availability.data.platform_modes.user_account,
-            installation: availability.data.platform_modes.installation,
-            callbackUrl: availability.data.callback_url,
-          }
-        : { type: "LOADING" },
+    availability: availabilityState,
     canContinue: ready,
     onIdentity: (next) => {
       if (pending.current || identity === next) {
         return;
       }
       abandon();
-      setSelection({ type: "IDENTITY", identity: next });
+      const sole = soleGitHubMethod(next, availabilityState);
+      setSelection(
+        sole == null
+          ? { type: "IDENTITY", identity: next }
+          : { type: "METHOD", mode: sole },
+      );
+      progression.advance(sole == null ? "METHOD" : "CONNECTION");
     },
     onMode: (next) => {
       if (pending.current || mode === next) {
@@ -698,12 +721,20 @@ export function useGitHubWizardContainer({
       }
       abandon();
       setSelection({ type: "METHOD", mode: next });
+      progression.advance("CONNECTION");
     },
     onCredentials: (next) => {
       if (pending.current) {
         return;
       }
       epoch.current.next();
+      if (
+        mode === "github_app_platform" &&
+        next.installationIds.join("\0") !==
+          credentials.installationIds.join("\0")
+      ) {
+        installationSelectionTouched.current = true;
+      }
       setCredentials(next);
       setSettings((current) => ({
         ...current,
@@ -750,13 +781,14 @@ export function useGitHubWizardContainer({
       if (!ready || pending.current) {
         return;
       }
-      setStage(
+      const next =
         stage === "CONNECTION"
           ? "FEATURES"
           : stage === "FEATURES"
             ? "RUNTIME"
-            : "REVIEW",
-      );
+            : "REVIEW";
+      setStage(next);
+      progression.advance(next);
     },
     onReset: () => {
       if (pending.current) {

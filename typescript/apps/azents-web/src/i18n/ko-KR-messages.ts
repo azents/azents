@@ -7,6 +7,7 @@ import common from "../../messages/ko-KR/common.json";
 import elevation from "../../messages/ko-KR/elevation.json";
 import externalAccountLinks from "../../messages/ko-KR/externalAccountLinks.json";
 import externalChannelApproval from "../../messages/ko-KR/externalChannelApproval.json";
+import githubAppGuide from "../../messages/ko-KR/githubAppGuide.json";
 import memberProfile from "../../messages/ko-KR/memberProfile.json";
 import metadata from "../../messages/ko-KR/metadata.json";
 import oauth from "../../messages/ko-KR/oauth.json";
@@ -31,6 +32,7 @@ const messages = composeMessages([
   ["elevation", elevation],
   ["externalAccountLinks", externalAccountLinks],
   ["externalChannelApproval", externalChannelApproval],
+  ["githubAppGuide", githubAppGuide],
   ["memberProfile", memberProfile],
   ["metadata", metadata],
   ["oauth", oauth],

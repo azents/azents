@@ -1,5 +1,5 @@
 import { rem } from "@mantine/core";
-import { expect, fn, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { DEFAULT_GITHUB_WIZARD_SETTINGS } from "../github-wizard-state";
 import {
@@ -15,7 +15,7 @@ const meta = {
   component: GitHubWizard,
   decorators: [
     (Story) => (
-      <StorybookCanvas maxWidth={rem(760)}>
+      <StorybookCanvas maxWidth={rem(980)}>
         <Story />
       </StorybookCanvas>
     ),
@@ -24,12 +24,68 @@ const meta = {
 } satisfies Meta<typeof GitHubWizard>;
 export default meta;
 type Story = StoryObj<typeof meta>;
+async function assertWizardGeometry(canvasElement: HTMLElement): Promise<void> {
+  await waitFor(async () => {
+    for (const icon of canvasElement.querySelectorAll<HTMLElement>(
+      "[data-wizard-icon-slot]",
+    )) {
+      const card = icon.closest("button");
+      const title = card?.querySelector<HTMLElement>(
+        "[data-wizard-choice-title]",
+      );
+      const description = card?.querySelector<HTMLElement>(
+        "[data-wizard-choice-description]",
+      );
+      const check = card?.querySelector<HTMLElement>(
+        "[data-wizard-check-slot]",
+      );
+      if (
+        card == null ||
+        title == null ||
+        description == null ||
+        check == null
+      ) {
+        throw new Error("Choice layout landmarks missing");
+      }
+      const padding =
+        Number.parseFloat(getComputedStyle(card).paddingTop) +
+        Number.parseFloat(getComputedStyle(card).borderTopWidth);
+      const i = icon.getBoundingClientRect();
+      const c = card.getBoundingClientRect();
+      const h = title.getBoundingClientRect();
+      const d = description.getBoundingClientRect();
+      await expect(Math.abs(i.top - c.top - padding)).toBeLessThan(1);
+      await expect(i.bottom).toBeLessThanOrEqual(h.top);
+      await expect(Math.abs(i.left - h.left)).toBeLessThan(1);
+      await expect(Math.abs(h.left - d.left)).toBeLessThan(1);
+      await expect(icon.getBoundingClientRect().width).toBeCloseTo(28, 1);
+      await expect(check.getBoundingClientRect().width).toBeCloseTo(22, 1);
+    }
+    for (const title of canvasElement.querySelectorAll<HTMLElement>(
+      "[data-wizard-section-title]",
+    )) {
+      const body = title
+        .closest("section")
+        ?.querySelector<HTMLElement>("[data-wizard-section-body]");
+      if (body == null) {
+        throw new Error("Section body landmark missing");
+      }
+      await expect(
+        Math.abs(
+          title.getBoundingClientRect().left -
+            body.getBoundingClientRect().left,
+        ),
+      ).toBeLessThan(1);
+    }
+  });
+}
+
 export const Identity: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     await expect(
       canvas.getByRole("heading", {
-        name: "How would you like to connect to GitHub?",
+        name: /How would you like to connect to GitHub\?$/,
       }),
     ).toBeVisible();
     await expect(
@@ -39,6 +95,7 @@ export const Identity: Story = {
       canvas.getByRole("button", { name: /Connect with my GitHub account/ }),
     );
     await expect(args.onIdentity).toHaveBeenCalledWith("PERSONAL");
+    await assertWizardGeometry(canvasElement);
   },
 };
 export const PersonalMethods: Story = {
@@ -52,6 +109,7 @@ export const PersonalMethods: Story = {
       canvas.getByRole("button", { name: "Register a GitHub App" }),
     );
     await expect(args.onMode).toHaveBeenCalledWith("github_app_user");
+    await assertWizardGeometry(canvasElement);
   },
 };
 export const AppMethods: Story = {
@@ -230,7 +288,11 @@ export const RuntimeOff: Story = {
   args: { ...wizardReviewProps, stage: "RUNTIME" },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.queryByRole("checkbox")).not.toBeInTheDocument();
+    await expect(
+      canvas.queryByRole("checkbox", {
+        name: /Agent processes can read or copy/,
+      }),
+    ).not.toBeInTheDocument();
     await expect(
       canvas.getByRole("button", { name: "Review connection" }),
     ).toBeEnabled();
@@ -250,7 +312,11 @@ export const RuntimeRiskUnacknowledged: Story = {
     await expect(
       canvas.getByRole("button", { name: "Review connection" }),
     ).toBeDisabled();
-    await userEvent.click(canvas.getByRole("checkbox"));
+    await userEvent.click(
+      canvas.getByRole("checkbox", {
+        name: /Agent processes can read or copy/,
+      }),
+    );
     await expect(args.onSettings).toHaveBeenCalledWith({
       ...args.settings,
       runtimeRiskAcknowledged: true,
@@ -266,11 +332,11 @@ export const FinalReview: Story = {
     );
     await expect(
       canvas.getByText(
-        "Workspace-shared Toolkit: attached Agents and their authorized participants perform ordinary and automatic GitHub work with the verified identity, not each participant's own account.",
+        "Workspace shared: attached Agents and their authorized participants use this verified GitHub account or App for ordinary and automatic work, not their own accounts.",
       ),
     ).toBeVisible();
     await expect(
-      canvas.queryByText(/Agent-only Toolkit:/),
+      canvas.queryByText(/This Agent only:/),
     ).not.toBeInTheDocument();
     await expect(
       canvas.queryByRole("button", { name: /Cancel/ }),
@@ -281,7 +347,9 @@ export const FinalReview: Story = {
     await userEvent.click(
       canvas.getByRole("button", { name: "Advanced settings" }),
     );
-    await expect(canvas.getByRole("textbox", { name: "Slug" })).toBeVisible();
+    await waitFor(async () => {
+      await expect(canvas.getByRole("textbox", { name: "Slug" })).toBeVisible();
+    });
     await userEvent.click(
       canvas.getByRole("button", { name: "Save GitHub connection" }),
     );
@@ -294,11 +362,11 @@ export const AgentReview: Story = {
     const canvas = within(canvasElement);
     await expect(
       canvas.getByText(
-        "Agent-only Toolkit: only this Agent and its authorized participants perform ordinary and automatic GitHub work with the verified identity, not each participant's own account.",
+        "This Agent only: this Agent and its authorized participants use this verified GitHub account or App for ordinary and automatic work, not their own accounts.",
       ),
     ).toBeVisible();
     await expect(
-      canvas.queryByText(/Workspace-shared Toolkit:/),
+      canvas.queryByText(/Workspace shared:/),
     ).not.toBeInTheDocument();
   },
 };
@@ -409,5 +477,20 @@ export const MobileReview: Story = {
       throw new Error("Wizard root is missing");
     }
     await expect(root.scrollWidth).toBeLessThanOrEqual(root.clientWidth);
+  },
+};
+
+export const SelectionGeometryMobile: Story = {
+  args: { identity: "PERSONAL", mode: "pat" },
+  parameters: { testViewport: { width: 390, height: 844 } },
+  play: async ({ canvasElement }) => {
+    await assertWizardGeometry(canvasElement);
+    const selected = within(canvasElement).getByRole("button", {
+      name: "Personal access token (PAT)",
+    });
+    await expect(selected).toHaveAttribute("aria-pressed", "true");
+    await expect(selected).toHaveAttribute("data-selected", "true");
+    await expect(getComputedStyle(selected).boxShadow).not.toBe("none");
+    await expect(within(selected).getByText("Selected")).toBeVisible();
   },
 };

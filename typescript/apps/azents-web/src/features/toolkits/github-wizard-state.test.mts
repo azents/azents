@@ -132,7 +132,7 @@ void test("a current connect result is accepted without canceling intentional OA
   assert.deepEqual(canceled, []);
 });
 
-void test("Korean identity, registration and bordered-reset action copy retains the approved wording", () => {
+void test("Korean identity copy stays natural while fixed registration and reset actions remain exact", () => {
   const messages = z
     .object({
       toolkits: z.object({
@@ -159,12 +159,12 @@ void test("Korean identity, registration and bordered-reset action copy retains 
       ),
     );
   assert.deepEqual(messages.toolkits.github.wizard, {
-    identityTitle: "GitHub에 어떻게 연결할까요?",
+    identityTitle: "어떤 계정으로 GitHub에 연결할까요?",
     personalChoice: "내 GitHub 계정으로 연결",
-    personalDescription: "내 계정으로 GitHub 작업을 수행합니다.",
+    personalDescription: "내 계정으로 GitHub 작업을 처리합니다.",
     appChoice: "GitHub App으로 연결",
-    appDescription: "개인 계정 대신 GitHub App으로 작업을 수행합니다.",
-    methodTitle: "인증 방법을 선택하세요",
+    appDescription: "개인 계정 대신 GitHub App으로 작업합니다.",
+    methodTitle: "연결 방법을 선택하세요",
     selfManagedMethod: "새로운 GitHub App 등록",
     reset: "연결 다시 설정",
   });

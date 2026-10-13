@@ -1,0 +1,127 @@
+{
+  "title": "Azents に接続する GitHub App の登録ガイド",
+  "intro": "Azents の接続画面は開いたままにしてください。この手順に沿って GitHub で App を作成・設定したら、接続画面に戻って必要な値を入力します。ガイドを開くだけで App が作成されたり、アクセスが許可されたりすることはありません。",
+  "contents": "このページの内容",
+  "opensNewTab": "新しいタブで開きます",
+  "safety": "シークレットと秘密鍵は接続ウィザードの認証情報欄だけに貼り付けてください。URL、Issue、チャット、スクリーンショット、リポジトリに含めないでください。このガイドには秘密情報の入力欄はありません。",
+  "steps": {
+    "register": {
+      "title": "GitHub App の登録画面を開く",
+      "personal": "個人所有の App：プロフィール画像 → Settings → Developer settings → GitHub Apps → New GitHub App と進みます。OAuth Apps ではなく GitHub Apps を選択してください。",
+      "organization": "組織所有の App：プロフィール画像 → Your organizations → 対象組織の Settings → Developer settings → GitHub Apps → New GitHub App と進みます。組織のオーナーまたは GitHub App 管理権限が必要です。",
+      "open": "個人アカウントの GitHub App 登録画面を開く"
+    },
+    "settings": {
+      "title": "基本情報と認証設定を入力する",
+      "name": "GitHub App name に識別しやすい一意の名前を入力します。Homepage URL にチームのウェブサイト、公開プロジェクトのリポジトリ、または所有アカウントの URL を入力してください。",
+      "callback": "Azents に表示された Callback URL 全体を GitHub の Callback URL にそのままコピーして登録してください。個人アカウント認証では必須、App のインストールとしての実行だけなら任意です。Workspace ページの URL や推測した例を使わないでください。",
+      "tokenExpiry": "自分の GitHub アカウントを接続する場合は Expire user authorization tokens のチェックを外してください。現在の Azents は期限のないユーザートークンのみ対応しています。既存の App では Optional Features → User-to-server token expiration → Opt-out を選びます。この設定は App のインストールトークンには影響しません。",
+      "authorization": "Request user authorization (OAuth) during installation と Enable Device Flow はチェックしないでください。接続中の画面に戻るため、アカウント認証は Azents の接続画面から開始します。",
+      "webhook": "この Azents 接続には Webhook の受信先は不要です。Webhook の Active を解除してください。Setup URL は空欄にします。Callback URL とは別の設定です。",
+      "visibility": "Where can this GitHub App be installed? で所有アカウントだけなら Only on this account を選びます。他のアカウントや組織にもインストールする場合のみ Any account を選んでください。選択だけでアクセス権は付与されません。"
+    },
+    "permissions": {
+      "title": "必要な操作の権限だけを選ぶ",
+      "intro": "Repository permissions、Organization permissions、Account permissions を開きます。使わない権限は No access のままにしてください。閲覧だけなら Read-only、データの変更が必要な場合のみ Read & write を選びます。以下の基本権限は Azents の既定の repos、issues、pull_requests、users に対応する出発点です。",
+      "metadata": "リポジトリ権限を選ぶと Metadata は自動で Read-only になります。接続確認のためだけに Administration、組織管理、アカウント権限を一括追加しないでください。",
+      "feature": "Azents の機能グループ",
+      "read": "閲覧のみの場合",
+      "write": "データを変更する場合",
+      "more": "追加の機能グループの権限",
+      "specific": "これらは操作別の出発点であり、グループ内の全ツールの動作を保証するものではありません。追加の API 権限、対応トークン、リポジトリ機能、組織プランが必要な場合があります。個別の操作は下の GitHub API 権限の参照を確認してください。",
+      "save": "権限を選んだら Create GitHub App をクリックします。既存の App を編集した場合は Save changes をクリックします。既存のインストールに新しい権限を追加した場合、そのアカウントのオーナーによる承認が必要です。"
+    },
+    "values": {
+      "title": "App 設定から必要な値を取得する",
+      "intro": "作成後、Developer settings → GitHub Apps → 対象の App → Edit を開きます。同じ名前の Azents 入力欄にコピーしてください。App ID と Client ID は異なる値です。",
+      "appId": "App ID：App の設定（General）にある数値の App ID をコピーします。両方の実行方式で必要です。インストール ID とも異なります。",
+      "clientId": "Client ID：App 設定の Client ID を OAuth Client ID にコピーします。アカウントとして実行する場合だけ必要です。App ID で代用しないでください。",
+      "clientSecret": "Client secret：App の Credentials / Client secrets で Generate a new client secret をクリックします。表示された値を OAuth Client Secret にコピーし、安全に保管してください。同じ値を後から表示することはできません。自分の GitHub アカウントで接続する場合のみ必要です。",
+      "privateKey": "秘密鍵：Credentials → Key pairs → New key を選びます。以前の画面では Private keys → Generate a private key です。ダウンロードされた .pem をローカルで開き、BEGIN/END 行と改行を含む全文を Private Key (PEM) に貼り付けます。両方の方式で必要です。",
+      "warning": ".pem のファイル名ではなく内容を入力してください。GitHub は公開鍵だけを保存するため、ダウンロードした秘密鍵を保護してください。Client secret を秘密鍵欄に貼り付けないでください。"
+    },
+    "install": {
+      "title": "必要なアカウントとリポジトリにインストールする",
+      "path": "App 設定で Install App → 対象アカウントまたは組織の Install を選びます。できれば Only select repositories で必要なリポジトリだけを選び、Install をクリックします。意図的に広い範囲が必要な場合のみ All repositories を選んでください。",
+      "account": "インストールとアカウント認証は別です。App として実行する場合はインストールが必要です。アカウント実行で非公開リポジトリにアクセスする場合も App をインストールし、自分のアカウントにもその権限が必要です。認証だけで全リポジトリが承認されるわけではありません。",
+      "id": "App で接続する場合はインストール ID も必要です。個人アカウントなら Settings の Integrations にある Applications → Installed GitHub Apps → Configure と進みます。組織なら、その組織の Settings の Third-party Access にある GitHub Apps → Configure を開いてください。GitHub URL が /settings/installations/123456 で終わる場合、その末尾の数値がインストール ID です。Installation IDs にその数値だけを入力し、複数ある場合はそれぞれ追加します。",
+      "pending": "Install ではなく Request が表示された場合は組織オーナーに承認を依頼します。申請やインストールページの閲覧だけではインストール・リポジトリ承認は完了していません。"
+    },
+    "finish": {
+      "title": "Azents に戻って確認し、保存する",
+      "values": "Azents の接続画面に戻り、自分のアカウントと App のどちらを使うか確認してください。GitHub App の登録を選び、App ID と Private Key (PEM) を入力します。自分のアカウントで使う場合は OAuth Client ID と OAuth Client Secret、App で使う場合は Installation IDs も入力してください。",
+      "verify": "アカウント実行では GitHub で認証をクリックしてアクセスを承認し、元の設定画面に戻ります。App 実行では接続を確認します。成功メッセージだけでなく、実際のアカウントまたは App と確認されたインストール先を確認してください。",
+      "save": "使う機能と任意の Runtime 設定を選びます。どのアカウント・App を使うか、誰が接続を利用できるか、設定が正しいかを確認して保存してください。GitHub で App を作成・インストール・認証するだけでは、Azents の Toolkit は保存されません。",
+      "sharing": "Workspace で共有する Toolkit では、権限のある参加者も自分のアカウントではなく接続済みのアカウントや App を使います。Runtime へのトークン注入を有効にすると Agent のプロセスがトークンを読めます。このリスクを理解して同意した場合のみ有効にしてください。"
+    }
+  },
+  "permissions": {
+    "repos": {
+      "title": "リポジトリ",
+      "read": "Repository → Contents: Read-only。ファイル・コミット・ブランチの閲覧と git clone。",
+      "write": "Contents: Read & write。ファイル変更・ブランチ・リリース・マージ・git push。.github/workflows の変更には Workflows: Read & write も必要です。"
+    },
+    "issues": {
+      "title": "Issue",
+      "read": "Repository → Issues: Read-only。Issue とコメントの閲覧。",
+      "write": "Issues: Read & write。Issue・コメント・ラベル・担当者の作成や変更。"
+    },
+    "pull_requests": {
+      "title": "プルリクエスト",
+      "read": "Repository → Pull requests: Read-only。PR とレビューの閲覧。コードやコミットには Contents: Read-only も必要です。",
+      "write": "Pull requests: Read & write。PR・レビューの作成や変更。マージ・ブランチ変更には Contents: Read & write も必要です。"
+    },
+    "users": {
+      "title": "ユーザー情報",
+      "read": "公開プロフィールの閲覧にアカウント権限の一括付与は不要です。アカウント専用操作はアカウント実行方式と API 個別の権限が必要です。",
+      "write": "意図したアカウント変更に必要な Account 権限だけを付与してください。インストールトークンは個人ユーザーとして操作できません。"
+    },
+    "actions": {
+      "title": "GitHub Actions",
+      "read": "Repository → Actions: Read-only。実行・ログ・アーティファクトの閲覧。",
+      "write": "Actions: Read & write。ワークフローの開始・再実行・キャンセル。ファイル自体の変更は Contents と Workflows で制御されます。"
+    },
+    "discussions": {
+      "title": "ディスカッション",
+      "read": "Repository → Discussions: Read-only。リポジトリで Discussions が有効である必要があります。",
+      "write": "Discussions: Read & write。ディスカッションとコメントの作成・変更。"
+    },
+    "code_security": {
+      "title": "コードセキュリティ",
+      "read": "Repository → Code scanning alerts、Dependabot alerts、Secret scanning alerts のうち、使う種類だけ Read-only。",
+      "write": "アラートの解除・更新時は対応する権限だけ Read & write にします。セキュリティ機能とプランの条件も適用されます。"
+    },
+    "orgs": {
+      "title": "組織",
+      "read": "Organization → Members: Read-only。非公開のメンバー・チーム情報。公開組織情報では不要な場合があります。",
+      "write": "Organization → Members: Read & write はメンバー・チーム変更が必要な場合だけ。他の管理操作には個別の権限が必要です。"
+    },
+    "projects": {
+      "title": "プロジェクト",
+      "read": "組織のプロジェクトは Organization → Projects: Read-only。非公開の Issue・リポジトリへのアクセスは別です。個人プロジェクトの API は GitHub App トークンに対応しない場合があるため、該当 API を確認してください。",
+      "write": "対応する Projects: Read & write。個人・組織プロジェクトの API によって対応トークンは異なります。"
+    },
+    "notifications": {
+      "title": "通知",
+      "read": "GitHub の通知一覧 API は GitHub App のユーザー・インストールトークンをサポートしません。App 権限を追加しても利用できません。",
+      "write": "通知が必要なら該当 API に対応する別の認証方式を確認してください。このガイドは App 接続を PAT に変更しません。"
+    }
+  },
+  "troubleshooting": {
+    "title": "困ったときに確認すること",
+    "callback": "戻り先やコールバックのエラー：GitHub の Callback URL と Azents に現在表示された全文を比較します。元のウィザードから認証を再開し、コピーしたコールバック URL を直接開かないでください。",
+    "credentials": "認証情報のエラー：App ID と Client ID、PEM 全文、シークレット・鍵の失効を確認します。必要なら GitHub で再生成し、認証情報欄だけに入力してください。",
+    "access": "リポジトリが見つからない・権限拒否：対象リポジトリ、追加権限のオーナー承認、アカウント実行での自分のアクセス権を確認します。接続成功は全機能・全リポジトリのアクセス保証ではありません。"
+  },
+  "sources": {
+    "title": "GitHub 公式リファレンス",
+    "intro": "GitHub のメニュー名は変更されることがあります。最新の登録・インストール手順と API の権限は以下で確認できます。",
+    "register": "GitHub App の登録",
+    "permissions": "GitHub App の権限選択",
+    "privateKeys": "秘密鍵の生成と保護",
+    "tokens": "ユーザートークンの期限設定",
+    "install": "自分の GitHub App のインストール",
+    "api": "GitHub App に必要な API 権限",
+    "notifications": "通知 API のトークン対応"
+  }
+}

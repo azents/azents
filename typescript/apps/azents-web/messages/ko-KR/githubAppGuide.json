@@ -1,0 +1,127 @@
+{
+  "title": "GitHub App 등록 가이드",
+  "intro": "연결 화면은 그대로 두고, 이 안내를 보면서 GitHub에서 App을 만들어 주세요. 설정을 마치면 연결 화면으로 돌아가 필요한 값을 입력하면 됩니다. 이 가이드를 여는 것만으로 App이 만들어지거나 권한이 생기지는 않아요.",
+  "contents": "목차",
+  "opensNewTab": "새 탭에서 열기",
+  "safety": "Secret과 개인 키는 연결 화면의 자격 증명 입력란에만 붙여 넣으세요. URL, 이슈, 채팅, 스크린샷, 저장소에 올리면 안 됩니다. 이 가이드에는 비밀값을 입력할 곳이 없어요.",
+  "steps": {
+    "register": {
+      "title": "GitHub에서 App 만들기 화면 열기",
+      "personal": "내 계정에 App을 만들려면 오른쪽 위 프로필 사진 → Settings → Developer settings → GitHub Apps → New GitHub App을 차례로 누르세요. OAuth Apps가 아니라 GitHub Apps입니다.",
+      "organization": "조직에 App을 만들려면 프로필 사진 → Your organizations → 해당 조직의 Settings → Developer settings → GitHub Apps → New GitHub App으로 들어가세요. 조직 소유자이거나 GitHub App을 관리할 권한이 있어야 합니다.",
+      "open": "내 계정에 GitHub App 만들기"
+    },
+    "settings": {
+      "title": "이름과 기본 설정 입력하기",
+      "name": "GitHub App name에 알아보기 쉬운 이름을 넣으세요. GitHub에서 이미 쓰는 이름은 사용할 수 없어요. Homepage URL에는 팀 홈페이지, 공개 프로젝트 저장소, 또는 App을 소유할 GitHub 계정의 주소를 넣으면 됩니다.",
+      "callback": "연결 화면에 표시된 Callback URL을 GitHub의 Callback URL에 그대로 복사해 등록하세요. 내 계정으로 인증할 때는 꼭 필요하고, App으로만 사용할 때는 선택 사항이에요. Workspace 화면 주소나 예시 주소로 바꾸지 마세요.",
+      "tokenExpiry": "내 계정으로 연결하려면 Expire user authorization tokens 체크를 해제하세요. 현재 Azents는 만료되지 않는 사용자 토큰만 지원합니다. 이미 만든 App이라면 Optional Features → User-to-server token expiration에서 Opt-out을 누르세요. App으로만 사용할 때의 설치 토큰에는 이 설정이 영향을 주지 않아요.",
+      "authorization": "Request user authorization (OAuth) during installation과 Enable Device Flow는 체크하지 마세요. 계정 인증은 Azents 연결 화면에서 시작해야 진행 중인 연결로 돌아올 수 있어요.",
+      "webhook": "이 연결에는 웹훅이 필요하지 않아요. Webhook의 Active 체크를 해제하고 Setup URL은 비워 두세요. Setup URL은 앞에서 입력한 Callback URL과 다른 항목입니다.",
+      "visibility": "Where can this GitHub App be installed?에서 App을 소유한 계정에만 설치하려면 Only on this account를 선택하세요. 다른 계정이나 조직에도 설치하려면 Any account를 선택하면 됩니다. 이 설정만으로 다른 저장소에 접근할 수 있는 건 아니에요."
+    },
+    "permissions": {
+      "title": "사용할 기능에 필요한 권한 고르기",
+      "intro": "Repository permissions, Organization permissions, Account permissions를 펼쳐 보세요. 읽기만 할 때는 Read-only, 내용을 바꿔야 할 때만 Read & write를 선택합니다. 나머지는 No access로 두세요. 아래는 처음 선택되어 있는 기능인 repos, issues, pull_requests, users에 필요한 기본 안내입니다.",
+      "metadata": "저장소 권한을 고르면 Metadata는 자동으로 Read-only가 됩니다. 연결이 안 된다고 Administration이나 조직·계정 권한까지 모두 켜지는 마세요.",
+      "feature": "Azents에서 사용할 기능",
+      "read": "읽기만 한다면",
+      "write": "수정도 한다면",
+      "more": "다른 기능의 권한도 보기",
+      "specific": "아래 권한은 자주 하는 작업을 기준으로 정리했어요. 같은 기능 안에서도 도구마다 추가 권한이나 지원하는 토큰이 다를 수 있습니다. 저장소에서 기능을 켜야 하거나 특정 요금제가 필요한 경우도 있어요. 정확한 작업별 권한은 아래 GitHub 공식 문서에서 확인하세요.",
+      "save": "권한을 고른 뒤 Create GitHub App을 누르세요. 기존 App을 수정했다면 Save changes를 누릅니다. 이미 설치한 App에 권한을 추가했다면, 설치한 계정의 소유자가 승인해야 새 권한을 사용할 수 있어요."
+    },
+    "values": {
+      "title": "연결에 필요한 값 복사하기",
+      "intro": "App을 만든 뒤 Developer settings → GitHub Apps에서 해당 App의 Edit를 누르세요. 아래 값을 찾아 연결 화면의 같은 이름 입력란에 넣으면 됩니다. App ID와 Client ID는 서로 다른 값이에요.",
+      "appId": "App ID: App 설정의 General에 있는 숫자 App ID를 복사하세요. 내 계정으로 쓰든 App으로 쓰든 필요합니다. 뒤에서 확인할 설치 ID와도 다른 숫자예요.",
+      "clientId": "Client ID: App 설정에 있는 Client ID를 OAuth Client ID에 넣으세요. 내 계정으로 사용할 때만 필요합니다. App ID를 대신 넣지 마세요.",
+      "clientSecret": "Client secret: App의 Credentials / Client secrets에서 Generate a new client secret을 누르세요. 새로 나온 값을 OAuth Client Secret에 넣습니다. 화면에 보일 때 안전하게 보관하세요. 나중에 같은 값을 다시 볼 수는 없어요. 내 계정으로 사용할 때만 필요합니다.",
+      "privateKey": "개인 키: Credentials → Key pairs → New key를 누르세요. 이전 화면에서는 Private keys → Generate a private key입니다. .pem 파일이 내려받아지면 내 컴퓨터에서 열어 전체 내용을 Private Key (PEM)에 붙여 넣으세요. BEGIN/END 줄과 줄바꿈도 그대로 넣어야 합니다. 두 연결 방식 모두 필요해요.",
+      "warning": ".pem 파일의 이름이 아니라 내용을 넣어야 해요. GitHub는 공개 키만 보관하므로 내려받은 개인 키는 안전하게 보관하세요. Client secret을 개인 키 입력란에 넣지 마세요."
+    },
+    "install": {
+      "title": "사용할 계정과 저장소에 App 설치하기",
+      "path": "App 설정에서 Install App을 누르고, 사용할 계정이나 조직 옆의 Install을 누르세요. 가능하면 Only select repositories를 선택해 필요한 저장소만 고른 뒤 Install을 누릅니다. 정말 모든 저장소가 필요할 때만 All repositories를 선택하세요.",
+      "account": "App 설치와 내 계정 인증은 별개예요. App으로 쓰려면 설치가 필요합니다. 내 계정으로 쓸 때도 비공개 저장소에 접근하려면 App을 설치해야 하고, 내 GitHub 계정에도 그 저장소의 권한이 있어야 합니다. 계정 인증만 했다고 모든 저장소를 쓸 수 있는 건 아니에요.",
+      "id": "App으로 쓸 때는 설치 ID도 필요해요. 개인 계정이라면 Settings에서 Integrations 아래 Applications → Installed GitHub Apps로 들어가 해당 App의 Configure를 누르세요. 조직이라면 조직의 Settings에서 Third-party Access 아래 GitHub Apps → Configure로 들어가세요. 주소 끝이 /settings/installations/123456이라면 마지막 숫자 123456이 설치 ID입니다. Installation IDs에 숫자만 넣으세요. 여러 곳에 설치했다면 각 설치 ID를 추가합니다.",
+      "pending": "Install 대신 Request가 보이면 조직 소유자에게 승인을 요청하세요. 요청을 보냈거나 설치 화면을 열었다는 것만으로 설치나 저장소 승인이 끝난 건 아니에요."
+    },
+    "finish": {
+      "title": "연결 화면으로 돌아와 확인하고 저장하기",
+      "values": "연결 화면으로 돌아가 어떤 계정으로 사용할지 확인하세요. 새로운 GitHub App 등록을 선택하고 App ID와 Private Key (PEM)를 입력합니다. 내 계정으로 쓴다면 OAuth Client ID와 OAuth Client Secret을, App으로 쓴다면 Installation IDs도 넣으세요.",
+      "verify": "내 계정으로 쓴다면 GitHub에서 인증을 눌러 요청한 접근을 승인하세요. 인증을 마치면 진행하던 연결 화면으로 돌아옵니다. App으로 쓴다면 연결 확인을 누르세요. 성공 메시지만 보지 말고, 표시된 계정·App 이름과 설치 대상이 맞는지도 확인해 주세요.",
+      "save": "이어서 사용할 기능과 Runtime 설정을 고르세요. 어떤 계정으로 실행되는지, 누가 사용할 수 있는지, 설정이 맞는지 확인한 뒤 저장합니다. GitHub에서 App을 만들거나 설치·인증하는 것만으로 Azents의 Toolkit이 저장되지는 않아요.",
+      "sharing": "Workspace에서 공유하는 Toolkit은 권한이 있는 참여자도 각자의 GitHub 계정이 아니라 연결해 둔 계정이나 App을 사용합니다. Runtime에 토큰을 주입하면 Agent 프로세스가 토큰을 읽을 수 있어요. 이 위험을 이해하고 동의할 때만 켜세요."
+    }
+  },
+  "permissions": {
+    "repos": {
+      "title": "저장소",
+      "read": "Repository → Contents를 Read-only로 설정하세요. 파일·커밋·브랜치를 읽거나 git clone을 할 수 있습니다.",
+      "write": "파일 수정·브랜치 변경·릴리스·병합·git push가 필요하면 Contents를 Read & write로 설정하세요. .github/workflows 파일도 바꾼다면 Workflows의 Read & write가 추가로 필요합니다."
+    },
+    "issues": {
+      "title": "이슈",
+      "read": "Repository → Issues를 Read-only로 설정하면 이슈와 댓글을 읽을 수 있어요.",
+      "write": "이슈나 댓글을 만들고 수정하거나 라벨·담당자를 바꾸려면 Issues를 Read & write로 설정하세요."
+    },
+    "pull_requests": {
+      "title": "Pull Request",
+      "read": "Repository → Pull requests를 Read-only로 설정하면 PR과 리뷰를 볼 수 있어요. 코드·커밋도 보려면 Contents의 Read-only가 필요합니다.",
+      "write": "PR이나 리뷰를 만들고 수정하려면 Pull requests를 Read & write로 설정하세요. 병합이나 브랜치 변경에는 Contents의 Read & write도 필요합니다."
+    },
+    "users": {
+      "title": "사용자 정보",
+      "read": "공개 프로필을 보는 데 계정 권한을 모두 켤 필요는 없어요. 계정 전용 작업은 내 계정으로 연결하고, 해당 API가 요구하는 권한만 추가하세요.",
+      "write": "내 계정의 정보를 바꿔야 할 때만 필요한 Account 권한을 추가하세요. 설치 토큰으로는 개인 사용자를 대신해 작업할 수 없습니다."
+    },
+    "actions": {
+      "title": "GitHub Actions",
+      "read": "Repository → Actions를 Read-only로 설정하면 워크플로 실행 내역·로그·아티팩트를 볼 수 있어요.",
+      "write": "워크플로를 실행·재실행·취소하려면 Actions를 Read & write로 설정하세요. 워크플로 파일 자체를 바꾸는 권한은 Contents와 Workflows입니다."
+    },
+    "discussions": {
+      "title": "토론",
+      "read": "Repository → Discussions를 Read-only로 설정하세요. 저장소에서도 Discussions 기능이 켜져 있어야 해요.",
+      "write": "토론이나 댓글을 만들고 수정하려면 Discussions를 Read & write로 설정하세요."
+    },
+    "code_security": {
+      "title": "코드 보안",
+      "read": "Repository의 Code scanning alerts, Dependabot alerts, Secret scanning alerts 중 볼 경고만 Read-only로 설정하세요.",
+      "write": "경고를 해제하거나 상태를 바꿀 때만 해당 권한을 Read & write로 설정하세요. 저장소에서 보안 기능이 켜져 있어야 하고, 필요한 요금제 조건도 충족해야 합니다."
+    },
+    "orgs": {
+      "title": "조직",
+      "read": "비공개 멤버·팀 정보를 보려면 Organization → Members를 Read-only로 설정하세요. 공개 조직 정보는 이 권한 없이도 볼 수 있는 경우가 있어요.",
+      "write": "멤버나 팀을 바꿔야 할 때만 Organization → Members를 Read & write로 설정하세요. 다른 조직 관리 작업에는 그 작업에 맞는 권한이 따로 필요합니다."
+    },
+    "projects": {
+      "title": "프로젝트",
+      "read": "조직 프로젝트는 Organization → Projects를 Read-only로 설정하세요. 연결된 비공개 이슈·저장소의 접근 권한은 별도입니다. 개인 프로젝트 API는 GitHub App 토큰을 지원하지 않을 수 있으니 사용할 API를 확인해 주세요.",
+      "write": "프로젝트를 바꾸려면 해당 Projects 권한을 Read & write로 설정하세요. 개인·조직 프로젝트마다 사용할 수 있는 토큰 종류가 다를 수 있어요."
+    },
+    "notifications": {
+      "title": "알림",
+      "read": "GitHub 알림 목록 API는 GitHub App 사용자·설치 토큰을 지원하지 않아요. App 권한을 더 추가해도 사용할 수 없습니다.",
+      "write": "알림이 꼭 필요하다면 사용할 API에 맞는 다른 인증 방식을 확인하세요. 이 가이드가 App 연결을 PAT 연결로 바꿔 주지는 않습니다."
+    }
+  },
+  "troubleshooting": {
+    "title": "잘 안 된다면 여기부터 확인하세요",
+    "callback": "다른 화면으로 돌아오거나 Callback 오류가 나나요? GitHub에 넣은 Callback URL과 연결 화면에 지금 표시된 주소가 완전히 같은지 확인하세요. 연결 화면에서 인증을 다시 시작해야 합니다. 복사한 Callback 주소를 직접 열지는 마세요.",
+    "credentials": "입력한 값이 잘못됐다고 나오나요? App ID와 Client ID를 혼동하지 않았는지, PEM 전체 내용을 넣었는지, Secret이나 키가 폐기되지 않았는지 확인하세요. 필요하면 GitHub에서 새 값을 만들어 자격 증명 입력란에만 다시 넣습니다.",
+    "access": "저장소가 보이지 않거나 권한이 거부되나요? 설치할 때 그 저장소를 골랐는지, 새 권한을 소유자가 승인했는지 확인하세요. 내 계정으로 쓴다면 내 계정의 저장소 권한도 확인해야 합니다. 연결에 성공했다고 모든 기능으로 모든 저장소를 사용할 수 있는 건 아니에요."
+  },
+  "sources": {
+    "title": "GitHub 공식 문서",
+    "intro": "GitHub 화면의 메뉴 이름은 바뀔 수 있어요. 최신 등록·설치 방법과 작업별 권한은 아래 공식 문서에서 확인할 수 있습니다.",
+    "register": "GitHub App 등록 방법",
+    "permissions": "GitHub App 권한 고르기",
+    "privateKeys": "개인 키 만들고 안전하게 보관하기",
+    "tokens": "사용자 토큰의 만료 설정 확인하기",
+    "install": "직접 만든 GitHub App 설치하기",
+    "api": "GitHub App의 작업별 필요 권한",
+    "notifications": "알림 API에서 쓸 수 있는 토큰"
+  }
+}

@@ -113,6 +113,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/toolkits/**
   - typescript/apps/azents-web/src/shared/toolkits/**
   - typescript/apps/azents-web/src/features/toolkit-setup/**
+  - typescript/apps/azents-web/src/features/github-app-guide/**
+  - typescript/apps/azents-web/src/app/(app)/github-app-guide/**
   - typescript/apps/azents-web/src/shared/lib/redacted-credentials.ts
   - typescript/apps/azents-web/src/shared/lib/toolkit-identifiers.ts
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
@@ -122,7 +124,7 @@ code_paths:
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-10-13
-spec_version: 144
+spec_version: 145
 ---
 
 # Toolkit
@@ -545,6 +547,29 @@ remain visible. Personal identity maps to PAT or App user-account modes; App
 identity maps to installation modes. Toolkit ownership is the entry context,
 not a consequence of identity selection. Saved Toolkit editing retains its
 existing controls and authorization behavior.
+
+The creation surface uses numbered section panes, explicit selected/check states,
+feature-choice tiles and a compact final settings summary. Explicit identity,
+method and next-section gestures move focus and scroll to the revealed heading
+in the actual page or nested editor scroll container; ordinary edits, query
+refreshes and initial mounting do not trigger progression scrolling. Reduced
+motion preferences are respected. A sole available method is selected only
+from successful availability evidence; a sole synchronized installation may be
+selected automatically without repeating an explicit deselection. Neither
+selection starts provider authorization, acknowledges Runtime risk, or publishes.
+
+Self-managed App setup links to the localized `/github-app-guide` page in a new
+tab. The read-only guide describes user-account versus installation execution,
+the GitHub registration menus, callback/settings choices, least-privilege
+feature-specific permissions, credential locations and installation IDs in one
+ordered registration flow. It has no preliminary identity-confirmation section.
+The callback URL is recommended during registration and marked required for
+personal-account OAuth, optional for installation-only execution. Personal App
+instructions match the existing non-expiring-user-token contract. The guide
+contains no credential inputs and carries no setup secrets or attempt IDs in
+its URL. Registration, installation, account authorization and final Toolkit
+publication remain distinct actions; the guide documents API/token limitations
+rather than promising that all feature groups work with every credential mode.
 
 Management setup availability retains the redacted registration presence field
 and adds per-mode local readiness. Loading or query failure is distinct from
@@ -1528,6 +1553,7 @@ notification execute only after the operation returns.
 
 ## Changelog
 
+- **2026-10-13** — Refined the GitHub Wizard with explicit selection states, gesture-driven page/modal progression, authoritative single-option selection, multilingual manual previews and a localized read-only App registration guide. Provider authority and explicit final publication remain unchanged.
 - **2026-10-13** — Replaced new GitHub creation with a progressive identity/method/verification/features/Runtime/final-review Wizard. Added exact-scope SDK-backed display/verification projections, per-mode readiness, required final settings in atomic user creation, and explicit candidate abandonment with final-publication-only close gating. Saved editing, five execution modes, generic MCP tests, existing encrypted attempts and Worker/Runtime authority remain.
 
 - **2026-10-11** (spec_version 143) — Aligned current collaboration guidance with

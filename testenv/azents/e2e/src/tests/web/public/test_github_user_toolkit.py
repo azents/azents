@@ -14,7 +14,6 @@ from azentspublicclient.models.toolkit_config_create_request import (
     ToolkitConfigCreateRequest,
 )
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as ec
 
@@ -38,8 +37,8 @@ from tests.web.public.test_agent_toolkits import (
 E2E_PLANNER_FALLBACK_WEIGHT = 45.0
 
 
-def _click_identity(driver: WebDriver, title: str) -> None:
-    """Select the real identity card whose accessible name includes its description."""
+def _click_choice(driver: WebDriver, title: str) -> None:
+    """Select an identity or method choice by its visible title."""
     _wait(driver).until(
         ec.element_to_be_clickable(
             (By.XPATH, f"//button[.//*[normalize-space()={title!r}]]")
@@ -207,8 +206,8 @@ def test_new_github_user_creation_returns_before_publication(
                 By.XPATH, '//*[@role="option" and normalize-space()="GitHub"]'
             )
         ).click()
-    _click_identity(browser_driver, "Connect with my GitHub account")
-    _click_button(browser_driver, "Register a GitHub App")
+    _click_choice(browser_driver, "Connect with my GitHub account")
+    _click_choice(browser_driver, "Register a GitHub App")
     _fill_text_input(browser_driver, "App ID", "123")
     _fill_text_input(browser_driver, "OAuth Client ID", "Iv1.azents-test")
     _fill_text_input(browser_driver, "OAuth Client Secret", "synthetic-client-secret")
@@ -278,23 +277,21 @@ def test_new_github_user_creation_returns_before_publication(
         browser_driver.set_window_size(1440, 1000)
         return
     _click_button(browser_driver, "Continue to features")
-    feature_input = _wait(browser_driver).until(
+    _wait(browser_driver).until(
         ec.element_to_be_clickable(
             (
                 By.XPATH,
-                '//label[normalize-space(text())="Enabled Toolsets"]'
-                "/following::input[1]",
+                '//label[normalize-space()="Actions"]',
             )
         )
-    )
-    feature_input.send_keys("actions", Keys.ENTER)
+    ).click()
     _click_button(browser_driver, "Continue to Runtime")
     _wait(browser_driver).until(
         ec.element_to_be_clickable(
             (
                 By.XPATH,
-                '//label[starts-with(normalize-space(), "Inject GitHub tokens '
-                'into Runtime environment variables")]',
+                '//label[starts-with(normalize-space(), "Use this connection '
+                'for git and gh commands")]',
             )
         )
     ).click()
@@ -302,7 +299,8 @@ def test_new_github_user_creation_returns_before_publication(
         ec.element_to_be_clickable(
             (
                 By.XPATH,
-                '//label[normalize-space()="I understand the exposure risk"]',
+                '//label[normalize-space()="I understand that Agent processes '
+                'can read or copy these tokens."]',
             )
         )
     ).click()

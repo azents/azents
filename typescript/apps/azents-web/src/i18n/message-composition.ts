@@ -14,6 +14,7 @@ export const MESSAGE_NAMESPACES = [
   "elevation",
   "externalAccountLinks",
   "externalChannelApproval",
+  "githubAppGuide",
   "memberProfile",
   "metadata",
   "oauth",

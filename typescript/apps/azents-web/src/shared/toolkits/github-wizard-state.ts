@@ -36,7 +36,7 @@ export const GITHUB_FEATURE_GROUPS = [
   "orgs",
   "projects",
   "discussions",
-];
+] as const;
 export interface GitHubWizardSettings {
   name: string;
   slug: string;
@@ -149,4 +149,22 @@ export function wizardCandidateRequiresRestart(error: unknown): boolean {
     error.data.code === "FORBIDDEN" ||
     error.data.code === "UNAUTHORIZED"
   );
+}
+
+export function gitHubWizardConnectionReady(
+  connection: GitHubWizardConnection,
+): boolean {
+  return connection.type === "CANDIDATE"
+    ? connection.app.type === "READY"
+    : connection.type === "VERIFIED" &&
+        connection.transport === "CURRENT" &&
+        connection.verification.connectivity.status === "ready" &&
+        connection.verification.installations.every(
+          (target) => target.status === "ready",
+        );
+}
+export function isKnownGitHubFeature(
+  value: string,
+): value is (typeof GITHUB_FEATURE_GROUPS)[number] {
+  return GITHUB_FEATURE_GROUPS.some((group) => group === value);
 }
