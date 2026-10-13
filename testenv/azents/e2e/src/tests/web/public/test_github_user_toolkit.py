@@ -1,5 +1,7 @@
 """Real browser popup/callback/review/confirmation against synthetic GitHub."""
 
+import json
+
 import azentsadminclient
 import azentspublicclient
 import pytest
@@ -12,10 +14,13 @@ from azentspublicclient.models.toolkit_config_create_request import (
     ToolkitConfigCreateRequest,
 )
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
+from selenium.webdriver.support import expected_conditions as ec
 
 from support.utils import single_candidate_model_options
 from tests.required.admin.test_03_system_settings import _generate_private_key
+from tests.required.public.test_agent_execution_persistence import json_object_payload
 from tests.required.public.test_github_user_toolkit import (
     _create_confirmed,
     _scenario,
@@ -31,6 +36,15 @@ from tests.web.public.test_agent_toolkits import (
 )
 
 E2E_PLANNER_FALLBACK_WEIGHT = 45.0
+
+
+def _click_identity(driver: WebDriver, title: str) -> None:
+    """Select the real identity card whose accessible name includes its description."""
+    _wait(driver).until(
+        ec.element_to_be_clickable(
+            (By.XPATH, f"//button[.//*[normalize-space()={title!r}]]")
+        )
+    ).click()
 
 
 def test_github_user_popup_callback_requires_explicit_sharing_confirmation(
@@ -134,7 +148,9 @@ def test_github_user_popup_callback_requires_explicit_sharing_confirmation(
     browser_driver.switch_to.window(original_window)
 
 
-@pytest.mark.parametrize("agent_owned", [False, True])
+@pytest.mark.parametrize(
+    "agent_owned,publish", [(False, True), (True, True), (True, False)]
+)
 def test_new_github_user_creation_returns_before_publication(
     browser_driver: WebDriver,
     azents_main_web_url: str,
@@ -143,6 +159,7 @@ def test_new_github_user_creation_returns_before_publication(
     admin_api_client: azentsadminclient.ApiClient,
     github_validation_proxy_url: str,
     agent_owned: bool,
+    publish: bool,
 ) -> None:
     """Same-context mobile-sized creation returns and requires explicit sharing."""
     _scenario(github_validation_proxy_url, "user_success")
@@ -190,18 +207,8 @@ def test_new_github_user_creation_returns_before_publication(
                 By.XPATH, '//*[@role="option" and normalize-space()="GitHub"]'
             )
         ).click()
-    _fill_text_input(browser_driver, "Name", "Authorized browser creation")
-    browser_driver.find_element(
-        By.XPATH,
-        '//label[normalize-space(text())="Authentication Method"]/following::input[1]',
-    ).click()
-    _wait(browser_driver).until(
-        lambda d: d.find_element(
-            By.XPATH,
-            '//*[@role="option" and normalize-space()='
-            '"GitHub App (self-managed) · user account"]',
-        )
-    ).click()
+    _click_identity(browser_driver, "Connect with my GitHub account")
+    _click_button(browser_driver, "Register a GitHub App")
     _fill_text_input(browser_driver, "App ID", "123")
     _fill_text_input(browser_driver, "OAuth Client ID", "Iv1.azents-test")
     _fill_text_input(browser_driver, "OAuth Client Secret", "synthetic-client-secret")
@@ -211,8 +218,8 @@ def test_new_github_user_creation_returns_before_publication(
         "/following::textarea[1]",
     ).send_keys(_generate_private_key())
     window = browser_driver.current_window_handle
-    _click_button(browser_driver, "Authorize GitHub account")
-    _assert_visible_text(browser_driver, "Confirm GitHub execution account")
+    _click_button(browser_driver, "Authorize with GitHub")
+    _assert_visible_text(browser_driver, "connected-user")
     assert browser_driver.current_window_handle == window
     assert browser_driver.current_url == azents_main_web_url + path
     assert (
@@ -220,13 +227,88 @@ def test_new_github_user_creation_returns_before_publication(
         and "state=" not in browser_driver.current_url
     )
     api = ToolkitV1Api(public_api_client)
-    assert not any(
-        item.name == "Authorized browser creation"
-        for item in api.toolkit_v1_list_toolkit_configs(
-            workspace.handle, _headers=headers
-        ).items
+    if agent_id:
+        assert not any(
+            item.toolkit.toolkit_type == "github"
+            for item in api.toolkit_v1_list_agent_toolkit_management(
+                handle=workspace.handle, agent_id=agent_id, _headers=headers
+            ).items
+        )
+    else:
+        assert not any(
+            item.toolkit_type == "github"
+            for item in api.toolkit_v1_list_toolkit_configs(
+                workspace.handle, _headers=headers
+            ).items
+        )
+    if not publish:
+        assert agent_id is not None
+        stored = browser_driver.execute_script(
+            "return sessionStorage.getItem('azents.github-user.creation')"
+        )
+        assert isinstance(stored, str)
+        context = json_object_payload(json.loads(stored), label="Creation context")
+        attempt = context["attemptId"]
+        assert isinstance(attempt, str)
+        candidate_url = (
+            f"{azents_public_server_url}/toolkit/v1/workspaces/{workspace.handle}"
+            f"/agents/{agent_id}/github-user-creations/{attempt}"
+        )
+        browser_driver.find_element(
+            By.CSS_SELECTOR, '[role="dialog"] button[aria-label="Close"]'
+        ).click()
+        _wait(browser_driver).until(
+            lambda _: (
+                requests.get(candidate_url, headers=headers, timeout=10).status_code
+                == 404
+            )
+        )
+        assert (
+            browser_driver.execute_script(
+                "return sessionStorage.getItem('azents.github-user.creation')"
+            )
+            is None
+        )
+        assert not any(
+            item.toolkit.toolkit_type == "github"
+            for item in api.toolkit_v1_list_agent_toolkit_management(
+                handle=workspace.handle, agent_id=agent_id, _headers=headers
+            ).items
+        )
+        browser_driver.set_window_size(1440, 1000)
+        return
+    _click_button(browser_driver, "Continue to features")
+    feature_input = _wait(browser_driver).until(
+        ec.element_to_be_clickable(
+            (
+                By.XPATH,
+                '//label[normalize-space(text())="Enabled Toolsets"]'
+                "/following::input[1]",
+            )
+        )
     )
-    _click_button(browser_driver, "Confirm account and sharing")
+    feature_input.send_keys("actions", Keys.ENTER)
+    _click_button(browser_driver, "Continue to Runtime")
+    _wait(browser_driver).until(
+        ec.element_to_be_clickable(
+            (
+                By.XPATH,
+                '//label[starts-with(normalize-space(), "Inject GitHub tokens '
+                'into Runtime environment variables")]',
+            )
+        )
+    ).click()
+    _wait(browser_driver).until(
+        ec.element_to_be_clickable(
+            (
+                By.XPATH,
+                '//label[normalize-space()="I understand the exposure risk"]',
+            )
+        )
+    ).click()
+    _click_button(browser_driver, "Review connection")
+    _fill_text_input(browser_driver, "Name", "Authorized browser creation")
+    _click_button(browser_driver, "Save GitHub connection")
     if agent_owned:
         _assert_visible_text(browser_driver, "Authorized browser creation")
     else:
@@ -241,4 +323,24 @@ def test_new_github_user_creation_returns_before_publication(
             )
         )
     assert "synthetic-token" not in browser_driver.page_source
+    if agent_id:
+        saved = next(
+            item.toolkit
+            for item in api.toolkit_v1_list_agent_toolkit_management(
+                handle=workspace.handle, agent_id=agent_id, _headers=headers
+            ).items
+            if item.toolkit.name == "Authorized browser creation"
+        )
+        assert "actions" in saved.config["toolsets"]
+        assert saved.config["inject_runtime_environment"] is True
+    else:
+        saved_toolkit = next(
+            item
+            for item in api.toolkit_v1_list_toolkit_configs(
+                workspace.handle, _headers=headers
+            ).items
+            if item.name == "Authorized browser creation"
+        )
+        assert "actions" in saved_toolkit.config["toolsets"]
+        assert saved_toolkit.config["inject_runtime_environment"] is True
     browser_driver.set_window_size(1440, 1000)

@@ -34,22 +34,22 @@ import { gitHubUserRegistrationDirty } from "../github-user-credentials";
 import { isGitHubUserMode } from "../github-user-oauth-state";
 import { GithubConfigFieldsContainer } from "../GithubConfigFieldsContainer";
 import { GitHubUserAuthorizationContainer } from "../GitHubUserAuthorizationContainer";
+import { GitHubWizardContainer } from "../GitHubWizardContainer";
 import { GoogleAnalyticsConfigFieldsContainer } from "../GoogleAnalyticsConfigFieldsContainer";
 import { KubernetesConfigFieldsContainer } from "../KubernetesConfigFieldsContainer";
 import { McpConfigFieldsContainer } from "../McpConfigFieldsContainer";
 import { NotionConfigFieldsContainer } from "../NotionConfigFieldsContainer";
 import { SentryConfigFieldsContainer } from "../SentryConfigFieldsContainer";
-import { GitHubUserCreation } from "./GitHubUserCreation";
 import { ShellConfigFields } from "./ShellConfigFields";
 import type { ToolkitFormValues } from "../schemas";
 import type { ToolkitConfigProjection } from "../toolkit-config-projection";
 import type { MutationState, ToolkitConfigFormState } from "../types";
-import type { GitHubUserCreationProps } from "./GitHubUserCreation";
 import type { UseFormReturnType } from "@mantine/form";
 import type { FormEventHandler, ReactNode } from "react";
 
 export interface ToolkitFormProps {
-  githubCreation?: GitHubUserCreationProps;
+  onComplete?: () => void;
+  onAbandonReady?: (abandon: (() => void) | null) => void;
   configProjection: ToolkitConfigProjection;
   configurationFields?: ReactNode;
   handle: string;
@@ -101,7 +101,8 @@ function oauthConnectionStatusTranslationKey(
 }
 
 export function ToolkitForm({
-  githubCreation,
+  onComplete,
+  onAbandonReady,
   configProjection,
   configurationFields,
   handle,
@@ -153,21 +154,21 @@ export function ToolkitForm({
     );
   }
 
-  if (
-    githubCreation != null &&
-    githubCreation.state.type !== "IDLE" &&
-    !(
-      githubCreation.state.type === "ERROR" &&
-      githubCreation.state.attemptId == null
-    )
-  ) {
+  if (!isEdit && currentToolSlug === "github") {
     return (
-      <Container size="md" py={embedded ? 0 : "xl"}>
-        <Stack gap="lg">
-          <Title order={3}>{t("createTitle")}</Title>
-          <GitHubUserCreation {...githubCreation} />
-        </Stack>
-      </Container>
+      <>
+        {configurationFields ?? (
+          <GitHubWizardContainer
+            handle={handle}
+            agentId={agentId}
+            embedded={embedded}
+            initialDescription={form.getValues().description}
+            onComplete={onComplete}
+            onPendingChange={onUserSetupPendingChange}
+            onAbandonReady={onAbandonReady}
+          />
+        )}
+      </>
     );
   }
 
@@ -559,9 +560,6 @@ export function ToolkitForm({
             {mutationState.type === "IDLE" && mutationState.error && (
               <Alert color="red">{mutationState.error}</Alert>
             )}
-            {githubCreation?.state.type === "ERROR" && (
-              <GitHubUserCreation {...githubCreation} />
-            )}
 
             <Group justify="flex-end">
               <Button
@@ -576,12 +574,7 @@ export function ToolkitForm({
                 type="submit"
                 loading={mutationState.type === "SUBMITTING"}
               >
-                {isEdit
-                  ? t("save")
-                  : currentToolSlug === "github" &&
-                      isGitHubUserMode(form.getValues().config.github_auth_type)
-                    ? t("github.user.authorize")
-                    : t("create")}
+                {isEdit ? t("save") : t("create")}
               </Button>
             </Group>
           </Stack>

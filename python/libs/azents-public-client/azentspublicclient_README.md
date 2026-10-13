@@ -239,11 +239,17 @@ Class | Method | HTTP request | Description
 *ExternalChannelV1Api* | [**external_channel_v1_validate_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_validate_connection) | **POST** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/validate | Validate Connection
 *ExternalChannelV1Api* | [**external_channel_v1_validate_multi_discord_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_validate_multi_discord_connection) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/validate | Validate Multi Discord Connection
 *ExternalChannelV1Api* | [**external_channel_v1_validate_multi_slack_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_validate_multi_slack_connection) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/validate | Validate Multi Slack Connection
+*GitHubSetupV1Api* | [**github_setup_v1_agent_setup_app**](azentspublicclient/docs/GitHubSetupV1Api.md#github_setup_v1_agent_setup_app) | **GET** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/github/setup-app | Agent Setup App
+*GitHubSetupV1Api* | [**github_setup_v1_agent_setup_verification**](azentspublicclient/docs/GitHubSetupV1Api.md#github_setup_v1_agent_setup_verification) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/github/setup-verification | Agent Setup Verification
+*GitHubSetupV1Api* | [**github_setup_v1_shared_setup_app**](azentspublicclient/docs/GitHubSetupV1Api.md#github_setup_v1_shared_setup_app) | **GET** /toolkit/v1/workspaces/{handle}/github/setup-app | Shared Setup App
+*GitHubSetupV1Api* | [**github_setup_v1_shared_setup_verification**](azentspublicclient/docs/GitHubSetupV1Api.md#github_setup_v1_shared_setup_verification) | **POST** /toolkit/v1/workspaces/{handle}/github/setup-verification | Shared Setup Verification
+*GitHubUserCreationV1Api* | [**github_user_creation_v1_agent_creation_app**](azentspublicclient/docs/GitHubUserCreationV1Api.md#github_user_creation_v1_agent_creation_app) | **GET** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/github-user-creations/{attempt_id}/app | Agent Creation App
 *GitHubUserCreationV1Api* | [**github_user_creation_v1_agent_creation_cancel**](azentspublicclient/docs/GitHubUserCreationV1Api.md#github_user_creation_v1_agent_creation_cancel) | **DELETE** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/github-user-creations/{attempt_id} | Agent Creation Cancel
 *GitHubUserCreationV1Api* | [**github_user_creation_v1_agent_creation_confirm**](azentspublicclient/docs/GitHubUserCreationV1Api.md#github_user_creation_v1_agent_creation_confirm) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/github-user-creations/confirm | Agent Creation Confirm
 *GitHubUserCreationV1Api* | [**github_user_creation_v1_agent_creation_connect**](azentspublicclient/docs/GitHubUserCreationV1Api.md#github_user_creation_v1_agent_creation_connect) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/github-user-creations/connect | Agent Creation Connect
 *GitHubUserCreationV1Api* | [**github_user_creation_v1_agent_creation_exchange**](azentspublicclient/docs/GitHubUserCreationV1Api.md#github_user_creation_v1_agent_creation_exchange) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/github-user-creations/exchange | Agent Creation Exchange
 *GitHubUserCreationV1Api* | [**github_user_creation_v1_agent_creation_review**](azentspublicclient/docs/GitHubUserCreationV1Api.md#github_user_creation_v1_agent_creation_review) | **GET** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/github-user-creations/{attempt_id} | Agent Creation Review
+*GitHubUserCreationV1Api* | [**github_user_creation_v1_shared_creation_app**](azentspublicclient/docs/GitHubUserCreationV1Api.md#github_user_creation_v1_shared_creation_app) | **GET** /toolkit/v1/workspaces/{handle}/github-user-creations/{attempt_id}/app | Shared Creation App
 *GitHubUserCreationV1Api* | [**github_user_creation_v1_shared_creation_cancel**](azentspublicclient/docs/GitHubUserCreationV1Api.md#github_user_creation_v1_shared_creation_cancel) | **DELETE** /toolkit/v1/workspaces/{handle}/github-user-creations/{attempt_id} | Shared Creation Cancel
 *GitHubUserCreationV1Api* | [**github_user_creation_v1_shared_creation_confirm**](azentspublicclient/docs/GitHubUserCreationV1Api.md#github_user_creation_v1_shared_creation_confirm) | **POST** /toolkit/v1/workspaces/{handle}/github-user-creations/confirm | Shared Creation Confirm
 *GitHubUserCreationV1Api* | [**github_user_creation_v1_shared_creation_connect**](azentspublicclient/docs/GitHubUserCreationV1Api.md#github_user_creation_v1_shared_creation_connect) | **POST** /toolkit/v1/workspaces/{handle}/github-user-creations/connect | Shared Creation Connect
@@ -507,6 +513,7 @@ Class | Method | HTTP request | Description
  - [AvatarUploadTicketResponse](azentspublicclient/docs/AvatarUploadTicketResponse.md)
  - [AwsConfig](azentspublicclient/docs/AwsConfig.md)
  - [AwsSecrets](azentspublicclient/docs/AwsSecrets.md)
+ - [Body](azentspublicclient/docs/Body.md)
  - [BuiltinToolConfig](azentspublicclient/docs/BuiltinToolConfig.md)
  - [CatalogOffPeakRule](azentspublicclient/docs/CatalogOffPeakRule.md)
  - [CatalogPriceIssue](azentspublicclient/docs/CatalogPriceIssue.md)
@@ -594,13 +601,25 @@ Class | Method | HTTP request | Description
  - [GcpSecrets](azentspublicclient/docs/GcpSecrets.md)
  - [GenerationFenceRequest](azentspublicclient/docs/GenerationFenceRequest.md)
  - [GetAuthMethodsResponse](azentspublicclient/docs/GetAuthMethodsResponse.md)
+ - [GitHubAppSetupVerification](azentspublicclient/docs/GitHubAppSetupVerification.md)
  - [GitHubInstallationItem](azentspublicclient/docs/GitHubInstallationItem.md)
+ - [GitHubPATSetupVerification](azentspublicclient/docs/GitHubPATSetupVerification.md)
  - [GitHubPlatformAuthorizationStateResponse](azentspublicclient/docs/GitHubPlatformAuthorizationStateResponse.md)
  - [GitHubPlatformInstallUrlResponse](azentspublicclient/docs/GitHubPlatformInstallUrlResponse.md)
  - [GitHubPlatformInstallationsRequest](azentspublicclient/docs/GitHubPlatformInstallationsRequest.md)
  - [GitHubPlatformInstallationsResponse](azentspublicclient/docs/GitHubPlatformInstallationsResponse.md)
  - [GitHubPlatformOAuthUrlResponse](azentspublicclient/docs/GitHubPlatformOAuthUrlResponse.md)
+ - [GitHubPlatformSetupVerification](azentspublicclient/docs/GitHubPlatformSetupVerification.md)
+ - [GitHubSetupAppIdentity](azentspublicclient/docs/GitHubSetupAppIdentity.md)
+ - [GitHubSetupAppOutput](azentspublicclient/docs/GitHubSetupAppOutput.md)
+ - [GitHubSetupAppVerifiedIdentity](azentspublicclient/docs/GitHubSetupAppVerifiedIdentity.md)
  - [GitHubSetupAvailability](azentspublicclient/docs/GitHubSetupAvailability.md)
+ - [GitHubSetupConnectivity](azentspublicclient/docs/GitHubSetupConnectivity.md)
+ - [GitHubSetupInstallationObservation](azentspublicclient/docs/GitHubSetupInstallationObservation.md)
+ - [GitHubSetupPlatformModes](azentspublicclient/docs/GitHubSetupPlatformModes.md)
+ - [GitHubSetupTransport](azentspublicclient/docs/GitHubSetupTransport.md)
+ - [GitHubSetupUserIdentity](azentspublicclient/docs/GitHubSetupUserIdentity.md)
+ - [GitHubSetupVerificationOutput](azentspublicclient/docs/GitHubSetupVerificationOutput.md)
  - [GitHubUserAccessPage](azentspublicclient/docs/GitHubUserAccessPage.md)
  - [GitHubUserAttemptRequest](azentspublicclient/docs/GitHubUserAttemptRequest.md)
  - [GitHubUserCandidateSummary](azentspublicclient/docs/GitHubUserCandidateSummary.md)
@@ -609,6 +628,8 @@ Class | Method | HTTP request | Description
  - [GitHubUserConnectionSummary](azentspublicclient/docs/GitHubUserConnectionSummary.md)
  - [GitHubUserConnectionSummaryResponse](azentspublicclient/docs/GitHubUserConnectionSummaryResponse.md)
  - [GitHubUserCreatedOutput](azentspublicclient/docs/GitHubUserCreatedOutput.md)
+ - [GitHubUserCreationConfirmRequest](azentspublicclient/docs/GitHubUserCreationConfirmRequest.md)
+ - [GitHubUserCreationFinalSettings](azentspublicclient/docs/GitHubUserCreationFinalSettings.md)
  - [GitHubUserCreationReview](azentspublicclient/docs/GitHubUserCreationReview.md)
  - [GitHubUserExchangeRequest](azentspublicclient/docs/GitHubUserExchangeRequest.md)
  - [GitHubUserInstallation](azentspublicclient/docs/GitHubUserInstallation.md)
@@ -630,6 +651,7 @@ Class | Method | HTTP request | Description
  - [HistoricalMemoryListResponse](azentspublicclient/docs/HistoricalMemoryListResponse.md)
  - [HistoricalMemoryResponse](azentspublicclient/docs/HistoricalMemoryResponse.md)
  - [HistoricalMemorySettingsScope](azentspublicclient/docs/HistoricalMemorySettingsScope.md)
+ - [Identity](azentspublicclient/docs/Identity.md)
  - [ImageFile](azentspublicclient/docs/ImageFile.md)
  - [ImageGenerationCatalogEntryResponse](azentspublicclient/docs/ImageGenerationCatalogEntryResponse.md)
  - [ImageGenerationCatalogSyncStatusResponse](azentspublicclient/docs/ImageGenerationCatalogSyncStatusResponse.md)

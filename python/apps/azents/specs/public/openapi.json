@@ -18065,6 +18065,129 @@
         }
       }
     },
+    "/toolkit/v1/workspaces/{handle}/github-user-creations/{attempt_id}/app": {
+      "get": {
+        "tags": [
+          "GitHub User Creation v1"
+        ],
+        "summary": "Shared Creation App",
+        "description": "Return App metadata under exact live shared candidate admission.",
+        "operationId": "github_user_creation_v1_shared_creation_app",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Attempt Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubSetupAppOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/github-user-creations/{attempt_id}/app": {
+      "get": {
+        "tags": [
+          "GitHub User Creation v1"
+        ],
+        "summary": "Agent Creation App",
+        "description": "Return App metadata only for this exact Agent REVIEW candidate.",
+        "operationId": "github_user_creation_v1_agent_creation_app",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Attempt Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubSetupAppOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/toolkit/v1/workspaces/{handle}/github-user-creations/confirm": {
       "post": {
         "tags": [
@@ -18094,7 +18217,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/GitHubUserAttemptRequest"
+                "$ref": "#/components/schemas/GitHubUserCreationConfirmRequest"
               }
             }
           }
@@ -18161,7 +18284,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/GitHubUserAttemptRequest"
+                "$ref": "#/components/schemas/GitHubUserCreationConfirmRequest"
               }
             }
           }
@@ -18173,6 +18296,274 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GitHubUserCreatedOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/github/setup-app": {
+      "get": {
+        "tags": [
+          "GitHub Setup v1"
+        ],
+        "summary": "Shared Setup App",
+        "description": "Observe current Platform display metadata after exact shared admission.",
+        "operationId": "github_setup_v1_shared_setup_app",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubSetupAppOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/github/setup-app": {
+      "get": {
+        "tags": [
+          "GitHub Setup v1"
+        ],
+        "summary": "Agent Setup App",
+        "description": "Observe current Platform App only within the exact Agent management scope.",
+        "operationId": "github_setup_v1_agent_setup_app",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubSetupAppOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/github/setup-verification": {
+      "post": {
+        "tags": [
+          "GitHub Setup v1"
+        ],
+        "summary": "Shared Setup Verification",
+        "description": "Verify unsaved execution identity without creating an executable Toolkit.",
+        "operationId": "github_setup_v1_shared_setup_verification",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/GitHubPATSetupVerification"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitHubAppSetupVerification"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitHubPlatformSetupVerification"
+                  }
+                ],
+                "discriminator": {
+                  "propertyName": "github_auth_type",
+                  "mapping": {
+                    "pat": "#/components/schemas/GitHubPATSetupVerification",
+                    "github_app": "#/components/schemas/GitHubAppSetupVerification",
+                    "github_app_platform": "#/components/schemas/GitHubPlatformSetupVerification"
+                  }
+                },
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubSetupVerificationOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/github/setup-verification": {
+      "post": {
+        "tags": [
+          "GitHub Setup v1"
+        ],
+        "summary": "Agent Setup Verification",
+        "description": "Verify unsaved credentials only within this exact managed Agent.",
+        "operationId": "github_setup_v1_agent_setup_verification",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/GitHubPATSetupVerification"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitHubAppSetupVerification"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GitHubPlatformSetupVerification"
+                  }
+                ],
+                "discriminator": {
+                  "propertyName": "github_auth_type",
+                  "mapping": {
+                    "pat": "#/components/schemas/GitHubPATSetupVerification",
+                    "github_app": "#/components/schemas/GitHubAppSetupVerification",
+                    "github_app_platform": "#/components/schemas/GitHubPlatformSetupVerification"
+                  }
+                },
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubSetupVerificationOutput"
                 }
               }
             }
@@ -26583,6 +26974,47 @@
         "title": "GetAuthMethodsResponse",
         "description": "Authentication method lookup response."
       },
+      "GitHubAppSetupVerification": {
+        "properties": {
+          "github_auth_type": {
+            "type": "string",
+            "const": "github_app",
+            "title": "Github Auth Type"
+          },
+          "transport": {
+            "$ref": "#/components/schemas/GitHubSetupTransport"
+          },
+          "app_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "title": "App Id"
+          },
+          "private_key": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Private Key"
+          },
+          "installation_ids": {
+            "items": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*$"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Installation Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "github_auth_type",
+          "transport",
+          "app_id",
+          "private_key",
+          "installation_ids"
+        ],
+        "title": "GitHubAppSetupVerification"
+      },
       "GitHubInstallationItem": {
         "properties": {
           "id": {
@@ -26615,6 +27047,31 @@
         ],
         "title": "GitHubInstallationItem",
         "description": "GitHub App installation item."
+      },
+      "GitHubPATSetupVerification": {
+        "properties": {
+          "github_auth_type": {
+            "type": "string",
+            "const": "pat",
+            "title": "Github Auth Type"
+          },
+          "transport": {
+            "$ref": "#/components/schemas/GitHubSetupTransport"
+          },
+          "token": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Token"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "github_auth_type",
+          "transport",
+          "token"
+        ],
+        "title": "GitHubPATSetupVerification"
       },
       "GitHubPlatformAuthorizationStateResponse": {
         "properties": {
@@ -26710,6 +27167,109 @@
         "title": "GitHubPlatformOAuthUrlResponse",
         "description": "GitHub Platform App OAuth URL response."
       },
+      "GitHubPlatformSetupVerification": {
+        "properties": {
+          "github_auth_type": {
+            "type": "string",
+            "const": "github_app_platform",
+            "title": "Github Auth Type"
+          },
+          "transport": {
+            "$ref": "#/components/schemas/GitHubSetupTransport"
+          },
+          "installation_ids": {
+            "items": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*$"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Installation Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "github_auth_type",
+          "transport",
+          "installation_ids"
+        ],
+        "title": "GitHubPlatformSetupVerification"
+      },
+      "GitHubSetupAppIdentity": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "title": "App Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "app_id",
+          "name",
+          "slug"
+        ],
+        "title": "GitHubSetupAppIdentity"
+      },
+      "GitHubSetupAppOutput": {
+        "properties": {
+          "app": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GitHubSetupAppIdentity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "app"
+        ],
+        "title": "GitHubSetupAppOutput"
+      },
+      "GitHubSetupAppVerifiedIdentity": {
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "title": "App Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "type": {
+            "type": "string",
+            "const": "app",
+            "title": "Type"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "app_id",
+          "name",
+          "slug",
+          "type"
+        ],
+        "title": "GitHubSetupAppVerifiedIdentity"
+      },
       "GitHubSetupAvailability": {
         "properties": {
           "platform": {
@@ -26732,6 +27292,9 @@
             ],
             "title": "Callback Url"
           },
+          "platform_modes": {
+            "$ref": "#/components/schemas/GitHubSetupPlatformModes"
+          },
           "user_tokens_must_not_expire": {
             "type": "boolean",
             "title": "User Tokens Must Not Expire",
@@ -26742,10 +27305,244 @@
         "type": "object",
         "required": [
           "platform",
-          "callback_url"
+          "callback_url",
+          "platform_modes"
         ],
         "title": "GitHubSetupAvailability",
         "description": "Local registration availability, independent of provider health."
+      },
+      "GitHubSetupConnectivity": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status",
+          "message"
+        ],
+        "title": "GitHubSetupConnectivity"
+      },
+      "GitHubSetupInstallationObservation": {
+        "properties": {
+          "installation_id": {
+            "type": "string",
+            "title": "Installation Id"
+          },
+          "account_login": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Login"
+          },
+          "account_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Type"
+          },
+          "account_avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Avatar Url"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "denied",
+              "unavailable"
+            ],
+            "title": "Status"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "installation_id",
+          "account_login",
+          "account_type",
+          "account_avatar_url",
+          "status",
+          "message"
+        ],
+        "title": "GitHubSetupInstallationObservation"
+      },
+      "GitHubSetupPlatformModes": {
+        "properties": {
+          "user_account": {
+            "type": "string",
+            "enum": [
+              "configured",
+              "incomplete",
+              "absent"
+            ],
+            "title": "User Account"
+          },
+          "installation": {
+            "type": "string",
+            "enum": [
+              "configured",
+              "incomplete",
+              "absent"
+            ],
+            "title": "Installation"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "user_account",
+          "installation"
+        ],
+        "title": "GitHubSetupPlatformModes",
+        "description": "Local readiness for the two supported Platform authentication paths."
+      },
+      "GitHubSetupTransport": {
+        "properties": {
+          "toolsets": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Toolsets"
+          },
+          "timeout": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Timeout"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "toolsets",
+          "timeout"
+        ],
+        "title": "GitHubSetupTransport",
+        "description": "Only supported MCP transport settings, without a provider URL override."
+      },
+      "GitHubSetupUserIdentity": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "user",
+            "title": "Type"
+          },
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "login": {
+            "type": "string",
+            "title": "Login"
+          },
+          "avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Url"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "id",
+          "login",
+          "avatar_url"
+        ],
+        "title": "GitHubSetupUserIdentity"
+      },
+      "GitHubSetupVerificationOutput": {
+        "properties": {
+          "identity": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/GitHubSetupUserIdentity"
+              },
+              {
+                "$ref": "#/components/schemas/GitHubSetupAppVerifiedIdentity"
+              }
+            ],
+            "title": "Identity",
+            "discriminator": {
+              "propertyName": "type",
+              "mapping": {
+                "app": "#/components/schemas/GitHubSetupAppVerifiedIdentity",
+                "user": "#/components/schemas/GitHubSetupUserIdentity"
+              }
+            }
+          },
+          "installations": {
+            "items": {
+              "$ref": "#/components/schemas/GitHubSetupInstallationObservation"
+            },
+            "type": "array",
+            "title": "Installations"
+          },
+          "connectivity": {
+            "$ref": "#/components/schemas/GitHubSetupConnectivity"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "identity",
+          "installations",
+          "connectivity"
+        ],
+        "title": "GitHubSetupVerificationOutput"
       },
       "GitHubUserAccessPage": {
         "properties": {
@@ -27032,6 +27829,120 @@
         ],
         "title": "GitHubUserCreatedOutput",
         "description": "Exact successfully published Toolkit, without credential payloads."
+      },
+      "GitHubUserCreationConfirmRequest": {
+        "properties": {
+          "attempt_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Attempt Id"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/GitHubUserCreationFinalSettings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "attempt_id",
+          "settings"
+        ],
+        "title": "GitHubUserCreationConfirmRequest",
+        "description": "Exact creation attempt plus complete final reviewed settings."
+      },
+      "GitHubUserCreationFinalSettings": {
+        "properties": {
+          "toolsets": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Toolsets"
+          },
+          "timeout": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Timeout"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slug"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "always_expose_tools": {
+            "type": "boolean",
+            "title": "Always Expose Tools"
+          },
+          "inject_runtime_environment": {
+            "type": "boolean",
+            "title": "Inject Runtime Environment"
+          },
+          "runtime_risk_acknowledged": {
+            "type": "boolean",
+            "title": "Runtime Risk Acknowledged"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "toolsets",
+          "timeout",
+          "name",
+          "slug",
+          "description",
+          "prompt",
+          "enabled",
+          "always_expose_tools",
+          "inject_runtime_environment",
+          "runtime_risk_acknowledged"
+        ],
+        "title": "GitHubUserCreationFinalSettings",
+        "description": "Complete final non-authentication input, never an attempt-settings patch."
       },
       "GitHubUserCreationReview": {
         "properties": {
@@ -40153,6 +41064,10 @@
     {
       "name": "GitHub User Creation v1",
       "description": "GitHub authorization before Toolkit creation."
+    },
+    {
+      "name": "GitHub Setup v1",
+      "description": "Management-only GitHub setup identity observations."
     },
     {
       "name": "User v1",

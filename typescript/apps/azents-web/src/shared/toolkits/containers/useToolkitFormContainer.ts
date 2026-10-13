@@ -8,7 +8,7 @@
  */
 
 import { useForm, type UseFormReturnType } from "@mantine/form";
-import { useWindowEvent } from "@mantine/hooks";
+import { readSessionStorageValue, useWindowEvent } from "@mantine/hooks";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import {
@@ -26,21 +26,24 @@ import {
 import { isRecord } from "@/shared/lib/unknown-value";
 import { trpc } from "@/trpc/client";
 import {
+  creationReturnPath,
+  deserializeGitHubUserCreation,
+  GITHUB_USER_CREATION_KEY,
+} from "../github-user-creation-state";
+import {
   missingNewGitHubUserRegistration,
   normalizeGitHubUserCredentialEdits,
 } from "../github-user-credentials";
-import { isGitHubUserMode } from "../github-user-oauth-state";
 import { toolkitFormSchema } from "../schemas";
 import {
   hydrateToolkitConfig,
   projectToolkitConfig,
   toolkitProjectionUsesOauth,
 } from "../toolkit-config-projection";
-import { useGitHubUserCreationContainer } from "./useGitHubUserCreationContainer";
+import type { GitHubUserCreationContext } from "../github-user-creation-state";
 import type { ToolkitFormValues } from "../schemas";
 import type { ToolkitConfigProjection } from "../toolkit-config-projection";
 import type {
-  GitHubUserSetupState,
   MutationState,
   ToolkitConfigFormState,
   ToolkitListState,
@@ -53,15 +56,13 @@ export interface ToolkitFormContainerProps {
   embedded?: boolean;
   onComplete?: () => void;
   onPendingChange?: (pending: boolean) => void;
+  onAbandonReady?: (abandon: (() => void) | null) => void;
   initialToolkitType?: string;
 }
 
 export interface ToolkitFormContainerOutput {
-  githubCreation: {
-    state: GitHubUserSetupState;
-    onCancel: () => void;
-    onConfirm: () => void;
-  };
+  onComplete?: () => void;
+  onAbandonReady?: (abandon: (() => void) | null) => void;
   configProjection: ToolkitConfigProjection;
   handle: string;
   agentId?: string;
@@ -210,27 +211,24 @@ export function useToolkitFormContainer(
     type: "IDLE",
     error: null,
   });
-  const creation = useGitHubUserCreationContainer({
-    handle,
-    agentId,
-    enabled: !isEditMode,
-    onComplete,
-    onPendingChange,
-    onReview: (review) => {
-      const hydrated = hydrateToolkitConfig("github", review.config);
-      form.setValues({
-        toolkitType: "github",
-        name: review.name,
-        slug: review.slug,
-        description: review.description ?? "",
-        prompt: review.prompt ?? "",
-        config: hydrated.config,
-        credentials: hydrated.credentials,
-        enabled: review.enabled,
-        alwaysExposeTools: review.always_expose_tools,
-      });
-    },
-  });
+  useEffect(() => {
+    if (isEditMode) {
+      return;
+    }
+    const saved = readSessionStorageValue<GitHubUserCreationContext | null>({
+      key: GITHUB_USER_CREATION_KEY,
+      deserialize: deserializeGitHubUserCreation,
+    });
+    if (
+      saved != null &&
+      saved.handle === handle &&
+      saved.agentId === agentId &&
+      saved.returnPath === creationReturnPath(handle, agentId)
+    ) {
+      form.setFieldValue("toolkitType", "github");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- restore entry selection only; the Wizard owns exact review hydration.
+  }, [agentId, handle, isEditMode]);
   useEffect(() => {
     onPendingChange?.(mutationState.type === "SUBMITTING");
   }, [mutationState.type, onPendingChange]);
@@ -408,6 +406,9 @@ export function useToolkitFormContainer(
 
   const submitForm = useCallback(
     (values: ToolkitFormValues): void => {
+      if (!isEditMode && values.toolkitType === "github") {
+        return;
+      }
       setMutationState({ type: "SUBMITTING" });
       const credentials =
         values.toolkitType === "github"
@@ -427,16 +428,6 @@ export function useToolkitFormContainer(
           type: "IDLE",
           error: t("github.registrationRequired"),
         });
-        return;
-      }
-
-      if (
-        !isEditMode &&
-        values.toolkitType === "github" &&
-        isGitHubUserMode(values.config.github_auth_type)
-      ) {
-        setMutationState({ type: "IDLE", error: null });
-        creation.start(values, credentials);
         return;
       }
 
@@ -506,7 +497,6 @@ export function useToolkitFormContainer(
       agentId,
       createAgentMutation,
       createMutation,
-      creation,
       formState,
       handle,
       isEditMode,
@@ -713,11 +703,8 @@ export function useToolkitFormContainer(
     formState.type === "EDIT" && toolkitProjectionUsesOauth(configProjection);
 
   return {
-    githubCreation: {
-      state: creation.state,
-      onCancel: creation.cancel,
-      onConfirm: creation.confirm,
-    },
+    onComplete,
+    onAbandonReady: props.onAbandonReady,
     configProjection,
     handle,
     ...(agentId != null && { agentId }),

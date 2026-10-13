@@ -8,6 +8,8 @@ from fastapi import Depends
 from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.core.github_auth import GitHubClientFactory, create_github_client
+from azents.core.github_installation import GitHubInstallationSnapshot
+from azents.core.github_setup import GitHubSetupAppIdentity
 from azents.core.github_user_auth import (
     GitHubUserAccessPage,
     GitHubUserAppIdentity,
@@ -15,6 +17,9 @@ from azents.core.github_user_auth import (
     GitHubUserToken,
     exchange_user_code,
     get_app_registration,
+    get_setup_app,
+    get_setup_installation,
+    get_setup_installation_token,
     get_user_identity,
     list_user_access,
     revoke_user_token,
@@ -54,6 +59,30 @@ class GitHubUserProvider:
     async def app(self, jwt_token: str) -> GitHubUserAppIdentity:
         """Read authenticated App and OAuth client binding."""
         return await get_app_registration(jwt_token, client_factory=self.client_factory)
+
+    async def setup_app(self, jwt_token: str, *, app_id: str) -> GitHubSetupAppIdentity:
+        return await get_setup_app(
+            jwt_token, app_id=app_id, client_factory=self.client_factory
+        )
+
+    async def setup_installation(
+        self, jwt_token: str, *, app_id: str, installation_id: str
+    ) -> GitHubInstallationSnapshot:
+        return await get_setup_installation(
+            jwt_token,
+            app_id=app_id,
+            installation_id=installation_id,
+            client_factory=self.client_factory,
+        )
+
+    async def setup_installation_token(
+        self, jwt_token: str, *, installation_id: str
+    ) -> GitHubUserToken:
+        return await get_setup_installation_token(
+            jwt_token,
+            installation_id=installation_id,
+            client_factory=self.client_factory,
+        )
 
     async def access(
         self, token: str, *, app_id: int, cursor: str | None

@@ -36,12 +36,21 @@ class GitHubUserStatusOutput(BaseModel):
     connection: GitHubUserConnectionSummary | None
 
 
+class GitHubSetupPlatformModes(BaseModel):
+    """Local readiness for the two supported Platform authentication paths."""
+
+    model_config = ConfigDict(extra="forbid")
+    user_account: Literal["configured", "incomplete", "absent"]
+    installation: Literal["configured", "incomplete", "absent"]
+
+
 class GitHubSetupAvailability(BaseModel):
     """Local registration availability, independent of provider health."""
 
     model_config = ConfigDict(extra="forbid")
     platform: Literal["configured", "incomplete", "absent"]
     callback_url: str | None
+    platform_modes: GitHubSetupPlatformModes
     user_tokens_must_not_expire: bool = True
 
 

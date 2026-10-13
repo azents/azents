@@ -328,6 +328,7 @@ export function ManagedAgentToolkitSectionView(
   },
 ): React.ReactElement {
   const t = useTranslations("workspace.agents");
+  const tWizard = useTranslations("workspace.toolkits.github.wizard");
   const { editor, state } = props;
   const detailId = editor.type === "DETAIL" ? editor.toolkitConfigId : null;
   const selectedItem =
@@ -449,9 +450,18 @@ export function ManagedAgentToolkitSectionView(
         size="lg"
         centered
         closeOnClickOutside={false}
-        withCloseButton={!props.setupPending && !props.attachPending}
+        closeButtonProps={{ "aria-label": tWizard("close") }}
+        withCloseButton={
+          !(editor.type === "CREATE" && editor.toolkitType === "github"
+            ? props.createPublicationPending
+            : props.setupPending) && !props.attachPending
+        }
         closeOnEscape={
-          !props.pending && !props.attachPending && !props.setupPending
+          !props.pending &&
+          !props.attachPending &&
+          !(editor.type === "CREATE" && editor.toolkitType === "github"
+            ? props.createPublicationPending
+            : props.setupPending)
         }
       >
         <Stack gap="md">
@@ -566,7 +576,11 @@ export function ManagedAgentToolkitSectionView(
                 variant="subtle"
                 leftSection={<IconArrowLeft size={14} />}
                 w="fit-content"
-                disabled={props.setupPending}
+                disabled={
+                  editor.type === "CREATE" && editor.toolkitType === "github"
+                    ? props.createPublicationPending
+                    : props.setupPending
+                }
                 onClick={() =>
                   editor.type === "CREATE"
                     ? props.onCatalogTabChange("new")
@@ -581,7 +595,12 @@ export function ManagedAgentToolkitSectionView(
                   agentId={props.agentId}
                   embedded
                   onComplete={props.onCompleteSetup}
-                  onPendingChange={props.onSetupPendingChange}
+                  onPendingChange={
+                    editor.type === "CREATE" && editor.toolkitType === "github"
+                      ? props.onCreatePublicationPendingChange
+                      : props.onSetupPendingChange
+                  }
+                  onAbandonReady={props.onCreateAbandonReady}
                   {...(editor.type === "CREATE"
                     ? { initialToolkitType: editor.toolkitType }
                     : { toolkitId: editor.toolkitConfigId })}

@@ -45,6 +45,7 @@ from azents.services.github_platform_system_setting.runtime import (
 )
 from azents.services.github_user_oauth.data import (
     GitHubSetupAvailability,
+    GitHubSetupPlatformModes,
     GitHubUserCandidateSummary,
     GitHubUserConnectOutput,
     GitHubUserStatusOutput,
@@ -129,8 +130,16 @@ class GitHubUserOAuthService:
             status = "configured"
         else:
             status = "incomplete"
+        # Both existing acquisition paths need the OAuth registration and callback
+        # base. Preserve the legacy presence-only editing projection.
+        mode_status = "absent" if status == "absent" else "incomplete"
+        if platform.setup_ready(web_url=self.config.web_url):
+            mode_status = "configured"
         return GitHubSetupAvailability(
             platform=status,
+            platform_modes=GitHubSetupPlatformModes(
+                user_account=mode_status, installation=mode_status
+            ),
             callback_url=(
                 f"{self.config.web_url.rstrip('/')}/oauth/github/callback"
                 if self.config.web_url

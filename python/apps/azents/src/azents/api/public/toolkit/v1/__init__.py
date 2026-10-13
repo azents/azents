@@ -47,6 +47,7 @@ from .data import (
     ToolkitListResponse,
     ToolkitResponse,
 )
+from .github_setup import router as github_setup_router
 from .github_user import _management_errors as github_user_management_errors
 from .github_user import router as github_user_router
 from .github_user_creation import router as github_creation_router
@@ -776,4 +777,10 @@ def mount(mounter: RouteMounter) -> None:
         prefix="/toolkit/v1",
         tag="GitHub User Creation v1",
         description="GitHub authorization before Toolkit creation.",
+    )
+    mounter(
+        github_setup_router,
+        prefix="/toolkit/v1",
+        tag="GitHub Setup v1",
+        description="Management-only GitHub setup identity observations.",
     )

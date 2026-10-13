@@ -19,6 +19,7 @@ import json
 
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, Optional
+from azentspublicclient.models.git_hub_setup_platform_modes import GitHubSetupPlatformModes
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -28,8 +29,9 @@ class GitHubSetupAvailability(BaseModel):
     """ # noqa: E501
     platform: StrictStr
     callback_url: Optional[StrictStr]
+    platform_modes: GitHubSetupPlatformModes
     user_tokens_must_not_expire: Optional[StrictBool] = True
-    __properties: ClassVar[List[str]] = ["platform", "callback_url", "user_tokens_must_not_expire"]
+    __properties: ClassVar[List[str]] = ["platform", "callback_url", "platform_modes", "user_tokens_must_not_expire"]
 
     @field_validator('platform')
     def platform_validate_enum(cls, value):
@@ -77,6 +79,9 @@ class GitHubSetupAvailability(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of platform_modes
+        if self.platform_modes:
+            _dict['platform_modes'] = self.platform_modes.to_dict()
         # set to None if callback_url (nullable) is None
         # and model_fields_set contains the field
         if self.callback_url is None and "callback_url" in self.model_fields_set:
@@ -98,6 +103,7 @@ class GitHubSetupAvailability(BaseModel):
             _key: _value for _key, _value in {
             "platform": obj.get("platform"),
             "callback_url": obj.get("callback_url"),
+            "platform_modes": GitHubSetupPlatformModes.from_dict(obj["platform_modes"]) if obj.get("platform_modes") is not None else None,
             "user_tokens_must_not_expire": obj.get("user_tokens_must_not_expire") if obj.get("user_tokens_must_not_expire") is not None else True
             }.items() if _key in obj
         })

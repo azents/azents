@@ -23,6 +23,8 @@ from pydantic import (
 )
 
 from azents.core.github_auth import GitHubClientFactory
+from azents.core.github_installation import GitHubInstallationSnapshot
+from azents.core.github_setup import GitHubSetupAppIdentity
 
 _API_VERSION = "2022-11-28"
 _PAGE_SIZE = 100
@@ -156,6 +158,16 @@ class _AppIdentity(_ProviderPayload):
     id: StrictInt = Field(gt=0)
     slug: StrictStr = Field(min_length=1)
     client_id: StrictStr = Field(min_length=1)
+
+
+class _AppDisplay(_ProviderPayload):
+    id: StrictInt = Field(gt=0)
+    name: StrictStr = Field(min_length=1, pattern=r"\S")
+    slug: StrictStr = Field(min_length=1, pattern=r"\S")
+
+
+class _InstallationToken(_ProviderPayload):
+    token: StrictStr = Field(min_length=1, repr=False)
 
 
 class _Account(_ProviderPayload):
@@ -340,6 +352,58 @@ async def get_app_registration(
         return GitHubUserAppIdentity(
             app_id=identity.id, slug=identity.slug, client_id=identity.client_id
         )
+
+
+async def get_setup_app(
+    jwt_token: str, *, app_id: str, client_factory: GitHubClientFactory
+) -> GitHubSetupAppIdentity:
+    """Read display metadata only after matching the authenticated App ID."""
+    async with _client(None, client_factory) as client:
+        response = await client.rest.apps.async_get_authenticated(
+            headers=_headers(jwt_token)
+        )
+        app = _AppDisplay.model_validate(response.raw_response.json())
+        if app.id != int(app_id):
+            raise GitHubUserProviderError(reason="invalid_response", status_code=None)
+        return GitHubSetupAppIdentity(app_id=str(app.id), name=app.name, slug=app.slug)
+
+
+async def get_setup_installation(
+    jwt_token: str,
+    *,
+    app_id: str,
+    installation_id: str,
+    client_factory: GitHubClientFactory,
+) -> GitHubInstallationSnapshot:
+    """Strictly verify every selected installation under the authenticated App."""
+    async with _client(None, client_factory) as client:
+        response = await client.rest.apps.async_get_installation(
+            int(installation_id), headers=_headers(jwt_token)
+        )
+        installation = _Installation.model_validate(response.raw_response.json())
+        if installation.id != int(installation_id) or installation.app_id != int(
+            app_id
+        ):
+            raise GitHubUserProviderError(reason="invalid_response", status_code=None)
+        return GitHubInstallationSnapshot(
+            installation_id=installation.id,
+            app_id=installation.app_id,
+            account_login=installation.account.login,
+            account_type=installation.account.type,
+            account_avatar_url=installation.account.avatar_url,
+        )
+
+
+async def get_setup_installation_token(
+    jwt_token: str, *, installation_id: str, client_factory: GitHubClientFactory
+) -> GitHubUserToken:
+    """Prepare an ephemeral MCP probe token, not a new saved credential authority."""
+    async with _client(None, client_factory) as client:
+        response = await client.rest.apps.async_create_installation_access_token(
+            int(installation_id), headers=_headers(jwt_token)
+        )
+        issued = _InstallationToken.model_validate(response.raw_response.json())
+        return GitHubUserToken(access_token=issued.token)
 
 
 def _decode_cursor(cursor: str | None) -> _AccessCursor:

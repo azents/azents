@@ -26,6 +26,13 @@ class TestGitHubUserCreationV1Api(unittest.TestCase):
     def tearDown(self) -> None:
         pass
 
+    def test_github_user_creation_v1_agent_creation_app(self) -> None:
+        """Test case for github_user_creation_v1_agent_creation_app
+
+        Agent Creation App
+        """
+        pass
+
     def test_github_user_creation_v1_agent_creation_cancel(self) -> None:
         """Test case for github_user_creation_v1_agent_creation_cancel
 
@@ -58,6 +65,13 @@ class TestGitHubUserCreationV1Api(unittest.TestCase):
         """Test case for github_user_creation_v1_agent_creation_review
 
         Agent Creation Review
+        """
+        pass
+
+    def test_github_user_creation_v1_shared_creation_app(self) -> None:
+        """Test case for github_user_creation_v1_shared_creation_app
+
+        Shared Creation App
         """
         pass
 

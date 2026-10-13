@@ -380,3 +380,46 @@ export const SharedInstanceCatalog = {
     await expect(args.onAttach).toHaveBeenCalledWith("shared-1");
   },
 } satisfies Story;
+
+export const GitHubCandidateCloseAllowed = {
+  args: {
+    editor: { type: "CREATE", toolkitType: "github" },
+    setupPending: true,
+    createPublicationPending: false,
+    setupView: (
+      <Text>GitHub authorization verified. Choose feature groups.</Text>
+    ),
+    onCloseEditor: fn(),
+    onCatalogTabChange: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const body = within(canvasElement.ownerDocument.body);
+    const dialog = within(
+      body.getByRole("dialog", { name: "Toolkit settings" }),
+    );
+    await expect(body.getByRole("button", { name: "Back" })).toBeEnabled();
+    const close = dialog.getByRole("button", { name: "Close" });
+    await expect(close).toHaveAttribute("aria-label", "Close");
+    await userEvent.click(close);
+    await expect(args.onCloseEditor).toHaveBeenCalledOnce();
+  },
+} satisfies Story;
+
+export const GitHubPublicationCloseBlocked = {
+  args: {
+    editor: { type: "CREATE", toolkitType: "github" },
+    setupPending: false,
+    createPublicationPending: true,
+    setupView: <Text>Saving the verified GitHub connection…</Text>,
+    onCloseEditor: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const body = within(canvasElement.ownerDocument.body);
+    await expect(body.getByRole("button", { name: "Back" })).toBeDisabled();
+    await expect(
+      body.queryByRole("button", { name: "Close" }),
+    ).not.toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    await expect(args.onCloseEditor).not.toHaveBeenCalled();
+  },
+} satisfies Story;

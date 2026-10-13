@@ -24,6 +24,7 @@ __all__ = [
     "ChatGPTOAuthV1Api",
     "ChatV1Api",
     "ExternalChannelV1Api",
+    "GitHubSetupV1Api",
     "GitHubUserCreationV1Api",
     "GitHubUserToolkitV1Api",
     "HealthV1Api",
@@ -170,6 +171,7 @@ __all__ = [
     "AvatarUploadTicketResponse",
     "AwsConfig",
     "AwsSecrets",
+    "Body",
     "BuiltinToolConfig",
     "CatalogOffPeakRule",
     "CatalogPriceIssue",
@@ -257,13 +259,25 @@ __all__ = [
     "GcpSecrets",
     "GenerationFenceRequest",
     "GetAuthMethodsResponse",
+    "GitHubAppSetupVerification",
     "GitHubInstallationItem",
+    "GitHubPATSetupVerification",
     "GitHubPlatformAuthorizationStateResponse",
     "GitHubPlatformInstallUrlResponse",
     "GitHubPlatformInstallationsRequest",
     "GitHubPlatformInstallationsResponse",
     "GitHubPlatformOAuthUrlResponse",
+    "GitHubPlatformSetupVerification",
+    "GitHubSetupAppIdentity",
+    "GitHubSetupAppOutput",
+    "GitHubSetupAppVerifiedIdentity",
     "GitHubSetupAvailability",
+    "GitHubSetupConnectivity",
+    "GitHubSetupInstallationObservation",
+    "GitHubSetupPlatformModes",
+    "GitHubSetupTransport",
+    "GitHubSetupUserIdentity",
+    "GitHubSetupVerificationOutput",
     "GitHubUserAccessPage",
     "GitHubUserAttemptRequest",
     "GitHubUserCandidateSummary",
@@ -272,6 +286,8 @@ __all__ = [
     "GitHubUserConnectionSummary",
     "GitHubUserConnectionSummaryResponse",
     "GitHubUserCreatedOutput",
+    "GitHubUserCreationConfirmRequest",
+    "GitHubUserCreationFinalSettings",
     "GitHubUserCreationReview",
     "GitHubUserExchangeRequest",
     "GitHubUserInstallation",
@@ -293,6 +309,7 @@ __all__ = [
     "HistoricalMemoryListResponse",
     "HistoricalMemoryResponse",
     "HistoricalMemorySettingsScope",
+    "Identity",
     "ImageFile",
     "ImageGenerationCatalogEntryResponse",
     "ImageGenerationCatalogSyncStatusResponse",
@@ -625,6 +642,7 @@ from azentspublicclient.api.auth_v1_api import AuthV1Api as AuthV1Api
 from azentspublicclient.api.chat_gpto_auth_v1_api import ChatGPTOAuthV1Api as ChatGPTOAuthV1Api
 from azentspublicclient.api.chat_v1_api import ChatV1Api as ChatV1Api
 from azentspublicclient.api.external_channel_v1_api import ExternalChannelV1Api as ExternalChannelV1Api
+from azentspublicclient.api.git_hub_setup_v1_api import GitHubSetupV1Api as GitHubSetupV1Api
 from azentspublicclient.api.git_hub_user_creation_v1_api import GitHubUserCreationV1Api as GitHubUserCreationV1Api
 from azentspublicclient.api.git_hub_user_toolkit_v1_api import GitHubUserToolkitV1Api as GitHubUserToolkitV1Api
 from azentspublicclient.api.health_v1_api import HealthV1Api as HealthV1Api
@@ -775,6 +793,7 @@ from azentspublicclient.models.avatar_upload_request import AvatarUploadRequest 
 from azentspublicclient.models.avatar_upload_ticket_response import AvatarUploadTicketResponse as AvatarUploadTicketResponse
 from azentspublicclient.models.aws_config import AwsConfig as AwsConfig
 from azentspublicclient.models.aws_secrets import AwsSecrets as AwsSecrets
+from azentspublicclient.models.body import Body as Body
 from azentspublicclient.models.builtin_tool_config import BuiltinToolConfig as BuiltinToolConfig
 from azentspublicclient.models.catalog_off_peak_rule import CatalogOffPeakRule as CatalogOffPeakRule
 from azentspublicclient.models.catalog_price_issue import CatalogPriceIssue as CatalogPriceIssue
@@ -862,13 +881,25 @@ from azentspublicclient.models.gcp_config import GcpConfig as GcpConfig
 from azentspublicclient.models.gcp_secrets import GcpSecrets as GcpSecrets
 from azentspublicclient.models.generation_fence_request import GenerationFenceRequest as GenerationFenceRequest
 from azentspublicclient.models.get_auth_methods_response import GetAuthMethodsResponse as GetAuthMethodsResponse
+from azentspublicclient.models.git_hub_app_setup_verification import GitHubAppSetupVerification as GitHubAppSetupVerification
 from azentspublicclient.models.git_hub_installation_item import GitHubInstallationItem as GitHubInstallationItem
+from azentspublicclient.models.git_hub_pat_setup_verification import GitHubPATSetupVerification as GitHubPATSetupVerification
 from azentspublicclient.models.git_hub_platform_authorization_state_response import GitHubPlatformAuthorizationStateResponse as GitHubPlatformAuthorizationStateResponse
 from azentspublicclient.models.git_hub_platform_install_url_response import GitHubPlatformInstallUrlResponse as GitHubPlatformInstallUrlResponse
 from azentspublicclient.models.git_hub_platform_installations_request import GitHubPlatformInstallationsRequest as GitHubPlatformInstallationsRequest
 from azentspublicclient.models.git_hub_platform_installations_response import GitHubPlatformInstallationsResponse as GitHubPlatformInstallationsResponse
 from azentspublicclient.models.git_hub_platform_o_auth_url_response import GitHubPlatformOAuthUrlResponse as GitHubPlatformOAuthUrlResponse
+from azentspublicclient.models.git_hub_platform_setup_verification import GitHubPlatformSetupVerification as GitHubPlatformSetupVerification
+from azentspublicclient.models.git_hub_setup_app_identity import GitHubSetupAppIdentity as GitHubSetupAppIdentity
+from azentspublicclient.models.git_hub_setup_app_output import GitHubSetupAppOutput as GitHubSetupAppOutput
+from azentspublicclient.models.git_hub_setup_app_verified_identity import GitHubSetupAppVerifiedIdentity as GitHubSetupAppVerifiedIdentity
 from azentspublicclient.models.git_hub_setup_availability import GitHubSetupAvailability as GitHubSetupAvailability
+from azentspublicclient.models.git_hub_setup_connectivity import GitHubSetupConnectivity as GitHubSetupConnectivity
+from azentspublicclient.models.git_hub_setup_installation_observation import GitHubSetupInstallationObservation as GitHubSetupInstallationObservation
+from azentspublicclient.models.git_hub_setup_platform_modes import GitHubSetupPlatformModes as GitHubSetupPlatformModes
+from azentspublicclient.models.git_hub_setup_transport import GitHubSetupTransport as GitHubSetupTransport
+from azentspublicclient.models.git_hub_setup_user_identity import GitHubSetupUserIdentity as GitHubSetupUserIdentity
+from azentspublicclient.models.git_hub_setup_verification_output import GitHubSetupVerificationOutput as GitHubSetupVerificationOutput
 from azentspublicclient.models.git_hub_user_access_page import GitHubUserAccessPage as GitHubUserAccessPage
 from azentspublicclient.models.git_hub_user_attempt_request import GitHubUserAttemptRequest as GitHubUserAttemptRequest
 from azentspublicclient.models.git_hub_user_candidate_summary import GitHubUserCandidateSummary as GitHubUserCandidateSummary
@@ -877,6 +908,8 @@ from azentspublicclient.models.git_hub_user_connection_status import GitHubUserC
 from azentspublicclient.models.git_hub_user_connection_summary import GitHubUserConnectionSummary as GitHubUserConnectionSummary
 from azentspublicclient.models.git_hub_user_connection_summary_response import GitHubUserConnectionSummaryResponse as GitHubUserConnectionSummaryResponse
 from azentspublicclient.models.git_hub_user_created_output import GitHubUserCreatedOutput as GitHubUserCreatedOutput
+from azentspublicclient.models.git_hub_user_creation_confirm_request import GitHubUserCreationConfirmRequest as GitHubUserCreationConfirmRequest
+from azentspublicclient.models.git_hub_user_creation_final_settings import GitHubUserCreationFinalSettings as GitHubUserCreationFinalSettings
 from azentspublicclient.models.git_hub_user_creation_review import GitHubUserCreationReview as GitHubUserCreationReview
 from azentspublicclient.models.git_hub_user_exchange_request import GitHubUserExchangeRequest as GitHubUserExchangeRequest
 from azentspublicclient.models.git_hub_user_installation import GitHubUserInstallation as GitHubUserInstallation
@@ -898,6 +931,7 @@ from azentspublicclient.models.health_status import HealthStatus as HealthStatus
 from azentspublicclient.models.historical_memory_list_response import HistoricalMemoryListResponse as HistoricalMemoryListResponse
 from azentspublicclient.models.historical_memory_response import HistoricalMemoryResponse as HistoricalMemoryResponse
 from azentspublicclient.models.historical_memory_settings_scope import HistoricalMemorySettingsScope as HistoricalMemorySettingsScope
+from azentspublicclient.models.identity import Identity as Identity
 from azentspublicclient.models.image_file import ImageFile as ImageFile
 from azentspublicclient.models.image_generation_catalog_entry_response import ImageGenerationCatalogEntryResponse as ImageGenerationCatalogEntryResponse
 from azentspublicclient.models.image_generation_catalog_sync_status_response import ImageGenerationCatalogSyncStatusResponse as ImageGenerationCatalogSyncStatusResponse

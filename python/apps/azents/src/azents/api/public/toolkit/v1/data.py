@@ -110,6 +110,7 @@ class ToolkitConfigCreateRequest(BaseModel):
     prompt: str | None = Field(default=None, description="Custom prompt")
     credentials: dict[str, Any] | None = Field(
         default=None,
+        repr=False,
         description="Credentials JSON object, such as MCP, encrypted on the server",
     )
     enabled: bool = Field(default=True, description="Enabled state")

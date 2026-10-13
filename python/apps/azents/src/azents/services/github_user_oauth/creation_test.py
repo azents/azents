@@ -8,9 +8,11 @@ import pytest
 from azcommon.result import Failure
 
 from azents.core.enums import WorkspaceUserRole
+from azents.core.github_setup import GitHubSetupAppIdentity
 from azents.core.github_user_auth import GitHubUserProviderError
 from azents.core.github_user_creation import (
     GitHubUserCreationAttempt,
+    GitHubUserCreationFinalSettings,
     GitHubUserCreationSubject,
 )
 from azents.core.github_user_oauth import (
@@ -22,6 +24,7 @@ from azents.core.github_user_oauth import (
 )
 from azents.repos.github_user_oauth.creation import GitHubUserCreationRepository
 from azents.repos.toolkit.data import ToolkitCreate
+from azents.services.github_user_oauth import creation as creation_module
 from azents.services.github_user_oauth.creation import GitHubUserCreationService
 from azents.services.github_user_oauth.service_test import _Harness, _harness
 from azents.services.toolkit import ToolkitService
@@ -77,13 +80,30 @@ def _creation(*, platform: bool) -> CreationHarness:
     repository.cancel.return_value = (
         GitHubUserRevocation(attempt.registration, "new-token"),
     )
+    toolkits = create_autospec(ToolkitService, instance=True)
+    toolkits.toolkit_registry = {"github": Mock(name="provider")}
+    toolkits.toolkit_registry["github"].name = "GitHub"
+    repository.load_review.return_value = attempt
     return CreationHarness(
-        GitHubUserCreationService(
-            repository, h.service, create_autospec(ToolkitService, instance=True)
-        ),
+        GitHubUserCreationService(repository, h.service, toolkits),
         repository,
         h,
         attempt,
+    )
+
+
+def _settings() -> GitHubUserCreationFinalSettings:
+    return GitHubUserCreationFinalSettings(
+        name="Final reviewed name",
+        slug="final_slug",
+        description="Final description",
+        prompt=None,
+        enabled=True,
+        always_expose_tools=True,
+        toolsets=["repos", "projects", "future_group"],
+        timeout=12.0,
+        inject_runtime_environment=True,
+        runtime_risk_acknowledged=True,
     )
 
 
@@ -93,10 +113,12 @@ async def test_platform_generation_change_rejects_review_and_publication() -> No
         h.oauth.platform.resolve.return_value,
         effective_generation="replaced-generation",
     )
-    for operation in [h.service.review, h.service.confirm]:
-        with pytest.raises(GitHubUserOAuthError) as error:
-            await operation(h.attempt.subject, h.attempt.id)
-        assert error.value.code is GitHubUserErrorCode.STALE
+    with pytest.raises(GitHubUserOAuthError) as error:
+        await h.service.review(h.attempt.subject, h.attempt.id)
+    assert error.value.code is GitHubUserErrorCode.STALE
+    with pytest.raises(GitHubUserOAuthError) as error:
+        await h.service.confirm(h.attempt.subject, h.attempt.id, _settings())
+    assert error.value.code is GitHubUserErrorCode.STALE
     h.repository.confirm.assert_not_awaited()
     h.oauth.provider.exchange.assert_not_awaited()
 
@@ -108,7 +130,7 @@ async def test_confirm_returns_only_toolkit_id_after_explicit_review() -> None:
     assert "new-token" not in reviewed.model_dump_json()
     assert "client-secret" not in reviewed.model_dump_json()
     h.repository.confirm.assert_not_awaited()
-    created = await h.service.confirm(h.attempt.subject, h.attempt.id)
+    created = await h.service.confirm(h.attempt.subject, h.attempt.id, _settings())
     assert created.toolkit_id == "created-toolkit"
     h.repository.confirm.assert_awaited_once()
 
@@ -192,3 +214,85 @@ async def test_ordinary_shared_and_agent_create_require_authorization(
         assert isinstance(result, Failure)
         assert isinstance(result.error, InvalidCredentials)
         assert "Authorize and confirm" in result.error.detail
+
+
+async def test_invalid_final_identifiers_preserve_live_candidate() -> None:
+    h = _creation(platform=False)
+    invalid = _settings().model_copy(update={"slug": "invalid/slug"})
+    with pytest.raises(GitHubUserOAuthError) as error:
+        await h.service.confirm(h.attempt.subject, h.attempt.id, invalid)
+    assert error.value.code is GitHubUserErrorCode.INVALID
+    h.repository.confirm.assert_not_awaited()
+    h.repository.cancel.assert_not_awaited()
+    reviewed = await h.service.review(h.attempt.subject, h.attempt.id)
+    assert reviewed.candidate.account_login == "new-account"
+
+
+async def test_confirm_forwards_only_validated_settings_overlay() -> None:
+    h = _creation(platform=False)
+    await h.service.confirm(h.attempt.subject, h.attempt.id, _settings())
+    h.repository.confirm.assert_awaited_once_with(
+        h.attempt.subject,
+        attempt_id=h.attempt.id,
+        registration=h.attempt.registration,
+        settings=_settings().prepare(canonical_name="GitHub"),
+    )
+
+
+async def test_candidate_app_metadata_rechecks_exact_review_after_provider_io(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    h = _creation(platform=False)
+    monkeypatch.setattr(
+        creation_module, "create_github_app_jwt", lambda *_: "private-jwt"
+    )
+    h.oauth.provider.setup_app.return_value = GitHubSetupAppIdentity(
+        app_id="123", name="Actual App", slug="actual-app"
+    )
+    result = await h.service.app(h.attempt.subject, h.attempt.id)
+    assert result.app is not None and result.app.name == "Actual App"
+    assert h.repository.load_review.await_count == 2
+    h.repository.confirm.assert_not_awaited()
+    h.repository.stage.assert_not_awaited()
+    assert "private-jwt" not in result.model_dump_json()
+
+
+async def test_candidate_cancelled_during_metadata_io_has_no_projection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    h = _creation(platform=False)
+    monkeypatch.setattr(
+        creation_module, "create_github_app_jwt", lambda *_: "private-jwt"
+    )
+    h.oauth.provider.setup_app.return_value = GitHubSetupAppIdentity(
+        app_id="123", name="Actual App", slug="actual-app"
+    )
+    h.repository.load_review.side_effect = [
+        h.attempt,
+        GitHubUserOAuthError(GitHubUserErrorCode.NOT_FOUND, "Attempt cancelled."),
+    ]
+    with pytest.raises(GitHubUserOAuthError) as error:
+        await h.service.app(h.attempt.subject, h.attempt.id)
+    assert error.value.code is GitHubUserErrorCode.NOT_FOUND
+    h.oauth.provider.setup_app.assert_awaited_once()
+    h.repository.confirm.assert_not_awaited()
+
+
+async def test_metadata_provider_error_preserves_candidate_for_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    h = _creation(platform=False)
+    monkeypatch.setattr(
+        creation_module, "create_github_app_jwt", lambda *_: "private-jwt"
+    )
+    h.oauth.provider.setup_app.side_effect = GitHubUserProviderError(
+        reason="provider_unavailable", status_code=429
+    )
+    with pytest.raises(GitHubUserProviderError):
+        await h.service.app(h.attempt.subject, h.attempt.id)
+    h.repository.discard_claimed.assert_not_awaited()
+    h.repository.cancel.assert_not_awaited()
+    h.repository.confirm.assert_not_awaited()
+    assert (
+        await h.service.review(h.attempt.subject, h.attempt.id)
+    ).candidate.account_id == 2
