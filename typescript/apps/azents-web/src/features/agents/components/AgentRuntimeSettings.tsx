@@ -47,6 +47,7 @@ import type {
 interface AgentRuntimeSettingsProps {
   handle: string;
   agent: AgentResponse;
+  environmentVariables?: React.ReactNode;
   state: AgentRuntimeSettingsState;
   metricsState: RuntimeSystemMetricsOverviewState;
   selectedProfileId: string | null;
@@ -418,6 +419,7 @@ function LifecycleControls({
 }
 
 function ManagedView({
+  environmentVariables,
   runtime,
   profiles,
   selectedProfileId,
@@ -443,6 +445,7 @@ function ManagedView({
   onConfirmRestart,
   onConfirmReset,
 }: {
+  environmentVariables?: React.ReactNode;
   runtime: AgentRuntimeResponse;
   profiles: WorkspaceRuntimeProfileResponse[];
   selectedProfileId: string | null;
@@ -502,6 +505,8 @@ function ManagedView({
           </Group>
         </Stack>
       </Paper>
+
+      {environmentVariables}
 
       {runtime.lifecycle ? (
         <RuntimeLifecycleStatus lifecycle={runtime.lifecycle} />
@@ -669,6 +674,7 @@ function RemovingView({
 }
 
 export function AgentRuntimeSettings({
+  environmentVariables,
   state,
   metricsState,
   selectedProfileId,
@@ -778,6 +784,7 @@ export function AgentRuntimeSettings({
         ) : null}
         {runtime.capability === "managed" ? (
           <ManagedView
+            environmentVariables={environmentVariables}
             runtime={runtime}
             profiles={profiles}
             selectedProfileId={selectedProfileId}

@@ -3,6 +3,7 @@
 /** Agent Runtime settings page entry. */
 
 import { createReactContainer } from "@/shared/lib/createReactContainer";
+import { AgentRuntimeEnvironmentVariablesSection } from "./AgentRuntimeEnvironmentVariablesSection";
 import { AgentRuntimeSettings } from "./components/AgentRuntimeSettings";
 import { AgentSettingsLayout } from "./components/AgentSettingsLayout";
 import { useAgentRuntimeSettingsContainer } from "./containers/useAgentRuntimeSettingsContainer";
@@ -17,7 +18,15 @@ function AgentRuntimeSettingsWithHeader(
       agent={props.agent}
       backTarget="settings"
     >
-      <AgentRuntimeSettings {...props} />
+      <AgentRuntimeSettings
+        {...props}
+        environmentVariables={
+          <AgentRuntimeEnvironmentVariablesSection
+            handle={props.handle}
+            agentId={props.agent.id}
+          />
+        }
+      />
     </AgentSettingsLayout>
   );
 }

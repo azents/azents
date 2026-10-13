@@ -17,7 +17,8 @@ from azents.core.enums import (
 from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.rdb.session_capabilities import ReadWriteSession
-from azents.repos.agent_session.repository_test import _create_agent, _create_workspace
+from azents.repos.agent_session.repository_test import _create_workspace
+from azents.testing.historical_agent_fixture import create_historical_agent
 
 
 async def test_existing_conversation_backfill_keeps_common_ids_and_child_group(
@@ -43,7 +44,9 @@ async def test_existing_conversation_backfill_keeps_common_ids_and_child_group(
             session = ReadWriteSession(raw)
             suffix = uuid4().hex[:10]
             workspace_id = await _create_workspace(session, f"migration-{suffix}")
-            agent_id = await _create_agent(session, workspace_id, f"migration-{suffix}")
+            agent_id = await create_historical_agent(
+                session, workspace_id=workspace_id, name=f"migration-{suffix}"
+            )
             root_id, child_id = uuid4().hex, uuid4().hex
             for session_id, handle, kind, product_mode, title in (
                 (root_id, "migration-root", "root", "team", "Original root title"),

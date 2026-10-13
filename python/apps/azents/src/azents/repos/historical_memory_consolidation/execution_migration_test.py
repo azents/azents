@@ -8,16 +8,21 @@ import pytest
 import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config
+from azcommon.result import Success
 from sqlalchemy.ext.asyncio import create_async_engine
 from testcontainers.postgres import PostgresContainer
 from uuid6 import uuid7
 
 from azents.consts import PROJECT_ROOT
-from azents.core.enums import EventKind
+from azents.core.agent_session_data import AgentSessionCreate
+from azents.core.enums import AgentSessionProductMode, EventKind
 from azents.core.historical_memory_legacy_audit import (
     MemoryLegacyCostMethod,
     MemoryLegacyRecordedOutcome,
 )
+from azents.core.workspace import WorkspaceCreate
+from azents.rdb.models.agent_runtime import RDBAgentRuntime
+from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.historical_memory_legacy_audit import (
@@ -26,10 +31,51 @@ from azents.rdb.models.historical_memory_legacy_audit import (
 )
 from azents.rdb.models.memory import RDBAgentMemory
 from azents.rdb.models.toolkit_state import RDBToolkitState
-from azents.rdb.session_capabilities import create_read_write_session_manager
-from azents.repos.session_execution.repository_test import _create_execution_subject
+from azents.rdb.session_capabilities import (
+    WriteSession,
+    create_read_write_session_manager,
+)
+from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.session_execution.repository_test import _ExecutionSubject
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
+from azents.repos.workspace import WorkspaceRepository
+from azents.testing.historical_agent_fixture import create_historical_agent
+
+
+async def _create_predecessor_execution_subject(
+    session: WriteSession, *, handle: str
+) -> _ExecutionSubject:
+    """Keep this seed at the historical schema being tested, not current Agent ORM."""
+    created_workspace = await WorkspaceRepository().create(
+        session, WorkspaceCreate(name="Migration test", handle=handle)
+    )
+    assert isinstance(created_workspace, Success)
+    workspace_id = await WorkspaceRepository().resolve_id(session, handle)
+    assert workspace_id is not None
+    agent_id = await create_historical_agent(
+        session, workspace_id=workspace_id, name=handle
+    )
+    runtime = RDBAgentRuntime(workspace_id=workspace_id, agent_id=agent_id)
+    runtime.workspace_path = "/workspace/agent"
+    session.write_session.add(runtime)
+    await session.write_session.flush()
+    repository = AgentSessionRepository()
+    created = await repository.create(
+        session,
+        AgentSessionCreate(
+            workspace_id=workspace_id,
+            product_mode=AgentSessionProductMode.TEAM,
+            associated_user_id=None,
+            agent_id=agent_id,
+            title=None,
+        ),
+    )
+    agent_session = await session.read_session.get(RDBAgentSession, created.id)
+    assert agent_session is not None
+    await repository.mark_running(session, created.id)
+    await session.write_session.refresh(agent_session)
+    return _ExecutionSubject(agent_session=agent_session, agent_id=agent_id)
 
 
 async def test_migration_keeps_current_pending_sources_saved_and_common_audit(
@@ -53,7 +99,7 @@ async def test_migration_keeps_current_pending_sources_saved_and_common_audit(
         now = datetime.datetime.now(datetime.UTC)
         try:
             async with manager() as session:
-                subject = await _create_execution_subject(
+                subject = await _create_predecessor_execution_subject(
                     session, handle=f"migration-{uuid7().hex}"
                 )
                 user = await UserRepository().create(

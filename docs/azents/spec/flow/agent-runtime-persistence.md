@@ -21,6 +21,10 @@ code_paths:
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/a32efa82fd63_replace_runtime_web_service_authority.py
   - python/apps/azents/src/azents/rdb/models/agent.py
+  - python/apps/azents/src/azents/core/runtime_environment.py
+  - python/apps/azents/src/azents/repos/agent_runtime_environment.py
+  - python/apps/azents/src/azents/services/agent_runtime_environment.py
+  - python/apps/azents/src/azents/engine/tools/builtin.py
   - python/apps/azents/src/azents/core/runtime_profile.py
   - python/apps/azents/src/azents/repos/agent_runtime/**
   - python/apps/azents/src/azents/repos/agent_runtime_add/**
@@ -58,11 +62,16 @@ code_paths:
   - typescript/packages/azents-public-client/**
   - typescript/apps/azents-web/src/shared/runtime-metrics/**
   - typescript/apps/azents-web/src/features/agents/components/AgentRuntimeSettings.tsx
+  - typescript/apps/azents-web/src/features/agents/AgentRuntimeSettingsPage.tsx
+  - typescript/apps/azents-web/src/features/agents/AgentRuntimeEnvironmentVariablesSection.tsx
+  - typescript/apps/azents-web/src/features/agents/components/AgentRuntimeEnvironmentVariables*
+  - typescript/apps/azents-web/src/features/agents/containers/useAgentRuntimeEnvironmentVariablesContainer.ts
+  - typescript/apps/azents-web/src/trpc/routers/agent.ts
   - typescript/apps/azents-web/src/features/agents/containers/useAgentRuntimeSettingsContainer.ts
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
-last_verified_at: 2026-10-05
+last_verified_at: 2026-10-13
 spec_version: 42
 ---
 
@@ -78,6 +87,45 @@ Projects, worktrees, and prompts consume that reported path without a fixed serv
 The Runner image includes Pixi and points its global environments, exposed
 commands, manifest, and package cache under the existing persistent Runner
 `HOME`.
+
+## Per-Agent Runtime environment variables
+
+Agent settings → Runtime exposes one environment-variable editor for managed Agents.
+Session pages and chat Runtime panels do not expose this editor. Owners and exact
+Agent administrators can replace the desired variable list; ordinary members can
+read only names for visible public Agents. Private Agents hide the setting from
+non-managers. Every write checks Workspace identity and active Agent lifecycle
+under the exact Agent row lock.
+
+The Agent stores a nullable Fernet-encrypted JSON mapping in
+`encrypted_runtime_environment`. GET/PUT on the Agent Runtime environment API
+return names, value-presence metadata and `can_manage`, never plaintext. Desired
+entries use explicit `stored` references or `replace` secret values. Stored
+references retain or rename an existing value without retrieving it; absent names
+are deleted, and an empty desired list clears the encrypted document. Blank
+existing UI inputs select retention rather than sending empty replacements.
+
+Names are POSIX names of at most 64 bytes. The mapping allows at most 50 entries,
+4096 UTF-8 bytes per value and 100 KiB total names/values. NUL values, duplicate
+desired names, duplicate retained references and missing references are rejected.
+Secret representations and request-validation errors are redacted.
+
+Runtime Toolkit reads the current setting for the owning `_runtime_agent_id`
+immediately before each command after credential capability admission. It preserves
+existing peer Toolkit collection and merges the Agent setting last, making Agent
+values authoritative on duplicate names while retaining unrelated Toolkit values.
+Removing an Agent entry removes only that contribution; a same-name Toolkit value
+can remain. Read/decryption failures fail command preparation rather than silently
+using stale or empty settings. Prompts include names only.
+
+Saved changes affect new shell processes without Runtime restart. Existing
+processes, Interactive Terminal, Runner environment, Provider configuration and
+Runtime configuration digests are unchanged. Agent settings survive Runtime
+stop/restart/reset, Profile changes and managed Runtime removal; Agent lifecycle
+and capability fence subsequent use. Explicit environment deletion or Agent
+deletion owns removal of this setting. Existing environment-variable Toolkits
+remain available with unchanged credentials and APIs; no deprecation or Toolkit
+data migration occurs.
 
 ## Runtime Profile binding and current configuration state
 

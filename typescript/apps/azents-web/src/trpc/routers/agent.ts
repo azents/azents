@@ -8,6 +8,8 @@
  * - listAdmins / addAdmin / removeAdmin: Agent admin management
  */
 import {
+  agentRuntimeV1GetRuntimeEnvironment,
+  agentRuntimeV1ReplaceRuntimeEnvironment,
   agentV1AddAgentAdmin,
   agentV1CreateAgent,
   agentV1CreateAgentMemory,
@@ -42,6 +44,68 @@ const memoryScopeEnum = z.enum(["agent", "user"]);
 const historicalMemoryScopeEnum = z.enum(["team", "user"]);
 
 export const agentRouter = router({
+  getRuntimeEnvironment: publicProcedure
+    .input(z.object({ handle: z.string().min(1), agentId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await agentRuntimeV1GetRuntimeEnvironment({
+          client: ctx.apiClient,
+          path: { handle: input.handle, agent_id: input.agentId },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+        });
+      }
+    }),
+
+  replaceRuntimeEnvironment: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        agentId: z.string().min(1),
+        entries: z
+          .array(
+            z.object({
+              name: z.string().min(1).max(64),
+              value: z.discriminatedUnion("type", [
+                z.object({
+                  type: z.literal("stored"),
+                  name: z.string().min(1).max(64),
+                }),
+                z.object({
+                  type: z.literal("replace"),
+                  value: z.string().max(4096),
+                }),
+              ]),
+            }),
+          )
+          .max(50),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await agentRuntimeV1ReplaceRuntimeEnvironment({
+          client: ctx.apiClient,
+          path: { handle: input.handle, agent_id: input.agentId },
+          body: { entries: input.entries },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          422: "BAD_REQUEST",
+        });
+      }
+    }),
+
   /** workspace of Agent list fetch */
   list: publicProcedure
     .input(z.object({ handle: z.string().min(1) }))

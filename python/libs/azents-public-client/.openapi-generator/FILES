@@ -445,6 +445,8 @@ azentspublicclient/docs/RedeemSignupTokenResponse.md
 azentspublicclient/docs/RefreshTokenRequest.md
 azentspublicclient/docs/RefreshTokenResponse.md
 azentspublicclient/docs/RemoveAgentRuntimeRequest.md
+azentspublicclient/docs/ReplaceRuntimeEnvironmentRequest.md
+azentspublicclient/docs/ReplacementRuntimeEnvironmentValue.md
 azentspublicclient/docs/RequestSignupEmailRequest.md
 azentspublicclient/docs/RequestSignupEmailResponse.md
 azentspublicclient/docs/RequestedInferenceProfile.md
@@ -459,6 +461,9 @@ azentspublicclient/docs/RuntimeConfigurationStateResponse.md
 azentspublicclient/docs/RuntimeConfigurationStatus.md
 azentspublicclient/docs/RuntimeDesiredState.md
 azentspublicclient/docs/RuntimeDirectNetworkAccess.md
+azentspublicclient/docs/RuntimeEnvironmentEntry.md
+azentspublicclient/docs/RuntimeEnvironmentEntryEdit.md
+azentspublicclient/docs/RuntimeEnvironmentSettings.md
 azentspublicclient/docs/RuntimeInfrastructureProfileSpec.md
 azentspublicclient/docs/RuntimeLifecycleCommandType.md
 azentspublicclient/docs/RuntimeNetworkAccess.md
@@ -557,6 +562,7 @@ azentspublicclient/docs/SkillAction.md
 azentspublicclient/docs/SlackConnectionCredentials.md
 azentspublicclient/docs/SlackConnectionSetupRequest.md
 azentspublicclient/docs/SlackManifestGuidance.md
+azentspublicclient/docs/StoredRuntimeEnvironmentValue.md
 azentspublicclient/docs/SubagentSettings.md
 azentspublicclient/docs/SubagentTreeNodeResponse.md
 azentspublicclient/docs/SubagentTreeResponse.md
@@ -589,6 +595,7 @@ azentspublicclient/docs/UploadedImage.md
 azentspublicclient/docs/UserV1Api.md
 azentspublicclient/docs/ValidationError.md
 azentspublicclient/docs/ValidationErrorLocInner.md
+azentspublicclient/docs/Value.md
 azentspublicclient/docs/VerifyCodeRequest.md
 azentspublicclient/docs/VerifyCodeResponse.md
 azentspublicclient/docs/Workspace.md
@@ -1039,6 +1046,8 @@ azentspublicclient/models/redeem_signup_token_response.py
 azentspublicclient/models/refresh_token_request.py
 azentspublicclient/models/refresh_token_response.py
 azentspublicclient/models/remove_agent_runtime_request.py
+azentspublicclient/models/replace_runtime_environment_request.py
+azentspublicclient/models/replacement_runtime_environment_value.py
 azentspublicclient/models/request_signup_email_request.py
 azentspublicclient/models/request_signup_email_response.py
 azentspublicclient/models/requested_inference_profile.py
@@ -1053,6 +1062,9 @@ azentspublicclient/models/runtime_configuration_state_response.py
 azentspublicclient/models/runtime_configuration_status.py
 azentspublicclient/models/runtime_desired_state.py
 azentspublicclient/models/runtime_direct_network_access.py
+azentspublicclient/models/runtime_environment_entry.py
+azentspublicclient/models/runtime_environment_entry_edit.py
+azentspublicclient/models/runtime_environment_settings.py
 azentspublicclient/models/runtime_infrastructure_profile_spec.py
 azentspublicclient/models/runtime_lifecycle_command_type.py
 azentspublicclient/models/runtime_network_access.py
@@ -1145,6 +1157,7 @@ azentspublicclient/models/skill_action.py
 azentspublicclient/models/slack_connection_credentials.py
 azentspublicclient/models/slack_connection_setup_request.py
 azentspublicclient/models/slack_manifest_guidance.py
+azentspublicclient/models/stored_runtime_environment_value.py
 azentspublicclient/models/subagent_settings.py
 azentspublicclient/models/subagent_tree_node_response.py
 azentspublicclient/models/subagent_tree_response.py
@@ -1173,6 +1186,7 @@ azentspublicclient/models/upload_response.py
 azentspublicclient/models/uploaded_image.py
 azentspublicclient/models/validation_error.py
 azentspublicclient/models/validation_error_loc_inner.py
+azentspublicclient/models/value.py
 azentspublicclient/models/verify_code_request.py
 azentspublicclient/models/verify_code_response.py
 azentspublicclient/models/workspace.py
@@ -1633,6 +1647,8 @@ azentspublicclient/test/test_redeem_signup_token_response.py
 azentspublicclient/test/test_refresh_token_request.py
 azentspublicclient/test/test_refresh_token_response.py
 azentspublicclient/test/test_remove_agent_runtime_request.py
+azentspublicclient/test/test_replace_runtime_environment_request.py
+azentspublicclient/test/test_replacement_runtime_environment_value.py
 azentspublicclient/test/test_request_signup_email_request.py
 azentspublicclient/test/test_request_signup_email_response.py
 azentspublicclient/test/test_requested_inference_profile.py
@@ -1647,6 +1663,9 @@ azentspublicclient/test/test_runtime_configuration_state_response.py
 azentspublicclient/test/test_runtime_configuration_status.py
 azentspublicclient/test/test_runtime_desired_state.py
 azentspublicclient/test/test_runtime_direct_network_access.py
+azentspublicclient/test/test_runtime_environment_entry.py
+azentspublicclient/test/test_runtime_environment_entry_edit.py
+azentspublicclient/test/test_runtime_environment_settings.py
 azentspublicclient/test/test_runtime_infrastructure_profile_spec.py
 azentspublicclient/test/test_runtime_lifecycle_command_type.py
 azentspublicclient/test/test_runtime_network_access.py
@@ -1745,6 +1764,7 @@ azentspublicclient/test/test_skill_action.py
 azentspublicclient/test/test_slack_connection_credentials.py
 azentspublicclient/test/test_slack_connection_setup_request.py
 azentspublicclient/test/test_slack_manifest_guidance.py
+azentspublicclient/test/test_stored_runtime_environment_value.py
 azentspublicclient/test/test_subagent_settings.py
 azentspublicclient/test/test_subagent_tree_node_response.py
 azentspublicclient/test/test_subagent_tree_response.py
@@ -1777,6 +1797,7 @@ azentspublicclient/test/test_uploaded_image.py
 azentspublicclient/test/test_user_v1_api.py
 azentspublicclient/test/test_validation_error.py
 azentspublicclient/test/test_validation_error_loc_inner.py
+azentspublicclient/test/test_value.py
 azentspublicclient/test/test_verify_code_request.py
 azentspublicclient/test/test_verify_code_response.py
 azentspublicclient/test/test_workspace.py

@@ -101,6 +101,7 @@ from azents.engine.tools.testing import FakeSharedStorage
 from azents.engine.tools.write import make_write_tool
 from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.agent_runtime_environment import AgentRuntimeEnvironmentRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.engine_tool_repositories import (
     EngineToolRepositories,
@@ -364,7 +365,12 @@ def _tool_repositories(
     runtime_profile_repository: RuntimeProfileRepository | None = None,
 ) -> EngineToolRepositories:
     """Compose actual completed operations around the existing owned DB fixtures."""
+    environment = AsyncMock(spec=AgentRuntimeEnvironmentRepository)
+    environment.read_values.return_value = {}
     return get_engine_tool_repositories(
+        runtime_environment_repository=require_instance(
+            environment, AgentRuntimeEnvironmentRepository
+        ),
         session_manager=session_manager,
         read_session_manager=session_manager,
         cipher=CredentialCipher(Fernet.generate_key().decode()),
@@ -3441,3 +3447,70 @@ async def test_runtime_projection_rejects_captured_capability_mismatch() -> None
     )
     binding.project_bound_authority_for_target.assert_not_awaited()
     binding.resolve_authority.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_agent_runtime_environment_is_fresh_and_uses_runtime_owner() -> None:
+    """One tool instance picks up changes for its Runtime owner on every launch."""
+    toolkit = _make_toolkit()
+    toolkit.set_runtime_agent_id("runtime-owner-agent")
+    environment = require_instance(toolkit.repositories.runtime_environment, AsyncMock)
+    environment.read_values.side_effect = [
+        {"API_TOKEN": "first"},
+        {"API_TOKEN": "next"},
+        {},
+    ]
+    runner = _runner_operations(toolkit)
+    tool = _find_tool(
+        (await toolkit.update_context(_make_context())).tools, "exec_command"
+    )
+    for _ in range(3):
+        await tool.handler(json.dumps({"command": "true", "workdir": "/tmp"}))
+    assert [call["env"] for call in runner.process_start_calls] == [
+        {"API_TOKEN": "first"},
+        {"API_TOKEN": "next"},
+        None,
+    ]
+    assert [call.args for call in environment.read_values.await_args_list] == [
+        ("runtime-owner-agent",)
+    ] * 3
+
+
+@pytest.mark.asyncio
+async def test_agent_runtime_environment_overrides_peer_without_exposing_values() -> (
+    None
+):
+    """Agent settings win duplicate names while unrelated Toolkit values remain."""
+    toolkit = _make_toolkit()
+    environment = require_instance(toolkit.repositories.runtime_environment, AsyncMock)
+    environment.read_values.return_value = {"API_TOKEN": "agent-only-secret"}
+    peer = AsyncMock()
+    peer.expose_env.return_value = {"API_TOKEN": "peer-secret", "OTHER": "peer-only"}
+    toolkit.set_peer_toolkits([peer])
+    prompt = await toolkit.get_static_prompt(_make_context())
+    assert "$API_TOKEN" in prompt
+    assert "agent-only-secret" not in prompt
+    assert "peer-secret" not in prompt
+    tool = _find_tool(
+        (await toolkit.update_context(_make_context())).tools, "exec_command"
+    )
+    result = await tool.handler(json.dumps({"command": "true", "workdir": "/tmp"}))
+    assert _runner_operations(toolkit).process_start_calls[-1]["env"] == {
+        "API_TOKEN": "agent-only-secret",
+        "OTHER": "peer-only",
+    }
+    assert "agent-only-secret" not in repr(result)
+
+
+@pytest.mark.asyncio
+async def test_environment_storage_failure_prevents_command_launch() -> None:
+    """Failed settings reads cannot silently execute without required credentials."""
+    toolkit = _make_toolkit()
+    environment = require_instance(toolkit.repositories.runtime_environment, AsyncMock)
+    environment.read_values.side_effect = RuntimeError("Settings unavailable")
+    tool = _find_tool(
+        (await toolkit.update_context(_make_context())).tools, "exec_command"
+    )
+    with pytest.raises(RuntimeError, match="Settings unavailable"):
+        await tool.handler(json.dumps({"command": "true", "workdir": "/tmp"}))
+    assert _runner_operations(toolkit).process_start_calls == []

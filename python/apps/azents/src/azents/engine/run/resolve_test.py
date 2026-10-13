@@ -73,6 +73,7 @@ from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.agent_runtime_environment import AgentRuntimeEnvironmentRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.engine_resolve import (
     get_engine_resolve_repositories,
@@ -548,6 +549,8 @@ def _make_builtin_provider() -> BuiltinToolkitProvider:
     snapshots.with_owner.return_value = snapshots
     snapshots.prompt_for_turn.return_value = ""
     snapshots.refresh_snapshot.return_value = False
+    environment = AsyncMock(spec=AgentRuntimeEnvironmentRepository)
+    environment.read_values.return_value = {}
     return BuiltinToolkitProvider(
         exchange_file_service=AsyncMock(),
         artifact_service=AsyncMock(),
@@ -556,6 +559,9 @@ def _make_builtin_provider() -> BuiltinToolkitProvider:
         vfs_read_router=AsyncMock(),
         agents_store=_FakeAgentsAppendixDedupeStateStore(),
         repositories=get_engine_tool_repositories(
+            runtime_environment_repository=require_instance(
+                environment, AgentRuntimeEnvironmentRepository
+            ),
             session_manager=_session_manager_for(session),
             read_session_manager=_session_manager_for(session),
             cipher=CredentialCipher(Fernet.generate_key().decode()),

@@ -7,8 +7,10 @@ Method | HTTP request | Description
 [**agent_runtime_v1_add_agent_runtime**](AgentRuntimeV1Api.md#agent_runtime_v1_add_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/add | Add Agent Runtime
 [**agent_runtime_v1_get_agent_runtime**](AgentRuntimeV1Api.md#agent_runtime_v1_get_agent_runtime) | **GET** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime | Get Agent Runtime
 [**agent_runtime_v1_get_agent_runtime_system_metrics**](AgentRuntimeV1Api.md#agent_runtime_v1_get_agent_runtime_system_metrics) | **GET** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/system-metrics | Get Agent Runtime System Metrics
+[**agent_runtime_v1_get_runtime_environment**](AgentRuntimeV1Api.md#agent_runtime_v1_get_runtime_environment) | **GET** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/environment | Get Runtime Environment
 [**agent_runtime_v1_observe_agent_runtime**](AgentRuntimeV1Api.md#agent_runtime_v1_observe_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/observe | Observe Agent Runtime
 [**agent_runtime_v1_remove_agent_runtime**](AgentRuntimeV1Api.md#agent_runtime_v1_remove_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/remove | Remove Agent Runtime
+[**agent_runtime_v1_replace_runtime_environment**](AgentRuntimeV1Api.md#agent_runtime_v1_replace_runtime_environment) | **PUT** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/environment | Replace Runtime Environment
 [**agent_runtime_v1_reset_agent_runtime**](AgentRuntimeV1Api.md#agent_runtime_v1_reset_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/reset | Reset Agent Runtime
 [**agent_runtime_v1_restart_agent_runtime**](AgentRuntimeV1Api.md#agent_runtime_v1_restart_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/restart | Restart Agent Runtime
 [**agent_runtime_v1_start_agent_runtime**](AgentRuntimeV1Api.md#agent_runtime_v1_start_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/start | Start Agent Runtime
@@ -263,6 +265,87 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
+# **agent_runtime_v1_get_runtime_environment**
+> RuntimeEnvironmentSettings agent_runtime_v1_get_runtime_environment(agent_id, handle)
+
+Get Runtime Environment
+
+Get environment names for this Agent without exposing values.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.runtime_environment_settings import RuntimeEnvironmentSettings
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.AgentRuntimeV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
+
+    try:
+        # Get Runtime Environment
+        api_response = api_instance.agent_runtime_v1_get_runtime_environment(agent_id, handle)
+        print("The response of AgentRuntimeV1Api->agent_runtime_v1_get_runtime_environment:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling AgentRuntimeV1Api->agent_runtime_v1_get_runtime_environment: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
+
+### Return type
+
+[**RuntimeEnvironmentSettings**](RuntimeEnvironmentSettings.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
 # **agent_runtime_v1_observe_agent_runtime**
 > AgentRuntimeResponse agent_runtime_v1_observe_agent_runtime(agent_id, handle)
 
@@ -426,6 +509,90 @@ Name | Type | Description  | Notes
 **200** | Successful Response |  -  |
 **403** | The caller cannot manage this Agent. |  -  |
 **409** | The irreversible Runtime removal cannot be committed. |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **agent_runtime_v1_replace_runtime_environment**
+> RuntimeEnvironmentSettings agent_runtime_v1_replace_runtime_environment(agent_id, handle, replace_runtime_environment_request)
+
+Replace Runtime Environment
+
+Replace environment variables under Agent management authorization.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.replace_runtime_environment_request import ReplaceRuntimeEnvironmentRequest
+from azentspublicclient.models.runtime_environment_settings import RuntimeEnvironmentSettings
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.AgentRuntimeV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
+    replace_runtime_environment_request = azentspublicclient.ReplaceRuntimeEnvironmentRequest() # ReplaceRuntimeEnvironmentRequest | 
+
+    try:
+        # Replace Runtime Environment
+        api_response = api_instance.agent_runtime_v1_replace_runtime_environment(agent_id, handle, replace_runtime_environment_request)
+        print("The response of AgentRuntimeV1Api->agent_runtime_v1_replace_runtime_environment:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling AgentRuntimeV1Api->agent_runtime_v1_replace_runtime_environment: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **replace_runtime_environment_request** | [**ReplaceRuntimeEnvironmentRequest**](ReplaceRuntimeEnvironmentRequest.md)|  | 
+
+### Return type
+
+[**RuntimeEnvironmentSettings**](RuntimeEnvironmentSettings.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

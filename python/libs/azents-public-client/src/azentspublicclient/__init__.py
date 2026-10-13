@@ -455,6 +455,8 @@ __all__ = [
     "RefreshTokenRequest",
     "RefreshTokenResponse",
     "RemoveAgentRuntimeRequest",
+    "ReplaceRuntimeEnvironmentRequest",
+    "ReplacementRuntimeEnvironmentValue",
     "RequestSignupEmailRequest",
     "RequestSignupEmailResponse",
     "RequestedInferenceProfile",
@@ -469,6 +471,9 @@ __all__ = [
     "RuntimeConfigurationStatus",
     "RuntimeDesiredState",
     "RuntimeDirectNetworkAccess",
+    "RuntimeEnvironmentEntry",
+    "RuntimeEnvironmentEntryEdit",
+    "RuntimeEnvironmentSettings",
     "RuntimeInfrastructureProfileSpec",
     "RuntimeLifecycleCommandType",
     "RuntimeNetworkAccess",
@@ -561,6 +566,7 @@ __all__ = [
     "SlackConnectionCredentials",
     "SlackConnectionSetupRequest",
     "SlackManifestGuidance",
+    "StoredRuntimeEnvironmentValue",
     "SubagentSettings",
     "SubagentTreeNodeResponse",
     "SubagentTreeResponse",
@@ -589,6 +595,7 @@ __all__ = [
     "UploadedImage",
     "ValidationError",
     "ValidationErrorLocInner",
+    "Value",
     "VerifyCodeRequest",
     "VerifyCodeResponse",
     "Workspace",
@@ -1077,6 +1084,8 @@ from azentspublicclient.models.redeem_signup_token_response import RedeemSignupT
 from azentspublicclient.models.refresh_token_request import RefreshTokenRequest as RefreshTokenRequest
 from azentspublicclient.models.refresh_token_response import RefreshTokenResponse as RefreshTokenResponse
 from azentspublicclient.models.remove_agent_runtime_request import RemoveAgentRuntimeRequest as RemoveAgentRuntimeRequest
+from azentspublicclient.models.replace_runtime_environment_request import ReplaceRuntimeEnvironmentRequest as ReplaceRuntimeEnvironmentRequest
+from azentspublicclient.models.replacement_runtime_environment_value import ReplacementRuntimeEnvironmentValue as ReplacementRuntimeEnvironmentValue
 from azentspublicclient.models.request_signup_email_request import RequestSignupEmailRequest as RequestSignupEmailRequest
 from azentspublicclient.models.request_signup_email_response import RequestSignupEmailResponse as RequestSignupEmailResponse
 from azentspublicclient.models.requested_inference_profile import RequestedInferenceProfile as RequestedInferenceProfile
@@ -1091,6 +1100,9 @@ from azentspublicclient.models.runtime_configuration_state_response import Runti
 from azentspublicclient.models.runtime_configuration_status import RuntimeConfigurationStatus as RuntimeConfigurationStatus
 from azentspublicclient.models.runtime_desired_state import RuntimeDesiredState as RuntimeDesiredState
 from azentspublicclient.models.runtime_direct_network_access import RuntimeDirectNetworkAccess as RuntimeDirectNetworkAccess
+from azentspublicclient.models.runtime_environment_entry import RuntimeEnvironmentEntry as RuntimeEnvironmentEntry
+from azentspublicclient.models.runtime_environment_entry_edit import RuntimeEnvironmentEntryEdit as RuntimeEnvironmentEntryEdit
+from azentspublicclient.models.runtime_environment_settings import RuntimeEnvironmentSettings as RuntimeEnvironmentSettings
 from azentspublicclient.models.runtime_infrastructure_profile_spec import RuntimeInfrastructureProfileSpec as RuntimeInfrastructureProfileSpec
 from azentspublicclient.models.runtime_lifecycle_command_type import RuntimeLifecycleCommandType as RuntimeLifecycleCommandType
 from azentspublicclient.models.runtime_network_access import RuntimeNetworkAccess as RuntimeNetworkAccess
@@ -1183,6 +1195,7 @@ from azentspublicclient.models.skill_action import SkillAction as SkillAction
 from azentspublicclient.models.slack_connection_credentials import SlackConnectionCredentials as SlackConnectionCredentials
 from azentspublicclient.models.slack_connection_setup_request import SlackConnectionSetupRequest as SlackConnectionSetupRequest
 from azentspublicclient.models.slack_manifest_guidance import SlackManifestGuidance as SlackManifestGuidance
+from azentspublicclient.models.stored_runtime_environment_value import StoredRuntimeEnvironmentValue as StoredRuntimeEnvironmentValue
 from azentspublicclient.models.subagent_settings import SubagentSettings as SubagentSettings
 from azentspublicclient.models.subagent_tree_node_response import SubagentTreeNodeResponse as SubagentTreeNodeResponse
 from azentspublicclient.models.subagent_tree_response import SubagentTreeResponse as SubagentTreeResponse
@@ -1211,6 +1224,7 @@ from azentspublicclient.models.upload_response import UploadResponse as UploadRe
 from azentspublicclient.models.uploaded_image import UploadedImage as UploadedImage
 from azentspublicclient.models.validation_error import ValidationError as ValidationError
 from azentspublicclient.models.validation_error_loc_inner import ValidationErrorLocInner as ValidationErrorLocInner
+from azentspublicclient.models.value import Value as Value
 from azentspublicclient.models.verify_code_request import VerifyCodeRequest as VerifyCodeRequest
 from azentspublicclient.models.verify_code_response import VerifyCodeResponse as VerifyCodeResponse
 from azentspublicclient.models.workspace import Workspace as Workspace

@@ -33,6 +33,13 @@ _OPENAI_IMAGE_PROMPT = "A deterministic OpenAI image"
 _OPENAI_IMAGE_CALL_ID = "call_openai_image_generation"
 _BRAVE_PROMPT_PREFIX = "Brave Search E2E "
 _BRAVE_KINDS = ("web", "context", "news", "images", "videos")
+RUNTIME_ENVIRONMENT_PROMPT_PREFIX = "Agent Runtime environment E2E: "
+RUNTIME_ENVIRONMENT_FINAL = "AGENT_RUNTIME_ENVIRONMENT_E2E_COMPLETED"
+RUNTIME_ENVIRONMENT_COMMAND = (
+    'if [ -n "${E2E_AGENT_SECRET+x}" ]; then '
+    'printf "%s" "$E2E_AGENT_SECRET" | sha256sum; '
+    'else printf "ABSENT\\n"; fi'
+)
 
 
 @dataclass(frozen=True)
@@ -2459,6 +2466,32 @@ class _Handler(BaseHTTPRequestHandler):
                         request,
                         plan.final_text,
                         response_id=f"resp_consolidation_final_{logical.chain_id}",
+                    )
+                return
+            if isinstance(user_text, str) and user_text.startswith(
+                RUNTIME_ENVIRONMENT_PROMPT_PREFIX
+            ):
+                step = user_text.removeprefix(RUNTIME_ENVIRONMENT_PROMPT_PREFIX)
+                call_id = f"call_runtime_environment_{step}"
+                if _SESSION_TITLE_SYSTEM_MARKER in (request.instructions or ""):
+                    self._write_text_response(
+                        request,
+                        '{"title":"Runtime environment E2E"}',
+                        response_id=f"resp_runtime_environment_title_{step}",
+                    )
+                    return
+                if request_has_tool_output(request, call_id):
+                    self._write_text_response(
+                        request,
+                        RUNTIME_ENVIRONMENT_FINAL,
+                        response_id=f"resp_runtime_environment_final_{step}",
+                    )
+                else:
+                    self._write_function_call_response(
+                        request,
+                        call_id=call_id,
+                        name="exec_command",
+                        arguments={"command": RUNTIME_ENVIRONMENT_COMMAND},
                     )
                 return
             try:

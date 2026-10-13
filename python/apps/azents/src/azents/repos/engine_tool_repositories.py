@@ -13,6 +13,7 @@ from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.agent_runtime_environment import AgentRuntimeEnvironmentRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.engine_runtime_tool_read import EngineRuntimeToolReadRepository
 from azents.repos.mailbox import MailboxRepository
@@ -103,6 +104,7 @@ class EngineToolRepositories:
     memory: MemoryOperationRepository
     session_history: SessionHistoryOperationRepository
     runtime: EngineRuntimeToolReadRepository
+    runtime_environment: AgentRuntimeEnvironmentRepository
     mcp_oauth: MCPOAuthRuntimeOperationRepository
     snapshots: EngineMcpSnapshotFactory
     appendix: ToolkitAgentsAppendixDedupeStateStore
@@ -136,6 +138,9 @@ def get_engine_tool_repositories(
     project_repository: Annotated[
         SessionWorkspaceProjectRepository, Depends(SessionWorkspaceProjectRepository)
     ],
+    runtime_environment_repository: Annotated[
+        AgentRuntimeEnvironmentRepository, Depends(AgentRuntimeEnvironmentRepository)
+    ],
 ) -> EngineToolRepositories:
     """Wire concrete tool database collaborators at the repository boundary."""
     return EngineToolRepositories(
@@ -158,6 +163,7 @@ def get_engine_tool_repositories(
             runtime_profile_repository=runtime_profile_repository,
             project_repository=project_repository,
         ),
+        runtime_environment=runtime_environment_repository,
         mcp_oauth=MCPOAuthRuntimeOperationRepository(
             session_manager=session_manager,
             connection_repository=MCPOAuthConnectionRepository(cipher=cipher),

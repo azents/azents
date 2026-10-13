@@ -36,8 +36,10 @@ from .data import (
     RemoveAgentRuntimeRequest,
     ResetAgentRuntimeRequest,
 )
+from .environment import router as environment_router
 
 router = APIRouter()
+router.include_router(environment_router)
 
 
 @router.get("/workspaces/{handle}/agents/{agent_id}/runtime")

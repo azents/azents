@@ -1243,6 +1243,9 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 publish_event=context.publish_event,
                 owner_session_id=self._session_id,
                 peer_toolkits=self._peer_toolkits,
+                read_agent_environment=lambda: (
+                    self.repositories.runtime_environment.read_values(runtime_agent_id)
+                ),
                 runtime_capability_resolver=capability_resolver,
                 expected_authority_provider=self._required_runtime_authority,
                 resolve_working_folder_authority=(
@@ -1342,6 +1345,16 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 else None
             ),
         )
+        environment = await self.repositories.runtime_environment.read_values(
+            self._runtime_agent_id
+        )
+        if environment:
+            names = ", ".join(f"${name}" for name in sorted(environment))
+            prompt += (
+                "\n\nAgent Runtime environment variables available in shell commands: "
+                f"{names}. "
+                "Do not echo or log their values."
+            )
         if behavior.prompt:
             return f"{prompt}\n\n{behavior.prompt}"
         return prompt
@@ -2341,6 +2354,7 @@ def make_exec_command_tool(
         [RuntimeOperationTarget],
         Awaitable[SessionWorkingFolderAuthority],
     ],
+    read_agent_environment: Callable[[], Awaitable[dict[str, str]]],
     peer_toolkits: Sequence[RuntimeEnvProvider] = (),
 ) -> FunctionTool:
     """Create an exec_command tool backed by Runtime Runner process operations."""
@@ -2370,6 +2384,7 @@ def make_exec_command_tool(
                     },
                 ) from None
             secret_env = await _collect_secret_env(peer_toolkits, agent_id)
+            secret_env.update(await read_agent_environment())
             await publish_event(RuntimeReadyEvent())
             result = await runner_operations.start_process(
                 runtime_id=runtime.id,

@@ -1488,6 +1488,128 @@
         }
       }
     },
+    "/agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/environment": {
+      "get": {
+        "tags": [
+          "Agent Runtime v1"
+        ],
+        "summary": "Get Runtime Environment",
+        "description": "Get environment names for this Agent without exposing values.",
+        "operationId": "agent_runtime_v1_get_runtime_environment",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeEnvironmentSettings"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Agent Runtime v1"
+        ],
+        "summary": "Replace Runtime Environment",
+        "description": "Replace environment variables under Agent management authorization.",
+        "operationId": "agent_runtime_v1_replace_runtime_environment",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceRuntimeEnvironmentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeEnvironmentSettings"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime": {
       "get": {
         "tags": [
@@ -34605,6 +34727,47 @@
         "title": "RemoveAgentRuntimeRequest",
         "description": "Final irreversible Runtime removal request."
       },
+      "ReplaceRuntimeEnvironmentRequest": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeEnvironmentEntryEdit"
+            },
+            "type": "array",
+            "title": "Entries"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "entries"
+        ],
+        "title": "ReplaceRuntimeEnvironmentRequest",
+        "description": "Complete desired list; omission deletes, stored references retain values."
+      },
+      "ReplacementRuntimeEnvironmentValue": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "replace",
+            "title": "Type"
+          },
+          "value": {
+            "type": "string",
+            "format": "password",
+            "title": "Value",
+            "writeOnly": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "value"
+        ],
+        "title": "ReplacementRuntimeEnvironmentValue",
+        "description": "Explicit replacement, including a valid empty environment value."
+      },
       "RequestSignupEmailRequest": {
         "properties": {
           "email": {
@@ -35055,6 +35218,81 @@
         ],
         "title": "RuntimeDirectNetworkAccess",
         "description": "Direct customer egress within one CIDR boundary."
+      },
+      "RuntimeEnvironmentEntry": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "has_value": {
+            "type": "boolean",
+            "title": "Has Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "has_value"
+        ],
+        "title": "RuntimeEnvironmentEntry",
+        "description": "Redacted stored entry metadata."
+      },
+      "RuntimeEnvironmentEntryEdit": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "value": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/StoredRuntimeEnvironmentValue"
+              },
+              {
+                "$ref": "#/components/schemas/ReplacementRuntimeEnvironmentValue"
+              }
+            ],
+            "title": "Value",
+            "discriminator": {
+              "propertyName": "type",
+              "mapping": {
+                "replace": "#/components/schemas/ReplacementRuntimeEnvironmentValue",
+                "stored": "#/components/schemas/StoredRuntimeEnvironmentValue"
+              }
+            }
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "value"
+        ],
+        "title": "RuntimeEnvironmentEntryEdit",
+        "description": "One desired entry with an explicit retain or replacement operation."
+      },
+      "RuntimeEnvironmentSettings": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeEnvironmentEntry"
+            },
+            "type": "array",
+            "title": "Entries"
+          },
+          "can_manage": {
+            "type": "boolean",
+            "title": "Can Manage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "entries",
+          "can_manage"
+        ],
+        "title": "RuntimeEnvironmentSettings",
+        "description": "Per-Agent management state; secret values never leave through this model."
       },
       "RuntimeInfrastructureProfileSpec": {
         "oneOf": [
@@ -38099,6 +38337,27 @@
           "manifest_json"
         ],
         "title": "SlackManifestGuidance"
+      },
+      "StoredRuntimeEnvironmentValue": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "stored",
+            "title": "Type"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "name"
+        ],
+        "title": "StoredRuntimeEnvironmentValue",
+        "description": "Retain an existing secret by its exact persisted variable name."
       },
       "SubagentSettings": {
         "properties": {
