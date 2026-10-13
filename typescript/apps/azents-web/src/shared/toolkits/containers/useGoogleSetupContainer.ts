@@ -21,6 +21,7 @@ import {
   googleResumeMatches,
   googleReturnPath,
   googleStateDigest,
+  sameGoogleResumeAttempt,
 } from "../google-resume";
 import { canPublishGoogleReview } from "../google-types";
 import type { GoogleResume } from "../google-resume";
@@ -131,9 +132,19 @@ export function useGoogleSetupContainer({
     active.current = context;
     saveResume(context);
   };
+  const readResume = (): GoogleResume | null =>
+    readSessionStorageValue<GoogleResume | null>({
+      key: GOOGLE_RESUME_KEY,
+      deserialize: deserializeGoogleResume,
+    }) ?? null;
   const reset = (): void => {
+    if (
+      active.current != null &&
+      sameGoogleResumeAttempt(readResume(), active.current)
+    ) {
+      clearResume();
+    }
     active.current = null;
-    clearResume();
     setAcknowledged(false);
     setOperationError(null);
     setFlow({ type: "SELECT" });
@@ -155,7 +166,14 @@ export function useGoogleSetupContainer({
     setAcknowledged(false);
     setFlow({ type: "REVIEW", review });
   };
-  const finish = async (outcome: GooglePublishedOutput): Promise<void> => {
+  const finish = async (
+    outcome: GooglePublishedOutput,
+    context: GoogleResume,
+  ): Promise<void> => {
+    if (!sameGoogleResumeAttempt(readResume(), context)) {
+      return;
+    }
+    const finishingGeneration = epoch.current;
     active.current = null;
     clearResume();
     setAcknowledged(false);
@@ -163,9 +181,16 @@ export function useGoogleSetupContainer({
     try {
       await invalidate();
     } catch {
-      setOperationError(t("statusFailed"));
+      if (isCurrent(finishingGeneration) && readResume() == null) {
+        setOperationError(t("statusFailed"));
+      }
     }
-    if (toolkitId == null && outcome.current && mounted.current) {
+    if (
+      toolkitId == null &&
+      outcome.current &&
+      isCurrent(finishingGeneration) &&
+      readResume() == null
+    ) {
       if (onComplete != null) {
         onComplete();
       } else {
@@ -299,6 +324,7 @@ export function useGoogleSetupContainer({
       pending.current ||
       flow.type !== "REVIEW" ||
       active.current == null ||
+      !sameGoogleResumeAttempt(readResume(), active.current) ||
       !canPublishGoogleReview(flow.review, tasks, acknowledged, Date.now())
     ) {
       return;
@@ -333,10 +359,13 @@ export function useGoogleSetupContainer({
               settings,
             });
       if (isCurrent(operation)) {
-        await finish(outcome);
+        await finish(outcome, context);
       }
     } catch {
       if (isCurrent(operation)) {
+        if (!sameGoogleResumeAttempt(readResume(), context)) {
+          return;
+        }
         writeResume({ ...context, phase: "UNKNOWN" });
         setFlow({ type: "UNKNOWN", checking: false, message: null });
       }
@@ -359,7 +388,7 @@ export function useGoogleSetupContainer({
         { retry: false, staleTime: 0 },
       );
       if (isCurrent(operation)) {
-        await finish(outcome);
+        await finish(outcome, context);
       }
     } catch {
       if (isCurrent(operation)) {
@@ -392,11 +421,19 @@ export function useGoogleSetupContainer({
         agentId,
         attemptId: context.attemptId,
       });
+      if (!sameGoogleResumeAttempt(readResume(), context)) {
+        return;
+      }
       if (!isCurrent(operation)) {
+        if (result.publication == null) {
+          clearResume();
+        } else {
+          saveResume({ ...context, phase: "UNKNOWN" });
+        }
         return;
       }
       if (result.publication != null) {
-        await finish(result.publication);
+        await finish(result.publication, context);
       } else {
         reset();
       }

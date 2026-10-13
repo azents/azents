@@ -19,6 +19,10 @@ code_paths:
   - typescript/apps/azents-web/src/shared/toolkits/google-*.ts
   - typescript/apps/azents-web/src/shared/toolkits/components/GoogleSetup.tsx
   - typescript/apps/azents-web/src/shared/toolkits/containers/useGoogleSetupContainer.ts
+  - typescript/apps/azents-web/src/shared/toolkits/containers/useToolkitFormContainer.ts
+  - typescript/apps/azents-web/src/shared/toolkits/toolkit-form-lifecycle.ts
+  - typescript/apps/azents-web/src/features/agents/containers/useAgentToolkitManagementContainer.ts
+  - typescript/apps/azents-web/src/features/agents/components/ManagedAgentToolkitSection.tsx
   - typescript/apps/azents-web/src/features/toolkits/*Google*.tsx
   - typescript/apps/azents-web/src/features/toolkits/containers/useGoogleCallbackContainer.ts
   - typescript/apps/azents-web/src/trpc/routers/google.ts
@@ -48,8 +52,14 @@ separate details. Empty usable evidence, missing renewal or an expired attempt
 cannot enable publication. Security acknowledgement starts false on each review.
 
 The same setup component supports Workspace-shared and exact Agent ownership.
-Saved Toolkit editing preserves generic metadata; task permission changes require
-ordinary staged reconnect and reviewed atomic replacement. Local disconnect has
+Saved Toolkit metadata updates omit Google provider configuration, preserving the
+task/timeout settings confirmed independently by reconnect. Task permission changes
+use ordinary staged reconnect and reviewed atomic replacement. Agent capabilities
+restores only the matching Google create or exact Agent-owned edit surface, including
+uncertain-publication recovery. Closing or backing out of staged Google creation
+invokes exact local abandonment; successful cleanup can finish after view unmount
+only while the stored resume still belongs to that attempt. A publication that wins
+that cancellation race remains an inspectable outcome. Local disconnect has
 explicit confirmation and does not claim remote revocation or reversal of effects.
 
 The `/oauth/google/callback` page scrubs transient query data and matches a
@@ -58,6 +68,10 @@ cancellation. Browser resume stores only exact context, deadline, attempt ID,
 correlation digest, phase and validated return destination. It contains no code,
 token, secret or OAuth state. The backend's encrypted state remains authoritative.
 A stale callback attaches nothing and does not cancel a sibling attempt.
+Every post-await callback storage write and navigation checks both the mounted
+operation and the exact current resume owner. Leaving or replacing the callback
+fences a late exchange/denial result without clearing a newer attempt. Strict Mode
+probing finishes before the one-use external exchange is dispatched.
 
 An uncertain exchange is inspected through review without exchanging again. An
 uncertain publication offers exact outcome lookup or local cancellation; it does

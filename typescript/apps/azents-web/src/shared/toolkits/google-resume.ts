@@ -65,6 +65,24 @@ export function googleResumeMatches(
     context.toolkitId === toolkitId
   );
 }
+export function sameGoogleResumeAttempt(
+  current: GoogleResume | null,
+  expected: GoogleResume,
+): boolean {
+  return (
+    current != null &&
+    googleResumeMatches(
+      current,
+      expected.handle,
+      expected.agentId,
+      expected.toolkitId,
+    ) &&
+    current.attemptId === expected.attemptId &&
+    current.stateDigest === expected.stateDigest &&
+    current.expiresAt === expected.expiresAt &&
+    current.returnPath === expected.returnPath
+  );
+}
 /** Opaque correlation only; server-owned encrypted state remains authoritative. */
 export async function googleStateDigest(state: string): Promise<string> {
   const hash = await crypto.subtle.digest(

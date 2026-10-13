@@ -45,6 +45,10 @@ import {
   projectToolkitConfig,
   toolkitProjectionUsesOauth,
 } from "../toolkit-config-projection";
+import {
+  metadataProviderFields,
+  usesToolkitCreationWizard,
+} from "../toolkit-form-lifecycle";
 import type { GitHubUserCreationContext } from "../github-user-creation-state";
 import type { GoogleResume } from "../google-resume";
 import type { ToolkitFormValues } from "../schemas";
@@ -419,7 +423,7 @@ export function useToolkitFormContainer(
 
   const submitForm = useCallback(
     (values: ToolkitFormValues): void => {
-      if (!isEditMode && values.toolkitType === "github") {
+      if (!isEditMode && usesToolkitCreationWizard(values.toolkitType)) {
         return;
       }
       setMutationState({ type: "SUBMITTING" });
@@ -454,7 +458,7 @@ export function useToolkitFormContainer(
             name: values.name,
             description: values.description ?? null,
             prompt: values.prompt ?? null,
-            config: values.config,
+            ...metadataProviderFields(values.toolkitType, values.config),
             ...(credentials != null && { credentials }),
             enabled: values.enabled,
             alwaysExposeTools: values.alwaysExposeTools,
@@ -485,7 +489,7 @@ export function useToolkitFormContainer(
           name: values.name,
           description: values.description ?? null,
           prompt: values.prompt ?? null,
-          config: values.config,
+          ...metadataProviderFields(values.toolkitType, values.config),
           ...(credentials != null && { credentials }),
           enabled: values.enabled,
           alwaysExposeTools: values.alwaysExposeTools,
