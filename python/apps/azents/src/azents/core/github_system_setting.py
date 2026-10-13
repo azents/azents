@@ -44,12 +44,12 @@ class PlatformGitHubAppSecrets(BaseModel):
 class PlatformGitHubAppEffective(BaseModel):
     """Complete and locally valid effective Platform GitHub App credentials."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
 
     app_id: str = Field(min_length=1, pattern=r"^[0-9]+$")
     client_id: str = Field(min_length=1)
-    private_key: str = Field(min_length=1)
-    client_secret: str = Field(min_length=1)
+    private_key: str = Field(min_length=1, repr=False)
+    client_secret: str = Field(min_length=1, repr=False)
 
     @field_validator("private_key")
     @classmethod

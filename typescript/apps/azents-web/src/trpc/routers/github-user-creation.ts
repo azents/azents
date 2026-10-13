@@ -1,9 +1,11 @@
 import {
+  githubUserCreationV1AgentCreationApp,
   githubUserCreationV1AgentCreationCancel,
   githubUserCreationV1AgentCreationConfirm,
   githubUserCreationV1AgentCreationConnect,
   githubUserCreationV1AgentCreationExchange,
   githubUserCreationV1AgentCreationReview,
+  githubUserCreationV1SharedCreationApp,
   githubUserCreationV1SharedCreationCancel,
   githubUserCreationV1SharedCreationConfirm,
   githubUserCreationV1SharedCreationConnect,
@@ -19,6 +21,20 @@ const scope = z.object({
   agentId: z.string().min(1).optional(),
 });
 const attempt = scope.extend({ attemptId: z.string().min(1).max(64) });
+const finalSettings = z
+  .object({
+    name: z.string().nullable(),
+    slug: z.string().nullable(),
+    description: z.string().nullable(),
+    prompt: z.string().nullable(),
+    enabled: z.boolean(),
+    always_expose_tools: z.boolean(),
+    toolsets: z.array(z.string()),
+    timeout: z.number().positive(),
+    inject_runtime_environment: z.boolean(),
+    runtime_risk_acknowledged: z.boolean(),
+  })
+  .strict();
 async function request<T>(operation: () => Promise<T>): Promise<T> {
   try {
     return await operation();
@@ -35,6 +51,26 @@ async function request<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 export const githubUserCreationRouter = router({
+  app: publicProcedure.input(attempt).query(async ({ ctx, input }) => {
+    const { data } = await request(() =>
+      input.agentId == null
+        ? githubUserCreationV1SharedCreationApp({
+            client: ctx.apiClient,
+            path: { handle: input.handle, attempt_id: input.attemptId },
+            throwOnError: true,
+          })
+        : githubUserCreationV1AgentCreationApp({
+            client: ctx.apiClient,
+            path: {
+              handle: input.handle,
+              agent_id: input.agentId,
+              attempt_id: input.attemptId,
+            },
+            throwOnError: true,
+          }),
+    );
+    return data;
+  }),
   connect: publicProcedure
     .input(
       scope.extend({
@@ -124,25 +160,27 @@ export const githubUserCreationRouter = router({
     );
     return data;
   }),
-  confirm: publicProcedure.input(attempt).mutation(async ({ ctx, input }) => {
-    const body = { attempt_id: input.attemptId };
-    const { data } = await request(() =>
-      input.agentId == null
-        ? githubUserCreationV1SharedCreationConfirm({
-            client: ctx.apiClient,
-            path: { handle: input.handle },
-            body,
-            throwOnError: true,
-          })
-        : githubUserCreationV1AgentCreationConfirm({
-            client: ctx.apiClient,
-            path: { handle: input.handle, agent_id: input.agentId },
-            body,
-            throwOnError: true,
-          }),
-    );
-    return data;
-  }),
+  confirm: publicProcedure
+    .input(attempt.extend({ settings: finalSettings }))
+    .mutation(async ({ ctx, input }) => {
+      const body = { attempt_id: input.attemptId, settings: input.settings };
+      const { data } = await request(() =>
+        input.agentId == null
+          ? githubUserCreationV1SharedCreationConfirm({
+              client: ctx.apiClient,
+              path: { handle: input.handle },
+              body,
+              throwOnError: true,
+            })
+          : githubUserCreationV1AgentCreationConfirm({
+              client: ctx.apiClient,
+              path: { handle: input.handle, agent_id: input.agentId },
+              body,
+              throwOnError: true,
+            }),
+      );
+      return data;
+    }),
   cancel: publicProcedure.input(attempt).mutation(async ({ ctx, input }) => {
     await request(() =>
       input.agentId == null

@@ -55,7 +55,9 @@ class ToolkitCreate(BaseModel):
     config: dict[str, Any] = Field(description="Tool settings")
     prompt: str | None = Field(default=None, description="Custom prompt")
     credentials: str | None = Field(
-        default=None, description="Credentials JSON (plaintext, encrypted by repo)"
+        default=None,
+        repr=False,
+        description="Credentials JSON (plaintext, encrypted by repo)",
     )
     enabled: bool = Field(default=True, description="Enabled flag")
     always_expose_tools: bool = Field(

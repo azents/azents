@@ -385,3 +385,54 @@ def test_revoked_account_keeps_authentication_failure_boundary() -> None:
     handler.do_POST()
     assert handler.response == _Response(401, {"message": "Bad synthetic credentials"})
     assert _WireHandler.mcp_call_count == 0
+
+
+def test_setup_app_name_changes_only_on_new_provider_request() -> None:
+    handler = _WireHandler("/app", b"", "synthetic-app-jwt")
+    handler.do_GET()
+    assert handler.response is not None and handler.response.payload is not None
+    assert handler.response.payload["name"] == "Azents Test App"
+    _WireHandler.scenario = "user_app_renamed"
+    renamed = _WireHandler("/app", b"", "synthetic-app-jwt")
+    renamed.do_GET()
+    assert renamed.response is not None and renamed.response.payload is not None
+    assert renamed.response.payload["name"] == "Renamed Test App"
+
+
+@pytest.mark.parametrize(
+    ("target", "status"), [("501", 200), ("502", 200), ("504", 403), ("999", 404)]
+)
+def test_setup_installation_projection_and_denial(target: str, status: int) -> None:
+    handler = _WireHandler("/app/installations/" + target, b"", "synthetic-app-jwt")
+    handler.do_GET()
+    assert handler.response is not None
+    assert handler.response.status == status
+    if status == 200:
+        assert handler.response.payload is not None
+        assert handler.response.payload["id"] == int(target)
+        assert handler.response.payload["app_id"] == 123
+
+
+def test_pat_identity_uses_only_explicit_synthetic_token() -> None:
+    valid = _WireHandler("/user", b"", "synthetic-pat")
+    valid.do_GET()
+    assert valid.response is not None and valid.response.payload is not None
+    assert valid.response.payload["login"] == "connected-user"
+    invalid = _WireHandler("/user", b"", "unknown-pat")
+    invalid.do_GET()
+    assert invalid.response == _Response(401, {"message": "Bad synthetic credentials"})
+
+
+def test_installation_token_requires_known_target_and_valid_payload() -> None:
+    handler = _WireHandler(
+        "/app/installations/501/access_tokens", _body({}), "synthetic-app-jwt"
+    )
+    handler.do_POST()
+    assert handler.response == _Response(201, {"token": "synthetic-installation-501"})
+    malformed = _WireHandler(
+        "/app/installations/501/access_tokens",
+        _body({"unexpected": True}),
+        "synthetic-app-jwt",
+    )
+    malformed.do_POST()
+    assert malformed.response == _Response(400, {"error": "invalid_synthetic_request"})

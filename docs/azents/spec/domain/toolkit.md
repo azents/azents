@@ -12,6 +12,7 @@ code_paths:
   - python/apps/azents/src/azents/core/github_auth.py
   - python/apps/azents/src/azents/core/github_installation.py
   - python/apps/azents/src/azents/core/github_credentials.py
+  - python/apps/azents/src/azents/core/github_setup*.py
   - python/apps/azents/src/azents/core/github_user_*.py
   - python/apps/azents/src/azents/core/historical_memory_settings.py
   - python/apps/azents/src/azents/core/historical_memory_context.py
@@ -116,10 +117,12 @@ code_paths:
   - typescript/apps/azents-web/src/shared/lib/toolkit-identifiers.ts
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
   - typescript/apps/azents-web/src/trpc/routers/github-user.ts
+  - typescript/apps/azents-web/src/trpc/routers/github-user-creation.ts
+  - typescript/apps/azents-web/src/trpc/routers/github-setup.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-10-11
-spec_version: 143
+last_verified_at: 2026-10-13
+spec_version: 144
 ---
 
 # Toolkit
@@ -533,6 +536,61 @@ The catalog, form and details share a responsive dialog while the parent Agent f
 The Agent-only form uses the existing provider-specific config, credential, test, GitHub, and MCP OAuth controls. The callback return target is the owning Agent's capabilities Toolkit section. The callback's opener notification contains only its fixed event type and success boolean; credentials, tokens, codes, and state plaintext are never rendered or posted.
 The Agent card reserves an OAuth popup before requesting an authorization URL, verifies callback origin and popup source, and invalidates the Agent management projection on callback success. Failure leaves readiness unchanged and displays an error. The existing ownership-specific OAuth endpoints and backend permission checks remain authoritative.
 
+### GitHub New-Connection Wizard
+
+New GitHub creation, in the shared full-page form and exact Agent editor, uses
+one progressive surface: execution identity, applicable method, connection
+evidence, feature groups, Runtime opt-in, and final review. Earlier sections
+remain visible. Personal identity maps to PAT or App user-account modes; App
+identity maps to installation modes. Toolkit ownership is the entry context,
+not a consequence of identity selection. Saved Toolkit editing retains its
+existing controls and authorization behavior.
+
+Management setup availability retains the redacted registration presence field
+and adds per-mode local readiness. Loading or query failure is distinct from
+confirmed absence/incompleteness. A locally unavailable Platform method is
+omitted. Its display name is fetched through the authenticated GitHub SDK App
+operation using the current registration; the numeric App ID must match.
+Metadata failure shows retry rather than a fabricated name or App absence.
+There is no retained display-name configuration/cache or refresh actor.
+
+GitHub-specific setup verification accepts strict PAT or installation-mode
+inputs under shared/exact-Agent management authority. It verifies the actual
+GitHub user or App and each selected installation, separates target observations
+from MCP connectivity, and repeats management admission after provider I/O.
+Platform verification additionally reuses the existing current-user/current-App
+synced selected-installation authority before metadata, before probe-token
+issuance and before returning. Foreign or removed initial targets cause no
+provider/probe I/O; authority loss during observation blocks issuance/response.
+Denied targets contain no invented owner metadata. Generic MCP connection-test
+contracts remain unchanged. Setup verification publishes no Toolkit and creates
+no durable credential receipt; final ordinary PAT/installation creation retains
+its existing credential and Platform binding authority.
+
+User-account App setup returns in the same browser context to the same Wizard.
+The existing exact encrypted candidate remains unpublished while the manager
+chooses feature groups, optional Runtime token injection and final metadata.
+App display metadata for a candidate is read through an exact-attempt endpoint
+with live scope/registration checks before and after the provider call.
+Only nonsecret attempt context is Session-stored. Downstream edits are in memory,
+not autosaved; reload restores the server's initial defaults for another review.
+
+Final review shows the actual execution identity/App, ownership/sharing context
+and the selected settings. All supported feature groups remain configurable;
+feature exposure does not grant GitHub access. Runtime injection is OFF by
+default and ON requires exposure acknowledgment. Only the final action creates
+the Toolkit. Both identity branches provide reset, which invalidates dependent
+connection evidence, and the host close action abandons unpublished setup.
+There is no duplicate final cancel button. Explicit abandonment invalidates
+local operations; a late connect response cancels its exact attempt rather than
+redirecting. Intentional same-context OAuth navigation does not cancel on unmount.
+
+New-creation close/reset is restricted while final publication is pending,
+separately from candidate review and existing saved-edit/attachment guards.
+An uncertain write outcome is not automatically replayed or reported as a
+rollback; the UI provides saved-state inspection. Closing/resetting does not
+disconnect a saved Toolkit, uninstall an App, or prove provider revocation.
+
 ### GitHub User Account Authority
 
 GitHub has five explicit authentication modes: `pat`, BYOA installation
@@ -563,6 +621,19 @@ creates ToolkitConfig, its connected account and the Agent-owned namespace
 reservation in one database-only transaction. Failed confirmation rolls back all
 publication; cancellation, rejected exchange and expired/abandoned attempts
 expose no new Toolkit to lists, attachments or execution.
+
+New-creation confirmation requires the exact attempt ID and a complete strict
+final-settings DTO. Name/slug/defaults, supported metadata, feature groups,
+timeout, enabled/tool exposure and Runtime choice are validated and overlaid on
+the exact locked candidate. Authentication mode, App/source/client identity,
+credentials, callback and owner are never accepted as final-setting changes.
+Runtime ON requires acknowledgment, which is not persisted as credential
+authority. The transaction repeats live scope, REVIEW/expiry and current binding
+checks, then atomically creates the Toolkit/account/Agent namespace and consumes
+the attempt. Correctable input failure preserves a still-live candidate. There
+is no attempt-settings update API, create-then-update publication, or creation
+attempt-ID-only fallback. Existing saved-Toolkit reconnect confirmation remains
+unchanged.
 
 Existing Toolkit setup reserves a ten-minute, one-use attempt bound to the exact active Azents
 User/Auth Session, Workspace, Toolkit, owning Agent when applicable, callback,
@@ -1322,6 +1393,9 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 - `GET /github/platform-oauth-url` — GitHub Platform OAuth URL
 - `POST /github/platform-installations` — OAuth code → user's installation list
 - `GET /github/setup-availability` — management-authorized, redacted Platform registration/callback availability (shared and exact Agent scope)
+- `GET /github/setup-app` — on-demand current Platform App display metadata, separate from local availability
+- `POST /github/setup-verification` — redacted PAT/App identity, selected-installation observations and MCP connectivity before ordinary creation
+- `GET /github-user-creations/{attempt_id}/app` — exact live candidate App metadata, with registration/scope rechecks around provider I/O
 - `POST /toolkit-configs/{id}/github-user/connect` — reserve bound setup and return authorization/install URLs
 - `POST /toolkit-configs/{id}/github-user/exchange` — exchange once and stage a verified account without activation
 - `GET /toolkit-configs/{id}/github-user/attempts/{attempt_id}` — read the exact setup candidate
@@ -1453,6 +1527,8 @@ an admitted trigger/cycle with its Task. Channel registration and deletion
 notification execute only after the operation returns.
 
 ## Changelog
+
+- **2026-10-13** — Replaced new GitHub creation with a progressive identity/method/verification/features/Runtime/final-review Wizard. Added exact-scope SDK-backed display/verification projections, per-mode readiness, required final settings in atomic user creation, and explicit candidate abandonment with final-publication-only close gating. Saved editing, five execution modes, generic MCP tests, existing encrypted attempts and Worker/Runtime authority remain.
 
 - **2026-10-11** (spec_version 143) — Aligned current collaboration guidance with
   the independent `wait` Toolkit, completed Brave Search Provider enumeration,

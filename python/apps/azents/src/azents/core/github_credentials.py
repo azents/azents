@@ -12,7 +12,7 @@ class GitHubSecretsPAT(BaseModel):
     """Personal Access Token authentication."""
 
     type: Literal["pat"] = "pat"
-    token: str = Field(description="GitHub PAT (ghp_... or fine-grained)")
+    token: str = Field(repr=False, description="GitHub PAT (ghp_... or fine-grained)")
 
 
 class GitHubInstallationTarget(BaseModel):
@@ -36,7 +36,7 @@ class GitHubSecretsApp(BaseModel):
 
     type: Literal["github_app"] = "github_app"
     app_id: str = Field(description="GitHub App ID")
-    private_key: str = Field(description="Private key in PEM format")
+    private_key: str = Field(repr=False, description="Private key in PEM format")
     installations: list[GitHubInstallationTarget] = Field(
         min_length=1,
         description="GitHub App installations available to this toolkit",

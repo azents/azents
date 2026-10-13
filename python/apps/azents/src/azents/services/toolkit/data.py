@@ -138,7 +138,7 @@ class ToolkitCreateInput(BaseModel):
     config: dict[str, object] = Field(description="Tool settings")
     prompt: str | None = Field(default=None, description="Custom prompt")
     credentials: dict[str, object] | None = Field(
-        default=None, description="Credentials JSON object"
+        default=None, repr=False, description="Credentials JSON object"
     )
     enabled: bool = Field(default=True, description="Enabled flag")
     always_expose_tools: bool = Field(

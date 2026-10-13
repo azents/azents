@@ -18,11 +18,13 @@ from azents.core.deps import get_config
 from azents.core.enums import MCPOAuthConnectionStatus
 from azents.core.github_auth import (
     create_github_app_jwt,
+    create_github_client,
     exchange_oauth_code,
     get_app_slug,
     list_user_installations,
     revoke_oauth_token,
 )
+from azents.core.github_user_testenv import github_user_testenv_client_factory
 from azents.core.mcp_discovery import (
     DcrError,
     register_client,
@@ -398,11 +400,18 @@ async def get_agent_github_platform_installations(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="GitHub Platform App OAuth is not configured.",
         )
+    base_url = config.testenv_github_platform_validation_base_url
+    client_factory = (
+        github_user_testenv_client_factory(base_url)
+        if config.testenv_api_enabled and base_url is not None
+        else create_github_client
+    )
     try:
         user_token = await exchange_oauth_code(
             platform.client_id,
             platform.client_secret,
             body.code,
+            client_factory=client_factory,
         )
     except ValueError as exc:
         raise HTTPException(
@@ -415,7 +424,9 @@ async def get_agent_github_platform_installations(
         ) from exc
     try:
         try:
-            raw_installations = await list_user_installations(user_token)
+            raw_installations = await list_user_installations(
+                user_token, client_factory=client_factory
+            )
         except httpx.HTTPStatusError as exc:
             raise RuntimeError(
                 f"Failed to fetch user installations: HTTP {exc.response.status_code}"
@@ -435,6 +446,7 @@ async def get_agent_github_platform_installations(
             platform.client_id,
             platform.client_secret,
             user_token,
+            client_factory=client_factory,
         )
     items: list[GitHubInstallationItem] = []
     for installation in raw_installations:

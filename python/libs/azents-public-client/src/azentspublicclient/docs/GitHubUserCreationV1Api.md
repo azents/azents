@@ -4,17 +4,102 @@ All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
+[**github_user_creation_v1_agent_creation_app**](GitHubUserCreationV1Api.md#github_user_creation_v1_agent_creation_app) | **GET** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/github-user-creations/{attempt_id}/app | Agent Creation App
 [**github_user_creation_v1_agent_creation_cancel**](GitHubUserCreationV1Api.md#github_user_creation_v1_agent_creation_cancel) | **DELETE** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/github-user-creations/{attempt_id} | Agent Creation Cancel
 [**github_user_creation_v1_agent_creation_confirm**](GitHubUserCreationV1Api.md#github_user_creation_v1_agent_creation_confirm) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/github-user-creations/confirm | Agent Creation Confirm
 [**github_user_creation_v1_agent_creation_connect**](GitHubUserCreationV1Api.md#github_user_creation_v1_agent_creation_connect) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/github-user-creations/connect | Agent Creation Connect
 [**github_user_creation_v1_agent_creation_exchange**](GitHubUserCreationV1Api.md#github_user_creation_v1_agent_creation_exchange) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/github-user-creations/exchange | Agent Creation Exchange
 [**github_user_creation_v1_agent_creation_review**](GitHubUserCreationV1Api.md#github_user_creation_v1_agent_creation_review) | **GET** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/github-user-creations/{attempt_id} | Agent Creation Review
+[**github_user_creation_v1_shared_creation_app**](GitHubUserCreationV1Api.md#github_user_creation_v1_shared_creation_app) | **GET** /toolkit/v1/workspaces/{handle}/github-user-creations/{attempt_id}/app | Shared Creation App
 [**github_user_creation_v1_shared_creation_cancel**](GitHubUserCreationV1Api.md#github_user_creation_v1_shared_creation_cancel) | **DELETE** /toolkit/v1/workspaces/{handle}/github-user-creations/{attempt_id} | Shared Creation Cancel
 [**github_user_creation_v1_shared_creation_confirm**](GitHubUserCreationV1Api.md#github_user_creation_v1_shared_creation_confirm) | **POST** /toolkit/v1/workspaces/{handle}/github-user-creations/confirm | Shared Creation Confirm
 [**github_user_creation_v1_shared_creation_connect**](GitHubUserCreationV1Api.md#github_user_creation_v1_shared_creation_connect) | **POST** /toolkit/v1/workspaces/{handle}/github-user-creations/connect | Shared Creation Connect
 [**github_user_creation_v1_shared_creation_exchange**](GitHubUserCreationV1Api.md#github_user_creation_v1_shared_creation_exchange) | **POST** /toolkit/v1/workspaces/{handle}/github-user-creations/exchange | Shared Creation Exchange
 [**github_user_creation_v1_shared_creation_review**](GitHubUserCreationV1Api.md#github_user_creation_v1_shared_creation_review) | **GET** /toolkit/v1/workspaces/{handle}/github-user-creations/{attempt_id} | Shared Creation Review
 
+
+# **github_user_creation_v1_agent_creation_app**
+> GitHubSetupAppOutput github_user_creation_v1_agent_creation_app(handle, agent_id, attempt_id)
+
+Agent Creation App
+
+Return App metadata only for this exact Agent REVIEW candidate.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.git_hub_setup_app_output import GitHubSetupAppOutput
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.GitHubUserCreationV1Api(api_client)
+    handle = 'handle_example' # str | 
+    agent_id = 'agent_id_example' # str | 
+    attempt_id = 'attempt_id_example' # str | 
+
+    try:
+        # Agent Creation App
+        api_response = api_instance.github_user_creation_v1_agent_creation_app(handle, agent_id, attempt_id)
+        print("The response of GitHubUserCreationV1Api->github_user_creation_v1_agent_creation_app:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling GitHubUserCreationV1Api->github_user_creation_v1_agent_creation_app: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
+ **agent_id** | **str**|  | 
+ **attempt_id** | **str**|  | 
+
+### Return type
+
+[**GitHubSetupAppOutput**](GitHubSetupAppOutput.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **github_user_creation_v1_agent_creation_cancel**
 > github_user_creation_v1_agent_creation_cancel(handle, agent_id, attempt_id)
@@ -97,7 +182,7 @@ void (empty response body)
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **github_user_creation_v1_agent_creation_confirm**
-> GitHubUserCreatedOutput github_user_creation_v1_agent_creation_confirm(handle, agent_id, git_hub_user_attempt_request)
+> GitHubUserCreatedOutput github_user_creation_v1_agent_creation_confirm(handle, agent_id, git_hub_user_creation_confirm_request)
 
 Agent Creation Confirm
 
@@ -109,8 +194,8 @@ Publish Toolkit, namespace and current account together.
 
 ```python
 import azentspublicclient
-from azentspublicclient.models.git_hub_user_attempt_request import GitHubUserAttemptRequest
 from azentspublicclient.models.git_hub_user_created_output import GitHubUserCreatedOutput
+from azentspublicclient.models.git_hub_user_creation_confirm_request import GitHubUserCreationConfirmRequest
 from azentspublicclient.rest import ApiException
 from pprint import pprint
 
@@ -136,11 +221,11 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     api_instance = azentspublicclient.GitHubUserCreationV1Api(api_client)
     handle = 'handle_example' # str | 
     agent_id = 'agent_id_example' # str | 
-    git_hub_user_attempt_request = azentspublicclient.GitHubUserAttemptRequest() # GitHubUserAttemptRequest | 
+    git_hub_user_creation_confirm_request = azentspublicclient.GitHubUserCreationConfirmRequest() # GitHubUserCreationConfirmRequest | 
 
     try:
         # Agent Creation Confirm
-        api_response = api_instance.github_user_creation_v1_agent_creation_confirm(handle, agent_id, git_hub_user_attempt_request)
+        api_response = api_instance.github_user_creation_v1_agent_creation_confirm(handle, agent_id, git_hub_user_creation_confirm_request)
         print("The response of GitHubUserCreationV1Api->github_user_creation_v1_agent_creation_confirm:\n")
         pprint(api_response)
     except Exception as e:
@@ -156,7 +241,7 @@ Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **handle** | **str**|  | 
  **agent_id** | **str**|  | 
- **git_hub_user_attempt_request** | [**GitHubUserAttemptRequest**](GitHubUserAttemptRequest.md)|  | 
+ **git_hub_user_creation_confirm_request** | [**GitHubUserCreationConfirmRequest**](GitHubUserCreationConfirmRequest.md)|  | 
 
 ### Return type
 
@@ -431,6 +516,87 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
+# **github_user_creation_v1_shared_creation_app**
+> GitHubSetupAppOutput github_user_creation_v1_shared_creation_app(handle, attempt_id)
+
+Shared Creation App
+
+Return App metadata under exact live shared candidate admission.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.git_hub_setup_app_output import GitHubSetupAppOutput
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.GitHubUserCreationV1Api(api_client)
+    handle = 'handle_example' # str | 
+    attempt_id = 'attempt_id_example' # str | 
+
+    try:
+        # Shared Creation App
+        api_response = api_instance.github_user_creation_v1_shared_creation_app(handle, attempt_id)
+        print("The response of GitHubUserCreationV1Api->github_user_creation_v1_shared_creation_app:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling GitHubUserCreationV1Api->github_user_creation_v1_shared_creation_app: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
+ **attempt_id** | **str**|  | 
+
+### Return type
+
+[**GitHubSetupAppOutput**](GitHubSetupAppOutput.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
 # **github_user_creation_v1_shared_creation_cancel**
 > github_user_creation_v1_shared_creation_cancel(handle, attempt_id)
 
@@ -510,7 +676,7 @@ void (empty response body)
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **github_user_creation_v1_shared_creation_confirm**
-> GitHubUserCreatedOutput github_user_creation_v1_shared_creation_confirm(handle, git_hub_user_attempt_request)
+> GitHubUserCreatedOutput github_user_creation_v1_shared_creation_confirm(handle, git_hub_user_creation_confirm_request)
 
 Shared Creation Confirm
 
@@ -522,8 +688,8 @@ Atomically create a shared Toolkit and its confirmed account.
 
 ```python
 import azentspublicclient
-from azentspublicclient.models.git_hub_user_attempt_request import GitHubUserAttemptRequest
 from azentspublicclient.models.git_hub_user_created_output import GitHubUserCreatedOutput
+from azentspublicclient.models.git_hub_user_creation_confirm_request import GitHubUserCreationConfirmRequest
 from azentspublicclient.rest import ApiException
 from pprint import pprint
 
@@ -548,11 +714,11 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.GitHubUserCreationV1Api(api_client)
     handle = 'handle_example' # str | 
-    git_hub_user_attempt_request = azentspublicclient.GitHubUserAttemptRequest() # GitHubUserAttemptRequest | 
+    git_hub_user_creation_confirm_request = azentspublicclient.GitHubUserCreationConfirmRequest() # GitHubUserCreationConfirmRequest | 
 
     try:
         # Shared Creation Confirm
-        api_response = api_instance.github_user_creation_v1_shared_creation_confirm(handle, git_hub_user_attempt_request)
+        api_response = api_instance.github_user_creation_v1_shared_creation_confirm(handle, git_hub_user_creation_confirm_request)
         print("The response of GitHubUserCreationV1Api->github_user_creation_v1_shared_creation_confirm:\n")
         pprint(api_response)
     except Exception as e:
@@ -567,7 +733,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **handle** | **str**|  | 
- **git_hub_user_attempt_request** | [**GitHubUserAttemptRequest**](GitHubUserAttemptRequest.md)|  | 
+ **git_hub_user_creation_confirm_request** | [**GitHubUserCreationConfirmRequest**](GitHubUserCreationConfirmRequest.md)|  | 
 
 ### Return type
 

@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict
 
 from azents.core.github_user_creation import (
     GitHubUserCreationAttempt,
+    GitHubUserCreationSettings,
     GitHubUserCreationStart,
     GitHubUserCreationSubject,
 )
@@ -205,6 +206,28 @@ class GitHubUserCreationRepository:
                 self.operations,
             )
 
+    async def load_review(
+        self, subject: GitHubUserCreationSubject, attempt_id: str
+    ) -> GitHubUserCreationAttempt:
+        """Admit live REVIEW and current registration for metadata observations."""
+        async with self.operations.session_manager() as session:
+            attempt = creation_from(
+                await self._row(session, subject, attempt_id, live=True),
+                self.operations,
+            )
+            if (
+                attempt.status is not GitHubUserAttemptStatus.REVIEW
+                or attempt.candidate is None
+            ):
+                raise GitHubUserOAuthError(
+                    GitHubUserErrorCode.STALE,
+                    "GitHub creation is not ready for review.",
+                )
+            await self.operations.validate_platform_registration(
+                session, attempt.registration
+            )
+            return attempt
+
     async def claim(
         self,
         subject: GitHubUserCreationSubject,
@@ -283,6 +306,7 @@ class GitHubUserCreationRepository:
         *,
         attempt_id: str,
         registration: GitHubUserRegistration,
+        settings: GitHubUserCreationSettings,
     ) -> str:
         async with self.operations.session_manager() as session:
             row = await self._row(session, subject, attempt_id, live=True)
@@ -298,7 +322,7 @@ class GitHubUserCreationRepository:
                 )
             await self.operations.validate_platform_registration(session, registration)
             toolkit = await self.operations.toolkit_repository.create(
-                session, attempt.desired
+                session, settings.apply(attempt.desired)
             )
             if subject.agent_id is not None:
                 await self.namespaces.ensure_active(

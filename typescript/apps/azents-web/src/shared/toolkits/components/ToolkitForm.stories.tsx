@@ -1,24 +1,20 @@
 import { Modal, rem, Stack } from "@mantine/core";
 import { useForm } from "@mantine/form";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { TRPCClientError } from "@trpc/client";
-import { observable } from "@trpc/server/observable";
-import { useState } from "react";
 import { expect, fn, userEvent, within } from "storybook/test";
 import {
   resolveDefaultToolkitSlug,
   trimToolkitWhitespace,
 } from "@/shared/lib/toolkit-identifiers";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
-import { trpc } from "@/trpc/client";
-import { GithubConfigFieldsContainer } from "../GithubConfigFieldsContainer";
 import { projectToolkitConfig } from "../toolkit-config-projection";
+import { wizardReviewProps } from "./github-wizard-story-fixtures";
+import { GitHubWizard } from "./GitHubWizard";
 import { ToolkitForm } from "./ToolkitForm";
 import type { ToolkitFormValues } from "../schemas";
 import type { ToolkitFormProps } from "./ToolkitForm";
 import type { ToolkitConfigResponse } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
-import type { ReactElement, ReactNode } from "react";
+import type { ReactElement } from "react";
 
 type ToolkitFormStoryProps = Omit<
   ToolkitFormProps,
@@ -307,38 +303,11 @@ export const CancelDelegatesWithoutSubmission = {
   },
 } satisfies Story;
 
-function StaticGithubProvider({
-  children,
-}: {
-  children: ReactNode;
-}): ReactElement {
-  const [queryClient] = useState(() => new QueryClient());
-  const [client] = useState(() =>
-    trpc.createClient({
-      links: [
-        () => () =>
-          observable((observer) => {
-            observer.error(
-              new TRPCClientError(
-                "Network operations are disabled in this static story.",
-              ),
-            );
-          }),
-      ],
-    }),
-  );
-  return (
-    <trpc.Provider client={client} queryClient={queryClient}>
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    </trpc.Provider>
-  );
-}
-
 export const MobileEmbeddedGithub = {
   parameters: { testViewport: { width: 390, height: 844 } },
   decorators: [
     (Story) => (
-      <StaticGithubProvider>
+      <>
         <Modal
           opened
           onClose={() => {}}
@@ -350,7 +319,7 @@ export const MobileEmbeddedGithub = {
             <Story />
           </Stack>
         </Modal>
-      </StaticGithubProvider>
+      </>
     ),
   ],
   args: {
@@ -362,13 +331,14 @@ export const MobileEmbeddedGithub = {
     namePlaceholder: "GitHub",
     slugPlaceholder: "github",
     configurationFields: (
-      <GithubConfigFieldsContainer
-        config={{ github_auth_type: "pat" }}
-        credentials={null}
-        hasCredentials={false}
-        authorizationState={null}
-        onConfigChange={fn()}
-        onCredentialsChange={fn()}
+      <GitHubWizard
+        {...wizardReviewProps}
+        embedded
+        sharingScope="agent_only"
+        settings={{
+          ...wizardReviewProps.settings,
+          injectRuntimeEnvironment: true,
+        }}
       />
     ),
   },
@@ -387,7 +357,7 @@ export const MobileEmbeddedGithub = {
       );
     }
     await expect(
-      within(dialog).getByText(/When enabled, GitHub tokens are injected/),
+      within(dialog).getByText(/When enabled, the connected account/),
     ).toBeVisible();
     await expect(
       within(dialog).queryByText(

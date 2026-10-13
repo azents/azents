@@ -8,6 +8,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **platform** | **str** |  | 
 **callback_url** | **str** |  | 
+**platform_modes** | [**GitHubSetupPlatformModes**](GitHubSetupPlatformModes.md) |  | 
 **user_tokens_must_not_expire** | **bool** |  | [optional] [default to True]
 
 ## Example

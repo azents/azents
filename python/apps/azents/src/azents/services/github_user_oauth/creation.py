@@ -11,12 +11,14 @@ import jwt
 from fastapi import Depends
 
 from azents.core.github_auth import create_github_app_jwt
+from azents.core.github_setup import GitHubSetupAppOutput
 from azents.core.github_user_auth import (
     GitHubUserProviderError,
     GitHubUserTokenRejected,
 )
 from azents.core.github_user_creation import (
     GitHubUserCreationAttempt,
+    GitHubUserCreationFinalSettings,
     GitHubUserCreationSubject,
 )
 from azents.core.github_user_oauth import (
@@ -256,15 +258,55 @@ class GitHubUserCreationService:
         return self._review(attempt)
 
     async def confirm(
-        self, subject: GitHubUserCreationSubject, attempt_id: str
+        self,
+        subject: GitHubUserCreationSubject,
+        attempt_id: str,
+        settings: GitHubUserCreationFinalSettings,
     ) -> GitHubUserCreatedOutput:
         attempt = await self.repository.load(subject, attempt_id)
         self._review(attempt)
         registration = await self._current(attempt)
+        try:
+            overlay = settings.prepare(
+                canonical_name=self.toolkits.toolkit_registry["github"].name
+            )
+            overlay.apply(attempt.desired)
+        except ValueError:
+            raise GitHubUserOAuthError(
+                GitHubUserErrorCode.INVALID, "Invalid final GitHub Toolkit settings."
+            ) from None
         toolkit_id = await self.repository.confirm(
-            subject, attempt_id=attempt_id, registration=registration
+            subject, attempt_id=attempt_id, registration=registration, settings=overlay
         )
         return GitHubUserCreatedOutput(toolkit_id=toolkit_id)
+
+    async def app(
+        self, subject: GitHubUserCreationSubject, attempt_id: str
+    ) -> GitHubSetupAppOutput:
+        """Observe the candidate's actual App without publishing or mutating it."""
+        attempt = await self.repository.load_review(subject, attempt_id)
+        await self._current(attempt)
+        prepared = await self.oauth.prepare_registration(
+            credentials_json=attempt.desired.credentials, revision=1
+        )
+        try:
+            token = create_github_app_jwt(
+                attempt.registration.app_id, prepared.private_key
+            )
+        except ValueError, jwt.PyJWTError:
+            raise GitHubUserOAuthError(
+                GitHubUserErrorCode.INVALID, "GitHub App registration is invalid."
+            ) from None
+        app = await self.oauth.provider.setup_app(
+            token, app_id=attempt.registration.app_id
+        )
+        current = await self.repository.load_review(subject, attempt_id)
+        await self._current(current)
+        if current.registration != attempt.registration:
+            raise GitHubUserOAuthError(
+                GitHubUserErrorCode.STALE, "GitHub creation registration changed."
+            )
+        return GitHubSetupAppOutput(app=app)
 
     async def cancel(self, subject: GitHubUserCreationSubject, attempt_id: str) -> None:
         await self.oauth.cleanup_revocations(

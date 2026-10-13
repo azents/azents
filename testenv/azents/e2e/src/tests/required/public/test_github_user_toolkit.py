@@ -129,7 +129,30 @@ def _create_confirmed(
     candidate = json_object_payload(review["candidate"], label="creation candidate")
     assert candidate["account_login"] == "connected-user"
     created = _operation(
-        base, token, "confirm", body={"attempt_id": candidate["attempt_id"]}
+        base,
+        token,
+        "confirm",
+        body={
+            "attempt_id": candidate["attempt_id"],
+            "settings": {
+                "name": body.name,
+                "slug": body.slug,
+                "description": body.description,
+                "prompt": body.prompt,
+                "enabled": body.enabled,
+                "always_expose_tools": body.always_expose_tools,
+                "toolsets": body.config.get(
+                    "toolsets", ["repos", "issues", "pull_requests", "users"]
+                ),
+                "timeout": body.config.get("timeout", 30),
+                "inject_runtime_environment": body.config.get(
+                    "inject_runtime_environment", False
+                ),
+                "runtime_risk_acknowledged": bool(
+                    body.config.get("inject_runtime_environment", False)
+                ),
+            },
+        },
     )
     toolkit_id = created["toolkit_id"]
     assert isinstance(toolkit_id, str)

@@ -121,6 +121,8 @@ def _decode_scenario(body: bytes) -> _ScenarioRequest:
         "user_cleanup_failure",
         "user_expiring",
         "user_revoked",
+        "user_app_renamed",
+        "user_malformed_app",
     }:
         raise _InvalidPayload("Unsupported synthetic scenario.")
     return _ScenarioRequest(scenario)
@@ -272,6 +274,9 @@ class Handler(BaseHTTPRequestHandler):
         if urlsplit(self.path).path.startswith("/user"):
             self._user_get()
             return
+        if parsed.path.startswith("/app/installations/"):
+            self._installation_get(parsed.path)
+            return
         if self.path != "/app":
             self._json_response(404, {"error": "not_found"})
             return
@@ -294,9 +299,53 @@ class Handler(BaseHTTPRequestHandler):
                 {"id": 999, "client_id": "Iv1.other", "slug": "other-app"},
             )
             return
+        if scenario == "user_malformed_app":
+            self._json_response(
+                200,
+                {"id": 123, "client_id": "Iv1.azents-test", "slug": "azents-test"},
+            )
+            return
         self._json_response(
             200,
-            {"id": 123, "client_id": "Iv1.azents-test", "slug": "azents-test"},
+            {
+                "id": 123,
+                "client_id": "Iv1.azents-test",
+                "slug": "azents-test",
+                "name": (
+                    "Renamed Test App"
+                    if scenario == "user_app_renamed"
+                    else "Azents Test App"
+                ),
+            },
+        )
+
+    def _installation_get(self, path: str) -> None:
+        """Return App-owned installation identities without trusting client labels."""
+        target = path.removeprefix("/app/installations/")
+        owners = {
+            "501": ("connected-user", "User"),
+            "502": ("research-team", "Organization"),
+            "503": ("ops-team", "Organization"),
+        }
+        if target == "504":
+            self._json_response(403, {"message": "Synthetic installation denied"})
+            return
+        owner = owners.get(target)
+        if owner is None:
+            self._json_response(404, {"message": "Unknown synthetic installation"})
+            return
+        self._json_response(
+            200,
+            {
+                "id": int(target),
+                "app_id": 123,
+                "account": {
+                    "login": owner[0],
+                    "type": owner[1],
+                    "avatar_url": None,
+                },
+                "permissions": {"contents": "read", "issues": "write"},
+            },
         )
 
     def do_POST(self) -> None:
@@ -323,6 +372,26 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/mcp":
             self._mcp_request(request_body)
+            return
+        if self.path.startswith("/app/installations/") and self.path.endswith(
+            "/access_tokens"
+        ):
+            target = self.path.removeprefix("/app/installations/").removesuffix(
+                "/access_tokens"
+            )
+            if target not in {"501", "502", "503"}:
+                self._json_response(403, {"message": "Synthetic installation denied"})
+                return
+            try:
+                if request_body:
+                    _load(request_body, set())
+            except _InvalidPayload:
+                self._json_response(400, {"error": "invalid_synthetic_request"})
+                return
+            token = "synthetic-installation-" + target
+            with self.state_lock:
+                type(self).user_tokens[token] = "connected-user"
+            self._json_response(201, {"token": token})
             return
         if self.path != "/login/oauth/access_token":
             self._json_response(404, {"error": "not_found"})
@@ -377,6 +446,8 @@ class Handler(BaseHTTPRequestHandler):
         with self.state_lock:
             if self.scenario == "user_revoked":
                 return None
+            if token == "synthetic-pat" and self.scenario.startswith("user_"):
+                return "connected-user"
             return self.user_tokens.get(token)
 
     def _user_get(self) -> None:

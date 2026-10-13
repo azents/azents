@@ -37,12 +37,18 @@ class TestGitHubSetupAvailability(unittest.TestCase):
             return GitHubSetupAvailability(
                 platform = 'configured',
                 callback_url = '',
+                platform_modes = azentspublicclient.models.git_hub_setup_platform_modes.GitHubSetupPlatformModes(
+                    user_account = 'configured', 
+                    installation = 'configured', ),
                 user_tokens_must_not_expire = True
             )
         else:
             return GitHubSetupAvailability(
                 platform = 'configured',
                 callback_url = '',
+                platform_modes = azentspublicclient.models.git_hub_setup_platform_modes.GitHubSetupPlatformModes(
+                    user_account = 'configured', 
+                    installation = 'configured', ),
         )
         """
 

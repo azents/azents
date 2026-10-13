@@ -26,7 +26,9 @@ from azents.core.auth.deps import WorkspaceMember
 from azents.core.auth.roles import get_permissions_for_role
 from azents.core.config import Config, CredentialEncryptionConfig
 from azents.core.enums import MCPOAuthConnectionStatus, WorkspaceUserRole
+from azents.core.github_auth import GitHubClientFactory, create_github_client
 from azents.core.github_installation import GitHubInstallationSnapshot
+from azents.core.github_user_testenv import github_user_testenv_client_factory
 from azents.core.mcp_discovery import (
     DcrError,
     DcrRegistrationResult,
@@ -547,11 +549,13 @@ async def test_workspace_installation_revoke_is_success_only_and_after_sync(
     harness = _harness(SharedOAuthContext(None, None), Success(None))
     failure = asyncio.CancelledError() if cancel else RuntimeError("failed stage")
 
-    async def exchange(*args: object) -> str:
+    async def exchange(*args: object, client_factory: GitHubClientFactory) -> str:
         harness.boundary.external("github-token")
         return "temporary-token"
 
-    async def installations(*args: object) -> tuple[GitHubInstallationSnapshot, ...]:
+    async def installations(
+        *args: object, client_factory: GitHubClientFactory
+    ) -> tuple[GitHubInstallationSnapshot, ...]:
         harness.boundary.external("list")
         if failure_stage == "list":
             raise failure
@@ -572,7 +576,7 @@ async def test_workspace_installation_revoke_is_success_only_and_after_sync(
             ),
         )
 
-    async def revoke(*args: object) -> None:
+    async def revoke(*args: object, client_factory: GitHubClientFactory) -> None:
         harness.boundary.external("revoke")
 
     monkeypatch.setattr(service_module, "exchange_oauth_code", exchange)
@@ -845,11 +849,13 @@ async def test_github_list_http_error_remains_transparent_runtime_failure(
     """Only the existing GitHub HTTP classification wraps list errors."""
     harness = _harness(SharedOAuthContext(None, None), Success(None))
 
-    async def exchange(*args: object) -> str:
+    async def exchange(*args: object, client_factory: GitHubClientFactory) -> str:
         harness.boundary.external("github-token")
         return "temporary-token"
 
-    async def installations(*args: object) -> tuple[GitHubInstallationSnapshot, ...]:
+    async def installations(
+        *args: object, client_factory: GitHubClientFactory
+    ) -> tuple[GitHubInstallationSnapshot, ...]:
         harness.boundary.external("list")
         raise httpx.HTTPStatusError(
             "failure",
@@ -908,17 +914,19 @@ async def test_agent_installation_finally_revoke_preserves_error_cancel_asymmetr
     toolkit_service.authorize_agent_management.side_effect = authorize
     toolkit_service.sync_agent_github_installations.side_effect = sync
 
-    async def exchange(*args: object) -> str:
+    async def exchange(*args: object, client_factory: GitHubClientFactory) -> str:
         harness.boundary.external("github-token")
         return "temporary-token"
 
-    async def installations(*args: object) -> tuple[GitHubInstallationSnapshot, ...]:
+    async def installations(
+        *args: object, client_factory: GitHubClientFactory
+    ) -> tuple[GitHubInstallationSnapshot, ...]:
         harness.boundary.external("list")
         if stage == "list":
             raise failure
         return ()
 
-    async def revoke(*args: object) -> None:
+    async def revoke(*args: object, client_factory: GitHubClientFactory) -> None:
         harness.boundary.external("revoke")
 
     monkeypatch.setattr(oauth, "exchange_oauth_code", exchange)
@@ -959,15 +967,17 @@ async def test_workspace_revoke_cancellation_happens_after_completed_sync(
     harness = _harness(SharedOAuthContext(None, None), Success(None))
     failure = asyncio.CancelledError()
 
-    async def exchange(*args: object) -> str:
+    async def exchange(*args: object, client_factory: GitHubClientFactory) -> str:
         harness.boundary.external("github-token")
         return "temporary-token"
 
-    async def installations(*args: object) -> tuple[GitHubInstallationSnapshot, ...]:
+    async def installations(
+        *args: object, client_factory: GitHubClientFactory
+    ) -> tuple[GitHubInstallationSnapshot, ...]:
         harness.boundary.external("list")
         return ()
 
-    async def revoke(*args: object) -> None:
+    async def revoke(*args: object, client_factory: GitHubClientFactory) -> None:
         harness.boundary.external("revoke")
         raise failure
 
@@ -987,4 +997,113 @@ async def test_workspace_revoke_cancellation_happens_after_completed_sync(
     assert raised.value is failure
     assert harness.boundary.synced == [()]
     assert harness.boundary.calls[-2:] == ["sync:closed", "revoke"]
+    assert not harness.boundary.active
+
+
+@pytest.mark.parametrize("scope", ["shared", "agent"])
+@pytest.mark.parametrize(
+    ("enabled", "base_url"),
+    [
+        (False, None),
+        (False, "http://synthetic-github.test"),
+        (True, None),
+        (True, "http://synthetic-github.test"),
+    ],
+)
+async def test_platform_installation_sdk_routing_requires_both_testenv_settings(
+    monkeypatch: pytest.MonkeyPatch,
+    scope: str,
+    enabled: bool,
+    base_url: str | None,
+) -> None:
+    """Exchange, list and revoke share the explicitly selected SDK factory."""
+    harness = _harness(SharedOAuthContext(None, None), Success(None))
+    config = harness.service.config.model_copy(
+        update={
+            "testenv_api_enabled": enabled,
+            "testenv_github_platform_validation_base_url": base_url,
+        }
+    )
+    service = dataclasses.replace(harness.service, config=config)
+    module = service_module if scope == "shared" else oauth
+    observed: list[GitHubClientFactory] = []
+
+    def fixture_factory(*args: object) -> NoReturn:
+        raise AssertionError("SDK helpers are mocked; clients must not be constructed.")
+
+    builder = create_autospec(github_user_testenv_client_factory)
+    builder.return_value = fixture_factory
+    monkeypatch.setattr(module, "github_user_testenv_client_factory", builder)
+
+    async def exchange(*args: object, client_factory: GitHubClientFactory) -> str:
+        observed.append(client_factory)
+        harness.boundary.external("github-token")
+        return "synthetic-temporary-token"
+
+    async def installations(
+        *args: object, client_factory: GitHubClientFactory
+    ) -> tuple[GitHubInstallationSnapshot, ...]:
+        observed.append(client_factory)
+        harness.boundary.external("list")
+        return ()
+
+    async def revoke(*args: object, client_factory: GitHubClientFactory) -> None:
+        observed.append(client_factory)
+        harness.boundary.external("revoke")
+
+    monkeypatch.setattr(module, "exchange_oauth_code", exchange)
+    monkeypatch.setattr(module, "list_user_installations", installations)
+    monkeypatch.setattr(module, "revoke_oauth_token", revoke)
+    if scope == "shared":
+        await service.platform_installations(
+            user_id="user-1",
+            session_id="session-1",
+            workspace_id="workspace-1",
+            code="synthetic-code",
+            state=create_platform_oauth_state(
+                "state-secret", effective_generation="generation-1"
+            ),
+        )
+    else:
+        toolkits = create_autospec(ToolkitService, instance=True)
+
+        async def authorize(*args: object, **kwargs: object) -> Result[None, NotAdmin]:
+            async with harness.boundary.operation("agent-authorize"):
+                return Success(None)
+
+        async def sync(*args: object, **kwargs: object) -> Result[None, NotAdmin]:
+            async with harness.boundary.operation("agent-sync"):
+                return Success(None)
+
+        toolkits.authorize_agent_management.side_effect = authorize
+        toolkits.sync_agent_github_installations.side_effect = sync
+        await oauth.get_agent_github_platform_installations(
+            _member(WorkspaceUserRole.OWNER),
+            toolkits,
+            config,
+            harness.service.platform_runtime,
+            oauth.GitHubPlatformInstallationsRequest(
+                code="synthetic-code",
+                state=create_agent_github_platform_oauth_state(
+                    "state-secret",
+                    effective_generation="generation-1",
+                    workspace_id="workspace-1",
+                    agent_id="agent-1",
+                    user_id="user-1",
+                    redirect_uri="https://app.test/oauth/github/callback",
+                    callback_target="agent_github_installations",
+                ),
+            ),
+            handle="workspace",
+            agent_id="agent-1",
+        )
+    selected = (
+        fixture_factory if enabled and base_url is not None else create_github_client
+    )
+    assert len(observed) == 3 and all(factory is selected for factory in observed)
+    if enabled and base_url is not None:
+        builder.assert_called_once_with(base_url)
+    else:
+        builder.assert_not_called()
+    assert harness.boundary.calls[-1] == "revoke"
     assert not harness.boundary.active

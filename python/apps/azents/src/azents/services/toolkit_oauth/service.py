@@ -11,10 +11,12 @@ from fastapi import Depends
 from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.core.github_auth import (
+    create_github_client,
     exchange_oauth_code,
     list_user_installations,
     revoke_oauth_token,
 )
+from azents.core.github_user_testenv import github_user_testenv_client_factory
 from azents.core.mcp_discovery import DcrError, register_client
 from azents.core.oauth2 import (
     build_authorization_url,
@@ -114,9 +116,18 @@ class ToolkitOAuthService:
                 ToolkitOAuthFailureReason.RESOURCE_NOT_FOUND,
                 "GitHub Platform App OAuth is not configured.",
             )
+        base_url = self.config.testenv_github_platform_validation_base_url
+        client_factory = (
+            github_user_testenv_client_factory(base_url)
+            if self.config.testenv_api_enabled and base_url is not None
+            else create_github_client
+        )
         try:
             user_token = await exchange_oauth_code(
-                platform.client_id, platform.client_secret, code
+                platform.client_id,
+                platform.client_secret,
+                code,
+                client_factory=client_factory,
             )
         except ValueError as exc:
             raise ToolkitOAuthError(
@@ -127,7 +138,9 @@ class ToolkitOAuthService:
                 f"GitHub OAuth token exchange failed: HTTP {exc.response.status_code}"
             ) from exc
         try:
-            raw_installations = await list_user_installations(user_token)
+            raw_installations = await list_user_installations(
+                user_token, client_factory=client_factory
+            )
         except httpx.HTTPStatusError as exc:
             raise RuntimeError(
                 f"Failed to fetch user installations: HTTP {exc.response.status_code}"
@@ -143,7 +156,12 @@ class ToolkitOAuthService:
             installations=records,
         )
         _require_authority(result)
-        await revoke_oauth_token(platform.client_id, platform.client_secret, user_token)
+        await revoke_oauth_token(
+            platform.client_id,
+            platform.client_secret,
+            user_token,
+            client_factory=client_factory,
+        )
         return helpers.project_installations(raw_installations)
 
     async def connect(

@@ -6,14 +6,17 @@ from fastapi import APIRouter, Depends, Response
 
 from azents.api.public.toolkit.v1.data import ToolkitConfigCreateRequest
 from azents.api.public.toolkit.v1.github_user import (
-    GitHubUserAttemptRequest,
     GitHubUserExchangeRequest,
     Member,
     _management_errors,
 )
 from azents.api.public.toolkit.v1.github_user_validation import GitHubUserRoute
 from azents.core.auth.deps import WorkspaceMember
-from azents.core.github_user_creation import GitHubUserCreationSubject
+from azents.core.github_setup import GitHubSetupAppOutput
+from azents.core.github_user_creation import (
+    GitHubUserCreationConfirmRequest,
+    GitHubUserCreationSubject,
+)
 from azents.services.github_user_oauth.creation import GitHubUserCreationService
 from azents.services.github_user_oauth.data import (
     GitHubUserConnectOutput,
@@ -114,21 +117,49 @@ async def agent_creation_review(
         return await service.review(_subject(member, agent_id), attempt_id)
 
 
+@router.get("/workspaces/{handle}/github-user-creations/{attempt_id}/app")
+async def shared_creation_app(
+    member: Member, service: Creation, *, handle: str, attempt_id: str
+) -> GitHubSetupAppOutput:
+    """Return App metadata under exact live shared candidate admission."""
+    del handle
+    with _management_errors():
+        return await service.app(_subject(member, None), attempt_id)
+
+
+@router.get(
+    "/workspaces/{handle}/agents/{agent_id}/github-user-creations/{attempt_id}/app"
+)
+async def agent_creation_app(
+    member: Member, service: Creation, *, handle: str, agent_id: str, attempt_id: str
+) -> GitHubSetupAppOutput:
+    """Return App metadata only for this exact Agent REVIEW candidate."""
+    del handle
+    with _management_errors():
+        return await service.app(_subject(member, agent_id), attempt_id)
+
+
 @router.post("/workspaces/{handle}/github-user-creations/confirm")
 async def shared_creation_confirm(
-    member: Member, service: Creation, body: GitHubUserAttemptRequest, *, handle: str
+    member: Member,
+    service: Creation,
+    body: GitHubUserCreationConfirmRequest,
+    *,
+    handle: str,
 ) -> GitHubUserCreatedOutput:
     """Atomically create a shared Toolkit and its confirmed account."""
     del handle
     with _management_errors():
-        return await service.confirm(_subject(member, None), body.attempt_id)
+        return await service.confirm(
+            _subject(member, None), body.attempt_id, body.settings
+        )
 
 
 @router.post("/workspaces/{handle}/agents/{agent_id}/github-user-creations/confirm")
 async def agent_creation_confirm(
     member: Member,
     service: Creation,
-    body: GitHubUserAttemptRequest,
+    body: GitHubUserCreationConfirmRequest,
     *,
     handle: str,
     agent_id: str,
@@ -136,7 +167,9 @@ async def agent_creation_confirm(
     """Publish Toolkit, namespace and current account together."""
     del handle
     with _management_errors():
-        return await service.confirm(_subject(member, agent_id), body.attempt_id)
+        return await service.confirm(
+            _subject(member, agent_id), body.attempt_id, body.settings
+        )
 
 
 @router.delete(

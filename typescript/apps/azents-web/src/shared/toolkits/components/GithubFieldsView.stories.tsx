@@ -26,6 +26,10 @@ const meta = {
       type: "READY",
       availability: {
         platform: "configured",
+        platform_modes: {
+          user_account: "configured",
+          installation: "configured",
+        },
         callback_url: "https://azents.example/oauth/github/callback",
       },
     },
@@ -67,6 +71,7 @@ export const PlatformAbsent = {
       type: "READY",
       availability: {
         platform: "absent",
+        platform_modes: { user_account: "absent", installation: "absent" },
         callback_url: "https://azents.example/oauth/github/callback",
       },
     },
@@ -90,6 +95,10 @@ export const PlatformIncomplete = {
       type: "READY",
       availability: {
         platform: "incomplete",
+        platform_modes: {
+          user_account: "incomplete",
+          installation: "incomplete",
+        },
         callback_url: "https://azents.example/oauth/github/callback",
       },
     },
@@ -127,6 +136,7 @@ export const SavedMissingPlatform = {
       type: "READY",
       availability: {
         platform: "absent",
+        platform_modes: { user_account: "absent", installation: "absent" },
         callback_url: "https://azents.example/oauth/github/callback",
       },
     },

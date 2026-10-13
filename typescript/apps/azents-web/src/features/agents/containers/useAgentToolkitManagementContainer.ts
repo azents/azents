@@ -46,6 +46,7 @@ export interface AgentToolkitManagementContainerOutput extends AgentToolkitManag
   pending: boolean;
   attachPending: boolean;
   setupPending: boolean;
+  createPublicationPending?: boolean;
   attachPendingId: string | null;
   deletePending: boolean;
   canAuthorizeShared: boolean;
@@ -61,6 +62,8 @@ export interface AgentToolkitManagementContainerOutput extends AgentToolkitManag
   onCloseEditor: () => void;
   onCompleteSetup: () => void;
   onSetupPendingChange: (pending: boolean) => void;
+  onCreatePublicationPendingChange?: (pending: boolean) => void;
+  onCreateAbandonReady?: (abandon: (() => void) | null) => void;
   onRetryRead: () => void;
   onAttach: (toolkitId: string) => void;
   onDetach: (agentToolkitId: string) => void;
@@ -83,6 +86,9 @@ export function useAgentToolkitManagementContainer({
     { type: "IDLE" },
   );
   const [setupPending, setSetupPending] = useState(false);
+  const [createPublicationPending, setCreatePublicationPending] =
+    useState(false);
+  const abandonCreate = useRef<(() => void) | null>(null);
   const [deleteTarget, setDeleteTarget] =
     useState<AgentToolkitManagementItemResponse | null>(null);
   const [authorizationPendingId, setAuthorizationPendingId] = useState<
@@ -338,13 +344,27 @@ export function useAgentToolkitManagementContainer({
     ],
   );
   const closeEditor = useCallback((): void => {
-    if (setupPending || attachMutation.isPending) {
+    const newGitHub =
+      editor.type === "CREATE" && editor.toolkitType === "github";
+    if (
+      (newGitHub ? createPublicationPending : setupPending) ||
+      attachMutation.isPending
+    ) {
       return;
+    }
+    if (newGitHub) {
+      abandonCreate.current?.();
     }
     setEditor({ type: "CLOSED" });
     setGithubUserPopup(null);
     void invalidate();
-  }, [invalidate, setupPending, attachMutation.isPending]);
+  }, [
+    invalidate,
+    editor,
+    createPublicationPending,
+    setupPending,
+    attachMutation.isPending,
+  ]);
 
   return {
     handle,
@@ -359,6 +379,7 @@ export function useAgentToolkitManagementContainer({
       deleteMutation.isPending,
     attachPending: attachMutation.isPending,
     setupPending,
+    createPublicationPending,
     attachPendingId: attachMutation.isPending
       ? attachMutation.variables.toolkitId
       : null,
@@ -373,6 +394,12 @@ export function useAgentToolkitManagementContainer({
       setEditor({ type: "CATALOG", tab: "new" });
     },
     onCatalogTabChange: (tab) => {
+      if (editor.type === "CREATE" && editor.toolkitType === "github") {
+        if (createPublicationPending) {
+          return;
+        }
+        abandonCreate.current?.();
+      }
       setMutationState({ type: "IDLE" });
       setEditor({ type: "CATALOG", tab });
     },
@@ -383,11 +410,17 @@ export function useAgentToolkitManagementContainer({
     onEdit: (toolkitConfigId) => setEditor({ type: "EDIT", toolkitConfigId }),
     onCloseEditor: closeEditor,
     onSetupPendingChange: setSetupPending,
+    onCreatePublicationPendingChange: setCreatePublicationPending,
+    onCreateAbandonReady: (abandon) => {
+      abandonCreate.current = abandon;
+    },
     onRetryRead: () => {
       void utils.toolkit.listAgentManagement.invalidate({ handle, agentId });
       void utils.toolkit.listToolkits.invalidate();
     },
     onCompleteSetup: () => {
+      setCreatePublicationPending(false);
+      abandonCreate.current = null;
       setSetupPending(false);
       setEditor((current) => completedToolkitEditor(current, editor));
       void invalidate();

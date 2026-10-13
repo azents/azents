@@ -1,18 +1,22 @@
 """Real PostgreSQL publication, one-use scope and rollback evidence."""
 
+import asyncio
 import dataclasses
 import datetime
 import json
 from types import SimpleNamespace
-from typing import NamedTuple
+from typing import NamedTuple, Never
 from unittest.mock import AsyncMock, create_autospec
 
 import pytest
 import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from azents.core.enums import AgentLifecycleStatus
 from azents.core.github_user_creation import (
     GitHubUserCreationAttempt,
+    GitHubUserCreationFinalSettings,
+    GitHubUserCreationSettings,
     GitHubUserCreationSubject,
 )
 from azents.core.github_user_oauth import (
@@ -29,8 +33,12 @@ from azents.rdb.models.toolkit import (
     RDBAgentToolkitNamespaceReservation,
     RDBToolkitConfig,
 )
+from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
+from azents.rdb.session_capabilities import (
+    WriteSession,
+    create_read_write_session_manager,
+)
 from azents.repos.agent import AgentRepository
 from azents.repos.github_user_oauth.creation import GitHubUserCreationRepository
 from azents.repos.github_user_oauth.operations_test import _Harness, _harness
@@ -86,6 +94,21 @@ async def _creation(manager: SessionManager[WriteSession]) -> CreationHarness:
     return CreationHarness(h, subject, repository, desired, result.attempt)
 
 
+def _settings() -> GitHubUserCreationSettings:
+    return GitHubUserCreationFinalSettings(
+        name="Final reviewed creation",
+        slug="confirmed",
+        description=None,
+        prompt=None,
+        enabled=True,
+        always_expose_tools=False,
+        toolsets=["repos", "projects"],
+        timeout=12.0,
+        inject_runtime_environment=True,
+        runtime_risk_acknowledged=True,
+    ).prepare(canonical_name="GitHub")
+
+
 async def _assert_unpublished(manager: SessionManager[WriteSession]) -> None:
     async with manager() as session:
         assert (
@@ -120,11 +143,21 @@ async def test_only_confirmation_publishes_account_and_toolkit(
     assert reviewed.candidate is not None
     await _assert_unpublished(rdb_session_manager)
     toolkit_id = await repo.confirm(
-        subject, attempt_id=attempt.id, registration=h.registration
+        subject,
+        attempt_id=attempt.id,
+        registration=h.registration,
+        settings=_settings(),
     )
     async with rdb_session_manager() as session:
         toolkit = await session.read_session.get(RDBToolkitConfig, toolkit_id)
         assert toolkit is not None and toolkit.slug == "confirmed"
+        assert toolkit.name == "Final reviewed creation"
+        assert toolkit.config == {
+            "github_auth_type": "github_app_user",
+            "toolsets": ["repos", "projects"],
+            "timeout": 12.0,
+            "inject_runtime_environment": True,
+        }
         connection = await session.read_session.scalar(
             sa.select(RDBGitHubUserConnection)
         )
@@ -132,7 +165,12 @@ async def test_only_confirmation_publishes_account_and_toolkit(
         assert h.cipher.decrypt(connection.encrypted_access_token) == "candidate-token"
         assert await session.read_session.get(RDBGitHubUserCreation, attempt.id) is None
     with pytest.raises(GitHubUserOAuthError):
-        await repo.confirm(subject, attempt_id=attempt.id, registration=h.registration)
+        await repo.confirm(
+            subject,
+            attempt_id=attempt.id,
+            registration=h.registration,
+            settings=_settings(),
+        )
 
 
 @pytest.mark.parametrize("field", ["user_id", "session_id", "agent_id"])
@@ -231,7 +269,12 @@ async def test_confirmation_failure_rolls_back_toolkit_and_preserves_review(
 
     monkeypatch.setattr(ToolkitRepository, "create", fail_after_insert)
     with pytest.raises(RuntimeError, match="after Toolkit insert"):
-        await repo.confirm(subject, attempt_id=attempt.id, registration=h.registration)
+        await repo.confirm(
+            subject,
+            attempt_id=attempt.id,
+            registration=h.registration,
+            settings=_settings(),
+        )
     async with rdb_session_manager() as session:
         assert (
             await session.read_session.scalar(sa.select(RDBGitHubUserConnection.id))
@@ -251,8 +294,11 @@ async def test_confirmation_failure_rolls_back_toolkit_and_preserves_review(
         )
 
 
+@pytest.mark.parametrize("fail_namespace", [False, True])
 async def test_agent_owned_publication_includes_namespace_atomically(
     rdb_session_manager: SessionManager[WriteSession],
+    monkeypatch: pytest.MonkeyPatch,
+    fail_namespace: bool,
 ) -> None:
     h, shared, repo, desired, initial = await _creation(rdb_session_manager)
     await repo.cancel(shared, initial.id)
@@ -326,10 +372,53 @@ async def test_agent_owned_publication_includes_namespace_atomically(
             )
             is None
         )
+    if fail_namespace:
+        original_namespace = ToolkitNamespaceRepository.ensure_active
+
+        async def fail_after_namespace(
+            repository: ToolkitNamespaceRepository,
+            session: WriteSession,
+            *,
+            agent_id: str,
+            toolkit_id: str,
+            base_slug: str,
+        ) -> Never:
+            await original_namespace(
+                repository,
+                session,
+                agent_id=agent_id,
+                toolkit_id=toolkit_id,
+                base_slug=base_slug,
+            )
+            raise RuntimeError("injected after namespace allocation")
+
+        monkeypatch.setattr(
+            ToolkitNamespaceRepository, "ensure_active", fail_after_namespace
+        )
+        with pytest.raises(RuntimeError, match="after namespace allocation"):
+            await repo.confirm(
+                subject,
+                attempt_id=result.attempt.id,
+                registration=h.registration,
+                settings=_settings(),
+            )
+        await _assert_unpublished(rdb_session_manager)
+        assert (
+            await repo.load_review(subject, result.attempt.id)
+        ).candidate is not None
+        async with rdb_session_manager() as session:
+            assert (
+                await session.read_session.scalar(
+                    sa.select(RDBAgentToolkitNamespaceReservation)
+                )
+                is None
+            )
+        return
     toolkit_id = await repo.confirm(
         subject,
         attempt_id=result.attempt.id,
         registration=h.registration,
+        settings=_settings(),
     )
     async with rdb_session_manager() as session:
         namespace = await session.read_session.scalar(
@@ -337,3 +426,131 @@ async def test_agent_owned_publication_includes_namespace_atomically(
         )
         assert namespace is not None and namespace.toolkit_id == toolkit_id
         assert namespace.agent_id == agent_id
+
+
+async def test_metadata_requires_exact_live_review_not_pending_or_exchanging(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    h, subject, repo, _, attempt = await _creation(rdb_session_manager)
+    with pytest.raises(GitHubUserOAuthError) as error:
+        await repo.load_review(subject, attempt.id)
+    assert error.value.code is GitHubUserErrorCode.STALE
+    await repo.claim(
+        subject, attempt_id=attempt.id, nonce="nonce", redirect_uri=attempt.redirect_uri
+    )
+    with pytest.raises(GitHubUserOAuthError):
+        await repo.load_review(subject, attempt.id)
+    await repo.stage(
+        subject,
+        attempt_id=attempt.id,
+        registration=h.registration,
+        candidate=GitHubUserCandidate("candidate-token", 42, "actual-account", None),
+    )
+    reviewed = await repo.load_review(subject, attempt.id)
+    assert reviewed.candidate is not None
+    await _assert_unpublished(rdb_session_manager)
+    await repo.cancel(subject, attempt.id)
+    with pytest.raises(GitHubUserOAuthError) as error:
+        await repo.load_review(subject, attempt.id)
+    assert error.value.code is GitHubUserErrorCode.NOT_FOUND
+
+
+@pytest.mark.parametrize("confirm_wins", [True, False])
+async def test_same_attempt_confirm_cancel_serialize_on_real_postgres_lock(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+    monkeypatch: pytest.MonkeyPatch,
+    confirm_wins: bool,
+) -> None:
+    """Use independent transactions and explicit barriers without scheduler sleeps."""
+    del latest_db_schema
+    manager = create_read_write_session_manager(rdb_engine)
+    h, subject, repo, _, attempt = await _creation(manager)
+    try:
+        await repo.claim(
+            subject,
+            attempt_id=attempt.id,
+            nonce="nonce",
+            redirect_uri=attempt.redirect_uri,
+        )
+        await repo.stage(
+            subject,
+            attempt_id=attempt.id,
+            registration=h.registration,
+            candidate=GitHubUserCandidate(
+                "candidate-token", 42, "actual-account", None
+            ),
+        )
+        lock_taken = asyncio.Event()
+        competitor_started = asyncio.Event()
+        release = asyncio.Event()
+        original_row = GitHubUserCreationRepository._row
+
+        async def gated_row(
+            repository: GitHubUserCreationRepository,
+            session: WriteSession,
+            current_subject: GitHubUserCreationSubject,
+            attempt_id: str,
+            *,
+            live: bool,
+        ) -> RDBGitHubUserCreation:
+            if live == confirm_wins:
+                row = await original_row(
+                    repository, session, current_subject, attempt_id, live=live
+                )
+                lock_taken.set()
+                await release.wait()
+                return row
+            competitor_started.set()
+            return await original_row(
+                repository, session, current_subject, attempt_id, live=live
+            )
+
+        monkeypatch.setattr(GitHubUserCreationRepository, "_row", gated_row)
+
+        async def confirm() -> str:
+            return await repo.confirm(
+                subject,
+                attempt_id=attempt.id,
+                registration=h.registration,
+                settings=_settings(),
+            )
+
+        async def cancel() -> None:
+            await repo.cancel(subject, attempt.id)
+
+        winner = asyncio.create_task(confirm() if confirm_wins else cancel())
+        await lock_taken.wait()
+        loser = asyncio.create_task(cancel() if confirm_wins else confirm())
+        await competitor_started.wait()
+        release.set()
+        await winner
+        with pytest.raises(GitHubUserOAuthError) as error:
+            await loser
+        assert error.value.code is GitHubUserErrorCode.NOT_FOUND
+        async with manager() as session:
+            assert (
+                await session.read_session.get(RDBGitHubUserCreation, attempt.id)
+                is None
+            )
+            count = await session.read_session.scalar(
+                sa.select(sa.func.count())
+                .select_from(RDBToolkitConfig)
+                .where(
+                    RDBToolkitConfig.workspace_id == subject.workspace_id,
+                    RDBToolkitConfig.slug == "confirmed",
+                )
+            )
+            assert count == (1 if confirm_wins else 0)
+            connection_count = await session.read_session.scalar(
+                sa.select(sa.func.count())
+                .select_from(RDBGitHubUserConnection)
+                .join(RDBToolkitConfig)
+                .where(RDBToolkitConfig.workspace_id == subject.workspace_id)
+            )
+            assert connection_count == (1 if confirm_wins else 0)
+    finally:
+        async with manager() as session:
+            await session.write_session.execute(
+                sa.delete(RDBWorkspace).where(RDBWorkspace.id == subject.workspace_id)
+            )

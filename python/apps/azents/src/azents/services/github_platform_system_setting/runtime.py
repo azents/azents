@@ -5,6 +5,7 @@ import enum
 from typing import Annotated
 
 from fastapi import Depends
+from pydantic import ValidationError
 
 from azents.core.github_credentials import (
     GitHubSecretsAppPlatform,
@@ -12,6 +13,7 @@ from azents.core.github_credentials import (
 )
 from azents.core.github_system_setting import (
     PlatformGitHubAppConfig,
+    PlatformGitHubAppEffective,
     PlatformGitHubAppSecrets,
 )
 from azents.core.system_setting import SystemSettingFieldSource, SystemSettingSection
@@ -24,10 +26,25 @@ class ResolvedPlatformGitHubApp:
 
     app_id: str | None
     client_id: str | None
-    private_key: str | None
-    client_secret: str | None
+    private_key: str | None = dataclasses.field(repr=False)
+    client_secret: str | None = dataclasses.field(repr=False)
     app_id_source: SystemSettingFieldSource
     effective_generation: str
+
+    def setup_ready(self, *, web_url: str | None) -> bool:
+        """Validate the existing acquisition registration and callback locally."""
+        try:
+            PlatformGitHubAppEffective.model_validate(
+                {
+                    "app_id": self.app_id,
+                    "client_id": self.client_id,
+                    "private_key": self.private_key,
+                    "client_secret": self.client_secret,
+                }
+            )
+        except ValidationError:
+            return False
+        return bool(web_url)
 
 
 class PlatformGitHubAppAuthorizationReason(enum.StrEnum):
