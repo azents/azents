@@ -15,6 +15,7 @@ from azents.core.toolkit_identifiers import (
     slugify_toolkit_name,
 )
 from azents.engine.tools.deps import get_toolkit_registry
+from azents.repos.agent_runtime_environment import AgentRuntimeEnvironmentRepository
 from azents.repos.engine_runtime_tool_read import EngineRuntimeToolReadRepository
 from azents.repos.engine_tool_repositories import (
     EngineMcpSnapshotFactory,
@@ -83,6 +84,10 @@ def test_registered_provider_names_produce_fallback_slugs() -> None:
     """Require every configurable Provider Name to satisfy the fallback invariant."""
     registry = get_toolkit_registry(
         EngineToolRepositories(
+            runtime_environment=require_instance(
+                MagicMock(spec=AgentRuntimeEnvironmentRepository),
+                AgentRuntimeEnvironmentRepository,
+            ),
             memory=require_instance(
                 MagicMock(spec=MemoryOperationRepository), MemoryOperationRepository
             ),

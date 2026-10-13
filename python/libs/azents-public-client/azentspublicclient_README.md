@@ -78,8 +78,10 @@ Class | Method | HTTP request | Description
 *AgentRuntimeV1Api* | [**agent_runtime_v1_add_agent_runtime**](azentspublicclient/docs/AgentRuntimeV1Api.md#agent_runtime_v1_add_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/add | Add Agent Runtime
 *AgentRuntimeV1Api* | [**agent_runtime_v1_get_agent_runtime**](azentspublicclient/docs/AgentRuntimeV1Api.md#agent_runtime_v1_get_agent_runtime) | **GET** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime | Get Agent Runtime
 *AgentRuntimeV1Api* | [**agent_runtime_v1_get_agent_runtime_system_metrics**](azentspublicclient/docs/AgentRuntimeV1Api.md#agent_runtime_v1_get_agent_runtime_system_metrics) | **GET** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/system-metrics | Get Agent Runtime System Metrics
+*AgentRuntimeV1Api* | [**agent_runtime_v1_get_runtime_environment**](azentspublicclient/docs/AgentRuntimeV1Api.md#agent_runtime_v1_get_runtime_environment) | **GET** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/environment | Get Runtime Environment
 *AgentRuntimeV1Api* | [**agent_runtime_v1_observe_agent_runtime**](azentspublicclient/docs/AgentRuntimeV1Api.md#agent_runtime_v1_observe_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/observe | Observe Agent Runtime
 *AgentRuntimeV1Api* | [**agent_runtime_v1_remove_agent_runtime**](azentspublicclient/docs/AgentRuntimeV1Api.md#agent_runtime_v1_remove_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/remove | Remove Agent Runtime
+*AgentRuntimeV1Api* | [**agent_runtime_v1_replace_runtime_environment**](azentspublicclient/docs/AgentRuntimeV1Api.md#agent_runtime_v1_replace_runtime_environment) | **PUT** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/environment | Replace Runtime Environment
 *AgentRuntimeV1Api* | [**agent_runtime_v1_reset_agent_runtime**](azentspublicclient/docs/AgentRuntimeV1Api.md#agent_runtime_v1_reset_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/reset | Reset Agent Runtime
 *AgentRuntimeV1Api* | [**agent_runtime_v1_restart_agent_runtime**](azentspublicclient/docs/AgentRuntimeV1Api.md#agent_runtime_v1_restart_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/restart | Restart Agent Runtime
 *AgentRuntimeV1Api* | [**agent_runtime_v1_start_agent_runtime**](azentspublicclient/docs/AgentRuntimeV1Api.md#agent_runtime_v1_start_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/start | Start Agent Runtime
@@ -797,6 +799,8 @@ Class | Method | HTTP request | Description
  - [RefreshTokenRequest](azentspublicclient/docs/RefreshTokenRequest.md)
  - [RefreshTokenResponse](azentspublicclient/docs/RefreshTokenResponse.md)
  - [RemoveAgentRuntimeRequest](azentspublicclient/docs/RemoveAgentRuntimeRequest.md)
+ - [ReplaceRuntimeEnvironmentRequest](azentspublicclient/docs/ReplaceRuntimeEnvironmentRequest.md)
+ - [ReplacementRuntimeEnvironmentValue](azentspublicclient/docs/ReplacementRuntimeEnvironmentValue.md)
  - [RequestSignupEmailRequest](azentspublicclient/docs/RequestSignupEmailRequest.md)
  - [RequestSignupEmailResponse](azentspublicclient/docs/RequestSignupEmailResponse.md)
  - [RequestedInferenceProfile](azentspublicclient/docs/RequestedInferenceProfile.md)
@@ -811,6 +815,9 @@ Class | Method | HTTP request | Description
  - [RuntimeConfigurationStatus](azentspublicclient/docs/RuntimeConfigurationStatus.md)
  - [RuntimeDesiredState](azentspublicclient/docs/RuntimeDesiredState.md)
  - [RuntimeDirectNetworkAccess](azentspublicclient/docs/RuntimeDirectNetworkAccess.md)
+ - [RuntimeEnvironmentEntry](azentspublicclient/docs/RuntimeEnvironmentEntry.md)
+ - [RuntimeEnvironmentEntryEdit](azentspublicclient/docs/RuntimeEnvironmentEntryEdit.md)
+ - [RuntimeEnvironmentSettings](azentspublicclient/docs/RuntimeEnvironmentSettings.md)
  - [RuntimeInfrastructureProfileSpec](azentspublicclient/docs/RuntimeInfrastructureProfileSpec.md)
  - [RuntimeLifecycleCommandType](azentspublicclient/docs/RuntimeLifecycleCommandType.md)
  - [RuntimeNetworkAccess](azentspublicclient/docs/RuntimeNetworkAccess.md)
@@ -903,6 +910,7 @@ Class | Method | HTTP request | Description
  - [SlackConnectionCredentials](azentspublicclient/docs/SlackConnectionCredentials.md)
  - [SlackConnectionSetupRequest](azentspublicclient/docs/SlackConnectionSetupRequest.md)
  - [SlackManifestGuidance](azentspublicclient/docs/SlackManifestGuidance.md)
+ - [StoredRuntimeEnvironmentValue](azentspublicclient/docs/StoredRuntimeEnvironmentValue.md)
  - [SubagentSettings](azentspublicclient/docs/SubagentSettings.md)
  - [SubagentTreeNodeResponse](azentspublicclient/docs/SubagentTreeNodeResponse.md)
  - [SubagentTreeResponse](azentspublicclient/docs/SubagentTreeResponse.md)
@@ -931,6 +939,7 @@ Class | Method | HTTP request | Description
  - [UploadedImage](azentspublicclient/docs/UploadedImage.md)
  - [ValidationError](azentspublicclient/docs/ValidationError.md)
  - [ValidationErrorLocInner](azentspublicclient/docs/ValidationErrorLocInner.md)
+ - [Value](azentspublicclient/docs/Value.md)
  - [VerifyCodeRequest](azentspublicclient/docs/VerifyCodeRequest.md)
  - [VerifyCodeResponse](azentspublicclient/docs/VerifyCodeResponse.md)
  - [Workspace](azentspublicclient/docs/Workspace.md)

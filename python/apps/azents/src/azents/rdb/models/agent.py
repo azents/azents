@@ -181,6 +181,10 @@ class RDBAgent(RDBModel):
             f'"max_depth": {DEFAULT_SUBAGENT_MAX_DEPTH}}}\'::jsonb'
         ),
     )
+    encrypted_runtime_environment: Mapped[str | None] = mapped_column(
+        sa.Text, nullable=True, default=None
+    )
+
     # Profile image JSONB; repositories parse and serialize the StoredImage format.
     avatar: Mapped[dict[str, Any] | None] = mapped_column(
         JSONB, nullable=True, default=None

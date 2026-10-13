@@ -1,5 +1,8 @@
 import { rem } from "@mantine/core";
+import { NextIntlClientProvider } from "next-intl";
+import koreanMessages from "@/i18n/ko-KR-messages";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
+import { RuntimeEnvironmentPreview } from "./AgentRuntimeEnvironmentVariables.story-fixtures";
 import { AgentRuntimeSettings } from "./AgentRuntimeSettings";
 import type {
   AgentResponse,
@@ -281,5 +284,48 @@ export const Removing = {
 export const Loading = {
   args: {
     state: { type: "LOADING" },
+  },
+} satisfies Story;
+
+export const EnvironmentVariablesPreview = {
+  decorators: [
+    (Story) => (
+      <NextIntlClientProvider locale="ko-KR" messages={koreanMessages}>
+        <Story />
+      </NextIntlClientProvider>
+    ),
+  ],
+  args: {
+    ...Managed.args,
+    environmentVariables: <RuntimeEnvironmentPreview />,
+    metricsState: {
+      type: "READY",
+      metrics: {
+        summary: "stopped",
+        scope: null,
+        cpu: {
+          state: "stopped",
+          measured_at: null,
+          used: null,
+          total: null,
+          percentage: null,
+        },
+        memory: {
+          state: "stopped",
+          measured_at: null,
+          used: null,
+          total: null,
+          percentage: null,
+        },
+        disk: {
+          state: "stopped",
+          measured_at: null,
+          used: null,
+          total: null,
+          percentage: null,
+        },
+        samples: [],
+      },
+    },
   },
 } satisfies Story;

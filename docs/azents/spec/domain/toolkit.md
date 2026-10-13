@@ -270,6 +270,13 @@ erDiagram
 
   When an existing `envvar` Toolkit is edited, non-empty submitted values replace only their matching stored values. Empty submitted values preserve the stored value, while values whose names are removed from `config.entries` are removed from encrypted credentials. This lets the redacted edit form preserve values that a manager leaves blank while retaining explicit entry deletion semantics.
 
+  Agent Runtime settings independently provide encrypted per-Agent environment
+  variables through the built-in Runtime Toolkit. At command launch, this mapping
+  is read for the owning Runtime Agent and merged after active peer Toolkit maps;
+  Agent settings win duplicate names. Empty Agent settings preserve existing
+  Toolkit behavior. These settings do not deprecate, migrate, remove or restrict
+  `envvar`. See [Per-Agent Runtime environment variables](../flow/agent-runtime-persistence.md#per-agent-runtime-environment-variables).
+
   Redacted Toolkit edit and unsaved Connection test forms omit credential
   placeholders that contain no secret value. Stored credentials remain authoritative
   for blank fields. Kubernetes applies this rule per configured cluster: non-empty

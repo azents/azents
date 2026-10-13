@@ -47,6 +47,13 @@ class TestAgentRuntimeV1Api(unittest.TestCase):
         """
         pass
 
+    def test_agent_runtime_v1_get_runtime_environment(self) -> None:
+        """Test case for agent_runtime_v1_get_runtime_environment
+
+        Get Runtime Environment
+        """
+        pass
+
     def test_agent_runtime_v1_observe_agent_runtime(self) -> None:
         """Test case for agent_runtime_v1_observe_agent_runtime
 
@@ -58,6 +65,13 @@ class TestAgentRuntimeV1Api(unittest.TestCase):
         """Test case for agent_runtime_v1_remove_agent_runtime
 
         Remove Agent Runtime
+        """
+        pass
+
+    def test_agent_runtime_v1_replace_runtime_environment(self) -> None:
+        """Test case for agent_runtime_v1_replace_runtime_environment
+
+        Replace Runtime Environment
         """
         pass
 
