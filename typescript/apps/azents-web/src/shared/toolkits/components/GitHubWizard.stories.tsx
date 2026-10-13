@@ -494,3 +494,88 @@ export const SelectionGeometryMobile: Story = {
     await expect(within(selected).getByText("Selected")).toBeVisible();
   },
 };
+
+function relativeLuminance(color: string): number {
+  const channels = color.match(/[\d.]+/g)?.map(Number);
+  if (channels == null || channels.length !== 3) {
+    throw new Error(`Expected an opaque computed RGB color, received ${color}`);
+  }
+  const linear = channels.map((channel) => {
+    const value = channel / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  });
+  const [red, green, blue] = linear;
+  if (red == null || green == null || blue == null) {
+    throw new Error("Computed RGB channels are missing");
+  }
+  return red * 0.2126 + green * 0.7152 + blue * 0.0722;
+}
+
+async function assertAppBadgeContrast(
+  canvasElement: HTMLElement,
+  colorScheme: "light" | "dark",
+): Promise<void> {
+  await waitFor(async () => {
+    await expect(canvasElement.ownerDocument.documentElement).toHaveAttribute(
+      "data-mantine-color-scheme",
+      colorScheme,
+    );
+    const badge = within(canvasElement)
+      .getByText("GitHub App", { exact: true })
+      .closest<HTMLElement>(".mantine-Badge-root");
+    if (badge == null) {
+      throw new Error("Verified App identity badge is missing");
+    }
+    await expect(badge).toBeVisible();
+    const style = getComputedStyle(badge);
+    const foreground = relativeLuminance(style.color);
+    const background = relativeLuminance(style.backgroundColor);
+    const contrast =
+      (Math.max(foreground, background) + 0.05) /
+      (Math.min(foreground, background) + 0.05);
+    await expect(contrast).toBeGreaterThanOrEqual(4.5);
+  });
+}
+
+export const InstalledAppLightContrast: Story = {
+  globals: { colorScheme: "light" },
+  args: {
+    identity: "APP",
+    mode: "github_app",
+    canContinue: true,
+    connection: {
+      type: "VERIFIED",
+      transport: "CURRENT",
+      verification: {
+        identity: {
+          type: "app",
+          app_id: "123",
+          name: "Azents Test App",
+          slug: "azents-test-app",
+        },
+        installations: [
+          {
+            installation_id: "7",
+            account_login: "fixture-org",
+            account_type: "Organization",
+            account_avatar_url: null,
+            status: "ready",
+            message: null,
+          },
+        ],
+        connectivity: { status: "ready", message: null },
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    await assertAppBadgeContrast(canvasElement, "light");
+  },
+};
+
+export const InstalledAppDarkContrast: Story = {
+  ...InstalledAppLightContrast,
+  globals: { colorScheme: "dark" },
+  play: async ({ canvasElement }) => {
+    await assertAppBadgeContrast(canvasElement, "dark");
+  },
+};
