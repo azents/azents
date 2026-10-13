@@ -20,6 +20,7 @@ def test_explicit_credentials_override_environment(
     monkeypatch.setenv("OPENAI_CUSTOM_HEADERS", "X-Shared: env\nX-Env: retained")
     headers = {"X-Shared": "credential", "X-Account": "account"}
     config = openai_responses_client_config(
+        session_id=None,
         provider=LLMProvider.OPENAI,
         credential_kwargs={
             "api_key": "synthetic-test-key",
@@ -50,14 +51,17 @@ def test_provider_endpoint_environment_precedence(
     monkeypatch.setenv("AZ_OPENAI_BASE_URL", "https://az.example.test/v1")
     monkeypatch.setenv("OPENAI_BASE_URL", "https://sdk.example.test/v1")
     openai = openai_responses_client_config(
+        session_id=None,
         provider=LLMProvider.OPENAI,
         credential_kwargs={},
     )
     chatgpt = openai_responses_client_config(
+        session_id=None,
         provider=LLMProvider.CHATGPT_OAUTH,
         credential_kwargs={},
     )
     alias = openai_responses_client_config(
+        session_id=None,
         provider=LLMProvider.OPENAI,
         credential_kwargs={"api_base": "https://alias.example.test/v1"},
     )
@@ -73,6 +77,7 @@ def test_invalid_credential_type_does_not_serialize_value(key: str) -> None:
     """Configuration validation identifies only the field, never its value."""
     with pytest.raises(TypeError, match=f"OpenAI client option {key} must be a string"):
         openai_responses_client_config(
+            session_id=None,
             provider=LLMProvider.OPENAI,
             credential_kwargs={key: {"private-value": "synthetic-canary"}},
         )
@@ -96,3 +101,55 @@ def test_invalid_headers_fail_without_value_serialization(value: object) -> None
     """Keep invalid header diagnostics independent of credential content."""
     with pytest.raises(TypeError, match=r"extra_headers must be dict\[str, str\]"):
         openai_credential_headers(value)
+
+
+@pytest.mark.parametrize("session_id", ["session-1", "session-2"])
+def test_chatgpt_inference_has_authoritative_session_headers(
+    monkeypatch: pytest.MonkeyPatch, session_id: str
+) -> None:
+    """Keep affinity session-local and override custom headers case-insensitively."""
+    monkeypatch.setenv(
+        "OPENAI_CUSTOM_HEADERS",
+        "Session-ID: wrong-environment\n"
+        "X-Client-Request-ID: wrong-request\nX-Env: kept",
+    )
+    headers = {"THREAD-ID": "wrong-credential", "ChatGPT-Account-Id": "account"}
+    config = openai_responses_client_config(
+        provider=LLMProvider.CHATGPT_OAUTH,
+        credential_kwargs={"extra_headers": headers},
+        session_id=session_id,
+    )
+    assert config.default_headers == {
+        "X-Env": "kept",
+        "ChatGPT-Account-Id": "account",
+        "session-id": session_id,
+        "thread-id": session_id,
+        "x-client-request-id": session_id,
+    }
+    assert headers == {"THREAD-ID": "wrong-credential", "ChatGPT-Account-Id": "account"}
+    repeated = openai_responses_client_config(
+        provider=LLMProvider.CHATGPT_OAUTH,
+        credential_kwargs={"extra_headers": headers},
+        session_id=session_id,
+    )
+    assert repeated.default_headers == config.default_headers
+
+
+@pytest.mark.parametrize(
+    "provider,session_id",
+    [(LLMProvider.OPENAI, "session-1"), (LLMProvider.CHATGPT_OAUTH, None)],
+)
+def test_sessionless_and_api_key_clients_preserve_custom_headers(
+    monkeypatch: pytest.MonkeyPatch,
+    provider: LLMProvider,
+    session_id: str | None,
+) -> None:
+    """Discovery and API-key clients retain their existing routing configuration."""
+    monkeypatch.delenv("OPENAI_CUSTOM_HEADERS", raising=False)
+    headers = {"Session-ID": "custom", "X-Client": "kept"}
+    config = openai_responses_client_config(
+        provider=provider,
+        credential_kwargs={"extra_headers": headers},
+        session_id=session_id,
+    )
+    assert config.default_headers == headers

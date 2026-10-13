@@ -16,6 +16,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/model_metadata_operations.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/841e7188d527_bind_oauth_reauthentication_targets.py
   - python/apps/azents/src/azents/core/chatgpt_oauth.py
+  - python/apps/azents/src/azents/core/openai_client_config.py
   - python/apps/azents/src/azents/core/credentials.py
   - python/apps/azents/src/azents/api/public/chatgpt_oauth/**
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/**
@@ -44,8 +45,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-10-06
-spec_version: 35
+last_verified_at: 2026-10-14
+spec_version: 36
 ---
 
 # ChatGPT OAuth Flow
@@ -242,6 +243,13 @@ Rules:
 - The WebSocket handshake explicitly carries the connected `ChatGPT-Account-Id` and Azents client
   identity headers because the SDK HTTP client's default headers are not inherited by the Responses
   WebSocket connection.
+- Session-bound ChatGPT inference also sends `session-id`, `thread-id`, and
+  `x-client-request-id`, each set to the current AgentSession ID. The SDK HTTP client and
+  WebSocket handshake use the same headers, including after HTTP fallback. Identity stays
+  stable across turns and retries; child sessions use their own identity rather than their
+  parent's. Session headers override custom header keys case-insensitively while preserving
+  authentication and unrelated headers. API-key OpenAI and sessionless discovery retain their
+  existing headers. These routing hints do not guarantee a cache hit.
 - ChatGPT Codex backend does not allow Responses API server-side persistence, so runtime calls set
   `store=false`, request encrypted reasoning content for stateless replay, send complete logical
   input over either physical transport, and never use `previous_response_id`.

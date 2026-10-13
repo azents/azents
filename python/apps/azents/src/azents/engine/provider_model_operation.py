@@ -193,6 +193,7 @@ def bind_provider_model_operation(
     selection: AgentModelSelection,
     settings: SelectableModelSettings,
     credential_kwargs: dict[str, object],
+    session_id: str | None,
     effective_input_tokens: int,
     sdk_factories: ModelSDKFactories,
     watchdog: ModelStreamWatchdog,
@@ -202,7 +203,9 @@ def bind_provider_model_operation(
     adapter: OpenAIResponsesModelAdapter | PydanticAIModelAdapter
     if selection.provider in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
         config = openai_responses_client_config(
-            provider=selection.provider, credential_kwargs=credential_kwargs
+            provider=selection.provider,
+            credential_kwargs=credential_kwargs,
+            session_id=session_id,
         )
         adapter = OpenAIResponsesModelAdapter(
             client=sdk_factories.openai_responses(config=config),
@@ -258,6 +261,7 @@ async def call_model_operation_text_with_usage(
         selection=selection,
         settings=settings,
         credential_kwargs=credential_kwargs,
+        session_id=call_context.session_id,
         effective_input_tokens=effective_input_tokens,
         sdk_factories=sdk_factories,
         watchdog=watchdog,

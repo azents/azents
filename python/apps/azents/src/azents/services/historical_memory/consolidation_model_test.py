@@ -196,6 +196,7 @@ async def test_native_continuation_preserves_common_admission_and_settings(
         settings=make_test_model_settings().model_copy(
             update={"max_output_tokens": output_tokens}
         ),
+        session_id=host.principal.owner.session_id,
         credential_kwargs={"api_key": "synthetic"},
         effective_input_tokens=128_000,
         sdk_factories=ModelSDKFactories(factory, _unused_provider),
@@ -273,6 +274,7 @@ async def test_native_retry_rechecks_owner_before_full_request_resend(
         selection=selection,
         settings=make_test_model_settings(),
         credential_kwargs={"api_key": "synthetic"},
+        session_id=host.principal.owner.session_id,
         effective_input_tokens=128_000,
         sdk_factories=ModelSDKFactories(factory, _unused_provider),
         watchdog=make_test_model_stream_watchdog(),
@@ -366,6 +368,7 @@ async def test_pydantic_ai_official_native_wire_refuses_lost_common_owner(
             "api_key": "synthetic",
             "base_url": "https://synthetic.invalid",
         },
+        session_id=host.principal.owner.session_id,
         effective_input_tokens=128_000,
         sdk_factories=dataclasses.replace(defaults, provider_model=factory),
         watchdog=make_test_model_stream_watchdog(),

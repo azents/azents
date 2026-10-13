@@ -23,11 +23,13 @@ def openai_responses_client_config(
     *,
     provider: LLMProvider,
     credential_kwargs: Mapping[str, object],
+    session_id: str | None,
 ) -> OpenAIResponsesClientConfig:
     """Build official SDK client configuration from resolved credentials.
 
     :param provider: selected integration provider identity
     :param credential_kwargs: resolved credential and endpoint configuration
+    :param session_id: owning AgentSession for inference, or no session for discovery
     :returns: client configuration with the existing environment precedence
     """
     api_key = _optional_credential_string(credential_kwargs, "api_key")
@@ -52,6 +54,14 @@ def openai_responses_client_config(
         **(environment_headers or {}),
         **(credential_headers or {}),
     } or None
+    if provider == LLMProvider.CHATGPT_OAUTH and session_id is not None:
+        session_header_names = {"session-id", "thread-id", "x-client-request-id"}
+        default_headers = {
+            name: value
+            for name, value in (default_headers or {}).items()
+            if name.lower() not in session_header_names
+        }
+        default_headers.update(dict.fromkeys(session_header_names, session_id))
     return OpenAIResponsesClientConfig(
         api_key=api_key,
         base_url=base_url,
