@@ -160,7 +160,11 @@ export function useGoogleSetupContainer({
     clearResume();
     setAcknowledged(false);
     setFlow({ type: "COMPLETE", outcome });
-    await invalidate();
+    try {
+      await invalidate();
+    } catch {
+      setOperationError(t("statusFailed"));
+    }
     if (toolkitId == null && outcome.current && mounted.current) {
       if (onComplete != null) {
         onComplete();

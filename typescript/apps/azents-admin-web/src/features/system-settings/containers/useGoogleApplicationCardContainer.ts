@@ -52,7 +52,7 @@ export function useGoogleApplicationCardContainer(): GoogleApplicationCardProps 
       await Promise.all([
         utils.systemSettings.getGoogleApplication.invalidate(),
         utils.systemSettings.listAuditEvents.invalidate(),
-      ]);
+      ]).catch(() => setReloadState("FAILED"));
     },
     onError: (failure) => {
       setError(failure.data?.code === "CONFLICT" ? "conflict" : "uncertain");
