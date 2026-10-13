@@ -10,8 +10,9 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from typing import Annotated, ClassVar, Generic, Literal, TypeVar
 
-from pydantic import BaseModel, BeforeValidator, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
+from azents.core.google_policy import GoogleTask
 from azents.core.mailbox_activity import MailboxActivityObserverProtocol
 from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.hooks.types import RuntimeHooks
@@ -117,6 +118,7 @@ class ToolkitType(enum.StrEnum):
     SHELL = "shell"
     MCP = "mcp"
     GITHUB = "github"
+    GOOGLE = "google"
     NOTION = "notion"
     GCP = "gcp"
     AWS = "aws"
@@ -502,6 +504,15 @@ class McpToolkitConfig(BaseModel):
     discovery_url: EmptyToNone = Field(
         default=None, description="OAuth2 AS discovery URL (override)"
     )
+
+
+class GoogleToolkitConfig(BaseModel):
+    """Google task selection; provider scopes do not silently select work."""
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    tasks: list[GoogleTask] = Field(min_length=1)
+    timeout: float = Field(default=30.0, gt=0, le=300, allow_inf_nan=False)
+    security_risk_acknowledged: bool
 
 
 class GitHubToolkitConfig(BaseModel):

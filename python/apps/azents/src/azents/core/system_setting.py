@@ -19,6 +19,7 @@ class SystemSettingSection(enum.StrEnum):
 
     EXTERNAL_CHANNEL_FILES = "external_channel_files"
     PLATFORM_GITHUB_APP = "platform_github_app"
+    GOOGLE_OAUTH = "google_oauth"
     PLATFORM_RUNTIME = "platform_runtime"
     SLACK_IDENTITY_OAUTH = "slack_identity_oauth"
     DISCORD_IDENTITY_OAUTH = "discord_identity_oauth"

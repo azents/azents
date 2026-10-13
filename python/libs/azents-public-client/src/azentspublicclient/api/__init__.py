@@ -10,6 +10,7 @@ from azentspublicclient.api.external_channel_v1_api import ExternalChannelV1Api
 from azentspublicclient.api.git_hub_setup_v1_api import GitHubSetupV1Api
 from azentspublicclient.api.git_hub_user_creation_v1_api import GitHubUserCreationV1Api
 from azentspublicclient.api.git_hub_user_toolkit_v1_api import GitHubUserToolkitV1Api
+from azentspublicclient.api.google_toolkit_v1_api import GoogleToolkitV1Api
 from azentspublicclient.api.health_v1_api import HealthV1Api
 from azentspublicclient.api.invitation_v1_api import InvitationV1Api
 from azentspublicclient.api.join_request_v1_api import JoinRequestV1Api

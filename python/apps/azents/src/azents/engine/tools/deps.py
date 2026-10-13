@@ -16,6 +16,7 @@ from azents.engine.tools.external_channel import ExternalChannelToolkitProvider
 from azents.engine.tools.gcp import GcpToolkitProvider
 from azents.engine.tools.github import GitHubToolkitProvider
 from azents.engine.tools.goal import GoalToolkitProvider
+from azents.engine.tools.google import GoogleToolkitProvider
 from azents.engine.tools.google_analytics import GoogleAnalyticsToolkitProvider
 from azents.engine.tools.kubernetes import KubernetesToolkitProvider
 from azents.engine.tools.mcp import McpToolkitProvider
@@ -63,6 +64,7 @@ from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
 )
 from azents.services.github_user_oauth.runtime import GitHubUserRuntimeService
+from azents.services.google_oauth.runtime import GoogleRuntimeService
 from azents.services.memory_vfs import MemoryVfsReadBackend
 from azents.services.runtime_web.service import (
     RuntimeWebService,
@@ -95,6 +97,7 @@ def get_toolkit_registry(
     artifact_service: Annotated[ArtifactService, Depends(ArtifactService)],
     github_runtime: Annotated[PlatformGitHubAppRuntimeService, Depends()],
     github_user_runtime: Annotated[GitHubUserRuntimeService, Depends()],
+    google_runtime: Annotated[GoogleRuntimeService, Depends()],
 ) -> dict[str, ToolkitProvider[Any]]:
     """Create the Toolkit registry.
 
@@ -137,6 +140,11 @@ def get_toolkit_registry(
             snapshot_factory=repositories.snapshots,
         ),
         "google_analytics": GoogleAnalyticsToolkitProvider(),
+        "google": GoogleToolkitProvider(
+            runtime=google_runtime,
+            snapshots=repositories.snapshots,
+            artifacts=artifact_service,
+        ),
         "brave_search": BraveSearchToolkitProvider(
             transport=make_brave_testenv_transport()
             if config.testenv_api_enabled

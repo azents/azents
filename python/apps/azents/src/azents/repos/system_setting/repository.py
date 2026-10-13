@@ -79,6 +79,7 @@ class SystemSettingRepository:
         if write.section in {
             SystemSettingSection.SLACK_IDENTITY_OAUTH,
             SystemSettingSection.DISCORD_IDENTITY_OAUTH,
+            SystemSettingSection.GOOGLE_OAUTH,
         }:
             # These writers must exclude exact OAuth claim/link finalization
             # through commit, including environment-backed absent current rows.

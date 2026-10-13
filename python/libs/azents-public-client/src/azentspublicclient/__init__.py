@@ -27,6 +27,7 @@ __all__ = [
     "GitHubSetupV1Api",
     "GitHubUserCreationV1Api",
     "GitHubUserToolkitV1Api",
+    "GoogleToolkitV1Api",
     "HealthV1Api",
     "InvitationV1Api",
     "JoinRequestV1Api",
@@ -304,6 +305,22 @@ __all__ = [
     "GoalStateResponse",
     "GoalStatusUpdateRequest",
     "GoalUpdateRequest",
+    "GoogleCancelOutput",
+    "GoogleConfirmRequest",
+    "GoogleConnectInput",
+    "GoogleConnectOutput",
+    "GoogleConnectionOutput",
+    "GoogleExchangeRequest",
+    "GoogleFinalSettings",
+    "GoogleIdentity",
+    "GooglePreparation",
+    "GooglePublishedOutput",
+    "GoogleReconnectConfirmRequest",
+    "GoogleReconnectSettings",
+    "GoogleReview",
+    "GoogleService",
+    "GoogleTask",
+    "GoogleTaskAccess",
     "HTTPValidationError",
     "HealthStatus",
     "HistoricalMemoryListResponse",
@@ -652,6 +669,7 @@ from azentspublicclient.api.external_channel_v1_api import ExternalChannelV1Api 
 from azentspublicclient.api.git_hub_setup_v1_api import GitHubSetupV1Api as GitHubSetupV1Api
 from azentspublicclient.api.git_hub_user_creation_v1_api import GitHubUserCreationV1Api as GitHubUserCreationV1Api
 from azentspublicclient.api.git_hub_user_toolkit_v1_api import GitHubUserToolkitV1Api as GitHubUserToolkitV1Api
+from azentspublicclient.api.google_toolkit_v1_api import GoogleToolkitV1Api as GoogleToolkitV1Api
 from azentspublicclient.api.health_v1_api import HealthV1Api as HealthV1Api
 from azentspublicclient.api.invitation_v1_api import InvitationV1Api as InvitationV1Api
 from azentspublicclient.api.join_request_v1_api import JoinRequestV1Api as JoinRequestV1Api
@@ -933,6 +951,22 @@ from azentspublicclient.models.goal_action import GoalAction as GoalAction
 from azentspublicclient.models.goal_state_response import GoalStateResponse as GoalStateResponse
 from azentspublicclient.models.goal_status_update_request import GoalStatusUpdateRequest as GoalStatusUpdateRequest
 from azentspublicclient.models.goal_update_request import GoalUpdateRequest as GoalUpdateRequest
+from azentspublicclient.models.google_cancel_output import GoogleCancelOutput as GoogleCancelOutput
+from azentspublicclient.models.google_confirm_request import GoogleConfirmRequest as GoogleConfirmRequest
+from azentspublicclient.models.google_connect_input import GoogleConnectInput as GoogleConnectInput
+from azentspublicclient.models.google_connect_output import GoogleConnectOutput as GoogleConnectOutput
+from azentspublicclient.models.google_connection_output import GoogleConnectionOutput as GoogleConnectionOutput
+from azentspublicclient.models.google_exchange_request import GoogleExchangeRequest as GoogleExchangeRequest
+from azentspublicclient.models.google_final_settings import GoogleFinalSettings as GoogleFinalSettings
+from azentspublicclient.models.google_identity import GoogleIdentity as GoogleIdentity
+from azentspublicclient.models.google_preparation import GooglePreparation as GooglePreparation
+from azentspublicclient.models.google_published_output import GooglePublishedOutput as GooglePublishedOutput
+from azentspublicclient.models.google_reconnect_confirm_request import GoogleReconnectConfirmRequest as GoogleReconnectConfirmRequest
+from azentspublicclient.models.google_reconnect_settings import GoogleReconnectSettings as GoogleReconnectSettings
+from azentspublicclient.models.google_review import GoogleReview as GoogleReview
+from azentspublicclient.models.google_service import GoogleService as GoogleService
+from azentspublicclient.models.google_task import GoogleTask as GoogleTask
+from azentspublicclient.models.google_task_access import GoogleTaskAccess as GoogleTaskAccess
 from azentspublicclient.models.http_validation_error import HTTPValidationError as HTTPValidationError
 from azentspublicclient.models.health_status import HealthStatus as HealthStatus
 from azentspublicclient.models.historical_memory_list_response import HistoricalMemoryListResponse as HistoricalMemoryListResponse

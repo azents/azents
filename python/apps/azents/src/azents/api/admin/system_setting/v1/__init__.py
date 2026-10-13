@@ -49,8 +49,10 @@ from .data import (
     SystemSettingSecretActionRequest,
     SystemSettingVersionConflictResponse,
 )
+from .google import router as google_router
 
 router = APIRouter()
+router.include_router(google_router)
 
 
 def _non_null_file_limit(value: int | None) -> int:

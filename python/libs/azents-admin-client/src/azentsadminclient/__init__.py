@@ -72,6 +72,8 @@ __all__ = [
     "FileLifecycleSettingsResponse",
     "FileLifecycleSettingsUpdateRequest",
     "FileLifecycleSettingsUpdateResponse",
+    "GoogleApplicationDetail",
+    "GoogleApplicationPatchRequest",
     "HTTPValidationError",
     "HealthStatus",
     "HistoricalMemoryExecutionDetailResponse",
@@ -267,6 +269,8 @@ from azentsadminclient.models.external_channel_files_patch_request import Extern
 from azentsadminclient.models.file_lifecycle_settings_response import FileLifecycleSettingsResponse as FileLifecycleSettingsResponse
 from azentsadminclient.models.file_lifecycle_settings_update_request import FileLifecycleSettingsUpdateRequest as FileLifecycleSettingsUpdateRequest
 from azentsadminclient.models.file_lifecycle_settings_update_response import FileLifecycleSettingsUpdateResponse as FileLifecycleSettingsUpdateResponse
+from azentsadminclient.models.google_application_detail import GoogleApplicationDetail as GoogleApplicationDetail
+from azentsadminclient.models.google_application_patch_request import GoogleApplicationPatchRequest as GoogleApplicationPatchRequest
 from azentsadminclient.models.http_validation_error import HTTPValidationError as HTTPValidationError
 from azentsadminclient.models.health_status import HealthStatus as HealthStatus
 from azentsadminclient.models.historical_memory_execution_detail_response import HistoricalMemoryExecutionDetailResponse as HistoricalMemoryExecutionDetailResponse

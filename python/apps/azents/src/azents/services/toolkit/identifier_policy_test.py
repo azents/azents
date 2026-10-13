@@ -112,6 +112,7 @@ def test_registered_provider_names_produce_fallback_slugs() -> None:
         MagicMock(),
         MagicMock(),
         MagicMock(),
+        MagicMock(),
     )
 
     assert registry
