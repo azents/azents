@@ -15,7 +15,8 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     """Add one current grant and encrypted unpublished attempt/outcome storage."""
     op.execute(
-        "ALTER TYPE system_setting_section ADD VALUE IF NOT EXISTS 'google_oauth'"
+        "ALTER TYPE system_setting_section ADD VALUE IF NOT EXISTS 'google_oauth' "
+        "AFTER 'platform_github_app'"
     )
     op.execute(
         "CREATE TYPE google_oauth_connection_status AS ENUM "
