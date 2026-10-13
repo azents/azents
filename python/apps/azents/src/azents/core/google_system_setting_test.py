@@ -44,3 +44,9 @@ def test_secret_validation_does_not_echo_the_input() -> None:
     with pytest.raises(ValidationError) as caught:
         GoogleApplicationSecrets(client_secret="   ")
     assert "input_value" not in str(caught.value)
+
+
+def test_operator_secret_model_does_not_include_secret_in_repr() -> None:
+    assert "PRIVATE-SECRET" not in repr(
+        GoogleApplicationSecrets(client_secret="PRIVATE-SECRET")
+    )

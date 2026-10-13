@@ -50,8 +50,8 @@ class GoogleIdentity(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
     issuer: str
-    subject: str
-    email: str | None
+    subject: str = Field(repr=False)
+    email: str | None = Field(repr=False)
 
 
 class GoogleTokens(BaseModel):

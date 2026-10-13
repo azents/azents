@@ -4,7 +4,7 @@ import dataclasses
 import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing_extensions import TypedDict
 
 from azents.core.system_setting import (
@@ -37,7 +37,7 @@ class GoogleApplicationSecrets(BaseModel):
     """Write-only current operator secret; never copied into Toolkit credentials."""
 
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
-    client_secret: str | None = None
+    client_secret: str | None = Field(default=None, repr=False)
 
     @field_validator("client_secret")
     @classmethod
