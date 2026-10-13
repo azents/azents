@@ -34,13 +34,23 @@ import {
   missingNewGitHubUserRegistration,
   normalizeGitHubUserCredentialEdits,
 } from "../github-user-credentials";
+import {
+  deserializeGoogleResume,
+  GOOGLE_RESUME_KEY,
+  googleResumeMatches,
+} from "../google-resume";
 import { toolkitFormSchema } from "../schemas";
 import {
   hydrateToolkitConfig,
   projectToolkitConfig,
   toolkitProjectionUsesOauth,
 } from "../toolkit-config-projection";
+import {
+  metadataProviderFields,
+  usesToolkitCreationWizard,
+} from "../toolkit-form-lifecycle";
 import type { GitHubUserCreationContext } from "../github-user-creation-state";
+import type { GoogleResume } from "../google-resume";
 import type { ToolkitFormValues } from "../schemas";
 import type { ToolkitConfigProjection } from "../toolkit-config-projection";
 import type {
@@ -227,6 +237,13 @@ export function useToolkitFormContainer(
     ) {
       form.setFieldValue("toolkitType", "github");
     }
+    const google = readSessionStorageValue<GoogleResume | null>({
+      key: GOOGLE_RESUME_KEY,
+      deserialize: deserializeGoogleResume,
+    });
+    if (google != null && googleResumeMatches(google, handle, agentId)) {
+      form.setFieldValue("toolkitType", "google");
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- restore entry selection only; the Wizard owns exact review hydration.
   }, [agentId, handle, isEditMode]);
   useEffect(() => {
@@ -406,7 +423,7 @@ export function useToolkitFormContainer(
 
   const submitForm = useCallback(
     (values: ToolkitFormValues): void => {
-      if (!isEditMode && values.toolkitType === "github") {
+      if (!isEditMode && usesToolkitCreationWizard(values.toolkitType)) {
         return;
       }
       setMutationState({ type: "SUBMITTING" });
@@ -441,7 +458,7 @@ export function useToolkitFormContainer(
             name: values.name,
             description: values.description ?? null,
             prompt: values.prompt ?? null,
-            config: values.config,
+            ...metadataProviderFields(values.toolkitType, values.config),
             ...(credentials != null && { credentials }),
             enabled: values.enabled,
             alwaysExposeTools: values.alwaysExposeTools,
@@ -472,7 +489,7 @@ export function useToolkitFormContainer(
           name: values.name,
           description: values.description ?? null,
           prompt: values.prompt ?? null,
-          config: values.config,
+          ...metadataProviderFields(values.toolkitType, values.config),
           ...(credentials != null && { credentials }),
           enabled: values.enabled,
           alwaysExposeTools: values.alwaysExposeTools,

@@ -46,6 +46,7 @@ import { publicProcedure, router } from "../init";
 import { githubSetupRouter } from "./github-setup";
 import { githubUserRouter } from "./github-user";
 import { githubUserCreationRouter } from "./github-user-creation";
+import { googleRouter } from "./google";
 
 const toolkitSlugInput = z.string().refine((value) => {
   const normalized = normalizeExplicitToolkitSlug(value);
@@ -53,6 +54,7 @@ const toolkitSlugInput = z.string().refine((value) => {
 });
 
 export const toolkitRouter = router({
+  google: googleRouter,
   githubUser: githubUserRouter,
   githubUserCreation: githubUserCreationRouter,
   githubSetup: githubSetupRouter,

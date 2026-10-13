@@ -1,0 +1,120 @@
+{
+  "title": "Connect Google",
+  "selectionDetails": "Task selection and timeout",
+  "permissionDetails": "Inspect exact tool permissions",
+  "permittedTools": "Permitted tool identifiers",
+  "unavailableTools": "Unavailable tool identifiers",
+  "reconnectTitle": "Reconnect Google",
+  "intro": "Use one Google account for the Calendar, Drive and Gmail tasks you choose.",
+  "reload": "Reload status",
+  "savedAccount": "Saved Google account",
+  "disconnect": "Disconnect locally",
+  "disconnectTitle": "Remove this saved connection?",
+  "disconnectDescription": "This removes the local credentials and stops pending reconnections. It does not revoke Google consent or undo completed operations.",
+  "keepConnection": "Keep connection",
+  "notLiveVerified": "Permission evidence does not verify access to every resource or Google Preview eligibility.",
+  "operatorRequired": "Administrator preparation required",
+  "operatorDescription": "Ask a system administrator to configure the Google OAuth application. Application secrets are not entered here.",
+  "preparationUnverified": "The application is configured locally. Live Google service access has not been verified.",
+  "selectTasks": "1. Choose tasks",
+  "selectDescription": "Choose only the tasks this Toolkit needs. Google may grant fewer permissions; you will review the actual result before saving.",
+  "timeout": "Tool request timeout (seconds)",
+  "authorize": "Continue to Google",
+  "authorizeAgain": "Authorize replacement connection",
+  "authorizing": "Opening Google authorization…",
+  "verifying": "Verifying this Google authorization…",
+  "failed": "Setup could not complete",
+  "restart": "Discard attempt and start again",
+  "reviewTitle": "2. Review account and permissions",
+  "agentOwnership": "This connection belongs only to this Agent. Runs use this saved account, not a participant's account.",
+  "sharedOwnership": "Workspace-shared connection: authorized users and Agents may act using this saved account.",
+  "actualPermissions": "These are Google's returned permissions, not a claim that all requested tasks were granted.",
+  "missingRenewal": "No renewable credential was returned. This candidate cannot be saved; start a new explicit authorization.",
+  "includeTask": "Keep this task in the saved connection",
+  "name": "Toolkit name",
+  "slug": "Tool namespace (optional)",
+  "description": "Description",
+  "prompt": "Custom instructions",
+  "enabled": "Enable Toolkit",
+  "alwaysExpose": "Always expose tools",
+  "riskTitle": "Google content remains untrusted",
+  "riskDescription": "Known-pattern screening can miss novel, semantic, obfuscated or multilingual attacks, and can reject harmless content. Uninspectable content is blocked. Screening is not complete prevention or Google certification.",
+  "noReplay": "A blocked response may follow an already completed Google operation. Do not blindly repeat a write.",
+  "acknowledge": "I have reviewed these screening limits and the ownership of this connection.",
+  "save": "Save Google Toolkit",
+  "replace": "Replace saved connection",
+  "cancel": "Discard local attempt",
+  "unknownPublication": "Save result is uncertain",
+  "unknownDescription": "Check the exact attempt's result instead of saving again. You may discard the local attempt; if publication already won the race, its saved result is returned.",
+  "checkOutcome": "Check saved result",
+  "saved": "Connection saved",
+  "savedDescription": "The reviewed grant is saved. Resource access still depends on Google permissions and policy.",
+  "superseded": "This result is no longer current",
+  "supersededDescription": "The attempt was saved earlier but another connection or disconnect replaced it.",
+  "availableActions": "{count, plural, =0 {No authorized actions} one {# authorized action} other {# authorized actions}}",
+  "authorizationFailed": "Unable to start Google authorization. The saved connection has not been replaced.",
+  "authorizationIncomplete": "Authorization did not return a verified result. Discard this local attempt before starting again.",
+  "verificationFailed": "The candidate is unavailable, expired, or could not be verified. No new connection was published.",
+  "verificationUncertain": "The verification response was not received. Return to setup to inspect this attempt without exchanging the code again.",
+  "expired": "This authorization attempt expired. Discard it and start a new one.",
+  "outcomeUnavailable": "The final result is not available yet. Check again or discard the exact attempt; do not repeat the save blindly.",
+  "cancelFailed": "Unable to discard the attempt. Keep this context and retry the same local cancellation.",
+  "disconnectFailed": "The disconnect result is uncertain. Reload status before taking another action.",
+  "preparationFailed": "Unable to load administrator preparation.",
+  "statusFailed": "Unable to load this saved connection.",
+  "staleCallback": "This callback does not match the active authorization context. No account was attached and no other attempt was cancelled.",
+  "returnToSetup": "Return to the original setup",
+  "access": {
+    "permitted": "Permitted",
+    "partial": "Partially permitted",
+    "not_granted": "Not granted",
+    "unknown": "Unknown permissions"
+  },
+  "grant": {
+    "full": "Requested task permissions granted",
+    "partial": "Only part of the requested work is permitted",
+    "none": "No selected task is usable",
+    "unknown": "Granted permissions could not be verified"
+  },
+  "connection": {
+    "not_connected": "Not connected",
+    "connected": "Grant saved",
+    "reconnect_required": "Reconnect required",
+    "operator_setup_required": "Administrator preparation required",
+    "client_changed": "Application changed — reconnect required"
+  },
+  "tasks": {
+    "calendar_read": {
+      "title": "Read calendars and events",
+      "description": "List and inspect calendar events."
+    },
+    "calendar_availability": {
+      "title": "Check calendar availability",
+      "description": "Check free/busy information."
+    },
+    "calendar_edit": {
+      "title": "Edit calendar events",
+      "description": "Create, update or delete events."
+    },
+    "drive_read": {
+      "title": "Read Drive files",
+      "description": "Search and inspect files accessible to this account."
+    },
+    "drive_files": {
+      "title": "Work with selected Drive files",
+      "description": "Access app-authorized files only; this does not enable whole-Drive search."
+    },
+    "gmail_read": {
+      "title": "Read Gmail",
+      "description": "Find and inspect messages and threads."
+    },
+    "gmail_drafts": {
+      "title": "Manage Gmail drafts",
+      "description": "Create and edit drafts. Sending mail is not included."
+    },
+    "gmail_modify": {
+      "title": "Organize Gmail",
+      "description": "Modify messages, threads and labels. Sending mail is not included."
+    }
+  }
+}

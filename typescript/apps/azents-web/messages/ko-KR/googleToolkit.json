@@ -1,0 +1,120 @@
+{
+  "title": "Google 연결",
+  "selectionDetails": "선택한 작업과 제한 시간",
+  "permissionDetails": "도구별 권한 자세히 보기",
+  "permittedTools": "허용된 도구 식별자",
+  "unavailableTools": "사용할 수 없는 도구 식별자",
+  "reconnectTitle": "Google 재연결",
+  "intro": "하나의 Google 계정으로 선택한 Calendar, Drive, Gmail 작업을 사용합니다.",
+  "reload": "상태 새로고침",
+  "savedAccount": "저장된 Google 계정",
+  "disconnect": "로컬 연결 해제",
+  "disconnectTitle": "저장된 연결을 해제할까요?",
+  "disconnectDescription": "로컬 인증 정보를 삭제하고 대기 중인 재연결을 중단합니다. Google에서 한 동의나 이미 완료된 작업을 되돌리지는 않습니다.",
+  "keepConnection": "연결 유지",
+  "notLiveVerified": "권한 정보만으로 모든 리소스 접근이나 Google Preview 이용 자격이 확인되지는 않습니다.",
+  "operatorRequired": "관리자 설정이 필요합니다",
+  "operatorDescription": "시스템 관리자에게 Google OAuth 앱 설정을 요청하세요. 이 화면에서는 앱 비밀값을 입력하지 않습니다.",
+  "preparationUnverified": "앱이 로컬에 설정되어 있습니다. 실제 Google 서비스 접근은 아직 검증되지 않았습니다.",
+  "selectTasks": "1. 사용할 작업 선택",
+  "selectDescription": "이 Toolkit에 필요한 작업만 선택하세요. Google이 일부 권한만 허용할 수 있으므로 저장 전에 실제 결과를 확인합니다.",
+  "timeout": "도구 요청 제한 시간(초)",
+  "authorize": "Google에서 동의하기",
+  "authorizeAgain": "교체할 연결에 동의하기",
+  "authorizing": "Google 동의 화면으로 이동 중…",
+  "verifying": "Google 인증 결과를 검증하는 중…",
+  "failed": "설정을 완료하지 못했습니다",
+  "restart": "시도를 폐기하고 다시 시작",
+  "reviewTitle": "2. 계정과 권한 확인",
+  "agentOwnership": "이 연결은 이 Agent만 소유합니다. 실행에는 대화 참여자의 계정이 아닌 저장된 계정이 사용됩니다.",
+  "sharedOwnership": "Workspace 공유 연결입니다. 권한이 있는 사용자와 Agent가 이 계정으로 작업할 수 있습니다.",
+  "actualPermissions": "Google이 실제 반환한 권한입니다. 요청한 모든 작업이 허용되었다는 뜻은 아닙니다.",
+  "missingRenewal": "갱신 가능한 인증 정보가 반환되지 않았습니다. 이 후보는 저장할 수 없으며 새 동의 절차를 직접 시작해야 합니다.",
+  "includeTask": "저장할 연결에 이 작업 포함",
+  "name": "Toolkit 이름",
+  "slug": "도구 네임스페이스(선택)",
+  "description": "설명",
+  "prompt": "사용자 지정 지침",
+  "enabled": "Toolkit 활성화",
+  "alwaysExpose": "도구 항상 노출",
+  "riskTitle": "Google 콘텐츠는 여전히 신뢰할 수 없습니다",
+  "riskDescription": "알려진 패턴 검사는 새로운 유형·의미 기반·난독화·다국어 공격을 놓치거나 정상 콘텐츠를 차단할 수 있습니다. 검사할 수 없는 콘텐츠는 차단됩니다. 완전한 방어나 Google 인증을 보장하지 않습니다.",
+  "noReplay": "응답이 차단되기 전에 Google 작업이 이미 완료되었을 수 있습니다. 쓰기 작업을 무작정 반복하지 마세요.",
+  "acknowledge": "콘텐츠 검사 한계와 이 연결의 소유 범위를 확인했습니다.",
+  "save": "Google Toolkit 저장",
+  "replace": "저장된 연결 교체",
+  "cancel": "로컬 시도 폐기",
+  "unknownPublication": "저장 결과가 불확실합니다",
+  "unknownDescription": "다시 저장하지 말고 같은 시도의 결과를 확인하세요. 로컬 시도를 폐기할 수도 있습니다. 이미 저장이 완료된 경우에는 그 결과가 반환됩니다.",
+  "checkOutcome": "저장 결과 확인",
+  "saved": "연결이 저장되었습니다",
+  "savedDescription": "검토한 권한이 저장되었습니다. 실제 리소스 접근은 Google 권한과 정책에 따라 달라집니다.",
+  "superseded": "현재 연결이 아닌 이전 결과입니다",
+  "supersededDescription": "이 시도는 이전에 저장됐지만 이후 다른 연결이나 연결 해제로 대체되었습니다.",
+  "availableActions": "허용된 작업 {count}개",
+  "authorizationFailed": "Google 동의를 시작하지 못했습니다. 저장된 연결은 교체되지 않았습니다.",
+  "authorizationIncomplete": "검증된 인증 결과로 돌아오지 않았습니다. 로컬 시도를 폐기한 뒤 다시 시작하세요.",
+  "verificationFailed": "후보를 사용할 수 없거나 만료되었거나 검증하지 못했습니다. 새 연결은 게시되지 않았습니다.",
+  "verificationUncertain": "검증 응답을 받지 못했습니다. 설정으로 돌아가 코드를 다시 교환하지 않고 이 시도를 확인하세요.",
+  "expired": "인증 시도가 만료되었습니다. 폐기한 뒤 새로 시작하세요.",
+  "outcomeUnavailable": "최종 결과를 아직 확인할 수 없습니다. 다시 확인하거나 이 시도를 폐기하세요. 저장을 무작정 반복하지 마세요.",
+  "cancelFailed": "시도를 폐기하지 못했습니다. 이 문맥을 유지하고 같은 로컬 취소를 다시 시도하세요.",
+  "disconnectFailed": "연결 해제 결과가 불확실합니다. 다른 작업을 하기 전에 상태를 새로고침하세요.",
+  "preparationFailed": "관리자 설정 상태를 불러오지 못했습니다.",
+  "statusFailed": "저장된 연결 상태를 불러오지 못했습니다.",
+  "staleCallback": "현재 인증 문맥과 일치하지 않는 콜백입니다. 계정을 연결하거나 다른 시도를 취소하지 않았습니다.",
+  "returnToSetup": "원래 설정으로 돌아가기",
+  "access": {
+    "permitted": "허용됨",
+    "partial": "일부 허용",
+    "not_granted": "허용되지 않음",
+    "unknown": "권한 확인 불가"
+  },
+  "grant": {
+    "full": "요청한 작업 권한이 허용되었습니다",
+    "partial": "요청한 작업 중 일부만 허용되었습니다",
+    "none": "선택한 작업을 사용할 수 없습니다",
+    "unknown": "허용된 권한을 확인하지 못했습니다"
+  },
+  "connection": {
+    "not_connected": "연결 안 됨",
+    "connected": "권한 저장됨",
+    "reconnect_required": "재연결 필요",
+    "operator_setup_required": "관리자 설정 필요",
+    "client_changed": "앱 변경됨 — 재연결 필요"
+  },
+  "tasks": {
+    "calendar_read": {
+      "title": "캘린더와 일정 읽기",
+      "description": "캘린더 일정을 조회하고 내용을 확인합니다."
+    },
+    "calendar_availability": {
+      "title": "캘린더 빈 시간 확인",
+      "description": "일정의 바쁨·한가함 정보를 확인합니다."
+    },
+    "calendar_edit": {
+      "title": "캘린더 일정 편집",
+      "description": "일정을 만들거나 수정·삭제합니다."
+    },
+    "drive_read": {
+      "title": "Drive 파일 읽기",
+      "description": "이 계정이 접근할 수 있는 파일을 검색하고 확인합니다."
+    },
+    "drive_files": {
+      "title": "선택된 Drive 파일 작업",
+      "description": "앱에 허용된 파일만 사용합니다. Drive 전체 검색은 포함되지 않습니다."
+    },
+    "gmail_read": {
+      "title": "Gmail 읽기",
+      "description": "메일과 스레드를 찾고 내용을 확인합니다."
+    },
+    "gmail_drafts": {
+      "title": "Gmail 초안 관리",
+      "description": "메일 초안을 만들고 편집합니다. 메일 발송은 포함되지 않습니다."
+    },
+    "gmail_modify": {
+      "title": "Gmail 정리",
+      "description": "메일·스레드·라벨을 변경합니다. 메일 발송은 포함되지 않습니다."
+    }
+  }
+}

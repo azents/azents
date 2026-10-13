@@ -22,6 +22,7 @@ import { ToolkitTypeIcon } from "@/shared/toolkits/components/ToolkitTypeIcon";
 import { isGitHubUserMode } from "@/shared/toolkits/github-user-oauth-state";
 import { GitHubUserAuthorizationContainer } from "@/shared/toolkits/GitHubUserAuthorizationContainer";
 import { projectToolkitDetails } from "@/shared/toolkits/toolkit-detail-projection";
+import { usesToolkitCreationWizard } from "@/shared/toolkits/toolkit-form-lifecycle";
 import { ToolkitFormContainer } from "@/shared/toolkits/ToolkitFormContainer";
 import { canAuthorizeAgentToolkitOAuth } from "../agentToolkitManagementState";
 import type { AgentToolkitManagementContainerOutput } from "../containers/useAgentToolkitManagementContainer";
@@ -452,14 +453,16 @@ export function ManagedAgentToolkitSectionView(
         closeOnClickOutside={false}
         closeButtonProps={{ "aria-label": tWizard("close") }}
         withCloseButton={
-          !(editor.type === "CREATE" && editor.toolkitType === "github"
+          !(editor.type === "CREATE" &&
+          usesToolkitCreationWizard(editor.toolkitType)
             ? props.createPublicationPending
             : props.setupPending) && !props.attachPending
         }
         closeOnEscape={
           !props.pending &&
           !props.attachPending &&
-          !(editor.type === "CREATE" && editor.toolkitType === "github"
+          !(editor.type === "CREATE" &&
+          usesToolkitCreationWizard(editor.toolkitType)
             ? props.createPublicationPending
             : props.setupPending)
         }
@@ -577,7 +580,8 @@ export function ManagedAgentToolkitSectionView(
                 leftSection={<IconArrowLeft size={14} />}
                 w="fit-content"
                 disabled={
-                  editor.type === "CREATE" && editor.toolkitType === "github"
+                  editor.type === "CREATE" &&
+                  usesToolkitCreationWizard(editor.toolkitType)
                     ? props.createPublicationPending
                     : props.setupPending
                 }
@@ -596,7 +600,8 @@ export function ManagedAgentToolkitSectionView(
                   embedded
                   onComplete={props.onCompleteSetup}
                   onPendingChange={
-                    editor.type === "CREATE" && editor.toolkitType === "github"
+                    editor.type === "CREATE" &&
+                    usesToolkitCreationWizard(editor.toolkitType)
                       ? props.onCreatePublicationPendingChange
                       : props.onSetupPendingChange
                   }

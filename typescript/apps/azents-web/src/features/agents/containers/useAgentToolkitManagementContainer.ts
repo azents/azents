@@ -17,6 +17,12 @@ import {
   GITHUB_USER_CONTEXT_KEY,
   isGitHubUserMode,
 } from "@/shared/toolkits/github-user-oauth-state";
+import {
+  deserializeGoogleResume,
+  GOOGLE_RESUME_KEY,
+  googleReturnPath,
+} from "@/shared/toolkits/google-resume";
+import { usesToolkitCreationWizard } from "@/shared/toolkits/toolkit-form-lifecycle";
 import { trpc } from "@/trpc/client";
 import {
   canAuthorizeAgentToolkitOAuth,
@@ -31,6 +37,7 @@ import type {
 } from "../types";
 import type { GitHubUserCreationContext } from "@/shared/toolkits/github-user-creation-state";
 import type { GitHubUserContext } from "@/shared/toolkits/github-user-oauth-state";
+import type { GoogleResume } from "@/shared/toolkits/google-resume";
 import type { AgentToolkitManagementItemResponse } from "@azents/public-client";
 
 export interface AgentToolkitManagementContainerProps {
@@ -119,6 +126,31 @@ export function useAgentToolkitManagementContainer({
       return;
     }
     restoredGithubReview.current = true;
+    const google = readSessionStorageValue<GoogleResume | null>({
+      key: GOOGLE_RESUME_KEY,
+      deserialize: deserializeGoogleResume,
+    });
+    if (
+      google != null &&
+      google.handle === handle &&
+      google.agentId === agentId &&
+      google.returnPath === googleReturnPath(handle, agentId, google.toolkitId)
+    ) {
+      if (google.toolkitId == null) {
+        setEditor({ type: "CREATE", toolkitType: "google" });
+        return;
+      }
+      const target = query.data.items.find(
+        (item) =>
+          item.toolkit.id === google.toolkitId &&
+          item.toolkit.toolkit_type === "google" &&
+          item.ownership_scope === "agent_only",
+      );
+      if (target != null) {
+        setEditor({ type: "EDIT", toolkitConfigId: target.toolkit.id });
+        return;
+      }
+    }
     const creation = readSessionStorageValue<GitHubUserCreationContext | null>({
       key: GITHUB_USER_CREATION_KEY,
       deserialize: deserializeGitHubUserCreation,
@@ -344,15 +376,15 @@ export function useAgentToolkitManagementContainer({
     ],
   );
   const closeEditor = useCallback((): void => {
-    const newGitHub =
-      editor.type === "CREATE" && editor.toolkitType === "github";
+    const newWizard =
+      editor.type === "CREATE" && usesToolkitCreationWizard(editor.toolkitType);
     if (
-      (newGitHub ? createPublicationPending : setupPending) ||
+      (newWizard ? createPublicationPending : setupPending) ||
       attachMutation.isPending
     ) {
       return;
     }
-    if (newGitHub) {
+    if (newWizard) {
       abandonCreate.current?.();
     }
     setEditor({ type: "CLOSED" });
@@ -394,7 +426,10 @@ export function useAgentToolkitManagementContainer({
       setEditor({ type: "CATALOG", tab: "new" });
     },
     onCatalogTabChange: (tab) => {
-      if (editor.type === "CREATE" && editor.toolkitType === "github") {
+      if (
+        editor.type === "CREATE" &&
+        usesToolkitCreationWizard(editor.toolkitType)
+      ) {
         if (createPublicationPending) {
           return;
         }

@@ -1,0 +1,120 @@
+{
+  "title": "Google に接続",
+  "selectionDetails": "選択した作業と制限時間",
+  "permissionDetails": "ツールごとの権限を確認",
+  "permittedTools": "許可されたツールの識別子",
+  "unavailableTools": "利用できないツールの識別子",
+  "reconnectTitle": "Google に再接続",
+  "intro": "選択した Calendar、Drive、Gmail の作業を、1つの Google アカウントで利用します。",
+  "reload": "状態を再読み込み",
+  "savedAccount": "保存された Google アカウント",
+  "disconnect": "ローカル接続を解除",
+  "disconnectTitle": "保存された接続を解除しますか？",
+  "disconnectDescription": "ローカルの認証情報を削除し、保留中の再接続を停止します。Google での同意や完了した操作は取り消しません。",
+  "keepConnection": "接続を維持",
+  "notLiveVerified": "権限情報だけでは、すべてのリソースへのアクセスや Google Preview の利用資格は確認できません。",
+  "operatorRequired": "管理者による設定が必要です",
+  "operatorDescription": "システム管理者に Google OAuth アプリの設定を依頼してください。この画面ではアプリのシークレットを入力しません。",
+  "preparationUnverified": "アプリはローカルに設定されています。実際の Google サービスへのアクセスは未検証です。",
+  "selectTasks": "1. 作業を選択",
+  "selectDescription": "この Toolkit に必要な作業だけを選択してください。Google が一部の権限だけを許可する場合があるため、保存前に実際の結果を確認します。",
+  "timeout": "ツールリクエストの制限時間（秒）",
+  "authorize": "Google で同意する",
+  "authorizeAgain": "置き換える接続を承認",
+  "authorizing": "Google の同意画面に移動中…",
+  "verifying": "Google の認証結果を検証中…",
+  "failed": "設定を完了できませんでした",
+  "restart": "試行を破棄してやり直す",
+  "reviewTitle": "2. アカウントと権限を確認",
+  "agentOwnership": "この接続はこの Agent のみが所有します。実行には参加者のアカウントではなく、保存されたアカウントが使われます。",
+  "sharedOwnership": "Workspace の共有接続です。権限のあるユーザーや Agent が、このアカウントで作業できます。",
+  "actualPermissions": "Google が実際に返した権限です。要求したすべての作業が許可されたことを意味しません。",
+  "missingRenewal": "更新可能な認証情報が返されませんでした。この候補は保存できません。新しい同意手続きを明示的に開始してください。",
+  "includeTask": "保存する接続にこの作業を含める",
+  "name": "Toolkit 名",
+  "slug": "ツールの名前空間（任意）",
+  "description": "説明",
+  "prompt": "カスタム指示",
+  "enabled": "Toolkit を有効化",
+  "alwaysExpose": "ツールを常に公開",
+  "riskTitle": "Google のコンテンツは引き続き信頼できません",
+  "riskDescription": "既知のパターン検査では、新しい手法・意味に基づく攻撃・難読化・多言語の攻撃を見逃したり、無害なコンテンツを拒否したりすることがあります。検査できないコンテンツはブロックされます。完全な防御や Google の認証を保証するものではありません。",
+  "noReplay": "応答がブロックされる前に、Google での操作が完了している場合があります。書き込み操作を無条件に繰り返さないでください。",
+  "acknowledge": "検査の制限と、この接続の所有範囲を確認しました。",
+  "save": "Google Toolkit を保存",
+  "replace": "保存された接続を置き換え",
+  "cancel": "ローカルの試行を破棄",
+  "unknownPublication": "保存結果が不明です",
+  "unknownDescription": "再度保存するのではなく、この試行の結果を確認してください。ローカルの試行を破棄することもできます。すでに保存が完了している場合は、その結果が返されます。",
+  "checkOutcome": "保存結果を確認",
+  "saved": "接続を保存しました",
+  "savedDescription": "確認した権限を保存しました。実際のリソースへのアクセスは Google の権限とポリシーに依存します。",
+  "superseded": "現在の接続ではない過去の結果です",
+  "supersededDescription": "この試行は以前保存されましたが、その後、別の接続や接続解除で置き換えられました。",
+  "availableActions": "許可された操作 {count} 件",
+  "authorizationFailed": "Google の同意手続きを開始できませんでした。保存された接続は置き換えられていません。",
+  "authorizationIncomplete": "検証済みの認証結果が返っていません。ローカルの試行を破棄してからやり直してください。",
+  "verificationFailed": "候補が利用できない、期限切れ、または検証できない状態です。新しい接続は公開されていません。",
+  "verificationUncertain": "検証応答を受信できませんでした。設定に戻り、コードを再交換せずにこの試行を確認してください。",
+  "expired": "認証試行の期限が切れました。破棄して新しく開始してください。",
+  "outcomeUnavailable": "最終結果をまだ確認できません。もう一度確認するか、この試行を破棄してください。保存を無条件に繰り返さないでください。",
+  "cancelFailed": "試行を破棄できませんでした。このコンテキストを維持し、同じローカルの取り消しを再試行してください。",
+  "disconnectFailed": "接続解除の結果が不明です。次の操作を行う前に状態を再読み込みしてください。",
+  "preparationFailed": "管理者の設定状態を読み込めませんでした。",
+  "statusFailed": "保存された接続を読み込めませんでした。",
+  "staleCallback": "このコールバックは現在の認証コンテキストと一致しません。アカウントの接続や別の試行の取り消しは行っていません。",
+  "returnToSetup": "元の設定に戻る",
+  "access": {
+    "permitted": "許可済み",
+    "partial": "一部許可",
+    "not_granted": "未許可",
+    "unknown": "権限不明"
+  },
+  "grant": {
+    "full": "要求した作業の権限が許可されました",
+    "partial": "要求した作業の一部のみ許可されました",
+    "none": "選択した作業を利用できません",
+    "unknown": "許可された権限を確認できませんでした"
+  },
+  "connection": {
+    "not_connected": "未接続",
+    "connected": "権限保存済み",
+    "reconnect_required": "再接続が必要",
+    "operator_setup_required": "管理者の設定が必要",
+    "client_changed": "アプリが変更されました — 再接続が必要"
+  },
+  "tasks": {
+    "calendar_read": {
+      "title": "カレンダーと予定を読む",
+      "description": "予定を一覧表示して内容を確認します。"
+    },
+    "calendar_availability": {
+      "title": "カレンダーの空き時間を確認",
+      "description": "予定の空き時間・予定ありの情報を確認します。"
+    },
+    "calendar_edit": {
+      "title": "カレンダーの予定を編集",
+      "description": "予定を作成・更新・削除します。"
+    },
+    "drive_read": {
+      "title": "Drive ファイルを読む",
+      "description": "このアカウントでアクセス可能なファイルを検索・確認します。"
+    },
+    "drive_files": {
+      "title": "選択された Drive ファイルを操作",
+      "description": "アプリに許可されたファイルのみを使用します。Drive 全体の検索は含まれません。"
+    },
+    "gmail_read": {
+      "title": "Gmail を読む",
+      "description": "メールとスレッドを検索して内容を確認します。"
+    },
+    "gmail_drafts": {
+      "title": "Gmail の下書きを管理",
+      "description": "下書きを作成・編集します。メール送信は含まれません。"
+    },
+    "gmail_modify": {
+      "title": "Gmail を整理",
+      "description": "メール・スレッド・ラベルを変更します。メール送信は含まれません。"
+    }
+  }
+}

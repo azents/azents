@@ -1,0 +1,120 @@
+{
+  "title": "Connecter Google",
+  "selectionDetails": "Tâches sélectionnées et délai maximal",
+  "permissionDetails": "Examiner les droits exacts des outils",
+  "permittedTools": "Identifiants des outils autorisés",
+  "unavailableTools": "Identifiants des outils indisponibles",
+  "reconnectTitle": "Reconnecter Google",
+  "intro": "Utilisez un seul compte Google pour les tâches Calendar, Drive et Gmail choisies.",
+  "reload": "Actualiser l’état",
+  "savedAccount": "Compte Google enregistré",
+  "disconnect": "Déconnecter localement",
+  "disconnectTitle": "Supprimer cette connexion enregistrée ?",
+  "disconnectDescription": "Cette action supprime les identifiants locaux et bloque les reconnexions en attente. Elle ne révoque pas le consentement Google et n’annule pas les opérations terminées.",
+  "keepConnection": "Conserver la connexion",
+  "notLiveVerified": "Les autorisations ne prouvent ni l’accès à toutes les ressources ni l’éligibilité à Google Preview.",
+  "operatorRequired": "Configuration administrateur requise",
+  "operatorDescription": "Demandez à un administrateur système de configurer l’application Google OAuth. Aucun secret d’application n’est saisi ici.",
+  "preparationUnverified": "L’application est configurée localement. L’accès réel aux services Google n’a pas été vérifié.",
+  "selectTasks": "1. Choisir les tâches",
+  "selectDescription": "Choisissez uniquement les tâches nécessaires à ce Toolkit. Google peut accorder moins de droits ; vous examinerez le résultat avant d’enregistrer.",
+  "timeout": "Délai maximal des requêtes d’outil (secondes)",
+  "authorize": "Continuer vers Google",
+  "authorizeAgain": "Autoriser la connexion de remplacement",
+  "authorizing": "Ouverture de l’autorisation Google…",
+  "verifying": "Vérification de cette autorisation Google…",
+  "failed": "La configuration n’a pas abouti",
+  "restart": "Abandonner la tentative et recommencer",
+  "reviewTitle": "2. Examiner le compte et les droits",
+  "agentOwnership": "Cette connexion appartient uniquement à cet Agent. Les exécutions utilisent ce compte enregistré, pas celui d’un participant.",
+  "sharedOwnership": "Connexion partagée du Workspace : les utilisateurs et Agents autorisés peuvent agir avec ce compte enregistré.",
+  "actualPermissions": "Il s’agit des droits réellement retournés par Google, pas d’une garantie que toutes les tâches demandées sont autorisées.",
+  "missingRenewal": "Aucun identifiant renouvelable n’a été retourné. Ce candidat ne peut pas être enregistré ; démarrez une nouvelle autorisation explicite.",
+  "includeTask": "Inclure cette tâche dans la connexion enregistrée",
+  "name": "Nom du Toolkit",
+  "slug": "Espace de noms des outils (facultatif)",
+  "description": "Description",
+  "prompt": "Instructions personnalisées",
+  "enabled": "Activer le Toolkit",
+  "alwaysExpose": "Toujours exposer les outils",
+  "riskTitle": "Le contenu Google reste non fiable",
+  "riskDescription": "La détection de motifs connus peut manquer des attaques inédites, sémantiques, masquées ou multilingues, et rejeter du contenu inoffensif. Le contenu non inspectable est bloqué. Ce contrôle ne constitue ni une protection complète ni une certification Google.",
+  "noReplay": "Une réponse bloquée peut suivre une opération Google déjà terminée. Ne répétez pas aveuglément une écriture.",
+  "acknowledge": "J’ai examiné ces limites de contrôle et la portée de propriété de cette connexion.",
+  "save": "Enregistrer le Toolkit Google",
+  "replace": "Remplacer la connexion enregistrée",
+  "cancel": "Abandonner la tentative locale",
+  "unknownPublication": "Résultat de l’enregistrement incertain",
+  "unknownDescription": "Vérifiez le résultat de cette tentative au lieu d’enregistrer à nouveau. Vous pouvez l’abandonner localement ; si la publication a déjà réussi, son résultat sera retourné.",
+  "checkOutcome": "Vérifier le résultat",
+  "saved": "Connexion enregistrée",
+  "savedDescription": "Les droits examinés sont enregistrés. L’accès aux ressources dépend toujours des autorisations et règles Google.",
+  "superseded": "Ce résultat n’est plus actuel",
+  "supersededDescription": "Cette tentative a été enregistrée auparavant, puis remplacée par une autre connexion ou une déconnexion.",
+  "availableActions": "{count, plural, =0 {Aucune action autorisée} one {# action autorisée} other {# actions autorisées}}",
+  "authorizationFailed": "Impossible de démarrer l’autorisation Google. La connexion enregistrée n’a pas été remplacée.",
+  "authorizationIncomplete": "L’autorisation n’a pas retourné de résultat vérifié. Abandonnez cette tentative locale avant de recommencer.",
+  "verificationFailed": "Le candidat est indisponible, expiré ou non vérifiable. Aucune nouvelle connexion n’a été publiée.",
+  "verificationUncertain": "La réponse de vérification n’a pas été reçue. Revenez à la configuration pour examiner cette tentative sans échanger le code à nouveau.",
+  "expired": "Cette tentative d’autorisation a expiré. Abandonnez-la et recommencez.",
+  "outcomeUnavailable": "Le résultat final n’est pas encore disponible. Vérifiez à nouveau ou abandonnez cette tentative précise ; ne répétez pas l’enregistrement aveuglément.",
+  "cancelFailed": "Impossible d’abandonner la tentative. Conservez ce contexte et réessayez la même annulation locale.",
+  "disconnectFailed": "Le résultat de la déconnexion est incertain. Actualisez l’état avant toute autre action.",
+  "preparationFailed": "Impossible de charger la configuration administrateur.",
+  "statusFailed": "Impossible de charger cette connexion enregistrée.",
+  "staleCallback": "Ce rappel ne correspond pas au contexte d’autorisation actif. Aucun compte n’a été associé et aucune autre tentative n’a été annulée.",
+  "returnToSetup": "Revenir à la configuration d’origine",
+  "access": {
+    "permitted": "Autorisé",
+    "partial": "Partiellement autorisé",
+    "not_granted": "Non accordé",
+    "unknown": "Droits inconnus"
+  },
+  "grant": {
+    "full": "Droits des tâches demandées accordés",
+    "partial": "Seule une partie du travail demandé est autorisée",
+    "none": "Aucune tâche sélectionnée n’est utilisable",
+    "unknown": "Les droits accordés n’ont pas pu être vérifiés"
+  },
+  "connection": {
+    "not_connected": "Non connecté",
+    "connected": "Droits enregistrés",
+    "reconnect_required": "Reconnexion requise",
+    "operator_setup_required": "Configuration administrateur requise",
+    "client_changed": "Application modifiée — reconnexion requise"
+  },
+  "tasks": {
+    "calendar_read": {
+      "title": "Lire les calendriers et événements",
+      "description": "Lister et consulter les événements."
+    },
+    "calendar_availability": {
+      "title": "Consulter les disponibilités",
+      "description": "Vérifier les périodes libres et occupées."
+    },
+    "calendar_edit": {
+      "title": "Modifier les événements",
+      "description": "Créer, modifier ou supprimer des événements."
+    },
+    "drive_read": {
+      "title": "Lire les fichiers Drive",
+      "description": "Rechercher et consulter les fichiers accessibles à ce compte."
+    },
+    "drive_files": {
+      "title": "Travailler sur les fichiers Drive sélectionnés",
+      "description": "Accéder uniquement aux fichiers autorisés pour l’application ; la recherche dans tout Drive n’est pas incluse."
+    },
+    "gmail_read": {
+      "title": "Lire Gmail",
+      "description": "Rechercher et consulter les messages et fils de discussion."
+    },
+    "gmail_drafts": {
+      "title": "Gérer les brouillons Gmail",
+      "description": "Créer et modifier des brouillons. L’envoi de messages n’est pas inclus."
+    },
+    "gmail_modify": {
+      "title": "Organiser Gmail",
+      "description": "Modifier les messages, fils et libellés. L’envoi de messages n’est pas inclus."
+    }
+  }
+}

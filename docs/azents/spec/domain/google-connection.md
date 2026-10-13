@@ -1,7 +1,7 @@
 ---
-title: "Google Connection Backend"
+title: "Google Connection"
 created: 2026-10-14
-tags: [google, toolkit, oauth, backend, engine, security]
+tags: [google, toolkit, oauth, backend, frontend, engine, security]
 spec_type: domain
 domain: google-connection
 code_paths:
@@ -16,16 +16,74 @@ code_paths:
   - python/apps/azents/src/azents/engine/tools/google.py
   - python/apps/azents/src/azents/engine/tools/deps.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/e5bb444eed80_add_google_connection_authority.py
+  - typescript/apps/azents-web/src/shared/toolkits/google-*.ts
+  - typescript/apps/azents-web/src/shared/toolkits/components/GoogleSetup.tsx
+  - typescript/apps/azents-web/src/shared/toolkits/containers/useGoogleSetupContainer.ts
+  - typescript/apps/azents-web/src/shared/toolkits/containers/useToolkitFormContainer.ts
+  - typescript/apps/azents-web/src/shared/toolkits/toolkit-form-lifecycle.ts
+  - typescript/apps/azents-web/src/features/agents/containers/useAgentToolkitManagementContainer.ts
+  - typescript/apps/azents-web/src/features/agents/components/ManagedAgentToolkitSection.tsx
+  - typescript/apps/azents-web/src/features/toolkits/*Google*.tsx
+  - typescript/apps/azents-web/src/features/toolkits/containers/useGoogleCallbackContainer.ts
+  - typescript/apps/azents-web/src/trpc/routers/google.ts
+  - typescript/apps/azents-admin-web/src/features/system-settings/*Google*.tsx
+  - typescript/apps/azents-admin-web/src/features/system-settings/google-application-state.ts
+  - typescript/apps/azents-admin-web/src/features/system-settings/components/GoogleApplicationCard.tsx
+  - typescript/apps/azents-admin-web/src/features/system-settings/containers/useGoogleApplicationCardContainer.ts
 last_verified_at: 2026-10-14
 spec_version: 1
 ---
 
-# Google Connection Backend
+# Google Connection
 
 The `google` provider composes fixed official Calendar, Drive and Gmail MCP
 endpoints. It is separate from generic single-server MCP, GCP and Google Analytics.
-This Spec covers the implemented backend/API and execution path, not an existing
-browser setup surface. The Google browser flow is a later delivery phase.
+This Spec covers backend/API execution and the management surfaces. Live Google
+interoperability remains distinct from deterministic local verification.
+
+## Management Surfaces
+
+Main Web routes Google creation through its unpublished lifecycle rather than
+generic Toolkit creation. Managers explicitly select tasks without write defaults,
+authorize, then inspect the actual account and full/partial/none/unknown task
+permissions. Earlier selections remain available in a disclosure. Task summaries
+are localized; exact permitted/unavailable tool identifiers are inspectable in
+separate details. Empty usable evidence, missing renewal or an expired attempt
+cannot enable publication. Security acknowledgement starts false on each review.
+
+The same setup component supports Workspace-shared and exact Agent ownership.
+Saved Toolkit metadata updates omit Google provider configuration, preserving the
+task/timeout settings confirmed independently by reconnect. Task permission changes
+use ordinary staged reconnect and reviewed atomic replacement. Agent capabilities
+restores only the matching Google create or exact Agent-owned edit surface, including
+uncertain-publication recovery. Closing or backing out of staged Google creation
+invokes exact local abandonment; successful cleanup can finish after view unmount
+only while the stored resume still belongs to that attempt. A publication that wins
+that cancellation race remains an inspectable outcome. Local disconnect has
+explicit confirmation and does not claim remote revocation or reversal of effects.
+
+The `/oauth/google/callback` page scrubs transient query data and matches a
+nonsecret digest to the exact originating attempt before exchange or denial
+cancellation. Browser resume stores only exact context, deadline, attempt ID,
+correlation digest, phase and validated return destination. It contains no code,
+token, secret or OAuth state. The backend's encrypted state remains authoritative.
+A stale callback attaches nothing and does not cancel a sibling attempt.
+Every post-await callback storage write and navigation checks both the mounted
+operation and the exact current resume owner. Leaving or replacing the callback
+fences a late exchange/denial result without clearing a newer attempt. Strict Mode
+probing finishes before the one-use external exchange is dispatched.
+
+An uncertain exchange is inspected through review without exchanging again. An
+uncertain publication offers exact outcome lookup or local cancellation; it does
+not automatically authorize, resubmit settings or replay a tool operation.
+Outcome lookup alone does not prove cancellation or current readiness.
+
+Admin System Settings has a Google application card with redacted preparation,
+environment-owned read-only fields, explicit secret replacement/clear actions,
+fixed callback copy and current-version conflict feedback. Saving uses optimistic
+versioning. A conflict or uncertain save requires reloading before another mutation;
+reloading discards the draft rather than silently merging secret edits. Configured
+locally is not labeled verified service access or Preview eligibility.
 
 ## Operator Registration and Ownership
 
