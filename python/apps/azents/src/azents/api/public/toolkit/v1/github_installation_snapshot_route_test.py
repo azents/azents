@@ -13,6 +13,7 @@ from azents.api.public.toolkit.v1.oauth import (
 )
 from azents.api.public.toolkit.v1.oauth_agent_test import _config, _member
 from azents.core.enums import WorkspaceUserRole
+from azents.core.github_auth import create_github_client
 from azents.core.github_installation import GitHubInstallationSnapshot
 from azents.core.oauth2 import create_agent_github_platform_oauth_state
 from azents.core.system_setting import SystemSettingFieldSource
@@ -145,4 +146,9 @@ async def test_agent_installation_snapshots_preserve_order_duplicates_and_avatar
         "",
         "https://example.test/b",
     ]
-    revoke.assert_awaited_once_with("client-id", "client-secret", "user-token")
+    revoke.assert_awaited_once_with(
+        "client-id",
+        "client-secret",
+        "user-token",
+        client_factory=create_github_client,
+    )

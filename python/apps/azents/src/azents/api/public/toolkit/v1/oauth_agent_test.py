@@ -22,6 +22,7 @@ from azents.api.public.toolkit.v1.oauth import (
 from azents.core.auth.deps import WorkspaceMember
 from azents.core.config import Config
 from azents.core.enums import WorkspaceUserRole
+from azents.core.github_auth import create_github_client
 from azents.core.github_installation import GitHubInstallationSnapshot
 from azents.core.mcp_discovery import OAuthServerMetadata
 from azents.core.oauth2 import (
@@ -390,7 +391,12 @@ async def test_agent_github_callback_syncs_through_authorized_service(
     assert sync_args.args == ("agent-1",)
     assert sync_args.kwargs["user_id"] == "user-1"
     assert sync_args.kwargs["installations"] == installations
-    revoke.assert_awaited_once_with("client-id", "client-secret", "user-token")
+    revoke.assert_awaited_once_with(
+        "client-id",
+        "client-secret",
+        "user-token",
+        client_factory=create_github_client,
+    )
 
 
 async def test_new_agent_oauth_connect_remains_authorization_required(

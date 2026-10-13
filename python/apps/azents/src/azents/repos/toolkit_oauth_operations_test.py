@@ -30,6 +30,7 @@ from azents.core.auth.roles import get_permissions_for_role
 from azents.core.config import Config
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import MCPOAuthConnectionStatus, WorkspaceUserRole
+from azents.core.github_auth import GitHubClientFactory, create_github_client
 from azents.core.github_installation import (
     GitHubInstallationSnapshot,
     decode_github_installations,
@@ -1605,16 +1606,19 @@ def install_service_external_gap(
             access_token="synthetic-exchanged", refresh_token=None, expires_at=None
         )
 
-    async def github_token(*args: object) -> str:
+    async def github_token(*args: object, client_factory: GitHubClientFactory) -> str:
         del args
+        assert client_factory is create_github_client
         fixture.scope.assert_closed()
         calls.append("github_exchange")
         return "synthetic-temporary-github-token"
 
     async def github_list(
         *args: object,
+        client_factory: GitHubClientFactory,
     ) -> tuple[GitHubInstallationSnapshot, ...]:
         del args
+        assert client_factory is create_github_client
         await gap()
         return decode_github_installations(
             [
@@ -1637,8 +1641,9 @@ def install_service_external_gap(
             ]
         )
 
-    async def revoke(*args: object) -> None:
+    async def revoke(*args: object, client_factory: GitHubClientFactory) -> None:
         del args
+        assert client_factory is create_github_client
         fixture.scope.assert_closed()
         calls.append("revoke_after_completed_sync")
 
