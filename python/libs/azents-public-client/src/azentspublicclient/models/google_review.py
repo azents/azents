@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, StrictBool, StrictFloat, StrictInt, StrictStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional, Union
 from azentspublicclient.models.google_identity import GoogleIdentity
 from azentspublicclient.models.google_task import GoogleTask
@@ -42,7 +42,7 @@ class GoogleReview(BaseModel):
     grant_result: StrictStr
     renewable: StrictBool
     can_confirm: StrictBool
-    service_access_verified: StrictBool
+    service_access_verified: StrictBool = Field(description="Scope review does not verify live resource access.")
     security_notice: StrictStr
     additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["attempt_id", "expires_at", "identity", "client_id", "ownership", "reconnect_toolkit_id", "requested_tasks", "timeout", "tasks", "grant_result", "renewable", "can_confirm", "service_access_verified", "security_notice"]
@@ -59,13 +59,6 @@ class GoogleReview(BaseModel):
         """Validates the enum"""
         if value not in set(['full', 'partial', 'none', 'unknown']):
             raise ValueError("must be one of enum values ('full', 'partial', 'none', 'unknown')")
-        return value
-
-    @field_validator('service_access_verified')
-    def service_access_verified_validate_enum(cls, value):
-        """Validates the enum"""
-        if value not in set(['false']):
-            raise ValueError("must be one of enum values ('false')")
         return value
 
     model_config = ConfigDict(

@@ -365,3 +365,33 @@ status and effective-generation fencing. Registration presence is preparation,
 not a live client/Preview/API validation. Client replacement retains ADR-D1's
 ineligibility and data-preservation consequences. No second confirmation mode,
 retired-secret fallback or false remote-health claim is introduced.
+
+## ADR-D2/D3 Clarification — Fresh Renewal at Explicit Connect/Reconnect
+
+- Accepted on: 2026-10-14 (KST).
+- Decision owner: `/root/google-design-owner`.
+- Authority: ADR-D2/D3, REQ-4, REQ-6, REQ-7, and durable usable authorization.
+
+Only explicitly manager-initiated initial Connect or ordinary Reconnect requests
+SDK-encoded `prompt=consent` together with offline access. Google may otherwise
+omit refresh tokens on repeated authorization. This modifies that existing
+authorization request; it adds no per-task control, permission inbox, automatic
+consent attempt or task replay.
+
+Each candidate validates its own returned renewal credential, granted scopes and
+verified subject/client. Missing renewal remains unavailable; requesting consent
+is not proof of issuance or complete permissions. Do not copy the old saved grant's
+refresh token into a candidate or borrow another Toolkit/account/client's token.
+Routine runtime refresh may retain only its exact current grant's omitted
+replacement token; it initiates no browser consent.
+
+Reject candidate-token copying as an unnecessary reuse/fencing authority. Keep
+staged replacement, local cancellation, disconnect, identity comparison and
+idempotent outcomes unchanged. Google refresh-token limits can invalidate older
+credentials; independent local storage does not promise provider independence or
+that cancellation reverses provider effects.
+
+Verification: explicit initial/reconnect URLs request fresh consent; runtime
+refresh does not; missing renewal cannot publish; isolated Toolkit candidates use
+their respective returned tokens; partial consent causes no follow-up attempt or
+replay. Actual provider issuance/interoperability remains conditional.

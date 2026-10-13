@@ -49,7 +49,10 @@ runs use the stored connected account, never a channel participant's identity.
 Connect stores an unpublished encrypted attempt with separate callback-state
 nonce, OIDC nonce, PKCE verifier, exact callback/client generation, selected tasks
 and optional saved reconnect target. Authorization requests use supported Authlib
-APIs, PKCE S256, minimal identity/task scopes and offline access. Encrypted callback
+APIs, PKCE S256, minimal identity/task scopes and offline access with fresh consent
+only at the explicitly manager-started Connect/Reconnect boundary. Each candidate
+uses its own returned renewal credential, never a copied saved grant token. Missing
+renewal remains unavailable despite the consent request. Encrypted callback
 state also binds the exact manager context.
 
 Exchange claims once before SDK/provider I/O. Signed Google identity verification

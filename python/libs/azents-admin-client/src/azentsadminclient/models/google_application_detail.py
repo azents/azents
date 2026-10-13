@@ -17,7 +17,7 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
 from azentsadminclient.models.system_setting_field_source import SystemSettingFieldSource
 from typing import Optional, Set
@@ -30,8 +30,8 @@ class GoogleApplicationDetail(BaseModel):
     status: StrictStr
     client_id: Optional[StrictStr]
     callback_url: Optional[StrictStr]
-    preview_verified: StrictBool
-    service_access_verified: StrictBool
+    preview_verified: StrictBool = Field(description="Always false for local operator preparation.")
+    service_access_verified: StrictBool = Field(description="Local preparation does not verify live service access.")
     section: StrictStr
     schema_version: StrictInt
     admin_version: StrictInt
@@ -46,20 +46,6 @@ class GoogleApplicationDetail(BaseModel):
         """Validates the enum"""
         if value not in set(['not_configured', 'incomplete', 'configured_unverified']):
             raise ValueError("must be one of enum values ('not_configured', 'incomplete', 'configured_unverified')")
-        return value
-
-    @field_validator('preview_verified')
-    def preview_verified_validate_enum(cls, value):
-        """Validates the enum"""
-        if value not in set(['false']):
-            raise ValueError("must be one of enum values ('false')")
-        return value
-
-    @field_validator('service_access_verified')
-    def service_access_verified_validate_enum(cls, value):
-        """Validates the enum"""
-        if value not in set(['false']):
-            raise ValueError("must be one of enum values ('false')")
         return value
 
     @field_validator('section')

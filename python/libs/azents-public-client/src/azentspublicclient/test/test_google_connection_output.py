@@ -58,7 +58,7 @@ class TestGoogleConnectionOutput(unittest.TestCase):
                             ], )
                     ],
                 renewable = True,
-                service_access_verified = false
+                service_access_verified = True
             )
         else:
             return GoogleConnectionOutput(
@@ -85,7 +85,7 @@ class TestGoogleConnectionOutput(unittest.TestCase):
                             ], )
                     ],
                 renewable = True,
-                service_access_verified = false,
+                service_access_verified = True,
         )
         """
 

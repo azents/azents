@@ -1,8 +1,11 @@
 """Google operator preparation under existing Admin System Settings authority."""
 
-from typing import Annotated, Never
+from collections.abc import Callable, Coroutine
+from typing import Annotated, Any, Never
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.routing import APIRoute
 from pydantic import Field, ValidationError
 from typing_extensions import Required, TypedDict
 
@@ -21,7 +24,32 @@ from azents.services.google_application.service import GoogleApplicationService
 
 from .data import SystemSettingSecretActionRequest
 
-router = APIRouter()
+
+class GoogleOperatorRoute(APIRoute):
+    """Write-only secret values must not appear in input-validation diagnostics."""
+
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        handler = super().get_route_handler()
+
+        async def safe(request: Request) -> Response:
+            try:
+                return await handler(request)
+            except RequestValidationError:
+                raise HTTPException(
+                    422,
+                    detail=[
+                        {
+                            "type": "value_error",
+                            "loc": ["body"],
+                            "msg": "Invalid Google operator configuration request.",
+                        }
+                    ],
+                ) from None
+
+        return safe
+
+
+router = APIRouter(route_class=GoogleOperatorRoute)
 Application = Annotated[GoogleApplicationService, Depends()]
 
 

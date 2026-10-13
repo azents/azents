@@ -3,14 +3,16 @@
 from unittest.mock import create_autospec
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 from pydantic import TypeAdapter, ValidationError
 
 from azents.api.admin.system_setting.v1.google import (
     GoogleApplicationPatchRequest,
     patch_google_oauth_setting,
+    router,
 )
-from azents.core.auth.deps import SystemAdmin
+from azents.core.auth.deps import SystemAdmin, get_system_admin
 from azents.core.system_setting import (
     SystemSettingSection,
     SystemSettingVersionConflict,
@@ -63,3 +65,36 @@ async def test_stale_operator_version_is_not_provider_failure() -> None:
     detail: object = caught.value.detail
     assert isinstance(detail, dict)
     assert detail["code"] == "stale_system_setting_version"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {
+            "expected_version": 0,
+            "client_secret": {"action": "clear", "value": "SECRET-MARKER"},
+        },
+        {
+            "expected_version": 0,
+            "client_secret": {"action": "unknown", "value": "SECRET-MARKER"},
+        },
+        {
+            "expected_version": "SECRET-MARKER",
+            "client_secret": {"action": "replace", "value": "SECRET-MARKER"},
+        },
+        {"expected_version": 0, "client_secret": "SECRET-MARKER"},
+        ["SECRET-MARKER"],
+    ],
+)
+def test_http_secret_validation_is_redacted_before_endpoint(body: object) -> None:
+    application = create_autospec(GoogleApplicationService, instance=True)
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_system_admin] = lambda: SystemAdmin("admin", "login")
+    app.dependency_overrides[GoogleApplicationService] = lambda: application
+    with TestClient(app) as client:
+        response = client.patch("/sections/google-oauth", json=body)
+    assert response.status_code == 422
+    assert "SECRET-MARKER" not in response.text
+    assert '"input"' not in response.text
+    application.patch.assert_not_awaited()

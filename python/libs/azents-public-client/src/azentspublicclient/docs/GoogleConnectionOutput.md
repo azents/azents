@@ -13,7 +13,7 @@ Name | Type | Description | Notes
 **timeout** | **float** |  | 
 **tasks** | [**List[GoogleTaskAccess]**](GoogleTaskAccess.md) |  | 
 **renewable** | **bool** |  | 
-**service_access_verified** | **bool** |  | 
+**service_access_verified** | **bool** | Saved grant metadata is not a live access probe. | 
 
 ## Example
 

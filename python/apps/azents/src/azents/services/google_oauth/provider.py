@@ -171,6 +171,7 @@ class GoogleOAuthProvider:
             code_challenge=code_challenge,
             code_challenge_method="S256",
             access_type="offline",
+            prompt="consent",
         )
         return url
 

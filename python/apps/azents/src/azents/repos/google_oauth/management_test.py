@@ -170,6 +170,57 @@ async def _review(h: Harness, target: str | None) -> GoogleAttempt:
     )
 
 
+async def test_reconnect_missing_renewal_cannot_borrow_saved_token(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    h = await _google(rdb_session_manager)
+    first = await _review(h, None)
+    saved = await h.repo.confirm(
+        h.subject,
+        attempt_id=first.id,
+        registration=h.registration,
+        settings=_settings(),
+    )
+    replacement = await h.repo.start(
+        h.subject,
+        registration=h.registration,
+        setup=h.setup,
+        target_toolkit_id=saved.toolkit_id,
+    )
+    await h.repo.claim(
+        h.subject,
+        attempt_id=replacement.id,
+        nonce="state-nonce",
+        registration=h.registration,
+    )
+    candidate = _candidate("nonrenewable-access")
+    await h.repo.stage(
+        h.subject,
+        attempt_id=replacement.id,
+        registration=h.registration,
+        candidate=candidate.model_copy(
+            update={
+                "tokens": candidate.tokens.model_copy(update={"refresh_token": None})
+            }
+        ),
+    )
+    with pytest.raises(GoogleOAuthError) as caught:
+        await h.repo.confirm(
+            h.subject,
+            attempt_id=replacement.id,
+            registration=h.registration,
+            settings=GoogleReconnectSettings(
+                tasks=(GoogleTask.CALENDAR_READ,),
+                timeout=30.0,
+                security_risk_acknowledged=True,
+            ),
+        )
+    assert caught.value.code == "no_usable_capability"
+    current = await h.repo.saved(h.subject, saved.toolkit_id)
+    assert current.connection is not None
+    assert current.connection.id == saved.connection_id
+
+
 async def test_only_confirm_publishes_and_exact_replay_has_one_outcome(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:

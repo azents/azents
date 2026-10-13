@@ -17,7 +17,7 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
 from typing import Optional, Set
 from typing_extensions import Self
@@ -29,8 +29,8 @@ class GooglePreparation(BaseModel):
     status: StrictStr
     client_id: Optional[StrictStr]
     callback_url: Optional[StrictStr]
-    preview_verified: StrictBool
-    service_access_verified: StrictBool
+    preview_verified: StrictBool = Field(description="Always false for local operator preparation.")
+    service_access_verified: StrictBool = Field(description="Local preparation does not verify live service access.")
     additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["status", "client_id", "callback_url", "preview_verified", "service_access_verified"]
 
@@ -39,20 +39,6 @@ class GooglePreparation(BaseModel):
         """Validates the enum"""
         if value not in set(['not_configured', 'incomplete', 'configured_unverified']):
             raise ValueError("must be one of enum values ('not_configured', 'incomplete', 'configured_unverified')")
-        return value
-
-    @field_validator('preview_verified')
-    def preview_verified_validate_enum(cls, value):
-        """Validates the enum"""
-        if value not in set(['false']):
-            raise ValueError("must be one of enum values ('false')")
-        return value
-
-    @field_validator('service_access_verified')
-    def service_access_verified_validate_enum(cls, value):
-        """Validates the enum"""
-        if value not in set(['false']):
-            raise ValueError("must be one of enum values ('false')")
         return value
 
     model_config = ConfigDict(

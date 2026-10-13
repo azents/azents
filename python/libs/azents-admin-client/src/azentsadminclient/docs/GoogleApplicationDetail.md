@@ -9,8 +9,8 @@ Name | Type | Description | Notes
 **status** | **str** |  | 
 **client_id** | **str** |  | 
 **callback_url** | **str** |  | 
-**preview_verified** | **bool** |  | 
-**service_access_verified** | **bool** |  | 
+**preview_verified** | **bool** | Always false for local operator preparation. | 
+**service_access_verified** | **bool** | Local preparation does not verify live service access. | 
 **section** | **str** |  | 
 **schema_version** | **int** |  | 
 **admin_version** | **int** |  | 

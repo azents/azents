@@ -1,6 +1,7 @@
 ---
 title: "Google Service Connection Design"
 created: 2026-10-13
+updated: 2026-10-14
 document_role: primary
 document_type: design
 snapshot_id: google-261013
@@ -12,7 +13,8 @@ tags: [google, toolkit, oauth, architecture, security, frontend, testing]
 - Snapshot: `google-261013`; reference: `google-261013/DESIGN`.
 - Scope authority: [google-261013/REQ](../requirements/google-261013-connection.md).
 - Material decision map: [google-261013/ADR](../adr/google-261013-connection.md).
-- Revision: `3`; accepted ADR-D1 through ADR-D4 and D1 activation refinement are reflected below.
+- Revision: `4`; accepted ADR-D1 through ADR-D4, D1 activation refinement and
+  ADR-D2/D3's fresh-renewal clarification are reflected below.
 - Mode: Autonomous under the requester's explicit instruction to implement without
   further questions. `/root/google-design-owner` owns technical approval.
 - This revision passed the bidirectional authority/feasibility audit and was
@@ -146,8 +148,10 @@ arbitrary Workspace/Agent destinations in a browser-supplied redirect.
    The authorization URL is SDK-owned and returns no token or client secret.
    Send distinct OIDC nonce, exact encrypted state, PKCE S256 challenge, minimal
    identity/selected-task scopes, `access_type=offline`, and the exact registered
-   redirect URI. Store callback state nonce and OIDC nonce separately. No blanket
-   `include_granted_scopes` or unconditional `prompt=consent` is implied.
+   redirect URI. Store callback state nonce and OIDC nonce separately. Explicit
+   manager-started Connect/Reconnect also requests `prompt=consent`, as accepted
+   in ADR-D2/D3's clarification. No runtime, automatic or per-task consent is
+   initiated, and `include_granted_scopes` is not requested.
 4. On callback, authenticate the returning initiator and verify exact context,
    encrypted state, one-use phase, deadline, redirect, nonce, and attempted client.
    Current write authority is checked again; a browser-selected context cannot
@@ -169,10 +173,13 @@ Identity scopes are limited to verified principal evidence and explained separat
 from Calendar/Drive/Gmail task access. Offline renewal is required for a durable
 connection. Missing renewal or scope evidence is not labeled fully ready.
 
-Google may omit a refresh token on later exchanges. Retention is permitted only
-where exact same subject/client/grant evidence and the approved lifecycle justify
-it. Never borrow a refresh token from another connection. Omitted grant scope must
-follow verified provider semantics; requested scopes cannot substitute for it.
+Google may omit refresh tokens on later authorization exchanges. Explicit
+Connect/Reconnect requests fresh consent for candidate-owned renewal. Each
+candidate must validate its own returned credential: do not copy saved or other
+Toolkit tokens into it. Missing renewal remains unavailable despite that request.
+Runtime refresh can retain only its own exact current grant's omitted replacement.
+Omitted grant scope follows verified provider semantics; requested scopes never
+substitute for actual evidence.
 
 An exchange timeout after attempt consumption is uncertain, not proven denial.
 Return a normalized verification failure/unknown state and require an explicit
@@ -524,7 +531,7 @@ Public discovery or fixture success cannot be called authenticated interoperabil
 
 ## Design Authority
 
-- Design revision: `3`.
+- Design revision: `4`.
 - M1–M12 retain their identities; accepted ADR-D1 through ADR-D4 add M13–M16.
 
 | ID | Material mechanism | Authority | Classification |
@@ -532,8 +539,8 @@ Public discovery or fixture success cannot be called authenticated interoperabil
 | M1 | Bounded Google provider and fixed official service routing, existing MCP facilities | REQ-1, fixed official-MCP/compatibility constraints; retained Toolkit provider composition | derived |
 | M2 | Selected task policy intersected with proved grants; unknown tools fail closed | REQ-3, REQ-5 | required |
 | M3 | Unpublished authorization and explicit review before initial atomic publication | REQ-4, REQ-6; retained Toolkit namespace/ownership obligations | derived |
-| M4 | Exact initiator/context callback and post-I/O current-authority validation | REQ-4, REQ-8; retained exact ownership boundaries | derived |
-| M5 | Requested/granted/unknown evidence and verified principal separation | REQ-4, REQ-5, REQ-6 | required |
+| M4 | Exact explicit Connect/Reconnect request and initiator/context callback with post-I/O validation | REQ-4, REQ-8; ADR-D2/D3 fresh-renewal clarification; retained ownership | derived |
+| M5 | Requested/granted/unknown evidence and candidate-owned renewal/principal separation | REQ-4, REQ-5, REQ-6; ADR-D2/D3 fresh-renewal clarification | derived |
 | M6 | Existing Agent/shared management, canonical private/Team Session execution and remote Runtime-free scope | REQ-8; retained Toolkit and agent-execution-loop contracts | existing |
 | M7 | Per-service background schema projection plus current DB Session generation/admission recheck | REQ-5, REQ-7; retained MCP discovery and canonical Session execution authority | derived |
 | M8 | Detached refresh, current Session mutation fence and exact stale-result comparison; no grant resurrection | REQ-5, REQ-7; retained MCP refresh boundary and Session owner mutation fence | derived |
@@ -542,8 +549,8 @@ Public discovery or fixture success cannot be called authenticated interoperabil
 | M11 | Progressive accessible same-context setup and truthful per-task feedback | REQ-1, REQ-4, REQ-5, REQ-9 | required |
 | M12 | Preserve unrelated providers and their durable credential authority | Fixed compatibility/data-preservation constraints; retained MCP and Toolkit Specs | existing |
 | M13 | One current direct-activation operator registration, same-client rotation and different-client ineligibility | google-261013/ADR-D1 including activation refinement; retained System Settings authority/lifecycle | decided |
-| M14 | One verified subject and one current Toolkit-owned grant across fixed service endpoints | google-261013/ADR-D2 | decided |
-| M15 | Staged reconnect with exact atomic replacement and idempotent inspectable outcome | google-261013/ADR-D3 | decided |
+| M14 | One verified subject and independently issued Toolkit grant across fixed endpoints | google-261013/ADR-D2 and fresh-renewal clarification | decided |
+| M15 | Staged candidate-owned reconnect with atomic replacement and inspectable outcome | google-261013/ADR-D3 and fresh-renewal clarification | decided |
 | M16 | Bounded Google-specific content screening and fresh reviewed residual-risk acknowledgement | google-261013/ADR-D4 | decided |
 
 Physical table names, SDK adapter/helper names, equivalent typed model layout,
@@ -613,15 +620,17 @@ only the minimum outcome and current grant, not a second credential authority.
 
 - Mode: `Autonomous`.
 - Decision owner: `/root/google-design-owner`.
-- Approved on: `2026-10-13`.
-- Approved Design revision: `3`.
+- Approved on: `2026-10-14`.
+- Approved Design revision: `4`.
 - Approved authority IDs: `M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16`.
-- Approved scope: M1–M16 at revision 3, including current operator registration,
+- Approved scope: M1–M16 at revision 4, including current operator registration,
   single-account grant, staged reconnect and bounded documented content screening.
 
 The requester explicitly delegated implementation without further questions.
 The delegated owner approved this exact revision and ID set for implementation
 and required deterministic verification after a complete authority/feasibility
 audit. Conditional live-provider evidence remains a verification obligation.
+Revision 4 preserves revision 3 mechanisms and adds only the separately accepted
+explicit Connect/Reconnect fresh-renewal clarification to M4/M5/M14/M15.
 That approval does not authorize production configuration, live account consent,
 deployment, paid processors, policy exceptions or a live-readiness claim.

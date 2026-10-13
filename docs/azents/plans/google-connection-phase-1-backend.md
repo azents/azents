@@ -9,9 +9,9 @@ tags: [google, backend, oauth, testing, implementation]
 - Phase: 1, backend.
 - Branch/base: `design/google-261013-connection` → `main`.
 - PR boundary: existing #2252, Google connection [1/3]: backend.
-- Inputs: [approved Design revision 3](../design/google-261013-connection.md),
+- Inputs: [approved Design revision 4](../design/google-261013-connection.md),
   [Requirements](../requirements/google-261013-connection.md), accepted snapshot
-  ADR-D1 through ADR-D4 and D1 activation refinement.
+  ADR-D1 through ADR-D4, direct activation and explicit fresh-renewal clarifications.
 - Deliverables: redacted operator configuration; typed task/scoped capability
   policy and content screening; exact unpublished OAuth; partial/unknown review;
   atomic create/reconnect; current grant/Session execution and renewal; management
@@ -44,5 +44,8 @@ tags: [google, backend, oauth, testing, implementation]
   repository fixtures, OpenAPI/client generation, docs checks and PR CI.
 - Scope-drift check: every change traces to assigned M IDs; reject added modes,
   token pooling, participant identity, permission inbox, blind replay and bypass.
-- Context checkpoint: implementation starts from approved revision 3 and clean
-  application baseline; live prerequisites are unavailable; phase 2/3 remain.
+- Context checkpoint: initial integrated backend has full/focused root validation.
+  Correct response-client Boolean decoding, repeated authorization renewal and
+  Admin validation redaction before same-reviewer re-review. Revision 4 preserves
+  M1–M16. Rebase onto main and regenerate affected clients before final CI; live
+  prerequisites and phase 2/3 remain.

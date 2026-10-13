@@ -8,9 +8,10 @@ tags: [google, toolkit, implementation, testing]
 
 - Inputs: [Requirements](../requirements/google-261013-connection.md),
   [accepted ADR](../adr/google-261013-connection.md), and
-  [approved Design revision 3](../design/google-261013-connection.md).
+  [approved Design revision 4](../design/google-261013-connection.md).
 - Approved mechanisms: `M1` through `M16`; authorities are the Design authority
-  table and ADR-D1 through ADR-D4 including D1's direct-activation refinement.
+  table and ADR-D1 through ADR-D4 including direct activation and explicit
+  Connect/Reconnect fresh-renewal clarifications.
 - Design delta: None.
 - Sole implementation/integration/validation owner: `/root`, as requested.
 - Exact independent read-only reviewer for every stable integrated phase:
@@ -76,4 +77,9 @@ At each phase record exact SHA/PR, implemented interfaces, authority/scope check
 removals, reviewer findings/resolution, root validation evidence, remaining paths
 and live limits. A new material mechanism returns to Design, not plan authority.
 
-Current checkpoint: approved revision 3; M1–M16; no application code implemented.
+Current checkpoint: backend implemented under M1–M16. Initial integrated review
+at `a0dcb9796` found response-client decoding, repeated offline authorization and
+Admin diagnostic-redaction defects. Root is correcting and validating them under
+approved revision 4; the same read-only reviewer performs targeted re-review.
+UI and product E2E phases remain. Main advanced through retention work; rebase
+preserves its schema/client changes and one linear migration chain.

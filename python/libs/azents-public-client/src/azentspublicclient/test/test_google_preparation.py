@@ -38,16 +38,16 @@ class TestGooglePreparation(unittest.TestCase):
                 status = 'not_configured',
                 client_id = '',
                 callback_url = '',
-                preview_verified = false,
-                service_access_verified = false
+                preview_verified = True,
+                service_access_verified = True
             )
         else:
             return GooglePreparation(
                 status = 'not_configured',
                 client_id = '',
                 callback_url = '',
-                preview_verified = false,
-                service_access_verified = false,
+                preview_verified = True,
+                service_access_verified = True,
         )
         """
 

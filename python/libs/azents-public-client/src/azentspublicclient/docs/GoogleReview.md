@@ -18,7 +18,7 @@ Name | Type | Description | Notes
 **grant_result** | **str** |  | 
 **renewable** | **bool** |  | 
 **can_confirm** | **bool** |  | 
-**service_access_verified** | **bool** |  | 
+**service_access_verified** | **bool** | Scope review does not verify live resource access. | 
 **security_notice** | **str** |  | 
 
 ## Example

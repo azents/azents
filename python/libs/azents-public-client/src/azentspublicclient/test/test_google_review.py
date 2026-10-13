@@ -63,7 +63,7 @@ class TestGoogleReview(unittest.TestCase):
                 grant_result = 'full',
                 renewable = True,
                 can_confirm = True,
-                service_access_verified = false,
+                service_access_verified = True,
                 security_notice = ''
             )
         else:
@@ -96,7 +96,7 @@ class TestGoogleReview(unittest.TestCase):
                 grant_result = 'full',
                 renewable = True,
                 can_confirm = True,
-                service_access_verified = false,
+                service_access_verified = True,
                 security_notice = '',
         )
         """

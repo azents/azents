@@ -68,8 +68,13 @@ class GooglePreparation(BaseModel):
     status: Literal["not_configured", "incomplete", "configured_unverified"]
     client_id: str | None
     callback_url: str | None
-    preview_verified: Literal[False]
-    service_access_verified: Literal[False]
+    preview_verified: bool = Field(
+        strict=True, description="Always false for local operator preparation."
+    )
+    service_access_verified: bool = Field(
+        strict=True,
+        description="Local preparation does not verify live service access.",
+    )
 
 
 class GoogleApplicationDetail(GooglePreparation):

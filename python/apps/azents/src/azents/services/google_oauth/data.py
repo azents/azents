@@ -50,7 +50,9 @@ class GoogleReview(BaseModel):
     grant_result: Literal["full", "partial", "none", "unknown"]
     renewable: bool
     can_confirm: bool
-    service_access_verified: Literal[False]
+    service_access_verified: bool = Field(
+        strict=True, description="Scope review does not verify live resource access."
+    )
     security_notice: str
 
 
@@ -85,7 +87,9 @@ class GoogleConnectionOutput(BaseModel):
     timeout: float
     tasks: tuple[GoogleTaskAccess, ...]
     renewable: bool
-    service_access_verified: Literal[False]
+    service_access_verified: bool = Field(
+        strict=True, description="Saved grant metadata is not a live access probe."
+    )
 
 
 GOOGLE_SECURITY_NOTICE = (

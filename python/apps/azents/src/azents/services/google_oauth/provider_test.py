@@ -58,7 +58,7 @@ async def test_authorization_request_sends_offline_and_distinct_oidc_nonce() -> 
     assert query["access_type"] == ["offline"]
     assert query["code_challenge_method"] == ["S256"]
     assert query["redirect_uri"] == [_setup().redirect_uri]
-    assert "prompt" not in query
+    assert query["prompt"] == ["consent"]
     assert "include_granted_scopes" not in query
     assert "gmail" not in query["scope"][0]
 
@@ -95,17 +95,16 @@ async def test_exchange_keeps_provider_scope_before_sdk_normalization() -> None:
 
 @pytest.mark.asyncio
 async def test_refresh_omission_does_not_fabricate_scope_or_refresh_token() -> None:
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(
-            lambda request: httpx.Response(
-                200,
-                json={
-                    "access_token": "fresh-access",
-                    "expires_in": 3600,
-                },
-            )
+    def respond(request: httpx.Request) -> httpx.Response:
+        body = parse_qs(request.content.decode())
+        assert body["grant_type"] == ["refresh_token"]
+        assert "prompt" not in body
+        return httpx.Response(
+            200,
+            json={"access_token": "fresh-access", "expires_in": 3600},
         )
-    ) as client:
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
         refreshed = await GoogleOAuthProvider(client, _config()).refresh(
             GoogleApplicationRegistration(
                 "client", "secret", "g", _setup().redirect_uri

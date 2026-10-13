@@ -30178,8 +30178,8 @@
           },
           "service_access_verified": {
             "type": "boolean",
-            "const": false,
-            "title": "Service Access Verified"
+            "title": "Service Access Verified",
+            "description": "Saved grant metadata is not a live access probe."
           }
         },
         "type": "object",
@@ -30376,13 +30376,13 @@
           },
           "preview_verified": {
             "type": "boolean",
-            "const": false,
-            "title": "Preview Verified"
+            "title": "Preview Verified",
+            "description": "Always false for local operator preparation."
           },
           "service_access_verified": {
             "type": "boolean",
-            "const": false,
-            "title": "Service Access Verified"
+            "title": "Service Access Verified",
+            "description": "Local preparation does not verify live service access."
           }
         },
         "type": "object",
@@ -30538,8 +30538,8 @@
           },
           "service_access_verified": {
             "type": "boolean",
-            "const": false,
-            "title": "Service Access Verified"
+            "title": "Service Access Verified",
+            "description": "Scope review does not verify live resource access."
           },
           "security_notice": {
             "type": "string",

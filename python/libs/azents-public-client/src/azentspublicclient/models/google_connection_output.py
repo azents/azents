@@ -17,7 +17,7 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictBool, StrictFloat, StrictInt, StrictStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional, Union
 from azentspublicclient.models.google_identity import GoogleIdentity
 from azentspublicclient.models.google_task import GoogleTask
@@ -36,7 +36,7 @@ class GoogleConnectionOutput(BaseModel):
     timeout: Union[StrictFloat, StrictInt]
     tasks: List[GoogleTaskAccess]
     renewable: StrictBool
-    service_access_verified: StrictBool
+    service_access_verified: StrictBool = Field(description="Saved grant metadata is not a live access probe.")
     additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["toolkit_id", "status", "identity", "selected_tasks", "timeout", "tasks", "renewable", "service_access_verified"]
 
@@ -45,13 +45,6 @@ class GoogleConnectionOutput(BaseModel):
         """Validates the enum"""
         if value not in set(['not_connected', 'connected', 'reconnect_required', 'operator_setup_required', 'client_changed']):
             raise ValueError("must be one of enum values ('not_connected', 'connected', 'reconnect_required', 'operator_setup_required', 'client_changed')")
-        return value
-
-    @field_validator('service_access_verified')
-    def service_access_verified_validate_enum(cls, value):
-        """Validates the enum"""
-        if value not in set(['false']):
-            raise ValueError("must be one of enum values ('false')")
         return value
 
     model_config = ConfigDict(
