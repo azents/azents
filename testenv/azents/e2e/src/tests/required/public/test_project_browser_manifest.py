@@ -13,15 +13,29 @@ from azentspublicclient.api.llm_provider_integration_v1_api import (
 )
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
+from azentspublicclient.models.agent_session_response import AgentSessionResponse
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
+from azentspublicclient.models.chat_write_response import ChatWriteResponse
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest
 from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
 )
+from azentspublicclient.models.project_browser_entry_response import (
+    ProjectBrowserEntryResponse,
+)
+from azentspublicclient.models.project_browser_manifest_response import (
+    ProjectBrowserManifestResponse,
+)
 from azentspublicclient.models.secrets import Secrets
-from pydantic import TypeAdapter, ValidationError
+from azentspublicclient.models.session_workspace_project_list_response import (
+    SessionWorkspaceProjectListResponse,
+)
+from azentspublicclient.models.session_workspace_project_response import (
+    SessionWorkspaceProjectResponse,
+)
+from pydantic import BaseModel
 from testcontainers.core.container import DockerContainer
 
 from support.runtime_profiles import create_workspace_runtime_profile
@@ -32,8 +46,6 @@ from support.utils import (
     unique,
 )
 
-_JSON_OBJECT = TypeAdapter(dict[str, object])
-_JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 _RUNTIME_PROVIDER_ID = "system-docker"
 
 
@@ -51,23 +63,16 @@ def _headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def _response_object(response: requests.Response, *, label: str) -> dict[str, object]:
-    """Validate a JSON object response."""
-    try:
-        return _JSON_OBJECT.validate_json(response.text)
-    except ValidationError as exc:
-        raise AssertionError(f"{label} is not an object: {response.text!r}") from exc
+def _response_model[ModelT: BaseModel](
+    response: requests.Response, response_type: type[ModelT]
+) -> ModelT:
+    """Decode a successful public response into its operation contract."""
+    return response_type.model_validate(response.json())
 
 
-def _object_items(raw_items: object, *, label: str) -> list[dict[str, object]]:
-    """Validate a JSON object list."""
-    try:
-        return _JSON_OBJECT_LIST.validate_python(raw_items)
-    except ValidationError as exc:
-        raise AssertionError(f"{label} is not an object list: {raw_items!r}") from exc
-
-
-def _get_json(*, server_url: str, token: str, path: str) -> dict[str, object]:
+def _get_json[ModelT: BaseModel](
+    *, server_url: str, token: str, path: str, response_type: type[ModelT]
+) -> ModelT:
     """Call a public GET endpoint and return a JSON object."""
     response = requests.get(
         f"{server_url}{path}",
@@ -75,16 +80,17 @@ def _get_json(*, server_url: str, token: str, path: str) -> dict[str, object]:
         timeout=10,
     )
     response.raise_for_status()
-    return _response_object(response, label=f"GET {path} response")
+    return _response_model(response, response_type)
 
 
-def _post_json(
+def _post_json[ModelT: BaseModel](
     *,
     server_url: str,
     token: str,
     path: str,
     payload: dict[str, object],
-) -> dict[str, object]:
+    response_type: type[ModelT],
+) -> ModelT:
     """Call a public POST endpoint and return a JSON object."""
     response = requests.post(
         f"{server_url}{path}",
@@ -93,7 +99,7 @@ def _post_json(
         timeout=10,
     )
     response.raise_for_status()
-    return _response_object(response, label=f"POST {path} response")
+    return _response_model(response, response_type)
 
 
 def _delete(*, server_url: str, token: str, path: str) -> None:
@@ -190,15 +196,9 @@ def _setup_project_browser(
         timeout=10,
     )
     primary_session_response.raise_for_status()
-    primary_session_id = _response_object(
-        primary_session_response,
-        label="Team primary session response",
-    ).get("id")
-    if not isinstance(primary_session_id, str):
-        raise AssertionError(
-            "Team primary session response did not include id: "
-            f"{primary_session_response.text!r}"
-        )
+    primary_session_id = _response_model(
+        primary_session_response, AgentSessionResponse
+    ).id
     return _ProjectBrowserSetup(
         token=token,
         primary_session_id=primary_session_id,
@@ -219,11 +219,9 @@ def _create_session(
         token=token,
         path=f"/chat/v1/agents/{agent_id}/sessions",
         payload={"existing_project_paths": project_paths, "setup_actions": []},
+        response_type=AgentSessionResponse,
     )
-    session_id = payload.get("id")
-    if not isinstance(session_id, str):
-        raise AssertionError(f"Create session response did not include id: {payload!r}")
-    return session_id
+    return payload.id
 
 
 def _prepare_session_folder(
@@ -242,6 +240,7 @@ def _prepare_session_folder(
             "/workspace/session-folder/prepare"
         ),
         payload={"client_request_id": f"project-browser-prepare-{unique()}"},
+        response_type=ChatWriteResponse,
     )
 
 
@@ -251,7 +250,7 @@ def _wait_for_session_manifest(
     token: str,
     agent_id: str,
     session_id: str,
-) -> dict[str, object]:
+) -> ProjectBrowserManifestResponse:
     """Wait for asynchronous Session-folder preparation to bind the manifest."""
     path = (
         f"/chat/v1/agents/{agent_id}/sessions/{session_id}"
@@ -266,7 +265,7 @@ def _wait_for_session_manifest(
             timeout=10,
         )
         if response.ok:
-            return _response_object(response, label=f"GET {path} response")
+            return _response_model(response, ProjectBrowserManifestResponse)
         last_response = response
         if response.status_code != 400:
             response.raise_for_status()
@@ -285,7 +284,7 @@ def _session_manifest(
     token: str,
     agent_id: str,
     session_id: str,
-) -> dict[str, object]:
+) -> ProjectBrowserManifestResponse:
     """Fetch a session Project browser manifest."""
     return _get_json(
         server_url=server_url,
@@ -294,6 +293,7 @@ def _session_manifest(
             f"/chat/v1/agents/{agent_id}/sessions/{session_id}"
             "/workspace/project-browser-manifest"
         ),
+        response_type=ProjectBrowserManifestResponse,
     )
 
 
@@ -303,13 +303,14 @@ def _preview_manifest(
     token: str,
     agent_id: str,
     project_paths: list[str],
-) -> dict[str, object]:
+) -> ProjectBrowserManifestResponse:
     """Fetch a pre-session Project browser manifest preview."""
     return _post_json(
         server_url=server_url,
         token=token,
         path=f"/chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview",
         payload={"project_paths": project_paths},
+        response_type=ProjectBrowserManifestResponse,
     )
 
 
@@ -319,44 +320,41 @@ def _list_projects(
     token: str,
     agent_id: str,
     session_id: str,
-) -> list[dict[str, object]]:
+) -> list[SessionWorkspaceProjectResponse]:
     """Fetch session Project registry rows."""
     payload = _get_json(
         server_url=server_url,
         token=token,
         path=f"/chat/v1/agents/{agent_id}/sessions/{session_id}/projects",
+        response_type=SessionWorkspaceProjectListResponse,
     )
-    return _object_items(payload.get("items"), label="session project items")
+    return payload.items
 
 
-def _manifest_entries(manifest: dict[str, object]) -> list[dict[str, object]]:
-    """Return validated manifest entries."""
-    return _object_items(manifest.get("entries"), label="manifest entries")
+def _manifest_entries(
+    manifest: ProjectBrowserManifestResponse,
+) -> list[ProjectBrowserEntryResponse]:
+    """Return manifest entries validated at the public response boundary."""
+    return manifest.entries
 
 
-def _entry_paths(entries: list[dict[str, object]]) -> list[str]:
-    """Return Project browser entry paths."""
-    paths: list[str] = []
-    for entry in entries:
-        path = entry.get("path")
-        if not isinstance(path, str):
-            raise AssertionError(f"Manifest entry path is not a string: {entry!r}")
-        paths.append(path)
-    return paths
+def _entry_paths(entries: list[ProjectBrowserEntryResponse]) -> list[str]:
+    """Return declared Project browser entry paths."""
+    return [entry.path for entry in entries]
 
 
 def _assert_project_root_capabilities(
-    entry: dict[str, object],
+    entry: ProjectBrowserEntryResponse,
     *,
     remove_project: bool,
 ) -> None:
     """Assert backend-provided Project root capability policy."""
-    capabilities = _JSON_OBJECT.validate_python(entry.get("capabilities"))
-    assert capabilities.get("open") is True
-    assert capabilities.get("remove_project") is remove_project
-    assert capabilities.get("filesystem_delete") is False
-    assert capabilities.get("filesystem_move") is False
-    assert capabilities.get("filesystem_rename") is False
+    capabilities = entry.capabilities
+    assert capabilities.open is True
+    assert capabilities.remove_project is remove_project
+    assert capabilities.filesystem_delete is False
+    assert capabilities.filesystem_move is False
+    assert capabilities.filesystem_rename is False
 
 
 def test_empty_project_manifest_includes_the_session_folder(
@@ -386,24 +384,24 @@ def test_empty_project_manifest_includes_the_session_folder(
         session_id=setup.primary_session_id,
     )
 
-    assert manifest.get("active_mode") == "projects"
+    assert manifest.active_mode == "projects"
     entries = _manifest_entries(manifest)
     assert len(entries) == 1
     session_entry = entries[0]
-    path = session_entry.get("path")
+    path = session_entry.path
     assert isinstance(path, str)
     assert path.startswith(f"{runtime_workspace_path}/.azents/sessions/")
-    source = _JSON_OBJECT.validate_python(session_entry.get("source"))
-    assert source.get("type") == "session_folder"
-    assert source.get("project_id") is None
-    capabilities = _JSON_OBJECT.validate_python(session_entry.get("capabilities"))
-    assert capabilities.get("prepare_session_folder") is True
+    source = session_entry.source
+    assert source.type == "session_folder"
+    assert source.project_id is None
+    capabilities = session_entry.capabilities
+    assert capabilities.prepare_session_folder is True
     _assert_project_root_capabilities(session_entry, remove_project=False)
-    assert manifest.get("empty_state") is None
+    assert manifest.empty_state is None
 
-    modes = _object_items(manifest.get("modes"), label="manifest modes")
-    assert [mode.get("id") for mode in modes] == ["projects", "all_files"]
-    assert modes[0].get("default") is True
+    modes = manifest.modes
+    assert [mode.id for mode in modes] == ["projects", "all_files"]
+    assert modes[0].default is True
 
 
 def test_session_project_manifest_uses_registry_capabilities_and_removal(
@@ -442,24 +440,24 @@ def test_session_project_manifest_uses_registry_capabilities_and_removal(
     )
     entries = _manifest_entries(manifest)
 
-    assert manifest.get("active_mode") == "projects"
+    assert manifest.active_mode == "projects"
     assert len(entries) == 3
     session_entry = entries[0]
-    session_path = session_entry.get("path")
+    session_path = session_entry.path
     assert isinstance(session_path, str)
     assert session_path.startswith(f"{runtime_workspace_path}/.azents/sessions/")
-    session_source = _JSON_OBJECT.validate_python(session_entry.get("source"))
-    assert session_source.get("type") == "session_folder"
-    assert session_source.get("project_id") is None
+    session_source = session_entry.source
+    assert session_source.type == "session_folder"
+    assert session_source.project_id is None
     _assert_project_root_capabilities(session_entry, remove_project=False)
 
     project_entries = entries[1:]
     assert _entry_paths(project_entries) == paths
     for entry in project_entries:
-        assert entry.get("kind") == "directory"
-        source = _JSON_OBJECT.validate_python(entry.get("source"))
-        assert source.get("type") == "session_project"
-        assert isinstance(source.get("project_id"), str)
+        assert entry.kind == "directory"
+        source = entry.source
+        assert source.type == "session_project"
+        assert isinstance(source.project_id, str)
         _assert_project_root_capabilities(entry, remove_project=True)
 
     projects = _list_projects(
@@ -468,10 +466,8 @@ def test_session_project_manifest_uses_registry_capabilities_and_removal(
         agent_id=setup.agent_id,
         session_id=session_id,
     )
-    removed_project = next(
-        project for project in projects if project.get("path") == paths[0]
-    )
-    project_id = removed_project.get("id")
+    removed_project = next(project for project in projects if project.path == paths[0])
+    project_id = removed_project.id
     if not isinstance(project_id, str):
         raise AssertionError(
             f"Project registry row did not include id: {removed_project!r}"
@@ -517,14 +513,14 @@ def test_pre_session_preview_uses_project_manifest_entry_model(
     )
     entries = _manifest_entries(manifest)
 
-    assert manifest.get("session_id") is None
-    assert manifest.get("active_mode") == "projects"
+    assert manifest.session_id is None
+    assert manifest.active_mode == "projects"
     assert _entry_paths(entries) == [preview_path]
-    source = _JSON_OBJECT.validate_python(entries[0].get("source"))
-    assert source.get("type") == "preview_project"
-    assert source.get("project_id") is None
+    source = entries[0].source
+    assert source.type == "preview_project"
+    assert source.project_id is None
     _assert_project_root_capabilities(entries[0], remove_project=False)
 
-    status = _JSON_OBJECT.validate_python(entries[0].get("status"))
-    assert status.get("value") == "unchecked"
-    assert status.get("stale") is True
+    status = entries[0].status
+    assert status.value == "unchecked"
+    assert status.stale is True

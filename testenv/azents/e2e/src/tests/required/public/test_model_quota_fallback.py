@@ -3,15 +3,25 @@
 import azentsadminclient
 import azentspublicclient
 import requests
+from azentspublicclient.models.agent_response import AgentResponse
+from azentspublicclient.models.agent_session_model_availability_response import (
+    AgentSessionModelAvailabilityResponse,
+)
+from azentspublicclient.models.selectable_model_option_response import (
+    SelectableModelOptionResponse,
+)
+from pydantic import StrictInt, StrictStr
 
+from support.observations import (
+    ExtensionObservation,
+    InputMessageObservation,
+)
 from support.utils import unique
 from tests.required.public.test_per_prompt_inference_profile import (
     _headers,
-    _history,
-    _object,
-    _objects,
     _response_object,
     _setup_profile_agent,
+    _typed_history,
     _wait_for_mock_models,
     _wait_for_session_idle,
 )
@@ -22,20 +32,22 @@ _PRIMARY_RETRY_PROMPT = "Reserved Primary retry uses primary candidate"
 _PRIMARY_RETRY_SUCCESS = "Reserved Primary candidate completed the request."
 
 
-def _candidate_selection(option: dict[str, object]) -> dict[str, object]:
-    """Return the first candidate as a valid update selection input."""
-    candidates = _objects(option.get("candidates"), label="model candidates")
-    stored = _object(
-        candidates[0].get("model_selection"),
-        label="candidate model selection",
-    )
-    integration_id = stored.get("llm_provider_integration_id")
-    model_identifier = stored.get("model_identifier")
-    if not isinstance(integration_id, str) or not isinstance(model_identifier, str):
-        raise AssertionError(f"Stored candidate selection is incomplete: {stored!r}")
+class _AppliedRoute(ExtensionObservation):
+    candidate_ordinal: StrictInt
+    candidate_role: StrictStr
+    model_identifier: StrictStr
+
+
+class _RouteMarker(ExtensionObservation):
+    applied_model_route: _AppliedRoute
+
+
+def _candidate_selection(option: SelectableModelOptionResponse) -> dict[str, object]:
+    """Select only declared fields from the validated stored candidate."""
+    stored = option.candidates[0].model_selection
     return {
-        "llm_provider_integration_id": integration_id,
-        "model_identifier": model_identifier,
+        "llm_provider_integration_id": stored.llm_provider_integration_id,
+        "model_identifier": stored.model_identifier,
     }
 
 
@@ -58,17 +70,10 @@ def test_quota_advances_to_fallback_and_primary_reservation_reconciles(
     agent_url = (
         f"{azents_public_server_url}/agent/v1/workspaces/{handle}/agents/{agent_id}"
     )
-    agent = _response_object(
-        requests.get(agent_url, headers=_headers(token), timeout=10)
+    agent = AgentResponse.model_validate(
+        _response_object(requests.get(agent_url, headers=_headers(token), timeout=10))
     )
-    options = {
-        option["label"]: option
-        for option in _objects(
-            agent.get("selectable_model_options"),
-            label="Agent selectable model options",
-        )
-        if isinstance(option.get("label"), str)
-    }
+    options = {option.label: option for option in agent.selectable_model_options}
     quality_selection = _candidate_selection(options["Quality"])
     fast_selection = _candidate_selection(options["Fast"])
     patched = requests.patch(
@@ -124,79 +129,85 @@ def test_quota_advances_to_fallback_and_primary_reservation_reconciles(
     )
     _wait_for_mock_models(mock_openai_url, "gpt-5.5", "gpt-5.5-mini")
 
-    history = _history(azents_public_server_url, token, session_id)
+    history = _typed_history(azents_public_server_url, token, session_id)
     assistant_contents = [
-        _object(event.get("payload"), label="assistant payload").get("content")
+        InputMessageObservation.model_validate(event.payload).content
         for event in history
-        if event.get("kind") == "assistant_message"
+        if event.kind == "assistant_message"
     ]
     assert assistant_contents == [_SUCCESS]
     assert all("Fallback" not in str(content) for content in assistant_contents)
-    turn_markers = [event for event in history if event.get("kind") == "turn_marker"]
-    marker = _object(turn_markers[-1].get("payload"), label="turn marker payload")
-    route = _object(marker.get("applied_model_route"), label="applied model route")
-    assert route["candidate_ordinal"] == 2
-    assert route["candidate_role"] == "fallback"
-    assert route["model_identifier"] == "gpt-5.5-mini"
+    turn_markers = [event for event in history if event.kind == "turn_marker"]
+    route = _RouteMarker.model_validate(turn_markers[-1].payload).applied_model_route
+    assert route.candidate_ordinal == 2
+    assert route.candidate_role == "fallback"
+    assert route.model_identifier == "gpt-5.5-mini"
 
     availability_url = (
         f"{azents_public_server_url}/chat/v1/agents/{agent_id}/sessions/"
         f"{session_id}/model-availability"
     )
-    availability = _response_object(
-        requests.get(availability_url, headers=_headers(token), timeout=10)
+    availability = AgentSessionModelAvailabilityResponse.model_validate(
+        _response_object(
+            requests.get(availability_url, headers=_headers(token), timeout=10)
+        )
     )
-    assert availability["semantic_label"] == "Quality"
-    assert availability["state"] == "cooldown"
-    assert availability["first_usable_fallback_display_name"]
+    assert availability.semantic_label == "Quality"
+    assert availability.state == "cooldown"
+    assert availability.first_usable_fallback_display_name
 
     reserved = requests.post(
         f"{azents_public_server_url}/chat/v1/agents/{agent_id}/sessions/"
         f"{session_id}/model-reservation",
         headers={**_headers(token), "Content-Type": "application/json"},
         json={
-            "semantic_label": availability["semantic_label"],
-            "primary": availability["primary"],
+            "semantic_label": availability.semantic_label,
+            "primary": availability.primary.to_dict(),
         },
         timeout=10,
     )
     reserved.raise_for_status()
-    reservation_state = _response_object(reserved)
-    assert reservation_state["state"] == "primary_next"
-    reservation = _object(
-        reservation_state.get("reservation"),
-        label="Primary reservation",
+    reservation_state = AgentSessionModelAvailabilityResponse.model_validate(
+        _response_object(reserved)
     )
+    assert reservation_state.state == "primary_next"
+    reservation = reservation_state.reservation
+    assert reservation is not None
 
     cancelled = requests.post(
         f"{azents_public_server_url}/chat/v1/agents/{agent_id}/sessions/"
         f"{session_id}/model-reservation/cancel",
         headers={**_headers(token), "Content-Type": "application/json"},
-        json={"reservation_generation": reservation["reservation_generation"]},
+        json={"reservation_generation": reservation.reservation_generation},
         timeout=10,
     )
     cancelled.raise_for_status()
-    assert _response_object(cancelled)["state"] == "cooldown"
+    assert (
+        AgentSessionModelAvailabilityResponse.model_validate(
+            _response_object(cancelled)
+        ).state
+        == "cooldown"
+    )
 
     reserved_again = requests.post(
         f"{azents_public_server_url}/chat/v1/agents/{agent_id}/sessions/"
         f"{session_id}/model-reservation",
         headers={**_headers(token), "Content-Type": "application/json"},
         json={
-            "semantic_label": availability["semantic_label"],
-            "primary": availability["primary"],
+            "semantic_label": availability.semantic_label,
+            "primary": availability.primary.to_dict(),
         },
         timeout=10,
     )
     reserved_again.raise_for_status()
-    second_reservation_state = _response_object(reserved_again)
-    assert second_reservation_state["state"] == "primary_next"
-    second_reservation = _object(
-        second_reservation_state.get("reservation"),
-        label="Second Primary reservation",
+    second_reservation_state = AgentSessionModelAvailabilityResponse.model_validate(
+        _response_object(reserved_again)
     )
-    first_generation = reservation.get("reservation_generation")
-    second_generation = second_reservation.get("reservation_generation")
+    assert second_reservation_state.state == "primary_next"
+    second_reservation = second_reservation_state.reservation
+    assert second_reservation is not None
+    first_generation = reservation.reservation_generation
+    second_generation = second_reservation.reservation_generation
     assert isinstance(first_generation, int)
     assert isinstance(second_generation, int)
     assert second_generation > first_generation
@@ -210,7 +221,7 @@ def test_quota_advances_to_fallback_and_primary_reservation_reconciles(
     )
     assert stale_cancel.status_code == 409
     assert (
-        _object(stale_cancel.json(), label="stale cancellation conflict")["state"]
+        AgentSessionModelAvailabilityResponse.model_validate(stale_cancel.json()).state
         == "primary_next"
     )
 
@@ -240,30 +251,27 @@ def test_quota_advances_to_fallback_and_primary_reservation_reconciles(
     primary_journal = _wait_for_mock_models(mock_openai_url, "gpt-5.5")
     assert "gpt-5.5-mini" not in primary_journal
 
-    retried_history = _history(azents_public_server_url, token, session_id)
+    retried_history = _typed_history(azents_public_server_url, token, session_id)
     retried_assistant_contents = [
-        _object(event.get("payload"), label="assistant payload").get("content")
+        InputMessageObservation.model_validate(event.payload).content
         for event in retried_history
-        if event.get("kind") == "assistant_message"
+        if event.kind == "assistant_message"
     ]
     assert retried_assistant_contents[-1] == _PRIMARY_RETRY_SUCCESS
     retried_markers = [
-        event for event in retried_history if event.get("kind") == "turn_marker"
+        event for event in retried_history if event.kind == "turn_marker"
     ]
-    retried_marker = _object(
-        retried_markers[-1].get("payload"),
-        label="reserved Primary turn marker payload",
-    )
-    retried_route = _object(
-        retried_marker.get("applied_model_route"),
-        label="reserved Primary applied model route",
-    )
-    assert retried_route["candidate_ordinal"] == 1
-    assert retried_route["candidate_role"] == "primary"
-    assert retried_route["model_identifier"] == "gpt-5.5"
+    retried_route = _RouteMarker.model_validate(
+        retried_markers[-1].payload
+    ).applied_model_route
+    assert retried_route.candidate_ordinal == 1
+    assert retried_route.candidate_role == "primary"
+    assert retried_route.model_identifier == "gpt-5.5"
 
-    recovered = _response_object(
-        requests.get(availability_url, headers=_headers(token), timeout=10)
+    recovered = AgentSessionModelAvailabilityResponse.model_validate(
+        _response_object(
+            requests.get(availability_url, headers=_headers(token), timeout=10)
+        )
     )
-    assert recovered["state"] == "available"
-    assert recovered["reservation"] is None
+    assert recovered.state == "available"
+    assert recovered.reservation is None

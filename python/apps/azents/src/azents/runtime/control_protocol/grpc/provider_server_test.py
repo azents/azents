@@ -9,6 +9,9 @@ from datetime import UTC, datetime, timedelta
 
 import grpc
 import pytest
+from azents_runtime_control.grpc_provider_client import (
+    _command as decode_provider_command,
+)
 from azents_runtime_control.proto import (
     runtime_configuration_pb2,
     runtime_provider_control_pb2,
@@ -48,12 +51,17 @@ from azents.runtime.control_protocol.data import (
 from azents.runtime.control_protocol.grpc.provider_server import (
     RuntimeProviderControlGrpcServicer,
 )
+from azents.runtime.control_protocol.grpc.provider_server import (
+    _provider_command as encode_provider_command,
+)
 from azents.runtime.control_protocol.service import (
     RuntimeControlProtocolService,
 )
 from azents.runtime.coordination.data import (
     RuntimeConnectionKind,
+    RuntimeCoordinationTarget,
     RuntimeReplyEventType,
+    RuntimeRequestEnvelope,
 )
 from azents.runtime.coordination.memory import (
     InMemoryRuntimeCoordinationStore,
@@ -213,6 +221,105 @@ class FakeRuntimeProviderContractProposer:
     async def propose_contract(self, **_: object) -> object:
         """Accept one test proposal."""
         return object()
+
+
+@pytest.mark.parametrize("control_tls_ca_pem", [None, "  test-ca-pem  ", " \n "])
+@pytest.mark.parametrize("allow_insecure_control", [None, False, True])
+def test_provider_command_encoder_and_decoder_share_auth_contract(
+    control_tls_ca_pem: str | None,
+    allow_insecure_control: bool | None,
+) -> None:
+    """The real backend encoder interoperates with strict Provider ingress."""
+    auth: dict[str, JsonValue] = {
+        "control_endpoint": "runtime-control:8020",
+        "transfer_endpoint": "runtime-transfer:8030",
+        "runner_auth_credential_id": "runner-credential-1",
+        "control_tls_ca_pem": control_tls_ca_pem,
+    }
+    if allow_insecure_control is not None:
+        auth["allow_insecure_control"] = allow_insecure_control
+    configuration = _runtime_configuration()
+    envelope = RuntimeRequestEnvelope(
+        request_id="request-1",
+        runtime_id="runtime-1",
+        target=RuntimeCoordinationTarget.PROVIDER,
+        generation=7,
+        operation_type="provider.start",
+        payload={
+            "provider_id": "provider-1",
+            "desired_generation": 5,
+            "command_type": "start",
+            "reset_final_desired_state": None,
+            "payload": {
+                "identity": {"agent_id": "agent-1", "workspace_id": "workspace-1"},
+                "runner_image": "runner:latest",
+                "auth": auth,
+            },
+            "runtime_configuration": {
+                "configuration_sequence": configuration.evidence.configuration_sequence,
+                "digest": configuration.evidence.digest,
+                "desired_generation": configuration.evidence.desired_generation,
+                "resolved_configuration_json": (
+                    configuration.resolved_configuration_json
+                ),
+            },
+        },
+        reply_stream_id="reply-1",
+        deadline_at=_now() + timedelta(seconds=30),
+        body_stream_id=None,
+    )
+    encoded = encode_provider_command(
+        envelope,
+        runner_credential_issuer=FakeRuntimeRunnerCredentialIssuer(),
+    )
+    wire = runtime_provider_control_pb2.ProviderCommand.FromString(
+        encoded.SerializeToString()
+    )
+    command = decode_provider_command(wire)
+
+    assert command.command_type is RuntimeProviderCommandType.START
+    assert command.identity.runtime_id == "runtime-1"
+    assert command.identity.agent_id == "agent-1"
+    assert command.identity.workspace_id == "workspace-1"
+    assert command.desired_generation == 5
+    assert command.provider_generation == 7
+    assert command.runner_image == "runner:latest"
+    assert command.auth.control_endpoint == "runtime-control:8020"
+    assert command.auth.transfer_endpoint == "runtime-transfer:8030"
+    assert command.auth.runner_auth_token == "runner-token"
+    assert command.auth.runner_auth_credential_id == "runner-credential-1"
+    assert command.auth.control_tls_ca_pem == (
+        control_tls_ca_pem.strip() or None if control_tls_ca_pem is not None else None
+    )
+    assert command.auth.allow_insecure_control is (allow_insecure_control is True)
+    assert command.reset_final_desired_state is None
+    assert command.runtime_configuration == configuration
+    assert wire.deadline_at.ToDatetime(tzinfo=UTC) == envelope.deadline_at
+    assert "runner_auth_token" not in wire.payload.fields["auth"].struct_value.fields
+
+    # Redundant JSON cannot replace the explicit protobuf identity or endpoints.
+    wire.payload.update(
+        {
+            "identity": {
+                "agent_id": "shadow-agent",
+                "workspace_id": "shadow-workspace",
+            },
+            "runner_image": "shadow:runner",
+            "auth": {
+                **auth,
+                "control_endpoint": "shadow-control:1",
+                "transfer_endpoint": "shadow-transfer:2",
+            },
+        }
+    )
+    assert (
+        decode_provider_command(
+            runtime_provider_control_pb2.ProviderCommand.FromString(
+                wire.SerializeToString()
+            )
+        )
+        == command
+    )
 
 
 class QueueIterator:

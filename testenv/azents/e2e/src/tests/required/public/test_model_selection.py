@@ -15,20 +15,28 @@ from azentspublicclient.models.api_key_secrets import ApiKeySecrets
 from azentspublicclient.models.create_workspace_request import (
     CreateWorkspaceRequest as PublicCreateWorkspaceRequest,
 )
+from azentspublicclient.models.image_generation_model_catalog_response import (
+    ImageGenerationModelCatalogResponse,
+)
 from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
 )
+from azentspublicclient.models.model_catalog_entry_list_response import (
+    ModelCatalogEntryListResponse,
+)
 from azentspublicclient.models.secrets import Secrets
-from pydantic import TypeAdapter, ValidationError
 
+from support.observations import (
+    TurnMarkerObservation,
+    decode_history_page,
+    decode_session,
+)
 from support.runtime_profiles import (
     create_workspace_runtime_profile,
     start_and_wait_for_agent_runtime,
 )
 from support.utils import authenticate_user, unique, wait_until
-
-_JSON_OBJECT_ADAPTER = TypeAdapter(dict[str, object])
 
 
 class _DeterministicWorkspace(NamedTuple):
@@ -37,14 +45,6 @@ class _DeterministicWorkspace(NamedTuple):
     token: str
     handle: str
     integration_id: str
-
-
-def _json_object(value: object) -> dict[str, object] | None:
-    """Validate one JSON object without bypassing the type checker."""
-    try:
-        return _JSON_OBJECT_ADAPTER.validate_python(value)
-    except ValidationError:
-        return None
 
 
 def _workspace_with_deterministic_integration(
@@ -110,18 +110,13 @@ def _wait_for_initial_catalog_sync(
         )
         if response.status_code != 200:
             return None
-        payload = _json_object(response.json())
-        if payload is None:
+        payload = ModelCatalogEntryListResponse.model_validate(response.json())
+        if payload.catalog_scope != "integration":
             return None
-        if payload.get("catalog_scope") != "integration":
-            return None
-        latest_sync_payload = payload.get("latest_sync")
-        if not isinstance(latest_sync_payload, dict):
-            return None
-        latest_sync = _json_object(latest_sync_payload)
-        if latest_sync is None:
-            return None
-        if latest_sync.get("status") not in {"succeeded", "failed"}:
+        if payload.latest_sync is None or payload.latest_sync.status not in {
+            "succeeded",
+            "failed",
+        }:
             return None
         return response
 
@@ -154,23 +149,13 @@ def _wait_for_image_catalog_sync(
         )
         if response.status_code != 200:
             return None
-        payload = _json_object(response.json())
-        if payload is None or payload.get("usable") is not True:
+        payload = ImageGenerationModelCatalogResponse.model_validate(response.json())
+        if not payload.usable:
             return None
-        entries = payload.get("entries")
-        if not isinstance(entries, list):
+        identifiers = [entry.provider_model_identifier for entry in payload.entries]
+        if identifiers != ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst"]:
             return None
-        identifiers = [
-            entry.get("provider_model_identifier")
-            for entry in entries
-            if isinstance(entry, dict)
-        ]
-        if identifiers != [
-            "gpt-image-2.5-flare",
-            "gpt-image-2.5-sunburst",
-        ]:
-            return None
-        return payload
+        return payload.to_dict()
 
     payload = wait_until(
         populated_catalog,
@@ -194,14 +179,14 @@ def _wait_for_turn_context(
 ) -> None:
     """Wait for one completed turn with the expected prepared context window."""
 
-    def matching_turn() -> dict[str, object] | None:
+    def matching_turn() -> TurnMarkerObservation | None:
         session = requests.get(
             f"{server_url}/chat/v1/agents/{agent_id}/sessions/{session_id}",
             headers=_headers(token),
             timeout=10,
         )
         session.raise_for_status()
-        if session.json().get("run_state") != "idle":
+        if decode_session(session.json()).run_state != "idle":
             return None
         history = requests.get(
             f"{server_url}/chat/v1/sessions/{session_id}/history?limit=100",
@@ -209,16 +194,12 @@ def _wait_for_turn_context(
             timeout=10,
         )
         history.raise_for_status()
-        for event in reversed(history.json()["items"]):
-            if event.get("kind") != "turn_marker":
+        for event in reversed(decode_history_page(history.json()).items):
+            if event.kind != "turn_marker":
                 continue
-            payload = _json_object(event.get("payload"))
-            if payload is None:
-                continue
-            profile = payload.get("applied_inference_profile")
-            if not isinstance(profile, dict):
-                continue
-            if profile.get("model_target_label") == target:
+            payload = TurnMarkerObservation.model_validate(event.payload)
+            profile = payload.applied_inference_profile
+            if profile is not None and profile.model_target_label == target:
                 return payload
         return None
 
@@ -229,8 +210,8 @@ def _wait_for_turn_context(
         message=f"Prepared turn context was not observed for {target}",
     )
     assert payload is not None
-    assert payload["effective_context_window_tokens"] == expected_effective
-    assert payload["effective_auto_compaction_threshold_tokens"] == int(
+    assert payload.effective_context_window_tokens == expected_effective
+    assert payload.effective_auto_compaction_threshold_tokens == int(
         expected_effective * 0.9
     )
 
@@ -286,7 +267,9 @@ class TestModelSelectionReadiness:
             integration_id,
         ).json()
         initial_sync = initial["latest_sync"]
-        initial_started_at = initial_sync["started_at"]
+        initial_catalog = ModelCatalogEntryListResponse.model_validate(initial)
+        assert initial_catalog.latest_sync is not None
+        initial_started_at = initial_catalog.latest_sync.started_at
         assert initial_started_at is not None
         assert "id" not in initial_sync
         integration_url = (
@@ -331,10 +314,12 @@ class TestModelSelectionReadiness:
             )
             if response.status_code != 200:
                 return None
-            sync = response.json().get("latest_sync")
-            if sync is None or sync.get("started_at") == initial_started_at:
+            sync = ModelCatalogEntryListResponse.model_validate(
+                response.json()
+            ).latest_sync
+            if sync is None or sync.started_at == initial_started_at:
                 return None
-            if sync.get("status") != "succeeded":
+            if sync.status != "succeeded":
                 return None
             return response
 
@@ -546,10 +531,12 @@ class TestModelSelectionReadiness:
             message="Stored catalog entries did not become readable",
         )
         listing.raise_for_status()
-        candidate = listing.json()["entries"][0]
+        candidate = ModelCatalogEntryListResponse.model_validate(
+            listing.json()
+        ).entries[0]
         selection = {
             "llm_provider_integration_id": integration_id,
-            "model_identifier": candidate["provider_model_identifier"],
+            "model_identifier": candidate.provider_model_identifier,
         }
 
         update = requests.put(

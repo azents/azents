@@ -1,6 +1,7 @@
 """Runtime Control server settings tests."""
 
 import asyncio
+import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
@@ -99,8 +100,10 @@ async def test_runner_generation_readiness_remains_available_after_wait(
 async def test_owner_route_conflict_retains_persisted_generation_readiness(
     monkeypatch: pytest.MonkeyPatch,
     runtime_deleted: bool,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """A live previous Owner lease cannot consume the new generation signal."""
+    caplog.set_level(logging.INFO, logger="azents.runtime.control_server")
     repository = Mock()
     repository.get_runtime = AsyncMock(
         return_value=Mock(desired_generation=2, runner_generation=3)
@@ -109,6 +112,7 @@ async def test_owner_route_conflict_retains_persisted_generation_readiness(
     entered = _observe_generation_wait(gate, repository, monkeypatch)
     owned = Mock()
     owned.offer = _web_offer(deadline_at=datetime.now(UTC) + timedelta(seconds=5))
+    owned.route = Mock(owner_replica_id="owner-replica", lease_generation=1)
     manager = Mock(spec=RuntimeStreamSessionOwnerManager)
     manager.acquire = AsyncMock(
         side_effect=[RuntimeWebSessionRouteConflict("Previous lease is live"), owned]
@@ -150,6 +154,30 @@ async def test_owner_route_conflict_retains_persisted_generation_readiness(
         assert repository.get_runtime.await_count == 7
         assert manager.acquire.await_count == 2
         assert not gate.events
+        records = [
+            record
+            for record in caplog.records
+            if record.name == "azents.runtime.control_server"
+        ]
+        assert [record.message for record in records] == [
+            "Runtime Web session offer unavailable",
+            "Runtime Web session offer issued",
+            "Runtime Web session offer unavailable",
+        ]
+        assert [record.levelno for record in records] == [
+            logging.WARNING,
+            logging.INFO,
+            logging.WARNING,
+        ]
+        assert [record.__dict__["runner_generation"] for record in records] == [3, 3, 3]
+        assert records[0].__dict__["reason"] == "owner_route_conflict"
+        assert records[0].exc_info is not None
+        assert records[0].exc_info[0] is RuntimeWebSessionRouteConflict
+        assert records[1].__dict__["owner_replica_id"] == "owner-replica"
+        assert records[1].__dict__["lease_generation"] == 1
+        assert records[1].exc_info is None
+        assert records[2].__dict__["reason"] == "runner_generation_not_current"
+        assert records[2].exc_info is None
     finally:
         first.cancel()
         await asyncio.gather(first, return_exceptions=True)

@@ -4,13 +4,22 @@ from __future__ import annotations
 
 import hashlib
 import time
-from typing import NamedTuple, TypedDict
+from typing import NamedTuple
 from urllib.parse import parse_qs, quote, urlparse, urlsplit, urlunsplit
 
 import azentsadminclient
 import azentspublicclient
 import pytest
 import requests
+from azentspublicclient.models.workspace_upload_create_response import (
+    WorkspaceUploadCreateResponse,
+)
+from azentspublicclient.models.workspace_upload_status_response import (
+    WorkspaceUploadStatusResponse,
+)
+from azentspublicclient.models.workspace_upload_ticket_response import (
+    WorkspaceUploadTicketResponse,
+)
 
 from support.utils import AgentSessionSetup, create_agent_session_setup
 
@@ -22,26 +31,6 @@ _TERMINAL_PHASES = {
     "expired",
     "retryable_failure",
 }
-
-
-class _WorkspaceUploadTicket(TypedDict):
-    method: str
-    url: str
-    headers: dict[str, str]
-
-
-class _WorkspaceUploadIdentity(TypedDict):
-    upload_id: str
-
-
-class _WorkspaceUploadStatus(TypedDict):
-    identity: _WorkspaceUploadIdentity
-    revision: int
-
-
-class _WorkspaceUploadResponse(TypedDict):
-    status: _WorkspaceUploadStatus
-    ticket: _WorkspaceUploadTicket
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -56,7 +45,7 @@ def _create_upload(
     destination_directory: str,
     filename: str,
     content: bytes,
-) -> _WorkspaceUploadResponse:
+) -> WorkspaceUploadCreateResponse:
     """Create one direct upload through the public API."""
     response = requests.post(
         f"{server_url}/chat/v1/agents/{setup.agent_id}/workspace/uploads",
@@ -73,45 +62,17 @@ def _create_upload(
         verify=False,
     )
     response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, dict):
-        raise AssertionError("Workspace upload create response must be an object.")
-    status = payload.get("status")
-    ticket = payload.get("ticket")
-    if not isinstance(status, dict) or not isinstance(ticket, dict):
-        raise AssertionError("Workspace upload create response is incomplete.")
-    identity = status.get("identity")
-    revision = status.get("revision")
-    upload_id = identity.get("upload_id") if isinstance(identity, dict) else None
-    if not isinstance(upload_id, str) or not isinstance(revision, int):
-        raise AssertionError("Workspace upload create response is missing identity.")
-    method = ticket.get("method")
-    url = ticket.get("url")
-    headers = ticket.get("headers")
-    if (
-        method != "PUT"
-        or not isinstance(url, str)
-        or not isinstance(headers, dict)
-        or not all(
-            isinstance(key, str) and isinstance(value, str)
-            for key, value in headers.items()
-        )
-    ):
-        raise AssertionError("Workspace upload ticket is malformed.")
-    return {
-        "status": {"identity": {"upload_id": upload_id}, "revision": revision},
-        "ticket": {"method": method, "url": url, "headers": headers},
-    }
+    return WorkspaceUploadCreateResponse.model_validate(response.json())
 
 
 def _put_direct(
-    ticket: _WorkspaceUploadTicket,
+    ticket: WorkspaceUploadTicketResponse,
     content: bytes,
     *,
     gateway_url: str,
 ) -> requests.Response:
     """Upload exact bytes through the host-mapped HTTPS gateway."""
-    ticket_url = urlsplit(ticket["url"])
+    ticket_url = urlsplit(ticket.url)
     gateway = urlsplit(gateway_url)
     if (
         ticket_url.scheme != "https"
@@ -129,10 +90,10 @@ def _put_direct(
             ticket_url.fragment,
         )
     )
-    headers = dict(ticket["headers"])
+    headers = dict(ticket.headers)
     headers["Host"] = ticket_url.netloc
     response = requests.request(
-        ticket["method"],
+        ticket.method,
         request_url,
         headers=headers,
         data=content,
@@ -148,7 +109,7 @@ def _get_status(
     server_url: str,
     setup: AgentSessionSetup,
     upload_id: str,
-) -> dict[str, object]:
+) -> WorkspaceUploadStatusResponse:
     """Read one authoritative upload status through the public API."""
     response = requests.get(
         f"{server_url}/chat/v1/agents/{setup.agent_id}/workspace/uploads/{upload_id}",
@@ -157,10 +118,7 @@ def _get_status(
         verify=False,
     )
     response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, dict):
-        raise AssertionError("Workspace upload status must be an object.")
-    return payload
+    return WorkspaceUploadStatusResponse.model_validate(response.json())
 
 
 def _wait_for_phase(
@@ -170,10 +128,10 @@ def _wait_for_phase(
     upload_id: str,
     expected: set[str],
     timeout_seconds: float = 120,
-) -> dict[str, object]:
+) -> WorkspaceUploadStatusResponse:
     """Poll fresh API status until one of the expected phases is observed."""
     deadline = time.monotonic() + timeout_seconds
-    last_status: dict[str, object] | None = None
+    last_status: WorkspaceUploadStatusResponse | None = None
     while time.monotonic() < deadline:
         status = _get_status(
             server_url=server_url,
@@ -181,7 +139,7 @@ def _wait_for_phase(
             upload_id=upload_id,
         )
         last_status = status
-        phase = status.get("phase")
+        phase = status.phase
         if phase in expected:
             return status
         time.sleep(0.5)
@@ -196,7 +154,7 @@ def _finalize(
     setup: AgentSessionSetup,
     upload_id: str,
     revision: int,
-) -> dict[str, object]:
+) -> WorkspaceUploadStatusResponse:
     """Finalize one completed direct PUT through the public API."""
     response = requests.post(
         f"{server_url}/chat/v1/agents/{setup.agent_id}/workspace/uploads/{upload_id}/finalize",
@@ -206,10 +164,7 @@ def _finalize(
         verify=False,
     )
     response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, dict):
-        raise AssertionError("Workspace upload finalize response must be an object.")
-    return payload
+    return WorkspaceUploadStatusResponse.model_validate(response.json())
 
 
 def _cancel(
@@ -219,7 +174,7 @@ def _cancel(
     upload_id: str,
     revision: int,
     current_delivery_number: int | None = None,
-) -> dict[str, object]:
+) -> WorkspaceUploadStatusResponse:
     """Request one revision-fenced upload cancellation through the public API."""
     response = requests.post(
         f"{server_url}/chat/v1/agents/{setup.agent_id}/workspace/uploads/{upload_id}/cancel",
@@ -232,10 +187,7 @@ def _cancel(
         verify=False,
     )
     response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, dict):
-        raise AssertionError("Workspace upload cancel response must be an object.")
-    return payload
+    return WorkspaceUploadStatusResponse.model_validate(response.json())
 
 
 def _retry(
@@ -247,7 +199,7 @@ def _retry(
     current_delivery_number: int,
     overwrite: bool,
     conflict_precondition: str | None,
-) -> dict[str, object]:
+) -> WorkspaceUploadStatusResponse:
     """Queue one Runtime delivery retry through the public API."""
     response = requests.post(
         f"{server_url}/chat/v1/agents/{setup.agent_id}/workspace/uploads/{upload_id}/retry",
@@ -262,10 +214,7 @@ def _retry(
         verify=False,
     )
     response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, dict):
-        raise AssertionError("Workspace upload retry response must be an object.")
-    return payload
+    return WorkspaceUploadStatusResponse.model_validate(response.json())
 
 
 def _download_workspace_file(
@@ -341,8 +290,8 @@ def _wait_for_workspace_bytes(
 
 
 class _UploadFinalization(NamedTuple):
-    created: _WorkspaceUploadStatus
-    terminal: dict[str, object]
+    created: WorkspaceUploadStatusResponse
+    terminal: WorkspaceUploadStatusResponse
 
 
 def _upload_and_finalize(
@@ -362,10 +311,10 @@ def _upload_and_finalize(
         filename=filename,
         content=content,
     )
-    created_status = created["status"]
-    upload_id = created_status["identity"]["upload_id"]
-    revision = created_status["revision"]
-    _put_direct(created["ticket"], content, gateway_url=gateway_url)
+    created_status = created.status
+    upload_id = created_status.identity.upload_id
+    revision = created_status.revision
+    _put_direct(created.ticket, content, gateway_url=gateway_url)
     _finalize(
         server_url=server_url,
         setup=setup,
@@ -404,14 +353,14 @@ def test_workspace_upload_direct_put_finalize_and_exact_download(
         filename=filename,
         content=content,
     )
-    upload_id = created["status"]["identity"]["upload_id"]
-    revision = created["status"]["revision"]
+    upload_id = created.status.identity.upload_id
+    revision = created.status.revision
     assert isinstance(upload_id, str)
     assert isinstance(revision, int)
-    assert urlparse(created["ticket"]["url"]).netloc
-    assert created["ticket"]["method"] == "PUT"
+    assert urlparse(created.ticket.url).netloc
+    assert created.ticket.method == "PUT"
     _put_direct(
-        created["ticket"],
+        created.ticket,
         content,
         gateway_url=azents_workspace_upload_gateway_url,
     )
@@ -427,8 +376,8 @@ def test_workspace_upload_direct_put_finalize_and_exact_download(
         upload_id=upload_id,
         expected={"succeeded"},
     )
-    assert terminal["actual_size"] == len(content)
-    assert terminal["sha256"] == hashlib.sha256(content).hexdigest()
+    assert terminal.actual_size == len(content)
+    assert terminal.sha256 == hashlib.sha256(content).hexdigest()
     _wait_for_workspace_bytes(
         server_url=azents_public_server_url,
         setup=setup,
@@ -473,12 +422,12 @@ def test_workspace_upload_conflict_overwrite_and_retry_without_reupload(
         filename=filename,
         content=second_content,
     )
-    upload_id = created["status"]["identity"]["upload_id"]
-    revision = created["status"]["revision"]
+    upload_id = created.status.identity.upload_id
+    revision = created.status.revision
     assert isinstance(upload_id, str)
     assert isinstance(revision, int)
     _put_direct(
-        created["ticket"],
+        created.ticket,
         second_content,
         gateway_url=azents_workspace_upload_gateway_url,
     )
@@ -494,16 +443,16 @@ def test_workspace_upload_conflict_overwrite_and_retry_without_reupload(
         upload_id=upload_id,
         expected={"conflicted"},
     )
-    conflict_revision = conflict.get("revision")
-    delivery_number = conflict.get("current_delivery_number")
-    evidence = conflict.get("destination_evidence")
+    conflict_revision = conflict.revision
+    delivery_number = conflict.current_delivery_number
+    evidence = conflict.destination_evidence
     if (
         not isinstance(conflict_revision, int)
         or not isinstance(delivery_number, int)
-        or not isinstance(evidence, dict)
+        or evidence is None
     ):
         raise AssertionError("Conflict status is missing retry fencing data.")
-    precondition = evidence.get("conflict_precondition")
+    precondition = evidence.conflict_precondition
     assert isinstance(precondition, str) and precondition
 
     retry = _retry(
@@ -515,14 +464,14 @@ def test_workspace_upload_conflict_overwrite_and_retry_without_reupload(
         overwrite=True,
         conflict_precondition=precondition,
     )
-    assert retry["phase"] == "moving_to_runtime"
+    assert retry.phase == "moving_to_runtime"
     terminal = _wait_for_phase(
         server_url=azents_public_server_url,
         setup=setup,
         upload_id=upload_id,
         expected={"succeeded"},
     )
-    assert terminal["current_delivery_number"] == delivery_number + 1
+    assert terminal.current_delivery_number == delivery_number + 1
     _wait_for_workspace_bytes(
         server_url=azents_public_server_url,
         setup=setup,
@@ -552,8 +501,8 @@ def test_workspace_upload_cancellation_does_not_publish_destination(
         filename=filename,
         content=content,
     )
-    upload_id = created["status"]["identity"]["upload_id"]
-    revision = created["status"]["revision"]
+    upload_id = created.status.identity.upload_id
+    revision = created.status.revision
     assert isinstance(upload_id, str)
     assert isinstance(revision, int)
     cancelled = _cancel(
@@ -562,14 +511,14 @@ def test_workspace_upload_cancellation_does_not_publish_destination(
         upload_id=upload_id,
         revision=revision,
     )
-    assert cancelled["phase"] == "cancelled"
+    assert cancelled.phase == "cancelled"
     terminal = _wait_for_phase(
         server_url=azents_public_server_url,
         setup=setup,
         upload_id=upload_id,
         expected={"cancelled"},
     )
-    assert terminal["failure"] == "cancelled"
+    assert terminal.failure == "cancelled"
     destination_path = f"{runtime_workspace_path}/{filename}"
     with pytest.raises(requests.HTTPError) as download_error:
         _download_workspace_file(

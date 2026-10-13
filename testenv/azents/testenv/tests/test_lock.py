@@ -1,7 +1,7 @@
 """Resource lock unit tests."""
 
 import threading
-import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -33,25 +33,25 @@ def test_lock_contention(tmp_path: Path) -> None:
         with exclusive_resource(["busy"], timeout=10, lock_dir=tmp_path):
             order.append("first-acquired")
             holding.set()
-            release.wait(timeout=5)
+            assert release.wait(timeout=10)
             order.append("first-release")
 
     def second() -> None:
-        holding.wait(timeout=5)
+        assert holding.wait(timeout=5)
         # First lock stays held, so second acquire with timeout=2 should fail.
         with pytest.raises(Timeout):
             with exclusive_resource(["busy"], timeout=2, lock_dir=tmp_path):
                 order.append("second-acquired")
 
-    t1 = threading.Thread(target=first)
-    t2 = threading.Thread(target=second)
-    t1.start()
-    t2.start()
-    # Wait for the second acquire to time out.
-    time.sleep(3)
-    release.set()
-    t1.join(timeout=10)
-    t2.join(timeout=10)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first_result = executor.submit(first)
+        second_result = executor.submit(second)
+        try:
+            # Completion of the actual timeout assertion establishes ordering.
+            second_result.result(timeout=5)
+        finally:
+            release.set()
+        first_result.result(timeout=5)
 
     assert "first-acquired" in order
     assert "first-release" in order

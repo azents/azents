@@ -21,13 +21,12 @@ import {
   TextInput,
 } from "@mantine/core";
 import {
-  IconAlertTriangle,
-  IconCheck,
   IconInfoCircle,
   IconPlugConnected,
   IconSettings,
 } from "@tabler/icons-react";
 import { useMemo } from "react";
+import { ProviderConnectionTestFeedback } from "./ProviderConnectionTestFeedback";
 
 const AWS_REGIONS = [
   { value: "us-east-1", label: "US East (N. Virginia)" },
@@ -209,23 +208,7 @@ export function AwsConfigFields({
           Test Connection
         </Button>
 
-        {testState.type === "RESULT" && (
-          <Alert
-            variant="light"
-            color={testState.result.success ? "green" : "red"}
-            icon={
-              testState.result.success ? (
-                <IconCheck size={16} />
-              ) : (
-                <IconAlertTriangle size={16} />
-              )
-            }
-          >
-            <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
-              {testState.result.message}
-            </Text>
-          </Alert>
-        )}
+        <ProviderConnectionTestFeedback state={testState} preWrap />
       </Stack>
 
       <Accordion variant="contained">

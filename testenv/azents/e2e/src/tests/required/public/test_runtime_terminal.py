@@ -7,7 +7,7 @@ import re
 import struct
 import time
 from dataclasses import dataclass
-from typing import Callable, NamedTuple
+from typing import Annotated, Callable, Literal, NamedTuple
 from urllib.parse import quote
 
 import azentsadminclient
@@ -23,12 +23,22 @@ from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
 from azentspublicclient.models.agent_runtime_capability import AgentRuntimeCapability
 from azentspublicclient.models.agent_runtime_response import AgentRuntimeResponse
+from azentspublicclient.models.agent_session_response import AgentSessionResponse
 from azentspublicclient.models.agent_type import AgentType
+from azentspublicclient.models.agent_workspace_stat_response import (
+    AgentWorkspaceStatResponse,
+)
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest
 from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
+)
+from azentspublicclient.models.project_browser_manifest_response import (
+    ProjectBrowserManifestResponse,
+)
+from azentspublicclient.models.runtime_terminal_lifecycle import (
+    RuntimeTerminalLifecycle,
 )
 from azentspublicclient.models.runtime_terminal_projection_response import (
     RuntimeTerminalProjectionResponse,
@@ -40,7 +50,7 @@ from azentspublicclient.models.runtime_terminal_ticket_status import (
     RuntimeTerminalTicketStatus,
 )
 from azentspublicclient.models.secrets import Secrets
-from pydantic import TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 from testcontainers.core.container import DockerContainer
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import ClientConnection
@@ -59,7 +69,99 @@ _RUNTIME_PROVIDER_ID = "system-docker"
 _SUBPROTOCOL = "azents.terminal.v1"
 _MAIN_WEB_ORIGIN = "https://azents-web-gateway:8443"
 _FRAME_HEADER = struct.Struct(">BBQ")
-_JSON_OBJECT = TypeAdapter(dict[str, object])
+
+
+class _TerminalControlModel(BaseModel):
+    """Closed server control shape mirrored from the canonical Terminal API."""
+
+    model_config = ConfigDict(strict=True, extra="forbid", hide_input_in_errors=True)
+
+
+class _AcceptedControl(_TerminalControlModel):
+    type: Literal["accepted"]
+    terminal_id: str
+    lifecycle: RuntimeTerminalLifecycle
+    attachment_generation: int = Field(ge=1)
+    desired_generation: int = Field(ge=1)
+    runner_generation: str
+    shell_label: str
+    working_directory_display: str
+    next_input_sequence: int = Field(ge=1)
+    replay_min_sequence: int = Field(ge=0)
+    replay_max_sequence: int = Field(ge=0)
+    replay_truncated: bool
+
+
+class _ReplayBeginControl(_TerminalControlModel):
+    type: Literal["replay_begin"]
+    minimum_sequence: int = Field(ge=0)
+    maximum_sequence: int = Field(ge=0)
+
+
+class _ReplayTruncatedControl(_TerminalControlModel):
+    type: Literal["replay_truncated"]
+    minimum_sequence: int = Field(ge=0)
+
+
+class _ReplayEndControl(_TerminalControlModel):
+    type: Literal["replay_end"]
+    maximum_sequence: int = Field(ge=0)
+
+
+class _InputAckControl(_TerminalControlModel):
+    type: Literal["input_ack"]
+    sequence: int = Field(ge=1)
+
+
+class _StatusControl(_TerminalControlModel):
+    type: Literal["status"]
+    lifecycle: RuntimeTerminalLifecycle
+    reason: str | None
+
+
+class _ExitControl(_TerminalControlModel):
+    type: Literal["exit"]
+    reason: str
+    exit_code: int | None
+
+
+class _RevokedControl(_TerminalControlModel):
+    type: Literal["revoked"]
+    reason_code: RuntimeTerminalReasonCode
+
+
+class _ErrorControl(_TerminalControlModel):
+    type: Literal["error"]
+    code: str
+
+
+class _HeartbeatAckControl(_TerminalControlModel):
+    type: Literal["heartbeat_ack"]
+    sequence: int = Field(ge=1)
+
+
+_TerminalControl = (
+    _AcceptedControl
+    | _ReplayBeginControl
+    | _ReplayTruncatedControl
+    | _ReplayEndControl
+    | _InputAckControl
+    | _StatusControl
+    | _ExitControl
+    | _RevokedControl
+    | _ErrorControl
+    | _HeartbeatAckControl
+)
+_TERMINAL_CONTROL = TypeAdapter(
+    Annotated[_TerminalControl, Field(discriminator="type")]
+)
+
+
+class _PreparationError(BaseModel):
+    """Typed HTTP error detail; unrelated response metadata is ignored."""
+
+    model_config = ConfigDict(strict=True, extra="ignore")
+    detail: str
 
 
 @dataclass(frozen=True)
@@ -95,12 +197,14 @@ def _headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def _response_object(response: requests.Response, *, label: str) -> dict[str, object]:
-    """Validate one JSON object response."""
+def _response_payload[Payload: BaseModel](
+    response: requests.Response, model: type[Payload], *, label: str
+) -> Payload:
+    """Decode one REST observation through its operation-specific API model."""
     try:
-        return _JSON_OBJECT.validate_json(response.text)
+        return model.model_validate_json(response.text, strict=True)
     except ValidationError as exc:
-        raise AssertionError(f"{label} is not an object: {response.text!r}") from exc
+        raise AssertionError(f"{label} payload is invalid") from exc
 
 
 def _primary_session_id(*, server_url: str, token: str, agent_id: str) -> str:
@@ -111,10 +215,9 @@ def _primary_session_id(*, server_url: str, token: str, agent_id: str) -> str:
         timeout=10,
     )
     response.raise_for_status()
-    session_id = _response_object(response, label="Team primary Session").get("id")
-    if not isinstance(session_id, str):
-        raise AssertionError(f"Team primary Session omitted id: {response.text!r}")
-    return session_id
+    return _response_payload(
+        response, AgentSessionResponse, label="Team primary Session"
+    ).id
 
 
 def _prepare_session_folder(
@@ -161,8 +264,9 @@ def _wait_session_folder_ready(
                 timeout=10,
             )
             if not manifest_response.ok:
-                manifest_error = _response_object(
+                manifest_error = _response_payload(
                     manifest_response,
+                    _PreparationError,
                     label="Session Project browser manifest error",
                 )
                 last_observation = {
@@ -171,27 +275,23 @@ def _wait_session_folder_ready(
                 }
                 if not (
                     manifest_response.status_code == 400
-                    and manifest_error.get("detail")
+                    and manifest_error.detail
                     == "Session working-folder binding is unavailable."
                 ):
                     manifest_response.raise_for_status()
                 time.sleep(0.5)
                 continue
-            manifest = _response_object(
+            manifest = _response_payload(
                 manifest_response,
+                ProjectBrowserManifestResponse,
                 label="Session Project browser manifest",
             )
-            entries = manifest.get("entries")
-            if not isinstance(entries, list):
-                raise AssertionError(f"Session manifest omitted entries: {manifest!r}")
             session_paths = [
-                entry.get("path")
-                for entry in entries
-                if isinstance(entry, dict)
-                and isinstance(entry.get("source"), dict)
-                and entry["source"].get("type") == "session_folder"
+                entry.path
+                for entry in manifest.entries
+                if entry.source.type == "session_folder"
             ]
-            if len(session_paths) != 1 or not isinstance(session_paths[0], str):
+            if len(session_paths) != 1:
                 raise AssertionError(
                     f"Session manifest omitted one Session folder: {manifest!r}"
                 )
@@ -210,12 +310,13 @@ def _wait_session_folder_ready(
             time.sleep(0.5)
             continue
         response.raise_for_status()
-        stat = _response_object(
+        stat = _response_payload(
             response,
+            AgentWorkspaceStatResponse,
             label="Session working-folder stat",
         )
         last_observation = stat
-        if stat.get("path") == session_folder_path and stat.get("kind") == "directory":
+        if stat.path == session_folder_path and stat.kind == "directory":
             return
         time.sleep(0.5)
     raise AssertionError(
@@ -498,31 +599,18 @@ class _TerminalSocket:
                     )
                 continue
             control = _control(message)
-            if control.get("type") == "accepted":
-                terminal_id = control.get("terminal_id")
-                attachment_generation = control.get("attachment_generation")
-                working_directory = control.get("working_directory_display")
-                next_input_sequence = control.get("next_input_sequence")
-                replay_maximum_raw = control.get("replay_max_sequence")
-                if not (
-                    isinstance(terminal_id, str)
-                    and isinstance(attachment_generation, int)
-                    and isinstance(working_directory, str)
-                    and isinstance(next_input_sequence, int)
-                    and isinstance(replay_maximum_raw, int)
-                ):
-                    raise AssertionError(f"Invalid accepted control: {control!r}")
-                replay_maximum = replay_maximum_raw
+            if isinstance(control, _AcceptedControl):
+                replay_maximum = control.replay_max_sequence
                 accepted = _AcceptedTerminal(
-                    terminal_id=terminal_id,
-                    attachment_generation=attachment_generation,
-                    working_directory=working_directory,
-                    next_input_sequence=next_input_sequence,
+                    terminal_id=control.terminal_id,
+                    attachment_generation=control.attachment_generation,
+                    working_directory=control.working_directory_display,
+                    next_input_sequence=control.next_input_sequence,
                     replay_maximum_sequence=replay_maximum,
                 )
-            elif control.get("type") == "replay_end":
+            elif isinstance(control, _ReplayEndControl):
                 assert accepted is not None
-                assert control.get("maximum_sequence") == replay_maximum
+                assert control.maximum_sequence == replay_maximum
                 connection.send(
                     json.dumps(
                         {
@@ -560,14 +648,16 @@ class _TerminalSocket:
             )
         )
 
-    def terminate(self) -> dict[str, object]:
+    def terminate(self) -> _ExitControl:
         """Terminate the live PTY and return its exit control."""
         self.connection.send(json.dumps({"type": "terminate"}))
-        return self.wait_for_control("exit", timeout=30)
+        control = self.wait_for_control("exit", timeout=30)
+        assert isinstance(control, _ExitControl)
+        return control
 
     def wait_for_control(
         self, control_type: str, *, timeout: float
-    ) -> dict[str, object]:
+    ) -> _TerminalControl:
         """Wait for one server control while acknowledging output."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -583,11 +673,13 @@ class _TerminalSocket:
                 self._accept_output(message)
                 continue
             control = _control(message)
-            if control.get("type") == control_type:
+            if control.type == control_type:
                 return control
         raise AssertionError(f"Terminal control was not observed: {control_type}")
 
-    def wait_for_invalidation(self, *, timeout: float) -> dict[str, object] | None:
+    def wait_for_invalidation(
+        self, *, timeout: float
+    ) -> _RevokedControl | _ExitControl | None:
         """Wait for a bounded revocation/exit control or socket close."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -601,7 +693,7 @@ class _TerminalSocket:
                 self._accept_output(message)
                 continue
             control = _control(message)
-            if control.get("type") in {"revoked", "exit"}:
+            if isinstance(control, _RevokedControl | _ExitControl):
                 return control
         raise AssertionError("Terminal was not invalidated within the lifecycle bound")
 
@@ -619,7 +711,7 @@ class _TerminalSocket:
                 self._accept_output(message)
                 continue
             control = _control(message)
-            if control.get("type") in {"exit", "revoked", "error"}:
+            if isinstance(control, _ExitControl | _RevokedControl | _ErrorControl):
                 raise AssertionError(
                     f"Terminal ended before output marker {marker!r}: {control!r}"
                 )
@@ -655,12 +747,12 @@ class _TerminalSocket:
             return
 
 
-def _control(message: str) -> dict[str, object]:
-    """Validate one server JSON control object."""
+def _control(message: str) -> _TerminalControl:
+    """Validate every canonical server control before interpreting its fields."""
     try:
-        return _JSON_OBJECT.validate_json(message)
+        return _TERMINAL_CONTROL.validate_json(message, strict=True)
     except ValidationError as exc:
-        raise AssertionError(f"Invalid Terminal control: {message!r}") from exc
+        raise AssertionError("Invalid Terminal control payload") from exc
 
 
 def _decode_output_frame(frame: bytes) -> _DecodedOutputFrame:
@@ -766,7 +858,7 @@ def test_runtime_terminal_protocol_reconnect_resize_ctrl_c_and_terminate(
         raise AssertionError(
             f"Terminal exit control timed out; projection={timed_out_projection!r}"
         ) from exc
-    assert exit_control.get("reason") == "caller"
+    assert exit_control.reason == "caller"
     projection = terminal_api.terminal_v1_get_terminal_projection(
         handle=workspace.handle,
         agent_id=workspace.agent_id,
@@ -850,7 +942,7 @@ def test_runtime_terminal_runtime_lifecycle_priority(
     assert projection.state == "stopped"
     assert projection.reason_code is RuntimeTerminalReasonCode.RUNTIME_STOPPED
     invalidation = active.wait_for_invalidation(timeout=15)
-    assert invalidation is None or invalidation.get("type") in {"revoked", "exit"}
+    assert invalidation is None or invalidation.type in {"revoked", "exit"}
 
     stopped_ticket = terminal_api.terminal_v1_issue_terminal_ticket(
         handle=workspace.handle,

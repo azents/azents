@@ -26,7 +26,6 @@ import {
 } from "@mantine/core";
 import {
   IconAlertTriangle,
-  IconCheck,
   IconInfoCircle,
   IconPlugConnected,
   IconPlus,
@@ -48,6 +47,7 @@ import {
   getClusters,
   GKE_LOCATIONS,
 } from "../kubernetes-fields";
+import { ProviderConnectionTestFeedback } from "./ProviderConnectionTestFeedback";
 import type {
   ClusterCredentialEntry,
   ClusterEntry,
@@ -868,23 +868,7 @@ export function KubernetesConfigFields({
             Connection test
           </Button>
 
-          {testState.type === "RESULT" && (
-            <Alert
-              variant="light"
-              color={testState.result.success ? "green" : "red"}
-              icon={
-                testState.result.success ? (
-                  <IconCheck size={16} />
-                ) : (
-                  <IconAlertTriangle size={16} />
-                )
-              }
-            >
-              <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
-                {testState.result.message}
-              </Text>
-            </Alert>
-          )}
+          <ProviderConnectionTestFeedback state={testState} preWrap />
         </Stack>
       )}
     </Stack>

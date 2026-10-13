@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 from collections.abc import AsyncIterable, AsyncIterator, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
 
@@ -95,8 +96,8 @@ class GrpcProviderControlClient(ProviderControlClient):
         provider_auth_method: str,
     ) -> None:
         """Initialize the gRPC client with a stream callable."""
-        self._stream = stream
-        self._channel = channel
+        self.stream = stream
+        self.channel = channel
         self._heartbeat_ack_timeout_seconds = heartbeat_ack_timeout_seconds
         self._metadata = _provider_credential_metadata(
             provider_credential,
@@ -160,7 +161,7 @@ class GrpcProviderControlClient(ProviderControlClient):
                 request_id="register",
             )
         )
-        responses = self._stream(outbound, metadata=self._metadata)
+        responses = self.stream(outbound, metadata=self._metadata)
         self._receiver_task = asyncio.create_task(self._receive(responses))
         return await self._accepted
 
@@ -263,9 +264,9 @@ class GrpcProviderControlClient(ProviderControlClient):
             ):
                 await self._receiver_task
             self._receiver_task = None
-        if self._channel is not None:
-            await self._channel.close()
-            self._channel = None
+        if self.channel is not None:
+            await self.channel.close()
+            self.channel = None
 
     async def _send(
         self,
@@ -404,7 +405,7 @@ def _command(
 ) -> RuntimeLifecycleCommand:
     if not message.HasField("runtime_configuration"):
         raise ValueError("Runtime configuration envelope is required.")
-    payload = json_value_from_struct(message.payload)
+    auth = _decode_command_auth(message.payload)
     return RuntimeLifecycleCommand(
         command_type=RuntimeLifecycleCommandType(message.command_type),
         identity=RuntimeIdentity(
@@ -419,9 +420,9 @@ def _command(
             control_endpoint=message.control_endpoint,
             transfer_endpoint=_required_transfer_endpoint(message.transfer_endpoint),
             runner_auth_token=message.runner_auth_token,
-            runner_auth_credential_id=_required_runner_auth_credential_id(payload),
-            control_tls_ca_pem=_optional_control_tls_ca_pem(payload),
-            allow_insecure_control=_allow_insecure_control(payload),
+            runner_auth_credential_id=auth.runner_auth_credential_id,
+            control_tls_ca_pem=auth.control_tls_ca_pem,
+            allow_insecure_control=auth.allow_insecure_control,
         ),
         reset_final_desired_state=_optional_desired_state(
             message.reset_final_desired_state
@@ -438,17 +439,52 @@ def _optional_desired_state(value: str) -> RuntimeDesiredState | None:
     return RuntimeDesiredState(value)
 
 
-def _required_runner_auth_credential_id(payload: dict[str, JsonValue]) -> str:
+@dataclass(frozen=True)
+class _ProviderCommandAuthPayload:
+    """Validated auth fields not represented directly in ProviderCommand."""
+
+    runner_auth_credential_id: str
+    control_tls_ca_pem: str | None
+    allow_insecure_control: bool
+
+
+def _decode_command_auth(
+    value: struct_pb2.Struct,
+) -> _ProviderCommandAuthPayload:
+    """Validate command auth once while protobuf owns redundant wire fields."""
+    payload = json_value_from_struct(value)
+    if payload.keys() - {"identity", "runner_image", "auth"}:
+        raise ValueError("Provider command payload contains unknown fields")
     auth = payload.get("auth")
     if not isinstance(auth, dict):
-        raise ValueError("runner_auth_credential_id is required")
+        raise ValueError("Provider command auth must be an object")
+    if auth.keys() - {
+        "control_endpoint",
+        "transfer_endpoint",
+        "runner_auth_credential_id",
+        "control_tls_ca_pem",
+        "allow_insecure_control",
+    }:
+        raise ValueError("Provider command auth contains unknown fields")
     credential_id = auth.get("runner_auth_credential_id")
     if not isinstance(credential_id, str):
         raise ValueError("runner_auth_credential_id is required")
     normalized = credential_id.strip()
     if not normalized:
         raise ValueError("runner_auth_credential_id is required")
-    return normalized
+
+    ca_pem = auth.get("control_tls_ca_pem")
+    if ca_pem is not None and not isinstance(ca_pem, str):
+        raise ValueError("control_tls_ca_pem must be a string or null")
+    normalized_ca = ca_pem.strip() or None if ca_pem is not None else None
+    allow_insecure = auth.get("allow_insecure_control", False)
+    if not isinstance(allow_insecure, bool):
+        raise ValueError("allow_insecure_control must be a boolean")
+    return _ProviderCommandAuthPayload(
+        runner_auth_credential_id=normalized,
+        control_tls_ca_pem=normalized_ca,
+        allow_insecure_control=allow_insecure,
+    )
 
 
 def _required_transfer_endpoint(value: str) -> str:
@@ -456,25 +492,6 @@ def _required_transfer_endpoint(value: str) -> str:
     if not normalized:
         raise ValueError("transfer_endpoint is required")
     return normalized
-
-
-def _optional_control_tls_ca_pem(payload: dict[str, JsonValue]) -> str | None:
-    auth = payload.get("auth")
-    if not isinstance(auth, dict):
-        return None
-    value = auth.get("control_tls_ca_pem")
-    if not isinstance(value, str):
-        return None
-    normalized = value.strip()
-    return normalized or None
-
-
-def _allow_insecure_control(payload: dict[str, JsonValue]) -> bool:
-    auth = payload.get("auth")
-    if not isinstance(auth, dict):
-        return False
-    value = auth.get("allow_insecure_control")
-    return value if isinstance(value, bool) else False
 
 
 def _report_message(

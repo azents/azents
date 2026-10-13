@@ -1,7 +1,6 @@
 """Model stream watchdog E2E coverage through public product paths."""
 
 import dataclasses
-import json
 import time
 from collections.abc import Callable
 
@@ -11,6 +10,7 @@ import requests
 from azentspublicclient.api.llm_provider_integration_v1_api import (
     LLMProviderIntegrationV1Api,
 )
+from azentspublicclient.models.agent_session_response import AgentSessionResponse
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
 from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
@@ -24,6 +24,19 @@ from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
 from websockets.sync.connection import Connection
 
+from support.image_watchdog_observations import (
+    ContentObservation,
+    WatchdogActionObservation,
+    WatchdogLiveObservation,
+    decode_image_requests,
+)
+from support.observations import (
+    FailedAttemptObservation,
+    FailedRunObservation,
+    HistoryEventObservation,
+    RunMarkerObservation,
+    SystemErrorObservation,
+)
 from support.utils import model_selection_from_first_candidate, unique
 from tests.required.public.test_agent_execution_persistence import (
     auth_headers,
@@ -31,9 +44,6 @@ from tests.required.public.test_agent_execution_persistence import (
     create_agent,
     failed_run_error_events,
     history_events,
-    json_object,
-    json_object_list_payload,
-    json_object_payload,
     list_history,
     list_live,
     message_contents,
@@ -69,21 +79,22 @@ _TITLE_OUTPUT_FALLBACK_TITLE = "Structured title fallback recovered"
 
 
 def _title_request_modes(proxy_url: str, prompt: str) -> list[str]:
-    """Read only output-format evidence from the synthetic provider journal."""
+    """Read typed output-format evidence from the synthetic provider journal."""
     response = requests.get(f"{proxy_url}/v1/_image_generation_requests", timeout=10)
     response.raise_for_status()
-    journal = json_object_list_payload(response.json(), label="title request journal")
     modes: list[str] = []
-    for request in journal:
-        serialized = json.dumps(request)
-        if prompt not in serialized or (
-            "Create a brief title from the request" not in serialized
+    for request in decode_image_requests(response.json()):
+        serialized = request.serialized()
+        if (
+            prompt not in serialized
+            or "Create a brief title from the request" not in serialized
         ):
             continue
-        text = request.get("text")
-        format_value = text.get("format") if isinstance(text, dict) else None
+        text = request.text
         structured = (
-            isinstance(format_value, dict) and format_value.get("type") == "json_schema"
+            text is not None
+            and text.format is not None
+            and text.format.type == "json_schema"
         )
         modes.append("structured" if structured else "plain_text")
     return modes
@@ -123,9 +134,8 @@ def _wait_for_idle_run_boundary(
             token=token,
             session_id=session_id,
         )
-        return (
-            observed.get("run") is None and observed.get("session_run_state") == "idle"
-        )
+        live = WatchdogLiveObservation.model_validate(observed)
+        return live.run is None and live.session_run_state == "idle"
 
     _wait_until(
         run_is_idle,
@@ -135,51 +145,27 @@ def _wait_for_idle_run_boundary(
 
 
 def _live_partial_contents(payload: dict[str, object]) -> list[str]:
-    """Return content strings from the REST live partial-history projection."""
-    partial_history = json_object_payload(
-        payload.get("partial_history"),
-        label="live partial history",
-    )
-    events = json_object_list_payload(
-        partial_history.get("items"),
-        label="live partial history items",
-    )
+    """Return content strings from the validated live partial-history projection."""
+    live = WatchdogLiveObservation.model_validate(payload)
     contents: list[str] = []
-    for event in events:
-        event_payload = json_object_payload(
-            event.get("payload"),
-            label="live event payload",
-        )
-        content = event_payload.get("content")
+    for event in live.partial_history.items:
+        content = ContentObservation.model_validate(event.payload).content
         if isinstance(content, str):
             contents.append(content)
     return contents
 
 
-def _live_event_ids_containing(
-    payload: dict[str, object],
-    marker: str,
-) -> set[str]:
-    """Return live event IDs whose projected content contains a marker."""
-    partial_history = json_object_payload(
-        payload.get("partial_history"),
-        label="live partial history",
-    )
-    events = json_object_list_payload(
-        partial_history.get("items"),
-        label="live partial history items",
-    )
-    event_ids: set[str] = set()
-    for event in events:
-        event_payload = json_object_payload(
-            event.get("payload"),
-            label="live event payload",
+def _live_event_ids_containing(payload: dict[str, object], marker: str) -> set[str]:
+    """Return typed live event IDs whose selected content contains a marker."""
+    live = WatchdogLiveObservation.model_validate(payload)
+    return {
+        event.id
+        for event in live.partial_history.items
+        if isinstance(
+            content := ContentObservation.model_validate(event.payload).content, str
         )
-        content = event_payload.get("content")
-        event_id = event.get("id")
-        if isinstance(content, str) and marker in content and isinstance(event_id, str):
-            event_ids.add(event_id)
-    return event_ids
+        and marker in content
+    }
 
 
 def _wait_for_live_content(
@@ -230,15 +216,15 @@ def _wait_for_retry_without_content(
             token=token,
             session_id=session_id,
         )
-        run_payload = observed.get("run")
+        run_payload = WatchdogLiveObservation.model_validate(observed).run
         if run_payload is None:
             return False
-        run = json_object_payload(run_payload, label="live run")
-        retry_payload = run.get("retry")
+        run = run_payload
+        retry_payload = run.retry
         if retry_payload is None:
             return False
-        retry = json_object_payload(retry_payload, label="live run retry")
-        count = retry.get("failed_attempt_count")
+        retry = retry_payload
+        count = retry.failed_attempt_count
         return (
             isinstance(count, int)
             and count >= failed_attempt_count
@@ -272,7 +258,7 @@ def _wait_for_ws_removed_event(
             action_type="live_event_removed",
             timeout=max(0.1, deadline - time.monotonic()),
         )
-        event_id = removed.get("event_id")
+        event_id = WatchdogActionObservation.model_validate(removed).event_id
         observed.append(event_id)
         if event_id in expected_event_ids:
             return removed
@@ -296,18 +282,16 @@ def _wait_for_ws_live_content(
             raw = websocket.recv(timeout=max(0.1, deadline - time.monotonic()))
         except TimeoutError:
             continue
-        action = json_object_payload(json.loads(raw), label="WebSocket action")
-        observed.append(action.get("type"))
-        if action.get("type") != "live_event_upserted":
+        action = WatchdogActionObservation.model_validate_json(raw)
+        observed.append(action.type)
+        if action.type != "live_event_upserted":
             continue
-        assert action.get("session_id") == session_id
-        event = json_object_payload(action.get("event"), label="live upsert event")
-        payload = json_object_payload(
-            event.get("payload"),
-            label="live upsert payload",
-        )
-        event_content = payload.get("content")
-        event_id = event.get("id")
+        assert action.session_id == session_id
+        event = action.event
+        assert event is not None
+        payload = ContentObservation.model_validate(event.payload)
+        event_content = payload.content
+        event_id = event.id
         if (
             isinstance(event_content, str)
             and content in event_content
@@ -336,53 +320,46 @@ def _wait_for_ws_clean_retry(
             raw = websocket.recv(timeout=max(0.1, deadline - time.monotonic()))
         except TimeoutError:
             continue
-        action = json_object_payload(json.loads(raw), label="WebSocket action")
-        action_type = action.get("type")
+        action = WatchdogActionObservation.model_validate_json(raw)
+        action_type = action.type
         observed.append(action_type)
         if action_type == "live_event_removed":
-            assert action.get("session_id") == session_id
-            event_id = action.get("event_id")
+            assert action.session_id == session_id
+            event_id = action.event_id
             if isinstance(event_id, str):
                 removed_event_ids.add(event_id)
             continue
         if action_type != "live_run_updated":
             continue
-        assert action.get("session_id") == session_id
-        run = json_object_payload(action.get("run"), label="WebSocket live run")
-        retry = json_object_payload(
-            run.get("retry"),
-            label="WebSocket retry state",
-        )
-        if retry.get("failed_attempt_count") != failed_attempt_count:
+        assert action.session_id == session_id
+        run = action.run
+        assert run is not None
+        retry = run.retry
+        if retry is None or retry.failed_attempt_count != failed_attempt_count:
             continue
         assert failed_event_ids <= removed_event_ids
-        return action
+        return action.model_dump(mode="json", exclude_unset=True)
     raise TimeoutError(
         "clean WebSocket retry was not observed: "
         f"removed={removed_event_ids!r}, actions={observed!r}"
     )
 
 
-def _failed_run_failure(payload: dict[str, object]) -> dict[str, object]:
-    """Return the single terminal failed-run failure metadata object."""
+def _failed_run_failure(payload: dict[str, object]) -> FailedRunObservation:
+    """Return validated terminal failed-run metadata from selected history."""
     failed_events = failed_run_error_events(payload)
     assert len(failed_events) == 1, failed_events
-    event_payload = json_object_payload(
-        failed_events[0].get("payload"),
-        label="failed-run event payload",
-    )
-    return json_object_payload(
-        event_payload.get("failure"),
-        label="failed-run failure",
-    )
+    event = HistoryEventObservation.model_validate(failed_events[0])
+    failure = SystemErrorObservation.model_validate(event.payload).failure
+    assert failure is not None
+    return failure
 
 
-def _failed_attempts(payload: dict[str, object]) -> list[dict[str, object]]:
-    """Return the terminal failed-run attempt history."""
-    return json_object_list_payload(
-        _failed_run_failure(payload).get("attempts"),
-        label="failed-run attempts",
-    )
+def _failed_attempts(payload: dict[str, object]) -> list[FailedAttemptObservation]:
+    """Return validated terminal attempt evidence."""
+    attempts = _failed_run_failure(payload).attempts
+    assert attempts is not None
+    return attempts
 
 
 def _post_stop(*, public_url: str, token: str, session_id: str) -> None:
@@ -438,44 +415,37 @@ def _wait_for_live_provider_retry(
             token=token,
             session_id=session_id,
         )
-        run_payload = observed.get("run")
+        run_payload = WatchdogLiveObservation.model_validate(observed).run
         if run_payload is None:
             return False
-        run = json_object_payload(run_payload, label="live run")
-        retry_payload = run.get("retry")
+        run = run_payload
+        retry_payload = run.retry
         if retry_payload is None:
             return False
-        retry = json_object_payload(retry_payload, label="live retry")
-        observed_attempt_count = retry.get("failed_attempt_count")
+        retry = retry_payload
+        observed_attempt_count = retry.failed_attempt_count
         if (
-            retry.get("error_kind") != "model_provider"
+            retry.error_kind != "model_provider"
             or not isinstance(observed_attempt_count, int)
             or observed_attempt_count < failed_attempt_count
         ):
             return False
-        attempts = json_object_list_payload(
-            retry.get("attempts"),
-            label="live provider retry attempts",
-        )
+        attempts = retry.attempts
         if not attempts or any(
-            attempt.get("retryability") != "unknown"
-            or attempt.get("failure_code") is not None
+            attempt.retryability != "unknown" or attempt.failure_code is not None
             for attempt in attempts
         ):
             return False
         if not preparing_context:
             return True
-        operation_payload = run.get("operation")
+        operation_payload = run.operation
         if operation_payload is None:
             return False
-        operation = json_object_payload(
-            operation_payload,
-            label="live run operation",
-        )
+        operation = operation_payload
         return (
-            operation.get("kind") == "preparing_context"
-            and operation.get("status") == "running"
-            and isinstance(operation.get("operation_id"), str)
+            operation.kind == "preparing_context"
+            and operation.status == "running"
+            and isinstance(operation.operation_id, str)
         )
 
     _wait_until(
@@ -505,14 +475,12 @@ def _wait_for_stopped_without_failure(
             session_id=session_id,
         )
         interrupted = False
-        for event in history_events(observed):
-            if event.get("kind") != "run_marker":
+        for raw_event in history_events(observed):
+            event = HistoryEventObservation.model_validate(raw_event)
+            if event.kind != "run_marker":
                 continue
-            event_payload = json_object_payload(
-                event.get("payload"),
-                label="run marker payload",
-            )
-            if event_payload.get("status") == "interrupted":
+            event_payload = RunMarkerObservation.model_validate(event.payload)
+            if event_payload.status == "interrupted":
                 interrupted = True
                 break
         if not interrupted or failed_run_error_events(observed):
@@ -522,7 +490,7 @@ def _wait_for_stopped_without_failure(
             token=token,
             session_id=session_id,
         )
-        return live.get("run") is None
+        return WatchdogLiveObservation.model_validate(live).run is None
 
     _wait_until(
         stopped,
@@ -625,7 +593,10 @@ class TestModelStreamWatchdog:
             session_id=session_id,
         ) as websocket:
             subscribed = wait_for_ws_action(websocket, action_type="subscribed")
-            assert subscribed.get("session_id") == session_id
+            assert (
+                WatchdogActionObservation.model_validate(subscribed).session_id
+                == session_id
+            )
             result = run_message(
                 public_api_client=public_api_client,
                 public_url=azents_public_server_url,
@@ -645,7 +616,10 @@ class TestModelStreamWatchdog:
                 failed_event_ids=failed_event_ids,
                 failed_attempt_count=1,
             )
-            assert retry_updated.get("session_id") == session_id
+            assert (
+                WatchdogActionObservation.model_validate(retry_updated).session_id
+                == session_id
+            )
 
         payload = wait_for_rest_contents(
             server_url=azents_public_server_url,
@@ -688,7 +662,10 @@ class TestModelStreamWatchdog:
             session_id=session_id,
         ) as websocket:
             subscribed = wait_for_ws_action(websocket, action_type="subscribed")
-            assert subscribed.get("session_id") == session_id
+            assert (
+                WatchdogActionObservation.model_validate(subscribed).session_id
+                == session_id
+            )
             result = run_message(
                 public_api_client=public_api_client,
                 public_url=azents_public_server_url,
@@ -714,20 +691,19 @@ class TestModelStreamWatchdog:
                 websocket,
                 expected_event_ids=failed_event_ids,
             )
-            assert removed.get("session_id") == result.session_id
+            assert (
+                WatchdogActionObservation.model_validate(removed).session_id
+                == result.session_id
+            )
             retry_updated = wait_for_ws_action(
                 websocket,
                 action_type="live_run_updated",
             )
-            retry_run = json_object_payload(
-                retry_updated.get("run"),
-                label="WebSocket live run",
-            )
-            retry = json_object_payload(
-                retry_run.get("retry"),
-                label="WebSocket retry state",
-            )
-            assert retry.get("failed_attempt_count") == 1
+            retry_run = WatchdogActionObservation.model_validate(retry_updated).run
+            assert retry_run is not None
+            retry = retry_run.retry
+            assert retry is not None
+            assert retry.failed_attempt_count == 1
 
         payload = wait_for_rest_contents(
             server_url=azents_public_server_url,
@@ -853,11 +829,10 @@ class TestModelStreamWatchdog:
             failed_attempt_count=1,
             preparing_context=True,
         )
-        first_run = json_object_payload(first_live.get("run"), label="live run")
-        first_operation = json_object_payload(
-            first_run.get("operation"),
-            label="live run operation",
-        )
+        first_run = WatchdogLiveObservation.model_validate(first_live).run
+        assert first_run is not None
+        first_operation = first_run.operation
+        assert first_operation is not None
         second_live = _wait_for_live_provider_retry(
             public_url=azents_public_server_url,
             token=workspace.token,
@@ -865,14 +840,11 @@ class TestModelStreamWatchdog:
             failed_attempt_count=2,
             preparing_context=True,
         )
-        second_run = json_object_payload(second_live.get("run"), label="live run")
-        second_operation = json_object_payload(
-            second_run.get("operation"),
-            label="live run operation",
-        )
-        assert second_operation.get("operation_id") == first_operation.get(
-            "operation_id"
-        )
+        second_run = WatchdogLiveObservation.model_validate(second_live).run
+        assert second_run is not None
+        second_operation = second_run.operation
+        assert second_operation is not None
+        assert second_operation.operation_id == first_operation.operation_id
 
         payload = wait_for_failed_run_error(
             server_url=azents_public_server_url,
@@ -883,10 +855,10 @@ class TestModelStreamWatchdog:
         failure = _failed_run_failure(payload)
         attempts = _failed_attempts(payload)
 
-        assert failure.get("error_kind") == "model_provider"
-        assert [attempt.get("attempt_number") for attempt in attempts] == [1, 2, 3, 4]
+        assert failure.error_kind == "model_provider"
+        assert [attempt.attempt_number for attempt in attempts] == [1, 2, 3, 4]
         assert all(
-            str(attempt.get("user_message", "")).startswith("Model provider error:")
+            attempt.user_message.startswith("Model provider error:")
             for attempt in attempts
         )
         roles = message_roles(payload)
@@ -923,7 +895,7 @@ class TestModelStreamWatchdog:
         )
 
         assert not system_error_events(payload)
-        session: dict[str, object] | None = None
+        session: AgentSessionResponse | None = None
 
         def initial_title_restored() -> bool:
             nonlocal session
@@ -934,10 +906,10 @@ class TestModelStreamWatchdog:
                 timeout=10,
             )
             response.raise_for_status()
-            session = json_object(response)
+            session = AgentSessionResponse.model_validate(response.json())
             return (
-                session.get("title") == _TITLE_PROMPT
-                and session.get("title_source") == "auto_initial"
+                session.title == _TITLE_PROMPT
+                and session.title_source == "auto_initial"
             )
 
         _wait_until(
@@ -946,8 +918,8 @@ class TestModelStreamWatchdog:
             message=lambda: f"Initial title was not restored: {session!r}",
         )
         assert session is not None
-        assert session.get("title") == _TITLE_PROMPT
-        assert session.get("title_source") == "auto_initial"
+        assert session.title == _TITLE_PROMPT
+        assert session.title_source == "auto_initial"
 
     def test_session_title_provider_failure_retries_without_failing_run(
         self,
@@ -980,7 +952,7 @@ class TestModelStreamWatchdog:
         )
         assert not system_error_events(payload)
 
-        observed: dict[str, object] | None = None
+        observed: AgentSessionResponse | None = None
 
         def title_recovered() -> bool:
             nonlocal observed
@@ -991,10 +963,10 @@ class TestModelStreamWatchdog:
                 timeout=10,
             )
             response.raise_for_status()
-            observed = json_object(response)
+            observed = AgentSessionResponse.model_validate(response.json())
             return (
-                observed.get("title") == _TITLE_PROVIDER_RETRY_TITLE
-                and observed.get("title_source") == "auto_generated"
+                observed.title == _TITLE_PROVIDER_RETRY_TITLE
+                and observed.title_source == "auto_generated"
             )
 
         _wait_until(
@@ -1056,7 +1028,7 @@ class TestModelStreamWatchdog:
         )
         assert not system_error_events(payload)
 
-        observed: dict[str, object] | None = None
+        observed: AgentSessionResponse | None = None
 
         def title_recovered() -> bool:
             nonlocal observed
@@ -1067,10 +1039,10 @@ class TestModelStreamWatchdog:
                 timeout=10,
             )
             response.raise_for_status()
-            observed = json_object(response)
+            observed = AgentSessionResponse.model_validate(response.json())
             return (
-                observed.get("title") == _TITLE_OUTPUT_FALLBACK_TITLE
-                and observed.get("title_source") == "auto_generated"
+                observed.title == _TITLE_OUTPUT_FALLBACK_TITLE
+                and observed.title_source == "auto_generated"
             )
 
         _wait_until(

@@ -6,18 +6,25 @@ Verify uploads and Exchange file listing, download, and deletion.
 import hashlib
 import json
 import time
+from dataclasses import dataclass
 from urllib.parse import quote, urlsplit
 
 import azentsadminclient
 import azentspublicclient
 import requests
 from azentspublicclient.api.chat_v1_api import ChatV1Api
+from azentspublicclient.models.chat_event_page_response import ChatEventPageResponse
 from azentspublicclient.models.upload_response import UploadResponse
-from pydantic import TypeAdapter, ValidationError
+from pydantic import Field, JsonValue, StrictStr, TypeAdapter, ValidationError
 from websockets.sync.client import connect as ws_connect
 from websockets.sync.connection import Connection
 
 from support.consts import E2E_GENERAL_FILE_MAXIMUM_BYTES
+from support.observations import (
+    ChatActionObservation,
+    ExtensionObservation,
+    decode_history_page,
+)
 from support.utils import (
     PNG_1X1,
     create_agent_setup,
@@ -32,6 +39,27 @@ _CHAT_UPLOAD_MAX_BYTES = E2E_GENERAL_FILE_MAXIMUM_BYTES
 _NONEXISTENT_AGENT_ID = "00000000000000000000000000000000"
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
+
+
+class _ContentPart(ExtensionObservation):
+    """Interpret text while retaining opaque file/output part evidence."""
+
+    type: StrictStr
+    text: StrictStr | None = None
+
+
+class _MessagePayload(ExtensionObservation):
+    """Current user/assistant fields used by upload message observations."""
+
+    content: StrictStr | list[_ContentPart]
+    attachments: list[dict[str, JsonValue]] = Field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class _MessageItem:
+    id: str
+    content: str
+    attachments: list[dict[str, JsonValue]]
 
 
 def _exchange_uri_is_file_location(uri: object) -> bool:
@@ -82,10 +110,10 @@ def _connect_existing_chat(
     return ws_connect(ws_uri)
 
 
-def _recv_event(ws: Connection, *, timeout: float = 10) -> dict[str, object]:
-    """Receive one WebSocket event as a JSON object."""
+def _recv_event(ws: Connection, *, timeout: float = 10) -> ChatActionObservation:
+    """Receive one canonical WebSocket action at its validated ingress."""
     raw = ws.recv(timeout=timeout)
-    return _object_item(json.loads(raw), label="WebSocket payload")
+    return ChatActionObservation.model_validate_json(raw)
 
 
 def _object_item(raw_item: object, *, label: str) -> dict[str, object]:
@@ -118,38 +146,27 @@ def _wait_for_user_input(
             event = _recv_event(ws, timeout=5)
         except TimeoutError:
             continue
-        observed.append(event.get("kind") or event.get("type"))
-        if event.get("type") == "history_event_appended":
-            event = _object_item(
-                event.get("event"),
-                label="history_event_appended event",
-            )
-        if event.get("kind") != "user_message":
+        observed.append(event.type)
+        if event.type != "history_event_appended":
             continue
-        payload = _object_item(
-            event.get("payload"),
-            label="user_message payload",
-        )
-        if _content_text(payload.get("content")) == content:
-            return payload
+        assert event.event is not None
+        if event.event.kind != "user_message":
+            continue
+        payload = _MessagePayload.model_validate(event.event.payload)
+        if _content_text(payload.content) == content:
+            return payload.model_dump(mode="json", exclude_unset=True)
     raise TimeoutError(f"user_input was not observed: {content}, {observed}")
 
 
-def _content_text(content: object) -> str:
+def _content_text(content: str | list[_ContentPart]) -> str:
     """Return text from either string or structured event content."""
     if isinstance(content, str):
         return content
-    try:
-        parts = _JSON_OBJECT_LIST.validate_python(content)
-    except ValidationError:
-        return ""
-    texts: list[str] = []
-    for part in parts:
-        part_type = part.get("type")
-        text = part.get("text")
-        if part_type == "input_text" and isinstance(text, str):
-            texts.append(text)
-    return "\n".join(texts)
+    return "\n".join(
+        part.text
+        for part in content
+        if part.type == "input_text" and part.text is not None
+    )
 
 
 def _assert_file_payload_is_blob_free(payload: object, *, label: str) -> None:
@@ -203,7 +220,7 @@ def _list_history(
     server_url: str,
     token: str,
     session_id: str,
-) -> dict[str, object]:
+) -> ChatEventPageResponse:
     """Fetch one REST history event page."""
     response = requests.get(
         f"{server_url}/chat/v1/sessions/{session_id}/history?limit=100",
@@ -211,35 +228,38 @@ def _list_history(
         timeout=10,
     )
     response.raise_for_status()
-    return _object_item(response.json(), label="list history response")
+    return decode_history_page(response.json())
 
 
-def _message_items(payload: dict[str, object]) -> list[dict[str, object]]:
+def _message_items(payload: ChatEventPageResponse) -> list[_MessageItem]:
     """Return user and assistant message items from REST history."""
-    events = _object_items(payload.get("items"), label="REST history items")
-    items: list[dict[str, object]] = []
-    for event in events:
-        if event.get("kind") not in {"user_message", "assistant_message"}:
+    items: list[_MessageItem] = []
+    for event in payload.items:
+        if event.kind not in {"user_message", "assistant_message"}:
             continue
-        event_payload = _object_item(event.get("payload"), label="history payload")
+        event_payload = _MessagePayload.model_validate(event.payload)
         items.append(
-            {
-                "id": event.get("external_id") or event.get("id"),
-                "content": _content_text(event_payload.get("content")),
-                "attachments": event_payload.get("attachments"),
-            }
+            _MessageItem(
+                id=event.external_id or event.id,
+                content=_content_text(event_payload.content),
+                attachments=event_payload.attachments,
+            )
         )
     return items
 
 
 def _message_with_content(
-    payload: dict[str, object],
+    payload: ChatEventPageResponse,
     content: str,
 ) -> dict[str, object]:
     """Return the REST history message with the expected content."""
     for item in _message_items(payload):
-        if item.get("content") == content:
-            return item
+        if item.content == content:
+            return {
+                "id": item.id,
+                "content": item.content,
+                "attachments": item.attachments,
+            }
     raise AssertionError(f"message content not found: {content}")
 
 
@@ -253,7 +273,7 @@ def _wait_for_rest_message(
 ) -> dict[str, object]:
     """Wait for REST history to contain the expected message."""
     deadline = time.monotonic() + timeout
-    last_payload: dict[str, object] | None = None
+    last_payload: ChatEventPageResponse | None = None
     while time.monotonic() < deadline:
         payload = _list_history(server_url, token, session_id)
         last_payload = payload

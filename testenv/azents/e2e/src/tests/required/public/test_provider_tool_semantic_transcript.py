@@ -2,18 +2,27 @@
 
 import json
 import time
-from typing import cast
 
 import azentsadminclient
 import azentspublicclient
 import requests
+from azentspublicclient.models.agent_session_response import AgentSessionResponse
+from azentspublicclient.models.session_context_raw_event_response import (
+    SessionContextRawEventResponse,
+)
+from azentspublicclient.models.session_context_response import SessionContextResponse
+from pydantic import JsonValue, StrictStr, TypeAdapter
 
+from support.observations import (
+    ExtensionObservation,
+    decode_history_page,
+)
+from support.profile_observations import (
+    ProfileProviderRequestObservation,
+)
 from support.utils import unique
 from tests.required.public.test_agent_execution_persistence import (
     auth_headers,
-    history_events,
-    json_object_list_payload,
-    json_object_payload,
     list_history,
 )
 from tests.required.public.test_per_prompt_inference_profile import setup_profile_agent
@@ -33,6 +42,51 @@ _PROXY_JOURNAL_PATH = "/v1/_image_generation_requests"
 _COMPACTION_SYSTEM_PREFIX = (
     "You are a context compaction engine for a long-running agent."
 )
+
+
+class _ContentPart(ExtensionObservation):
+    type: StrictStr
+    text: StrictStr | None = None
+
+
+class _TextPayload(ExtensionObservation):
+    content: StrictStr | list[dict[str, JsonValue]]
+
+
+class _InputItem(ExtensionObservation):
+    type: StrictStr | None = None
+    id: StrictStr | None = None
+    role: StrictStr | None = None
+    content: StrictStr | list[_ContentPart] | None = None
+
+
+class _Tool(ExtensionObservation):
+    type: StrictStr
+
+
+class _SemanticRequest(ProfileProviderRequestObservation):
+    instructions: StrictStr | None = None
+    tools: list[_Tool] | None = None
+
+
+_REQUESTS = TypeAdapter(list[_SemanticRequest])
+
+
+class _Reference(ExtensionObservation):
+    uri: StrictStr | None
+
+
+class _Semantic(ExtensionObservation):
+    input: StrictStr | None
+    references: list[_Reference]
+
+
+class _ProviderPayload(ExtensionObservation):
+    name: StrictStr
+    semantic: _Semantic
+
+
+_ITEMS = TypeAdapter(list[_InputItem])
 
 
 def _submit(
@@ -75,7 +129,7 @@ def _wait_for_turn(
     """Wait until the assistant response is durable and the session is idle."""
     deadline = time.monotonic() + timeout
     last_state: object = None
-    latest_history: dict[str, object] | None = None
+    latest_history: object = None
     while time.monotonic() < deadline:
         latest_history = list_history(
             server_url=server_url,
@@ -83,14 +137,11 @@ def _wait_for_turn(
             session_id=session_id,
         )
         response_observed = False
-        for event in history_events(latest_history):
-            if event.get("kind") != "assistant_message":
+        for event in decode_history_page(latest_history).items:
+            if event.kind != "assistant_message":
                 continue
-            payload = json_object_payload(
-                event.get("payload"),
-                label="assistant payload",
-            )
-            if payload.get("content") == expected_response:
+            payload = _TextPayload.model_validate(event.payload)
+            if payload.content == expected_response:
                 response_observed = True
                 break
         session_response = requests.get(
@@ -99,11 +150,8 @@ def _wait_for_turn(
             timeout=10,
         )
         session_response.raise_for_status()
-        session = json_object_payload(
-            session_response.json(),
-            label="session response",
-        )
-        last_state = session.get("run_state")
+        session = AgentSessionResponse.model_validate(session_response.json())
+        last_state = session.run_state
         if response_observed and last_state == "idle":
             return
         time.sleep(0.2)
@@ -120,7 +168,7 @@ def _context(
     token: str,
     agent_id: str,
     session_id: str,
-) -> dict[str, object]:
+) -> SessionContextResponse:
     """Fetch the public context-inspector payload."""
     response = requests.get(
         f"{server_url}/chat/v1/agents/{agent_id}/sessions/{session_id}/context",
@@ -129,53 +177,44 @@ def _context(
         timeout=10,
     )
     response.raise_for_status()
-    return json_object_payload(response.json(), label="context response")
+    return SessionContextResponse.model_validate(response.json())
 
 
-def _proxy_journal(openai_proxy_url: str) -> list[dict[str, object]]:
+def _proxy_journal(openai_proxy_url: str) -> list[_SemanticRequest]:
     """Return raw Responses requests captured by the deterministic proxy."""
     response = requests.get(
         f"{openai_proxy_url}{_PROXY_JOURNAL_PATH}",
         timeout=10,
     )
     response.raise_for_status()
-    return json_object_list_payload(response.json(), label="proxy journal")
+    return _REQUESTS.validate_python(response.json())
 
 
-def _last_user_text(request: dict[str, object]) -> str | None:
-    """Return the last user input text from one Responses request."""
-    input_value = request.get("input")
-    if isinstance(input_value, str):
-        return input_value
-    if not isinstance(input_value, list):
+def _last_user_text(request: _SemanticRequest) -> str | None:
+    """Interpret known message fields after decoding the Responses input."""
+    if isinstance(request.input, str):
+        return request.input
+    if request.input is None:
         return None
-    for raw_item in reversed(cast(list[object], input_value)):
-        if not isinstance(raw_item, dict):
+    for item in reversed(_ITEMS.validate_python(request.input)):
+        if item.role != "user":
             continue
-        item = cast(dict[str, object], raw_item)
-        if item.get("role") != "user":
-            continue
-        content = item.get("content")
-        if isinstance(content, str):
-            return content
-        if not isinstance(content, list):
+        if isinstance(item.content, str):
+            return item.content
+        if item.content is None:
             return None
-        text_parts: list[str] = []
-        for raw_part in cast(list[object], content):
-            if not isinstance(raw_part, dict):
-                continue
-            part = cast(dict[str, object], raw_part)
-            text = part.get("text")
-            if part.get("type") == "input_text" and isinstance(text, str):
-                text_parts.append(text)
-        return "".join(text_parts)
+        return "".join(
+            part.text
+            for part in item.content
+            if part.type == "input_text" and part.text is not None
+        )
     return None
 
 
 def _request_for_prompt(
-    requests_: list[dict[str, object]],
+    requests_: list[_SemanticRequest],
     prompt: str,
-) -> dict[str, object]:
+) -> _SemanticRequest:
     """Return the captured request whose last user input matches the prompt."""
     for request in requests_:
         if _last_user_text(request) == prompt:
@@ -206,14 +245,14 @@ def _run_compaction(
     )
     response.raise_for_status()
     deadline = time.monotonic() + timeout
-    latest_history: dict[str, object] | None = None
+    latest_history: object = None
     while time.monotonic() < deadline:
         latest_history = list_history(
             server_url=server_url,
             token=token,
             session_id=session_id,
         )
-        kinds = {event.get("kind") for event in history_events(latest_history)}
+        kinds = {event.kind for event in decode_history_page(latest_history).items}
         if {"compaction_marker", "compaction_summary"} <= kinds:
             return
         time.sleep(0.2)
@@ -222,10 +261,12 @@ def _run_compaction(
     )
 
 
-def _compaction_request(requests_: list[dict[str, object]]) -> dict[str, object]:
+def _compaction_request(
+    requests_: list[_SemanticRequest],
+) -> _SemanticRequest:
     """Return the captured context-compaction model request."""
     for request in reversed(requests_):
-        instructions = request.get("instructions")
+        instructions = request.instructions
         if isinstance(instructions, str) and instructions.startswith(
             _COMPACTION_SYSTEM_PREFIX
         ):
@@ -233,25 +274,20 @@ def _compaction_request(requests_: list[dict[str, object]]) -> dict[str, object]
     raise AssertionError("proxy did not capture a compaction model request")
 
 
-def _serialized_input(request: dict[str, object]) -> str:
+def _serialized_input(request: _SemanticRequest) -> str:
     """Serialize model input for deterministic semantic assertions."""
-    return json.dumps(request.get("input"), ensure_ascii=False, sort_keys=True)
+    return json.dumps(request.input, ensure_ascii=False, sort_keys=True)
 
 
-def _provider_semantic_event(context: dict[str, object]) -> dict[str, object]:
+def _provider_semantic_event(
+    context: SessionContextResponse,
+) -> SessionContextRawEventResponse:
     """Return the durable provider Web-search context event."""
-    raw_events = json_object_list_payload(
-        context.get("raw_events"),
-        label="context raw events",
-    )
-    for event in raw_events:
-        if event.get("kind") != "provider_tool_call":
+    for event in context.raw_events:
+        if event.kind != "provider_tool_call":
             continue
-        payload = json_object_payload(
-            event.get("payload"),
-            label="provider tool payload",
-        )
-        if payload.get("name") == "web_search":
+        payload = _ProviderPayload.model_validate(event.payload)
+        if payload.name == "web_search":
             return event
     raise AssertionError("provider Web-search event was not found in context")
 
@@ -302,33 +338,19 @@ class TestProviderToolSemanticTranscript:
             session_id=session_id,
         )
         provider_event = _provider_semantic_event(context)
-        payload = json_object_payload(
-            provider_event.get("payload"),
-            label="provider tool payload",
-        )
-        semantic = json_object_payload(
-            payload.get("semantic"),
-            label="provider tool semantic content",
-        )
-        assert semantic.get("input") == json.dumps(
+        payload = _ProviderPayload.model_validate(provider_event.payload)
+        semantic = payload.semantic
+        assert semantic.input == json.dumps(
             {"query": _QUERY, "type": "search"},
             separators=(",", ":"),
             sort_keys=True,
         )
-        references = json_object_list_payload(
-            semantic.get("references"),
-            label="provider tool references",
-        )
-        assert [reference.get("uri") for reference in references] == [_SOURCE_URL]
-        breakdown = json_object_list_payload(
-            context.get("breakdown"),
-            label="context breakdown",
-        )
+        assert [reference.uri for reference in semantic.references] == [_SOURCE_URL]
         tool_segments = [
-            segment for segment in breakdown if segment.get("key") == "tool"
+            segment for segment in context.breakdown if segment.key == "tool"
         ]
         assert len(tool_segments) == 1
-        tool_tokens = tool_segments[0].get("tokens")
+        tool_tokens = tool_segments[0].tokens
         assert isinstance(tool_tokens, int)
         assert tool_tokens > len(_QUERY)
 
@@ -336,11 +358,9 @@ class TestProviderToolSemanticTranscript:
             _proxy_journal(openai_proxy_url),
             _PROMPT,
         )
-        tools = json_object_list_payload(
-            initial_request.get("tools"),
-            label="initial provider tools",
-        )
-        assert "web_search" in {tool.get("type") for tool in tools}
+        tools = initial_request.tools
+        assert tools is not None
+        assert "web_search" in {tool.type for tool in tools}
 
         _submit(
             server_url=azents_public_server_url,
@@ -361,17 +381,14 @@ class TestProviderToolSemanticTranscript:
             _proxy_journal(openai_proxy_url),
             _SAME_NATIVE_PROMPT,
         )
-        same_native_input = json_object_list_payload(
-            same_native_request.get("input"),
-            label="same-native input",
-        )
+        same_native_input = _ITEMS.validate_python(same_native_request.input)
         replayed_searches = [
-            item for item in same_native_input if item.get("type") == "web_search_call"
+            item for item in same_native_input if item.type == "web_search_call"
         ]
         assert len(replayed_searches) == 1
-        assert replayed_searches[0].get("id") == _NATIVE_ITEM_ID
-        assert _QUERY in json.dumps(replayed_searches[0], ensure_ascii=False)
-        assert _SOURCE_URL in json.dumps(replayed_searches[0], ensure_ascii=False)
+        assert replayed_searches[0].id == _NATIVE_ITEM_ID
+        assert _QUERY in replayed_searches[0].model_dump_json(exclude_unset=True)
+        assert _SOURCE_URL in replayed_searches[0].model_dump_json(exclude_unset=True)
 
         _submit(
             server_url=azents_public_server_url,
@@ -418,14 +435,14 @@ class TestProviderToolSemanticTranscript:
             token=token,
             session_id=session_id,
         )
-        compacted_events = history_events(compacted_history)
+        compacted_events = decode_history_page(compacted_history).items
         summaries = [
-            json_object_payload(event.get("payload"), label="compaction summary")
+            _TextPayload.model_validate(event.payload)
             for event in compacted_events
-            if event.get("kind") == "compaction_summary"
+            if event.kind == "compaction_summary"
         ]
         assert len(summaries) == 1
-        summary_content = summaries[0].get("content")
+        summary_content = summaries[0].content
         assert isinstance(summary_content, str)
         assert _QUERY in summary_content
         assert _SOURCE_URL in summary_content

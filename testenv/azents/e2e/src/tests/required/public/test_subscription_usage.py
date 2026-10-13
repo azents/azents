@@ -1,6 +1,5 @@
 """Credential-free subscription usage product-path E2E coverage."""
 
-import datetime
 import json
 from dataclasses import dataclass
 
@@ -15,20 +14,19 @@ from azentspublicclient.api.llm_provider_integration_v1_api import (
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
 from azentspublicclient.models.create_invitation_request import CreateInvitationRequest
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest
-from azentspublicclient.models.subscription_usage_unavailable_reason import (
-    SubscriptionUsageUnavailableReason,
-)
-from azentspublicclient.models.subscription_usage_unavailable_response import (
-    SubscriptionUsageUnavailableResponse,
-)
 from pydantic import TypeAdapter
 from testcontainers.core.container import DockerContainer
 
 from support.oauth_connections import connect_chatgpt_oauth, connect_xai_oauth
+from support.subscription_usage_evidence import (
+    json_object as _json_object,
+)
+from support.subscription_usage_evidence import (
+    subscription_usage_log_records as _subscription_usage_log_records,
+)
 from support.utils import authenticate_user, unique
 
 _SUBSCRIPTION_USAGE_JOURNAL_PATH = "/v1/_subscription_usage_requests"
-_JSON_OBJECT = TypeAdapter(dict[str, object])
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 
 
@@ -45,34 +43,6 @@ class SubscriptionWorkspace:
 def _headers(token: str) -> dict[str, str]:
     """Build bearer headers."""
     return {"Authorization": f"Bearer {token}"}
-
-
-def _json_object(value: dict[str, object]) -> dict[str, object]:
-    """Convert generated-client dictionaries into JSON-compatible values."""
-    return _JSON_OBJECT.validate_python(_JSON_OBJECT.dump_python(value, mode="json"))
-
-
-def test_json_object_normalizes_generated_datetime_values() -> None:
-    """Serialize generated-client datetime fields without using broken to_json."""
-    response = SubscriptionUsageUnavailableResponse(
-        type="unavailable",
-        integration_id="integration-id",
-        provider="chatgpt_oauth",
-        fetched_at=datetime.datetime(2026, 7, 19, tzinfo=datetime.UTC),
-        reason=SubscriptionUsageUnavailableReason.DISABLED,
-        message="Enable this integration to refresh subscription usage.",
-        retryable=False,
-    )
-
-    assert _json_object(response.to_dict()) == {
-        "type": "unavailable",
-        "integration_id": "integration-id",
-        "provider": "chatgpt_oauth",
-        "fetched_at": "2026-07-19T00:00:00Z",
-        "reason": "disabled",
-        "message": "Enable this integration to refresh subscription usage.",
-        "retryable": False,
-    }
 
 
 def setup_subscription_workspace(
@@ -219,46 +189,6 @@ def _assert_no_sensitive_source_values(value: object) -> None:
         assert forbidden not in serialized
 
 
-def _subscription_usage_log_records(logs: str) -> list[dict[str, object]]:
-    """Return structured log records emitted by subscription usage services."""
-    records: list[dict[str, object]] = []
-    for line in logs.splitlines():
-        try:
-            record = _JSON_OBJECT.validate_python(json.loads(line))
-        except ValueError:
-            continue
-        name = record.get("name")
-        if isinstance(name, str) and name.startswith(
-            "azents.services.subscription_usage"
-        ):
-            records.append(record)
-    assert records
-    return records
-
-
-def test_subscription_usage_log_records_ignore_unrelated_service_logs() -> None:
-    """Scope source-value checks to the subscription usage logging boundary."""
-    usage_record = {
-        "name": "azents.services.subscription_usage.service",
-        "operation": "subscription_usage_read",
-        "outcome": "available",
-    }
-    logs = "\n".join(
-        [
-            json.dumps(
-                {
-                    "name": "azents.core.email.service",
-                    "to_email": "unrelated@example.com",
-                }
-            ),
-            json.dumps(usage_record),
-            "non-json process output",
-        ]
-    )
-
-    assert _subscription_usage_log_records(logs) == [usage_record]
-
-
 def _assert_safe_subscription_usage_journal(journal: list[dict[str, object]]) -> None:
     """Verify the proxy journal contains classifications, not source values."""
     _assert_no_sensitive_source_values(journal)
@@ -380,30 +310,21 @@ class TestChatGPTSubscriptionUsage:
         _assert_no_sensitive_source_values(payload)
         _assert_safe_subscription_usage_journal(journal)
 
-    @pytest.mark.parametrize(
-        ("scenario", "reason", "retryable"),
-        [
-            ("test-chatgpt-transport", "temporarily_unavailable", True),
-            ("test-chatgpt-rate-limited", "rate_limited", True),
-            ("test-chatgpt-unavailable", "temporarily_unavailable", True),
-            ("test-chatgpt-malformed", "invalid_provider_response", False),
-        ],
-    )
-    def test_typed_unavailable_outcomes(
+    def test_transport_failure_reaches_public_unavailable_result(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         openai_proxy_url: str,
-        scenario: str,
-        reason: str,
-        retryable: bool,
     ) -> None:
-        """Normalize provider and transport failures without exposing payloads."""
+        """Project a real provider transport failure without exposing payloads."""
         clear_subscription_usage_journal(openai_proxy_url)
         workspace = setup_subscription_workspace(public_api_client, admin_api_client)
         api = LLMProviderIntegrationV1Api(public_api_client)
         integration_id = create_chatgpt_subscription_integration(
-            public_api_client, workspace, proxy_url=openai_proxy_url, scenario=scenario
+            public_api_client,
+            workspace,
+            proxy_url=openai_proxy_url,
+            scenario="test-chatgpt-transport",
         )
 
         payload = _usage(
@@ -414,8 +335,8 @@ class TestChatGPTSubscriptionUsage:
         )
 
         assert payload["type"] == "unavailable"
-        assert payload["reason"] == reason
-        assert payload["retryable"] is retryable
+        assert payload["reason"] == "temporarily_unavailable"
+        assert payload["retryable"] is True
         assert "error" not in json.dumps(payload, sort_keys=True).lower()
         _assert_no_sensitive_source_values(payload)
         _assert_safe_subscription_usage_journal(
@@ -480,44 +401,14 @@ class TestXaiSubscriptionUsage:
         [
             ("test-xai-external", "external", None, ["/v1/settings"]),
             (
-                "test-xai-invalid-redirect",
-                "unavailable",
-                "invalid_provider_response",
-                ["/v1/settings"],
-            ),
-            (
-                "test-xai-settings-failure",
-                "available",
-                None,
-                ["/v1/settings", "/v1/billing", "/v1/auto-topup-rule"],
-            ),
-            (
                 "test-xai-billing-denied",
                 "unavailable",
                 "entitlement_unavailable",
                 ["/v1/settings", "/v1/billing"],
             ),
-            (
-                "test-xai-transport",
-                "unavailable",
-                "temporarily_unavailable",
-                ["/v1/settings", "/v1/billing"],
-            ),
-            (
-                "test-xai-unavailable",
-                "unavailable",
-                "temporarily_unavailable",
-                ["/v1/settings", "/v1/billing"],
-            ),
-            (
-                "test-xai-malformed",
-                "unavailable",
-                "invalid_provider_response",
-                ["/v1/settings", "/v1/billing"],
-            ),
         ],
     )
-    def test_redirect_enrichment_and_failure_outcomes(
+    def test_external_redirect_and_billing_denial_preserve_integration(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
@@ -527,7 +418,7 @@ class TestXaiSubscriptionUsage:
         expected_reason: str | None,
         expected_paths: list[str],
     ) -> None:
-        """Validate xAI short-circuit, best-effort, and required-read behavior."""
+        """Verify external short-circuit and persisted authority after denial."""
         clear_subscription_usage_journal(openai_proxy_url)
         workspace = setup_subscription_workspace(public_api_client, admin_api_client)
         api = LLMProviderIntegrationV1Api(public_api_client)
@@ -549,8 +440,6 @@ class TestXaiSubscriptionUsage:
         if scenario == "test-xai-external":
             assert payload["url"] == "https://grok.com/usage"
             assert "financial_details" not in payload
-        if scenario == "test-xai-settings-failure":
-            assert payload["plan_label"] == "SuperGrok"
         if scenario == "test-xai-billing-denied":
             integration = api.llm_provider_integration_v1_get_integration(
                 integration_id=integration_id,

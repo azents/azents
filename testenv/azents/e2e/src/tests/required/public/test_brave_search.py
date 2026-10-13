@@ -25,21 +25,37 @@ from azentspublicclient.models.agent_toolkit_config_update_request import (
 )
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
+from azentspublicclient.models.chat_event_response import ChatEventResponse
 from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
 )
 from azentspublicclient.models.secrets import Secrets
+from azentspublicclient.models.test_connection_response import (
+    TestConnectionResponse as ConnectionTestResponse,
+)
 from azentspublicclient.models.toolkit_config_create_request import (
     ToolkitConfigCreateRequest,
 )
 from azentspublicclient.models.toolkit_config_update_request import (
     ToolkitConfigUpdateRequest,
 )
+from pydantic import ConfigDict, TypeAdapter
 from testcontainers.core.container import DockerContainer
 
 from support.exchange_download import download_fixture_exchange_file
-from support.observations import RunMarkerObservation
+from support.image_watchdog_observations import (
+    ContentObservation,
+    ImageOutputObservation,
+    ImageRequestObservation,
+    decode_image_requests,
+)
+from support.observations import (
+    RunMarkerObservation,
+    ToolCallObservation,
+    ToolResultObservation,
+    decode_history_page,
+)
 from support.utils import (
     model_selection_from_first_candidate,
     single_candidate_model_options,
@@ -47,9 +63,6 @@ from support.utils import (
 )
 from tests.required.public.test_agent_execution_persistence import (
     auth_headers,
-    history_events,
-    json_object_list_payload,
-    json_object_payload,
     list_history,
 )
 from tests.required.public.test_per_prompt_inference_profile import (
@@ -64,6 +77,13 @@ from tests.required.public.test_runtime_optional_capability import (
 )
 
 _KINDS = ("web", "context", "news", "images", "videos")
+_IMAGE_PARTS = TypeAdapter(list[ImageOutputObservation])
+
+
+class _ConnectionTestObservation(ConnectionTestResponse):
+    """Retain provider extensions so redaction checks inspect all returned evidence."""
+
+    model_config = ConfigDict(extra="allow")
 
 
 def _submit(
@@ -90,17 +110,25 @@ def _submit(
 
 def _tool_events(
     *, server_url: str, token: str, session_id: str
-) -> list[dict[str, object]]:
+) -> list[ChatEventResponse]:
     """Read durable tool events rather than inferring success from model text."""
     history = list_history(server_url=server_url, token=token, session_id=session_id)
-    return history_events(history)
+    return decode_history_page(history).items
 
 
-def _request_journal(proxy_url: str) -> list[dict[str, object]]:
+def _request_journal(proxy_url: str) -> list[ImageRequestObservation]:
     """Read model requests to scope assertions to one new execution."""
     response = requests.get(f"{proxy_url}/v1/_image_generation_requests", timeout=10)
     response.raise_for_status()
-    return json_object_list_payload(response.json(), label="Brave request journal")
+    return decode_image_requests(response.json())
+
+
+def _request_input_wire(request: ImageRequestObservation) -> object:
+    """Serialize an already validated input projection for the shared node counter."""
+    value = request.input
+    if isinstance(value, list):
+        return [item.model_dump(mode="json", exclude_unset=True) for item in value]
+    return value
 
 
 def _wait_for_terminal_session(
@@ -111,8 +139,8 @@ def _wait_for_terminal_session(
     while time.monotonic() < deadline:
         events = _tool_events(server_url=server_url, token=token, session_id=session_id)
         if any(
-            event.get("kind") == "run_marker"
-            and RunMarkerObservation.model_validate(event.get("payload")).status
+            event.kind == "run_marker"
+            and RunMarkerObservation.model_validate(event.payload).status
             in {"completed", "failed", "stopped", "interrupted"}
             for event in events
         ):
@@ -241,10 +269,7 @@ def test_brave_five_tools_and_one_call_multi_image_without_runtime(
         )
         connection.raise_for_status()
         assert (
-            json_object_payload(connection.json(), label="Brave connection test").get(
-                "success"
-            )
-            is True
+            _ConnectionTestObservation.model_validate(connection.json()).success is True
         )
     for key, expected in (
         ("brave-e2e-revoked", "key is invalid"),
@@ -263,9 +288,9 @@ def test_brave_five_tools_and_one_call_multi_image_without_runtime(
             timeout=10,
         )
         connection.raise_for_status()
-        result = json_object_payload(connection.json(), label="Brave failure test")
-        assert result.get("success") is False
-        assert expected in str(result.get("message"))
+        result = _ConnectionTestObservation.model_validate(connection.json())
+        assert result.success is False
+        assert expected in str(result.message)
         assert key not in str(result)
     saved_connection = requests.post(
         f"{azents_public_server_url}/toolkit/v1/workspaces/"
@@ -281,9 +306,7 @@ def test_brave_five_tools_and_one_call_multi_image_without_runtime(
     )
     saved_connection.raise_for_status()
     assert (
-        json_object_payload(
-            saved_connection.json(), label="Brave saved-key connection"
-        ).get("success")
+        _ConnectionTestObservation.model_validate(saved_connection.json()).success
         is True
     )
 
@@ -316,7 +339,7 @@ def test_brave_five_tools_and_one_call_multi_image_without_runtime(
         f"{workspace.handle}/agents/{agent.id}/toolkit-configs/test-connection"
     )
 
-    def test_saved_private_key() -> dict[str, object]:
+    def test_saved_private_key() -> ConnectionTestResponse:
         response = requests.post(
             agent_connection_url,
             headers=headers,
@@ -329,12 +352,12 @@ def test_brave_five_tools_and_one_call_multi_image_without_runtime(
             timeout=10,
         )
         response.raise_for_status()
-        result = json_object_payload(response.json(), label="Agent-owned Brave key")
+        result = _ConnectionTestObservation.model_validate(response.json())
         assert "brave-e2e-valid" not in str(result)
         assert "brave-e2e-revoked" not in str(result)
         return result
 
-    assert test_saved_private_key().get("success") is True
+    assert test_saved_private_key().success is True
     replaced = api.toolkit_v1_update_agent_toolkit_config(
         handle=workspace.handle,
         agent_id=agent.id,
@@ -345,7 +368,7 @@ def test_brave_five_tools_and_one_call_multi_image_without_runtime(
         _headers=headers,
     )
     assert "brave-e2e-revoked" not in replaced.model_dump_json()
-    assert test_saved_private_key().get("success") is False
+    assert test_saved_private_key().success is False
     api.toolkit_v1_update_agent_toolkit_config(
         handle=workspace.handle,
         agent_id=agent.id,
@@ -387,17 +410,17 @@ def test_brave_five_tools_and_one_call_multi_image_without_runtime(
         session_id=disabled_session,
     )
     disabled_calls = [
-        json_object_payload(event.get("payload"), label="Disabled Brave call")
+        ToolCallObservation.model_validate(event.payload)
         for event in disabled_events
-        if event.get("kind") == "client_tool_call"
+        if event.kind == "client_tool_call"
     ]
-    assert [call.get("name") for call in disabled_calls] == ["tool_search"]
+    assert [call.name for call in disabled_calls] == ["tool_search"]
     disabled_search = next(
-        json_object_payload(event.get("payload"), label="Disabled Brave search")
+        ToolResultObservation.model_validate(event.payload)
         for event in disabled_events
-        if event.get("kind") == "client_tool_result"
+        if event.kind == "client_tool_result"
     )
-    assert "private_brave__" not in json.dumps(disabled_search)
+    assert "private_brave__" not in disabled_search.model_dump_json()
 
     image_session_id: str | None = None
     vision_journal_start = len(_request_journal(openai_proxy_url))
@@ -412,28 +435,24 @@ def test_brave_five_tools_and_one_call_multi_image_without_runtime(
             token=workspace.token,
             session_id=session_id,
         )
-        calls = [event for event in events if event.get("kind") == "client_tool_call"]
-        results = [
-            event for event in events if event.get("kind") == "client_tool_result"
-        ]
+        calls = [event for event in events if event.kind == "client_tool_call"]
+        results = [event for event in events if event.kind == "client_tool_result"]
         assert len(calls) == len(results) == 2, events
-        search_call = json_object_payload(
-            calls[0].get("payload"), label="Tool Search call"
-        )
-        assert search_call.get("name") == "tool_search"
-        call = json_object_payload(calls[1].get("payload"), label="Brave call")
-        result = json_object_payload(results[1].get("payload"), label="Brave result")
-        assert call.get("name") == f"brave__search_{kind}"
-        assert result.get("call_id") == call.get("call_id")
+        search_call = ToolCallObservation.model_validate(calls[0].payload)
+        assert search_call.name == "tool_search"
+        call = ToolCallObservation.model_validate(calls[1].payload)
+        result = ToolResultObservation.model_validate(results[1].payload)
+        assert call.name == f"brave__search_{kind}"
+        assert result.call_id == call.call_id
         assistant_text = [
-            json_object_payload(event.get("payload"), label="Brave assistant").get(
-                "content"
-            )
+            ContentObservation.model_validate(event.payload).content
             for event in events
-            if event.get("kind") == "assistant_message"
+            if event.kind == "assistant_message"
         ]
         assert f"BRAVE_SEARCH_E2E_COMPLETED_{kind}" in assistant_text
-        serialized = json.dumps(result, ensure_ascii=False)
+        serialized = json.dumps(
+            result.model_dump(mode="json", exclude_unset=True), ensure_ascii=False
+        )
         assert f"https://example.org/brave/{kind}" in serialized or (
             kind == "images" and "https://example.org/brave/image-page-1" in serialized
         )
@@ -445,18 +464,18 @@ def test_brave_five_tools_and_one_call_multi_image_without_runtime(
         assert "https://example.org/brave/original-2.png" in serialized
         assert "https://example.org/brave/original-3.png" in serialized
         assert "Thumbnail was unavailable or unsafe." in serialized
-        output = result.get("output")
+        output = result.output
         assert isinstance(output, list), result
-        parts = json_object_list_payload(output, label="Brave image output")
-        assert sum(part.get("type") == "attachment" for part in parts) == 2
-        assert sum(part.get("kind") == "image" for part in parts) == 2
-        attachments = [part for part in parts if part.get("type") == "attachment"]
+        parts = _IMAGE_PARTS.validate_python(output)
+        assert sum(part.type == "attachment" for part in parts) == 2
+        assert sum(part.kind == "image" for part in parts) == 2
+        attachments = [part for part in parts if part.type == "attachment"]
         for attachment in attachments:
-            assert attachment.get("availability") == "available"
-            uri = attachment.get("uri")
+            assert attachment.availability == "available"
+            uri = attachment.uri
             assert isinstance(uri, str)
             assert uri.startswith("exchange://")
-            attachment_id = attachment.get("attachment_id")
+            attachment_id = attachment.attachment_id
             assert isinstance(attachment_id, str)
             downloaded = download_fixture_exchange_file(
                 server_url=azents_public_server_url,
@@ -472,12 +491,12 @@ def test_brave_five_tools_and_one_call_multi_image_without_runtime(
     image_continuations = [
         request
         for request in requests_
-        if "call_brave_e2e_images" in json.dumps(request)
-        and "function_call_output" in json.dumps(request)
+        if "call_brave_e2e_images" in request.serialized()
+        and "function_call_output" in request.serialized()
     ]
     assert image_continuations, "Image result was not fed back to the model."
     assert any(
-        _count_typed_items(request.get("input"), "input_image") == 2
+        _count_typed_items(_request_input_wire(request), "input_image") == 2
         for request in image_continuations
     ), "The two generated FileParts must reach the vision-capable model."
 
@@ -543,27 +562,31 @@ def test_brave_five_tools_and_one_call_multi_image_without_runtime(
         session_id=text_session,
     )
     text_image_result = next(
-        json_object_payload(event.get("payload"), label="Text-only image result")
+        ToolResultObservation.model_validate(event.payload)
         for event in text_events
-        if event.get("kind") == "client_tool_result"
-        and json_object_payload(
-            event.get("payload"), label="Text-only image result"
-        ).get("name")
+        if event.kind == "client_tool_result"
+        and ToolResultObservation.model_validate(event.payload).name
         == "brave__search_images"
     )
-    assert "text-only model has NOT visually inspected" in json.dumps(text_image_result)
-    assert "https://example.org/brave/image-page-1" in json.dumps(text_image_result)
+    assert (
+        "text-only model has NOT visually inspected"
+        in text_image_result.model_dump_json(exclude_unset=True)
+    )
+    assert (
+        "https://example.org/brave/image-page-1"
+        in text_image_result.model_dump_json(exclude_unset=True)
+    )
     continuations = [
         request
         for request in _request_journal(openai_proxy_url)[text_journal_start:]
-        if "call_brave_e2e_images" in json.dumps(request)
-        and "function_call_output" in json.dumps(request)
+        if "call_brave_e2e_images" in request.serialized()
+        and "function_call_output" in request.serialized()
     ]
     assert any(
-        _count_typed_items(request.get("input"), "input_image") == 0
-        and "model does not support this file input" in json.dumps(request)
-        and "https://example.org/brave/image-page-1" in json.dumps(request)
-        and "https://example.org/brave/original-1.png" in json.dumps(request)
+        _count_typed_items(_request_input_wire(request), "input_image") == 0
+        and "model does not support this file input" in request.serialized()
+        and "https://example.org/brave/image-page-1" in request.serialized()
+        and "https://example.org/brave/original-1.png" in request.serialized()
         for request in continuations
     ), "The text-only model must receive bounded placeholders and source links."
 
@@ -608,14 +631,14 @@ def test_brave_five_tools_and_one_call_multi_image_without_runtime(
         failures = [
             event
             for event in failed_events
-            if event.get("kind") == "client_tool_result"
-            and json_object_payload(
-                event.get("payload"), label="Brave failure result"
-            ).get("name")
+            if event.kind == "client_tool_result"
+            and ToolResultObservation.model_validate(event.payload).name
             == "brave__search_web"
         ]
         assert len(failures) == 1, failed_events
-        failure = json.dumps(failures[0], ensure_ascii=False)
+        failure = json.dumps(
+            failures[0].model_dump(mode="json", exclude_unset=True), ensure_ascii=False
+        )
         assert safe_failure in failure
         assert key not in failure
         assert "attachment" not in failure

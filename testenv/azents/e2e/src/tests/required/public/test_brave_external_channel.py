@@ -19,6 +19,7 @@ from azentspublicclient.models.agent_toolkit_attach_request import (
     AgentToolkitAttachRequest,
 )
 from azentspublicclient.models.agent_type import AgentType
+from azentspublicclient.models.chat_event_response import ChatEventResponse
 from azentspublicclient.models.external_channel_transport import (
     ExternalChannelTransport,
 )
@@ -33,6 +34,7 @@ from azentspublicclient.models.toolkit_config_create_request import (
 )
 from testcontainers.core.container import DockerContainer
 
+from support.observations import ToolCallObservation, ToolResultObservation
 from support.utils import (
     single_candidate_model_options,
     unique,
@@ -52,7 +54,6 @@ from tests.required.public.external_channel_scenarios import (
 )
 from tests.required.public.test_agent_execution_persistence import (
     auth_headers,
-    json_object_payload,
 )
 from tests.required.public.test_brave_search import _request_journal, _tool_events
 from tests.required.public.test_runtime_optional_capability import (
@@ -238,7 +239,7 @@ def test_brave_external_channel_reuses_one_search(
         )
         assert session_id is not None
 
-        def channel_result() -> list[dict[str, object]] | None:
+        def channel_result() -> list[ChatEventResponse] | None:
             events = _tool_events(
                 server_url=azents_public_server_url,
                 token=workspace.token,
@@ -247,10 +248,8 @@ def test_brave_external_channel_reuses_one_search(
             matches = [
                 event
                 for event in events
-                if event.get("kind") == "client_tool_result"
-                and json_object_payload(
-                    event.get("payload"), label="Brave Channel result"
-                ).get("name")
+                if event.kind == "client_tool_result"
+                and ToolResultObservation.model_validate(event.payload).name
                 == "channel_action"
             ]
             return events if len(matches) == 1 else None
@@ -263,24 +262,22 @@ def test_brave_external_channel_reuses_one_search(
         )
         assert events is not None
         calls = [
-            json_object_payload(event.get("payload"), label="Brave Channel call")
+            ToolCallObservation.model_validate(event.payload)
             for event in events
-            if event.get("kind") == "client_tool_call"
+            if event.kind == "client_tool_call"
         ]
-        assert [call.get("name") for call in calls] == [
+        assert [call.name for call in calls] == [
             "brave__search_images",
             "channel_action",
         ]
         search_result = next(
-            json_object_payload(event.get("payload"), label="Brave search result")
+            ToolResultObservation.model_validate(event.payload)
             for event in events
-            if event.get("kind") == "client_tool_result"
-            and json_object_payload(
-                event.get("payload"), label="Brave search result"
-            ).get("name")
+            if event.kind == "client_tool_result"
+            and ToolResultObservation.model_validate(event.payload).name
             == "brave__search_images"
         )
-        serialized = json.dumps(search_result)
+        serialized = search_result.model_dump_json(exclude_unset=True)
         assert "https://example.org/brave/original-1.png" in serialized
         assert "https://example.org/brave/image-page-1" in serialized
         continuations = [
@@ -288,31 +285,31 @@ def test_brave_external_channel_reuses_one_search(
             for model_request in _request_journal(openai_proxy_url)[
                 channel_journal_start:
             ]
-            if "call_brave_e2e_channel_images" in json.dumps(model_request)
-            and "function_call_output" in json.dumps(model_request)
+            if "call_brave_e2e_channel_images" in model_request.serialized()
+            and "function_call_output" in model_request.serialized()
         ]
         assert any(
-            "https://example.org/brave/original-1.png" in json.dumps(model_request)
-            and "https://example.org/brave/image-page-1" in json.dumps(model_request)
+            "https://example.org/brave/original-1.png" in model_request.serialized()
+            and "https://example.org/brave/image-page-1" in model_request.serialized()
             for model_request in continuations
         ), "Both URLs must reach the model before explicit Channel Action."
-        channel_call = json.dumps(calls[1])
+        channel_call = calls[1].model_dump_json(exclude_unset=True)
         assert "https://example.org/brave/original-1.png" in channel_call
         assert "https://example.org/brave/image-page-1" in channel_call
         finished = next(
-            json_object_payload(event.get("payload"), label="Channel Action result")
+            ToolResultObservation.model_validate(event.payload)
             for event in events
-            if event.get("kind") == "client_tool_result"
-            and json_object_payload(
-                event.get("payload"), label="Channel Action result"
-            ).get("name")
+            if event.kind == "client_tool_result"
+            and ToolResultObservation.model_validate(event.payload).name
             == "channel_action"
         )
-        assert finished.get("status") == "completed"
-        output = finished.get("output")
+        assert finished.status == "completed"
+        output = finished.output
         assert isinstance(output, str)
         assert '"status": "delivered"' in output
-        assert "brave-e2e-valid" not in json.dumps(events)
+        assert "brave-e2e-valid" not in json.dumps(
+            [event.model_dump(mode="json", exclude_unset=True) for event in events]
+        )
         delivery = _provider_state(slack_provider_fake_url)
         raw_deliveries = delivery.get("deliveries")
         assert isinstance(raw_deliveries, list)

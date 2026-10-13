@@ -1,16 +1,23 @@
 """Focused Scheduled Task public API and execution E2E tests."""
 
-from typing import cast
+from typing import Literal
 
 import azentsadminclient
 import azentspublicclient
 import requests
 from azentspublicclient.api.scheduled_task_v1_api import ScheduledTaskV1Api
+from azentspublicclient.models.live_event_list_response import LiveEventListResponse
 from azentspublicclient.models.scheduled_task_create_request import (
     ScheduledTaskCreateRequest,
 )
 from docker.models.containers import Container
+from pydantic import StrictInt, StrictStr
 
+from support.observations import (
+    ExtensionObservation,
+    InputMessageObservation,
+    decode_history_page,
+)
 from support.utils import (
     AgentSessionSetup,
     create_agent_session_setup,
@@ -25,6 +32,22 @@ _CREATION_TITLE = "Scheduled Task E2E creation"
 _CREATION_OBJECTIVE = "Verify Scheduled Task creation and retrieval."
 _CREATION_AT = "2099-05-01T00:00:00Z"
 _INITIAL_RESPONSE = "Upload session initialized."
+
+
+class _DispatchObservation(ExtensionObservation):
+    now: StrictStr
+    claimed: StrictInt
+    admitted: StrictInt
+    coalesced: StrictInt
+    skipped: StrictInt
+    wake_failed: StrictInt
+
+
+class _ScheduledResultObservation(ExtensionObservation):
+    title: StrictStr
+    scheduled_for: StrictStr
+    status: Literal["finished", "failed"]
+    result: StrictStr
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -44,10 +67,7 @@ def _dispatch_at(testenv_server_url: str, *, now: str) -> dict[str, object]:
             "Scheduled Task dispatch failed with "
             f"{response.status_code}: {response.text}"
         )
-    payload = response.json()
-    if not isinstance(payload, dict):
-        raise AssertionError(f"Scheduled Task dispatch was not an object: {payload!r}")
-    return cast(dict[str, object], payload)
+    return _DispatchObservation.model_validate(response.json()).model_dump()
 
 
 def _scheduled_result(
@@ -65,23 +85,13 @@ def _scheduled_result(
         timeout=10,
     )
     response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, dict):
-        raise AssertionError(f"Session history was not an object: {payload!r}")
-    raw_items = payload.get("items")
-    if not isinstance(raw_items, list):
-        raise AssertionError(f"Session history items were not a list: {payload!r}")
-    for raw_item in raw_items:
-        if (
-            not isinstance(raw_item, dict)
-            or raw_item.get("kind") != "scheduled_task_result"
-        ):
+    history = decode_history_page(response.json())
+    for event in history.items:
+        if event.kind != "scheduled_task_result":
             continue
-        raw_event_payload = raw_item.get("payload")
-        if not isinstance(raw_event_payload, dict):
-            continue
-        if raw_event_payload.get("result") == expected_result:
-            return cast(dict[str, object], raw_event_payload)
+        result = _ScheduledResultObservation.model_validate(event.payload)
+        if result.result == expected_result:
+            return result.model_dump()
     return None
 
 
@@ -99,15 +109,12 @@ def _session_initialized(
         timeout=10,
     )
     history_response.raise_for_status()
-    history = history_response.json()
-    if not isinstance(history, dict):
-        raise AssertionError(f"Session history was not an object: {history!r}")
-    items = history.get("items")
-    initialized = isinstance(items, list) and any(
-        isinstance(item, dict)
-        and item.get("kind") == "assistant_message"
-        and _INITIAL_RESPONSE in str(item.get("payload"))
-        for item in items
+    history = decode_history_page(history_response.json())
+    initialized = any(
+        event.kind == "assistant_message"
+        and _INITIAL_RESPONSE
+        in str(InputMessageObservation.model_validate(event.payload).content)
+        for event in history.items
     )
     if not initialized:
         return False
@@ -118,8 +125,10 @@ def _session_initialized(
         timeout=10,
     )
     live_response.raise_for_status()
-    live = live_response.json()
-    return isinstance(live, dict) and live.get("session_run_state") == "idle"
+    return (
+        LiveEventListResponse.model_validate(live_response.json()).session_run_state
+        == "idle"
+    )
 
 
 def _setup(

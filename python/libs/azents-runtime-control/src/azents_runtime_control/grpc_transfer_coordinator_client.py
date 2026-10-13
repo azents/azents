@@ -676,9 +676,9 @@ class GrpcRuntimeTransferCoordinatorClient:
         :param credential_supplier: authority that issues exact RPC credentials
         :param channel: owned gRPC channel, when created from an endpoint
         """
-        self._stub = stub
-        self._credential_supplier = credential_supplier
-        self._channel = channel
+        self.stub = stub
+        self.credential_supplier = credential_supplier
+        self.channel = channel
 
     @classmethod
     def from_endpoint(
@@ -711,8 +711,8 @@ class GrpcRuntimeTransferCoordinatorClient:
 
     async def close(self) -> None:
         """Close the endpoint-owned gRPC channel, if any."""
-        if self._channel is not None:
-            await self._channel.close()
+        if self.channel is not None:
+            await self.channel.close()
 
     async def admit_transfer(
         self,
@@ -724,7 +724,7 @@ class GrpcRuntimeTransferCoordinatorClient:
         :returns: admitted status and opaque trusted object handle
         """
         message = admit_transfer_request_to_message(request)
-        response = await self._stub.AdmitTransfer(
+        response = await self.stub.AdmitTransfer(
             message,
             metadata=await self._metadata(
                 COORDINATOR_OPERATION_ADMIT_TRANSFER,
@@ -743,7 +743,7 @@ class GrpcRuntimeTransferCoordinatorClient:
         :returns: current transfer status
         """
         message = mark_transfer_ready_request_to_message(request)
-        response = await self._stub.MarkTransferReady(
+        response = await self.stub.MarkTransferReady(
             message,
             metadata=await self._metadata(
                 COORDINATOR_OPERATION_MARK_TRANSFER_READY,
@@ -762,7 +762,7 @@ class GrpcRuntimeTransferCoordinatorClient:
         :returns: current transfer status
         """
         message = dispatch_transfer_request_to_message(request)
-        response = await self._stub.DispatchTransfer(
+        response = await self.stub.DispatchTransfer(
             message,
             metadata=await self._metadata(
                 COORDINATOR_OPERATION_DISPATCH_TRANSFER,
@@ -781,7 +781,7 @@ class GrpcRuntimeTransferCoordinatorClient:
         :returns: current transfer status
         """
         message = cancel_transfer_request_to_message(request)
-        response = await self._stub.CancelTransfer(
+        response = await self.stub.CancelTransfer(
             message,
             metadata=await self._metadata(
                 COORDINATOR_OPERATION_CANCEL_TRANSFER,
@@ -800,7 +800,7 @@ class GrpcRuntimeTransferCoordinatorClient:
         :returns: status, opaque handle, and verified manifest
         """
         message = get_verified_object_request_to_message(request)
-        response = await self._stub.GetVerifiedObject(
+        response = await self.stub.GetVerifiedObject(
             message,
             metadata=await self._metadata(
                 COORDINATOR_OPERATION_GET_VERIFIED_OBJECT,
@@ -822,7 +822,7 @@ class GrpcRuntimeTransferCoordinatorClient:
             request,
             request_type=runtime_transfer_coordinator_pb2.ClaimConsumerRequest,
         )
-        response = await self._stub.ClaimConsumer(
+        response = await self.stub.ClaimConsumer(
             message,
             metadata=await self._metadata(
                 COORDINATOR_OPERATION_CLAIM_CONSUMER,
@@ -840,7 +840,7 @@ class GrpcRuntimeTransferCoordinatorClient:
             request,
             request_type=runtime_transfer_coordinator_pb2.RenewConsumerLeaseRequest,
         )
-        response = await self._stub.RenewConsumerLease(
+        response = await self.stub.RenewConsumerLease(
             message,
             metadata=await self._metadata(
                 COORDINATOR_OPERATION_RENEW_CONSUMER_LEASE,
@@ -862,7 +862,7 @@ class GrpcRuntimeTransferCoordinatorClient:
             request,
             request_type=(runtime_transfer_coordinator_pb2.AcknowledgeConsumerRequest),
         )
-        response = await self._stub.AcknowledgeConsumer(
+        response = await self.stub.AcknowledgeConsumer(
             message,
             metadata=await self._metadata(
                 COORDINATOR_OPERATION_ACKNOWLEDGE_CONSUMER,
@@ -884,7 +884,7 @@ class GrpcRuntimeTransferCoordinatorClient:
             request,
             request_type=runtime_transfer_coordinator_pb2.AbandonConsumerRequest,
         )
-        response = await self._stub.AbandonConsumer(
+        response = await self.stub.AbandonConsumer(
             message,
             metadata=await self._metadata(
                 COORDINATOR_OPERATION_ABANDON_CONSUMER,
@@ -903,7 +903,7 @@ class GrpcRuntimeTransferCoordinatorClient:
         :returns: current transfer status
         """
         message = settle_transfer_request_to_message(request)
-        response = await self._stub.SettleTransfer(
+        response = await self.stub.SettleTransfer(
             message,
             metadata=await self._metadata(
                 COORDINATOR_OPERATION_SETTLE_TRANSFER,
@@ -922,7 +922,7 @@ class GrpcRuntimeTransferCoordinatorClient:
         :returns: current transfer status
         """
         message = record_cleanup_request_to_message(request)
-        response = await self._stub.RecordCleanup(
+        response = await self.stub.RecordCleanup(
             message,
             metadata=await self._metadata(
                 COORDINATOR_OPERATION_RECORD_CLEANUP,
@@ -937,7 +937,7 @@ class GrpcRuntimeTransferCoordinatorClient:
     ) -> CoordinatorTransferStatus:
         """Register preparation multipart cleanup before provider body streaming."""
         message = register_preparation_cleanup_request_to_message(request)
-        response = await self._stub.RegisterPreparationCleanup(
+        response = await self.stub.RegisterPreparationCleanup(
             message,
             metadata=await self._metadata(
                 COORDINATOR_OPERATION_REGISTER_PREPARATION_CLEANUP,
@@ -952,7 +952,7 @@ class GrpcRuntimeTransferCoordinatorClient:
     ) -> CoordinatorTransferStatus:
         """Promote preparation cleanup from abort to object deletion."""
         message = promote_preparation_cleanup_request_to_message(request)
-        response = await self._stub.PromotePreparationCleanup(
+        response = await self.stub.PromotePreparationCleanup(
             message,
             metadata=await self._metadata(
                 COORDINATOR_OPERATION_PROMOTE_PREPARATION_CLEANUP,
@@ -967,7 +967,7 @@ class GrpcRuntimeTransferCoordinatorClient:
     ) -> CoordinatorTransferStatus:
         """Clear exact preparation cleanup evidence after trusted cleanup."""
         message = clear_preparation_cleanup_request_to_message(request)
-        response = await self._stub.ClearPreparationCleanup(
+        response = await self.stub.ClearPreparationCleanup(
             message,
             metadata=await self._metadata(
                 COORDINATOR_OPERATION_CLEAR_PREPARATION_CLEANUP,
@@ -986,7 +986,7 @@ class GrpcRuntimeTransferCoordinatorClient:
         :returns: current transfer status
         """
         message = get_transfer_status_request_to_message(request)
-        response = await self._stub.GetTransferStatus(
+        response = await self.stub.GetTransferStatus(
             message,
             metadata=await self._metadata(
                 COORDINATOR_OPERATION_GET_TRANSFER_STATUS,
@@ -1004,7 +1004,7 @@ class GrpcRuntimeTransferCoordinatorClient:
             operation,
             message,
         )
-        credential = await self._credential_supplier.issue(credential_request)
+        credential = await self.credential_supplier.issue(credential_request)
         if not credential or credential != credential.strip():
             raise ValueError(
                 "Coordinator credential supplier returned an invalid token"

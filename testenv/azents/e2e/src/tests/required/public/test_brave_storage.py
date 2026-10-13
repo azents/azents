@@ -17,15 +17,17 @@ from azentspublicclient.models.toolkit_config_create_request import (
     ToolkitConfigCreateRequest,
 )
 from botocore.exceptions import ClientError
+from pydantic import TypeAdapter
 from testcontainers.core.container import DockerContainer
 
+from support.image_watchdog_observations import ImageOutputObservation
+from support.observations import ToolCallObservation, ToolResultObservation
 from support.utils import (
     single_candidate_model_options,
     unique,
 )
 from tests.required.public.test_agent_execution_persistence import (
     auth_headers,
-    json_object_payload,
 )
 from tests.required.public.test_brave_search import _submit, _tool_events
 from tests.required.public.test_per_prompt_inference_profile import (
@@ -170,26 +172,22 @@ def test_brave_storage_failure_cleans_partial_images_and_recovers(
             session_id=failed_session,
         )
         assert any(
-            json_object_payload(event.get("payload"), label="Failed Brave call").get(
-                "name"
-            )
+            ToolCallObservation.model_validate(event.payload).name
             == "brave__search_images"
             for event in failed_events
-            if event.get("kind") == "client_tool_call"
+            if event.kind == "client_tool_call"
         )
         failed_results = [
-            json_object_payload(event.get("payload"), label="Failed Brave result")
+            ToolResultObservation.model_validate(event.payload)
             for event in failed_events
-            if event.get("kind") == "client_tool_result"
-            and json_object_payload(
-                event.get("payload"), label="Failed Brave result"
-            ).get("name")
+            if event.kind == "client_tool_result"
+            and ToolResultObservation.model_validate(event.payload).name
             == "brave__search_images"
         ]
         assert len(failed_results) == 1
         failed_result = failed_results[0]
-        assert failed_result.get("status") == "failed"
-        assert failed_result.get("output") == [
+        assert failed_result.status == "failed"
+        assert failed_result.output == [
             {"type": "text", "text": "Generated image output could not be stored."}
         ]
         assert workspace_objects() == []
@@ -224,20 +222,18 @@ def test_brave_storage_failure_cleans_partial_images_and_recovers(
         session_id=recovered_session,
     )
     results = [
-        json_object_payload(event.get("payload"), label="Recovered Brave result")
+        ToolResultObservation.model_validate(event.payload)
         for event in recovered
-        if event.get("kind") == "client_tool_result"
-        and json_object_payload(
-            event.get("payload"), label="Recovered Brave result"
-        ).get("name")
+        if event.kind == "client_tool_result"
+        and ToolResultObservation.model_validate(event.payload).name
         == "brave__search_images"
     ]
     assert len(results) == 1
-    output = results[0].get("output")
+    output = results[0].output
     assert isinstance(output, list)
     attachments = [
         part
-        for part in output
-        if isinstance(part, dict) and part.get("type") == "attachment"
+        for part in TypeAdapter(list[ImageOutputObservation]).validate_python(output)
+        if part.type == "attachment"
     ]
     assert len(attachments) == 2

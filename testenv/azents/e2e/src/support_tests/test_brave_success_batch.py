@@ -2,8 +2,23 @@
 
 import pytest
 import requests
+from azentspublicclient.models.chat_event_response import ChatEventResponse
 
 from tests.required.public import test_brave_search as brave
+
+
+def _marker(status: str) -> ChatEventResponse:
+    """Build the current typed durable terminal-event contract."""
+    return ChatEventResponse.model_validate(
+        {
+            "id": "marker",
+            "session_id": "session",
+            "kind": "run_marker",
+            "payload": {"status": status},
+            "schema_version": "1",
+            "created_at": "2026-10-13T00:00:00Z",
+        }
+    )
 
 
 @pytest.mark.parametrize("submit_failure", [None, "news"])
@@ -67,15 +82,15 @@ def test_batch_admits_before_waiting_and_drains_after_failures(
 def test_terminal_drain_requires_marker_before_idle(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    projections: list[list[dict[str, object]]] = [
+    projections: list[list[ChatEventResponse]] = [
         [],
-        [{"kind": "run_marker", "payload": {"status": "failed"}}],
+        [_marker("failed")],
     ]
     trace: list[str] = []
 
     def events(
         *, server_url: str, token: str, session_id: str
-    ) -> list[dict[str, object]]:
+    ) -> list[ChatEventResponse]:
         trace.append("history")
         return projections.pop(0)
 
@@ -118,9 +133,9 @@ def test_rejection_preserves_http_error_and_drains_previously_admitted_sessions(
 
     def events(
         *, server_url: str, token: str, session_id: str
-    ) -> list[dict[str, object]]:
+    ) -> list[ChatEventResponse]:
         drained.append(session_id)
-        return [{"kind": "run_marker", "payload": {"status": "completed"}}]
+        return [_marker("completed")]
 
     def idle(*, server_url: str, token: str, agent_id: str, session_id: str) -> None:
         return None

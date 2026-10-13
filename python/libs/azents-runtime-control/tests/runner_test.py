@@ -3,6 +3,7 @@
 import asyncio
 import dataclasses
 import json
+import logging
 from collections import Counter
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextvars import ContextVar
@@ -12,6 +13,7 @@ from typing import TypedDict
 import pytest
 
 from azents_runtime_control.runner import (
+    RunnerConnectionRejected,
     RunnerControlClient,
     RunnerHeartbeatAcknowledgement,
     RunnerOperationCancel,
@@ -346,7 +348,62 @@ async def test_heartbeat_adopts_configuration_and_reports_evidence() -> None:
 
 
 @pytest.mark.asyncio
-async def test_heartbeat_rejects_mismatched_configuration_generation() -> None:
+async def test_heartbeat_rejection_logs_context_and_preserves_retry(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A rejected heartbeat retains identity context and never advances cadence."""
+
+    class RejectingRunnerControlClient(FakeRunnerControlClient):
+        async def heartbeat_runner(
+            self,
+            *,
+            runtime_id: str,
+            generation: int,
+            heartbeat_at: datetime,
+        ) -> RunnerHeartbeatAcknowledgement:
+            acknowledgement = await super().heartbeat_runner(
+                runtime_id=runtime_id,
+                generation=generation,
+                heartbeat_at=heartbeat_at,
+            )
+            return dataclasses.replace(acknowledgement, accepted=False)
+
+    client = RejectingRunnerControlClient()
+    loop = _loop(client, BlockingOperations())
+    await loop.start()
+    original = client.reports[-1].runtime_configuration
+
+    for _ in range(2):
+        with pytest.raises(
+            RunnerConnectionRejected,
+            match="Runner generation is stale: runtime=runtime-1",
+        ):
+            await loop.run_once(block_ms=0)
+
+    assert client.heartbeats == [("runtime-1", 7), ("runtime-1", 7)]
+    assert len(client.reports) == 1
+    assert client.reports[-1].runtime_configuration == original
+    assert not client.claimed_request_ids
+    warnings = [
+        record
+        for record in caplog.records
+        if record.getMessage() == "Runtime Runner heartbeat rejected"
+    ]
+    assert len(warnings) == 2
+    for warning in warnings:
+        assert warning.levelno == logging.WARNING
+        assert warning.__dict__["runtime_id"] == "runtime-1"
+        assert warning.__dict__["runner_generation"] == 7
+        assert warning.__dict__["runner_id"] == "runner-1"
+        assert "configuration_sequence" not in warning.__dict__
+        assert "error_code" not in warning.__dict__
+        assert warning.exc_info is None
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_rejects_mismatched_configuration_generation(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Mismatched desired-generation evidence never mutates Runner state."""
     client = FakeRunnerControlClient()
     loop = _loop(client, BlockingOperations())
@@ -359,12 +416,31 @@ async def test_heartbeat_rejects_mismatched_configuration_generation() -> None:
     )
 
     await loop.run_once(block_ms=0)
+    await loop.run_once(block_ms=0)
 
     assert client.reports[-1].runtime_configuration == original
+    assert len(client.reports) == 1
+    assert client.heartbeats == [("runtime-1", 7)]
+    warnings = [
+        record
+        for record in caplog.records
+        if record.getMessage() == "Runtime Runner heartbeat configuration rejected"
+    ]
+    assert len(warnings) == 1
+    warning = warnings[0]
+    assert warning.levelno == logging.WARNING
+    assert warning.__dict__["runtime_id"] == "runtime-1"
+    assert warning.__dict__["runner_generation"] == 7
+    assert warning.__dict__["configuration_sequence"] == 2
+    assert warning.__dict__["error_code"] == "desired_generation_mismatch"
+    assert "runner_id" not in warning.__dict__
+    assert warning.exc_info is None
 
 
 @pytest.mark.asyncio
-async def test_heartbeat_rejects_invalid_configuration_evidence() -> None:
+async def test_heartbeat_rejects_invalid_configuration_evidence(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Malformed exact evidence never mutates Runner state."""
     client = FakeRunnerControlClient()
     loop = _loop(client, BlockingOperations())
@@ -377,8 +453,27 @@ async def test_heartbeat_rejects_invalid_configuration_evidence() -> None:
     )
 
     await loop.run_once(block_ms=0)
+    await loop.run_once(block_ms=0)
 
     assert client.reports[-1].runtime_configuration == original
+    assert len(client.reports) == 1
+    assert client.heartbeats == [("runtime-1", 7)]
+    warnings = [
+        record
+        for record in caplog.records
+        if record.getMessage() == "Runtime Runner heartbeat configuration rejected"
+    ]
+    assert len(warnings) == 1
+    warning = warnings[0]
+    assert warning.levelno == logging.WARNING
+    assert warning.__dict__["runtime_id"] == "runtime-1"
+    assert warning.__dict__["runner_generation"] == 7
+    assert warning.__dict__["configuration_sequence"] == 2
+    assert warning.__dict__["error_code"] == "runtime_configuration_invalid"
+    assert "runner_id" not in warning.__dict__
+    assert warning.exc_info is not None
+    assert warning.exc_info[0] is ValueError
+    assert warning.exc_info[2] is not None
 
 
 @pytest.mark.asyncio
