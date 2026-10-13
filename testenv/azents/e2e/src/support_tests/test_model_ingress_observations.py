@@ -398,13 +398,13 @@ def _inject_generated_usage_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
         usage, "LLMProviderIntegrationV1Api", lambda _client: _GeneratedUsageApi()
     )
     monkeypatch.setattr(usage, "clear_subscription_usage_journal", lambda _url: None)
-    monkeypatch.setattr(usage, "subscription_usage_journal", lambda _url: [])
 
 
 def test_actual_owner_member_financial_assertions_serialize_generated_dates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _inject_generated_usage_boundary(monkeypatch)
+    monkeypatch.setattr(usage, "subscription_usage_journal", lambda _url: [])
     usage.TestChatGPTSubscriptionUsage().test_owner_member_and_exhausted_snapshots(
         public_api_client=usage.azentspublicclient.ApiClient(),
         admin_api_client=usage.azentsadminclient.ApiClient(),
@@ -416,11 +416,112 @@ def test_actual_unavailable_wire_assertion_serializes_generated_fetched_at(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _inject_generated_usage_boundary(monkeypatch)
+    journal = [
+        {
+            "scenario": "chatgpt_transport",
+            "path": "/backend-api/wham/usage",
+            "sequence": 1,
+            "status": "transport_close",
+            "required_headers": {
+                "authorization": True,
+                "account": True,
+                "originator": True,
+                "user_agent": True,
+            },
+        }
+    ]
+    paths: list[str] = []
+
+    def get(url: str, *, timeout: int) -> requests.Response:
+        assert timeout == 10
+        paths.append(url)
+        response = requests.Response()
+        response.status_code = 200
+        response._content = json.dumps(journal).encode()
+        return response
+
+    monkeypatch.setattr(usage.requests, "get", get)
     usage.TestChatGPTSubscriptionUsage().test_transport_failure_reaches_public_unavailable_result(
         public_api_client=usage.azentspublicclient.ApiClient(),
         admin_api_client=usage.azentsadminclient.ApiClient(),
         openai_proxy_url="http://unused.invalid",
     )
+    assert paths == ["http://unused.invalid/v1/_subscription_usage_requests"]
+
+
+@pytest.mark.parametrize(
+    "scenario,path,headers",
+    [
+        (
+            "chatgpt_transport",
+            "/backend-api/wham/usage",
+            {
+                "authorization": True,
+                "account": True,
+                "originator": True,
+                "user_agent": True,
+            },
+        ),
+        (
+            "xai_transport",
+            "/v1/billing",
+            {
+                "authorization": True,
+                "token_auth": True,
+                "account": True,
+                "client_version": True,
+                "client_identifier": True,
+                "client_mode": True,
+            },
+        ),
+    ],
+)
+def test_usage_journal_decodes_current_transport_close_producers(
+    scenario: str, path: str, headers: dict[str, bool]
+) -> None:
+    payload = {
+        "scenario": scenario,
+        "path": path,
+        "sequence": 1,
+        "status": "transport_close",
+        "required_headers": headers,
+    }
+    decoded = usage._USAGE_JOURNAL.validate_python([payload])
+    assert decoded[0].status == "transport_close"
+    assert decoded[0].sequence == 1
+    assert decoded[0].required_headers == headers
+    assert decoded[0].model_dump(mode="json") == payload
+    usage._assert_safe_subscription_usage_journal(decoded)
+
+
+@pytest.mark.parametrize("status", [200, 400, 401, 403, 429, 500, 503])
+def test_usage_journal_retains_all_current_http_status_variants(status: int) -> None:
+    payload = {**_usage_journal(), "status": status}
+    decoded = usage._USAGE_JOURNAL.validate_python([payload])
+    assert decoded[0].status == status
+    assert type(decoded[0].status) is int
+    assert decoded[0].model_dump(mode="json") == payload
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        "transport_closed",
+        "TRANSPORT_CLOSE",
+        "200",
+        "",
+        True,
+        False,
+        200.0,
+        200.5,
+        None,
+        [],
+        {},
+    ],
+)
+def test_usage_journal_rejects_unknown_or_coerced_statuses(status: object) -> None:
+    with pytest.raises(ValidationError):
+        usage._USAGE_JOURNAL.validate_python([{**_usage_journal(), "status": status}])
 
 
 def test_usage_json_egress_retains_dates_nulls_extensions_and_sensitive_evidence() -> (

@@ -2,6 +2,7 @@
 
 import json
 from dataclasses import dataclass
+from typing import Literal
 
 import azentsadminclient
 import azentspublicclient
@@ -53,7 +54,7 @@ class _UsageJournalEntry(BaseModel):
     scenario: StrictStr
     path: StrictStr
     sequence: StrictInt
-    status: StrictInt
+    status: StrictInt | Literal["transport_close"]
     required_headers: dict[str, StrictBool]
 
 
