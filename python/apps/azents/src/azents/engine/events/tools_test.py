@@ -206,7 +206,15 @@ async def test_build_tool_catalog_prefixes_and_lowers_native_schema() -> None:
 
 
 async def test_build_tool_catalog_classifies_direct_and_deferred_tools() -> None:
-    """Keep core and service control tools direct while deferring operations."""
+    """Keep Session history search and service controls direct, deferring services."""
+    search_sessions = FunctionTool(
+        spec=FunctionToolSpec(
+            name="search_sessions",
+            description="Search permitted Sessions by title and conversation text.",
+            input_schema={"type": "object"},
+        ),
+        handler=_echo,
+    )
     switch_installation = FunctionTool(
         spec=FunctionToolSpec(
             name="switch_installation",
@@ -234,7 +242,7 @@ async def test_build_tool_catalog_classifies_direct_and_deferred_tools() -> None
     catalog = await build_tool_catalog(
         toolkit_bindings=[
             ToolkitBinding(
-                toolkit=_Toolkit(),
+                toolkit=_InlineToolkit(search_sessions),
                 slug="core",
                 base_slug="core",
                 use_prefix=False,
@@ -280,8 +288,8 @@ async def test_build_tool_catalog_classifies_direct_and_deferred_tools() -> None
     assert catalog.direct_tool_names == [
         "channel_action",
         "download_external_file",
-        "echo",
         "github__switch_installation",
+        "search_sessions",
     ]
     assert catalog.deferred_tool_names == ["azents__echo"]
     assert catalog.entries["azents__echo"].source.slug == "azents"

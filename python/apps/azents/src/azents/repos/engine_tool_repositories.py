@@ -22,12 +22,15 @@ from azents.repos.mcp_oauth_connection.operations import (
 )
 from azents.repos.memory import MemoryRepository
 from azents.repos.memory.operations import MemoryOperationRepository
+from azents.repos.message import MessageRepository
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task.tool_operations import (
     ScheduledTaskToolOperationRepository,
 )
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
+from azents.repos.session_history.operations import SessionHistoryOperationRepository
+from azents.repos.session_history.repository import SessionHistoryRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.toolkit_state.engine import (
     GitHubSelectedInstallationStore,
@@ -35,6 +38,7 @@ from azents.repos.toolkit_state.engine import (
     TodoStateStore,
     ToolkitAgentsAppendixDedupeStateStore,
 )
+from azents.repos.workspace_user import WorkspaceUserRepository
 
 
 @dataclasses.dataclass(frozen=True)
@@ -97,6 +101,7 @@ class EngineToolRepositories:
     """Expose completed operations and factories, never an Engine session scope."""
 
     memory: MemoryOperationRepository
+    session_history: SessionHistoryOperationRepository
     runtime: EngineRuntimeToolReadRepository
     mcp_oauth: MCPOAuthRuntimeOperationRepository
     snapshots: EngineMcpSnapshotFactory
@@ -134,6 +139,13 @@ def get_engine_tool_repositories(
 ) -> EngineToolRepositories:
     """Wire concrete tool database collaborators at the repository boundary."""
     return EngineToolRepositories(
+        session_history=SessionHistoryOperationRepository(
+            session_manager=session_manager,
+            agent_session_repository=agent_session_repository,
+            workspace_user_repository=WorkspaceUserRepository(),
+            history_repository=SessionHistoryRepository(),
+            message_repository=MessageRepository(),
+        ),
         memory=MemoryOperationRepository(
             owner=None,
             session_manager=session_manager,
