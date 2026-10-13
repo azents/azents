@@ -68,6 +68,13 @@ class TestSystemSettingsV1Api(unittest.TestCase):
         """
         pass
 
+    def test_system_settings_v1_get_google_oauth_setting(self) -> None:
+        """Test case for system_settings_v1_get_google_oauth_setting
+
+        Get Google Oauth Setting
+        """
+        pass
+
     def test_system_settings_v1_get_historical_memory_execution_setting(self) -> None:
         """Test case for system_settings_v1_get_historical_memory_execution_setting
 
@@ -107,6 +114,13 @@ class TestSystemSettingsV1Api(unittest.TestCase):
         """Test case for system_settings_v1_patch_external_channel_files_setting
 
         Patch External Channel Files Setting
+        """
+        pass
+
+    def test_system_settings_v1_patch_google_oauth_setting(self) -> None:
+        """Test case for system_settings_v1_patch_google_oauth_setting
+
+        Patch Google Oauth Setting
         """
         pass
 

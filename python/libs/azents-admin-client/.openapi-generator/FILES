@@ -50,6 +50,8 @@ azentsadminclient/docs/ExternalChannelFilesPatchRequest.md
 azentsadminclient/docs/FileLifecycleSettingsResponse.md
 azentsadminclient/docs/FileLifecycleSettingsUpdateRequest.md
 azentsadminclient/docs/FileLifecycleSettingsUpdateResponse.md
+azentsadminclient/docs/GoogleApplicationDetail.md
+azentsadminclient/docs/GoogleApplicationPatchRequest.md
 azentsadminclient/docs/HTTPValidationError.md
 azentsadminclient/docs/HealthStatus.md
 azentsadminclient/docs/HealthV1Api.md
@@ -229,6 +231,8 @@ azentsadminclient/models/external_channel_files_patch_request.py
 azentsadminclient/models/file_lifecycle_settings_response.py
 azentsadminclient/models/file_lifecycle_settings_update_request.py
 azentsadminclient/models/file_lifecycle_settings_update_response.py
+azentsadminclient/models/google_application_detail.py
+azentsadminclient/models/google_application_patch_request.py
 azentsadminclient/models/health_status.py
 azentsadminclient/models/historical_memory_execution_detail_response.py
 azentsadminclient/models/historical_memory_execution_patch_request.py
@@ -399,6 +403,8 @@ azentsadminclient/test/test_external_channel_files_patch_request.py
 azentsadminclient/test/test_file_lifecycle_settings_response.py
 azentsadminclient/test/test_file_lifecycle_settings_update_request.py
 azentsadminclient/test/test_file_lifecycle_settings_update_response.py
+azentsadminclient/test/test_google_application_detail.py
+azentsadminclient/test/test_google_application_patch_request.py
 azentsadminclient/test/test_health_status.py
 azentsadminclient/test/test_health_v1_api.py
 azentsadminclient/test/test_historical_memory_execution_detail_response.py
