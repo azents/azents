@@ -2,6 +2,7 @@
 title: "Google Service Connection Design"
 created: 2026-10-13
 updated: 2026-10-14
+implemented: 2026-10-14
 document_role: primary
 document_type: design
 snapshot_id: google-261013
@@ -634,3 +635,21 @@ Revision 4 preserves revision 3 mechanisms and adds only the separately accepted
 explicit Connect/Reconnect fresh-renewal clarification to M4/M5/M14/M15.
 That approval does not authorize production configuration, live account consent,
 deployment, paid processors, policy exceptions or a live-readiness claim.
+
+## Implementation Verification
+
+Revision 4 M1–M16 was implemented and independently reviewed in the three-phase
+stack. Final code SHA `8b7adbdaaf73cd1dd9f8da4de511243dec36c840` passed CI
+38470970886, including all four required E2E lanes and Web E2E. Root's full backend
+regression passed 12,299 tests with three existing Redis-only skips. Representative
+assembled API/Worker/shared-browser/Agent-browser Google flows passed four tests;
+the Worker keeps write work selected while the actual grant excludes it, proves
+explicit admission failure and observes no provider write.
+
+The [implementation verification report](google-connection-verification-report-2026-10-14.md)
+preserves exact phase heads, review correction, local validation and CI evidence.
+Temporary implementation and phase plans were removed after these gates passed.
+The snapshot's implementation date records verified local product implementation,
+not merge, deployment, live Google interoperability or Preview eligibility.
+Current behavior belongs in the Google Connection, Toolkit and System Settings
+Specs. Conditional live-provider obligations remain explicit.

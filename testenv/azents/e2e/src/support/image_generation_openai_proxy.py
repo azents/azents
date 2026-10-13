@@ -2744,6 +2744,48 @@ class _Handler(BaseHTTPRequestHandler):
                 arguments={"q": "Brave Search E2E external_channel", "count": 2},
             )
             return
+        if self.path == "/v1/responses" and (
+            user_text == "Google Connection E2E partial"
+            or (
+                user_text is None
+                and any(
+                    request_has_tool_output(request, name)
+                    for name in (
+                        "call_google_product_search",
+                        "call_google_product_read",
+                        "call_google_product_write",
+                    )
+                )
+            )
+        ):
+            if not request_has_tool_output(request, "call_google_product_search"):
+                self._write_function_call_response(
+                    request,
+                    call_id="call_google_product_search",
+                    name="tool_search",
+                    arguments={"query": "calendar list events Google", "limit": 8},
+                )
+            elif not request_has_tool_output(request, "call_google_product_read"):
+                self._write_function_call_response(
+                    request,
+                    call_id="call_google_product_read",
+                    name="google_product__calendar_list_events",
+                    arguments={},
+                )
+            elif not request_has_tool_output(request, "call_google_product_write"):
+                self._write_function_call_response(
+                    request,
+                    call_id="call_google_product_write",
+                    name="google_product__calendar_create_event",
+                    arguments={},
+                )
+            else:
+                self._write_text_response(
+                    request,
+                    "GOOGLE_PRODUCT_E2E_COMPLETED",
+                    response_id="resp_google_product_completed",
+                )
+            return
         if self.path == "/v1/responses":
             for kind in (
                 "mcp",

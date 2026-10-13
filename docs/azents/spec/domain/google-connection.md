@@ -30,6 +30,8 @@ code_paths:
   - typescript/apps/azents-admin-web/src/features/system-settings/google-application-state.ts
   - typescript/apps/azents-admin-web/src/features/system-settings/components/GoogleApplicationCard.tsx
   - typescript/apps/azents-admin-web/src/features/system-settings/containers/useGoogleApplicationCardContainer.ts
+  - testenv/azents/e2e/src/tests/required/public/test_google_connection.py
+  - testenv/azents/e2e/src/tests/web/public/test_google_connection.py
 last_verified_at: 2026-10-14
 spec_version: 1
 ---
@@ -217,8 +219,23 @@ operator configuration and changed-client binding. Admin operator routes are
 ## Verification Limits
 
 Deterministic unit, HTTP-route and PostgreSQL tests validate local contracts,
-including real independent-transaction confirm/cancel ordering. Public discovery
-established endpoint metadata and catalogs, not authenticated permissions.
+including real independent-transaction confirm/cancel ordering. Assembled-product
+E2E uses synthetic fixed-host Google TLS/OAuth/identity/MCP inside the isolated
+test Docker network, with ephemeral certificate trust in Public API and Worker
+containers. Product URLs, supported SDK verification and authorization remain
+unchanged. The fixture does not use a live Google account or write the product DB.
+
+Representative API flows cover partial grants, unpublished review, explicit
+acknowledgement, idempotent publication, reconnect cancellation/replacement,
+historical outcome and local disconnect. Worker E2E proves SDK refresh, a permitted
+Calendar read and absence of the ungranted write at the synthetic provider.
+Browser E2E covers same-window/context callback return, partial review and explicit
+publication for Workspace-shared and Agent-owned surfaces, ordinary reconnect and
+metadata updates that preserve its confirmed timeout. Narrower tests own the
+remaining authorization, race, scanner and UI-state matrices.
+
+These checks establish assembled local behavior against a synthetic contract.
+Public discovery established endpoint metadata and catalogs, not authenticated permissions.
 Live scope-to-tool mapping, endpoint token reuse, Preview/renewal behavior,
 screening efficacy/compliance and mixed-version rollback remain conditional.
 No live Google account or production change is claimed.

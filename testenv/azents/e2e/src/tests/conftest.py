@@ -49,6 +49,12 @@ from support.container_logs import (
     read_container_logs,
 )
 from support.e2e_image_preparation import E2EImagePreparation as _E2EImagePreparation
+from support.google_provider_fake import HOSTS as GOOGLE_FIXTURE_HOSTS
+from support.google_provider_fixture import (
+    GoogleProviderFixture,
+    configure_trust,
+    write_material,
+)
 from support.model_stream_fixture_policy import ordinary_model_stream_environment
 from support.observations import (
     DockerNetworkObservation,
@@ -1238,6 +1244,40 @@ def _write_e2e_image_build_observability(
 
 
 @pytest.fixture(scope="session")
+def google_provider_fixture(
+    request: pytest.FixtureRequest,
+    tmp_path_factory: pytest.TempPathFactory,
+    container_network: Network,
+    azents_server_image: str,
+) -> Generator[GoogleProviderFixture | None, None, None]:
+    """Bind fixed Google hosts only in lanes containing Google product tests."""
+    if not any(
+        "test_google_connection.py" in item.nodeid for item in request.session.items
+    ):
+        yield None
+        return
+    root = tmp_path_factory.mktemp("synthetic-google")
+    write_material(root)
+    script = REPOSITORY_ROOT / "testenv/azents/e2e/src/support/google_provider_fake.py"
+    container = (
+        DockerContainer(azents_server_image)
+        .with_network(container_network)
+        .with_network_aliases(*GOOGLE_FIXTURE_HOSTS)
+        .with_volume_mapping(str(script), "/e2e-google.py", "ro")
+        .with_volume_mapping(str(root), "/e2e-google", "ro")
+        .with_command(["python", "/e2e-google.py", "/e2e-google"])
+        .with_exposed_ports(8086)
+    )
+    with container:
+        _wait_for_fixture_health(container, port=8086, name="synthetic Google provider")
+        yield GoogleProviderFixture(
+            container,
+            root,
+            f"http://{container.get_container_host_ip()}:{container.get_exposed_port(8086)}",
+        )
+
+
+@pytest.fixture(scope="session")
 def credential_encryption_key() -> str:
     return random_fernet_key()
 
@@ -1679,6 +1719,7 @@ def azents_core_service_containers(
     github_validation_proxy_container: DockerContainer,
     runtime_provider_bootstrap_source_path: Path,
     azents_browser_s3_endpoint_url: str,
+    google_provider_fixture: GoogleProviderFixture | None,
 ) -> Generator[_CoreServiceContainers, None, None]:
     """Start Public API, Admin API, and Engine Worker concurrently."""
     del (
@@ -1797,6 +1838,8 @@ def azents_core_service_containers(
         system_bootstrap_setup_token=system_bootstrap_setup_token,
     )
 
+    configure_trust(public_container, google_provider_fixture)
+    configure_trust(engine_container, google_provider_fixture)
     containers = _CoreServiceContainers(
         public=public_container,
         admin=admin_container,
