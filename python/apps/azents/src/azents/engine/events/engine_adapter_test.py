@@ -2909,6 +2909,13 @@ async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
     model_adapter = captured["model_adapter"]
     assert isinstance(model_adapter, OpenAIResponsesModelAdapter)
     assert model_adapter.continuation_planner is None
+    assert isinstance(model_adapter.client, OpenAISDKResponsesClient)
+    assert model_adapter.client.websocket_headers == {
+        "session-id": "session-1",
+        "thread-id": "session-1",
+        "x-client-request-id": "session-1",
+    }
+    assert "extra_headers" not in native_request.options
 
 
 async def test_openrouter_model_binding_keeps_responses_and_exact_model_id() -> None:

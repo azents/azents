@@ -82,9 +82,16 @@ async def test_internal_text_request_matches_foreground_selected_settings(
     client = _SummaryClient("Unused stream fixture")
 
     def native_factory(*, config: OpenAIResponsesClientConfig) -> _SummaryClient:
+        if provider == LLMProvider.CHATGPT_OAUTH:
+            assert config.default_headers == {
+                "session-id": "session-1",
+                "thread-id": "session-1",
+                "x-client-request-id": "session-1",
+            }
         return client
 
     operation = bind_provider_model_operation(
+        session_id="session-1",
         selection=selection,
         settings=settings,
         credential_kwargs={"api_key": "synthetic-unused"},

@@ -128,6 +128,7 @@ async def test_real_runner_stale_owner_is_preserved_at_native_memory_wire(
         selection=selection,
         settings=settings,
         credential_kwargs=credentials,
+        session_id=principal.owner.session_id,
         effective_input_tokens=128_000,
         sdk_factories=sdk_factories,
         watchdog=watchdog,

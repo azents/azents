@@ -524,6 +524,7 @@ class AgentEngineAdapter:
             config = openai_responses_client_config(
                 provider=request.provider,
                 credential_kwargs=request.credential_kwargs,
+                session_id=request.session_id,
             )
             return openai_images_client_factory(config)()
 
@@ -1161,6 +1162,7 @@ class AgentEngineAdapter:
             client_config = openai_responses_client_config(
                 provider=request.provider,
                 credential_kwargs=request.credential_kwargs,
+                session_id=request.session_id,
             )
             model_adapter = OpenAIResponsesModelAdapter(
                 client=self.sdk_factories.openai_responses(config=client_config),

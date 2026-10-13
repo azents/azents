@@ -1296,6 +1296,7 @@ async def _list_openai_image_generation_models(
         raise ValueError("OpenAI image model listing requires an OpenAI integration.")
     secrets = _require_api_key_secrets(integration.secrets)
     client_config = openai_responses_client_config(
+        session_id=None,
         provider=LLMProvider.OPENAI,
         credential_kwargs={"api_key": secrets.api_key},
     )

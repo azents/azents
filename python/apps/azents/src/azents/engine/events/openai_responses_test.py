@@ -1192,10 +1192,12 @@ def test_client_config_keeps_endpoint_identity_outside_request(
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("AZ_OPENAI_BASE_URL", "https://openai.example/v1")
     openai_config = openai_responses_client_config(
+        session_id=None,
         provider=LLMProvider.OPENAI,
         credential_kwargs={"api_key": "key"},
     )
     chatgpt_config = openai_responses_client_config(
+        session_id=None,
         provider=LLMProvider.CHATGPT_OAUTH,
         credential_kwargs={
             "api_key": "token",
@@ -1230,10 +1232,12 @@ def test_client_config_keeps_endpoint_identity_outside_request(
 
     monkeypatch.delenv("AZ_OPENAI_BASE_URL")
     official_openai_config = openai_responses_client_config(
+        session_id=None,
         provider=LLMProvider.OPENAI,
         credential_kwargs={"api_key": "key"},
     )
     official_chatgpt_config = openai_responses_client_config(
+        session_id=None,
         provider=LLMProvider.CHATGPT_OAUTH,
         credential_kwargs={
             "api_key": "token",
@@ -1264,6 +1268,7 @@ async def test_client_config_resolves_sdk_environment_for_websocket(
         "X-Environment: environment\nX-Override: environment",
     )
     config = openai_responses_client_config(
+        session_id=None,
         provider=LLMProvider.OPENAI,
         credential_kwargs={
             "api_key": "synthetic-test-key",
@@ -1334,6 +1339,71 @@ async def test_sdk_websocket_connect_forwards_bounded_receive_limit(
     await opened.close()
     assert connection.closed is True
     await client.close()
+
+
+async def test_chatgpt_session_identity_reaches_http_and_websocket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Send stable identity through SDK HTTP and the actual WebSocket handshake."""
+    monkeypatch.delenv("OPENAI_CUSTOM_HEADERS", raising=False)
+    captured_http: list[dict[str, str]] = []
+    captured_websocket: dict[str, object] = {}
+
+    def respond(request: httpx2.Request) -> httpx2.Response:
+        captured_http.append(dict(request.headers))
+        return httpx2.Response(
+            200, request=request, json=_response().model_dump(mode="json")
+        )
+
+    config = openai_responses_client_config(
+        provider=LLMProvider.CHATGPT_OAUTH,
+        credential_kwargs={
+            "api_key": "synthetic-test-key",
+            "base_url": CHATGPT_OAUTH_BACKEND_BASE_URL,
+            "extra_headers": {"ChatGPT-Account-Id": "synthetic-account"},
+        },
+        session_id="session-identity",
+    )
+    client = create_openai_responses_client(config=config)
+    assert isinstance(client, OpenAISDKResponsesClient)
+    assert openai_responses_websocket_endpoint_eligible(
+        provider=LLMProvider.CHATGPT_OAUTH, config=config
+    )
+    connection = _FakeWebSocketConnection([_completed_event()])
+
+    class Manager:
+        async def enter(self) -> _FakeWebSocketConnection:
+            return connection
+
+    def connect(**kwargs: object) -> Manager:
+        captured_websocket.update(kwargs)
+        return Manager()
+
+    monkeypatch.setattr(client.sdk_client.responses, "connect", connect)
+    http_client = httpx2.AsyncClient(transport=httpx2.MockTransport(respond))
+    try:
+        async with client.sdk_client.with_options(http_client=http_client) as sdk:
+            for _ in range(2):
+                await sdk.responses.create(model="gpt-6.1-sol", input="synthetic")
+        opened = await client.connect_websocket()
+        await opened.close()
+    finally:
+        await http_client.aclose()
+        await client.close()
+
+    expected = {
+        "session-id": "session-identity",
+        "thread-id": "session-identity",
+        "x-client-request-id": "session-identity",
+    }
+    assert len(captured_http) == 2
+    for headers in captured_http:
+        assert {name: headers[name] for name in expected} == expected
+        assert headers["chatgpt-account-id"] == "synthetic-account"
+    assert captured_websocket["extra_headers"] == {
+        "ChatGPT-Account-Id": "synthetic-account",
+        **expected,
+    }
 
 
 async def test_pinned_sdk_http_serializes_and_parses_ultrafast() -> None:

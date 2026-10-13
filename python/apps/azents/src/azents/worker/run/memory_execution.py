@@ -508,6 +508,7 @@ class MemoryRunExecutor:
             selection=candidate.model_selection,
             settings=candidate.settings,
             credential_kwargs=resolved.credential_kwargs,
+            session_id=principal.owner.session_id,
             effective_input_tokens=resolved.effective_input_tokens,
             sdk_factories=self.sdk_factories,
             watchdog=self.watchdog,

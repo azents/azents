@@ -1916,6 +1916,7 @@ async def call_openai_responses_text_with_usage(
         config=openai_responses_client_config(
             provider=provider,
             credential_kwargs=credential_kwargs,
+            session_id=call_context.session_id,
         )
     )
     options: OpenAIResponsesOptions = {
