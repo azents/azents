@@ -306,16 +306,29 @@ def test_google_verified_partial_grant_reaches_worker_and_blocks_write(
     )
     base = f"{azents_public_server_url}/toolkit/v1/workspaces/{workspace.handle}"
     review = connect(fixture, base, workspace.token)
+    worker_settings = {
+        **final_settings("google_product"),
+        "tasks": ["calendar_read", "calendar_edit"],
+    }
     published = GooglePublishedOutput.from_json(
         response(
             base,
             workspace.token,
             "POST",
             "/google/attempts/" + review.attempt_id + "/confirm",
-            {"settings": final_settings("google_product")},
+            {"settings": worker_settings},
         ).text
     )
     assert published is not None
+    current = saved_status(base, workspace.token, published.toolkit_id)
+    edit = next(item for item in current.tasks if item.task.value == "calendar_edit")
+    assert edit.status == "not_granted"
+    saved = ToolkitV1Api(public_api_client).toolkit_v1_get_toolkit_config(
+        handle=workspace.handle,
+        toolkit_config_id=published.toolkit_id,
+        _headers=headers,
+    )
+    assert "calendar_edit" in saved.config["tasks"]
     ToolkitV1Api(public_api_client).toolkit_v1_attach_toolkit_to_agent(
         handle=workspace.handle,
         agent_id=agent.id,
@@ -366,6 +379,10 @@ def test_google_verified_partial_grant_reaches_worker_and_blocks_write(
     )
     denied = next(
         item for item in results if item.call_id == "call_google_product_write"
+    )
+    assert denied.status == "failed"
+    assert "Tool not found: google_product__calendar_create_event" in (
+        denied.model_dump_json()
     )
     assert "GOOGLE_E2E_READ_OK" not in denied.model_dump_json()
     observed = requests.get(fixture.control_url + "/__testenv/state", timeout=5)
