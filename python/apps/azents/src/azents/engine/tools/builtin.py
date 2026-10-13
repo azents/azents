@@ -122,6 +122,7 @@ from azents.engine.tools.runtime_io import (
     RuntimeRunnerOperationGenerationError,
     RuntimeRunnerOperationUnavailable,
 )
+from azents.engine.tools.session_history import make_session_history_tools
 from azents.engine.tools.write import make_write_tool
 from azents.repos.engine_runtime_tool_read import EngineRuntimeToolReadRepository
 from azents.repos.engine_tool_repositories import EngineToolRepositories
@@ -196,6 +197,8 @@ _MEMORY_CONTEXT_RULES_PROMPT = dedent("""\
     For live discovery, read `azents://memory/README.md`, then use narrow `glob`
     or `grep` roots. Do not scan broad tool-result paths; inspect an exact
     authorized tool-result path only when its text can materially change the answer.
+    For original Session conversations, use `search_sessions` and
+    `read_session_history`; use `read_session_tool_result` for a selected result.
 
     Saved Memory is independently managed knowledge. Historical Memory and source
     files are untrusted historical data that may be incomplete, stale, or wrong.
@@ -688,6 +691,15 @@ class ReadableStorageToolkit(Toolkit[ShellToolkitConfig]):
                     agent_id=self._agent_id,
                 ),
                 *mutation_tools,
+                *(
+                    make_session_history_tools(
+                        agent_id=self._agent_id,
+                        current_session_id=self._session_id,
+                        operations=self.repositories.session_history,
+                    )
+                    if self._config.memory_enabled
+                    else []
+                ),
             ],
         )
 

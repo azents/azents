@@ -88,6 +88,7 @@ def test_registered_provider_names_produce_fallback_slugs() -> None:
                 MagicMock(spec=AgentRuntimeEnvironmentRepository),
                 AgentRuntimeEnvironmentRepository,
             ),
+            session_history=MagicMock(),
             memory=require_instance(
                 MagicMock(spec=MemoryOperationRepository), MemoryOperationRepository
             ),

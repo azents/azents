@@ -220,7 +220,14 @@ async def test_readable_storage_toolkit_exposes_generic_reads_without_runtime(
     state = await toolkit.update_context(_make_context(resource_authority=authority))
 
     assert state.status.value == "enabled"
-    assert {tool.spec.name for tool in state.tools} == {"read", "grep", "glob"}
+    assert {tool.spec.name for tool in state.tools} == {
+        "read",
+        "grep",
+        "glob",
+        "search_sessions",
+        "read_session_history",
+        "read_session_tool_result",
+    }
 
 
 def test_runtime_toolkit_requires_prompt_selected_authority() -> None:
@@ -273,6 +280,9 @@ async def test_file_tool_owner_registers_mutations_once_without_starting_runtime
         "edit",
         "delete",
         "apply_patch",
+        "search_sessions",
+        "read_session_history",
+        "read_session_tool_result",
     }
     _runtime_repo(runtime).get_by_agent_id.assert_not_awaited()
     tool = _find_tool(state.tools, "write")
