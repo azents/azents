@@ -1,0 +1,127 @@
+{
+  "title": "Enregistrer une GitHub App pour Azents",
+  "intro": "Gardez l'onglet de connexion Azents ouvert. Suivez ces étapes pour créer et configurer votre App sur GitHub, puis revenez saisir les valeurs nécessaires. Ouvrir ce guide ne crée pas d'App et n'accorde aucun accès.",
+  "contents": "Dans cette page",
+  "opensNewTab": "S'ouvre dans un nouvel onglet",
+  "safety": "Collez les secrets et la clé privée uniquement dans les champs d'identifiants de l'assistant. Ne les mettez jamais dans une URL, une issue, un chat, une capture ou un dépôt. Ce guide n'a aucun champ de saisie de secret.",
+  "steps": {
+    "register": {
+      "title": "Ouvrir le formulaire d'enregistrement GitHub App",
+      "personal": "App appartenant à votre compte : photo de profil → Settings → Developer settings → GitHub Apps → New GitHub App. Choisissez GitHub Apps, et non OAuth Apps.",
+      "organization": "App appartenant à une organisation : photo de profil → Your organizations → Settings de l'organisation → Developer settings → GitHub Apps → New GitHub App. Vous devez être propriétaire ou disposer des droits de gestion des GitHub Apps.",
+      "open": "Ouvrir l'enregistrement pour mon compte"
+    },
+    "settings": {
+      "title": "Renseigner les réglages de base",
+      "name": "GitHub App name : choisissez un nom unique et reconnaissable. Homepage URL : indiquez le site de votre équipe, un dépôt de projet public ou l'URL du compte propriétaire.",
+      "callback": "Enregistrez le Callback URL complet affiché dans Azents dans le champ Callback URL de GitHub. Il est obligatoire pour l'autorisation d'un compte personnel et facultatif en mode installation uniquement. Copiez-le exactement ; n'utilisez pas l'URL d'une page Workspace ou un exemple supposé.",
+      "tokenExpiry": "Pour connecter votre compte GitHub, décochez Expire user authorization tokens. Azents exige actuellement des jetons utilisateur sans expiration et ne renouvelle pas les jetons expirants. Pour une App existante, ouvrez Optional Features → User-to-server token expiration → Opt-out. Ce réglage n'affecte pas les jetons d'installation de l'App.",
+      "authorization": "Laissez Request user authorization (OAuth) during installation et Enable Device Flow décochés. Lancez l'autorisation depuis la page de connexion Azents pour revenir à la connexion en cours.",
+      "webhook": "Cette connexion Azents n'a pas besoin de réception de webhooks. Décochez Active dans Webhook. Laissez Setup URL vide : ce réglage est différent de Callback URL.",
+      "visibility": "Dans Where can this GitHub App be installed?, choisissez Only on this account si seul le compte propriétaire en a besoin. Choisissez Any account uniquement pour une installation sur d'autres comptes ou organisations. Ce choix n'accorde pas l'accès à lui seul."
+    },
+    "permissions": {
+      "title": "Choisir uniquement les permissions nécessaires",
+      "intro": "Ouvrez Repository permissions, Organization permissions ou Account permissions. Laissez les permissions inutilisées sur No access. Choisissez Read-only pour consulter et Read & write uniquement pour modifier des données. La base ci-dessous correspond aux groupes Azents par défaut : repos, issues, pull_requests et users.",
+      "metadata": "Metadata devient automatiquement Read-only quand des permissions de dépôt sont choisies. N'ajoutez pas Administration, la gestion d'organisation ou des droits de compte seulement pour réussir la vérification.",
+      "feature": "Groupe de fonctions Azents",
+      "read": "Pour consulter uniquement",
+      "write": "Pour modifier des données",
+      "more": "Permissions des groupes supplémentaires",
+      "specific": "Il s'agit de points de départ par tâche, pas d'une garantie que chaque outil fonctionnera. Certains outils exigent d'autres permissions d'API, un type de jeton compatible, des fonctions de dépôt ou une offre d'organisation. Vérifiez l'opération exacte dans la référence API GitHub ci-dessous.",
+      "save": "Après avoir choisi les permissions, cliquez sur Create GitHub App. Pour une App existante, cliquez sur Save changes. Toute nouvelle permission d'une installation existante doit être approuvée par le propriétaire du compte avant de prendre effet."
+    },
+    "values": {
+      "title": "Récupérer les valeurs dans les réglages de l'App",
+      "intro": "Après la création, ouvrez Developer settings → GitHub Apps → votre App → Edit. Copiez chaque valeur dans le champ Azents de même nom. App ID et Client ID sont différents.",
+      "appId": "App ID : copiez l'identifiant numérique dans les réglages de l'App (General). Il est nécessaire dans les deux modes et diffère de l'identifiant d'installation.",
+      "clientId": "Client ID : copiez Client ID depuis les réglages de l'App vers OAuth Client ID. Il n'est requis que pour agir avec votre compte ; ne le remplacez pas par App ID.",
+      "clientSecret": "Client secret : dans Credentials / Client secrets de l'App, cliquez sur Generate a new client secret. Copiez la valeur dans OAuth Client Secret et conservez-la en lieu sûr pendant qu'elle est affichée. Vous ne pourrez pas la consulter à nouveau. Elle est nécessaire uniquement pour connecter votre compte GitHub personnel.",
+      "privateKey": "Clé privée : ouvrez Credentials → Key pairs → New key. Dans l'ancienne interface, utilisez Private keys → Generate a private key. GitHub télécharge un fichier .pem. Ouvrez-le localement et collez tout son contenu, y compris les lignes BEGIN/END et les sauts de ligne, dans Private Key (PEM). Les deux modes l'exigent.",
+      "warning": "Le nom du fichier .pem n'est pas la valeur de la clé. GitHub conserve uniquement sa partie publique ; protégez la clé téléchargée. Ne collez pas le secret client dans le champ de clé privée."
+    },
+    "install": {
+      "title": "Installer l'App sur les dépôts nécessaires",
+      "path": "Dans les réglages de l'App, choisissez Install App → Install à côté du compte ou de l'organisation cible. Préférez Only select repositories, choisissez les dépôts nécessaires et cliquez sur Install. Choisissez All repositories uniquement si cette portée est voulue.",
+      "account": "L'installation et l'autorisation du compte sont distinctes. Le mode App exige une installation. Pour agir avec votre compte sur des dépôts privés, installez également l'App et vérifiez votre propre accès à ces dépôts. Autoriser le compte ne valide pas tous les dépôts.",
+      "id": "Pour connecter l'App, ouvrez sa page Configure. Pour votre compte : Settings → sous Integrations, Applications → Installed GitHub Apps → Configure. Pour une organisation : ses Settings → sous Third-party Access, GitHub Apps → Configure. Dans une URL GitHub se terminant par /settings/installations/123456, le nombre final est l'identifiant d'installation. Saisissez ce nombre seul dans Installation IDs et répétez pour chaque installation.",
+      "pending": "Si GitHub affiche Request au lieu d'Install, demandez l'approbation du propriétaire de l'organisation. Une demande ou une visite de la page ne prouve pas une installation ni l'approbation des dépôts."
+    },
+    "finish": {
+      "title": "Revenir dans Azents, vérifier puis enregistrer",
+      "values": "Revenez dans l'onglet de connexion Azents. Vérifiez si vous voulez utiliser votre compte ou l'App, puis choisissez l'enregistrement d'une GitHub App. Saisissez App ID et Private Key (PEM). Pour votre compte, ajoutez OAuth Client ID et OAuth Client Secret ; pour l'App, ajoutez Installation IDs.",
+      "verify": "En mode compte, cliquez sur Autoriser avec GitHub, approuvez l'accès demandé puis revenez au contexte d'origine. En mode App, vérifiez la connexion. Contrôlez l'identité réelle et les installations observées, pas seulement le message de réussite.",
+      "save": "Choisissez les fonctions utiles et le réglage Runtime facultatif. Vérifiez quel compte ou quelle App sera utilisé, qui pourra utiliser la connexion et les réglages, puis enregistrez. Créer, installer ou autoriser l'App sur GitHub ne sauvegarde pas de Toolkit dans Azents.",
+      "sharing": "Avec un Toolkit partagé au Workspace, les participants autorisés utilisent le compte GitHub ou l'App connecté, pas leur propre compte. L'injection de jetons dans le Runtime permet aux processus de l'Agent de lire le jeton. Activez-la uniquement si vous comprenez et acceptez ce risque."
+    }
+  },
+  "permissions": {
+    "repos": {
+      "title": "Dépôts",
+      "read": "Repository → Contents : Read-only pour fichiers, commits, branches et git clone.",
+      "write": "Contents : Read & write pour fichiers, branches, releases, fusion et git push. Les fichiers .github/workflows exigent aussi Workflows : Read & write."
+    },
+    "issues": {
+      "title": "Issues",
+      "read": "Repository → Issues : Read-only pour issues et commentaires.",
+      "write": "Issues : Read & write pour créer/modifier issues, commentaires, labels et responsables."
+    },
+    "pull_requests": {
+      "title": "Pull requests",
+      "read": "Repository → Pull requests : Read-only pour PR et revues ; Contents : Read-only pour code et commits.",
+      "write": "Pull requests : Read & write pour créer/modifier PR et revues. Fusionner ou modifier les branches exige aussi Contents : Read & write."
+    },
+    "users": {
+      "title": "Profils utilisateur",
+      "read": "Les profils publics n'exigent pas de droits de compte globaux. Les opérations personnelles exigent le mode compte et la permission précise de l'API.",
+      "write": "Accordez uniquement la permission Account nécessaire à un changement voulu. Un jeton d'installation n'agit pas comme un utilisateur personnel."
+    },
+    "actions": {
+      "title": "GitHub Actions",
+      "read": "Repository → Actions : Read-only pour exécutions, logs et artefacts.",
+      "write": "Actions : Read & write pour déclencher, relancer ou annuler les workflows. La modification des fichiers dépend de Contents et Workflows."
+    },
+    "discussions": {
+      "title": "Discussions",
+      "read": "Repository → Discussions : Read-only ; Discussions doit être activé sur le dépôt.",
+      "write": "Discussions : Read & write pour créer/modifier discussions et commentaires."
+    },
+    "code_security": {
+      "title": "Sécurité du code",
+      "read": "Repository → Code scanning alerts, Dependabot alerts ou Secret scanning alerts : Read-only uniquement pour les alertes utilisées.",
+      "write": "Read & write uniquement pour les alertes à fermer ou modifier. Les fonctions de sécurité et conditions d'offre du dépôt s'appliquent."
+    },
+    "orgs": {
+      "title": "Organisations",
+      "read": "Organization → Members : Read-only pour membres/équipes privés. Les informations publiques peuvent ne pas l'exiger.",
+      "write": "Organization → Members : Read & write seulement pour modifier membres/équipes. Les autres opérations de gestion exigent leurs propres droits."
+    },
+    "projects": {
+      "title": "Projets",
+      "read": "Organization → Projects : Read-only pour les projets d'organisation. L'accès aux issues/dépôts privés associés est distinct. Les API de projets personnels peuvent ne pas accepter les jetons GitHub App ; vérifiez l'API exacte.",
+      "write": "Projects correspondant : Read & write pour modifier le projet. Les types de jetons pris en charge diffèrent selon les API utilisateur/organisation."
+    },
+    "notifications": {
+      "title": "Notifications",
+      "read": "L'API de liste des notifications ne prend pas en charge les jetons utilisateur ou d'installation GitHub App. Ajouter des droits App ne suffit pas.",
+      "write": "Si les notifications sont indispensables, vérifiez l'API et utilisez un autre mode d'authentification compatible. Ce guide ne convertit pas votre App en connexion PAT."
+    }
+  },
+  "troubleshooting": {
+    "title": "En cas de difficulté",
+    "callback": "Mauvaise page de retour ou erreur callback : comparez le Callback URL complet de GitHub et celui actuellement affiché par Azents. Recommencez depuis l'assistant d'origine ; n'ouvrez pas manuellement une URL de callback copiée.",
+    "credentials": "Identifiants invalides : vérifiez App ID contre Client ID, le texte PEM complet et si le secret/la clé a été révoqué. Générez un remplacement si nécessaire et saisissez-le uniquement dans les champs d'identifiants.",
+    "access": "Dépôt absent ou accès refusé : vérifiez les dépôts sélectionnés, l'approbation des nouvelles permissions et votre propre accès en mode compte. Une vérification réussie ne garantit pas l'accès à tous les dépôts par toutes les fonctions."
+  },
+  "sources": {
+    "title": "Références officielles GitHub",
+    "intro": "GitHub peut modifier les libellés des menus. Ces références décrivent les exigences actuelles d'enregistrement, d'installation et de permissions d'API.",
+    "register": "Enregistrer une GitHub App",
+    "permissions": "Choisir les permissions d'une GitHub App",
+    "privateKeys": "Générer et protéger les clés privées",
+    "tokens": "Configurer l'expiration des jetons utilisateur",
+    "install": "Installer votre propre GitHub App",
+    "api": "Permissions requises pour les GitHub Apps",
+    "notifications": "Compatibilité des jetons pour les notifications"
+  }
+}

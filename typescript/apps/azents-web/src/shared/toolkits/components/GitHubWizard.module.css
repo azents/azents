@@ -1,0 +1,172 @@
+.section {
+  border: rem(1px) solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-lg);
+  background: var(--mantine-color-default);
+  padding: var(--mantine-spacing-lg);
+  min-width: 0;
+}
+.sectionHeader {
+  margin-bottom: var(--mantine-spacing-lg);
+}
+.sectionHeadingRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--mantine-spacing-sm);
+}
+.sectionBody,
+.sectionSubtitle {
+  margin-inline-start: 0;
+}
+.headerSubtitle {
+  margin-inline-start: 0;
+}
+.number {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: rem(26px);
+  height: rem(26px);
+  border: rem(1px) solid var(--mantine-color-default-border);
+  border-radius: 50%;
+  color: var(--mantine-color-dimmed);
+  font-size: var(--mantine-font-size-sm);
+}
+.number[data-complete] {
+  color: var(--mantine-primary-color-filled);
+  border-color: var(--mantine-primary-color-filled);
+  background: var(--mantine-primary-color-light);
+}
+.heading {
+  scroll-margin-top: var(--mantine-spacing-lg);
+  margin-top: 0;
+  outline-offset: var(--mantine-spacing-xs);
+}
+.choice {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: var(--mantine-spacing-md);
+  border: rem(1px) solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-md);
+  background: var(--mantine-color-body);
+  text-align: start;
+  min-height: rem(140px);
+}
+.choice:hover:not(:disabled) {
+  border-color: var(--mantine-primary-color-filled);
+}
+.choice[data-selected] {
+  border-color: var(--mantine-primary-color-filled);
+  box-shadow: inset 0 0 0 rem(1px) var(--mantine-primary-color-filled);
+  background: var(--mantine-primary-color-light);
+}
+.choice:focus-visible {
+  outline: rem(3px) solid var(--mantine-primary-color-filled);
+  outline-offset: rem(3px);
+}
+.choice:disabled {
+  opacity: var(--mantine-disabled-opacity);
+  cursor: not-allowed;
+}
+.choiceHeader {
+  width: 100%;
+  flex-shrink: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--mantine-spacing-sm);
+}
+.choiceIcon {
+  width: rem(28px);
+  height: rem(28px);
+}
+.choiceCheck {
+  width: rem(22px);
+  min-width: rem(22px);
+  height: rem(28px);
+  min-height: rem(28px);
+}
+.choiceTitle {
+  min-width: 0;
+  min-height: rem(20px);
+  margin-top: var(--mantine-spacing-xs);
+  overflow-wrap: anywhere;
+}
+.choiceBody {
+  flex: 1;
+  margin-inline-start: 0;
+  margin-inline-end: 0;
+  margin-top: var(--mantine-spacing-xs);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.selectedSlot {
+  min-height: rem(20px);
+  margin-top: auto;
+}
+.progress {
+  display: flex;
+  gap: var(--mantine-spacing-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.segment {
+  width: rem(28px);
+  height: rem(3px);
+  background: var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-xs);
+}
+.segment[data-active],
+.segment[data-complete] {
+  background: var(--mantine-primary-color-filled);
+}
+.feature {
+  padding: var(--mantine-spacing-sm) var(--mantine-spacing-md);
+  border: rem(1px) solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-md);
+  background: var(--mantine-color-body);
+  min-width: 0;
+}
+.feature[data-selected] {
+  border-color: var(--mantine-primary-color-filled);
+  background: var(--mantine-primary-color-light);
+}
+.summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 3fr);
+  gap: var(--mantine-spacing-sm) var(--mantine-spacing-md);
+  margin: 0;
+}
+.summary dt {
+  color: var(--mantine-color-dimmed);
+  font-size: var(--mantine-font-size-sm);
+}
+.summary dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--mantine-font-size-sm);
+}
+@media (max-width: 36em) {
+  .section {
+    padding: var(--mantine-spacing-md);
+  }
+  .sectionHeader {
+    margin-bottom: var(--mantine-spacing-md);
+  }
+  .choice {
+    min-height: rem(132px);
+  }
+  .summary {
+    grid-template-columns: 1fr;
+    gap: var(--mantine-spacing-xs);
+  }
+  .summary dd {
+    margin-bottom: var(--mantine-spacing-sm);
+  }
+}

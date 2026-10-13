@@ -7,7 +7,6 @@ import {
   Button,
   Checkbox,
   Container,
-  Divider,
   Group,
   Loader,
   MultiSelect,
@@ -20,10 +19,36 @@ import {
   Text,
   Textarea,
   TextInput,
+  ThemeIcon,
   Title,
+  VisuallyHidden,
 } from "@mantine/core";
+import {
+  IconArrowRight,
+  IconBrandGithub,
+  IconExternalLink,
+  IconKey,
+  IconLock,
+  IconRefresh,
+  IconShieldCheck,
+  IconUser,
+  IconUsers,
+  IconX,
+} from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { GITHUB_FEATURE_GROUPS, wizardMode } from "../github-wizard-state";
+import Link from "next/link";
+import { GITHUB_WIZARD_STEPS } from "../github-wizard-progression";
+import {
+  GITHUB_FEATURE_GROUPS,
+  gitHubWizardConnectionReady,
+  isKnownGitHubFeature,
+  wizardMode,
+} from "../github-wizard-state";
+import classes from "./GitHubWizard.module.css";
+import { GitHubWizardCallbackHelp } from "./GitHubWizardCallbackHelp";
+import { GitHubWizardChoice } from "./GitHubWizardChoice";
+import { GitHubWizardSection } from "./GitHubWizardSection";
+import type { GitHubWizardStep } from "../github-wizard-progression";
 import type {
   GitHubWizardAppState,
   GitHubWizardAvailability,
@@ -39,6 +64,7 @@ import type { RefObject } from "react";
 
 export interface GitHubWizardProps {
   embedded: boolean;
+  registrationGuideHref?: string;
   sharingScope: "workspace_shared" | "agent_only";
   identity: GitHubWizardIdentity | null;
   mode: GitHubWizardMode | null;
@@ -62,7 +88,7 @@ export interface GitHubWizardProps {
           account_type: string;
         }[];
       };
-  headingRef?: RefObject<HTMLHeadingElement | null>;
+  rootRef?: RefObject<HTMLDivElement | null>;
   canContinue: boolean;
   onIdentity: (identity: GitHubWizardIdentity) => void;
   onMode: (mode: GitHubWizardMode) => void;
@@ -247,6 +273,16 @@ export function GitHubWizard(props: GitHubWizardProps): React.ReactElement {
         ? props.availability.installation
         : props.availability.userAccount
       : null;
+  const currentStep: GitHubWizardStep =
+    props.identity == null
+      ? "IDENTITY"
+      : props.mode == null
+        ? "METHOD"
+        : props.stage;
+  const currentIndex = GITHUB_WIZARD_STEPS.indexOf(currentStep);
+  const verified =
+    props.connection.type === "VERIFIED" ||
+    props.connection.type === "CANDIDATE";
   function credential(
     field: keyof GitHubWizardCredentials,
     value: string | string[],
@@ -268,31 +304,67 @@ export function GitHubWizard(props: GitHubWizardProps): React.ReactElement {
       props.onMode(mode);
     }
   }
-  const verified =
-    props.connection.type === "VERIFIED" ||
-    props.connection.type === "CANDIDATE";
+  function resetButton(): React.ReactElement {
+    return (
+      <Button
+        variant="default"
+        leftSection={<IconRefresh size="1em" />}
+        onClick={props.onReset}
+        disabled={pending}
+      >
+        {t("reset")}
+      </Button>
+    );
+  }
+  function nextButton(
+    label: "continueFeatures" | "continueRuntime" | "continueReview",
+    disabled: boolean,
+  ): React.ReactElement {
+    return (
+      <Group justify="flex-end" mt="lg">
+        <Button
+          onClick={props.onContinue}
+          disabled={disabled || pending}
+          rightSection={<IconArrowRight size="1em" />}
+        >
+          {t(label)}
+        </Button>
+      </Group>
+    );
+  }
   return (
     <Container
-      size="md"
+      ref={props.rootRef}
+      size="lg"
       w="100%"
       miw={0}
       px={props.embedded ? 0 : "md"}
       py={props.embedded ? 0 : "xl"}
     >
-      <Stack gap="lg">
-        <Group justify="space-between" wrap="wrap">
-          <Title order={3}>{t("title")}</Title>
-          <Group gap="xs">
-            <Button
-              variant="default"
-              onClick={props.onReset}
-              disabled={pending}
+      <Stack gap="md">
+        <Group align="flex-start" justify="space-between" wrap="wrap">
+          <div>
+            <ThemeIcon variant="default" size="xl" radius="md" aria-hidden>
+              <IconBrandGithub size="1.4em" />
+            </ThemeIcon>
+            <Title order={3} mt="sm">
+              {t("title")}
+            </Title>
+            <Text
+              className={classes.headerSubtitle}
+              size="sm"
+              c="dimmed"
+              mt="xs"
             >
-              {t("reset")}
-            </Button>
+              {t("progressiveHint")}
+            </Text>
+          </div>
+          <Group gap="xs">
+            {props.mode == null && resetButton()}
             {!props.embedded && (
               <Button
                 variant="default"
+                leftSection={<IconX size="1em" />}
                 onClick={props.onClose}
                 disabled={pending}
               >
@@ -301,52 +373,76 @@ export function GitHubWizard(props: GitHubWizardProps): React.ReactElement {
             )}
           </Group>
         </Group>
-        <fieldset
-          disabled={locked}
-          style={{ border: 0, padding: 0, minWidth: 0 }}
-        >
-          <Stack gap="lg">
-            <section aria-labelledby="github-wizard-identity">
-              <Stack gap="sm">
-                <Title id="github-wizard-identity" order={4}>
-                  {t("identityTitle")}
-                </Title>
-                <SimpleGrid cols={{ base: 1, sm: 2 }}>
-                  <Button
-                    h="auto"
-                    py="md"
-                    variant={
-                      props.identity === "PERSONAL" ? "light" : "default"
-                    }
-                    aria-pressed={props.identity === "PERSONAL"}
-                    onClick={() => props.onIdentity("PERSONAL")}
-                    styles={{ label: { whiteSpace: "normal" } }}
-                  >
-                    <Stack gap="xs">
-                      <Text fw={600}>{t("personalChoice")}</Text>
-                      <Text size="sm" fw={400}>
-                        {t("personalDescription")}
-                      </Text>
-                    </Stack>
-                  </Button>
-                  <Button
-                    h="auto"
-                    py="md"
-                    variant={props.identity === "APP" ? "light" : "default"}
-                    aria-pressed={props.identity === "APP"}
-                    onClick={() => props.onIdentity("APP")}
-                    styles={{ label: { whiteSpace: "normal" } }}
-                  >
-                    <Stack gap="xs">
-                      <Text fw={600}>{t("appChoice")}</Text>
-                      <Text size="sm" fw={400}>
-                        {t("appDescription")}
-                      </Text>
-                    </Stack>
-                  </Button>
-                </SimpleGrid>
-              </Stack>
-            </section>
+        <Group gap="sm">
+          <Badge
+            variant="light"
+            leftSection={
+              props.sharingScope === "agent_only" ? (
+                <IconLock size="1em" />
+              ) : (
+                <IconUsers size="1em" />
+              )
+            }
+          >
+            {t(
+              props.sharingScope === "agent_only"
+                ? "agentScopeShort"
+                : "sharedScopeShort",
+            )}
+          </Badge>
+          <Text size="sm" c="dimmed">
+            {t("ownershipHint")}
+          </Text>
+        </Group>
+        <ol className={classes.progress} aria-label={t("setupProgress")}>
+          {GITHUB_WIZARD_STEPS.map((step, index) => (
+            <li
+              key={step}
+              className={classes.segment}
+              data-active={index === currentIndex || void 0}
+              data-complete={
+                (index < currentIndex &&
+                  (step !== "CONNECTION" ||
+                    gitHubWizardConnectionReady(props.connection))) ||
+                void 0
+              }
+              aria-current={index === currentIndex ? "step" : void 0}
+            >
+              <VisuallyHidden>{t(`progressSteps.${step}`)}</VisuallyHidden>
+            </li>
+          ))}
+        </ol>
+        <div>
+          <Stack gap="md">
+            <GitHubWizardSection
+              disabled={locked}
+              id="github-wizard-identity"
+              number={1}
+              title={t("identityTitle")}
+              subtitle={t("identityHint")}
+              complete={props.identity != null}
+            >
+              <SimpleGrid
+                type="container"
+                cols={{ base: 1, "35rem": 2 }}
+                spacing="sm"
+              >
+                <GitHubWizardChoice
+                  title={t("personalChoice")}
+                  description={t("personalDescription")}
+                  icon={<IconUser size="1em" />}
+                  selected={props.identity === "PERSONAL"}
+                  onSelect={() => props.onIdentity("PERSONAL")}
+                />
+                <GitHubWizardChoice
+                  title={t("appChoice")}
+                  description={t("appDescription")}
+                  icon={<IconBrandGithub size="1em" />}
+                  selected={props.identity === "APP"}
+                  onSelect={() => props.onIdentity("APP")}
+                />
+              </SimpleGrid>
+            </GitHubWizardSection>
             {props.mode == null && (
               <ConnectionEvidence
                 connection={props.connection}
@@ -354,17 +450,15 @@ export function GitHubWizard(props: GitHubWizardProps): React.ReactElement {
               />
             )}
             {props.identity != null && (
-              <section aria-labelledby="github-wizard-method">
+              <GitHubWizardSection
+                disabled={locked}
+                id="github-wizard-method"
+                number={2}
+                title={t("methodTitle")}
+                subtitle={t("methodHint")}
+                complete={props.mode != null}
+              >
                 <Stack gap="sm">
-                  <Divider />
-                  <Title
-                    id="github-wizard-method"
-                    ref={props.mode == null ? props.headingRef : void 0}
-                    tabIndex={-1}
-                    order={4}
-                  >
-                    {t("methodTitle")}
-                  </Title>
                   {props.availability.type === "LOADING" && (
                     <Group role="status">
                       <Loader size="xs" />
@@ -377,7 +471,7 @@ export function GitHubWizard(props: GitHubWizardProps): React.ReactElement {
                         <Text>{g("availabilityError")}</Text>
                         <Button
                           onClick={props.onRetryAvailability}
-                          variant="subtle"
+                          variant="default"
                         >
                           {t("retry")}
                         </Button>
@@ -388,58 +482,76 @@ export function GitHubWizard(props: GitHubWizardProps): React.ReactElement {
                     <Alert color="yellow">{g("platformIncomplete")}</Alert>
                   )}
                   {platformReadiness === "configured" &&
-                    (props.platformApp.type === "READY" ? (
-                      <Button
-                        h="auto"
-                        py="sm"
-                        styles={{ label: { whiteSpace: "normal" } }}
-                        variant={platformMode ? "light" : "default"}
-                        aria-pressed={platformMode}
-                        onClick={() => selectMethod("PLATFORM")}
-                      >
-                        {t("platformMethod", {
-                          name: props.platformApp.app.name,
-                        })}
-                      </Button>
-                    ) : (
+                    props.platformApp.type !== "READY" && (
                       <AppMetadata
                         state={props.platformApp}
                         onRetry={props.onRetryPlatformMetadata}
                       />
-                    ))}
-                  <Button
-                    variant={selfManaged ? "light" : "default"}
-                    aria-pressed={selfManaged}
-                    onClick={() => selectMethod("SELF_MANAGED")}
+                    )}
+                  <SimpleGrid
+                    type="container"
+                    cols={{
+                      base: 1,
+                      "35rem": 2,
+                      "48rem": props.identity === "PERSONAL" ? 3 : 2,
+                    }}
+                    spacing="sm"
                   >
-                    {t("selfManagedMethod")}
-                  </Button>
-                  {props.identity === "PERSONAL" && (
-                    <Button
-                      variant={props.mode === "pat" ? "light" : "default"}
-                      aria-pressed={props.mode === "pat"}
-                      onClick={() => selectMethod("PAT")}
-                    >
-                      {t("patMethod")}
-                    </Button>
-                  )}
+                    {platformReadiness === "configured" &&
+                      props.platformApp.type === "READY" && (
+                        <GitHubWizardChoice
+                          title={t("platformMethod", {
+                            name: props.platformApp.app.name,
+                          })}
+                          description={t("platformDescription")}
+                          icon={<IconShieldCheck size="1em" />}
+                          selected={platformMode}
+                          onSelect={() => selectMethod("PLATFORM")}
+                        />
+                      )}
+                    <GitHubWizardChoice
+                      title={t("selfManagedMethod")}
+                      description={t("selfManagedDescription")}
+                      icon={<IconBrandGithub size="1em" />}
+                      selected={selfManaged}
+                      onSelect={() => selectMethod("SELF_MANAGED")}
+                    />
+                    {props.identity === "PERSONAL" && (
+                      <GitHubWizardChoice
+                        title={t("patMethod")}
+                        description={t("patDescription")}
+                        icon={<IconKey size="1em" />}
+                        selected={props.mode === "pat"}
+                        onSelect={() => selectMethod("PAT")}
+                      />
+                    )}
+                  </SimpleGrid>
+                  <Anchor
+                    component={Link}
+                    href={props.registrationGuideHref ?? "/github-app-guide"}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    w="fit-content"
+                  >
+                    <Group gap="xs">
+                      <IconExternalLink size="1em" />
+                      <Text size="sm">{t("registrationGuide")}</Text>
+                    </Group>
+                  </Anchor>
                 </Stack>
-              </section>
+              </GitHubWizardSection>
             )}
             {props.mode != null && (
-              <section aria-labelledby="github-wizard-connection">
+              <GitHubWizardSection
+                disabled={locked}
+                id="github-wizard-connection"
+                number={3}
+                title={t("connectionTitle")}
+                subtitle={t("connectionHint")}
+                complete={gitHubWizardConnectionReady(props.connection)}
+                action={resetButton()}
+              >
                 <Stack gap="sm">
-                  <Divider />
-                  <Title
-                    id="github-wizard-connection"
-                    ref={
-                      props.stage === "CONNECTION" ? props.headingRef : void 0
-                    }
-                    tabIndex={-1}
-                    order={4}
-                  >
-                    {t("connectionTitle")}
-                  </Title>
                   {props.connection.type !== "CANDIDATE" && (
                     <>
                       {props.mode === "pat" && (
@@ -454,6 +566,19 @@ export function GitHubWizard(props: GitHubWizardProps): React.ReactElement {
                       )}
                       {selfManaged && (
                         <>
+                          <Anchor
+                            component={Link}
+                            href={
+                              props.registrationGuideHref ?? "/github-app-guide"
+                            }
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            <Group gap="xs">
+                              <IconExternalLink size="1em" />
+                              <Text size="sm">{t("registrationGuide")}</Text>
+                            </Group>
+                          </Anchor>
                           <TextInput
                             label={g("appIdLabel")}
                             value={props.credentials.appId}
@@ -547,6 +672,12 @@ export function GitHubWizard(props: GitHubWizardProps): React.ReactElement {
                           )}
                         </Stack>
                       )}
+                      {(selfManaged || userMode) && (
+                        <GitHubWizardCallbackHelp
+                          availability={props.availability}
+                          optional={!userMode}
+                        />
+                      )}
                       {userMode && (
                         <Alert color="blue">
                           <Stack gap="xs">
@@ -556,16 +687,6 @@ export function GitHubWizard(props: GitHubWizardProps): React.ReactElement {
                                   ? "userRegistrationInstructions"
                                   : "platformUserInstructions",
                               )}
-                            </Text>
-                            <Text size="sm">{g("callbackLabel")}</Text>
-                            <Text
-                              size="sm"
-                              style={{ overflowWrap: "anywhere" }}
-                            >
-                              {props.availability.type === "READY"
-                                ? (props.availability.callbackUrl ??
-                                  g("callbackUnavailable"))
-                                : g("availabilityLoading")}
                             </Text>
                             <Anchor
                               target="_blank"
@@ -579,7 +700,8 @@ export function GitHubWizard(props: GitHubWizardProps): React.ReactElement {
                       )}
                       <Button
                         w="fit-content"
-                        variant="light"
+                        variant="default"
+                        leftSection={<IconShieldCheck size="1em" />}
                         loading={
                           props.connection.type === "LOADING" ||
                           (props.connection.type === "VERIFIED" &&
@@ -597,88 +719,123 @@ export function GitHubWizard(props: GitHubWizardProps): React.ReactElement {
                       </Button>
                     </>
                   )}
+
                   <ConnectionEvidence
                     connection={props.connection}
                     onRetry={props.onRetryMetadata}
                   />
-                  {props.stage === "CONNECTION" && (
-                    <Button
-                      w="fit-content"
-                      onClick={props.onContinue}
-                      disabled={!props.canContinue}
-                    >
-                      {t("continueFeatures")}
-                    </Button>
-                  )}
                 </Stack>
-              </section>
+                {props.stage === "CONNECTION" &&
+                  nextButton("continueFeatures", !props.canContinue)}
+              </GitHubWizardSection>
             )}
             {props.stage !== "CONNECTION" && (
-              <section aria-labelledby="github-wizard-features">
+              <GitHubWizardSection
+                disabled={locked}
+                id="github-wizard-features"
+                number={4}
+                title={t("featuresTitle")}
+                complete={props.stage === "RUNTIME" || props.stage === "REVIEW"}
+              >
                 <Stack gap="sm">
-                  <Divider />
-                  <Title
-                    id="github-wizard-features"
-                    ref={props.stage === "FEATURES" ? props.headingRef : void 0}
-                    tabIndex={-1}
-                    order={4}
+                  <Text size="sm" c="dimmed">
+                    {g("toolsetsDescription")}
+                  </Text>
+                  <SimpleGrid
+                    type="container"
+                    cols={{ base: 1, "16rem": 2 }}
+                    spacing="xs"
                   >
-                    {t("featuresTitle")}
-                  </Title>
-                  <TagsInput
-                    label={g("toolsetsLabel")}
-                    description={g("toolsetsDescription")}
-                    data={GITHUB_FEATURE_GROUPS}
-                    value={props.settings.toolsets}
-                    onChange={(value) => setting("toolsets", value)}
-                  />
+                    {GITHUB_FEATURE_GROUPS.map((group) => (
+                      <div
+                        key={group}
+                        className={classes.feature}
+                        data-selected={
+                          props.settings.toolsets.includes(group) || void 0
+                        }
+                      >
+                        <Checkbox
+                          styles={{
+                            body: {
+                              flexDirection: "column",
+                              alignItems: "flex-start",
+                              gap: "var(--mantine-spacing-xs)",
+                            },
+                            label: { paddingInlineStart: 0 },
+                          }}
+                          label={t(`featureNames.${group}`)}
+                          checked={props.settings.toolsets.includes(group)}
+                          onChange={(event) =>
+                            setting(
+                              "toolsets",
+                              event.currentTarget.checked
+                                ? [...props.settings.toolsets, group]
+                                : props.settings.toolsets.filter(
+                                    (value) => value !== group,
+                                  ),
+                            )
+                          }
+                        />
+                      </div>
+                    ))}
+                  </SimpleGrid>
                   <Text size="sm" c="dimmed">
                     {t("permissionsNotice")}
                   </Text>
-                  {props.stage === "FEATURES" && (
-                    <Button
-                      w="fit-content"
-                      onClick={props.onContinue}
-                      disabled={!props.canContinue}
-                    >
-                      {t("continueRuntime")}
-                    </Button>
-                  )}
+                  <Accordion>
+                    <Accordion.Item value="custom">
+                      <Accordion.Control>
+                        {t("customFeatures")}
+                      </Accordion.Control>
+                      <Accordion.Panel>
+                        <TagsInput
+                          label={g("toolsetsLabel")}
+                          description={t("customFeaturesDescription")}
+                          data={[...GITHUB_FEATURE_GROUPS]}
+                          value={props.settings.toolsets}
+                          onChange={(value) => setting("toolsets", value)}
+                        />
+                      </Accordion.Panel>
+                    </Accordion.Item>
+                  </Accordion>
                 </Stack>
-              </section>
+                {props.stage === "FEATURES" &&
+                  nextButton("continueRuntime", !props.canContinue)}
+              </GitHubWizardSection>
             )}
             {(props.stage === "RUNTIME" || props.stage === "REVIEW") && (
-              <section aria-labelledby="github-wizard-runtime">
+              <GitHubWizardSection
+                disabled={locked}
+                id="github-wizard-runtime"
+                number={5}
+                title={t("runtimeTitle")}
+                subtitle={t("runtimeHint")}
+                complete={props.stage === "REVIEW"}
+              >
                 <Stack gap="sm">
-                  <Divider />
-                  <Title
-                    id="github-wizard-runtime"
-                    ref={props.stage === "RUNTIME" ? props.headingRef : void 0}
-                    tabIndex={-1}
-                    order={4}
-                  >
-                    {t("runtimeTitle")}
-                  </Title>
-                  <Switch
-                    label={g("runtimeEnvironmentToggle")}
-                    description={g(
-                      userMode
-                        ? "userRuntimeDescription"
-                        : "runtimeEnvironmentToggleDescription",
-                    )}
-                    checked={props.settings.injectRuntimeEnvironment}
-                    onChange={(event) =>
-                      props.onSettings({
-                        ...props.settings,
-                        injectRuntimeEnvironment: event.currentTarget.checked,
-                        runtimeRiskAcknowledged: false,
-                      })
+                  <div
+                    className={classes.feature}
+                    data-selected={
+                      props.settings.injectRuntimeEnvironment || void 0
                     }
-                  />
+                  >
+                    <Switch
+                      label={t("runtimeToggle")}
+                      description={t("runtimeHint")}
+                      checked={props.settings.injectRuntimeEnvironment}
+                      onChange={(event) =>
+                        props.onSettings({
+                          ...props.settings,
+                          injectRuntimeEnvironment: event.currentTarget.checked,
+                          runtimeRiskAcknowledged: false,
+                        })
+                      }
+                    />
+                  </div>
                   {props.settings.injectRuntimeEnvironment && (
                     <Alert
                       color="orange"
-                      title={g("runtimeEnvironmentWarningTitle")}
+                      title={t("runtimeWarningTitle")}
                       styles={{
                         body: { minWidth: 0, overflowWrap: "anywhere" },
                       }}
@@ -692,7 +849,7 @@ export function GitHubWizard(props: GitHubWizardProps): React.ReactElement {
                           )}
                         </Text>
                         <Checkbox
-                          label={g("runtimeEnvironmentAcknowledge")}
+                          label={t("runtimeAcknowledge")}
                           checked={props.settings.runtimeRiskAcknowledged}
                           onChange={(event) =>
                             setting(
@@ -704,34 +861,25 @@ export function GitHubWizard(props: GitHubWizardProps): React.ReactElement {
                       </Stack>
                     </Alert>
                   )}
-                  {props.stage === "RUNTIME" && (
-                    <Button
-                      w="fit-content"
-                      disabled={
-                        !props.canContinue ||
-                        (props.settings.injectRuntimeEnvironment &&
-                          !props.settings.runtimeRiskAcknowledged)
-                      }
-                      onClick={props.onContinue}
-                    >
-                      {t("continueReview")}
-                    </Button>
-                  )}
                 </Stack>
-              </section>
+                {props.stage === "RUNTIME" &&
+                  nextButton(
+                    "continueReview",
+                    !props.canContinue ||
+                      (props.settings.injectRuntimeEnvironment &&
+                        !props.settings.runtimeRiskAcknowledged),
+                  )}
+              </GitHubWizardSection>
             )}
             {props.stage === "REVIEW" && (
-              <section aria-labelledby="github-wizard-review">
-                <Stack gap="sm">
-                  <Divider />
-                  <Title
-                    id="github-wizard-review"
-                    ref={props.headingRef}
-                    tabIndex={-1}
-                    order={4}
-                  >
-                    {t("reviewTitle")}
-                  </Title>
+              <GitHubWizardSection
+                disabled={locked}
+                id="github-wizard-review"
+                number={6}
+                title={t("reviewTitle")}
+                subtitle={t("reviewHint")}
+              >
+                <Stack gap="md">
                   <TextInput
                     label={f("nameLabel")}
                     placeholder="GitHub"
@@ -740,11 +888,75 @@ export function GitHubWizard(props: GitHubWizardProps): React.ReactElement {
                       setting("name", event.currentTarget.value)
                     }
                   />
+                  <dl className={classes.summary}>
+                    <dt>{t("identitySummary")}</dt>
+                    <dd>
+                      {props.connection.type === "CANDIDATE" ? (
+                        <Group gap="xs">
+                          <Text size="sm">
+                            {props.connection.candidate.account_login}
+                            {props.connection.app.type === "READY" &&
+                              ` · ${props.connection.app.app.name}`}
+                          </Text>
+                        </Group>
+                      ) : props.connection.type === "VERIFIED" ? (
+                        <Text size="sm">
+                          {props.connection.verification.identity.type ===
+                          "user"
+                            ? props.connection.verification.identity.login
+                            : props.connection.verification.identity.name}
+                          {props.connection.verification.installations.length >
+                            0 &&
+                            ` · ${props.connection.verification.installations.map((target) => target.account_login ?? target.installation_id).join(", ")}`}
+                        </Text>
+                      ) : (
+                        <Text size="sm">{t("connectionError")}</Text>
+                      )}
+                    </dd>
+                    <dt>{t("scopeSummary")}</dt>
+                    <dd>
+                      {t(
+                        props.sharingScope === "agent_only"
+                          ? "agentScopeShort"
+                          : "sharedScopeShort",
+                      )}
+                    </dd>
+                    <dt>{t("selectedFeaturesSummary")}</dt>
+                    <dd>
+                      {props.settings.toolsets.map((group) => (
+                        <Badge
+                          key={group}
+                          variant="outline"
+                          tt="none"
+                          color="gray"
+                          mr="xs"
+                          mb="xs"
+                        >
+                          {isKnownGitHubFeature(group)
+                            ? t(`featureNames.${group}`)
+                            : group}
+                        </Badge>
+                      ))}
+                    </dd>
+                    <dt>{t("runtimeSummary")}</dt>
+                    <dd>
+                      {t(
+                        props.settings.injectRuntimeEnvironment ? "on" : "off",
+                      )}
+                    </dd>
+                  </dl>
                   <Accordion>
                     <Accordion.Item value="advanced">
                       <Accordion.Control>{t("advanced")}</Accordion.Control>
                       <Accordion.Panel>
                         <Stack gap="sm">
+                          <TagsInput
+                            label={g("toolsetsLabel")}
+                            description={t("customFeaturesDescription")}
+                            data={[...GITHUB_FEATURE_GROUPS]}
+                            value={props.settings.toolsets}
+                            onChange={(value) => setting("toolsets", value)}
+                          />
                           <TextInput
                             label={f("slugLabel")}
                             description={
@@ -804,42 +1016,33 @@ export function GitHubWizard(props: GitHubWizardProps): React.ReactElement {
                       </Accordion.Panel>
                     </Accordion.Item>
                   </Accordion>
-                  <ConnectionEvidence
-                    connection={props.connection}
-                    onRetry={props.onRetryMetadata}
-                  />
-                  <Text size="sm">
-                    {t("reviewSettings", {
-                      groups: props.settings.toolsets.join(", "),
-                      runtime: t(
-                        props.settings.injectRuntimeEnvironment ? "on" : "off",
-                      ),
-                    })}
-                  </Text>
-                  <Alert color="blue">
+                  <Alert variant="light">
                     {t(
                       props.sharingScope === "agent_only"
                         ? "agentScope"
                         : "sharedScope",
                     )}
                   </Alert>
-                  <Button
-                    onClick={props.onPublish}
-                    loading={pending}
-                    disabled={
-                      !props.canContinue ||
-                      locked ||
-                      (props.settings.injectRuntimeEnvironment &&
-                        !props.settings.runtimeRiskAcknowledged)
-                    }
-                  >
-                    {t("confirm")}
-                  </Button>
+                  <Group justify="flex-end">
+                    <Button
+                      onClick={props.onPublish}
+                      loading={pending}
+                      disabled={
+                        !props.canContinue ||
+                        locked ||
+                        (props.settings.injectRuntimeEnvironment &&
+                          !props.settings.runtimeRiskAcknowledged)
+                      }
+                      rightSection={<IconArrowRight size="1em" />}
+                    >
+                      {t("confirm")}
+                    </Button>
+                  </Group>
                 </Stack>
-              </section>
+              </GitHubWizardSection>
             )}
           </Stack>
-        </fieldset>
+        </div>
         <div aria-live="polite" role="status">
           {props.publication.type === "ERROR" && (
             <Alert color="red">{props.publication.message}</Alert>

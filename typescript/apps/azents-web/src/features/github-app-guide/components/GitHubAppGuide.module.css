@@ -1,0 +1,39 @@
+.guide {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.section {
+  min-width: 0;
+  scroll-margin-top: calc(var(--mantine-spacing-xl) * 3);
+}
+
+.headerIcon {
+  flex-shrink: 0;
+}
+
+.sectionBody {
+  min-width: 0;
+}
+
+.permission {
+  border-bottom: 0.0625rem solid var(--mantine-color-default-border);
+}
+
+.permission:last-child {
+  border-bottom: 0;
+}
+
+.permissionColumns > * {
+  min-width: 0;
+}
+
+.sourcesLink {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mantine-spacing-xs);
+}
+
+.sourcesLink svg {
+  flex-shrink: 0;
+}
