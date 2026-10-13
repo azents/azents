@@ -1,6 +1,6 @@
 import { Container, rem } from "@mantine/core";
 import { NextIntlClientProvider } from "next-intl";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import frenchMessages from "@/i18n/fr-FR-messages";
 import japaneseMessages from "@/i18n/ja-JP-messages";
 import koreanMessages from "@/i18n/ko-KR-messages";
@@ -81,7 +81,9 @@ export const Desktop: Story = {
       canvas.getByText(/App ID and Client ID are different values/),
     ).toBeVisible();
     await expect(
-      canvas.getByText(/uncheck Expire user authorization tokens/),
+      canvas.getByText(
+        /On the New GitHub App creation form, uncheck Expire user authorization tokens before clicking Create GitHub App/,
+      ),
     ).toBeVisible();
     await expect(
       canvas.getByText(/Third-party Access, GitHub Apps → Configure/),
@@ -92,7 +94,9 @@ export const Desktop: Story = {
         name: "Permissions for additional feature groups",
       }),
     );
-    await expect(canvas.getByText("notifications")).toBeVisible();
+    await waitFor(async () => {
+      await expect(canvas.getByText("notifications")).toBeVisible();
+    });
     await expect(
       canvas.getByText(/notification-list API does not support GitHub App/),
     ).toBeVisible();
@@ -125,7 +129,9 @@ export const Mobile: Story = {
         name: "Permissions for additional feature groups",
       }),
     );
-    await expect(canvas.getByText("projects")).toBeVisible();
+    await waitFor(async () => {
+      await expect(canvas.getByText("projects")).toBeVisible();
+    });
     await expect(guide.scrollWidth).toBeLessThanOrEqual(guide.clientWidth);
     await assertIconAboveTitleLayout(canvasElement);
   },
@@ -152,7 +158,9 @@ export const Korean: Story = {
       canvas.getByText(/OAuth Apps가 아니라 GitHub Apps/),
     ).toBeVisible();
     await expect(
-      canvas.getByText(/Expire user authorization tokens 체크를 해제/),
+      canvas.getByText(
+        /GitHub App을 만드는 화면에서 Expire user authorization tokens 체크를 해제한 뒤 Create GitHub App/,
+      ),
     ).toBeVisible();
     await expect(
       canvas.queryByRole("heading", { name: /실행 주체를 확인/ }),
@@ -179,7 +187,9 @@ export const French: Story = {
       }),
     ).toBeVisible();
     await expect(
-      canvas.getByText(/décochez Expire user authorization tokens/),
+      canvas.getByText(
+        /Dans le formulaire New GitHub App, décochez Expire user authorization tokens avant de cliquer sur Create GitHub App/,
+      ),
     ).toBeVisible();
     await expect(
       canvas.getByText(/obligatoire pour l'autorisation d'un compte personnel/),
@@ -207,7 +217,9 @@ export const Japanese: Story = {
       }),
     ).toBeVisible();
     await expect(
-      canvas.getByText(/Expire user authorization tokens のチェックを外して/),
+      canvas.getByText(
+        /GitHub App の作成画面で Expire user authorization tokens のチェックを外してから、Create GitHub App/,
+      ),
     ).toBeVisible();
     await expect(canvas.getByText(/個人アカウント認証では必須/)).toBeVisible();
     await expect(canvas.queryByRole("textbox")).not.toBeInTheDocument();

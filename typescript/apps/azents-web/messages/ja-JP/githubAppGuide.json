@@ -15,7 +15,7 @@
       "title": "基本情報と認証設定を入力する",
       "name": "GitHub App name に識別しやすい一意の名前を入力します。Homepage URL にチームのウェブサイト、公開プロジェクトのリポジトリ、または所有アカウントの URL を入力してください。",
       "callback": "Azents に表示された Callback URL 全体を GitHub の Callback URL にそのままコピーして登録してください。個人アカウント認証では必須、App のインストールとしての実行だけなら任意です。Workspace ページの URL や推測した例を使わないでください。",
-      "tokenExpiry": "自分の GitHub アカウントを接続する場合は Expire user authorization tokens のチェックを外してください。現在の Azents は期限のないユーザートークンのみ対応しています。既存の App では Optional Features → User-to-server token expiration → Opt-out を選びます。この設定は App のインストールトークンには影響しません。",
+      "tokenExpiry": "GitHub App の作成画面で Expire user authorization tokens のチェックを外してから、Create GitHub App をクリックしてください。個人の GitHub アカウントで接続する場合に必要です。現在の Azents は有効期限のないユーザートークンのみ対応しており、この設定はインストールトークンには影響しません。",
       "authorization": "Request user authorization (OAuth) during installation と Enable Device Flow はチェックしないでください。接続中の画面に戻るため、アカウント認証は Azents の接続画面から開始します。",
       "webhook": "この Azents 接続には Webhook の受信先は不要です。Webhook の Active を解除してください。Setup URL は空欄にします。Callback URL とは別の設定です。",
       "visibility": "Where can this GitHub App be installed? で所有アカウントだけなら Only on this account を選びます。他のアカウントや組織にもインストールする場合のみ Any account を選んでください。選択だけでアクセス権は付与されません。"
