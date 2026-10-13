@@ -1,15 +1,21 @@
 """Listener-free regressions for interpreted model/upload/usage observations."""
 
 import json
+from datetime import datetime
 
 import pytest
 import requests
+from azentspublicclient.models import (
+    response_llm_provider_integration_v1_get_subscription_usage as usage_response,
+)
 from pydantic import ValidationError
 
 from tests.required.public import test_file_upload as upload
 from tests.required.public import test_model_selection as selection
 from tests.required.public import test_subscription_usage as usage
 from tests.required.public import test_xai_image_generation as xai
+
+_UsageResult = usage_response.ResponseLlmProviderIntegrationV1GetSubscriptionUsage
 
 
 def test_upload_attachment_preserves_opaque_metadata_and_content() -> None:
@@ -302,3 +308,148 @@ def test_catalog_literal_equality_retains_extensions_and_explicit_null(
     observation = model.model_validate(extended)
     assert observation.model_dump(mode="json", exclude_unset=True) == extended
     assert observation.model_dump(mode="json", exclude_unset=True) != payload
+
+
+class _GeneratedUsageApi:
+    """Inject generated SDK results while executing the real usage assertions."""
+
+    def llm_provider_integration_v1_get_subscription_usage(
+        self,
+        *,
+        integration_id: str,
+        handle: str,
+        _headers: dict[str, str],
+    ) -> usage_response.ResponseLlmProviderIntegrationV1GetSubscriptionUsage:
+        assert handle == "workspace"
+        assert _headers["Authorization"] in {"Bearer owner", "Bearer member"}
+        if integration_id == "test-chatgpt-transport":
+            return _UsageResult.from_dict(
+                {
+                    "type": "unavailable",
+                    "integration_id": "1" * 32,
+                    "provider": "chatgpt_oauth",
+                    "fetched_at": "2026-10-14T00:00:00Z",
+                    "reason": "temporarily_unavailable",
+                    "message": "Usage is temporarily unavailable.",
+                    "retryable": True,
+                }
+            )
+        financials = {
+            "type": "chatgpt",
+            "has_credits": True,
+            "unlimited": False,
+            "balance": "120 credits",
+            "spend_limit": "500 credits",
+            "spend_used": "180 credits",
+            "spend_remaining_percent": 64.0,
+            "spend_resets_at": "2026-08-01T00:00:00Z",
+            "reached_type": None,
+        }
+        limits = [
+            {
+                "id": "primary",
+                "label": "Primary window",
+                "used_percent": (
+                    100.0 if integration_id == "test-chatgpt-exhausted" else 35.0
+                ),
+                "window_minutes": 300,
+                "resets_at": "2026-08-01T00:00:00Z",
+                "primary": True,
+            },
+            {
+                "id": "secondary",
+                "label": "Secondary window",
+                "used_percent": 81.0,
+                "window_minutes": 10080,
+                "resets_at": None,
+                "primary": False,
+            },
+        ]
+        return _UsageResult.from_dict(
+            {
+                "type": "available",
+                "integration_id": "1" * 32,
+                "provider": "chatgpt_oauth",
+                "fetched_at": "2026-10-14T00:00:00Z",
+                "plan_label": "Pro",
+                "limits": limits,
+                "financial_details": (
+                    None if _headers["Authorization"] == "Bearer member" else financials
+                ),
+            }
+        )
+
+
+def _inject_generated_usage_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace only external setup/API transports, not the assertion/egress code."""
+    workspace = usage.SubscriptionWorkspace(
+        handle="workspace",
+        owner_email="owner@example.invalid",
+        owner_token="owner",
+        member_token="member",
+    )
+    monkeypatch.setattr(usage, "setup_subscription_workspace", lambda *_args: workspace)
+    monkeypatch.setattr(
+        usage,
+        "create_chatgpt_subscription_integration",
+        lambda *_args, **kwargs: kwargs["scenario"],
+    )
+    monkeypatch.setattr(
+        usage, "LLMProviderIntegrationV1Api", lambda _client: _GeneratedUsageApi()
+    )
+    monkeypatch.setattr(usage, "clear_subscription_usage_journal", lambda _url: None)
+    monkeypatch.setattr(usage, "subscription_usage_journal", lambda _url: [])
+
+
+def test_actual_owner_member_financial_assertions_serialize_generated_dates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _inject_generated_usage_boundary(monkeypatch)
+    usage.TestChatGPTSubscriptionUsage().test_owner_member_and_exhausted_snapshots(
+        public_api_client=usage.azentspublicclient.ApiClient(),
+        admin_api_client=usage.azentsadminclient.ApiClient(),
+        openai_proxy_url="http://unused.invalid",
+    )
+
+
+def test_actual_unavailable_wire_assertion_serializes_generated_fetched_at(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _inject_generated_usage_boundary(monkeypatch)
+    usage.TestChatGPTSubscriptionUsage().test_transport_failure_reaches_public_unavailable_result(
+        public_api_client=usage.azentspublicclient.ApiClient(),
+        admin_api_client=usage.azentsadminclient.ApiClient(),
+        openai_proxy_url="http://unused.invalid",
+    )
+
+
+def test_usage_json_egress_retains_dates_nulls_extensions_and_sensitive_evidence() -> (
+    None
+):
+    api = _GeneratedUsageApi()
+    owner = api.llm_provider_integration_v1_get_subscription_usage(
+        integration_id="test-chatgpt-normal",
+        handle="workspace",
+        _headers={"Authorization": "Bearer owner"},
+    ).actual_instance
+    assert isinstance(owner, usage.SubscriptionUsageAvailableResponse)
+    assert isinstance(owner.fetched_at, datetime)
+    owner.additional_properties["future"] = {"date": owner.fetched_at, "kept": True}
+    wire = usage._json_object(owner.to_dict())
+    assert wire["fetched_at"] == "2026-10-14T00:00:00Z"
+    assert wire["future"] == {"date": "2026-10-14T00:00:00Z", "kept": True}
+    financials = wire["financial_details"]
+    assert isinstance(financials, dict)
+    assert financials["spend_resets_at"] == "2026-08-01T00:00:00Z"
+    assert "reached_type" in financials and financials["reached_type"] is None
+    usage._assert_no_sensitive_source_values(owner)
+    member = api.llm_provider_integration_v1_get_subscription_usage(
+        integration_id="test-chatgpt-normal",
+        handle="workspace",
+        _headers={"Authorization": "Bearer member"},
+    ).actual_instance
+    assert isinstance(member, usage.SubscriptionUsageAvailableResponse)
+    assert usage._json_object(member.to_dict())["financial_details"] is None
+    owner.additional_properties["sensitive_extension"] = "test-chatgpt-access-token"
+    with pytest.raises(AssertionError):
+        usage._assert_no_sensitive_source_values(owner)

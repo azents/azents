@@ -8,6 +8,7 @@ import requests
 from azentspublicclient.models.chat_session_model_profile_response import (
     ChatSessionModelProfileResponse,
 )
+from pydantic import TypeAdapter, ValidationError
 
 from support.utils import unique
 from tests.required.public.test_per_prompt_inference_profile import (
@@ -17,12 +18,33 @@ from tests.required.public.test_per_prompt_inference_profile import (
     setup_profile_api_agent,
 )
 
+_JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 
-def _journal(url: str) -> bytes:
-    """Snapshot opaque journal bytes to prove no provider side effects."""
-    response = requests.get(url, timeout=10)
+
+def _journal_snapshot(response: requests.Response) -> list[dict[str, object]]:
+    """Preserve opaque object-list equality without interpreting provider fields."""
     response.raise_for_status()
-    return response.content
+    try:
+        return _JSON_OBJECT_LIST.validate_python(response.json())
+    except ValidationError as error:
+        raise AssertionError("Provider journal was not an object list.") from error
+
+
+def _journal(mock_openai_url: str) -> list[dict[str, object]]:
+    """Read the mock provider request journal from its base URL."""
+    return _journal_snapshot(
+        requests.get(f"{mock_openai_url}/v1/_requests", timeout=10)
+    )
+
+
+def _image_generation_journal(openai_proxy_url: str) -> list[dict[str, object]]:
+    """Read the separate image-generation proxy journal from its base URL."""
+    return _journal_snapshot(
+        requests.get(
+            f"{openai_proxy_url}/v1/_image_generation_requests",
+            timeout=10,
+        )
+    )
 
 
 def _profile(response: requests.Response) -> ChatSessionModelProfileResponse:
@@ -72,10 +94,8 @@ def test_complete_profile_is_idempotent_side_effect_free(
     target = "Astra"
     enabled_execution_options = ["ultrafast"]
     before_history = _history(azents_public_server_url, token, session_id)
-    journal_url = f"{mock_openai_url}/v1/_requests"
-    before_journal = _journal(journal_url)
-    proxy_url = f"{openai_proxy_url}/v1/_image_generation_requests"
-    before_proxy = _journal(proxy_url)
+    before_journal = _journal(mock_openai_url)
+    before_proxy = _image_generation_journal(openai_proxy_url)
     client_request_id = f"model-only-{unique()}"
     replace_profile = partial(
         _replace_profile,
@@ -123,5 +143,5 @@ def test_complete_profile_is_idempotent_side_effect_free(
         enabled_execution_options=enabled_execution_options,
     )
     assert _history(azents_public_server_url, token, session_id) == before_history
-    assert _journal(journal_url) == before_journal
-    assert _journal(proxy_url) == before_proxy
+    assert _journal(mock_openai_url) == before_journal
+    assert _image_generation_journal(openai_proxy_url) == before_proxy

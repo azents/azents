@@ -37,6 +37,7 @@ from pydantic import (
 from testcontainers.core.container import DockerContainer
 
 from support.oauth_connections import connect_chatgpt_oauth, connect_xai_oauth
+from support.subscription_usage_evidence import json_object as _json_object
 from support.subscription_usage_evidence import (
     subscription_usage_log_records as _subscription_usage_log_records,
 )
@@ -215,8 +216,8 @@ def _assert_no_sensitive_source_values(value: object) -> None:
             SubscriptionUsageExternalResponse,
         ),
     ):
-        value = value.to_dict()
-    serialized = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+        value = _json_object(value.to_dict())
+    serialized = json.dumps(value, ensure_ascii=False, sort_keys=True)
     for forbidden in (
         "test-chatgpt-access-token",
         "test-chatgpt-refresh-token",
@@ -296,7 +297,7 @@ class TestChatGPTSubscriptionUsage:
         assert owner.plan_label == "Pro"
         assert len(_limits(owner)) == 2
         assert owner.financial_details is not None
-        assert owner.financial_details.to_dict() == {
+        assert _json_object(owner.to_dict())["financial_details"] == {
             "type": "chatgpt",
             "has_credits": True,
             "unlimited": False,
@@ -313,7 +314,10 @@ class TestChatGPTSubscriptionUsage:
         assert member.financial_details is None
         exhausted_limits = _limits(exhausted)
         assert exhausted_limits[0].used_percent == 100.0
-        assert all("remaining" not in limit.to_dict() for limit in exhausted_limits)
+        assert all(
+            "remaining" not in _json_object(limit.to_dict())
+            for limit in exhausted_limits
+        )
         _assert_no_sensitive_source_values(owner)
         _assert_no_sensitive_source_values(member)
         _assert_safe_subscription_usage_journal(
@@ -387,7 +391,10 @@ class TestChatGPTSubscriptionUsage:
         assert payload.type == "unavailable"
         assert payload.reason == "temporarily_unavailable"
         assert payload.retryable is True
-        assert "error" not in json.dumps(payload.to_dict(), sort_keys=True).lower()
+        assert (
+            "error"
+            not in json.dumps(_json_object(payload.to_dict()), sort_keys=True).lower()
+        )
         _assert_no_sensitive_source_values(payload)
         _assert_safe_subscription_usage_journal(
             subscription_usage_journal(openai_proxy_url)
@@ -425,7 +432,7 @@ class TestXaiSubscriptionUsage:
         assert len(_limits(owner)) == 1
         assert _limits(owner)[0].used_percent == 42.0
         assert owner.financial_details is not None
-        assert owner.financial_details.to_dict() == {
+        assert _json_object(owner.to_dict())["financial_details"] == {
             "type": "xai",
             "prepaid_balance_cents": 2540,
             "payg_cap_cents": 10000,
@@ -490,11 +497,11 @@ class TestXaiSubscriptionUsage:
         if expected_reason is not None:
             assert isinstance(payload, SubscriptionUsageUnavailableResponse)
             assert payload.reason == expected_reason
-            assert "url" not in payload.to_dict()
+            assert "url" not in _json_object(payload.to_dict())
         if scenario == "test-xai-external":
             assert isinstance(payload, SubscriptionUsageExternalResponse)
             assert payload.url == "https://grok.com/usage"
-            assert "financial_details" not in payload.to_dict()
+            assert "financial_details" not in _json_object(payload.to_dict())
         if scenario == "test-xai-billing-denied":
             integration = api.llm_provider_integration_v1_get_integration(
                 integration_id=integration_id,
