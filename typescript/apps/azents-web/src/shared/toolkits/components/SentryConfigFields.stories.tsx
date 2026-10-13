@@ -1,4 +1,5 @@
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
+import { projectSentryFields } from "../provider-config-views";
 import { SentryConfigFieldsContainer } from "../SentryConfigFieldsContainer";
 import { ProviderFieldStoryTransport } from "./provider-field-story-fixtures";
 import { SentryConfigFields } from "./SentryConfigFields";
@@ -9,7 +10,9 @@ interface StoryProps extends SimpleProviderFieldsProps {
   onRequest: (input: unknown) => void;
 }
 function FieldStory(props: StoryProps): React.ReactElement {
-  return <SentryConfigFields {...props} />;
+  return (
+    <SentryConfigFields {...props} view={projectSentryFields(props.config)} />
+  );
 }
 const meta = {
   title: "Toolkits/Provider fields/Sentry",

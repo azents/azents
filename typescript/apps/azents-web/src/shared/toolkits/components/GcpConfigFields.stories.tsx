@@ -1,5 +1,6 @@
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { GcpConfigFieldsContainer } from "../GcpConfigFieldsContainer";
+import { projectGcpFields } from "../provider-config-views";
 import { GcpConfigFields } from "./GcpConfigFields";
 import { ProviderFieldStoryTransport } from "./provider-field-story-fixtures";
 import type { ServiceAccountProviderFieldsProps } from "../types";
@@ -9,7 +10,12 @@ interface StoryProps extends ServiceAccountProviderFieldsProps {
   onRequest: (input: unknown) => void;
 }
 function FieldStory(props: StoryProps): React.ReactElement {
-  return <GcpConfigFields {...props} />;
+  return (
+    <GcpConfigFields
+      {...props}
+      view={projectGcpFields(props.config, props.credentials)}
+    />
+  );
 }
 const meta = {
   title: "Toolkits/Provider fields/Gcp",

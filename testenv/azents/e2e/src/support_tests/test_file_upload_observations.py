@@ -1,5 +1,7 @@
 """Docker-free message parsing regressions for file-upload E2E helpers."""
 
+from dataclasses import asdict
+
 import pytest
 from pydantic import ValidationError
 
@@ -23,9 +25,10 @@ def test_structured_text_and_opaque_file_parts_keep_upload_evidence() -> None:
         }
     )
     assert _content_text(payload.content) == "Describe uploaded image and file"
-    assert payload.attachments == [
-        {"uri": "exchange://opaque", "media_type": "image/png"}
-    ]
+    assert [
+        attachment.model_dump(mode="json", exclude_unset=True)
+        for attachment in payload.attachments
+    ] == [{"uri": "exchange://opaque", "media_type": "image/png"}]
     assert payload.model_extra == {"sender_user_id": None}
 
 
@@ -46,7 +49,7 @@ def test_history_selection_uses_typed_identity_and_preserves_output_shape() -> N
             "has_more": False,
         }
     )
-    assert _message_with_content(page, "uploaded") == {
+    assert asdict(_message_with_content(page, "uploaded")) == {
         "id": "message-1",
         "content": "uploaded",
         "attachments": [],

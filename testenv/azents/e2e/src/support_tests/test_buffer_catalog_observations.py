@@ -209,10 +209,12 @@ def test_catalog_poll_accepts_valid_terminal_contract(
         return response
 
     monkeypatch.setattr(requests, "get", get)
-    assert (
-        _wait_for_initial_catalog_sync("https://example.test", "token", "ws", "llm")
-        is response
+    catalog = _wait_for_initial_catalog_sync(
+        "https://example.test", "token", "ws", "llm"
     )
+    assert catalog.latest_sync is not None
+    assert catalog.latest_sync.status == "succeeded"
+    assert catalog.model_dump(mode="json", exclude_unset=True) == response.json()
 
 
 def _running_live() -> dict[str, object]:

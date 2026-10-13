@@ -36,6 +36,6 @@
 
   .row + .row {
     padding-top: var(--mantine-spacing-md);
-    border-top: 1px solid var(--mantine-color-default-border);
+    border-top: 0.0625rem solid var(--mantine-color-default-border);
   }
 }

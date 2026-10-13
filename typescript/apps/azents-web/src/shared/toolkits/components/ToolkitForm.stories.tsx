@@ -6,6 +6,7 @@ import {
   trimToolkitWhitespace,
 } from "@/shared/lib/toolkit-identifiers";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
+import { projectGitHubFormRegistration } from "../provider-config-views";
 import { projectToolkitConfig } from "../toolkit-config-projection";
 import { wizardReviewProps } from "./github-wizard-story-fixtures";
 import { GitHubWizard } from "./GitHubWizard";
@@ -18,7 +19,7 @@ import type { ReactElement } from "react";
 
 type ToolkitFormStoryProps = Omit<
   ToolkitFormProps,
-  "form" | "onSubmit" | "configProjection"
+  "form" | "onSubmit" | "configProjection" | "githubRegistration"
 > & {
   onSubmitValues?: (values: ToolkitFormValues) => void;
 };
@@ -48,6 +49,11 @@ function ToolkitFormStory(props: ToolkitFormStoryProps): ReactElement {
   return (
     <ToolkitForm
       {...props}
+      githubRegistration={projectGitHubFormRegistration(
+        props.formState.type === "EDIT" ? props.formState.config.config : null,
+        form.values.config,
+        form.values.credentials ?? null,
+      )}
       slugPlaceholder={
         canonicalName
           ? resolveDefaultToolkitSlug(

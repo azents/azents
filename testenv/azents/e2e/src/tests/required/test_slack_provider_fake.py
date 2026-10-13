@@ -13,6 +13,12 @@ import pytest
 import requests
 from websockets.sync.client import connect as websocket_connect
 
+from support.slack_fake_observations import (
+    BarrierObservation,
+    FakeEvidenceObservation,
+    OAuthTokenObservation,
+    UploadTargetObservation,
+)
 from support.slack_provider_fake import (
     FakeState,
     SlackHTTPHandler,
@@ -21,13 +27,6 @@ from support.slack_provider_fake import (
 )
 
 _SERVER_POLL_INTERVAL_SECONDS = 0.01
-
-
-def _object(value: object) -> dict[str, object]:
-    """Validate one fake evidence object with string keys."""
-    if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
-        raise AssertionError("Expected an object with string keys.")
-    return value
 
 
 @pytest.fixture
@@ -94,16 +93,18 @@ def test_slack_fake_records_block_kit_approval_links_as_sanitized_evidence(
         timeout=5,
     ).raise_for_status()
 
-    evidence = requests.get(
-        f"{slack_fake_url}/__testenv/state",
-        timeout=5,
-    ).json()
+    evidence = FakeEvidenceObservation.model_validate(
+        requests.get(
+            f"{slack_fake_url}/__testenv/state",
+            timeout=5,
+        ).json()
+    )
     rendered = str(evidence)
-    assert evidence["request_counts"] == {
+    assert evidence.request_counts == {
         "auth.test": 1,
         "chat.postMessage": 1,
     }
-    assert evidence["deliveries"][0]["approval_request_id"] == "request-1"
+    assert evidence.deliveries[0]["approval_request_id"] == "request-1"
     assert "xoxb-private-token" not in rendered
     assert "Approval is required" not in rendered
 
@@ -176,12 +177,14 @@ def test_slack_fake_records_sanitized_channel_and_thread_presence(
 
     channel.raise_for_status()
     thread.raise_for_status()
-    evidence = requests.get(
-        f"{slack_fake_url}/__testenv/state",
-        timeout=5,
-    ).json()
+    evidence = FakeEvidenceObservation.model_validate(
+        requests.get(
+            f"{slack_fake_url}/__testenv/state",
+            timeout=5,
+        ).json()
+    )
     rendered = str(evidence)
-    assert evidence["presence"] == [
+    assert evidence.presence == [
         {
             "operation": "assistant.threads.setStatus",
             "channel": "C-E2E",
@@ -259,17 +262,19 @@ def test_slack_fake_sequences_retry_after_and_blocks_exact_history(
     thread = threading.Thread(target=request_history)
     thread.start()
     for _ in range(50):
-        barrier = requests.get(
-            f"{slack_fake_url}/__testenv/barrier",
-            timeout=5,
-        ).json()
-        if barrier["reached"]:
+        barrier = BarrierObservation.model_validate(
+            requests.get(
+                f"{slack_fake_url}/__testenv/barrier",
+                timeout=5,
+            ).json()
+        )
+        if barrier.reached:
             break
         time.sleep(0.02)
     else:
         pytest.fail("Slack history barrier was not reached.")
     assert responses == []
-    assert barrier == {
+    assert barrier.model_dump() == {
         "operation": "conversations.replies",
         "occurrence": 1,
         "request_count": 1,
@@ -327,12 +332,14 @@ def test_slack_fake_serves_bounded_parent_and_thread_history_pages(
 
     assert parent.json()["messages"] == messages
     assert thread.json()["messages"] == messages
-    evidence = requests.get(
-        f"{slack_fake_url}/__testenv/state",
-        timeout=5,
-    ).json()
+    evidence = FakeEvidenceObservation.model_validate(
+        requests.get(
+            f"{slack_fake_url}/__testenv/state",
+            timeout=5,
+        ).json()
+    )
     rendered = str(evidence)
-    assert evidence["request_counts"] == {
+    assert evidence.request_counts == {
         "conversations.history": 1,
         "conversations.replies": 1,
     }
@@ -367,17 +374,19 @@ def test_slack_fake_blocks_one_targeted_delivery_operation(
     thread = threading.Thread(target=update_message)
     thread.start()
     for _ in range(50):
-        barrier = requests.get(
-            f"{slack_fake_url}/__testenv/barrier",
-            timeout=5,
-        ).json()
-        if barrier["reached"]:
+        barrier = BarrierObservation.model_validate(
+            requests.get(
+                f"{slack_fake_url}/__testenv/barrier",
+                timeout=5,
+            ).json()
+        )
+        if barrier.reached:
             break
         time.sleep(0.02)
     else:
         pytest.fail("Slack delivery barrier was not reached.")
     assert responses == []
-    assert barrier == {
+    assert barrier.model_dump() == {
         "operation": "chat.update",
         "occurrence": 1,
         "request_count": 1,
@@ -391,11 +400,13 @@ def test_slack_fake_blocks_one_targeted_delivery_operation(
     thread.join(timeout=5)
     assert not thread.is_alive()
     assert responses[0].status_code == 200
-    evidence = requests.get(
-        f"{slack_fake_url}/__testenv/state",
-        timeout=5,
-    ).json()
-    assert evidence["deliveries"] == [
+    evidence = FakeEvidenceObservation.model_validate(
+        requests.get(
+            f"{slack_fake_url}/__testenv/state",
+            timeout=5,
+        ).json()
+    )
+    assert evidence.deliveries == [
         {
             "operation": "chat.update",
             "channel": "C-E2E",
@@ -466,15 +477,17 @@ def test_slack_fake_configures_installation_identity_and_captures_selector_view(
     )
     opened.raise_for_status()
 
-    evidence = requests.get(
-        f"{slack_fake_url}/__testenv/state",
-        timeout=5,
-    ).json()
+    evidence = FakeEvidenceObservation.model_validate(
+        requests.get(
+            f"{slack_fake_url}/__testenv/state",
+            timeout=5,
+        ).json()
+    )
     rendered = str(evidence)
     assert auth["team_id"] == "T-MULTI"
     assert auth["user_id"] == "U-BOT-MULTI"
     assert bot["bot"]["app_id"] == "A-MULTI"
-    assert evidence["views"] == [
+    assert evidence.views == [
         {
             "operation": "views.open",
             "control_scope": "selector",
@@ -557,7 +570,7 @@ def test_slack_fake_oauth_success_replay_and_redaction(
         timeout=5,
     )
     token.raise_for_status()
-    access_token = token.json()["access_token"]
+    access_token = OAuthTokenObservation.model_validate(token.json()).access_token
     userinfo = requests.post(
         f"{slack_fake_url}/api/openid.connect.userInfo",
         headers={"Authorization": f"Bearer {access_token}"},
@@ -582,11 +595,13 @@ def test_slack_fake_oauth_success_replay_and_redaction(
     )
     assert replay.json() == {"ok": False, "error": "invalid_code"}
 
-    evidence = requests.get(
-        f"{slack_fake_url}/__testenv/state",
-        timeout=5,
-    ).json()
-    assert [item["outcome"] for item in evidence["oauth"]["requests"]] == [
+    evidence = FakeEvidenceObservation.model_validate(
+        requests.get(
+            f"{slack_fake_url}/__testenv/state",
+            timeout=5,
+        ).json()
+    )
+    assert [item.outcome for item in evidence.oauth.requests] == [
         "authorized",
         "exchanged",
         "identified",
@@ -631,11 +646,13 @@ def test_slack_fake_oauth_controls_authorization_failures(
         timeout=5,
     )
     assert response.status_code == 302
-    evidence = requests.get(
-        f"{slack_fake_url}/__testenv/state",
-        timeout=5,
-    ).json()
-    assert evidence["oauth"]["requests"][0]["outcome"] == expected_outcome
+    evidence = FakeEvidenceObservation.model_validate(
+        requests.get(
+            f"{slack_fake_url}/__testenv/state",
+            timeout=5,
+        ).json()
+    )
+    assert evidence.oauth.requests[0].outcome == expected_outcome
     assert "private-failure-state" not in str(evidence)
 
 
@@ -756,13 +773,15 @@ def test_slack_fake_keeps_model_draft_controls_and_actions_transient(
         "azents_model_select": {"option-opaque-1": "Private model label"}
     }
     assert transient["action_values"] == {"azents_model_next": "signed-page-2"}
-    evidence = requests.get(
-        f"{slack_fake_url}/__testenv/state",
-        timeout=5,
-    ).json()
-    assert evidence["views"][0]["control_scope"] == "model"
-    assert evidence["views"][0]["control_count"] == 2
-    assert evidence["views"][0]["option_count"] == 1
+    evidence = FakeEvidenceObservation.model_validate(
+        requests.get(
+            f"{slack_fake_url}/__testenv/state",
+            timeout=5,
+        ).json()
+    )
+    assert evidence.views[0]["control_scope"] == "model"
+    assert evidence.views[0]["control_count"] == 2
+    assert evidence.views[0]["option_count"] == 1
     rendered = str(evidence)
     assert "signed-model-draft" not in rendered
     assert "option-opaque-1" not in rendered
@@ -800,13 +819,15 @@ def test_slack_fake_captures_selector_control_without_visible_copy(
         timeout=5,
     ).raise_for_status()
 
-    evidence = requests.get(
-        f"{slack_fake_url}/__testenv/state",
-        timeout=5,
-    ).json()
+    evidence = FakeEvidenceObservation.model_validate(
+        requests.get(
+            f"{slack_fake_url}/__testenv/state",
+            timeout=5,
+        ).json()
+    )
     rendered = str(evidence)
-    assert evidence["deliveries"][0]["action_ids"] == ["azents_agent_selector_open"]
-    assert evidence["deliveries"][0]["selector_admission_id"] == "admission-1"
+    assert evidence.deliveries[0]["action_ids"] == ["azents_agent_selector_open"]
+    assert evidence.deliveries[0]["selector_admission_id"] == "admission-1"
     assert "Private selector instructions" not in rendered
     assert "Private button label" not in rendered
 
@@ -846,11 +867,13 @@ def test_slack_fake_captures_plan_after_agent_identity_block(
         timeout=5,
     ).raise_for_status()
 
-    evidence = requests.get(
-        f"{slack_fake_url}/__testenv/state",
-        timeout=5,
-    ).json()
-    assert evidence["deliveries"] == [
+    evidence = FakeEvidenceObservation.model_validate(
+        requests.get(
+            f"{slack_fake_url}/__testenv/state",
+            timeout=5,
+        ).json()
+    )
+    assert evidence.deliveries == [
         {
             "operation": "chat.update",
             "channel": "C-E2E",
@@ -900,14 +923,16 @@ def test_slack_fake_serves_private_file_without_leaking_content_evidence(
     )
     download.raise_for_status()
 
-    evidence = requests.get(
-        f"{slack_fake_url}/__testenv/state",
-        timeout=5,
-    ).json()
+    evidence = FakeEvidenceObservation.model_validate(
+        requests.get(
+            f"{slack_fake_url}/__testenv/state",
+            timeout=5,
+        ).json()
+    )
     rendered = str(evidence)
     assert info["file"]["size"] == len(content)
     assert download.content == content
-    assert evidence["request_counts"] == {
+    assert evidence.request_counts == {
         "files.info": 1,
         "file.download": 1,
     }
@@ -921,26 +946,30 @@ def test_slack_fake_collects_ordered_external_upload_evidence(
     slack_fake_url: str,
 ) -> None:
     """Acquire, stream, and complete ordered files without retaining their bodies."""
-    first_target = requests.post(
-        f"{slack_fake_url}/api/files.getUploadURLExternal",
-        json={"filename": "first-private.txt", "length": 3},
-        headers={"Authorization": "Bearer xoxb-private-token"},
-        timeout=5,
-    ).json()
-    second_target = requests.post(
-        f"{slack_fake_url}/api/files.getUploadURLExternal",
-        json={"filename": "second-private.txt", "length": 4},
-        headers={"Authorization": "Bearer xoxb-private-token"},
-        timeout=5,
-    ).json()
+    first_target = UploadTargetObservation.model_validate(
+        requests.post(
+            f"{slack_fake_url}/api/files.getUploadURLExternal",
+            json={"filename": "first-private.txt", "length": 3},
+            headers={"Authorization": "Bearer xoxb-private-token"},
+            timeout=5,
+        ).json()
+    )
+    second_target = UploadTargetObservation.model_validate(
+        requests.post(
+            f"{slack_fake_url}/api/files.getUploadURLExternal",
+            json={"filename": "second-private.txt", "length": 4},
+            headers={"Authorization": "Bearer xoxb-private-token"},
+            timeout=5,
+        ).json()
+    )
     requests.post(
-        first_target["upload_url"],
+        first_target.upload_url,
         data=b"abc",
         headers={"Content-Type": "application/octet-stream"},
         timeout=5,
     ).raise_for_status()
     requests.post(
-        second_target["upload_url"],
+        second_target.upload_url,
         data=b"defg",
         headers={"Content-Type": "application/octet-stream"},
         timeout=5,
@@ -949,8 +978,8 @@ def test_slack_fake_collects_ordered_external_upload_evidence(
         f"{slack_fake_url}/api/files.completeUploadExternal",
         json={
             "files": [
-                {"id": first_target["file_id"], "title": "first-private.txt"},
-                {"id": second_target["file_id"], "title": "second-private.txt"},
+                {"id": first_target.file_id, "title": "first-private.txt"},
+                {"id": second_target.file_id, "title": "second-private.txt"},
             ],
             "channel_id": "C-E2E",
             "thread_ts": "1721600000.000100",
@@ -961,25 +990,27 @@ def test_slack_fake_collects_ordered_external_upload_evidence(
     )
     completion.raise_for_status()
 
-    evidence = requests.get(
-        f"{slack_fake_url}/__testenv/state",
-        timeout=5,
-    ).json()
+    evidence = FakeEvidenceObservation.model_validate(
+        requests.get(
+            f"{slack_fake_url}/__testenv/state",
+            timeout=5,
+        ).json()
+    )
     rendered = str(evidence)
     assert completion.json()["ok"] is True
-    assert evidence["request_counts"] == {
+    assert evidence.request_counts == {
         "files.getUploadURLExternal": 2,
         "file.upload": 2,
         "files.completeUploadExternal": 1,
     }
-    assert evidence["deliveries"] == [
+    assert evidence.deliveries == [
         {
             "operation": "files.completeUploadExternal",
             "channel": "C-E2E",
             "thread_ts": "1721600000.000100",
             "file_ids": [
-                first_target["file_id"],
-                second_target["file_id"],
+                first_target.file_id,
+                second_target.file_id,
             ],
             "file_count": 2,
             "total_bytes": 7,
@@ -988,15 +1019,13 @@ def test_slack_fake_collects_ordered_external_upload_evidence(
         }
     ]
     uploads = [
-        request
-        for request in evidence["requests"]
-        if request["operation"] == "file.upload"
+        request for request in evidence.requests if request.operation == "file.upload"
     ]
-    assert uploads == [
+    assert [request.model_dump() for request in uploads] == [
         {
             "operation": "file.upload",
             "method": "POST",
-            "file": first_target["file_id"],
+            "file": first_target.file_id,
             "content_length": 3,
             "received_length": 3,
             "content_sha256": hashlib.sha256(b"abc").hexdigest(),
@@ -1004,7 +1033,7 @@ def test_slack_fake_collects_ordered_external_upload_evidence(
         {
             "operation": "file.upload",
             "method": "POST",
-            "file": second_target["file_id"],
+            "file": second_target.file_id,
             "content_length": 4,
             "received_length": 4,
             "content_sha256": hashlib.sha256(b"defg").hexdigest(),
@@ -1042,13 +1071,15 @@ def test_slack_fake_controls_file_scope_and_size_rejection(
         f"{slack_fake_url}/api/auth.test",
         timeout=5,
     )
-    target = requests.post(
-        f"{slack_fake_url}/api/files.getUploadURLExternal",
-        json={"filename": "size.txt", "length": 4},
-        timeout=5,
-    ).json()
+    target = UploadTargetObservation.model_validate(
+        requests.post(
+            f"{slack_fake_url}/api/files.getUploadURLExternal",
+            json={"filename": "size.txt", "length": 4},
+            timeout=5,
+        ).json()
+    )
     upload = requests.post(
-        target["upload_url"],
+        target.upload_url,
         data=b"abc",
         timeout=5,
     )
@@ -1062,15 +1093,17 @@ def test_slack_fake_accepts_url_encoded_file_upload_requests(
     slack_fake_url: str,
 ) -> None:
     """Match Slack's form-encoded external upload API request format."""
-    target = requests.post(
-        f"{slack_fake_url}/api/files.getUploadURLExternal",
-        data={"filename": "encoded.txt", "length": "3"},
-        timeout=5,
-    ).json()
-    assert target["ok"] is True
+    target = UploadTargetObservation.model_validate(
+        requests.post(
+            f"{slack_fake_url}/api/files.getUploadURLExternal",
+            data={"filename": "encoded.txt", "length": "3"},
+            timeout=5,
+        ).json()
+    )
+    assert target.ok is True
 
     upload = requests.post(
-        target["upload_url"],
+        target.upload_url,
         data=b"abc",
         timeout=5,
     )
@@ -1080,7 +1113,7 @@ def test_slack_fake_accepts_url_encoded_file_upload_requests(
         f"{slack_fake_url}/api/files.completeUploadExternal",
         data={
             "files": json.dumps(
-                [{"id": target["file_id"], "title": "encoded.txt"}],
+                [{"id": target.file_id, "title": "encoded.txt"}],
                 separators=(",", ":"),
             ),
             "channel_id": "C-E2E",
@@ -1090,16 +1123,18 @@ def test_slack_fake_accepts_url_encoded_file_upload_requests(
         timeout=5,
     ).json()
     assert completion["ok"] is True
-    state = requests.get(
-        f"{slack_fake_url}/__testenv/state",
-        timeout=5,
-    ).json()
-    assert state["deliveries"] == [
+    state = FakeEvidenceObservation.model_validate(
+        requests.get(
+            f"{slack_fake_url}/__testenv/state",
+            timeout=5,
+        ).json()
+    )
+    assert state.deliveries == [
         {
             "operation": "files.completeUploadExternal",
             "channel": "C-E2E",
             "thread_ts": "1721600000.000001",
-            "file_ids": [target["file_id"]],
+            "file_ids": [target.file_id],
             "file_count": 1,
             "total_bytes": 3,
             "has_initial_comment": True,
@@ -1112,13 +1147,15 @@ def test_slack_fake_accepts_query_encoded_upload_target_requests(
     slack_fake_url: str,
 ) -> None:
     """Match slack_sdk's query-encoded upload target request format."""
-    target = requests.post(
-        f"{slack_fake_url}/api/files.getUploadURLExternal",
-        params={"filename": "query.txt", "length": "3"},
-        timeout=5,
-    ).json()
+    target = UploadTargetObservation.model_validate(
+        requests.post(
+            f"{slack_fake_url}/api/files.getUploadURLExternal",
+            params={"filename": "query.txt", "length": "3"},
+            timeout=5,
+        ).json()
+    )
 
-    assert target["ok"] is True
+    assert target.ok is True
 
 
 @pytest.mark.parametrize(
@@ -1188,13 +1225,15 @@ def test_slack_fake_can_make_completion_ambiguous(
         },
         timeout=5,
     ).raise_for_status()
-    target = requests.post(
-        f"{slack_fake_url}/api/files.getUploadURLExternal",
-        json={"filename": "ambiguous.txt", "length": 3},
-        timeout=5,
-    ).json()
+    target = UploadTargetObservation.model_validate(
+        requests.post(
+            f"{slack_fake_url}/api/files.getUploadURLExternal",
+            json={"filename": "ambiguous.txt", "length": 3},
+            timeout=5,
+        ).json()
+    )
     requests.post(
-        target["upload_url"],
+        target.upload_url,
         data=b"abc",
         timeout=5,
     ).raise_for_status()
@@ -1203,7 +1242,7 @@ def test_slack_fake_can_make_completion_ambiguous(
         requests.post(
             f"{slack_fake_url}/api/files.completeUploadExternal",
             json={
-                "files": [{"id": target["file_id"], "title": "ambiguous.txt"}],
+                "files": [{"id": target.file_id, "title": "ambiguous.txt"}],
                 "channel_id": "C-E2E",
                 "thread_ts": "1721600000.000100",
                 "initial_comment": "Ambiguous completion",
@@ -1276,9 +1315,9 @@ def test_slack_fake_websocket_captures_acknowledgement_after_envelope() -> None:
         server.server_close()
         thread.join(timeout=5)
 
-    evidence = state.evidence()
-    socket_evidence_object = _object(evidence["socket"])
-    assert socket_evidence_object["connections"] == 1
-    assert socket_evidence_object["envelope_ids"] == ["Env-1"]
-    assert socket_evidence_object["acknowledgements"] == ["Env-1"]
+    evidence = FakeEvidenceObservation.model_validate(state.evidence())
+    socket_evidence_object = evidence.socket
+    assert socket_evidence_object.connections == 1
+    assert socket_evidence_object.envelope_ids == ["Env-1"]
+    assert socket_evidence_object.acknowledgements == ["Env-1"]
     assert "content excluded from evidence" not in str(evidence)

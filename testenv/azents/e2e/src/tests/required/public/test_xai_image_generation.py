@@ -4,7 +4,7 @@ import hashlib
 import json
 import time
 from collections.abc import Callable
-from typing import NamedTuple
+from typing import Annotated, Literal, NamedTuple
 
 import azentsadminclient
 import azentspublicclient
@@ -13,7 +13,10 @@ from azentspublicclient.api.llm_provider_integration_v1_api import (
     LLMProviderIntegrationV1Api,
 )
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
+from azentspublicclient.models.agent_response import AgentResponse
+from azentspublicclient.models.agent_session_response import AgentSessionResponse
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
+from azentspublicclient.models.chat_event_response import ChatEventResponse
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest
 from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
@@ -22,12 +25,24 @@ from azentspublicclient.models.llm_provider_integration_create_request import (
 from azentspublicclient.models.llm_provider_integration_update_request import (
     LLMProviderIntegrationUpdateRequest,
 )
+from azentspublicclient.models.model_catalog_entry_list_response import (
+    ModelCatalogEntryListResponse,
+)
+from azentspublicclient.models.model_catalog_entry_response import (
+    ModelCatalogEntryResponse,
+)
 from azentspublicclient.models.secrets import Secrets
-from pydantic import TypeAdapter
+from pydantic import BaseModel, Field, JsonValue, StrictInt, StrictStr, TypeAdapter
 
 from support.consts import REPOSITORY_ROOT
 from support.exchange_download import download_fixture_exchange_file
 from support.oauth_connections import connect_xai_oauth
+from support.observations import (
+    ExtensionObservation,
+    ProxyToolObservation,
+    ToolResultObservation,
+    decode_history_page,
+)
 from support.runtime_profiles import (
     create_workspace_runtime_profile,
     start_and_wait_for_agent_runtime,
@@ -35,9 +50,6 @@ from support.runtime_profiles import (
 from support.utils import authenticate_user, unique, wait_until
 from tests.required.public.test_agent_execution_persistence import (
     auth_headers,
-    history_events,
-    json_object_list_payload,
-    json_object_payload,
     list_history,
 )
 
@@ -79,15 +91,64 @@ _IMAGE_SHA256 = hashlib.sha256(_IMAGE_BYTES).hexdigest()
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 
 
+class _FunctionDeclaration(ExtensionObservation):
+    name: StrictStr | None = None
+
+
+class _ToolDeclaration(ProxyToolObservation):
+    function: _FunctionDeclaration | None = None
+
+
+class _ModelRequestObservation(ExtensionObservation):
+    tools: list[_ToolDeclaration] = Field(default_factory=list)
+
+
+class _TextPart(ExtensionObservation):
+    type: Literal["text"]
+    text: StrictStr
+
+
+class _FilePart(ExtensionObservation):
+    type: Literal["file"]
+    model_file_id: StrictStr
+    kind: StrictStr | None = None
+
+
+class _AttachmentPart(ExtensionObservation):
+    type: Literal["attachment"]
+    attachment_id: StrictStr
+    media_type: StrictStr
+    size: StrictInt
+    availability: Literal["available", "expired", "unavailable"]
+
+
+type _ImageOutput = Annotated[
+    _TextPart | _FilePart | _AttachmentPart, Field(discriminator="type")
+]
+
+
+class _ImageToolResult(ExtensionObservation):
+    name: StrictStr | None = None
+    status: StrictStr | None = None
+    output: list[_ImageOutput]
+
+
+class _AssistantPayload(ExtensionObservation):
+    content: JsonValue = None
+
+
+_MODEL_REQUESTS = TypeAdapter(list[_ModelRequestObservation])
+
+
 def _headers(token: str) -> dict[str, str]:
     """Build bearer headers."""
     return {"Authorization": f"Bearer {token}"}
 
 
-def _response_object(response: requests.Response) -> dict[str, object]:
-    """Validate one HTTP JSON response."""
+def _response_model[T: BaseModel](response: requests.Response, *, model: type[T]) -> T:
+    """Validate the generated operation contract at the HTTP ingress."""
     response.raise_for_status()
-    return json_object_payload(response.json(), label="HTTP response")
+    return model.model_validate(response.json())
 
 
 def _journal(proxy_url: str, path: str) -> list[dict[str, object]]:
@@ -120,10 +181,12 @@ def _wait_for_catalog_attempt_completion(
         response = requests.get(entries_url, headers=_headers(token), timeout=10)
         if response.status_code == 404:
             return False
-        latest_sync = _response_object(response).get("latest_sync")
-        if not isinstance(latest_sync, dict):
+        latest_sync = _response_model(
+            response, model=ModelCatalogEntryListResponse
+        ).latest_sync
+        if latest_sync is None:
             return False
-        return latest_sync.get("status") in {"failed", "succeeded"}
+        return latest_sync.status in {"failed", "succeeded"}
 
     wait_until(
         sync_completed,
@@ -212,16 +275,13 @@ def _setup_xai_agent(
     quality_identifier = "grok-4"
     fast_identifier = "grok-4-fast"
 
-    def populated_entries() -> list[dict[str, object]] | None:
+    def populated_entries() -> list[ModelCatalogEntryResponse] | None:
         response = requests.get(entries_url, headers=_headers(token), timeout=10)
         if response.status_code == 404:
             return None
         response.raise_for_status()
-        entries = json_object_list_payload(
-            _response_object(response).get("entries"),
-            label="xAI catalog entries",
-        )
-        identifiers = {entry.get("provider_model_identifier") for entry in entries}
+        entries = _response_model(response, model=ModelCatalogEntryListResponse).entries
+        identifiers = {entry.provider_model_identifier for entry in entries}
         if {quality_identifier, fast_identifier}.issubset(identifiers):
             return entries
         return None
@@ -233,10 +293,10 @@ def _setup_xai_agent(
         message="Deterministic xAI catalog entries did not become readable",
     )
     assert entries is not None
-    by_identifier = {entry["provider_model_identifier"]: entry for entry in entries}
+    by_identifier = {entry.provider_model_identifier: entry for entry in entries}
 
     def selection(identifier: str) -> dict[str, str]:
-        model_identifier = by_identifier[identifier].get("provider_model_identifier")
+        model_identifier = by_identifier[identifier].provider_model_identifier
         if not isinstance(model_identifier, str):
             raise AssertionError("xAI catalog entry is missing its model identifier.")
         return {
@@ -254,7 +314,7 @@ def _setup_xai_agent(
         workspace_handle=handle,
         provider_id="system-docker",
     )
-    created = _response_object(
+    created = _response_model(
         requests.post(
             f"{server_url}/agent/v1/workspaces/{handle}/agents",
             headers={**_headers(token), "Content-Type": "application/json"},
@@ -298,27 +358,25 @@ def _setup_xai_agent(
                 "runtime_profile_id": runtime_profile_id,
             },
             timeout=10,
-        )
+        ),
+        model=AgentResponse,
     )
-    agent_id = created.get("id")
-    if not isinstance(agent_id, str):
-        raise AssertionError(f"Agent response did not include id: {created!r}")
+    agent_id = created.id
     start_and_wait_for_agent_runtime(
         public_api_client,
         token=token,
         workspace_handle=handle,
         agent_id=agent_id,
     )
-    session = _response_object(
+    session = _response_model(
         requests.get(
             f"{server_url}/chat/v1/agents/{agent_id}/team-primary-session",
             headers=_headers(token),
             timeout=10,
-        )
+        ),
+        model=AgentSessionResponse,
     )
-    session_id = session.get("id")
-    if not isinstance(session_id, str):
-        raise AssertionError(f"Session response did not include id: {session!r}")
+    session_id = session.id
     return _XaiAgentFixture(
         access_token=token,
         agent_id=agent_id,
@@ -353,12 +411,12 @@ def _submit(
     response.raise_for_status()
 
 
-def _assistant_content(event: dict[str, object]) -> str | None:
+def _assistant_content(event: ChatEventResponse) -> str | None:
     """Return plain assistant content from one history event."""
-    if event.get("kind") != "assistant_message":
+    if event.kind != "assistant_message":
         return None
-    payload = json_object_payload(event.get("payload"), label="assistant payload")
-    content = payload.get("content")
+    payload = _AssistantPayload.model_validate(event.payload)
+    content = payload.content
     return content if isinstance(content, str) else None
 
 
@@ -367,9 +425,9 @@ def _wait_for_history(
     server_url: str,
     token: str,
     session_id: str,
-    predicate: Callable[[dict[str, object]], bool],
+    predicate: Callable[[ChatEventResponse], bool],
     timeout: float = 120,
-) -> dict[str, object]:
+) -> ChatEventResponse:
     """Poll history until the supplied event predicate succeeds."""
     deadline = time.monotonic() + timeout
     latest: dict[str, object] | None = None
@@ -379,7 +437,7 @@ def _wait_for_history(
             token=token,
             session_id=session_id,
         )
-        for event in history_events(latest):
+        for event in decode_history_page(latest).items:
             if predicate(event):
                 return event
         time.sleep(0.2)
@@ -406,8 +464,8 @@ def _wait_for_idle(
             timeout=10,
         )
         response.raise_for_status()
-        payload = json_object_payload(response.json(), label="session response")
-        last_state = payload.get("run_state")
+        payload = AgentSessionResponse.model_validate(response.json())
+        last_state = payload.run_state
         if last_state == "idle":
             return
         time.sleep(0.2)
@@ -416,40 +474,35 @@ def _wait_for_idle(
     )
 
 
-def _client_result(events: list[dict[str, object]]) -> dict[str, object] | None:
-    """Return the image-generation client tool result."""
-    for event in events:
-        if event.get("kind") != "client_tool_result":
+def _client_result(history: dict[str, object]) -> _ImageToolResult | None:
+    """Validate interpreted client-result fields after the history envelope."""
+    for event in decode_history_page(history).items:
+        if event.kind != "client_tool_result":
             continue
-        payload = json_object_payload(event.get("payload"), label="client result")
-        if payload.get("name") == "image_generation":
-            return event
+        identity = ToolResultObservation.model_validate(event.payload)
+        if identity.name == "image_generation":
+            return _ImageToolResult.model_validate(event.payload)
     return None
 
 
-def _tool_name(tool: dict[str, object]) -> str | None:
-    """Return a tool name from Responses or Chat Completions syntax."""
-    name = tool.get("name")
-    if isinstance(name, str):
-        return name
-    function = tool.get("function")
-    if isinstance(function, dict):
-        nested_name = function.get("name")
-        return nested_name if isinstance(nested_name, str) else None
-    return None
+def _tool_name(tool: _ToolDeclaration) -> str | None:
+    """Project native flat or nested function declaration identity."""
+    return (
+        tool.name
+        if tool.name is not None
+        else (tool.function.name if tool.function is not None else None)
+    )
 
 
 def _assert_image_tool_exposure(*, proxy_url: str, expected: bool) -> None:
     """Verify xAI model requests advertise the client image tool as configured."""
-    requests_ = _journal(proxy_url, _MODEL_JOURNAL_PATH)
+    response = requests.get(f"{proxy_url}{_MODEL_JOURNAL_PATH}", timeout=10)
+    response.raise_for_status()
+    requests_ = _MODEL_REQUESTS.validate_python(response.json())
     assert requests_, "No captured xAI model request was observed"
     tool_names: set[str | None] = set()
-    for index, request in enumerate(requests_):
-        tools = json_object_list_payload(
-            request.get("tools", []),
-            label=f"xAI model request {index} tools",
-        )
-        tool_names.update(_tool_name(tool) for tool in tools)
+    for request in requests_:
+        tool_names.update(_tool_name(tool) for tool in request.tools)
     assert ("image_generation" in tool_names) is expected, tool_names
 
 
@@ -468,24 +521,22 @@ def _assert_success_result(
         *scenario_secrets,
     ):
         assert secret not in serialized
-    result = _client_result(history_events(history))
+    result = _client_result(history)
     assert result is not None, serialized
-    payload = json_object_payload(result.get("payload"), label="client result payload")
-    assert payload.get("status") == "completed"
-    output = json_object_list_payload(
-        payload.get("output"),
-        label="client result output",
-    )
-    assert "attachments" not in payload
+    payload = result
+    assert payload.status == "completed"
+    output = payload.output
     assert len(output) == 2
-    assert output[0].get("kind") == "image"
-    assert isinstance(output[0].get("model_file_id"), str)
+    assert isinstance(output[0], _FilePart)
+    assert output[0].kind == "image"
+    assert isinstance(output[0].model_file_id, str)
     attachment = output[1]
-    assert attachment.get("type") == "attachment"
-    assert attachment.get("availability") == "available"
-    assert attachment.get("media_type") == "image/png"
-    assert attachment.get("size") == len(_IMAGE_BYTES)
-    attachment_id = attachment.get("attachment_id")
+    assert isinstance(attachment, _AttachmentPart)
+    assert attachment.type == "attachment"
+    assert attachment.availability == "available"
+    assert attachment.media_type == "image/png"
+    assert attachment.size == len(_IMAGE_BYTES)
+    attachment_id = attachment.attachment_id
     assert isinstance(attachment_id, str)
     download = download_fixture_exchange_file(
         server_url=server_url,
@@ -715,15 +766,13 @@ class TestXaiImageGeneration:
         assert "test-xai-oauth-rejected-initial" not in serialized
         assert "test-xai-oauth-rejected-refreshed" not in serialized
         assert "test-xai-refresh-rejected" not in serialized
-        result = _client_result(history_events(history))
+        result = _client_result(history)
         assert result is not None
-        payload = json_object_payload(
-            result.get("payload"),
-            label="failed client result",
-        )
-        assert payload.get("status") == "failed"
-        assert "attachments" not in payload
-        assert payload.get("output") == [
+        payload = result
+        assert payload.status == "failed"
+        assert [
+            part.model_dump(mode="json", exclude_unset=True) for part in payload.output
+        ] == [
             {
                 "type": "text",
                 "text": "xAI OAuth reconnect is required for image generation.",
@@ -790,6 +839,6 @@ class TestXaiImageGeneration:
             token=token,
             session_id=session_id,
         )
-        assert _client_result(history_events(history)) is None
+        assert _client_result(history) is None
         assert _journal(openai_proxy_url, _IMAGINE_JOURNAL_PATH) == []
         _assert_image_tool_exposure(proxy_url=openai_proxy_url, expected=False)

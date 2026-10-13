@@ -27,14 +27,15 @@ import {
   IconSettings,
   IconUpload,
 } from "@tabler/icons-react";
-import { useCallback, useMemo } from "react";
-import { getOptionalString, parseJsonRecord } from "@/shared/lib/unknown-value";
+import { useCallback } from "react";
+import { parseJsonRecord } from "@/shared/lib/unknown-value";
 import { getServiceAccountKey } from "../service-account-fields";
 import { ProviderConnectionTestFeedback } from "./ProviderConnectionTestFeedback";
-import type { ServiceAccountProviderFieldsProps } from "../types";
+import type { GoogleAnalyticsConfigFieldsProps } from "../types";
 
 export function GoogleAnalyticsConfigFields({
   config,
+  view,
   onConfigChange,
   credentials,
   onCredentialsChange,
@@ -44,24 +45,12 @@ export function GoogleAnalyticsConfigFields({
   showKeyInput,
   onShowKeyInput,
   onKeyFileUpload,
-}: ServiceAccountProviderFieldsProps): React.ReactElement {
-  const propertyId =
-    typeof config.default_property_id === "string"
-      ? config.default_property_id
-      : "";
-  const timeoutValue = typeof config.timeout === "number" ? config.timeout : 30;
-
-  const clientEmail = useMemo(() => {
-    if (!credentials) {
-      return null;
-    }
-    const serviceAccountKey = getServiceAccountKey(
-      credentials.service_account_key,
-    );
-    return serviceAccountKey
-      ? (getOptionalString(serviceAccountKey.client_email) ?? null)
-      : null;
-  }, [credentials]);
+}: GoogleAnalyticsConfigFieldsProps): React.ReactElement {
+  const {
+    default_property_id: propertyId,
+    timeout: timeoutValue,
+    clientEmail,
+  } = view;
 
   const handleKeyPaste = useCallback(
     (value: string): void => {

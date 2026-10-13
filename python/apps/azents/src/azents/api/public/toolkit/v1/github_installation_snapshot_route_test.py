@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 from azcommon.result import Result, Success
 
-import azents.api.public.toolkit.v1.oauth as oauth_module
+import azents.services.toolkit_oauth.service as oauth_module
 from azents.api.public.toolkit.v1.oauth import (
     GitHubPlatformInstallationsRequest,
     get_agent_github_platform_installations,

@@ -1,6 +1,6 @@
 """Real browser popup/callback/review/confirmation against synthetic GitHub."""
 
-import json
+from typing import Literal, Self
 
 import azentsadminclient
 import azentspublicclient
@@ -13,15 +13,24 @@ from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.toolkit_config_create_request import (
     ToolkitConfigCreateRequest,
 )
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictStr,
+    ValidationError,
+    model_validator,
+)
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as ec
 
 from support.utils import single_candidate_model_options
 from tests.required.admin.test_03_system_settings import _generate_private_key
-from tests.required.public.test_agent_execution_persistence import json_object_payload
 from tests.required.public.test_github_user_toolkit import (
     _create_confirmed,
+    _decode,
+    _GitHubConfig,
     _scenario,
     _status,
 )
@@ -35,6 +44,42 @@ from tests.web.public.test_agent_toolkits import (
 )
 
 E2E_PLANNER_FALLBACK_WEIGHT = 45.0
+
+
+class _CreationContext(BaseModel):
+    """Mirror the current strict browser storage producer, not OAuth wire state."""
+
+    model_config = ConfigDict(extra="forbid")
+    handle: StrictStr = Field(min_length=1)
+    agent_id: StrictStr | None = Field(default=None, alias="agentId", min_length=1)
+    attempt_id: StrictStr = Field(alias="attemptId", pattern=r"^[a-zA-Z0-9_-]{1,64}$")
+    return_path: StrictStr = Field(alias="returnPath")
+    phase: Literal["AUTHORIZING", "REVIEW", "ERROR"]
+
+    @model_validator(mode="after")
+    def validate_return_path(self) -> Self:
+        expected = (
+            f"/w/{self.handle}/toolkits/new"
+            if self.agent_id is None
+            else (
+                f"/w/{self.handle}/agents/{self.agent_id}"
+                "/settings/capabilities#agent-toolkits"
+            )
+        )
+        if self.return_path != expected:
+            raise ValueError("Creation context has an invalid return path.")
+        if "agent_id" in self.model_fields_set and self.agent_id is None:
+            raise ValueError("Creation context has an invalid Agent identity.")
+        return self
+
+
+def _creation_context(stored: str) -> _CreationContext:
+    try:
+        return _CreationContext.model_validate_json(stored)
+    except ValidationError:
+        raise AssertionError(
+            "Creation context did not match the storage contract."
+        ) from None
 
 
 def _click_choice(driver: WebDriver, title: str) -> None:
@@ -116,17 +161,19 @@ def test_github_user_popup_callback_requires_explicit_sharing_confirmation(
     assert "state=" not in browser_driver.current_url
     dialog = browser_driver.find_element(By.CSS_SELECTOR, '[role="dialog"]')
     assert "connected-user" in dialog.text
-    assert _status(base, workspace.token) == {"connection": None}
+    assert _status(base, workspace.token).model_dump(exclude_unset=True) == {
+        "connection": None
+    }
     _click_button(browser_driver, "Confirm account and sharing")
     _assert_visible_text(browser_driver, "Execution account: connected-user")
-    active = _status(base, workspace.token)["connection"]
+    active = _status(base, workspace.token).connection
     assert active is not None
     assert "synthetic-token" not in browser_driver.page_source
     _click_button(browser_driver, "Save")
     _wait(browser_driver).until(
         lambda driver: driver.current_url.endswith(f"/w/{workspace.handle}/toolkits")
     )
-    assert _status(base, workspace.token)["connection"] == active
+    assert _status(base, workspace.token).connection == active
     browser_driver.get(
         f"{azents_main_web_url}/w/{workspace.handle}/toolkits/{toolkit.id}/edit"
     )
@@ -139,7 +186,9 @@ def test_github_user_popup_callback_requires_explicit_sharing_confirmation(
         '//*[@role="dialog"]//button[normalize-space()="Disconnect account"]',
     ).click()
     _assert_visible_text(browser_driver, "No GitHub execution account is connected.")
-    assert _status(base, workspace.token) == {"connection": None}
+    assert _status(base, workspace.token).model_dump(exclude_unset=True) == {
+        "connection": None
+    }
     for window in list(browser_driver.window_handles):
         if window != original_window:
             browser_driver.switch_to.window(window)
@@ -246,9 +295,7 @@ def test_new_github_user_creation_returns_before_publication(
             "return sessionStorage.getItem('azents.github-user.creation')"
         )
         assert isinstance(stored, str)
-        context = json_object_payload(json.loads(stored), label="Creation context")
-        attempt = context["attemptId"]
-        assert isinstance(attempt, str)
+        attempt = _creation_context(stored).attempt_id
         candidate_url = (
             f"{azents_public_server_url}/toolkit/v1/workspaces/{workspace.handle}"
             f"/agents/{agent_id}/github-user-creations/{attempt}"
@@ -329,8 +376,9 @@ def test_new_github_user_creation_returns_before_publication(
             ).items
             if item.toolkit.name == "Authorized browser creation"
         )
-        assert "actions" in saved.config["toolsets"]
-        assert saved.config["inject_runtime_environment"] is True
+        config = _decode(saved.config, _GitHubConfig, label="Saved Agent GitHub config")
+        assert "actions" in config.toolsets
+        assert config.inject_runtime_environment is True
     else:
         saved_toolkit = next(
             item
@@ -339,6 +387,9 @@ def test_new_github_user_creation_returns_before_publication(
             ).items
             if item.name == "Authorized browser creation"
         )
-        assert "actions" in saved_toolkit.config["toolsets"]
-        assert saved_toolkit.config["inject_runtime_environment"] is True
+        config = _decode(
+            saved_toolkit.config, _GitHubConfig, label="Saved GitHub config"
+        )
+        assert "actions" in config.toolsets
+        assert config.inject_runtime_environment is True
     browser_driver.set_window_size(1440, 1000)

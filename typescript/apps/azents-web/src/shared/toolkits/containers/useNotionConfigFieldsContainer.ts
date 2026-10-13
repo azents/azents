@@ -1,11 +1,16 @@
 "use client";
+import { projectNotionFields } from "../provider-config-views";
 import { useProviderConnectionTest } from "./useProviderConnectionTest";
 import type {
-  SimpleProviderFieldsProps,
+  NotionConfigFieldsProps,
   ToolkitConfigFieldsInput,
 } from "../types";
 export function useNotionConfigFieldsContainer(
   props: ToolkitConfigFieldsInput,
-): SimpleProviderFieldsProps {
-  return { ...props, ...useProviderConnectionTest(props, "notion") };
+): NotionConfigFieldsProps {
+  return {
+    ...props,
+    view: projectNotionFields(props.config),
+    ...useProviderConnectionTest(props, "notion"),
+  };
 }

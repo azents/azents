@@ -131,6 +131,67 @@ def test_current_host_request_dispatches_file_script_without_upstream(
     assert len(proxy._State.requests) == 1
 
 
+def test_handler_continuation_uses_typed_stored_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(proxy._State, "requests", [])
+    monkeypatch.setattr(proxy._State, "consolidation_continuations", OrderedDict())
+    request = _request()
+    request["input"] = [{"role": "user", "content": "Own execution"}]
+    first = _FixtureHandler(request)
+    first.do_POST()
+    assert first.call is not None
+    response_id = f"resp_{first.call.call_id.removeprefix('call_')}"
+    stored = proxy._State.consolidation_continuations[response_id]
+    assert len(stored.input_items) == 2
+    assert all(
+        isinstance(item, proxy._ConsolidationInput) for item in stored.input_items
+    )
+    output = {
+        "type": "function_call_output",
+        "call_id": first.call.call_id,
+        "output": "Own instructions",
+        "provider_extension": {"future": [None]},
+    }
+    second = _FixtureHandler(
+        {**request, "previous_response_id": response_id, "input": [output]}
+    )
+    second.do_POST()
+    assert second.call is not None
+    assert second.call.name == "glob"
+    assert second.call.call_id.endswith(f"_{stored.chain_id}")
+    journal = proxy._State.requests[-1]
+    assert journal["fixture_physical_input"] == [output]
+    assert journal["fixture_consolidation_chain"] == stored.chain_id
+    logical_input = journal["input"]
+    assert isinstance(logical_input, list) and len(logical_input) == 3
+    assert logical_input[-1] == output
+
+
+@pytest.mark.parametrize("inputs", [None, "invalid", [None]])
+def test_handler_rejects_invalid_private_context_without_mutating_state(
+    monkeypatch: pytest.MonkeyPatch, inputs: object
+) -> None:
+    class RejectedHandler(_FixtureHandler):
+        def __init__(self, request: dict[str, object]) -> None:
+            super().__init__(request)
+            self.status: int | None = None
+
+        def _write_json(self, status: int, value: object) -> None:
+            self.status = status
+
+    monkeypatch.setattr(proxy._State, "requests", [])
+    monkeypatch.setattr(proxy._State, "consolidation_continuations", OrderedDict())
+    request = _request()
+    request["input"] = inputs
+    handler = RejectedHandler(request)
+    handler.do_POST()
+    assert handler.status == 409
+    assert handler.call is None
+    assert not proxy._State.requests
+    assert not proxy._State.consolidation_continuations
+
+
 def test_plain_file_rounds_require_submission_correction_and_continuation() -> None:
     """Provider plans request host effects rather than fabricate acceptance."""
     request = _request()
@@ -316,7 +377,12 @@ def test_provider_continuation_keeps_own_chain_and_rejects_retired_state() -> No
     assert result.chain_id == _CHAIN
     identifier = f"resp_consolidation_readme_{_CHAIN}"
     prior = ConsolidationFixtureContinuation(
-        _CHAIN, [{"role": "user", "content": "Own execution"}]
+        _CHAIN,
+        (
+            proxy._decode_consolidation_input(
+                {"role": "user", "content": "Own execution"}
+            ),
+        ),
     )
     next_request = {
         **first,
@@ -333,8 +399,8 @@ def test_provider_continuation_keeps_own_chain_and_rejects_retired_state() -> No
         next_request, {identifier: prior}, new_chain_id="f" * 32
     )
     assert continued.chain_id == _CHAIN
-    inputs = continued.request["input"]
-    assert isinstance(inputs, list) and len(inputs) == 2
+    inputs = continued.request.input_items
+    assert inputs is not None and len(inputs) == 2
     with pytest.raises(ValueError, match="unavailable"):
         consolidation_fixture_request(next_request, {}, new_chain_id="f" * 32)
 
@@ -352,3 +418,148 @@ def test_stage1_keeps_only_this_request_synthetic_scope_markers() -> None:
     response = historical_memory_summary_response(request)
     assert response is not None and _MARKER in response
     assert "AGENTIC_PERSONAL" not in response
+
+
+def test_decoded_request_drives_planning_without_reinterpreting_wire(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _request()
+    request["input"] = [
+        {
+            "type": "function_call_output",
+            "call_id": f"call_consolidation_readme_{_CHAIN}",
+            "output": "Own instructions",
+        }
+    ]
+    decoded = proxy._decode_model_request(request)
+    request["instructions"] = "Unrelated task"
+    request["input"] = None
+
+    def forbid_rehydration(value: str) -> object:
+        raise AssertionError("Domain decisions must consume decoded fields.")
+
+    monkeypatch.setattr(proxy.json, "loads", forbid_rehydration)
+    assert is_consolidation_fixture_request(decoded)
+    logical = consolidation_fixture_request(decoded, {}, new_chain_id="f" * 32)
+    assert logical.chain_id == _CHAIN
+    plan = consolidation_fixture_plan(logical.request, chain_id=logical.chain_id)
+    assert plan.call is not None and plan.call.name == "glob"
+
+
+@pytest.mark.parametrize("inputs", [None, {}, "text", [None], ["text"], [3]])
+def test_invalid_private_input_rejects_without_rejecting_other_provider_matching(
+    inputs: object,
+) -> None:
+    request = _request()
+    request["input"] = inputs
+    decoded = proxy._decode_model_request(request)
+    assert is_consolidation_fixture_request(decoded)
+    with pytest.raises(ValueError, match="input is invalid"):
+        consolidation_fixture_request(decoded, {}, new_chain_id=_CHAIN)
+    with pytest.raises(ValueError, match="input is invalid"):
+        consolidation_fixture_plan(decoded, chain_id=_CHAIN)
+
+
+def test_missing_private_input_is_first_empty_round() -> None:
+    request = _request()
+    request.pop("input")
+    logical = consolidation_fixture_request(request, {}, new_chain_id=_CHAIN)
+    assert logical.request.input_items == ()
+    plan = consolidation_fixture_plan(logical.request, chain_id=_CHAIN)
+    assert plan.call is not None and plan.call.name == "read"
+    assert proxy._consolidation_request_egress(logical.request)["input"] == []
+
+
+@pytest.mark.parametrize("tool", [None, "tool", 3, []])
+def test_non_object_tool_does_not_match_private_script(tool: object) -> None:
+    request = _request()
+    tools = request["tools"]
+    assert isinstance(tools, list)
+    tools.append(tool)
+    decoded = proxy._decode_model_request(request)
+    assert not is_consolidation_fixture_request(decoded)
+
+
+@pytest.mark.parametrize("output", [None, 3, {}, ["text"]])
+def test_own_tool_output_requires_valid_string_evidence(output: object) -> None:
+    request = _request()
+    request["input"] = [
+        {
+            "type": "function_call_output",
+            "call_id": f"call_consolidation_readme_{_CHAIN}",
+            "output": output,
+        }
+    ]
+    with pytest.raises(ValueError, match="result is invalid"):
+        consolidation_fixture_plan(request, chain_id=_CHAIN)
+
+
+def test_stateless_mixed_chain_rejects_before_planning() -> None:
+    request = _request()
+    request["input"] = [
+        {
+            "type": "function_call_output",
+            "call_id": f"call_consolidation_readme_{chain}",
+            "output": "Own instructions",
+        }
+        for chain in (_CHAIN, "f" * 32)
+    ]
+    with pytest.raises(ValueError, match="mixes execution identities"):
+        consolidation_fixture_request(request, {}, new_chain_id=_CHAIN)
+
+
+def test_stored_chain_rejects_foreign_result_in_planning() -> None:
+    request = _request()
+    identifier = f"resp_consolidation_readme_{_CHAIN}"
+    request["previous_response_id"] = identifier
+    request["input"] = [
+        {
+            "type": "function_call_output",
+            "call_id": f"call_consolidation_readme_{'f' * 32}",
+            "output": "Foreign instructions",
+        }
+    ]
+    logical = consolidation_fixture_request(
+        request,
+        {identifier: ConsolidationFixtureContinuation(_CHAIN, ())},
+        new_chain_id="e" * 32,
+    )
+    assert logical.chain_id == _CHAIN
+    with pytest.raises(ValueError, match="result is invalid"):
+        consolidation_fixture_plan(logical.request, chain_id=_CHAIN)
+
+
+def test_provider_extensions_and_opaque_unrelated_inputs_survive_context_egress() -> (
+    None
+):
+    request = _request()
+    extras = {"nested": [None, {"future": True}], "empty": ""}
+    request["provider_extension"] = extras
+    tools = request["tools"]
+    assert isinstance(tools, list)
+    tools[0]["provider_extension"] = extras
+    old_input = {"role": "user", "content": "Own execution", "extension": extras}
+    next_input = {
+        "type": "function_call_output",
+        "call_id": f"call_consolidation_readme_{_CHAIN}",
+        "output": "Own instructions",
+        "extension": extras,
+    }
+    identifier = f"resp_consolidation_readme_{_CHAIN}"
+    request["previous_response_id"] = identifier
+    request["input"] = [next_input]
+    logical = consolidation_fixture_request(
+        request,
+        {
+            identifier: ConsolidationFixtureContinuation(
+                _CHAIN, (proxy._decode_consolidation_input(old_input),)
+            )
+        },
+        new_chain_id="f" * 32,
+    )
+    decoded = logical.request
+    assert decoded.input_items is not None
+    assert len(decoded.input_items) == 2
+    assert json.loads(decoded.physical_input_json) == [next_input]
+    payload = proxy._consolidation_request_egress(decoded)
+    assert payload == {**request, "input": [old_input, next_input]}

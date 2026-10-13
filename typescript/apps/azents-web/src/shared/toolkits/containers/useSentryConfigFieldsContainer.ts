@@ -1,11 +1,16 @@
 "use client";
+import { projectSentryFields } from "../provider-config-views";
 import { useProviderConnectionTest } from "./useProviderConnectionTest";
 import type {
-  SimpleProviderFieldsProps,
+  SentryConfigFieldsProps,
   ToolkitConfigFieldsInput,
 } from "../types";
 export function useSentryConfigFieldsContainer(
   props: ToolkitConfigFieldsInput,
-): SimpleProviderFieldsProps {
-  return { ...props, ...useProviderConnectionTest(props, "sentry") };
+): SentryConfigFieldsProps {
+  return {
+    ...props,
+    view: projectSentryFields(props.config),
+    ...useProviderConnectionTest(props, "sentry"),
+  };
 }

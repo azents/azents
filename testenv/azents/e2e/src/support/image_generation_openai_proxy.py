@@ -12,7 +12,7 @@ import urllib.request
 from base64 import b64encode, urlsafe_b64encode
 from collections import OrderedDict
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -105,6 +105,9 @@ _HISTORICAL_MEMORY_SUMMARY = (
 
 _CONSOLIDATION_TASK_MARKER = "You are an internal historical-context Memory Agent."
 _CONSOLIDATION_SENTINEL = re.compile(r"AGENTIC_(?:TEAM|PERSONAL)_[a-zA-Z0-9]+_V[0-9]+")
+_CONSOLIDATION_CONTINUATION_MARKER = (
+    "The Memory task is not complete: no explicit submission has been accepted."
+)
 
 
 class ConsolidationFixtureCall(NamedTuple):
@@ -118,36 +121,127 @@ class ConsolidationFixturePlan(NamedTuple):
     final_text: str | None
 
 
+@dataclass(frozen=True)
+class _ConsolidationInput:
+    """Consumed input fields, with provider extras retained only for egress."""
+
+    kind: str | None
+    call_id: str | None
+    output: str | None
+    submission_continuation: bool
+    wire_json: str
+
+
+@dataclass(frozen=True)
+class _ConsolidationRequest:
+    """Validated private-script projection independent of opaque provider wire."""
+
+    instructions: str | None
+    tools: tuple[_NamedTool, ...] | None
+    previous_response_id: str | None
+    input_items: tuple[_ConsolidationInput, ...] | None
+    physical_input_json: str
+    wire_json: str
+
+
 class ConsolidationFixtureContinuation(NamedTuple):
     chain_id: str
-    input_items: list[dict[str, object]]
+    input_items: tuple[_ConsolidationInput, ...]
 
 
 class ConsolidationFixtureRequest(NamedTuple):
     chain_id: str
-    request: dict[str, object]
+    request: _ConsolidationRequest
 
 
-def is_consolidation_fixture_request(request: dict[str, object]) -> bool:
+def _decode_consolidation_input(value: object) -> _ConsolidationInput:
+    payload = _object(value)
+    wire_json = json.dumps(payload)
+    return _ConsolidationInput(
+        kind=_optional_string(payload.get("type")),
+        call_id=_optional_string(payload.get("call_id")),
+        output=_optional_string(payload.get("output")),
+        # Preserve the provider fixture's literal continuation selector, projecting
+        # its outcome at ingress rather than inspecting serialized wire in planning.
+        submission_continuation=_CONSOLIDATION_CONTINUATION_MARKER in wire_json,
+        wire_json=wire_json,
+    )
+
+
+def _decode_consolidation_request(
+    value: _ModelRequestInput | _ConsolidationRequest,
+) -> _ConsolidationRequest:
+    """Validate matching fields once; provider extensions remain opaque.
+
+    Missing input means the first empty round. Explicit null, non-list input and
+    non-object items are invalid private-script context, without rejecting an
+    unrelated provider request before it is recognized. Invalid optional strings
+    do not match, consistent with the existing provider matching boundary.
+    """
+    if isinstance(value, _ConsolidationRequest):
+        return value
+    if isinstance(value, _ModelRequest):
+        return value.consolidation
+    payload = _object(value)
+    raw_tools = payload.get("tools")
+    tools: tuple[_NamedTool, ...] | None = None
+    if isinstance(raw_tools, list) and all(
+        isinstance(tool, dict) for tool in raw_tools
+    ):
+        tools = tuple(
+            _NamedTool(
+                _optional_string(_object(tool).get("name")),
+                _optional_string(_object(tool).get("type")),
+            )
+            for tool in raw_tools
+        )
+    raw_input = payload.get("input", [])
+    inputs: tuple[_ConsolidationInput, ...] | None = None
+    if isinstance(raw_input, list) and all(
+        isinstance(item, dict) for item in raw_input
+    ):
+        inputs = tuple(_decode_consolidation_input(item) for item in raw_input)
+    return _ConsolidationRequest(
+        instructions=_optional_string(payload.get("instructions")),
+        tools=tools,
+        previous_response_id=_optional_string(payload.get("previous_response_id")),
+        input_items=inputs,
+        physical_input_json=json.dumps(payload.get("input")),
+        wire_json=json.dumps(payload),
+    )
+
+
+def _consolidation_request_egress(
+    request: _ConsolidationRequest,
+) -> dict[str, object]:
+    """Serialize typed context and relay uninterpreted provider extensions."""
+    payload = _object(json.loads(request.wire_json))
+    assert request.input_items is not None
+    payload["input"] = [json.loads(item.wire_json) for item in request.input_items]
+    return payload
+
+
+def is_consolidation_fixture_request(
+    request: _ModelRequestInput | _ConsolidationRequest,
+) -> bool:
     """Match the current private task and every tool in its closed file contract."""
-    instructions = request.get("instructions")
-    tools = request.get("tools")
+    request = _decode_consolidation_request(request)
+    instructions = request.instructions
+    tools = request.tools
     if (
-        not isinstance(instructions, str)
+        instructions is None
         or not instructions.lstrip().startswith(_CONSOLIDATION_TASK_MARKER)
         or "azents://execution/README.md" not in instructions
         or "azents://execution/inputs/" not in instructions
         or "submit_memory" not in instructions
-        or not isinstance(tools, list)
+        or tools is None
         or not tools
     ):
         return False
     names: set[str] = set()
     for tool in tools:
-        if not isinstance(tool, dict):
-            return False
-        name, kind = tool.get("name"), tool.get("type")
-        if not isinstance(name, str) or name in names:
+        name, kind = tool.name, tool.kind
+        if name is None or name in names:
             return False
         if kind != "function" and not (name == "apply_patch" and kind == "custom"):
             return False
@@ -169,48 +263,52 @@ def is_consolidation_fixture_request(request: dict[str, object]) -> bool:
 
 
 def consolidation_fixture_request(
-    request: dict[str, object],
+    request: _ModelRequestInput | _ConsolidationRequest,
     continuations: Mapping[str, ConsolidationFixtureContinuation],
     *,
     new_chain_id: str,
 ) -> ConsolidationFixtureRequest:
     """Emulate provider stored context without mixing logical executions."""
-    inputs = [_object(item) for item in _list(request.get("input", []))]
-    previous = request.get("previous_response_id")
-    if isinstance(previous, str) and previous.startswith("resp_consolidation_"):
+    request = _decode_consolidation_request(request)
+    inputs = request.input_items
+    if inputs is None:
+        raise ValueError("Consolidation fixture input is invalid.")
+    previous = request.previous_response_id
+    if previous is not None and previous.startswith("resp_consolidation_"):
         stored = continuations.get(previous)
         if stored is None:
             raise ValueError("Consolidation fixture context is unavailable.")
         return ConsolidationFixtureRequest(
-            stored.chain_id, {**request, "input": [*stored.input_items, *inputs]}
+            stored.chain_id,
+            replace(request, input_items=(*stored.input_items, *inputs)),
         )
     identifiers = {
         call_id.rsplit("_", 1)[-1]
         for item in inputs
-        if isinstance(call_id := item.get("call_id"), str)
+        if (call_id := item.call_id) is not None
         and call_id.startswith("call_consolidation_")
     }
     if len(identifiers) > 1:
         raise ValueError("Consolidation fixture mixes execution identities.")
     chain_id = next(iter(identifiers), new_chain_id)
-    return ConsolidationFixtureRequest(chain_id, {**request, "input": inputs})
+    return ConsolidationFixtureRequest(chain_id, request)
 
 
 def consolidation_fixture_plan(
-    request: dict[str, object], *, chain_id: str
+    request: _ModelRequestInput | _ConsolidationRequest, *, chain_id: str
 ) -> ConsolidationFixturePlan:
     """Choose real file-tool rounds from returned own-scope evidence."""
+    request = _decode_consolidation_request(request)
+    if request.input_items is None:
+        raise ValueError("Consolidation fixture input is invalid.")
     outputs: dict[str, str] = {}
-    for raw in _list(request.get("input", [])):
-        item = _object(raw)
-        if item.get("type") != "function_call_output":
+    for item in request.input_items:
+        if item.kind != "function_call_output":
             continue
-        call_id, output = item.get("call_id"), item.get("output")
-        if not isinstance(call_id, str) or not call_id.startswith(
-            "call_consolidation_"
-        ):
+        call_id, output = item.call_id, item.output
+        if call_id is None or not call_id.startswith("call_consolidation_"):
             continue
-        if not call_id.endswith(f"_{chain_id}") or not isinstance(output, str):
+        if not call_id.endswith(f"_{chain_id}") or output is None:
             raise ValueError("Consolidation fixture result is invalid.")
         stage = call_id.removeprefix("call_consolidation_").removesuffix(f"_{chain_id}")
         outputs[stage] = output
@@ -259,10 +357,7 @@ def consolidation_fixture_plan(
         else "No useful historical findings in the provided summaries."
     )
     # Exercise the host's normal-ending continuation before any submission.
-    if (
-        "The Memory task is not complete: no explicit submission has been accepted."
-        not in json.dumps(request.get("input", []))
-    ):
+    if not any(item.submission_continuation for item in request.input_items):
         return ConsolidationFixturePlan(None, "CONSOLIDATION_FIXTURE_NOT_SUBMITTED")
     result_path = "azents://execution/result.md"
     if "write_oversized" not in outputs:
@@ -487,6 +582,7 @@ class _ModelRequest:
     matching_sorted_text: str
     request_fingerprint: str
     wire_json: str
+    consolidation: _ConsolidationRequest
 
 
 type _ModelRequestInput = _ModelRequest | dict[str, object]
@@ -656,6 +752,7 @@ def _decode_model_request(value: object) -> _ModelRequest:
             json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()
         ).hexdigest(),
         wire_json=json.dumps(payload),
+        consolidation=_decode_consolidation_request(payload),
     )
 
 
@@ -2374,7 +2471,7 @@ class _Handler(BaseHTTPRequestHandler):
         request = _decode_model_request(request)
         user_text = _last_user_text(request)
         if self.path == "/v1/responses":
-            fixture_request = _model_request_egress(request)
+            fixture_request = request.consolidation
             if is_consolidation_fixture_request(fixture_request):
                 try:
                     with _State.lock:
@@ -2386,11 +2483,14 @@ class _Handler(BaseHTTPRequestHandler):
                         plan = consolidation_fixture_plan(
                             logical.request, chain_id=logical.chain_id
                         )
+                        assert logical.request.input_items is not None
                         _State.requests.append(
                             {
-                                **logical.request,
+                                **_consolidation_request_egress(logical.request),
                                 "fixture_consolidation_chain": logical.chain_id,
-                                "fixture_physical_input": fixture_request.get("input"),
+                                "fixture_physical_input": json.loads(
+                                    fixture_request.physical_input_json
+                                ),
                             }
                         )
                         if plan.call is not None:
@@ -2411,15 +2511,10 @@ class _Handler(BaseHTTPRequestHandler):
                             _State.consolidation_continuations[response_id] = (
                                 ConsolidationFixtureContinuation(
                                     logical.chain_id,
-                                    [
-                                        *[
-                                            _object(item)
-                                            for item in _list(
-                                                logical.request.get("input", [])
-                                            )
-                                        ],
-                                        item,
-                                    ],
+                                    (
+                                        *logical.request.input_items,
+                                        _decode_consolidation_input(item),
+                                    ),
                                 )
                             )
                         else:
@@ -2427,18 +2522,15 @@ class _Handler(BaseHTTPRequestHandler):
                             _State.consolidation_continuations[response_id] = (
                                 ConsolidationFixtureContinuation(
                                     logical.chain_id,
-                                    [
-                                        *[
-                                            _object(item)
-                                            for item in _list(
-                                                logical.request.get("input", [])
-                                            )
-                                        ],
-                                        {
-                                            "role": "assistant",
-                                            "content": plan.final_text,
-                                        },
-                                    ],
+                                    (
+                                        *logical.request.input_items,
+                                        _decode_consolidation_input(
+                                            {
+                                                "role": "assistant",
+                                                "content": plan.final_text,
+                                            }
+                                        ),
+                                    ),
                                 )
                             )
                             while len(_State.consolidation_continuations) > 256:

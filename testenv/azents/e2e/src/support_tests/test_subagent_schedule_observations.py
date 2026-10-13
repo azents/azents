@@ -75,7 +75,7 @@ def test_agent_result_wait_matches_source_status_and_detects_duplicate(
         source_path="/root/child",
         run_status="completed",
     )
-    assert result["content"] == "done"
+    assert result.content == "done"
     messages.append(messages[0])
     with pytest.raises(AssertionError, match="duplicate terminal"):
         subagents._wait_for_agent_result(
@@ -143,7 +143,7 @@ def test_wait_outcome_matches_declared_fields_without_ignoring_reason(
         outcome="timeout",
         reason="active_descendants",
     )
-    assert result["id"] == "event-1"
+    assert result.id == "event-1"
     assert (
         subagents._WaitOutcomeObservation.model_validate(
             {"outcome": "all_idle", "reason": None}
@@ -156,13 +156,16 @@ def test_wait_outcome_matches_declared_fields_without_ignoring_reason(
 
 def test_list_agents_rejects_extra_item_fields_and_nonstring_status() -> None:
     valid = {"agents": [{"agent_name": "/root/child", "agent_status": "idle"}]}
-    assert subagents._listed_agents(valid) == valid["agents"]
+    assert [
+        agent.model_dump()
+        for agent in subagents._ListedAgentsObservation.model_validate(valid).agents
+    ] == valid["agents"]
     for invalid in [
         {"agent_name": "/root/child", "agent_status": False},
         {"agent_name": "/root/child", "agent_status": "idle", "private": True},
     ]:
         with pytest.raises(ValidationError):
-            subagents._listed_agents({"agents": [invalid]})
+            subagents._ListedAgentsObservation.model_validate({"agents": [invalid]})
 
 
 def test_run_markers_ignore_unrelated_payload_and_require_typed_status() -> None:

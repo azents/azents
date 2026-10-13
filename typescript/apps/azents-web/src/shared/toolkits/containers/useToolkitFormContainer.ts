@@ -23,7 +23,6 @@ import {
   resolveDefaultToolkitSlug,
   trimToolkitWhitespace,
 } from "@/shared/lib/toolkit-identifiers";
-import { isRecord } from "@/shared/lib/unknown-value";
 import { trpc } from "@/trpc/client";
 import {
   creationReturnPath,
@@ -39,6 +38,11 @@ import {
   GOOGLE_RESUME_KEY,
   googleResumeMatches,
 } from "../google-resume";
+import { decodeOAuthCallbackMessage } from "../popup-messages";
+import {
+  projectGitHubAuthEvidence,
+  projectGitHubFormRegistration,
+} from "../provider-config-views";
 import { toolkitFormSchema } from "../schemas";
 import {
   hydrateToolkitConfig,
@@ -51,6 +55,7 @@ import {
 } from "../toolkit-form-lifecycle";
 import type { GitHubUserCreationContext } from "../github-user-creation-state";
 import type { GoogleResume } from "../google-resume";
+import type { GitHubFormRegistration } from "../provider-config-views";
 import type { ToolkitFormValues } from "../schemas";
 import type { ToolkitConfigProjection } from "../toolkit-config-projection";
 import type {
@@ -71,6 +76,7 @@ export interface ToolkitFormContainerProps {
 }
 
 export interface ToolkitFormContainerOutput {
+  githubRegistration: GitHubFormRegistration;
   onComplete?: () => void;
   onAbandonReady?: (abandon: (() => void) | null) => void;
   configProjection: ToolkitConfigProjection;
@@ -433,11 +439,11 @@ export function useToolkitFormContainer(
           : normalizeCredentialEdits(values.credentials ?? null);
       if (
         values.toolkitType === "github" &&
-        values.config.github_auth_type === "github_app_user" &&
+        projectGitHubAuthEvidence(values.config).byoaUser &&
         !(
           formState.type === "EDIT" &&
           formState.config.has_credentials &&
-          formState.config.config.github_auth_type === "github_app_user"
+          projectGitHubAuthEvidence(formState.config.config).byoaUser
         ) &&
         missingNewGitHubUserRegistration(credentials).length > 0
       ) {
@@ -631,8 +637,7 @@ export function useToolkitFormContainer(
       if (
         event.origin !== window.location.origin ||
         formState.type !== "EDIT" ||
-        !isRecord(event.data) ||
-        event.data.type !== "azents-oauth-callback"
+        decodeOAuthCallbackMessage(event, window.location.origin) == null
       ) {
         return;
       }
@@ -720,6 +725,11 @@ export function useToolkitFormContainer(
     formState.type === "EDIT" && toolkitProjectionUsesOauth(configProjection);
 
   return {
+    githubRegistration: projectGitHubFormRegistration(
+      formState.type === "EDIT" ? formState.config.config : null,
+      form.getValues().config,
+      form.getValues().credentials ?? null,
+    ),
     onComplete,
     onAbandonReady: props.onAbandonReady,
     configProjection,

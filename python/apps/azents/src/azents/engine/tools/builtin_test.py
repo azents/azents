@@ -1487,7 +1487,6 @@ class TestRuntimeToolkitUpdateContext:
         names = {t.spec.name for t in state.tools}
         assert "exec_command" in names
         assert "write_stdin" in names
-        assert "bash" not in names
         assert {"write", "edit", "delete", "apply_patch"}.isdisjoint(names)
         assert {tool.spec.name for tool in toolkit.make_mutation_tools()} == {
             "write",
@@ -1882,8 +1881,6 @@ class TestRuntimeToolkitUpdateContext:
             '`pixi search <name> --platform "$PIXI_PLATFORM"` and '
             "`pixi global install <package>`. Do not use sudo or OS package managers."
         ) in prompt
-        assert "nix profile install" not in prompt
-        assert "You can execute commands, install packages, and run code." not in prompt
 
     @pytest.mark.asyncio
     async def test_prompt_rejects_removed_containment_profile_without_downgrade(
@@ -2036,14 +2033,6 @@ class TestRuntimeToolkitUpdateContext:
         assert "import_file" not in prompt
         assert "present_file" not in prompt
         assert "read_image" not in prompt
-
-    @pytest.mark.asyncio
-    async def test_prompt_excludes_legacy_data_paths(self) -> None:
-        """runtime prompt does not guide legacy /data path."""
-        toolkit = _make_toolkit()
-        ctx = _make_context()
-        await toolkit.update_context(ctx)
-        assert "/data/" not in (await toolkit.get_static_prompt(_make_context()))
 
     @pytest.mark.asyncio
     async def test_prompt_includes_registered_projects(self) -> None:

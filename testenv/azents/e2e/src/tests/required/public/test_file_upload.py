@@ -15,7 +15,7 @@ import requests
 from azentspublicclient.api.chat_v1_api import ChatV1Api
 from azentspublicclient.models.chat_event_page_response import ChatEventPageResponse
 from azentspublicclient.models.upload_response import UploadResponse
-from pydantic import Field, JsonValue, StrictStr, TypeAdapter, ValidationError
+from pydantic import Field, StrictStr
 from websockets.sync.client import connect as ws_connect
 from websockets.sync.connection import Connection
 
@@ -37,8 +37,13 @@ from support.utils import (
 _UPLOAD_PROMPT = "Describe uploaded image and file"
 _CHAT_UPLOAD_MAX_BYTES = E2E_GENERAL_FILE_MAXIMUM_BYTES
 _NONEXISTENT_AGENT_ID = "00000000000000000000000000000000"
-_JSON_OBJECT = TypeAdapter(dict[str, object])
-_JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
+
+
+class _AttachmentObservation(ExtensionObservation):
+    """Interpreted attachment metadata with opaque extensions preserved."""
+
+    uri: StrictStr
+    media_type: StrictStr
 
 
 class _ContentPart(ExtensionObservation):
@@ -52,14 +57,14 @@ class _MessagePayload(ExtensionObservation):
     """Current user/assistant fields used by upload message observations."""
 
     content: StrictStr | list[_ContentPart]
-    attachments: list[dict[str, JsonValue]] = Field(default_factory=list)
+    attachments: list[_AttachmentObservation] = Field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class _MessageItem:
     id: str
     content: str
-    attachments: list[dict[str, JsonValue]]
+    attachments: list[_AttachmentObservation]
 
 
 def _exchange_uri_is_file_location(uri: object) -> bool:
@@ -116,28 +121,12 @@ def _recv_event(ws: Connection, *, timeout: float = 10) -> ChatActionObservation
     return ChatActionObservation.model_validate_json(raw)
 
 
-def _object_item(raw_item: object, *, label: str) -> dict[str, object]:
-    """Validate and return a JSON object."""
-    try:
-        return _JSON_OBJECT.validate_python(raw_item)
-    except ValidationError as exc:
-        raise AssertionError(f"{label} is not an object: {raw_item!r}") from exc
-
-
-def _object_items(raw_items: object, *, label: str) -> list[dict[str, object]]:
-    """Validate and return a list of JSON objects."""
-    try:
-        return _JSON_OBJECT_LIST.validate_python(raw_items)
-    except ValidationError as exc:
-        raise AssertionError(f"{label} is not an object list: {raw_items!r}") from exc
-
-
 def _wait_for_user_input(
     ws: Connection,
     content: str,
     *,
     timeout: float = 90,
-) -> dict[str, object]:
+) -> _MessagePayload:
     """Wait for a durable user-message event with the expected content."""
     deadline = time.monotonic() + timeout
     observed: list[object] = []
@@ -154,7 +143,7 @@ def _wait_for_user_input(
             continue
         payload = _MessagePayload.model_validate(event.event.payload)
         if _content_text(payload.content) == content:
-            return payload.model_dump(mode="json", exclude_unset=True)
+            return payload
     raise TimeoutError(f"user_input was not observed: {content}, {observed}")
 
 
@@ -251,15 +240,11 @@ def _message_items(payload: ChatEventPageResponse) -> list[_MessageItem]:
 def _message_with_content(
     payload: ChatEventPageResponse,
     content: str,
-) -> dict[str, object]:
+) -> _MessageItem:
     """Return the REST history message with the expected content."""
     for item in _message_items(payload):
         if item.content == content:
-            return {
-                "id": item.id,
-                "content": item.content,
-                "attachments": item.attachments,
-            }
+            return item
     raise AssertionError(f"message content not found: {content}")
 
 
@@ -270,7 +255,7 @@ def _wait_for_rest_message(
     content: str,
     *,
     timeout: float = 90,
-) -> dict[str, object]:
+) -> _MessageItem:
     """Wait for REST history to contain the expected message."""
     deadline = time.monotonic() + timeout
     last_payload: ChatEventPageResponse | None = None
@@ -317,11 +302,10 @@ class TestFileUpload:
         )
 
         assert response.status_code == 200
-        body = response.json()
-        assert "uri" in body
-        assert _exchange_uri_is_file_location(body["uri"])
-        assert body["media_type"] == "image/png"
-        assert body["size"] == len(content)
+        body = UploadResponse.model_validate(response.json())
+        assert _exchange_uri_is_file_location(body.uri)
+        assert body.media_type == "image/png"
+        assert body.size == len(content)
 
     def test_upload_without_auth_returns_401(
         self,
@@ -566,12 +550,10 @@ class TestUploadMessagePath:
         )
         assert image_response.status_code == 200
         assert file_response.status_code == 200
-        image_upload = image_response.json()
-        file_upload = file_response.json()
-        image_uri = image_upload["uri"]
-        file_uri = file_upload["uri"]
-        assert "file_part" not in image_upload
-        assert "file_part" not in file_upload
+        image_upload = UploadResponse.model_validate(image_response.json())
+        file_upload = UploadResponse.model_validate(file_response.json())
+        image_uri = image_upload.uri
+        file_uri = file_upload.uri
 
         with _connect_existing_chat(
             public_api_client=public_api_client,
@@ -598,17 +580,16 @@ class TestUploadMessagePath:
             response.raise_for_status()
             item = _wait_for_user_input(ws, _UPLOAD_PROMPT)
 
-        attachment_items = _object_items(
-            item.get("attachments"),
-            label="user_input attachments",
-        )
+        attachment_items = item.attachments
         assert len(attachment_items) == 2
-        assert attachment_items[0]["uri"] == image_uri
-        assert attachment_items[0]["media_type"] == "image/png"
-        assert attachment_items[1]["uri"] == file_uri
-        assert attachment_items[1]["media_type"] == "text/plain"
-        assert "images" not in item
-        _assert_file_payload_is_blob_free(item, label="event user_message")
+        assert attachment_items[0].uri == image_uri
+        assert attachment_items[0].media_type == "image/png"
+        assert attachment_items[1].uri == file_uri
+        assert attachment_items[1].media_type == "text/plain"
+        assert "images" not in item.model_dump(exclude_unset=True)
+        _assert_file_payload_is_blob_free(
+            item.model_dump(mode="json", exclude_unset=True), label="event user_message"
+        )
         journal = _wait_for_upload_journal(mock_openai_url)
         assert "\\u0000" not in journal
         _assert_file_payload_is_blob_free(journal, label="model request journal")
@@ -619,16 +600,20 @@ class TestUploadMessagePath:
             session_id,
             _UPLOAD_PROMPT,
         )
-        rest_attachment_items = _object_items(
-            rest_user_message.get("attachments"),
-            label="REST attachments",
-        )
-        assert {item["uri"] for item in rest_attachment_items} == {
+        rest_attachment_items = rest_user_message.attachments
+        assert {item.uri for item in rest_attachment_items} == {
             image_uri,
             file_uri,
         }
         _assert_file_payload_is_blob_free(
-            rest_user_message,
+            {
+                "id": rest_user_message.id,
+                "content": rest_user_message.content,
+                "attachments": [
+                    attachment.model_dump(mode="json", exclude_unset=True)
+                    for attachment in rest_user_message.attachments
+                ],
+            },
             label="REST user message",
         )
         _wait_for_rest_message(

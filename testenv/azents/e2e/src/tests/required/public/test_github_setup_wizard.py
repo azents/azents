@@ -1,5 +1,6 @@
 """Assembled GitHub setup verification and reviewed final-settings publication."""
 
+from typing import Annotated, Literal
 from urllib.parse import parse_qs, urlsplit
 
 import azentsadminclient
@@ -16,7 +17,9 @@ from azentspublicclient.models.agent_model_selection_input import (
     AgentModelSelectionInput,
 )
 from azentspublicclient.models.agent_type import AgentType
+from pydantic import Field, StrictStr
 
+from support.observations import ExtensionObservation
 from support.utils import single_candidate_model_options, unique
 from tests.required.admin.test_03_system_settings import (
     _generate_private_key,
@@ -24,12 +27,81 @@ from tests.required.admin.test_03_system_settings import (
 )
 from tests.required.public.test_agent_execution_persistence import (
     auth_headers,
-    json_object_payload,
 )
-from tests.required.public.test_github_user_toolkit import _operation, _scenario
+from tests.required.public.test_github_user_toolkit import (
+    _Connect,
+    _Created,
+    _CreationReview,
+    _GitHubConfig,
+    _operation,
+    _ProxyEvidence,
+    _response,
+    _scenario,
+)
 from tests.required.public.test_runtime_optional_capability import _create_workspace
 
 E2E_PLANNER_FALLBACK_WEIGHT = 25.0
+
+
+class _UserIdentity(ExtensionObservation):
+    type: Literal["user"]
+    login: StrictStr
+
+
+class _AppIdentity(ExtensionObservation):
+    type: Literal["app"]
+    app_id: StrictStr
+    name: StrictStr
+
+
+class _Installation(ExtensionObservation):
+    installation_id: StrictStr
+    account_login: StrictStr | None
+    status: Literal["ready", "denied", "unavailable"]
+
+
+class _Connectivity(ExtensionObservation):
+    status: Literal["ready", "failed"]
+
+
+class _Verification(ExtensionObservation):
+    identity: Annotated[_UserIdentity | _AppIdentity, Field(discriminator="type")]
+    installations: list[_Installation]
+    connectivity: _Connectivity
+
+
+class _AppMetadata(ExtensionObservation):
+    app_id: StrictStr
+    name: StrictStr
+
+
+class _AppOutput(ExtensionObservation):
+    app: _AppMetadata | None
+
+
+class _OAuthUrl(ExtensionObservation):
+    oauth_url: StrictStr
+
+
+class _Toolkit(ExtensionObservation):
+    toolkit_type: StrictStr
+
+
+class _ToolkitPage(ExtensionObservation):
+    items: list[_Toolkit]
+
+
+class _AgentToolkit(ExtensionObservation):
+    toolkit: _Toolkit
+
+
+class _AgentToolkitPage(ExtensionObservation):
+    items: list[_AgentToolkit]
+
+
+class _PublishedToolkit(ExtensionObservation):
+    name: StrictStr
+    config: _GitHubConfig
 
 
 def _management_base(
@@ -63,18 +135,12 @@ def _assert_no_github_toolkits(base: str, token: str, *, agent_owned: bool) -> N
     response = requests.get(
         base + "/toolkit-configs", headers=auth_headers(token), timeout=10
     )
-    response.raise_for_status()
-    payload = json_object_payload(response.json(), label="Toolkit management scope")
-    items = payload["items"]
-    assert isinstance(items, list)
-    for raw in items:
-        item = json_object_payload(raw, label="Toolkit management item")
-        toolkit = (
-            json_object_payload(item["toolkit"], label="Agent management Toolkit")
-            if agent_owned
-            else item
-        )
-        assert toolkit["toolkit_type"] != "github"
+    if agent_owned:
+        page = _response(response, _AgentToolkitPage, label="Agent Toolkit management")
+        assert all(item.toolkit.toolkit_type != "github" for item in page.items)
+    else:
+        shared = _response(response, _ToolkitPage, label="Shared Toolkit management")
+        assert all(item.toolkit_type != "github" for item in shared.items)
 
 
 @pytest.mark.parametrize("agent_owned", [False, True])
@@ -104,19 +170,21 @@ def test_setup_verifies_actual_pat_and_app_targets_without_publication(
         base + "/github",
         workspace.token,
         "setup-verification",
+        model=_Verification,
         body={
             "github_auth_type": "pat",
             "token": "synthetic-pat",
             "transport": {"toolsets": ["users", "repos"], "timeout": 5},
         },
     )
-    identity = json_object_payload(pat["identity"], label="Verified PAT identity")
-    assert identity["type"] == "user" and identity["login"] == "connected-user"
-    assert "synthetic-pat" not in str(pat)
+    identity = pat.identity
+    assert isinstance(identity, _UserIdentity) and identity.login == "connected-user"
+    assert "synthetic-pat" not in pat.model_dump_json(exclude_unset=True)
     app = _operation(
         base + "/github",
         workspace.token,
         "setup-verification",
+        model=_Verification,
         body={
             "github_auth_type": "github_app",
             "app_id": "123",
@@ -125,21 +193,15 @@ def test_setup_verifies_actual_pat_and_app_targets_without_publication(
             "transport": {"toolsets": ["users", "repos"], "timeout": 5},
         },
     )
-    app_identity = json_object_payload(app["identity"], label="Verified App identity")
-    assert app_identity["type"] == "app"
-    assert app_identity["app_id"] == "123"
-    assert app_identity["name"] == "Azents Test App"
-    installations = app["installations"]
-    assert isinstance(installations, list)
-    targets = {
-        item["installation_id"]: item
-        for raw in installations
-        for item in [json_object_payload(raw, label="Verified installation")]
-    }
-    assert targets["501"]["account_login"] == "connected-user"
-    assert targets["502"]["account_login"] == "research-team"
-    assert targets["504"]["status"] == "denied"
-    assert "synthetic-installation" not in str(app)
+    app_identity = app.identity
+    assert isinstance(app_identity, _AppIdentity)
+    assert app_identity.app_id == "123"
+    assert app_identity.name == "Azents Test App"
+    targets = {item.installation_id: item for item in app.installations}
+    assert targets["501"].account_login == "connected-user"
+    assert targets["502"].account_login == "research-team"
+    assert targets["504"].status == "denied"
+    assert "synthetic-installation" not in app.model_dump_json(exclude_unset=True)
     _assert_no_github_toolkits(base, workspace.token, agent_owned=agent_owned)
 
 
@@ -187,26 +249,25 @@ def test_creation_publishes_only_reviewed_post_authorization_settings(
         "enabled": True,
         "always_expose_tools": False,
     }
-    connected = _operation(creation, workspace.token, "connect", body=initial)
-    authorization_url = connected["authorization_url"]
-    assert isinstance(authorization_url, str)
+    connected = _operation(
+        creation, workspace.token, "connect", body=initial, model=_Connect
+    )
+    authorization_url = connected.authorization_url
     state = parse_qs(urlsplit(authorization_url).query)["state"][0]
     review = _operation(
         creation,
         workspace.token,
         "exchange",
         body={"code": "e2e-user-wizard-" + unique(), "state": state},
+        model=_CreationReview,
     )
-    candidate = json_object_payload(review["candidate"], label="Wizard candidate")
-    attempt = candidate["attempt_id"]
-    assert isinstance(attempt, str)
+    attempt = review.candidate.attempt_id
     app_response = requests.get(
         creation + f"/{attempt}/app", headers=headers, timeout=10
     )
-    app_response.raise_for_status()
-    metadata = json_object_payload(app_response.json(), label="Candidate metadata")
-    app = json_object_payload(metadata["app"], label="Candidate App")
-    assert app["name"] == "Azents Test App"
+    metadata = _response(app_response, _AppOutput, label="Candidate metadata")
+    assert metadata.app is not None
+    assert metadata.app.name == "Azents Test App"
     settings = {
         "name": "Reviewed final Wizard settings",
         "slug": initial["slug"],
@@ -237,22 +298,21 @@ def test_creation_publishes_only_reviewed_post_authorization_settings(
         workspace.token,
         "confirm",
         body={"attempt_id": attempt, "settings": settings},
+        model=_Created,
     )
-    toolkit_id = published["toolkit_id"]
-    assert isinstance(toolkit_id, str)
+    toolkit_id = published.toolkit_id
     saved = requests.get(
         base + f"/toolkit-configs/{toolkit_id}", headers=headers, timeout=10
     )
-    saved.raise_for_status()
-    saved_payload = json_object_payload(saved.json(), label="Published Toolkit")
-    config = json_object_payload(saved_payload["config"], label="Final GitHub config")
-    assert saved_payload["name"] == settings["name"]
-    assert config["github_auth_type"] == "github_app_user"
-    assert config["toolsets"] == settings["toolsets"]
-    assert config["timeout"] == 17
-    assert config["inject_runtime_environment"] is True
-    assert "runtime_risk_acknowledged" not in config
-    assert "synthetic-token" not in str(saved_payload)
+    saved_payload = _response(saved, _PublishedToolkit, label="Published Toolkit")
+    config = saved_payload.config
+    assert saved_payload.name == settings["name"]
+    assert config.github_auth_type == "github_app_user"
+    assert config.toolsets == settings["toolsets"]
+    assert config.timeout == 17
+    assert config.inject_runtime_environment is True
+    assert "runtime_risk_acknowledged" not in config.model_dump(exclude_unset=True)
+    assert "synthetic-token" not in saved_payload.model_dump_json(exclude_unset=True)
 
 
 @pytest.mark.parametrize("agent_owned", [False, True])
@@ -293,9 +353,11 @@ def test_platform_app_name_is_current_provider_metadata(
         + "/github"
     )
     headers = auth_headers(workspace.token)
-    before = requests.get(
-        github_validation_proxy_url + "/__testenv/state", timeout=5
-    ).json()
+    before = _response(
+        requests.get(github_validation_proxy_url + "/__testenv/state", timeout=5),
+        _ProxyEvidence,
+        label="App verification evidence",
+    )
     unlinked = requests.post(
         base + "/setup-verification",
         headers=headers,
@@ -307,16 +369,19 @@ def test_platform_app_name_is_current_provider_metadata(
         timeout=10,
     )
     assert unlinked.status_code in {400, 403}
-    after = requests.get(
-        github_validation_proxy_url + "/__testenv/state", timeout=5
-    ).json()
-    assert after["app_request_count"] == before["app_request_count"]
+    after = _response(
+        requests.get(github_validation_proxy_url + "/__testenv/state", timeout=5),
+        _ProxyEvidence,
+        label="App verification evidence",
+    )
+    assert after.app_request_count == before.app_request_count
 
     # The existing installation OAuth synchronization grants only this user's
     # selected-installation authority; verification cannot substitute App keys.
     oauth = requests.get(base + "/platform-oauth-url", headers=headers, timeout=10)
-    oauth.raise_for_status()
-    state = parse_qs(urlsplit(oauth.json()["oauth_url"]).query)["state"][0]
+    state = parse_qs(
+        urlsplit(_response(oauth, _OAuthUrl, label="Platform OAuth").oauth_url).query
+    )["state"][0]
     synchronized = requests.post(
         base + "/platform-installations",
         headers=headers,
@@ -328,31 +393,27 @@ def test_platform_app_name_is_current_provider_metadata(
         base,
         workspace.token,
         "setup-verification",
+        model=_Verification,
         body={
             "github_auth_type": "github_app_platform",
             "installation_ids": ["501", "502"],
             "transport": {"toolsets": ["repos"], "timeout": 5},
         },
     )
-    permitted_identity = json_object_payload(
-        permitted["identity"], label="User-admitted Platform App"
-    )
-    assert permitted_identity["type"] == "app"
-    assert permitted_identity["app_id"] == "123"
-    permitted_connectivity = json_object_payload(
-        permitted["connectivity"], label="User-admitted Platform MCP"
-    )
-    assert permitted_connectivity["status"] == "ready"
+    permitted_identity = permitted.identity
+    assert isinstance(permitted_identity, _AppIdentity)
+    assert permitted_identity.app_id == "123"
+    assert permitted.connectivity.status == "ready"
     first = requests.get(base + "/setup-app", headers=headers, timeout=10)
-    first.raise_for_status()
-    first_app = json_object_payload(first.json()["app"], label="Platform App metadata")
-    assert first_app["name"] == "Azents Test App"
+    first_app = _response(first, _AppOutput, label="Platform App metadata").app
+    assert first_app is not None
+    assert first_app.name == "Azents Test App"
     _scenario(github_validation_proxy_url, "user_app_renamed")
     renamed = requests.get(base + "/setup-app", headers=headers, timeout=10)
-    renamed.raise_for_status()
-    renamed_app = json_object_payload(
-        renamed.json()["app"], label="Renamed Platform App metadata"
-    )
-    assert renamed_app["app_id"] == first_app["app_id"]
-    assert renamed_app["name"] == "Renamed Test App"
+    renamed_app = _response(
+        renamed, _AppOutput, label="Renamed Platform App metadata"
+    ).app
+    assert renamed_app is not None
+    assert renamed_app.app_id == first_app.app_id
+    assert renamed_app.name == "Renamed Test App"
     _scenario(github_validation_proxy_url, "user_success")

@@ -1,15 +1,21 @@
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { KubernetesConfigFieldsContainer } from "../KubernetesConfigFieldsContainer";
+import { projectKubernetesFields } from "../provider-config-views";
 import { KubernetesConfigFields } from "./KubernetesConfigFields";
 import { ProviderFieldStoryTransport } from "./provider-field-story-fixtures";
 import type { KubernetesConfigFieldsProps } from "../types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
-interface StoryProps extends KubernetesConfigFieldsProps {
+interface StoryProps extends Omit<KubernetesConfigFieldsProps, "view"> {
   onRequest: (input: unknown) => void;
 }
 function FieldStory(props: StoryProps): React.ReactElement {
-  return <KubernetesConfigFields {...props} />;
+  return (
+    <KubernetesConfigFields
+      {...props}
+      view={projectKubernetesFields(props.config, props.credentials)}
+    />
+  );
 }
 const meta = {
   title: "Toolkits/Provider fields/Kubernetes",

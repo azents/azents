@@ -1,16 +1,15 @@
 "use client";
 import { useState } from "react";
+import { projectAwsFields } from "../provider-config-views";
 import { useProviderConnectionTest } from "./useProviderConnectionTest";
-import type {
-  CredentialProviderFieldsProps,
-  ToolkitConfigFieldsInput,
-} from "../types";
+import type { AwsConfigFieldsProps, ToolkitConfigFieldsInput } from "../types";
 export function useAwsConfigFieldsContainer(
   props: ToolkitConfigFieldsInput,
-): CredentialProviderFieldsProps {
+): AwsConfigFieldsProps {
   const [showKeyInput, setShowKeyInput] = useState(!props.hasCredentials);
   return {
     ...props,
+    view: projectAwsFields(props.config, props.credentials),
     ...useProviderConnectionTest(props, "aws"),
     showKeyInput,
     onShowKeyInput: () => setShowKeyInput(true),

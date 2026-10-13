@@ -25,7 +25,6 @@ import {
   IconPlugConnected,
   IconSettings,
 } from "@tabler/icons-react";
-import { useMemo } from "react";
 import { ProviderConnectionTestFeedback } from "./ProviderConnectionTestFeedback";
 
 const AWS_REGIONS = [
@@ -48,10 +47,11 @@ const AWS_REGIONS = [
   { value: "ca-central-1", label: "Canada (Central)" },
 ];
 
-import type { CredentialProviderFieldsProps } from "../types";
+import type { AwsConfigFieldsProps } from "../types";
 
 export function AwsConfigFields({
   config,
+  view,
   onConfigChange,
   credentials,
   onCredentialsChange,
@@ -60,21 +60,14 @@ export function AwsConfigFields({
   onTestConnection,
   showKeyInput,
   onShowKeyInput,
-}: CredentialProviderFieldsProps): React.ReactElement {
-  const region =
-    typeof config.region === "string" ? config.region : "us-east-1";
-  const roleArn = typeof config.role_arn === "string" ? config.role_arn : "";
-  const externalId =
-    typeof config.external_id === "string" ? config.external_id : "";
-  const timeoutValue = typeof config.timeout === "number" ? config.timeout : 30;
-
-  const accessKeyId = useMemo(
-    () =>
-      credentials && typeof credentials.access_key_id === "string"
-        ? credentials.access_key_id
-        : "",
-    [credentials],
-  );
+}: AwsConfigFieldsProps): React.ReactElement {
+  const {
+    region,
+    role_arn: roleArn,
+    external_id: externalId,
+    timeout: timeoutValue,
+    accessKeyId,
+  } = view;
 
   return (
     <Stack gap="md">

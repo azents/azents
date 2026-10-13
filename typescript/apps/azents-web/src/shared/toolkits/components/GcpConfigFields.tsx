@@ -32,11 +32,7 @@ import {
   IconUpload,
 } from "@tabler/icons-react";
 import { useCallback, useMemo } from "react";
-import {
-  getOptionalString,
-  getStringArray,
-  parseJsonRecord,
-} from "@/shared/lib/unknown-value";
+import { parseJsonRecord } from "@/shared/lib/unknown-value";
 import { ProviderConnectionTestFeedback } from "./ProviderConnectionTestFeedback";
 
 // ---------------------------------------------------------------------------
@@ -141,30 +137,16 @@ const TIER_LABELS: Record<string, string> = {
   data: "Data",
 };
 
-const DEFAULT_SERVICES = ["logging", "monitoring"];
-
-function getConfiguredServices(value: unknown, fallback: string[]): string[] {
-  if (!Array.isArray(value)) {
-    return fallback;
-  }
-
-  const supportedServices = new Set(SERVICES.map((service) => service.value));
-  return [
-    ...new Set(
-      getStringArray(value).filter((service) => supportedServices.has(service)),
-    ),
-  ];
-}
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
 import { getServiceAccountKey } from "../service-account-fields";
-import type { ServiceAccountProviderFieldsProps } from "../types";
+import type { GcpConfigFieldsProps } from "../types";
 
 export function GcpConfigFields({
   config,
+  view,
   onConfigChange,
   credentials,
   onCredentialsChange,
@@ -174,32 +156,14 @@ export function GcpConfigFields({
   showKeyInput,
   onShowKeyInput,
   onKeyFileUpload,
-}: ServiceAccountProviderFieldsProps): React.ReactElement {
-  const projectId =
-    typeof config.project_id === "string" ? config.project_id : "";
-  const selectedServices = useMemo(
-    () => getConfiguredServices(config.services, DEFAULT_SERVICES),
-    [config.services],
-  );
-  const writableServices = useMemo(
-    () => getConfiguredServices(config.writable_services, []),
-    [config.writable_services],
-  );
-  const timeoutValue = typeof config.timeout === "number" ? config.timeout : 30;
-
-  // SA Key state
-
-  const clientEmail = useMemo(() => {
-    if (!credentials) {
-      return null;
-    }
-    const serviceAccountKey = getServiceAccountKey(
-      credentials.service_account_key,
-    );
-    return serviceAccountKey
-      ? (getOptionalString(serviceAccountKey.client_email) ?? null)
-      : null;
-  }, [credentials]);
+}: GcpConfigFieldsProps): React.ReactElement {
+  const {
+    project_id: projectId,
+    services: selectedServices,
+    writable_services: writableServices,
+    timeout: timeoutValue,
+    clientEmail,
+  } = view;
 
   // Connection test
 

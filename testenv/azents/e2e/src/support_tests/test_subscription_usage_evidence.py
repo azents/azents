@@ -3,6 +3,7 @@
 import datetime
 import json
 
+import pytest
 from azentspublicclient.models.subscription_usage_unavailable_reason import (
     SubscriptionUsageUnavailableReason,
 )
@@ -58,3 +59,59 @@ def test_subscription_usage_log_records_ignore_unrelated_service_logs() -> None:
         ]
     )
     assert subscription_usage_log_records(logs) == [usage_record]
+
+
+@pytest.mark.parametrize(
+    "unrelated",
+    [
+        None,
+        False,
+        0,
+        "",
+        [],
+        {},
+        {"name": None},
+        {"name": False},
+        {"name": 0},
+        {"name": []},
+        {"name": {}},
+        {"name": ""},
+        {"name": "azents.services.other"},
+    ],
+)
+def test_log_source_decoder_skips_malformed_and_unrelated_records(
+    unrelated: object,
+) -> None:
+    """Only strict source strings can select subscription usage evidence."""
+    record = {"name": "azents.services.subscription_usage.service"}
+    logs = "\n".join([json.dumps(unrelated), "invalid JSON", json.dumps(record)])
+    assert subscription_usage_log_records(logs) == [record]
+
+
+def test_log_evidence_preserves_opaque_fields_and_source_prefix_semantics() -> None:
+    """Return accepted log fields exactly, without interpreting their contents."""
+    records = [
+        {
+            "name": name,
+            "message": "Subscription usage refresh failed",
+            "operation": "subscription_usage_read",
+            "outcome": "unavailable",
+            "future_field": {
+                "nested": [None, False, 0, "", {"source": "unrelated"}],
+            },
+            "credential": "synthetic-private-evidence",
+        }
+        for name in (
+            "azents.services.subscription_usage",
+            "azents.services.subscription_usage.service",
+            "azents.services.subscription_usage_future",
+        )
+    ]
+    logs = "\n".join(json.dumps(record) for record in records)
+    assert subscription_usage_log_records(logs) == records
+
+
+def test_missing_subscription_evidence_remains_a_failure() -> None:
+    """Do not convert an empty or unrelated log capture into successful QA."""
+    with pytest.raises(AssertionError):
+        subscription_usage_log_records('{"name": null}\nnot JSON')
