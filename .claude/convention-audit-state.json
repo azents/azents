@@ -1,12 +1,10 @@
 {
   "change_checkpoint": {
-    "checked_at": "2026-10-11T22:10:55Z",
+    "checked_at": "2026-10-12T22:58:37Z",
     "checked_ruleset_revisions": [
-      "03a79b1cb3b0cd3fab3981885c9ee35e3094d6ee83a993eda8955c559bc5a525",
-      "193cd524af5bf589eeab7744b06e813623015ce64d6d503b684ddbbbf9bbced2",
-      "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835"
+      "03a79b1cb3b0cd3fab3981885c9ee35e3094d6ee83a993eda8955c559bc5a525"
     ],
-    "checked_through_commit": "25517e3d8c60dc0d8029f9bac5f4a7ebda1be51d"
+    "checked_through_commit": "bedfbfb2a14877fc84bda026ad71a02b1c3e5d87"
   },
   "ranges": {
     ".::bucket-1-of-8": {
@@ -665,34 +663,34 @@
       "checked_through_commit": "83fc6e43a41896e5478b1086d5a1fead1b722b35"
     },
     "testenv/**::bucket-1-of-8": {
-      "checked_at": "2026-09-09T22:27:17Z",
-      "checked_ruleset_revision": "d9dfd01f3c4842450c9e23c3318946d7b5b764e41309d900ef221c6ae8a986a0",
-      "checked_through_commit": "ee98d09836a537bb7e006df742c6d440bee60685"
+      "checked_at": "2026-10-12T22:58:37Z",
+      "checked_ruleset_revision": "766c579c22206f1c77dfac6c9675c6619b9762929affa695b77bebf505e3f15b",
+      "checked_through_commit": "bedfbfb2a14877fc84bda026ad71a02b1c3e5d87"
     },
     "testenv/**::bucket-2-of-8": {
-      "checked_at": "2026-09-10T22:11:05Z",
-      "checked_ruleset_revision": "d9dfd01f3c4842450c9e23c3318946d7b5b764e41309d900ef221c6ae8a986a0",
-      "checked_through_commit": "04b5ccc1ddd80cdc86d41d1a10cf18fc4e41916a"
+      "checked_at": "2026-10-12T22:58:37Z",
+      "checked_ruleset_revision": "766c579c22206f1c77dfac6c9675c6619b9762929affa695b77bebf505e3f15b",
+      "checked_through_commit": "bedfbfb2a14877fc84bda026ad71a02b1c3e5d87"
     },
     "testenv/**::bucket-3-of-8": {
-      "checked_at": "2026-09-10T22:11:05Z",
-      "checked_ruleset_revision": "d9dfd01f3c4842450c9e23c3318946d7b5b764e41309d900ef221c6ae8a986a0",
-      "checked_through_commit": "04b5ccc1ddd80cdc86d41d1a10cf18fc4e41916a"
+      "checked_at": "2026-10-12T22:58:37Z",
+      "checked_ruleset_revision": "766c579c22206f1c77dfac6c9675c6619b9762929affa695b77bebf505e3f15b",
+      "checked_through_commit": "bedfbfb2a14877fc84bda026ad71a02b1c3e5d87"
     },
     "testenv/**::bucket-4-of-8": {
-      "checked_at": "2026-09-10T22:11:05Z",
-      "checked_ruleset_revision": "d9dfd01f3c4842450c9e23c3318946d7b5b764e41309d900ef221c6ae8a986a0",
-      "checked_through_commit": "04b5ccc1ddd80cdc86d41d1a10cf18fc4e41916a"
+      "checked_at": "2026-10-12T22:58:37Z",
+      "checked_ruleset_revision": "766c579c22206f1c77dfac6c9675c6619b9762929affa695b77bebf505e3f15b",
+      "checked_through_commit": "bedfbfb2a14877fc84bda026ad71a02b1c3e5d87"
     },
     "testenv/**::bucket-5-of-8": {
-      "checked_at": "2026-09-10T22:11:05Z",
-      "checked_ruleset_revision": "d9dfd01f3c4842450c9e23c3318946d7b5b764e41309d900ef221c6ae8a986a0",
-      "checked_through_commit": "04b5ccc1ddd80cdc86d41d1a10cf18fc4e41916a"
+      "checked_at": "2026-10-12T22:58:37Z",
+      "checked_ruleset_revision": "766c579c22206f1c77dfac6c9675c6619b9762929affa695b77bebf505e3f15b",
+      "checked_through_commit": "bedfbfb2a14877fc84bda026ad71a02b1c3e5d87"
     },
     "testenv/**::bucket-6-of-8": {
-      "checked_at": "2026-09-10T22:11:05Z",
-      "checked_ruleset_revision": "d9dfd01f3c4842450c9e23c3318946d7b5b764e41309d900ef221c6ae8a986a0",
-      "checked_through_commit": "04b5ccc1ddd80cdc86d41d1a10cf18fc4e41916a"
+      "checked_at": "2026-10-12T22:58:37Z",
+      "checked_ruleset_revision": "766c579c22206f1c77dfac6c9675c6619b9762929affa695b77bebf505e3f15b",
+      "checked_through_commit": "bedfbfb2a14877fc84bda026ad71a02b1c3e5d87"
     },
     "testenv/**::bucket-7-of-8": {
       "checked_at": "2026-09-10T22:11:05Z",
