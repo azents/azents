@@ -76,8 +76,9 @@ and understand each service's state without repeating unrelated setup flows.
 - Google is the primary connection entry, not three mandatory independent entries.
 - Relevant setup sections appear progressively on one surface, with earlier
   choices available for review and correction.
-- UI grouping does not promise one consent operation, shared account identity,
-  or automatic access to every service.
+- A connection uses one verified account across selected services. UI grouping
+  alone is not account evidence and does not promise automatic access to each
+  service or one successful consent operation.
 - Saved Agent and Workspace-shared entry contexts retain their existing scope.
 
 ### REQ-2. Operator-owned preparation and guidance
@@ -222,20 +223,20 @@ mobile sizes, consistent with the existing connection experience.
 
 ## Open Assumptions and Product Boundaries
 
-The following remain unresolved and are not implementation authority:
+Implementation proceeds under the requester's 2026-10-13 instruction to complete
+the feature without further questions. The bounded realization uses a reusable
+operator-owned application, one verified account per connection, ordinary
+reconnect with reviewed replacement, and documented security-risk review.
+It introduces no manager-owned application or separate service-account workflow.
 
-- Whether operator application settings are reusable across connections, whether
-  managers may bring their own application, and the management entry for each.
+The following remain evidence limits, not authority to invent capabilities:
+
 - Initial service/task defaults and the supported task catalog beyond the three
   named services; examples are not the full feature contract.
-- Whether services in one Google connection must use the same Google account.
-- The explicit user experience for updating a saved connection with reduced
-  grants through ordinary reconnect, and the effect of resetting or closing
-  while a write is in progress. This is not authority for a separate consent UI.
 - The exact provider-supported scope-to-tool mappings and grant verification
   evidence. Documentation alone does not establish live interoperability.
-- The provider-policy-compatible prompt/response screening and risk-disclosure
-  approach. No paid security service is selected by this snapshot.
+- Provider-policy compliance and screening efficacy require evidence; merely
+  documenting limitations is not proof of complete attack prevention.
 
 ## Confirmation
 
@@ -248,4 +249,9 @@ listed open boundaries silently.
 The earlier correction removed an assistant-added per-capability consent
 workflow. It did not reduce the requested Google connection feature. Technical
 decisions and revision-bound Design approval remain separate from Requirements
-confirmation. Implementation has not started.
+confirmation. That scope confirmation alone did not authorize implementation.
+
+The requester then explicitly asked to implement the feature without further
+questions. Remaining bounded implementation decisions are delegated; the original
+scope, compatibility, authority, security and operational constraints still apply.
+No production authorization or deployment is implied.

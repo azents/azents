@@ -8,6 +8,7 @@ from azents.core.external_channel_file_system_setting import (
     get_external_channel_files_definition,
 )
 from azents.core.github_system_setting import get_platform_github_app_definition
+from azents.core.google_system_setting import get_google_oauth_definition
 from azents.core.historical_memory_system_setting import (
     get_historical_memory_execution_definition,
 )
@@ -22,6 +23,7 @@ def get_system_setting_registry() -> SystemSettingRegistry:
             get_external_channel_files_definition(),
             get_historical_memory_execution_definition(),
             get_platform_github_app_definition(),
+            get_google_oauth_definition(),
             get_platform_runtime_definition(),
             get_slack_identity_oauth_definition(),
             get_discord_identity_oauth_definition(),

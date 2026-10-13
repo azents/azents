@@ -14,7 +14,9 @@ not an approved primary Design or an accepted ADR. The corresponding
 original scope and exclude a separate additional-consent feature. The requester
 directed technical design to proceed on that basis. The consequential choices
 identified below remain outstanding.
-No implementation, account authorization, migration, or deployment has occurred.
+At the time of this initial analysis, no implementation, account authorization,
+migration, or deployment had occurred. Implementation subsequently started under
+the approved primary Design; this record remains research evidence only.
 
 The snapshot's [ADR](../adr/google-261013-connection.md) now owns the material
 decision map, and its [primary Design](google-261013-connection.md) owns the

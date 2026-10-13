@@ -12,11 +12,13 @@ tags: [google, toolkit, oauth, architecture, security, frontend, testing]
 - Snapshot: `google-261013`; reference: `google-261013/DESIGN`.
 - Scope authority: [google-261013/REQ](../requirements/google-261013-connection.md).
 - Material decision map: [google-261013/ADR](../adr/google-261013-connection.md).
-- Revision: `1`; independent implementation contracts are drafted below.
-- This is an unapproved primary draft, not a complete implementation authorization.
-  D1–D4 remain pending. Their proposed realizations are isolated from the authority
-  table; placeholders identify the exact affected contracts.
-- No code, migration, Google consent, or deployment has been performed.
+- Revision: `3`; accepted ADR-D1 through ADR-D4 and D1 activation refinement are reflected below.
+- Mode: Autonomous under the requester's explicit instruction to implement without
+  further questions. `/root/google-design-owner` owns technical approval.
+- This revision passed the bidirectional authority/feasibility audit and was
+  approved by the delegated technical owner for implementation.
+- Approval preceded implementation. Google account consent and production
+  deployment are outside this implementation authorization.
 
 ## Current System and Gap
 
@@ -26,7 +28,7 @@ tags: [google, toolkit, oauth, architecture, security, frontend, testing]
 | Generic OAuth stores requested `scope`; `OAuthTokenResponse` omits granted scope | Partial consent requires independently verified grant evidence |
 | MCP snapshots store remote schemas and survive discovery outages | Google must filter both projections and calls using current capability evidence |
 | GitHub user creation retains encrypted unpublished attempts and publishes on confirm | Reusable lifecycle pattern; Google-specific identity and scopes must be validated |
-| System Settings separates operator secrets from public status and fences effective configuration | Reusable facilities; Google's chosen registration binding is pending D1 |
+| System Settings separates operator secrets from public status and fences effective configuration | Reuse a typed operator Google Section under ADR-D1 |
 | Toolkit resolution retains exact Agent/shared ownership and Team owner checks | Google must use the same authority, not channel-participant identity |
 
 Repository baseline for this design research:
@@ -54,9 +56,10 @@ flowchart TB
     Guard --> Gmail[Official Gmail MCP]
 ```
 
-The diagram does not resolve registration storage, account cardinality, or saved
-reconnect eligibility. Those are D1–D3. It describes authority boundaries common
-to either admitted outcome.
+ADR-D1 selects the current operator registration authority; ADR-D2 selects one
+verified subject/grant across services; ADR-D3 stages saved replacement until
+explicit review and confirmation. No alternative registration/account/reconnect
+mode is exposed.
 
 ### Responsibilities
 
@@ -87,9 +90,9 @@ typed failures continue using the existing MCP client.
 
 ## Data and Source of Truth
 
-The following are logical records, not an approved choice of physical schema or
-account cardinality. Implementation can choose equivalent typed layout once the
-pending binding/reconnect contracts are settled.
+The following logical records have one authority. Equivalent typed physical
+layout is agent-owned, but it cannot change cardinality, lifetime, encryption,
+recovery, or the comparison contracts.
 
 | Logical unit | Required data | Lifetime and access |
 | --- | --- | --- |
@@ -109,10 +112,25 @@ excluded from repr, logs, model context, and management responses. Attempt
 abandonment removes unpublished ciphertext. Minimal publication outcome data is
 not a product draft/version-history feature.
 
-**Pending D1:** registration source and retirement policy.
-**Pending D2:** one or several grant relations and identity review projection.
-**Pending D3:** target saved-state comparison and eligibility during reconnect.
-There is no provisional implementation of both options.
+Each Toolkit has one verified subject/client-bound current grant. Attempts may
+target initial creation or the exact current saved connection. Reconnect captures
+connection identity, permission/auth state and authentication-affecting Toolkit
+configuration, not a product version. Confirm replaces the identity, so old refresh
+results cannot update the replacement.
+
+Operator registration is a typed `google_oauth` System Settings Section with
+nonsecret client identity and write-only encrypted secret. Use existing optimistic
+Admin mutation and environment-field ownership. Direct activation is appropriate:
+configuration presence is preparation, not a falsely claimed live client test.
+Both local validation and public projections explicitly distinguish declared
+readiness from verified Google grant/endpoint behavior. Google consent/API/Preview
+instructions are guidance, not automatic infrastructure actions.
+
+Saved grants retain the client binding, not a copy of the operator secret.
+Same-client rotation preserves grants and future operations resolve the current
+secret. Changed effective generation defeats both stale success and failure.
+Changed client makes old grants ineligible until ordinary reconnect, preserving
+their encrypted state without retired-secret fallback.
 
 ## OAuth Attempt and Callback Contract
 
@@ -126,6 +144,10 @@ arbitrary Workspace/Agent destinations in a browser-supplied redirect.
    scopes. Configuration absence blocks consent start but not unrelated Toolkits.
 3. Persist an unpublished attempt with encrypted PKCE S256 and nonce/state context.
    The authorization URL is SDK-owned and returns no token or client secret.
+   Send distinct OIDC nonce, exact encrypted state, PKCE S256 challenge, minimal
+   identity/selected-task scopes, `access_type=offline`, and the exact registered
+   redirect URI. Store callback state nonce and OIDC nonce separately. No blanket
+   `include_granted_scopes` or unconditional `prompt=consent` is implied.
 4. On callback, authenticate the returning initiator and verify exact context,
    encrypted state, one-use phase, deadline, redirect, nonce, and attempted client.
    Current write authority is checked again; a browser-selected context cannot
@@ -135,6 +157,9 @@ arbitrary Workspace/Agent destinations in a browser-supplied redirect.
 6. Use supported Authlib APIs and the existing HTTP/proxy adapter. Verify Google
    identity with supported Google identity APIs: issuer, audience, expiry, nonce,
    and stable subject. Browser email and `login_hint` are never proof.
+   Compare the nonce only after signed ID-token verification. Google-specific
+   typed decoding retains scope/identity evidence before SDK normalization; do
+   not reuse the common decoder that drops those fields unchanged.
 7. Decode authoritative granted-scope evidence separately from requested scope.
    Recheck initiating authority, exact claimed attempt, configuration, and expiry
    after provider I/O before storing the verified candidate.
@@ -243,7 +268,13 @@ Schema removals/changes that cannot be validated fail closed for affected tools.
 ### Execution Boundary
 
 Reload current exact Toolkit eligibility, selected tasks, grant evidence/client
-binding, and Team owner fence. Reject stale captured authority before outbound I/O.
+binding, and canonical `SessionExecutionOwner`. Private and Team execution share
+this contract. Validate active/running Session, active Agent and Workspace, exact
+root/SessionAgent context and captured `owner_generation` against PostgreSQL
+before outbound execution. A local bound owner object alone is insufficient.
+Revalidate applicable execution ownership and grant/configuration fences before
+dependent post-I/O persistence. No human sender/manager is the runtime principal.
+Reject stale captured authority before outbound I/O.
 Resolve the fixed service endpoint and token only after admission, and perform
 MCP I/O outside database transactions.
 
@@ -274,10 +305,10 @@ The mandatory common contract, independent of D1–D3, is:
 Locks are not held over provider I/O. Correctness does not depend on singleflight,
 Redis, invalidation events, or a refresh task's process lifetime.
 
-On a proved authentication rejection, at most one safe refresh/retry can be used
-when the provider proves the first operation had no effect. Ambiguous transport
-failure or unknown write outcome is not automatically retried. Reconnect never
-replays the Agent's earlier task.
+Renew expiring credentials before call admission. A rejected/uncertain Google
+MCP call returns its failure without automatic effect replay; do not reuse the
+generic write retry path that cannot prove the first effect absent. A later
+explicit call may resolve current renewal. Reconnect never replays an earlier task.
 
 ### Required Race Outcomes
 
@@ -291,10 +322,23 @@ replays the Agent's earlier task.
 | Old cached tool versus lost permission | Projection and call both deny |
 | Operator binding changes during I/O | Mismatched result cannot commit |
 
-**Pending D3** selects whether the old saved grant continues running during an
-ordinary reconnect, and how a reviewed reduced/account-changed result replaces
-it. Staged replacement is the recommendation in the ADR, not approved behavior.
-Both admitted options must retain the race outcomes above.
+### Saved Reconnect Replacement
+
+ADR-D3 retains the saved grant during unpublished reconnect, subject to current
+permissions/client/execution authority. Reduced or changed-account results receive
+fresh explicit review. Confirm rechecks captured connection identity, ownership,
+permission/auth state and authentication-affecting configuration inside one atomic
+replacement transaction. Unrelated current metadata is preserved.
+
+Routine token renewal keeps connection identity and does not alone stale the
+candidate. Grant/auth/configuration changes cause conflict/reload; publication
+creates a new identity and defeats old refresh CAS. Disconnect defeats pending
+targets permanently. Sibling candidates cannot both replace the captured identity.
+
+Persist minimal exact-attempt/final-settings outcome atomically. Identical confirm
+replay observes that outcome; different final settings conflict. An outcome is
+historical success, not a claim that its grant remains currently usable after
+replacement/disconnect. Cancel after publication cannot claim abandonment.
 
 ## Management Interfaces and Frontend
 
@@ -310,7 +354,7 @@ ownership test.
 | Review/read result | Exact attempt and current authority | Actual identities/capabilities and next actions |
 | Confirm | Exact reviewed result and final nonsecret settings | Atomic initial publication and inspectable outcome |
 | Cancel | Exact unpublished attempt | Idempotent local abandonment; no provider revocation |
-| Saved reconnect | Exact managed Toolkit | Ordinary reconnect; replacement contract pending D3 |
+| Saved reconnect | Exact managed Toolkit | Unpublished candidate and reviewed atomic replacement under ADR-D3 |
 | Disconnect/delete | Exact managed Toolkit | Existing local management boundary; no promised reversal |
 
 Tokens, secret values, PKCE, plaintext state, internal effective generations, and
@@ -329,9 +373,12 @@ pending, full/partial/zero/unknown grants, failed verification, confirm pending/
 unknown, and reconnect-required. It explains task-level work in localized copy
 instead of presenting raw scope codes as the main explanation.
 
-**Pending D1/D2/D3:** operator entry/input projection, identity cardinality, and
-saved reconnect continuity. These unresolved screens are not filled with invented
-defaults or additional-consent controls.
+System Admin prepares the reusable Google registration through existing Admin
+System Settings. Public managers see redacted guidance/status, never secret entry.
+New setup asks the manager to select desired tasks explicitly; no write task is
+silently preselected. Review shows one actual account and service/task capability
+states, ownership warning and the fresh security-risk acknowledgement. Reconnect
+uses that same review instead of a task-specific consent control.
 
 ## Security and Operations
 
@@ -350,11 +397,38 @@ defaults or additional-consent controls.
 - Network timeouts retain current MCP controls. No unbounded retry, background
   consent, write replay, or remote revocation cleanup is introduced.
 
-**Pending D4:** prompt/response scanning enforcement and accepted-risk disclosure.
-Google's published guidance requires an actual screening approach. A warning or
-ordinary untrusted-content prompt alone is not a verified substitute. Until D4
-and its evidence close, this design cannot claim live/provider-policy readiness.
-Model Armor must not be enabled by this documentation PR.
+### Google Content Screening
+
+ADR-D4 uses one Google-scoped deterministic known-pattern scanner. Screen remote
+schema names/descriptions/keys/values/annotations before persistence/exposure,
+and re-screen cached schemas. Quarantine flagged or unscannable tools. Screen all
+serialized outgoing argument keys/nested values after authorization and before
+MCP I/O. Screen complete incoming text/structured results/embedded resource text
+before any common result extraction or artifact creation.
+
+Explicit depth/node/string/total budgets and bounded Unicode/case/invisible/
+supported-encoding inspection reject incomplete coverage; no prefix-only approval
+or silent argument rewriting. Unsupported binary content fails closed. Known
+override/role-spoofing/exfiltration/other-tool-command patterns have malicious and
+benign fixtures. Ordinary links, imperatives or system terminology alone are not
+classified as malicious.
+
+Flagged arguments cause no outbound call. Blocked incoming content yields a safe
+error, no original text/partial extraction/artifact, and no retry; a provider
+write may already have completed and is reported uncertain rather than undone.
+Scanner errors fail closed and diagnostics reveal only safe reason/counters.
+Screening does not classify OAuth revocation.
+
+Final review requires explicit `security_risk_acknowledged=true` for the exact new
+or reconnect candidate. Persist minimal current acknowledgement, not history.
+Document known-pattern coverage and novel/semantic/obfuscated/multilingual gaps,
+false negatives, false positives and budget rejection. Google content remains
+untrusted even after scanning. No Model Armor, paid processor, relay, scanner
+plugin mode or background model call is introduced.
+
+Implementation may proceed with deterministic evidence; live compliance and
+efficacy remain conditional, not certified. Report a broader provider-coverage
+requirement as an exact gap instead of manufacturing compliance.
 
 ## Migration, Rollout, and Recovery
 
@@ -407,9 +481,15 @@ return/review/publish flow. Live Google access is not a required CI dependency.
 | Existing MCP/Notion/Sentry/GitHub/GCP | Unchanged current provider contracts |
 | Keyboard, focus, mobile, reduced motion | Browser behavior plus focused component/Storybook verification |
 
-D1–D4 add their exact acceptance rows when selected. In particular, client
-replacement/secret rotation, account projection, reconnect continuity, scanner
-outage/coverage and disclosure tests cannot be asserted from unaccepted proposals.
+| Accepted-decision scenario | Primary evidence |
+| --- | --- |
+| Same-client rotation and different-client replacement | Current secret resolution, preserved grants, ineligible mismatched client, stale successes/failures discarded |
+| Single account across services | One verified identity, separate service permissions; two Toolkits never borrow tokens |
+| Staged reconnect continuity | Valid saved grant retained; reduced/account-changed review; fresh explicit confirm |
+| Reconnect races/outcomes | Disconnect/sibling/state changes conflict, routine renewal allowed, unrelated metadata preserved, replay idempotent |
+| Screening schemas/args/results | Tested attacks/nested content/Unicode blocked; benign corpus passes; no call on flagged args |
+| Screening bounds/errors/binary | Fail closed, no partial artifacts/prefix approval, truthful uncertain-effect response |
+| Fresh risk acknowledgement | Missing/false acknowledgement denied; exact reviewed creation and reconnect accepted |
 
 ### Fixture and Prerequisite Support
 
@@ -444,10 +524,8 @@ Public discovery or fixture success cannot be called authenticated interoperabil
 
 ## Design Authority
 
-- Design revision: `1`.
-- The following stable IDs cover only independently authorized common mechanisms.
-  Recommendations D1–D4 are outside this set. Their acceptance creates new IDs and
-  a new revision; it cannot retroactively authorize this draft.
+- Design revision: `3`.
+- M1–M12 retain their identities; accepted ADR-D1 through ADR-D4 add M13–M16.
 
 | ID | Material mechanism | Authority | Classification |
 | --- | --- | --- | --- |
@@ -456,13 +534,17 @@ Public discovery or fixture success cannot be called authenticated interoperabil
 | M3 | Unpublished authorization and explicit review before initial atomic publication | REQ-4, REQ-6; retained Toolkit namespace/ownership obligations | derived |
 | M4 | Exact initiator/context callback and post-I/O current-authority validation | REQ-4, REQ-8; retained exact ownership boundaries | derived |
 | M5 | Requested/granted/unknown evidence and verified principal separation | REQ-4, REQ-5, REQ-6 | required |
-| M6 | Existing Agent/shared management, Team execution and remote Runtime-free scope | REQ-8; retained Toolkit contracts | existing |
-| M7 | Per-service background schema projection plus current execution recheck | REQ-5, REQ-7; retained nonblocking MCP discovery and Team fencing | derived |
-| M8 | Detached refresh and exact stale-result comparison; no grant resurrection | REQ-5, REQ-7; retained MCP refresh transaction boundary | derived |
+| M6 | Existing Agent/shared management, canonical private/Team Session execution and remote Runtime-free scope | REQ-8; retained Toolkit and agent-execution-loop contracts | existing |
+| M7 | Per-service background schema projection plus current DB Session generation/admission recheck | REQ-5, REQ-7; retained MCP discovery and canonical Session execution authority | derived |
+| M8 | Detached refresh, current Session mutation fence and exact stale-result comparison; no grant resurrection | REQ-5, REQ-7; retained MCP refresh boundary and Session owner mutation fence | derived |
 | M9 | Ordinary reconnect only; no consent/replay initiated by Agent execution | REQ-7 and non-goals | required |
 | M10 | Encrypted/redacted credential boundaries and local-only abandonment | REQ-4, REQ-7, REQ-8; retained credential cipher and disconnect contract | derived |
 | M11 | Progressive accessible same-context setup and truthful per-task feedback | REQ-1, REQ-4, REQ-5, REQ-9 | required |
 | M12 | Preserve unrelated providers and their durable credential authority | Fixed compatibility/data-preservation constraints; retained MCP and Toolkit Specs | existing |
+| M13 | One current direct-activation operator registration, same-client rotation and different-client ineligibility | google-261013/ADR-D1 including activation refinement; retained System Settings authority/lifecycle | decided |
+| M14 | One verified subject and one current Toolkit-owned grant across fixed service endpoints | google-261013/ADR-D2 | decided |
+| M15 | Staged reconnect with exact atomic replacement and idempotent inspectable outcome | google-261013/ADR-D3 | decided |
+| M16 | Bounded Google-specific content screening and fresh reviewed residual-risk acknowledgement | google-261013/ADR-D4 | decided |
 
 Physical table names, SDK adapter/helper names, equivalent typed model layout,
 fixture names, timeout constants within current contracts, and route file layout
@@ -471,21 +553,22 @@ secret-retention policy, recovery semantics, or configuration modes.
 
 ### Bidirectional Coverage
 
-| Requirement | Common mechanism IDs | Pending choice or feasibility dependency |
+| Requirement | Mechanism IDs | Remaining verification dependency |
 | --- | --- | --- |
-| REQ-1 | M1, M6, M11 | D2 identity cardinality |
-| REQ-2 | M1, M4, M10 | D1 operator registration; Preview/configuration evidence |
+| REQ-1 | M1, M6, M11, M14 | Actual provider interoperability |
+| REQ-2 | M1, M4, M10, M13 | Preview/configuration evidence |
 | REQ-3 | M2, M5 | Proved supported task/scope catalog |
-| REQ-4 | M3, M4, M5, M10, M11 | D1 binding and D2 identity projection |
+| REQ-4 | M3, M4, M5, M10, M11, M13, M14, M15 | SDK identity/callback verification |
 | REQ-5 | M2, M5, M7, M8 | Actual scope-to-tool and refresh semantics |
-| REQ-6 | M3, M5, M6, M11 | D2 review identities; D3 saved replacement |
-| REQ-7 | M7, M8, M9, M10 | D3 reconnect continuity |
-| REQ-8 | M4, M6, M10, M12 | D4 screening/disclosure; D2 account relationship |
+| REQ-6 | M3, M5, M6, M11, M14, M15, M16 | Actual reduced-grant and confirmation behavior |
+| REQ-7 | M7, M8, M9, M10, M13, M15 | Staged recovery E2E |
+| REQ-8 | M4, M6, M10, M12, M14, M16 | Screening corpus/coverage and live policy evidence |
 | REQ-9 | M11 | Browser/layout verification |
 
-The common authority audit passes by construction; the whole Design authority
-audit is incomplete because pending mechanisms have not been accepted or added.
-Coverage of a requirement is not a claim that its dependencies are closed.
+All nine Requirements trace to mechanisms; all sixteen mechanisms trace to
+Requirements, accepted ADRs or retained contracts. No pending material choice or
+second source of secret/permission authority remains. Coverage does not claim that
+live evidence or implementation validation is complete.
 
 ## Feasibility Validation
 
@@ -493,20 +576,20 @@ Coverage of a requirement is not a claim that its dependencies are closed.
 | --- | --- | --- |
 | Provider composition and shared transport | feasible | Existing GitHub/GCP compose MCP; fixed URLs need no generic config migration |
 | Candidate/publication and exact authorization | feasible | Existing GitHub creation and ownership-specific repository operations; Google implementation/tests still needed |
-| Operator registration resolution | conditional | Typed System Settings exists; D1 and operator entry context unresolved |
+| Operator registration resolution | feasible | Typed direct Sections, encrypted secrets, redacted Admin projection and generation fences exist; ADR-D1 fixes binding |
 | Requested versus actual grant evidence | conditional | Token model currently omits scope; Google SDK decoding/identity and omission behavior require fixtures and live verification |
-| Scope-to-tool policy and endpoint grant reuse | conditional | Public discovery 9/8/23 tools, no scope authority in inspected schemas; live mapping and D2 needed |
+| Scope-to-tool policy and endpoint grant reuse | conditional | Public discovery 9/8/23 and documented service scopes permit conservative fixture policy; live endpoint mapping remains unverified |
 | Refresh and stale-result protection | feasible common contract; conditional provider behavior | Existing detached CAS refresh; Google offline/rotation/omission behavior unverified |
-| Saved reconnect | conditional | Common fences specified; D3 required for continuity/replacement contract |
-| Provider security compliance | blocked for live readiness | D4 has no selected/verified scanner and risk-disclosure solution |
+| Saved reconnect | feasible | ADR-D3 fixes exact staged replacement; current repository atomic publication and CAS patterns are reusable |
+| Provider security screening | feasible implementation; conditional live compliance | ADR-D4 defines bounded own scanner before schema/result exposure and artifacts; coverage/efficacy not certified |
 | Additive migration and rollback | conditional | Existing rows remain untouched; unknown-type mixed-version behavior must be tested |
 | UI/accessibility and required verification | feasible plan | Existing progressive setup, public E2E fixture and Web lanes; new scenario coverage not yet executed |
 
 Unauthenticated metadata and `tools/list` establish reachability/catalogs only.
 No real account/token, user-data call, renewal, or write was used. No blocker is
 waived by a common architecture recommendation. Conditional provider claims must
-close before final readiness, and unapproved material alternatives require ADR
-selection before a complete Design approval candidate can be produced.
+close before live-readiness claims; the deterministic implementation and required
+fixture/Web verification can proceed without provider credentials.
 
 ## Removal and Replacement
 
@@ -515,25 +598,30 @@ selection before a complete Design approval candidate can be produced.
 | Existing generic MCP config/OAuth state | None; preserve | M12 and current Specs | No migration/reinterpretation | Regression E2E and migration fixture comparison |
 | Existing GitHub/GCP/Analytics and other provider paths | None; preserve | M1, M12 | New Google provider only | Existing provider E2E and effective Toolkit resolution |
 | Existing ungranted schema exposure for other providers | None; preserve | Current contracts | Google filtering is scoped | Provider-specific tests; no generic policy change |
-| New Google prototypes/temporary bypasses, if introduced during implementation | Only behavior-preserving consolidation into M1–M12/accepted later mechanisms | One approved Google lifecycle | Implementation cleanup; no second authority | Call-site/config/schema search plus primary E2E |
+| New Google prototypes/temporary bypasses, if introduced during implementation | Behavior-preserving consolidation into M1–M16 | One approved Google lifecycle | Implementation cleanup; no second authority | Call-site/config/schema search plus primary E2E |
 | Hand-edited generated client artifacts | Prohibited by project generation rules | Generated OpenAPI clients | Regenerate during API implementation | Generation produces no unexplained diff |
 | Stale confirmation wording in supporting draft | Confirmed scope, documentation process | Requirements and primary ADR/Design | This documentation change only | Snapshot links/catalog and no second approval authority |
 
 No current production Google-specific implementation/state was found to remove.
 No existing authoritative contract, credential, table, fixture, or configuration
-is scheduled for deletion by this draft. Accepted D1–D4 may create new retirement
-obligations, which must be added with their exact authority.
+is scheduled for deletion. Same-client rotation discards the replaced current
+secret through existing System Settings replacement; grants never retain old
+copies. Abandoned candidates lose local ciphertext; confirm consumption preserves
+only the minimum outcome and current grant, not a second credential authority.
 
 ## Design Approval
 
-- Mode: `Collaborative`.
-- Decision owner: requester.
-- Approved on: not approved.
-- Approved Design revision: none.
-- Approved authority IDs: none.
-- Proposed common scope: M1–M12, plus D1–D4 mechanisms only after acceptance and
-  a revised bidirectional authority/feasibility audit.
+- Mode: `Autonomous`.
+- Decision owner: `/root/google-design-owner`.
+- Approved on: `2026-10-13`.
+- Approved Design revision: `3`.
+- Approved authority IDs: `M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16`.
+- Approved scope: M1–M16 at revision 3, including current operator registration,
+  single-account grant, staged reconnect and bounded documented content screening.
 
-The instruction to continue technical design confirms the scope and permits
-drafting. It is not approval of pending alternatives, provider-policy exceptions,
-implementation, deployment, or this complete Design revision.
+The requester explicitly delegated implementation without further questions.
+The delegated owner approved this exact revision and ID set for implementation
+and required deterministic verification after a complete authority/feasibility
+audit. Conditional live-provider evidence remains a verification obligation.
+That approval does not authorize production configuration, live account consent,
+deployment, paid processors, policy exceptions or a live-readiness claim.

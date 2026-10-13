@@ -12,9 +12,11 @@ tags: [google, toolkit, oauth, architecture, security]
 - Snapshot: `google-261013`
 - Reference: `google-261013/ADR`
 - Requirements: [google-261013/REQ](../requirements/google-261013-connection.md).
-- Mode: Collaborative; the requester owns unresolved material decisions.
-- This is the initial decision map, not an accepted decision log. No pending
-  recommendation below authorizes implementation.
+- Mode: Autonomous after the requester's instruction to implement without further
+  questions on 2026-10-13. Dedicated technical decision owner:
+  `/root/google-design-owner`.
+- The initial proposals remain context. Accepted outcomes are appended below;
+  unaccepted proposals do not authorize implementation.
 
 ## Fixed Direction
 
@@ -41,10 +43,10 @@ contracts. These derived boundaries do not approve the pending mechanisms below.
 
 | Topic | Kind and owner | State | Consequence |
 | --- | --- | --- | --- |
-| D1: operator registration binding and rotation | Material technical decision; requester | Current, pending | Secret retention, existing-grant eligibility, and replacement failure behavior |
-| D2: account/grant relationship | Product boundary first; requester | Pending | Whether one connection can show different service accounts; subsequent grant cardinality |
-| D3: saved reconnect replacement | Product recovery boundary followed by technical decision; requester | Pending | What continues executing during reconnect and how reduced/account-changed results replace saved authority |
-| D4: provider-policy screening | Material security/operational decision; requester | Pending | Additional data processor, failure behavior, deployment prerequisite, and risk disclosure |
+| D1: operator registration binding and rotation | Material technical decision; delegated owner | Accepted; see appended ADR-D1 | Secret retention, existing-grant eligibility, and replacement failure behavior |
+| D2: account/grant relationship | Bounded implementation choice; delegated owner | Accepted; see appended ADR-D2 | One actual account across selected service capability projections |
+| D3: saved reconnect replacement | Material recovery decision; delegated owner | Accepted; see appended ADR-D3 | Staged candidate, current grant retained until reviewed atomic replacement |
+| D4: provider-policy screening | Material security/operational decision; delegated owner | Accepted; see appended ADR-D4 | Local bounded screening and explicit residual-risk acknowledgement |
 
 Encrypted local credentials, exact callback ownership, one-use attempt consumption,
 atomic publication, current-state checks, and stale-response rejection are fixed
@@ -176,3 +178,190 @@ After the requester chooses a topic, append its accepted outcome, alternatives,
 consequences, authority, and date as `google-261013/ADR-DN`. Pending proposals above
 are retained as context. Do not turn an instruction to continue drafting into
 blanket delegation, Requirements changes, or Design approval.
+
+## Accepted google-261013/ADR-D1 — Current Operator Registration
+
+- Accepted on: 2026-10-13.
+- Decision owner: `/root/google-design-owner`, under the requester's instruction
+  to implement without further questions.
+- Authority: REQ-2, REQ-4, REQ-7, REQ-8 and optional-integration/compatibility/data
+  preservation constraints; retained System Settings and detached MCP refresh.
+
+Use one optional operator-owned Google OAuth registration in existing typed System
+Settings. Keep client identity with each Google grant, but no connection-bound
+copy of its client secret. Only existing System Admin authority manages settings;
+public managers receive redacted preparation state. No manager-BYOA mode or new
+secret authority is added.
+
+Same-client secret rotation preserves client bindings and verified scopes. Future
+credential operations resolve current configuration. An effective-generation
+change during provider I/O defeats stale successes and failures; it cannot mark
+current credentials rejected. No ambiguous external effect is automatically
+replayed.
+
+Client replacement makes mismatched grants ineligible for projection/execution and
+requires ordinary reconnect. Never refresh an old token with the replacement
+client. Preserve encrypted grant state; configuration replacement is not deletion
+or Google revocation. Missing/incomplete configuration blocks Google credential
+use with an operator-preparation reason, not fabricated user denial.
+
+Callback claim, post-I/O finalization, publication and refresh compare current
+registration and exact grant state. Provider I/O remains outside transactions.
+Database state and effective configuration, not Redis/events, own correctness.
+
+Rejected alternative: connection-bound old credentials create indefinite secret
+copies and a retirement obligation without a requested need. Current reference
+keeps one secret authority and practical same-client rotation.
+
+Verification obligations: redaction, absent config, same-client rotation, changed
+client ineligibility, rotation during exchange/refresh, stale failure rejection,
+callback/publication races, data preservation, and unrelated-provider regression.
+
+## Accepted google-261013/ADR-D2 — One Subject and Toolkit-Owned Grant
+
+- Accepted on: 2026-10-13.
+- Decision owner: `/root/google-design-owner`, under delegated implementation
+  authority within the original account-authorization scenario.
+- Authority: primary scenario, REQ-1, REQ-3 through REQ-6, REQ-8 and current
+  ownership/non-goal constraints.
+
+One Google Toolkit has one current verified Google subject and one Toolkit-owned
+grant, routed to the three fixed official endpoints. Review displays that actual
+account once and partitions usable/unavailable/unknown work by service/task.
+Partial consent does not create separate service accounts or another consent flow.
+Separate service accounts were an explored alternative, not a required capability.
+
+Identity includes stable subject, trusted issuer, and exact client binding, using
+supported verification with issuer/audience/expiry/nonce checks. Display email,
+browser input and login hints are not evidence. A changed subject/client never
+inherits scopes or renewal credentials. No grant pooling or token borrowing occurs
+across Toolkits, even with identical subject/client.
+
+Do not invent endpoint-specific audience/resource parameters. Public metadata
+establishes a common authorization server but not authenticated token reuse.
+Interoperability, tool-to-scope mapping, Preview and renewal remain conditional
+until live evidence. If live evidence contradicts the single-grant contract,
+report that blocker; do not silently introduce per-service accounts/grants,
+multiple consent modes, direct API substitutes, or a relay.
+
+Shared/Team execution continues using the connected account, not participant
+identity. Review retains the shared-account warning.
+
+Verification obligations: one identity across service projections; partial service
+grants; subject/client isolation; independent Toolkit credentials; bad issuer/
+audience/nonce; exact service routing and current execution authority.
+
+## Accepted google-261013/ADR-D3 — Staged Reconnect Replacement
+
+- Accepted on: 2026-10-13.
+- Decision owner: `/root/google-design-owner`, under delegated implementation
+  authority.
+- Authority: REQ-4, REQ-6, REQ-7, REQ-8; ADR-D1/D2 and retained ownership,
+  credential-preservation and detached-refresh contracts.
+
+Ordinary reconnect stages an unpublished candidate against the exact saved
+Toolkit and current connection identity. The saved grant stays eligible only
+under current scopes, client binding and execution authority. Reconnect does not
+restore revoked permission or suspend a still-valid saved grant.
+
+Explicit review displays the new account and actual capabilities, including
+reductions. Confirm atomically replaces the single current grant and relevant
+selected configuration. Cancel, expiry, denial and verification failure discard
+only the candidate. Local abandonment never promises reversal of Google consent,
+revocation, or completed provider effects. Different subjects/clients never inherit
+scopes or renewal credentials.
+
+Capture exact ownership, current connection identity, permission/auth state,
+authentication-affecting configuration and operator-generation fence. Compare
+these in the final publication transaction. Different connection, disconnect,
+changed ownership, grants/auth state or authentication configuration causes stale
+conflict. Unrelated metadata is preserved. Routine access-token renewal retains
+connection identity and does not alone stale an independently verified candidate.
+Publication creates a new current connection identity, defeating old refresh CAS.
+Sibling candidates cannot both replace the captured identity.
+
+Persist the exact attempt/final-settings publication outcome atomically. Identical
+confirm replay returns the outcome under current management authority; different
+settings conflict. Outcome lookup after response loss never repeats provider I/O.
+Cancel after publication cannot claim proven abandonment. Historical publication
+success does not assert current readiness after replacement/disconnect and cannot
+restore the old connection. These identities are internal concurrency fences,
+not product version history.
+
+Rejected alternative: suspend-at-start introduces unnecessary interruption and
+changes cancellation recovery. No automatic task replay or remote revocation is
+added to either creation or reconnect.
+
+Verification obligations: partial/account-changed review, preserved local state,
+same-attempt replay/settings mismatch, response loss, confirm/cancel races,
+disconnect/refresh/publication races, sibling candidates, auth-config conflict,
+routine refresh during reconnect, unrelated metadata preservation, and historical
+outcome lookup without resurrection.
+
+## Accepted google-261013/ADR-D4 — Google-Scoped Content Screening
+
+- Accepted on: 2026-10-13.
+- Decision owner: `/root/google-design-owner`, under delegated implementation
+  authority.
+- Authority: REQ-8, truthful final review under REQ-4/REQ-6, fixed provider-policy
+  constraints.
+
+Use a bounded application-owned deterministic scanner at the Google MCP boundary.
+Screen remote schema text before persistence/exposure and re-screen cached
+schemas; screen complete outgoing argument keys/nested values after current
+authorization but before outbound I/O; screen complete incoming text/structured
+results and embedded resource text before extraction or artifact publication.
+Unsupported binary content is not passed through as scanned.
+
+Traverse with explicit depth/node/string/total-content budgets. Unicode
+normalization, casefolding, invisible/control handling and supported encoded-text
+inspection are bounded inspection views, never silent rewriting. Over-budget,
+unsupported, flagged or scanner-error content fails closed; do not approve a
+truncated prefix. Detect a reviewed known-pattern corpus of overrides, role
+spoofing, credential/prompt exfiltration and other-tool commandeering. Ordinary
+links, imperatives and the word system alone are not malicious classification.
+Add benign/false-positive fixtures. Keep compiled instructions separate from
+remote text.
+
+Diagnostics contain safe categories/counters/operation identity only, no contents,
+excerpts, private-content hashes or secret-bearing URLs. Flagged arguments cause
+no Google call. A blocked response may follow a completed provider effect: report
+that uncertainty without publishing any original content/artifact or retrying.
+Screening is not OAuth-revocation evidence.
+
+Final review documents known-pattern coverage, novel/semantic/obfuscated and
+multilingual gaps, false negatives, false positives and bounded-content rejection.
+Require fresh explicit `security_risk_acknowledged=true` for exact creation and
+reconnect confirmation; an old grant or browser default cannot approve a new
+candidate. Persist minimal current-connection acknowledgement. This is part of
+required final review, not another OAuth/additional-consent feature.
+
+Rejected direction: enabling Model Armor introduces an unselected paid processor
+and operational configuration; a warning without screening does not satisfy the
+contract. No relay, generic scanner plugin, background model call, or bypass is
+added.
+
+Implementation and deterministic verification may proceed. This is not complete
+prevention, detection-efficacy proof or Google certification. Authenticated
+behavior and provider-policy compliance remain conditional; report any broader
+provider-coverage requirement instead of manufacturing compliance.
+
+Verification obligations: malicious and benign corpus at every boundary; nested
+keys/values and supported encodings; Unicode/invisible handling; budget limits and
+scanner exceptions; cached-schema quarantine; zero outbound calls on flagged
+arguments; no artifacts or replay after flagged responses; fresh acknowledgement;
+safe diagnostics; unchanged unrelated providers.
+
+## ADR-D1 Refinement — Direct Local Activation
+
+- Accepted on: 2026-10-13.
+- Decision owner: `/root/google-design-owner`.
+- Authority: ADR-D1 and REQ-2's distinction between declared preparation and
+  verified results.
+
+Use existing direct typed Section activation for `google_oauth`: local schema
+validation, optimistic mutation, encryption, environment ownership, redacted
+status and effective-generation fencing. Registration presence is preparation,
+not a live client/Preview/API validation. Client replacement retains ADR-D1's
+ineligibility and data-preservation consequences. No second confirmation mode,
+retired-secret fallback or false remote-health claim is introduced.

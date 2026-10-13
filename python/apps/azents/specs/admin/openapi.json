@@ -3286,6 +3286,78 @@
         }
       }
     },
+    "/system-setting/v1/sections/google-oauth": {
+      "get": {
+        "tags": [
+          "System Settings v1"
+        ],
+        "summary": "Get Google Oauth Setting",
+        "description": "Describe current local preparation without secrets or false live health.",
+        "operationId": "system_settings_v1_get_google_oauth_setting",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoogleApplicationDetail"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "System Settings v1"
+        ],
+        "summary": "Patch Google Oauth Setting",
+        "description": "Directly activate a version-fenced operator registration mutation.",
+        "operationId": "system_settings_v1_patch_google_oauth_setting",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleApplicationPatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoogleApplicationDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/system-setting/v1/sections": {
       "get": {
         "tags": [
@@ -6206,6 +6278,120 @@
         ],
         "title": "FileLifecycleSettingsUpdateResponse",
         "description": "Updated settings and optional durable recalculation application."
+      },
+      "GoogleApplicationDetail": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "not_configured",
+              "incomplete",
+              "configured_unverified"
+            ],
+            "title": "Status"
+          },
+          "client_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id"
+          },
+          "callback_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Callback Url"
+          },
+          "preview_verified": {
+            "type": "boolean",
+            "const": false,
+            "title": "Preview Verified"
+          },
+          "service_access_verified": {
+            "type": "boolean",
+            "const": false,
+            "title": "Service Access Verified"
+          },
+          "section": {
+            "type": "string",
+            "const": "google_oauth",
+            "title": "Section"
+          },
+          "schema_version": {
+            "type": "integer",
+            "title": "Schema Version"
+          },
+          "admin_version": {
+            "type": "integer",
+            "title": "Admin Version"
+          },
+          "client_id_source": {
+            "$ref": "#/components/schemas/SystemSettingFieldSource"
+          },
+          "client_secret_source": {
+            "$ref": "#/components/schemas/SystemSettingFieldSource"
+          },
+          "client_secret_configured": {
+            "type": "boolean",
+            "title": "Client Secret Configured"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "client_id",
+          "callback_url",
+          "preview_verified",
+          "service_access_verified",
+          "section",
+          "schema_version",
+          "admin_version",
+          "client_id_source",
+          "client_secret_source",
+          "client_secret_configured"
+        ],
+        "title": "GoogleApplicationDetail",
+        "description": "Admin redacted effective fields and optimistic version, never secret values."
+      },
+      "GoogleApplicationPatchRequest": {
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Version"
+          },
+          "client_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id"
+          },
+          "client_secret": {
+            "$ref": "#/components/schemas/SystemSettingSecretActionRequest"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_version"
+        ],
+        "title": "GoogleApplicationPatchRequest",
+        "description": "Partial local preparation with explicit secret replace/clear actions."
       },
       "HTTPValidationError": {
         "properties": {
