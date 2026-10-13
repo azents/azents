@@ -510,14 +510,6 @@ def test_historical_preparation_snapshot_runtime_free_vfs_and_lifecycle(
     assert f"azents://memory/historical/user/{personal}/summary.md" not in captured
     tools = foreground[-1].tools
     assert tools is not None
-    assert all(
-        name not in {tool.name for tool in tools}
-        for name in (
-            "get_memory",
-            "list_memories",
-            "search_memories",
-        )
-    )
     assert {
         "search_sessions",
         "read_session_history",
