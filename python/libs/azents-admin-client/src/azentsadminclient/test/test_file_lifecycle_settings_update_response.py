@@ -38,6 +38,7 @@ class TestFileLifecycleSettingsUpdateResponse(unittest.TestCase):
                 settings = azentsadminclient.models.file_lifecycle_settings_response.FileLifecycleSettingsResponse(
                     archived_session_retention_days = 0.0, 
                     revision = 1.0, 
+                    compacted_event_retention_days = 0.0, 
                     updated_by_user_id = '', 
                     created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                     updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
@@ -91,6 +92,7 @@ class TestFileLifecycleSettingsUpdateResponse(unittest.TestCase):
                 settings = azentsadminclient.models.file_lifecycle_settings_response.FileLifecycleSettingsResponse(
                     archived_session_retention_days = 0.0, 
                     revision = 1.0, 
+                    compacted_event_retention_days = 0.0, 
                     updated_by_user_id = '', 
                     created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                     updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 

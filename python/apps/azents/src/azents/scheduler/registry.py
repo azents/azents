@@ -20,6 +20,7 @@ from azents.services.archived_session_retention import (
     ArchivedSessionRetentionService,
 )
 from azents.services.chat import ChatSessionService
+from azents.services.compacted_event_retention import CompactedEventRetentionService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.external_account_oauth.service import (
     ExternalAccountOAuthAttemptService,
@@ -29,6 +30,20 @@ from azents.services.llm_catalog import SystemCatalogProjectionService
 from azents.services.owner_lifecycle import OwnerLifecycleService
 
 logger = logging.getLogger(__name__)
+
+
+async def compacted_event_cleanup_handler(context: TaskContext) -> TaskResult:
+    """Delete one bounded batch of expired pre-compaction events."""
+    service = await context.container.solve(CompactedEventRetentionService)
+    summary = await service.cleanup_once()
+    return TaskResult(
+        summary={
+            "task_key": context.task_key,
+            "attempt_started_at": context.attempt_started_at.isoformat(),
+            "manual_triggered": context.manual_triggered,
+            **dataclasses.asdict(summary),
+        }
+    )
 
 
 async def heartbeat_handler(context: TaskContext) -> TaskResult:
@@ -407,11 +422,27 @@ USER_SCHEDULED_TASK_DISPATCH_TASK = ScheduledTaskDefinition(
     enabled_by_default=True,
 )
 
+COMPACTED_EVENT_CLEANUP_TASK = ScheduledTaskDefinition(
+    key="compacted_event_cleanup",
+    description="Delete expired events displaced behind Session compaction heads.",
+    interval=datetime.timedelta(minutes=5),
+    timeout=datetime.timedelta(minutes=2),
+    retry_policy=RetryPolicy(
+        kind="bounded_backoff",
+        min_delay=datetime.timedelta(minutes=1),
+        max_delay=datetime.timedelta(minutes=30),
+    ),
+    handler=compacted_event_cleanup_handler,
+    enabled_by_default=True,
+)
+
+
 SCHEDULED_TASK_DEFINITIONS: tuple[ScheduledTaskDefinition, ...] = (
     HEARTBEAT_TASK,
     SYSTEM_CATALOG_PROJECTION_TASK,
     ARCHIVED_SESSION_RETENTION_RECALCULATION_TASK,
     ARCHIVED_SESSION_PURGE_TASK,
+    COMPACTED_EVENT_CLEANUP_TASK,
     SESSION_AUTO_ARCHIVE_TASK,
     AGENT_DECOMMISSION_TASK,
     AGENT_RUNTIME_REMOVAL_TASK,

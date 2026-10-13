@@ -57,6 +57,7 @@ from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.compacted_event_retention import record_compaction_displacement
 from azents.repos.historical_memory_consolidation.lifecycle import (
     source_availability_in_session,
 )
@@ -1907,6 +1908,9 @@ class AgentSessionRepository:
         rdb = await session.write_session.get(RDBAgentSession, session_id)
         if rdb is None:
             raise ValueError("AgentSession not found")
+        await record_compaction_displacement(
+            session, session_id=session_id, head_event_id=event_id
+        )
         rdb.model_input_head_event_id = event_id
         await session.write_session.flush()
         await session.write_session.refresh(rdb)

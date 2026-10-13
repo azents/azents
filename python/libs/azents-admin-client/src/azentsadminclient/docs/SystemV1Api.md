@@ -11,6 +11,7 @@ Method | HTTP request | Description
 [**system_v1_list_system_role_assignments**](SystemV1Api.md#system_v1_list_system_role_assignments) | **GET** /system/v1/role-assignments | List System Role Assignments
 [**system_v1_preview_archive_retention_update**](SystemV1Api.md#system_v1_preview_archive_retention_update) | **POST** /system/v1/settings/file-lifecycle/archive-retention/preview | Preview Archive Retention Update
 [**system_v1_revoke_system_admin**](SystemV1Api.md#system_v1_revoke_system_admin) | **DELETE** /system/v1/users/{user_id}/roles/system_admin | Revoke System Admin
+[**system_v1_update_compacted_event_retention**](SystemV1Api.md#system_v1_update_compacted_event_retention) | **PATCH** /system/v1/settings/file-lifecycle/compacted-event-retention | Update Compacted Event Retention
 [**system_v1_update_file_lifecycle_settings**](SystemV1Api.md#system_v1_update_file_lifecycle_settings) | **PATCH** /system/v1/settings/file-lifecycle | Update File Lifecycle Settings
 
 
@@ -553,6 +554,86 @@ void (empty response body)
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **204** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **system_v1_update_compacted_event_retention**
+> CompactedEventRetentionSettingsResponse system_v1_update_compacted_event_retention(compacted_event_retention_update_request)
+
+Update Compacted Event Retention
+
+Set independent retention for events displaced by successful compaction.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentsadminclient
+from azentsadminclient.models.compacted_event_retention_settings_response import CompactedEventRetentionSettingsResponse
+from azentsadminclient.models.compacted_event_retention_update_request import CompactedEventRetentionUpdateRequest
+from azentsadminclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentsadminclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentsadminclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentsadminclient.SystemV1Api(api_client)
+    compacted_event_retention_update_request = azentsadminclient.CompactedEventRetentionUpdateRequest() # CompactedEventRetentionUpdateRequest | 
+
+    try:
+        # Update Compacted Event Retention
+        api_response = api_instance.system_v1_update_compacted_event_retention(compacted_event_retention_update_request)
+        print("The response of SystemV1Api->system_v1_update_compacted_event_retention:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling SystemV1Api->system_v1_update_compacted_event_retention: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **compacted_event_retention_update_request** | [**CompactedEventRetentionUpdateRequest**](CompactedEventRetentionUpdateRequest.md)|  | 
+
+### Return type
+
+[**CompactedEventRetentionSettingsResponse**](CompactedEventRetentionSettingsResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

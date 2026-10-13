@@ -103,6 +103,7 @@ def _admin() -> SystemAdmin:
 def _settings(now: datetime.datetime) -> SystemFileLifecycleSettings:
     return SystemFileLifecycleSettings(
         archived_session_retention_days=30,
+        compacted_event_retention_days=None,
         revision=2,
         updated_by_user_id="admin-1",
         created_at=now,

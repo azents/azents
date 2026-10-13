@@ -10,6 +10,7 @@ import type {
 } from "../types";
 
 export interface RetentionPageContentProps {
+  compactedEvents: CompactedEventRetentionProps;
   state: RetentionSettingsState;
   retentionDays: number | null;
   applicationScope: RetentionApplicationScope;
@@ -27,10 +28,20 @@ export interface RetentionPageContentProps {
   onConfirmUpdate: () => void;
 }
 
+export interface CompactedEventRetentionProps {
+  retentionDays: number | null;
+  saving: boolean;
+  saveDisabled: boolean;
+  errorMessage: string | null;
+  onChange: (days: number | null) => void;
+  onSave: () => void;
+}
+
 export function useRetentionPageContainer(): RetentionPageContentProps {
   const utils = trpc.useUtils();
   const settingsQuery = trpc.retention.getSettings.useQuery();
   const [retentionDays, setRetentionDays] = useState<number | null>(30);
+  const [compactedDays, setCompactedDays] = useState<number | null>(null);
   const [applicationScope, setApplicationScope] =
     useState<RetentionApplicationScope>("new_archives_only");
   const [confirmation, setConfirmation] =
@@ -38,17 +49,38 @@ export function useRetentionPageContainer(): RetentionPageContentProps {
   const [applicationId, setApplicationId] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  const savedArchiveDays = settingsQuery.data?.archived_session_retention_days;
+  const savedCompactedDays = settingsQuery.data?.compacted_event_retention_days;
+  const savedApplicationId = settingsQuery.data?.active_application?.id;
+
   useEffect(() => {
-    if (!settingsQuery.data) {
-      return;
+    if (typeof savedArchiveDays !== "undefined") {
+      setRetentionDays(savedArchiveDays);
     }
-    setRetentionDays(settingsQuery.data.archived_session_retention_days);
-    if (settingsQuery.data.active_application) {
-      setApplicationId(settingsQuery.data.active_application.id);
+    if (typeof savedApplicationId !== "undefined") {
+      setApplicationId(savedApplicationId);
     }
-  }, [settingsQuery.data]);
+  }, [savedArchiveDays, savedApplicationId]);
+
+  useEffect(() => {
+    if (typeof savedCompactedDays !== "undefined") {
+      setCompactedDays(savedCompactedDays);
+    }
+  }, [savedCompactedDays]);
 
   const previewMutation = trpc.retention.preview.useMutation();
+  const compactedMutation =
+    trpc.retention.updateCompactedEventRetention.useMutation({
+      onSuccess: async () => {
+        setSuccessMessage(
+          "Compacted-event retention updated. Cleanup runs every five minutes.",
+        );
+        await utils.retention.getSettings.invalidate();
+      },
+      onError: async () => {
+        await utils.retention.getSettings.invalidate();
+      },
+    });
   const updateMutation = trpc.retention.updateSettings.useMutation({
     onSuccess: async (result) => {
       setConfirmation(null);
@@ -111,7 +143,34 @@ export function useRetentionPageContainer(): RetentionPageContentProps {
     !validRetention ||
     !changed ||
     previewMutation.isPending ||
+    compactedMutation.isPending ||
     updateMutation.isPending;
+
+  const compactedSaveDisabled =
+    state.type !== "LOADED" ||
+    compactedDays === state.settings.compacted_event_retention_days ||
+    (compactedDays !== null &&
+      (!Number.isInteger(compactedDays) ||
+        compactedDays < 0 ||
+        compactedDays > 2_147_483_647)) ||
+    compactedMutation.isPending ||
+    updateMutation.isPending;
+
+  const handleCompactedSave = useCallback((): void => {
+    if (!settingsQuery.data || compactedSaveDisabled) {
+      return;
+    }
+    setSuccessMessage(null);
+    compactedMutation.mutate({
+      expectedRevision: settingsQuery.data.revision,
+      retentionDays: compactedDays,
+    });
+  }, [
+    settingsQuery.data,
+    compactedSaveDisabled,
+    compactedMutation,
+    compactedDays,
+  ]);
 
   const performUpdate = useCallback(
     (
@@ -175,6 +234,14 @@ export function useRetentionPageContainer(): RetentionPageContentProps {
   }, []);
 
   return {
+    compactedEvents: {
+      retentionDays: compactedDays,
+      saving: compactedMutation.isPending,
+      saveDisabled: compactedSaveDisabled,
+      errorMessage: compactedMutation.error?.message ?? null,
+      onChange: setCompactedDays,
+      onSave: handleCompactedSave,
+    },
     state,
     retentionDays,
     applicationScope,

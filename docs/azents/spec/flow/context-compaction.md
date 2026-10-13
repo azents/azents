@@ -52,8 +52,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-10-09
-spec_version: 56
+last_verified_at: 2026-10-13
+spec_version: 57
 ---
 
 # Context Compaction
@@ -63,8 +63,10 @@ record. They require neither a public Conversation profile nor a participant
 tree, and never manufacture public fields for an internal Session. The existing
 Event/Run identities and adjacent append/head commit boundaries remain unchanged.
 
-Context compaction keeps long session history within model input limits without deleting audit/UI
-history. The event runtime uses append-only compaction.
+Context compaction keeps long session history within model input limits without
+synchronously deleting audit/UI history. The event runtime uses append-only
+compaction. A separate administrator-configured retention policy may later
+permanently delete expired pre-head history; its default is Unlimited.
 
 Automatic compaction effective context window is computed by
 `engine/context/window.py`. Each option first resolves a default input window and
@@ -143,7 +145,7 @@ When compaction is required:
    changed head or latest non-reverted event ID makes the plan stale and writes
    no compaction event.
 8. For a current plan, append adjacent `compaction_marker(status=started)` and `compaction_summary` events with the same `compaction_id` and reason at the physical transcript tail. The summary payload contains the enriched checkpoint followed by bounded `Recent User Messages` and `Recent Transcript` sections.
-9. Move `agent_sessions.model_input_head_event_id` to the summary event, replace the Session's `tool_search/working_set.tool_names` with an empty list, and commit the same transaction. The Tool Search reset applies even when the Agent currently has Tool Search disabled; other Toolkit State identities are unchanged.
+9. Record the summary creation timestamp as `events.compacted_at` on newly displaced events, preserving earlier timestamps. Move `agent_sessions.model_input_head_event_id` to the summary event, replace the Session's `tool_search/working_set.tool_names` with an empty list, and commit the same transaction. The Tool Search reset applies even when the Agent currently has Tool Search disabled; other Toolkit State identities are unchanged.
 10. Remove the live operation after success, Stop, cancellation, or terminal failure. A skipped, failed, cancelled, or stale attempt appends no compaction marker or summary, does not move the model-input head, and does not reset the Tool Search working set.
 
 Run-owned compaction settlement is enabled by typed model-operation completion
@@ -420,7 +422,13 @@ the immediate shape of the recent interaction.
   All routes use the captured candidate settings and foreground output-cap clamp;
   checkpoint character retention does not create a provider output ceiling.
 - Summary content is bounded by the runtime char guard after the model returns.
-- UI/audit history continues to include pre-compaction events. ModelFile GC may later delete unpinned ModelFile blobs whose single FilePart event is behind the head cursor, but it does not delete events or history metadata.
+- UI/audit history includes retained pre-compaction events. ModelFile GC may
+  delete unpinned ModelFile blobs behind the head; the separate
+  `compacted_event_cleanup` task may then delete expired pre-head events according
+  to first-displacement age and the current compacted-event retention policy.
+  Cleanup preserves the current summary/head and later events, waits for the
+  file-GC cursor and protects pending/running Run input references. Unlimited
+  retention (the default) preserves original events indefinitely.
 - Legacy SDK compaction packages are not part of production compaction.
 
 ## External Channel Continuity
@@ -452,6 +460,9 @@ not remove a preserved started cycle from the summary until that cycle
 terminalizes.
 
 ## Changelog
+
+- **2026-10-13** (spec_version 57) — Record first compaction displacement age and
+  describe optional scheduled removal of expired original history.
 
 - **2026-10-09** (spec_version 56) — Force bounded foreground compaction on
   native request-size or provider context overflow across both lowerers,

@@ -2,6 +2,7 @@ import {
   systemV1GetArchiveRetentionApplication,
   systemV1GetFileLifecycleSettings,
   systemV1PreviewArchiveRetentionUpdate,
+  systemV1UpdateCompactedEventRetention,
   systemV1UpdateFileLifecycleSettings,
 } from "@azents/admin-client";
 import { z } from "zod/v4";
@@ -15,6 +16,29 @@ const applicationScopeSchema = z.enum([
 ]);
 
 export const retentionRouter = router({
+  updateCompactedEventRetention: protectedProcedure
+    .input(
+      z.object({
+        expectedRevision: z.number().int().positive(),
+        retentionDays: retentionDaysSchema,
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await systemV1UpdateCompactedEventRetention({
+          client: ctx.adminApiClient,
+          body: {
+            expected_revision: input.expectedRevision,
+            compacted_event_retention_days: input.retentionDays,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (error) {
+        throw mapExpectedError(error, { 409: "CONFLICT" });
+      }
+    }),
+
   getSettings: protectedProcedure.query(async ({ ctx }) => {
     const { data } = await systemV1GetFileLifecycleSettings({
       client: ctx.adminApiClient,

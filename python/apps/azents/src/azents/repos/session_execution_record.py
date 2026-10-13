@@ -16,6 +16,7 @@ from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.repos.compacted_event_retention import record_compaction_displacement
 
 
 class SessionExecutionRecordRepository:
@@ -202,6 +203,9 @@ class SessionExecutionRecordRepository:
         )
         if existing is None:
             raise ValueError("Model input head event not found in session")
+        await record_compaction_displacement(
+            session, session_id=session_id, head_event_id=event_id
+        )
         current = await session.write_session.scalar(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == session_id)

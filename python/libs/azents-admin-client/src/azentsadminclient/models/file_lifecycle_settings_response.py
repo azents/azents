@@ -31,12 +31,13 @@ class FileLifecycleSettingsResponse(BaseModel):
     """ # noqa: E501
     archived_session_retention_days: Optional[Annotated[int, Field(strict=True, ge=0)]]
     revision: Annotated[int, Field(strict=True, ge=1)] = Field(description="Optimistic settings revision")
+    compacted_event_retention_days: Optional[Annotated[int, Field(strict=True, ge=0)]]
     updated_by_user_id: Optional[StrictStr]
     created_at: datetime = Field(description="Created timestamp")
     updated_at: datetime = Field(description="Updated timestamp")
     active_application: Optional[ArchiveRetentionApplicationResponse]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["archived_session_retention_days", "revision", "updated_by_user_id", "created_at", "updated_at", "active_application"]
+    __properties: ClassVar[List[str]] = ["archived_session_retention_days", "revision", "compacted_event_retention_days", "updated_by_user_id", "created_at", "updated_at", "active_application"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -92,6 +93,11 @@ class FileLifecycleSettingsResponse(BaseModel):
         if self.archived_session_retention_days is None and "archived_session_retention_days" in self.model_fields_set:
             _dict['archived_session_retention_days'] = None
 
+        # set to None if compacted_event_retention_days (nullable) is None
+        # and model_fields_set contains the field
+        if self.compacted_event_retention_days is None and "compacted_event_retention_days" in self.model_fields_set:
+            _dict['compacted_event_retention_days'] = None
+
         # set to None if updated_by_user_id (nullable) is None
         # and model_fields_set contains the field
         if self.updated_by_user_id is None and "updated_by_user_id" in self.model_fields_set:
@@ -118,6 +124,7 @@ class FileLifecycleSettingsResponse(BaseModel):
             _key: _value for _key, _value in {
             "archived_session_retention_days": obj.get("archived_session_retention_days"),
             "revision": obj.get("revision"),
+            "compacted_event_retention_days": obj.get("compacted_event_retention_days"),
             "updated_by_user_id": obj.get("updated_by_user_id"),
             "created_at": obj.get("created_at"),
             "updated_at": obj.get("updated_at"),

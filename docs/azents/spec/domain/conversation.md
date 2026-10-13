@@ -195,8 +195,8 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
-last_verified_at: 2026-10-08
-spec_version: 187
+last_verified_at: 2026-10-13
+spec_version: 188
 ---
 
 # Conversation & Events
@@ -1504,6 +1504,14 @@ event. After generation and enrichment succeed, one transaction appends adjacent
 `agent_sessions.model_input_head_event_id` to the summary id so future model input starts from the
 compacted head. Failed, cancelled, stopped, and stale-plan attempts append neither event and do not
 move the head.
+
+Successful compaction records first displacement in `events.compacted_at` for
+newly covered events in that same transaction. Later compaction preserves the
+original age. Original history is retained by default (Unlimited); the independent
+administrator compacted-event TTL can permanently remove expired pre-head events
+through a five-minute cleanup pass. Cleanup preserves the current head and later
+events, waits for file GC and protects pending/running Run inputs. It does not
+archive or delete the Session itself.
 
 Future model input is selected from `model_input_head_event_id` and sorted by event ID. Auto and manual compaction both
 summarize the full supported summary projection of the selected transcript into one

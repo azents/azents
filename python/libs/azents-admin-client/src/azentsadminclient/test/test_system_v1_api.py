@@ -75,6 +75,13 @@ class TestSystemV1Api(unittest.TestCase):
         """
         pass
 
+    def test_system_v1_update_compacted_event_retention(self) -> None:
+        """Test case for system_v1_update_compacted_event_retention
+
+        Update Compacted Event Retention
+        """
+        pass
+
     def test_system_v1_update_file_lifecycle_settings(self) -> None:
         """Test case for system_v1_update_file_lifecycle_settings
 

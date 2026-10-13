@@ -60,6 +60,25 @@ class ArchiveRetentionPreviewRequest(BaseModel):
     )
 
 
+class CompactedEventRetentionUpdateRequest(BaseModel):
+    """Independent compacted-event retention mutation."""
+
+    expected_revision: int = Field(ge=1)
+    compacted_event_retention_days: int | None = Field(
+        ge=0,
+        le=2_147_483_647,
+        strict=True,
+        description=(
+            "Whole days since first compaction displacement; null means Unlimited. "
+            "Applies to existing and future displaced events on scheduled cleanup."
+        ),
+    )
+
+
+class CompactedEventRetentionSettingsResponse(SystemFileLifecycleSettings):
+    """Lifecycle settings after an independent compacted-event policy mutation."""
+
+
 class ArchiveRetentionPreviewResponse(RetentionImpactPreview):
     """Existing archive impact preview response."""
 

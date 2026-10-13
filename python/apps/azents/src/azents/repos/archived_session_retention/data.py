@@ -23,6 +23,10 @@ class SystemFileLifecycleSettings(BaseModel):
         description="Whole-day archive retention; null means Unlimited",
     )
     revision: int = Field(ge=1, description="Optimistic settings revision")
+    compacted_event_retention_days: int | None = Field(
+        ge=0,
+        description="Days since first compaction displacement; null means Unlimited",
+    )
     updated_by_user_id: str | None = Field(description="Latest administrator ID")
     created_at: datetime.datetime = Field(description="Created timestamp")
     updated_at: datetime.datetime = Field(description="Updated timestamp")

@@ -8,6 +8,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **archived_session_retention_days** | **int** |  | 
 **revision** | **int** | Optimistic settings revision | 
+**compacted_event_retention_days** | **int** |  | 
 **updated_by_user_id** | **str** |  | 
 **created_at** | **datetime** | Created timestamp | 
 **updated_at** | **datetime** | Updated timestamp | 

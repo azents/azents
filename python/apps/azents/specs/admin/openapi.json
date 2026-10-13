@@ -2899,6 +2899,53 @@
         }
       }
     },
+    "/system/v1/settings/file-lifecycle/compacted-event-retention": {
+      "patch": {
+        "tags": [
+          "System v1"
+        ],
+        "summary": "Update Compacted Event Retention",
+        "description": "Set independent retention for events displaced by successful compaction.",
+        "operationId": "system_v1_update_compacted_event_retention",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompactedEventRetentionUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompactedEventRetentionSettingsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/system/v1/me": {
       "get": {
         "tags": [
@@ -5160,6 +5207,107 @@
         "title": "ArchivedSessionRetentionApplicationStatus",
         "description": "Durable existing-archive retention application status."
       },
+      "CompactedEventRetentionSettingsResponse": {
+        "properties": {
+          "archived_session_retention_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived Session Retention Days",
+            "description": "Whole-day archive retention; null means Unlimited"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Revision",
+            "description": "Optimistic settings revision"
+          },
+          "compacted_event_retention_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compacted Event Retention Days",
+            "description": "Days since first compaction displacement; null means Unlimited"
+          },
+          "updated_by_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated By User Id",
+            "description": "Latest administrator ID"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Created timestamp"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "Updated timestamp"
+          }
+        },
+        "type": "object",
+        "required": [
+          "archived_session_retention_days",
+          "revision",
+          "compacted_event_retention_days",
+          "updated_by_user_id",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "CompactedEventRetentionSettingsResponse",
+        "description": "Lifecycle settings after an independent compacted-event policy mutation."
+      },
+      "CompactedEventRetentionUpdateRequest": {
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Revision"
+          },
+          "compacted_event_retention_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compacted Event Retention Days",
+            "description": "Whole days since first compaction displacement; null means Unlimited. Applies to existing and future displaced events on scheduled cleanup."
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_revision",
+          "compacted_event_retention_days"
+        ],
+        "title": "CompactedEventRetentionUpdateRequest",
+        "description": "Independent compacted-event retention mutation."
+      },
       "CreatePasswordResetTokenRequest": {
         "properties": {
           "user_id": {
@@ -5936,6 +6084,19 @@
             "title": "Revision",
             "description": "Optimistic settings revision"
           },
+          "compacted_event_retention_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compacted Event Retention Days",
+            "description": "Days since first compaction displacement; null means Unlimited"
+          },
           "updated_by_user_id": {
             "anyOf": [
               {
@@ -5975,6 +6136,7 @@
         "required": [
           "archived_session_retention_days",
           "revision",
+          "compacted_event_retention_days",
           "updated_by_user_id",
           "created_at",
           "updated_at",
