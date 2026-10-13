@@ -15,7 +15,7 @@ from uuid6 import uuid7
 
 from azents.consts import PROJECT_ROOT
 from azents.core.agent_session_data import AgentSessionCreate
-from azents.core.enums import AgentSessionProductMode, EventKind
+from azents.core.enums import AgentSessionProductMode
 from azents.core.historical_memory_legacy_audit import (
     MemoryLegacyCostMethod,
     MemoryLegacyRecordedOutcome,
@@ -23,7 +23,6 @@ from azents.core.historical_memory_legacy_audit import (
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
-from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.historical_memory_legacy_audit import (
     RDBMemoryLegacyJob,
@@ -121,11 +120,7 @@ async def test_migration_keeps_current_pending_sources_saved_and_common_audit(
                     content="Saved memory survives",
                     user_id=None,
                 )
-                event = RDBEvent(
-                    session_id=subject.agent_session.id,
-                    kind=EventKind.USER_MESSAGE,
-                    payload={"text": "Common audit survives"},
-                )
+                event_id = uuid7().hex
                 snapshot = RDBToolkitState(
                     agent_id=subject.agent_id,
                     session_id=subject.agent_session.id,
@@ -142,10 +137,20 @@ async def test_migration_keeps_current_pending_sources_saved_and_common_audit(
                     state_json={"value": "preserved"},
                     schema_version=1,
                 )
-                session.write_session.add_all(
-                    [source, saved, event, snapshot, unrelated]
-                )
+                session.write_session.add_all([source, saved, snapshot, unrelated])
                 await session.write_session.flush()
+                # The predecessor schema predates current event-model columns.
+                await session.write_session.execute(
+                    sa.text("""
+                        INSERT INTO events (id, session_id, kind, payload)
+                        VALUES (:id, :session, 'user_message', CAST(:payload AS jsonb))
+                    """),
+                    {
+                        "id": event_id,
+                        "session": subject.agent_session.id,
+                        "payload": json.dumps({"text": "Common audit survives"}),
+                    },
+                )
                 await session.write_session.execute(
                     sa.text("""
                     INSERT INTO historical_consolidation_units
@@ -347,7 +352,11 @@ async def test_migration_keeps_current_pending_sources_saved_and_common_audit(
                     personal.scope == "USER" and personal.associated_user_id == user.id
                 )
                 assert personal.accepted_at is None
-                assert await session.read_session.get(RDBEvent, event.id) is not None
+                preserved_event = await session.read_session.scalar(
+                    sa.text("SELECT payload FROM events WHERE id = :id"),
+                    {"id": event_id},
+                )
+                assert preserved_event == {"text": "Common audit survives"}
                 assert (
                     await session.read_session.get(RDBAgentMemory, saved.id) is not None
                 )
