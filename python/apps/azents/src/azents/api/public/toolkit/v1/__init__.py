@@ -51,6 +51,7 @@ from .github_setup import router as github_setup_router
 from .github_user import _management_errors as github_user_management_errors
 from .github_user import router as github_user_router
 from .github_user_creation import router as github_creation_router
+from .google import router as google_router
 from .oauth import router as oauth_router
 
 router = APIRouter()
@@ -783,4 +784,10 @@ def mount(mounter: RouteMounter) -> None:
         prefix="/toolkit/v1",
         tag="GitHub Setup v1",
         description="Management-only GitHub setup identity observations.",
+    )
+    mounter(
+        google_router,
+        prefix="/toolkit/v1",
+        tag="Google Toolkit v1",
+        description="Google partial-consent setup and reviewed publication.",
     )

@@ -5,6 +5,7 @@ from typing import Annotated
 from urllib.parse import urlsplit
 
 from fastapi import Depends
+from pydantic import ValidationError
 
 from azents.core.config import Config
 from azents.core.deps import get_config
@@ -18,7 +19,11 @@ from azents.core.google_system_setting import (
     google_preparation,
     resolve_google_registration,
 )
-from azents.core.system_setting import SystemSettingSecretAction, SystemSettingSection
+from azents.core.system_setting import (
+    ResolvedSystemSetting,
+    SystemSettingSecretAction,
+    SystemSettingSection,
+)
 from azents.core.system_setting_data import SystemSettingMutation
 from azents.services.system_setting.service import SystemSettingsService
 
@@ -42,12 +47,20 @@ class GoogleApplicationService:
 
     async def resolve(self) -> GoogleApplicationRegistration:
         """Return a complete detached client with exact configuration generation."""
-        current = await self.settings.resolve(SystemSettingSection.GOOGLE_OAUTH)
+        current = await self._current()
         return resolve_google_registration(current, self.callback_url())
+
+    async def _current(self) -> ResolvedSystemSetting:
+        try:
+            return await self.settings.resolve(SystemSettingSection.GOOGLE_OAUTH)
+        except ValidationError:
+            raise GoogleApplicationUnavailable(
+                "Google operator configuration is invalid. Verify operator settings."
+            ) from None
 
     async def preparation(self) -> GooglePreparation:
         """Describe local preparation without account tokens or provider claims."""
-        current = await self.settings.resolve(SystemSettingSection.GOOGLE_OAUTH)
+        current = await self._current()
         try:
             redirect_uri = self.callback_url()
         except GoogleApplicationUnavailable:
@@ -56,7 +69,7 @@ class GoogleApplicationService:
 
     async def detail(self) -> GoogleApplicationDetail:
         """Redact operator credentials while preserving field-source ownership."""
-        current = await self.settings.resolve(SystemSettingSection.GOOGLE_OAUTH)
+        current = await self._current()
         try:
             redirect_uri = self.callback_url()
         except GoogleApplicationUnavailable:

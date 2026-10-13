@@ -59,7 +59,7 @@ class GoogleTokens(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
     access_token: str = Field(repr=False, min_length=1)
-    refresh_token: str | None = Field(repr=False)
+    refresh_token: str | None = Field(repr=False, min_length=1)
     expires_at: datetime.datetime
     granted_scopes: tuple[str, ...] | None
 
@@ -78,11 +78,11 @@ class GoogleSavedTarget(BaseModel):
 
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
     toolkit_id: str
-    connection_id: str
-    client_id: str
-    subject: str
+    connection_id: str | None
+    client_id: str | None
+    subject: str | None
     granted_scopes: tuple[str, ...] | None
-    status: GoogleConnectionStatus
+    status: GoogleConnectionStatus | None
     tasks: tuple[GoogleTask, ...]
     timeout: float
     security_risk_acknowledged: bool
@@ -114,8 +114,8 @@ class GoogleFinalSettings(BaseModel):
     enabled: bool
     always_expose_tools: bool
     tasks: tuple[GoogleTask, ...]
-    timeout: float = Field(gt=0, le=300)
-    security_risk_acknowledged: bool
+    timeout: float = Field(gt=0, le=300, allow_inf_nan=False)
+    security_risk_acknowledged: bool = Field(strict=True)
 
 
 class GoogleReconnectSettings(BaseModel):
@@ -123,8 +123,8 @@ class GoogleReconnectSettings(BaseModel):
 
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
     tasks: tuple[GoogleTask, ...]
-    timeout: float = Field(gt=0, le=300)
-    security_risk_acknowledged: bool
+    timeout: float = Field(gt=0, le=300, allow_inf_nan=False)
+    security_risk_acknowledged: bool = Field(strict=True)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -170,3 +170,13 @@ class GoogleAuthorization:
 
     access_token: str = dataclasses.field(repr=False)
     connection_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class GoogleSavedConnection:
+    """Management-only current state; never return credentials directly."""
+
+    toolkit_id: str
+    tasks: tuple[GoogleTask, ...]
+    timeout: float
+    connection: GoogleConnection | None = dataclasses.field(repr=False)

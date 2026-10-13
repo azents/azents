@@ -18703,6 +18703,1371 @@
         }
       }
     },
+    "/toolkit/v1/workspaces/{handle}/google/preparation": {
+      "get": {
+        "tags": [
+          "Google Toolkit v1"
+        ],
+        "summary": "Shared Google Preparation",
+        "operationId": "google_toolkit_v1_shared_google_preparation",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GooglePreparation"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/google/preparation": {
+      "get": {
+        "tags": [
+          "Google Toolkit v1"
+        ],
+        "summary": "Agent Google Preparation",
+        "operationId": "google_toolkit_v1_agent_google_preparation",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GooglePreparation"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/google/connect": {
+      "post": {
+        "tags": [
+          "Google Toolkit v1"
+        ],
+        "summary": "Shared Google Connect",
+        "operationId": "google_toolkit_v1_shared_google_connect",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleConnectInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoogleConnectOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/google/connect": {
+      "post": {
+        "tags": [
+          "Google Toolkit v1"
+        ],
+        "summary": "Agent Google Connect",
+        "operationId": "google_toolkit_v1_agent_google_connect",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleConnectInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoogleConnectOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/google/reconnect": {
+      "post": {
+        "tags": [
+          "Google Toolkit v1"
+        ],
+        "summary": "Shared Google Reconnect",
+        "operationId": "google_toolkit_v1_shared_google_reconnect",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleConnectInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoogleConnectOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/google/reconnect": {
+      "post": {
+        "tags": [
+          "Google Toolkit v1"
+        ],
+        "summary": "Agent Google Reconnect",
+        "operationId": "google_toolkit_v1_agent_google_reconnect",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleConnectInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoogleConnectOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/google/exchange": {
+      "post": {
+        "tags": [
+          "Google Toolkit v1"
+        ],
+        "summary": "Shared Google Exchange",
+        "operationId": "google_toolkit_v1_shared_google_exchange",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleExchangeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoogleReview"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/google/exchange": {
+      "post": {
+        "tags": [
+          "Google Toolkit v1"
+        ],
+        "summary": "Agent Google Exchange",
+        "operationId": "google_toolkit_v1_agent_google_exchange",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleExchangeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoogleReview"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/google/attempts/{attempt_id}": {
+      "get": {
+        "tags": [
+          "Google Toolkit v1"
+        ],
+        "summary": "Shared Google Review",
+        "operationId": "google_toolkit_v1_shared_google_review",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Attempt Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoogleReview"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Google Toolkit v1"
+        ],
+        "summary": "Shared Google Cancel",
+        "operationId": "google_toolkit_v1_shared_google_cancel",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Attempt Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoogleCancelOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/google/attempts/{attempt_id}": {
+      "get": {
+        "tags": [
+          "Google Toolkit v1"
+        ],
+        "summary": "Agent Google Review",
+        "operationId": "google_toolkit_v1_agent_google_review",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Attempt Id"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoogleReview"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Google Toolkit v1"
+        ],
+        "summary": "Agent Google Cancel",
+        "operationId": "google_toolkit_v1_agent_google_cancel",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Attempt Id"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoogleCancelOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/google/attempts/{attempt_id}/confirm": {
+      "post": {
+        "tags": [
+          "Google Toolkit v1"
+        ],
+        "summary": "Shared Google Confirm",
+        "operationId": "google_toolkit_v1_shared_google_confirm",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Attempt Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleConfirmRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GooglePublishedOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/google/attempts/{attempt_id}/confirm": {
+      "post": {
+        "tags": [
+          "Google Toolkit v1"
+        ],
+        "summary": "Agent Google Confirm",
+        "operationId": "google_toolkit_v1_agent_google_confirm",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Attempt Id"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleConfirmRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GooglePublishedOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/google/attempts/{attempt_id}/reconnect-confirm": {
+      "post": {
+        "tags": [
+          "Google Toolkit v1"
+        ],
+        "summary": "Shared Google Reconnect Confirm",
+        "operationId": "google_toolkit_v1_shared_google_reconnect_confirm",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Attempt Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleReconnectConfirmRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GooglePublishedOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/google/attempts/{attempt_id}/reconnect-confirm": {
+      "post": {
+        "tags": [
+          "Google Toolkit v1"
+        ],
+        "summary": "Agent Google Reconnect Confirm",
+        "operationId": "google_toolkit_v1_agent_google_reconnect_confirm",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Attempt Id"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleReconnectConfirmRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GooglePublishedOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/google/attempts/{attempt_id}/outcome": {
+      "get": {
+        "tags": [
+          "Google Toolkit v1"
+        ],
+        "summary": "Shared Google Outcome",
+        "operationId": "google_toolkit_v1_shared_google_outcome",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Attempt Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GooglePublishedOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/google/attempts/{attempt_id}/outcome": {
+      "get": {
+        "tags": [
+          "Google Toolkit v1"
+        ],
+        "summary": "Agent Google Outcome",
+        "operationId": "google_toolkit_v1_agent_google_outcome",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Attempt Id"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GooglePublishedOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/google/connection": {
+      "get": {
+        "tags": [
+          "Google Toolkit v1"
+        ],
+        "summary": "Shared Google Status",
+        "operationId": "google_toolkit_v1_shared_google_status",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoogleConnectionOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Google Toolkit v1"
+        ],
+        "summary": "Shared Google Disconnect",
+        "operationId": "google_toolkit_v1_shared_google_disconnect",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/google/connection": {
+      "get": {
+        "tags": [
+          "Google Toolkit v1"
+        ],
+        "summary": "Agent Google Status",
+        "operationId": "google_toolkit_v1_agent_google_status",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoogleConnectionOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Google Toolkit v1"
+        ],
+        "summary": "Agent Google Disconnect",
+        "operationId": "google_toolkit_v1_agent_google_disconnect",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/user/v1/me": {
       "get": {
         "tags": [
@@ -28672,6 +30037,603 @@
         "type": "object",
         "title": "GoalUpdateRequest",
         "description": "Session goal update request."
+      },
+      "GoogleCancelOutput": {
+        "properties": {
+          "cancelled": {
+            "type": "boolean",
+            "title": "Cancelled"
+          },
+          "publication": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GooglePublishedOutput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "cancelled",
+          "publication"
+        ],
+        "title": "GoogleCancelOutput",
+        "description": "Publication won the race or candidate was locally abandoned."
+      },
+      "GoogleConfirmRequest": {
+        "properties": {
+          "settings": {
+            "$ref": "#/components/schemas/GoogleFinalSettings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "settings"
+        ],
+        "title": "GoogleConfirmRequest"
+      },
+      "GoogleConnectInput": {
+        "properties": {
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleTask"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Tasks"
+          },
+          "timeout": {
+            "type": "number",
+            "maximum": 300.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Timeout"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "tasks",
+          "timeout"
+        ],
+        "title": "GoogleConnectInput",
+        "description": "Explicit work selection before initial or ordinary reconnect authorization."
+      },
+      "GoogleConnectOutput": {
+        "properties": {
+          "attempt_id": {
+            "type": "string",
+            "title": "Attempt Id"
+          },
+          "authorization_url": {
+            "type": "string",
+            "title": "Authorization Url"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "attempt_id",
+          "authorization_url",
+          "expires_at"
+        ],
+        "title": "GoogleConnectOutput",
+        "description": "Browser navigation receipt, not a saved/executable connection."
+      },
+      "GoogleConnectionOutput": {
+        "properties": {
+          "toolkit_id": {
+            "type": "string",
+            "title": "Toolkit Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "not_connected",
+              "connected",
+              "reconnect_required",
+              "operator_setup_required",
+              "client_changed"
+            ],
+            "title": "Status"
+          },
+          "identity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GoogleIdentity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "selected_tasks": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleTask"
+            },
+            "type": "array",
+            "title": "Selected Tasks"
+          },
+          "timeout": {
+            "type": "number",
+            "title": "Timeout"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleTaskAccess"
+            },
+            "type": "array",
+            "title": "Tasks"
+          },
+          "renewable": {
+            "type": "boolean",
+            "title": "Renewable"
+          },
+          "service_access_verified": {
+            "type": "boolean",
+            "const": false,
+            "title": "Service Access Verified"
+          }
+        },
+        "type": "object",
+        "required": [
+          "toolkit_id",
+          "status",
+          "identity",
+          "selected_tasks",
+          "timeout",
+          "tasks",
+          "renewable",
+          "service_access_verified"
+        ],
+        "title": "GoogleConnectionOutput",
+        "description": "Saved identity, authorization and selected work under manager authority."
+      },
+      "GoogleExchangeRequest": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 8192,
+            "minLength": 1,
+            "title": "Code"
+          },
+          "state": {
+            "type": "string",
+            "maxLength": 16384,
+            "minLength": 1,
+            "title": "State"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "state"
+        ],
+        "title": "GoogleExchangeRequest",
+        "description": "Transient code and encrypted state, not caller-selected target identity."
+      },
+      "GoogleFinalSettings": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slug"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "always_expose_tools": {
+            "type": "boolean",
+            "title": "Always Expose Tools"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleTask"
+            },
+            "type": "array",
+            "title": "Tasks"
+          },
+          "timeout": {
+            "type": "number",
+            "maximum": 300.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Timeout"
+          },
+          "security_risk_acknowledged": {
+            "type": "boolean",
+            "title": "Security Risk Acknowledged"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "slug",
+          "description",
+          "prompt",
+          "enabled",
+          "always_expose_tools",
+          "tasks",
+          "timeout",
+          "security_risk_acknowledged"
+        ],
+        "title": "GoogleFinalSettings",
+        "description": "Complete final reviewed settings; no provider permission booleans accepted."
+      },
+      "GoogleIdentity": {
+        "properties": {
+          "issuer": {
+            "type": "string",
+            "title": "Issuer"
+          },
+          "subject": {
+            "type": "string",
+            "title": "Subject"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "issuer",
+          "subject",
+          "email"
+        ],
+        "title": "GoogleIdentity",
+        "description": "Principal obtained only from verified signed Google identity claims."
+      },
+      "GooglePreparation": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "not_configured",
+              "incomplete",
+              "configured_unverified"
+            ],
+            "title": "Status"
+          },
+          "client_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id"
+          },
+          "callback_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Callback Url"
+          },
+          "preview_verified": {
+            "type": "boolean",
+            "const": false,
+            "title": "Preview Verified"
+          },
+          "service_access_verified": {
+            "type": "boolean",
+            "const": false,
+            "title": "Service Access Verified"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "client_id",
+          "callback_url",
+          "preview_verified",
+          "service_access_verified"
+        ],
+        "title": "GooglePreparation",
+        "description": "Public redacted declaration; never claims verified Preview or service access."
+      },
+      "GooglePublishedOutput": {
+        "properties": {
+          "toolkit_id": {
+            "type": "string",
+            "title": "Toolkit Id"
+          },
+          "connection_id": {
+            "type": "string",
+            "title": "Connection Id"
+          },
+          "current": {
+            "type": "boolean",
+            "title": "Current"
+          }
+        },
+        "type": "object",
+        "required": [
+          "toolkit_id",
+          "connection_id",
+          "current"
+        ],
+        "title": "GooglePublishedOutput",
+        "description": "Idempotent historical outcome; current binding is not current readiness."
+      },
+      "GoogleReconnectConfirmRequest": {
+        "properties": {
+          "settings": {
+            "$ref": "#/components/schemas/GoogleReconnectSettings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "settings"
+        ],
+        "title": "GoogleReconnectConfirmRequest"
+      },
+      "GoogleReconnectSettings": {
+        "properties": {
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleTask"
+            },
+            "type": "array",
+            "title": "Tasks"
+          },
+          "timeout": {
+            "type": "number",
+            "maximum": 300.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Timeout"
+          },
+          "security_risk_acknowledged": {
+            "type": "boolean",
+            "title": "Security Risk Acknowledged"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "tasks",
+          "timeout",
+          "security_risk_acknowledged"
+        ],
+        "title": "GoogleReconnectSettings",
+        "description": "Reconnect changes authentication selection, not unrelated saved metadata."
+      },
+      "GoogleReview": {
+        "properties": {
+          "attempt_id": {
+            "type": "string",
+            "title": "Attempt Id"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "identity": {
+            "$ref": "#/components/schemas/GoogleIdentity"
+          },
+          "client_id": {
+            "type": "string",
+            "title": "Client Id"
+          },
+          "ownership": {
+            "type": "string",
+            "enum": [
+              "agent_only",
+              "workspace_shared"
+            ],
+            "title": "Ownership"
+          },
+          "reconnect_toolkit_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reconnect Toolkit Id"
+          },
+          "requested_tasks": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleTask"
+            },
+            "type": "array",
+            "title": "Requested Tasks"
+          },
+          "timeout": {
+            "type": "number",
+            "title": "Timeout"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/GoogleTaskAccess"
+            },
+            "type": "array",
+            "title": "Tasks"
+          },
+          "grant_result": {
+            "type": "string",
+            "enum": [
+              "full",
+              "partial",
+              "none",
+              "unknown"
+            ],
+            "title": "Grant Result"
+          },
+          "renewable": {
+            "type": "boolean",
+            "title": "Renewable"
+          },
+          "can_confirm": {
+            "type": "boolean",
+            "title": "Can Confirm"
+          },
+          "service_access_verified": {
+            "type": "boolean",
+            "const": false,
+            "title": "Service Access Verified"
+          },
+          "security_notice": {
+            "type": "string",
+            "title": "Security Notice"
+          }
+        },
+        "type": "object",
+        "required": [
+          "attempt_id",
+          "expires_at",
+          "identity",
+          "client_id",
+          "ownership",
+          "reconnect_toolkit_id",
+          "requested_tasks",
+          "timeout",
+          "tasks",
+          "grant_result",
+          "renewable",
+          "can_confirm",
+          "service_access_verified",
+          "security_notice"
+        ],
+        "title": "GoogleReview",
+        "description": "Actual grant result with token-free exact ownership/capability projection."
+      },
+      "GoogleService": {
+        "type": "string",
+        "enum": [
+          "calendar",
+          "drive",
+          "gmail"
+        ],
+        "title": "GoogleService",
+        "description": "Fixed official Google Workspace MCP services."
+      },
+      "GoogleTask": {
+        "type": "string",
+        "enum": [
+          "calendar_read",
+          "calendar_availability",
+          "calendar_edit",
+          "drive_read",
+          "drive_files",
+          "gmail_read",
+          "gmail_drafts",
+          "gmail_modify"
+        ],
+        "title": "GoogleTask",
+        "description": "Explicit selected work; no task is silently selected."
+      },
+      "GoogleTaskAccess": {
+        "properties": {
+          "task": {
+            "$ref": "#/components/schemas/GoogleTask"
+          },
+          "service": {
+            "$ref": "#/components/schemas/GoogleService"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "permitted",
+              "partial",
+              "not_granted",
+              "unknown"
+            ],
+            "title": "Status"
+          },
+          "permitted_tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Permitted Tools"
+          },
+          "unavailable_tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Unavailable Tools"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task",
+          "service",
+          "status",
+          "permitted_tools",
+          "unavailable_tools"
+        ],
+        "title": "GoogleTaskAccess",
+        "description": "Task-level permission evidence; no live resource-access promise."
       },
       "HTTPValidationError": {
         "properties": {
@@ -41327,6 +43289,10 @@
     {
       "name": "GitHub Setup v1",
       "description": "Management-only GitHub setup identity observations."
+    },
+    {
+      "name": "Google Toolkit v1",
+      "description": "Google partial-consent setup and reviewed publication."
     },
     {
       "name": "User v1",

@@ -42,9 +42,9 @@ class GoogleTokenResponse(BaseModel):
     access_token: str = Field(min_length=1, repr=False)
     token_type: str = "Bearer"
     expires_in: int = Field(gt=0)
-    refresh_token: str | None = Field(default=None, repr=False)
+    refresh_token: str | None = Field(default=None, repr=False, min_length=1)
     scope: str | None = None
-    id_token: str | None = Field(default=None, repr=False)
+    id_token: str | None = Field(default=None, repr=False, min_length=1)
     _received_at: datetime.datetime = PrivateAttr(
         default_factory=lambda: datetime.datetime.now(datetime.UTC)
     )
@@ -277,7 +277,11 @@ class GoogleOAuthProvider:
         try:
             async with asyncio.timeout(10):
                 return await asyncio.to_thread(verify)
-        except google.auth.exceptions.GoogleAuthError, requests.RequestException:
+        except google.auth.exceptions.TransportError, requests.RequestException:
+            raise GoogleOAuthError(
+                "provider_unavailable", "Google identity verification is unavailable."
+            ) from None
+        except google.auth.exceptions.GoogleAuthError:
             raise GoogleOAuthError(
                 "invalid_identity", "Google account identity could not be verified."
             ) from None

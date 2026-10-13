@@ -10,6 +10,7 @@ from azents.core.auth.deps import SystemAdmin, get_system_admin
 from azents.core.google_system_setting import (
     GoogleApplicationConfigPatch,
     GoogleApplicationDetail,
+    GoogleApplicationUnavailable,
 )
 from azents.core.system_setting import (
     SystemSettingEnvironmentFieldReadOnly,
@@ -62,7 +63,16 @@ async def get_google_oauth_setting(
 ) -> GoogleApplicationDetail:
     """Describe current local preparation without secrets or false live health."""
     del system_admin
-    return await service.detail()
+    try:
+        return await service.detail()
+    except GoogleApplicationUnavailable:
+        raise HTTPException(
+            422,
+            detail={
+                "code": "invalid_google_operator_configuration",
+                "message": "Verify the operator Google configuration.",
+            },
+        ) from None
 
 
 @router.patch("/sections/google-oauth")

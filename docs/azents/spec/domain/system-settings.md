@@ -1,7 +1,7 @@
 ---
 title: "System Settings"
 created: 2026-07-19
-updated: 2026-10-13
+updated: 2026-10-14
 tags: [backend, frontend, admin, scheduler, security, infra]
 spec_type: domain
 domain: system-settings
@@ -13,6 +13,8 @@ code_paths:
   - python/apps/azents/src/azents/core/system_setting_payload.py
   - python/apps/azents/src/azents/core/system_setting_deps.py
   - python/apps/azents/src/azents/core/github_system_setting.py
+  - python/apps/azents/src/azents/core/google_system_setting.py
+  - python/apps/azents/src/azents/services/google_application/**
   - python/apps/azents/src/azents/core/github_system_setting_data.py
   - python/apps/azents/src/azents/core/external_channel_file_system_setting.py
   - python/apps/azents/src/azents/core/historical_memory_system_setting.py
@@ -61,7 +63,7 @@ api_routes:
   - /system/v1/settings/file-lifecycle/compacted-event-retention
   - /system/v1/settings/file-lifecycle/archive-retention/preview
   - /system/v1/settings/file-lifecycle/retention-applications/{application_id}
-last_verified_at: 2026-10-13
+last_verified_at: 2026-10-14
 spec_version: 10
 ---
 
@@ -77,6 +79,7 @@ independent setting families currently use this domain:
 - the direct-activation `historical_memory_execution` Section for consolidation
   maximum logical turns and elapsed-time policy;
 - the direct-activation Slack and Discord identity OAuth Sections;
+- the optional direct-activation `google_oauth` operator client Section;
 - archived-session retention under the file-lifecycle API; and
 - the confirmed `platform_runtime` Section, whose typed non-secret configuration stores the
   Platform default Provider logical ID used only by exact Runtime selection.
@@ -84,6 +87,28 @@ independent setting families currently use this domain:
 Only a user with a live database-backed `system_admin` assignment may read or mutate either family.
 Public API users, Workspace roles, environment configuration, and UI visibility never grant System
 Settings authority.
+
+## Google Operator OAuth Section
+
+`google_oauth` stores optional nonsecret `client_id` and write-only encrypted
+`client_secret`. Environment bindings `AZ_GOOGLE_OAUTH_CLIENT_ID` and
+`AZ_GOOGLE_OAUTH_CLIENT_SECRET` retain field-level ownership. Admin
+`GET|PATCH /system-setting/v1/sections/google-oauth` provides redacted fields,
+callback, preparation status and optimistic `expected_version`; secrets use
+explicit replace/clear actions. Direct activation validates local configuration,
+not live client/Preview/service health. Invalid configuration reports a safe
+operator-preparation error.
+
+Google grants retain client binding, never operator-secret copies. Same-client
+rotation preserves bindings; changed-client grants become ineligible until
+ordinary reconnect. Google Section writes and OAuth finalization share the narrow
+Section lock/generation fence so stale success or failure cannot win through
+configuration replacement. Existing data is preserved; there is no retired-secret
+fallback or remote revocation on local configuration change.
+
+See [Google Connection Backend](google-connection.md) for the exact manager/
+execution and candidate/publication contracts. The Google Admin browser editor
+is not yet part of this backend implementation.
 
 ## Provider-neutral Section lifecycle
 

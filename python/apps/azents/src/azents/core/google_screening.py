@@ -113,7 +113,18 @@ def inspect_google_content(
 
     visit(value, 0)
     # A complete joined view also detects tested directives split across fields.
-    views = [_normalize("\n".join(strings))]
+    views: list[str] = []
+    normalized_chars = 0
+
+    def inspect_view(text: str) -> None:
+        nonlocal normalized_chars
+        normalized = _normalize(text)
+        normalized_chars += len(normalized)
+        if normalized_chars > limits.max_total_chars:
+            raise GoogleContentBlocked("content_budget")
+        views.append(normalized)
+
+    inspect_view("\n".join(strings))
     decoded_chars = 0
     for text in strings:
         try:
@@ -122,14 +133,14 @@ def inspect_google_content(
             raise GoogleContentBlocked("unsupported_encoding") from None
         if decoded != text:
             decoded_chars += len(decoded)
-            views.append(_normalize(decoded))
+            inspect_view(decoded)
         for match in _BASE64.finditer(text):
             try:
                 decoded = base64.b64decode(match[1], validate=True).decode("utf-8")
             except binascii.Error, UnicodeDecodeError:
                 raise GoogleContentBlocked("unsupported_encoding") from None
             decoded_chars += len(decoded)
-            views.append(_normalize(decoded))
+            inspect_view(decoded)
         if chars + decoded_chars > limits.max_total_chars:
             raise GoogleContentBlocked("content_budget")
     for view in views:

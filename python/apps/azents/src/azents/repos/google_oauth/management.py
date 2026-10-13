@@ -19,11 +19,13 @@ from azents.core.google_oauth import (
     GoogleAttempt,
     GoogleAttemptStatus,
     GoogleCandidate,
+    GoogleConnection,
     GoogleConnectionStatus,
     GoogleFinalSettings,
     GoogleOAuthError,
     GooglePublication,
     GoogleReconnectSettings,
+    GoogleSavedConnection,
     GoogleSavedTarget,
     GoogleSetup,
     GoogleSubject,
@@ -286,21 +288,23 @@ class GoogleOAuthRepository:
             .with_for_update()
             .execution_options(populate_existing=True)
         )
-        if connection is None:
-            raise GoogleOAuthError(
-                "stale", "Google connection changed or was disconnected."
-            )
         config = GoogleToolkitConfig.model_validate(toolkit.config)
-        candidate = GoogleCandidate.model_validate_json(
-            self.cipher.decrypt(connection.encrypted_payload)
+        candidate = (
+            None
+            if connection is None
+            else GoogleCandidate.model_validate_json(
+                self.cipher.decrypt(connection.encrypted_payload)
+            )
         )
         return GoogleSavedTarget(
             toolkit_id=toolkit_id,
-            connection_id=connection.id,
-            client_id=connection.client_id,
-            subject=candidate.identity.subject,
-            granted_scopes=candidate.tokens.granted_scopes,
-            status=connection.status,
+            connection_id=None if connection is None else connection.id,
+            client_id=None if connection is None else connection.client_id,
+            subject=None if candidate is None else candidate.identity.subject,
+            granted_scopes=None
+            if candidate is None
+            else candidate.tokens.granted_scopes,
+            status=None if connection is None else connection.status,
             tasks=tuple(config.tasks),
             timeout=config.timeout,
             security_risk_acknowledged=config.security_risk_acknowledged,
@@ -359,6 +363,39 @@ class GoogleOAuthRepository:
             session.write_session.add(row)
             await session.write_session.flush()
             return attempt_from(row, self.cipher)
+
+    async def saved(
+        self,
+        subject: GoogleSubject,
+        toolkit_id: str,
+    ) -> GoogleSavedConnection:
+        """Current projection uses exact ownership, not an unpublished attempt."""
+        async with self.session_manager() as session:
+            await self._scope(session, subject, lock=True)
+            target = await self._target(session, subject, toolkit_id)
+            row = await session.read_session.scalar(
+                sa.select(RDBGoogleConnection).where(
+                    RDBGoogleConnection.toolkit_id == toolkit_id
+                )
+            )
+            connection = (
+                None
+                if row is None
+                else GoogleConnection(
+                    id=row.id,
+                    toolkit_id=row.toolkit_id,
+                    client_id=row.client_id,
+                    candidate=GoogleCandidate.model_validate_json(
+                        self.cipher.decrypt(row.encrypted_payload)
+                    ),
+                    status=row.status,
+                    updated_at=row.updated_at,
+                    encrypted_payload=row.encrypted_payload,
+                )
+            )
+            return GoogleSavedConnection(
+                toolkit_id, target.tasks, target.timeout, connection
+            )
 
     async def load(self, subject: GoogleSubject, attempt_id: str) -> GoogleAttempt:
         """Commit expired-secret cleanup before reporting expiry to the service."""
@@ -458,8 +495,15 @@ class GoogleOAuthRepository:
         if row.published_toolkit_id is None or row.published_connection_id is None:
             raise AssertionError("Google publication outcome is incomplete.")
         current = await session.read_session.scalar(
-            sa.select(RDBGoogleConnection.id).where(
-                RDBGoogleConnection.toolkit_id == row.published_toolkit_id
+            sa.select(RDBGoogleConnection.id)
+            .join(
+                RDBToolkitConfig, RDBToolkitConfig.id == RDBGoogleConnection.toolkit_id
+            )
+            .where(
+                RDBGoogleConnection.toolkit_id == row.published_toolkit_id,
+                RDBToolkitConfig.workspace_id == row.workspace_id,
+                RDBToolkitConfig.owner_agent_id == row.agent_id,
+                RDBToolkitConfig.toolkit_type == "google",
             )
         )
         return GooglePublication(
@@ -473,13 +517,15 @@ class GoogleOAuthRepository:
         subject: GoogleSubject,
         *,
         attempt_id: str,
-        registration: GoogleApplicationRegistration,
+        registration: GoogleApplicationRegistration | None,
         settings: GoogleFinalSettings | GoogleReconnectSettings,
     ) -> GooglePublication:
         """Publish exactly once; historical replay never restores old credentials."""
         result: GooglePublication | None = None
         async with self.session_manager() as session:
-            await self._registration(session, registration)
+            await self.settings.acquire_section_lock(
+                session, section=SystemSettingSection.GOOGLE_OAUTH
+            )
             row = await self._row(session, subject, attempt_id)
             if row.status is GoogleAttemptStatus.PUBLISHED:
                 if row.final_settings != settings.model_dump(mode="json"):
@@ -487,6 +533,12 @@ class GoogleOAuthRepository:
                         "stale", "Google confirmation settings changed."
                     )
                 return await self._outcome(session, row)
+            if registration is None:
+                raise GoogleOAuthError(
+                    "operator_setup_required",
+                    "Google operator preparation is required.",
+                )
+            await self._registration(session, registration)
             if not expire_attempt(row):
                 attempt = attempt_from(row, self.cipher)
                 setup, candidate = attempt.setup, attempt.candidate
@@ -510,7 +562,10 @@ class GoogleOAuthRepository:
                         "invalid_selection",
                         "Final Google tasks must come from the reviewed selection.",
                     )
-                if candidate.tokens.refresh_token is None or not any(
+                if (
+                    candidate.tokens.expires_at <= datetime.datetime.now(datetime.UTC)
+                    or candidate.tokens.refresh_token is None
+                ) or not any(
                     permitted_tools(
                         settings.tasks, candidate.tokens.granted_scopes, service
                     )
@@ -623,6 +678,16 @@ class GoogleOAuthRepository:
             row.encrypted_candidate = None
             row.status = GoogleAttemptStatus.CANCELLED
         return None
+
+    async def outcome(
+        self, subject: GoogleSubject, attempt_id: str
+    ) -> GooglePublication:
+        """Inspect a published result under exact authority without credentials."""
+        async with self.session_manager() as session:
+            row = await self._row(session, subject, attempt_id)
+            if row.status is not GoogleAttemptStatus.PUBLISHED:
+                raise GoogleOAuthError("stale", "Google setup is not published.")
+            return await self._outcome(session, row)
 
     async def disconnect(self, subject: GoogleSubject, toolkit_id: str) -> None:
         """Local disconnect permanently defeats pending reconnect targets."""

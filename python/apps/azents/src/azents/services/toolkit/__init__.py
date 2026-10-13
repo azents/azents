@@ -257,6 +257,12 @@ class ToolkitService:
         InvalidToolkitType | InvalidConfig | InvalidIdentifier | InvalidCredentials,
     ]:
         """Create a Workspace-shared Toolkit with validated configuration."""
+        if create.toolkit_type == "google":
+            return Failure(
+                InvalidCredentials(
+                    "Authorize and review Google before confirming this connection."
+                )
+            )
         if self._requires_user_creation(create):
             return Failure(
                 InvalidCredentials(
@@ -1218,6 +1224,12 @@ class ToolkitService:
         | InvalidCredentials,
     ]:
         """Create an Agent-owned ToolkitConfig without a scope or attachment."""
+        if create.toolkit_type == "google":
+            return Failure(
+                InvalidCredentials(
+                    "Authorize and review Google before confirming this connection."
+                )
+            )
         if self._requires_user_creation(create):
             return Failure(
                 InvalidCredentials(

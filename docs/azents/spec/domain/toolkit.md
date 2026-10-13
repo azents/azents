@@ -123,8 +123,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/github-setup.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-10-13
-spec_version: 145
+last_verified_at: 2026-10-14
+spec_version: 146
 ---
 
 # Toolkit
@@ -141,6 +141,12 @@ This domain covers four feature groups.
 4. **Registered read-only VFS** — immutable run-scoped Skills and live authorized
    Memory resources behind generic read tools. Skills remain outside Runtime until
    `import_file` materializes one selected entry; Memory has no transfer capability.
+
+The [Google connection backend](google-connection.md) adds a `google` provider
+for official Calendar, Drive and Gmail MCP endpoints. It retains Toolkit ownership
+and execution contracts but stores one Google grant separately from generic MCP
+OAuth. Unpublished setup, explicit reduced-capability review and atomic confirm
+precede creation; plain Toolkit CRUD cannot bypass that publication boundary.
 
 All credentials are stored in DB with Fernet (`AZ_CREDENTIAL_ENCRYPTION_KEY`) symmetric encryption and are never exposed in agent prompt. (`CredentialCipher`, [`python/apps/azents/src/azents/core/crypto.py`](../../../../python/apps/azents/src/azents/core/crypto.py))
 
@@ -1261,6 +1267,7 @@ Goal and Todo auto-bound toolkits expose fixed tool definitions independent of c
 | `gcp`, `aws` | Cloud-provider native auth (IRSA / workload identity) | — (no config) |
 | `kubernetes` | depends on `clusters[].auth_type` — kubeconfig / token / EKS / GKE | kubeconfig secret |
 | `google_analytics` | service account / ADC | — |
+| `google` | current canonical Session owner and enabled effective Toolkit; selected work, actual scopes, verified subject/current client, and screened remote contract | encrypted Google Toolkit-owned grant and current operator `google_oauth` Section |
 | `brave_search` | enabled attached ToolkitConfig with a valid non-empty API key | ToolkitConfig `encrypted_credentials` |
 
 ### Runtime-Only Toolkit Boundary
