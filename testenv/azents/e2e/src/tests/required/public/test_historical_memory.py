@@ -516,11 +516,13 @@ def test_historical_preparation_snapshot_runtime_free_vfs_and_lifecycle(
             "get_memory",
             "list_memories",
             "search_memories",
-            "search_sessions",
-            "read_session_history",
-            "read_session_tool_result",
         )
     )
+    assert {
+        "search_sessions",
+        "read_session_history",
+        "read_session_tool_result",
+    } <= {tool.name for tool in tools}
     summary_uri = f"azents://memory/historical/team/{source}/summary.md"
     assert "blue" in _inspect(
         azents_public_server_url, setup, consumer, operation="read", path=summary_uri
