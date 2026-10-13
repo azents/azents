@@ -5,11 +5,13 @@ import {
   systemSettingsV1ConfirmPlatformGithubAppCandidate,
   systemSettingsV1GetExternalAccountOauthSetting,
   systemSettingsV1GetExternalChannelFilesSetting,
+  systemSettingsV1GetGoogleOauthSetting,
   systemSettingsV1GetHistoricalMemoryExecutionSetting,
   systemSettingsV1GetPlatformGithubAppSetting,
   systemSettingsV1ListSystemSettingAuditEvents,
   systemSettingsV1PatchExternalAccountOauthSetting,
   systemSettingsV1PatchExternalChannelFilesSetting,
+  systemSettingsV1PatchGoogleOauthSetting,
   systemSettingsV1PatchHistoricalMemoryExecutionSetting,
   systemSettingsV1PatchPlatformGithubAppSetting,
   systemSettingsV1ValidatePlatformGithubAppCandidate,
@@ -36,6 +38,45 @@ const externalAccountOAuthSecretActionSchema = z.discriminatedUnion("action", [
 ]);
 
 export const systemSettingsRouter = router({
+  getGoogleApplication: protectedProcedure.query(async ({ ctx }) => {
+    const { data } = await systemSettingsV1GetGoogleOauthSetting({
+      client: ctx.adminApiClient,
+      throwOnError: true,
+    });
+    return data;
+  }),
+  patchGoogleApplication: protectedProcedure
+    .input(
+      z
+        .object({
+          expected_version: z.number().int().nonnegative(),
+          client_id: z.string().nullable().optional(),
+          client_secret: z
+            .discriminatedUnion("action", [
+              z
+                .object({
+                  action: z.literal("replace"),
+                  value: z.string().min(1),
+                })
+                .strict(),
+              z.object({ action: z.literal("clear") }).strict(),
+            ])
+            .optional(),
+        })
+        .strict(),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await systemSettingsV1PatchGoogleOauthSetting({
+          client: ctx.adminApiClient,
+          body: input,
+          throwOnError: true,
+        });
+        return data;
+      } catch (error) {
+        throw mapExpectedError(error, { 409: "CONFLICT", 422: "BAD_REQUEST" });
+      }
+    }),
   getHistoricalMemoryExecution: protectedProcedure.query(async ({ ctx }) => {
     const { data } = await systemSettingsV1GetHistoricalMemoryExecutionSetting({
       client: ctx.adminApiClient,

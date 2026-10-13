@@ -15,6 +15,7 @@ export const MESSAGE_NAMESPACES = [
   "externalAccountLinks",
   "externalChannelApproval",
   "githubAppGuide",
+  "googleToolkit",
   "memberProfile",
   "metadata",
   "oauth",

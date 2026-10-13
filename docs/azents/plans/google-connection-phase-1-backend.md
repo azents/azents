@@ -44,8 +44,10 @@ tags: [google, backend, oauth, testing, implementation]
   repository fixtures, OpenAPI/client generation, docs checks and PR CI.
 - Scope-drift check: every change traces to assigned M IDs; reject added modes,
   token pooling, participant identity, permission inbox, blind replay and bypass.
-- Context checkpoint: initial integrated backend has full/focused root validation.
-  Correct response-client Boolean decoding, repeated authorization renewal and
-  Admin validation redaction before same-reviewer re-review. Revision 4 preserves
-  M1–M16. Rebase onto main and regenerate affected clients before final CI; live
-  prerequisites and phase 2/3 remain.
+- Context checkpoint: completed at `cdefeda1ad0fd255d1171a5228126b3ca33025cb`,
+  PR #2252. Root corrected Boolean client decoding, explicit renewal consent,
+  Admin secret-safe validation and migration enum ordering. The same independent
+  reviewer approved the corrected phase under revision 4 M1–M16. Root backend
+  12,299 passed/three Redis-only skips; migration 26, client templates 16 and
+  documentation 18 passed. Latest-SHA CI 38448628646 succeeded, including required
+  and Web E2E. Unmerged; no live provider or production change. Phase 2/3 remain.

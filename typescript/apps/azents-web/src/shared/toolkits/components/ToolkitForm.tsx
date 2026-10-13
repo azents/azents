@@ -36,6 +36,7 @@ import { GithubConfigFieldsContainer } from "../GithubConfigFieldsContainer";
 import { GitHubUserAuthorizationContainer } from "../GitHubUserAuthorizationContainer";
 import { GitHubWizardContainer } from "../GitHubWizardContainer";
 import { GoogleAnalyticsConfigFieldsContainer } from "../GoogleAnalyticsConfigFieldsContainer";
+import { GoogleSetupContainer } from "../GoogleSetupContainer";
 import { KubernetesConfigFieldsContainer } from "../KubernetesConfigFieldsContainer";
 import { McpConfigFieldsContainer } from "../McpConfigFieldsContainer";
 import { NotionConfigFieldsContainer } from "../NotionConfigFieldsContainer";
@@ -169,6 +170,23 @@ export function ToolkitForm({
           />
         )}
       </>
+    );
+  }
+
+  if (!isEdit && currentToolSlug === "google") {
+    return configurationFields != null ? (
+      <>{configurationFields}</>
+    ) : (
+      <GoogleSetupContainer
+        key={`google:${handle}:${agentId ?? "shared"}:new`}
+        handle={handle}
+        agentId={agentId}
+        embedded={embedded}
+        initialDescription={form.getValues().description}
+        onComplete={onComplete}
+        onPendingChange={onUserSetupPendingChange}
+        onAbandonReady={onAbandonReady}
+      />
     );
   }
 
@@ -424,6 +442,17 @@ export function ToolkitForm({
                     {...(formState.type === "EDIT" && {
                       toolkitConfigId: formState.config.id,
                     })}
+                  />
+                )}
+
+                {currentToolSlug === "google" && formState.type === "EDIT" && (
+                  <GoogleSetupContainer
+                    key={`google:${handle}:${agentId ?? "shared"}:${formState.config.id}`}
+                    handle={handle}
+                    agentId={agentId}
+                    toolkitId={formState.config.id}
+                    embedded
+                    onPendingChange={onUserSetupPendingChange}
                   />
                 )}
 

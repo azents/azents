@@ -29,6 +29,7 @@ import {
   IconSettings,
   IconX,
 } from "@tabler/icons-react";
+import { GoogleApplicationCardContainer } from "../GoogleApplicationCardContainer";
 import { ExternalAccountOAuthCards } from "./ExternalAccountOAuthCards";
 import { HistoricalMemoryExecutionCard } from "./HistoricalMemoryExecutionCard";
 import type { SystemSettingsPageContentProps } from "../containers/useSystemSettingsPageContainer";
@@ -562,6 +563,7 @@ export function SystemSettingsPageContent({
       />
 
       <ExternalAccountOAuthCards />
+      <GoogleApplicationCardContainer />
 
       <HistoricalMemoryExecutionCard />
 

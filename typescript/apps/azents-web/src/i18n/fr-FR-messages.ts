@@ -8,6 +8,7 @@ import elevation from "../../messages/fr-FR/elevation.json";
 import externalAccountLinks from "../../messages/fr-FR/externalAccountLinks.json";
 import externalChannelApproval from "../../messages/fr-FR/externalChannelApproval.json";
 import githubAppGuide from "../../messages/fr-FR/githubAppGuide.json";
+import googleToolkit from "../../messages/fr-FR/googleToolkit.json";
 import memberProfile from "../../messages/fr-FR/memberProfile.json";
 import metadata from "../../messages/fr-FR/metadata.json";
 import oauth from "../../messages/fr-FR/oauth.json";
@@ -33,6 +34,7 @@ const messages = composeMessages([
   ["externalAccountLinks", externalAccountLinks],
   ["externalChannelApproval", externalChannelApproval],
   ["githubAppGuide", githubAppGuide],
+  ["googleToolkit", googleToolkit],
   ["memberProfile", memberProfile],
   ["metadata", metadata],
   ["oauth", oauth],

@@ -77,9 +77,14 @@ At each phase record exact SHA/PR, implemented interfaces, authority/scope check
 removals, reviewer findings/resolution, root validation evidence, remaining paths
 and live limits. A new material mechanism returns to Design, not plan authority.
 
-Current checkpoint: backend implemented under M1–M16. Initial integrated review
-at `a0dcb9796` found response-client decoding, repeated offline authorization and
-Admin diagnostic-redaction defects. Root is correcting and validating them under
-approved revision 4; the same read-only reviewer performs targeted re-review.
-UI and product E2E phases remain. Main advanced through retention work; rebase
-preserves its schema/client changes and one linear migration chain.
+Phase 1 checkpoint: `cdefeda1ad0fd255d1171a5228126b3ca33025cb`, PR #2252,
+approved revision 4 M1–M16. The same independent reviewer approved all integrated
+review corrections and the enum-order migration correction. Root validation:
+12,299 backend tests passed, three existing Redis-only skips; 26 migration tests,
+16 client template tests and 18 documentation tests passed. Latest-SHA CI run
+38448628646 succeeded, including required four-shard and Web E2E. No merge or
+live Google access occurred. Main's retention schema remains preserved.
+
+Phase 2 starts on `feature/google-261013-ui` with its tracked UI execution plan.
+Root implements the management surfaces; product-specific E2E, integrated QA,
+Spec promotion and plan cleanup remain in phase 3.

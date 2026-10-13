@@ -34,6 +34,11 @@ import {
   missingNewGitHubUserRegistration,
   normalizeGitHubUserCredentialEdits,
 } from "../github-user-credentials";
+import {
+  deserializeGoogleResume,
+  GOOGLE_RESUME_KEY,
+  googleResumeMatches,
+} from "../google-resume";
 import { toolkitFormSchema } from "../schemas";
 import {
   hydrateToolkitConfig,
@@ -41,6 +46,7 @@ import {
   toolkitProjectionUsesOauth,
 } from "../toolkit-config-projection";
 import type { GitHubUserCreationContext } from "../github-user-creation-state";
+import type { GoogleResume } from "../google-resume";
 import type { ToolkitFormValues } from "../schemas";
 import type { ToolkitConfigProjection } from "../toolkit-config-projection";
 import type {
@@ -226,6 +232,13 @@ export function useToolkitFormContainer(
       saved.returnPath === creationReturnPath(handle, agentId)
     ) {
       form.setFieldValue("toolkitType", "github");
+    }
+    const google = readSessionStorageValue<GoogleResume | null>({
+      key: GOOGLE_RESUME_KEY,
+      deserialize: deserializeGoogleResume,
+    });
+    if (google != null && googleResumeMatches(google, handle, agentId)) {
+      form.setFieldValue("toolkitType", "google");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- restore entry selection only; the Wizard owns exact review hydration.
   }, [agentId, handle, isEditMode]);
