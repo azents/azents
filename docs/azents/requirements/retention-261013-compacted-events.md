@@ -1,6 +1,7 @@
 ---
 title: "Compacted Event Retention Requirements"
 created: 2026-10-13
+implemented: 2026-10-13
 tags: [retention, conversation, backend]
 document_role: primary
 document_type: requirements

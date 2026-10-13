@@ -1,6 +1,7 @@
 ---
 title: "Compacted Event Retention Design"
 created: 2026-10-13
+implemented: 2026-10-13
 tags: [retention, conversation, backend]
 document_role: primary
 document_type: design
@@ -63,7 +64,19 @@ Repository evidence supports all mechanisms: monotonic ID ordering, immutable su
 
 - Mode: Collaborative.
 - Decision owner: requester.
-- Date: 2026-10-13.
+- Approved on: 2026-10-13.
+- Approved Design revision: `1`.
+- Approved authority IDs: `M1`, `M2`, `M3`, `M4`, `M5`.
 - Implementation scope authorized after the requester confirmed REQ and ADR-D1.
 - Authorized scope: M1–M5; first-displacement retention, Unlimited default, current-context preservation and existing scheduled maintenance approach.
 - Local implementation details: nullable event timestamp, repository helper, endpoint names, batch/index layout and fixture composition.
+
+## Verification
+
+On 2026-10-13 the focused PostgreSQL/API/scheduler/regression suite passed 89
+tests, and the subsequent valid-head safety suite passed 18 tests. Migration
+upgrade/backfill/downgrade passed against an isolated PostgreSQL database.
+Backend Ruff, complete `ty` checks, Admin Web format/lint/typecheck and production
+build passed. Commit hooks also ran complete TypeScript lint/type checks and
+OpenAPI generation. Admin clients were regenerated. Live provider compaction,
+browser-driven Admin QA and production cleanup were not executed.
