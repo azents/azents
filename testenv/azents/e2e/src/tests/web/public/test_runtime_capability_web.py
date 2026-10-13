@@ -49,6 +49,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from testcontainers.core.container import DockerContainer
 
 from support.runtime_profiles import create_workspace_runtime_profile
+from support.session_panel_layout import prepare_mobile_session_composer
 from support.utils import (
     authenticate_user,
     model_selection_from_first_candidate,
@@ -171,14 +172,9 @@ def _open_services_tab(driver: WebDriver) -> None:
 
 def _assert_mobile_session_panel(driver: WebDriver) -> None:
     """Keep the conversation draft while switching full-width panel contents."""
-    driver.set_window_size(390, 844)
     toggle = (By.CSS_SELECTOR, "button[aria-label='Toggle session panel']")
     close = (By.CSS_SELECTOR, "button[aria-label='Close session panel']")
-    if _has_visible_css_element(driver, close[1]):
-        _wait(driver).until(ec.element_to_be_clickable(close)).click()
-    composer = _wait(driver).until(
-        ec.element_to_be_clickable((By.CSS_SELECTOR, "textarea"))
-    )
+    composer = prepare_mobile_session_composer(driver)
     composer.send_keys(Keys.CONTROL, "a")
     composer.send_keys("Keep this draft while inspecting the session")
     _wait(driver).until(
