@@ -18,6 +18,7 @@ import {
   Title,
 } from "@mantine/core";
 import { IconAlertTriangle, IconArchive, IconCheck } from "@tabler/icons-react";
+import { CompactedEventRetentionPanel } from "./CompactedEventRetentionPanel";
 import type { RetentionPageContentProps } from "../containers/useRetentionPageContainer";
 import type {
   RetentionApplicationScope,
@@ -337,6 +338,7 @@ function ApplicationPanel({
 }
 
 export function RetentionPageContent({
+  compactedEvents,
   state,
   retentionDays,
   applicationScope,
@@ -391,6 +393,10 @@ export function RetentionPageContent({
       />
 
       <ApplicationPanel state={applicationState} />
+
+      {state.type === "LOADED" && (
+        <CompactedEventRetentionPanel {...compactedEvents} />
+      )}
 
       <Modal
         opened={confirmation !== null}

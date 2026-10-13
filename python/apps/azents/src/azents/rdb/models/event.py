@@ -34,6 +34,12 @@ class RDBEvent(RDBModel):
 
     IX_SESSION_ID = sa.Index("ix_events_session_id", "session_id")
     IX_SESSION_CREATED = sa.Index("ix_events_session_created", "session_id", "id")
+    IX_COMPACTED_AT = sa.Index(
+        "ix_events_compacted_at",
+        "compacted_at",
+        "id",
+        postgresql_where=sa.text("compacted_at IS NOT NULL"),
+    )
     UQ_SESSION_EXTERNAL = sa.Index(
         "uq_events_session_external",
         "session_id",
@@ -88,9 +94,16 @@ class RDBEvent(RDBModel):
         init=False,
         server_default=sa.func.now(),
     )
+    compacted_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=True,
+        default=None,
+    )
 
     __table_args__ = (
         IX_SESSION_ID,
         IX_SESSION_CREATED,
+        IX_COMPACTED_AT,
         UQ_SESSION_EXTERNAL,
     )

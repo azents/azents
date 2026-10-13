@@ -1,7 +1,7 @@
 ---
 title: "System Settings"
 created: 2026-07-19
-updated: 2026-10-04
+updated: 2026-10-13
 tags: [backend, frontend, admin, scheduler, security, infra]
 spec_type: domain
 domain: system-settings
@@ -37,6 +37,8 @@ code_paths:
   - python/apps/azents/src/azents/api/admin/system/v1/**
   - python/apps/azents/src/azents/api/admin/system_setting/v1/**
   - python/apps/azents/src/azents/services/archived_session_retention.py
+  - python/apps/azents/src/azents/services/compacted_event_retention.py
+  - python/apps/azents/src/azents/repos/compacted_event_retention.py
   - python/apps/azents/src/azents/repos/archived_session_retention/**
   - python/apps/azents/src/azents/rdb/models/archived_session_retention.py
   - python/apps/azents/src/azents/scheduler/registry.py
@@ -56,10 +58,11 @@ api_routes:
   - /system-setting/v1/sections/platform-github-app/health-check
   - /system-setting/v1/audit-events
   - /system/v1/settings/file-lifecycle
+  - /system/v1/settings/file-lifecycle/compacted-event-retention
   - /system/v1/settings/file-lifecycle/archive-retention/preview
   - /system/v1/settings/file-lifecycle/retention-applications/{application_id}
-last_verified_at: 2026-10-04
-spec_version: 9
+last_verified_at: 2026-10-13
+spec_version: 10
 ---
 
 # System Settings
@@ -314,6 +317,33 @@ Successful save invalidates detail and audit queries. New consolidation jobs
 snapshot the effective policy and one absolute deadline; running attempts retain
 their original policy/deadline through candidate handoffs.
 
+## Compacted-event retention policy
+
+The lifecycle settings singleton independently stores `compacted_event_retention_days`.
+It defaults to null (Unlimited) on installation and upgrade. A finite value is a
+non-negative whole-day integer. Zero makes eligible events available to the next
+asynchronous cleanup pass; saving never deletes events synchronously.
+
+`GET /system/v1/settings/file-lifecycle` includes this value.
+`PATCH /system/v1/settings/file-lifecycle/compacted-event-retention` requires
+`expected_revision` and `compacted_event_retention_days`, including explicit null
+for Unlimited. It updates only compacted-event retention and shares the existing
+settings revision CAS and administrator attribution. A stale revision returns
+`409 retention_revision_conflict`; archive recalculation is neither started nor
+changed.
+
+The current policy applies to existing and future displaced events at each pass.
+Retention starts at first successful compaction displacement, stored as
+`events.compacted_at`, and does not restart with later compaction. The independent
+five-minute `compacted_event_cleanup` task deletes at most 1,000 expired events per
+pass, strictly before the current head and only through the ModelFile GC cursor.
+Pending/running Run inputs remain protected. Unlimited skips deletion; changing
+back to Unlimited cannot restore already deleted history.
+
+Admin Web exposes a separate Unlimited/whole-days editor and save action on the
+existing retention screen, with expiration semantics, irreversible deletion
+warning, saving state and conflict/error feedback.
+
 ## Archived-session retention policy
 
 `system_file_lifecycle_settings` is a singleton row. A fresh installation starts at 30 whole days.
@@ -405,6 +435,9 @@ page resumes the application returned by the settings endpoint.
   [`../flow/file-exchange-storage.md`](../flow/file-exchange-storage.md).
 
 ## Changelog
+
+- **2026-10-13** (spec_version 10) — Added independent Unlimited-default retention
+  of compacted events, first-displacement TTL and administrator controls.
 
 - **2026-10-02** — v8. Moved Section lifecycle, concrete GitHub impact/confirmation
   and audit lifetimes into completed database-only repository operations, with

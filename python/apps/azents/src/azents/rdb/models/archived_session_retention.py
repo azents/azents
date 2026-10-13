@@ -58,6 +58,16 @@ class RDBSystemFileLifecycleSetting(RDBModel):
         "OR archived_session_retention_days >= 0",
         name="ck_system_file_lifecycle_settings_retention_days",
     )
+    CK_COMPACTED_EVENT_RETENTION_DAYS = sa.CheckConstraint(
+        "compacted_event_retention_days IS NULL OR compacted_event_retention_days >= 0",
+        name="ck_system_file_lifecycle_settings_compacted_event_days",
+    )
+    compacted_event_retention_days: Mapped[int | None] = mapped_column(
+        sa.Integer,
+        init=False,
+        nullable=True,
+        default=None,
+    )
 
     id: Mapped[int] = mapped_column(
         sa.SmallInteger,
@@ -98,6 +108,7 @@ class RDBSystemFileLifecycleSetting(RDBModel):
     __table_args__ = (
         CK_SINGLETON_ID,
         CK_ARCHIVED_SESSION_RETENTION_DAYS,
+        CK_COMPACTED_EVENT_RETENTION_DAYS,
     )
 
 

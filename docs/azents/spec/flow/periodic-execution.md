@@ -86,8 +86,8 @@ code_paths:
   - python/apps/azents/bin/scheduler.sh
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
-last_verified_at: 2026-10-07
-spec_version: 37
+last_verified_at: 2026-10-13
+spec_version: 38
 ---
 
 # Periodic Execution Flow Spec
@@ -131,12 +131,21 @@ definition that scans that domain.
 
 Registered tasks include `scheduler_heartbeat`, `model_catalog_system_projection`,
 `archived_session_retention_recalculation`, `archived_session_purge`,
+`compacted_event_cleanup`,
 `session_auto_archive`, `agent_decommission`, `agent_runtime_removal`, `owner_lifecycle`,
 `file_lifecycle_cleanup`, `external_account_oauth_cleanup`,
 `historical_memory_discovery`, plus the user Scheduled
 Task dispatcher definition.
 `scheduler_heartbeat` is a no-op heartbeat that returns a small execution
 summary and has no external network dependency.
+
+`compacted_event_cleanup` runs every five minutes with a two-minute timeout and
+bounded retry backoff from one to thirty minutes. It deletes at most 1,000 expired
+pre-head events per pass, using first compaction displacement age and the current
+independent lifecycle retention setting. Unlimited (the default) skips deletion.
+The pass holds a shared settings lock, locks eligible event rows with skip-locked,
+waits for the ModelFile GC cursor and protects pending/running Run input
+references. Its summary reports `deleted_count`, `limit_reached` and `unlimited`.
 
 The existing six-hour `model_catalog_system_projection` task collects bounded inert
 source JSON, prepares exact per-model normalized prices and system projections, and
@@ -568,6 +577,9 @@ The periodic execution flow does not provide:
   the existing system projection task.
 
 ## Changelog
+
+- **2026-10-13** (spec_version 38) — Registered independent five-minute compacted
+  event cleanup with bounded deletion and default Unlimited policy.
 
 - **2026-10-07** (spec_version 37) — Route summary-only integration to common
   Session Workers; record explicit submission, immutable takeover cutoffs and

@@ -18,6 +18,7 @@ from azents.core.system_user_role import (
     SystemUserNotFound,
 )
 from azents.services.archived_session_retention import ArchivedSessionRetentionService
+from azents.services.compacted_event_retention import CompactedEventRetentionService
 from azents.services.system_user_role.service import SystemUserRoleService
 from azents.utils.fastapi.route import RouteMounter
 
@@ -25,6 +26,8 @@ from .data import (
     ArchiveRetentionApplicationResponse,
     ArchiveRetentionPreviewRequest,
     ArchiveRetentionPreviewResponse,
+    CompactedEventRetentionSettingsResponse,
+    CompactedEventRetentionUpdateRequest,
     FileLifecycleSettingsResponse,
     FileLifecycleSettingsUpdateRequest,
     FileLifecycleSettingsUpdateResponse,
@@ -34,6 +37,30 @@ from .data import (
 )
 
 router = APIRouter()
+
+
+@router.patch("/settings/file-lifecycle/compacted-event-retention")
+async def update_compacted_event_retention(
+    request: CompactedEventRetentionUpdateRequest,
+    system_admin: Annotated[SystemAdmin, Depends(get_system_admin)],
+    retention_service: Annotated[CompactedEventRetentionService, Depends()],
+) -> CompactedEventRetentionSettingsResponse:
+    """Set independent retention for events displaced by successful compaction."""
+    try:
+        result = await retention_service.update_settings(
+            expected_revision=request.expected_revision,
+            retention_days=request.compacted_event_retention_days,
+            user_id=system_admin.user_id,
+        )
+    except RetentionRevisionConflict as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "retention_revision_conflict",
+                "message": "File lifecycle settings changed. Reload and try again.",
+            },
+        ) from error
+    return CompactedEventRetentionSettingsResponse.model_validate(result.model_dump())
 
 
 @router.get("/me")

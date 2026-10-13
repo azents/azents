@@ -1095,6 +1095,7 @@ class ArchivedSessionRetentionRepository:
     ) -> SystemFileLifecycleSettings:
         return SystemFileLifecycleSettings(
             archived_session_retention_days=row.archived_session_retention_days,
+            compacted_event_retention_days=row.compacted_event_retention_days,
             revision=row.revision,
             updated_by_user_id=row.updated_by_user_id,
             created_at=row.created_at,

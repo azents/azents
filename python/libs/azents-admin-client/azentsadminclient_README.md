@@ -148,6 +148,7 @@ Class | Method | HTTP request | Description
 *SystemV1Api* | [**system_v1_list_system_role_assignments**](azentsadminclient/docs/SystemV1Api.md#system_v1_list_system_role_assignments) | **GET** /system/v1/role-assignments | List System Role Assignments
 *SystemV1Api* | [**system_v1_preview_archive_retention_update**](azentsadminclient/docs/SystemV1Api.md#system_v1_preview_archive_retention_update) | **POST** /system/v1/settings/file-lifecycle/archive-retention/preview | Preview Archive Retention Update
 *SystemV1Api* | [**system_v1_revoke_system_admin**](azentsadminclient/docs/SystemV1Api.md#system_v1_revoke_system_admin) | **DELETE** /system/v1/users/{user_id}/roles/system_admin | Revoke System Admin
+*SystemV1Api* | [**system_v1_update_compacted_event_retention**](azentsadminclient/docs/SystemV1Api.md#system_v1_update_compacted_event_retention) | **PATCH** /system/v1/settings/file-lifecycle/compacted-event-retention | Update Compacted Event Retention
 *SystemV1Api* | [**system_v1_update_file_lifecycle_settings**](azentsadminclient/docs/SystemV1Api.md#system_v1_update_file_lifecycle_settings) | **PATCH** /system/v1/settings/file-lifecycle | Update File Lifecycle Settings
 *UserEmailV1Api* | [**useremail_v1_create_email**](azentsadminclient/docs/UserEmailV1Api.md#useremail_v1_create_email) | **POST** /user-email/v1/users/{user_id}/emails | Create Email
 *UserEmailV1Api* | [**useremail_v1_delete_email**](azentsadminclient/docs/UserEmailV1Api.md#useremail_v1_delete_email) | **DELETE** /user-email/v1/emails/{email_id} | Delete Email
@@ -178,6 +179,8 @@ Class | Method | HTTP request | Description
  - [ArchiveRetentionPreviewRequest](azentsadminclient/docs/ArchiveRetentionPreviewRequest.md)
  - [ArchiveRetentionPreviewResponse](azentsadminclient/docs/ArchiveRetentionPreviewResponse.md)
  - [ArchivedSessionRetentionApplicationStatus](azentsadminclient/docs/ArchivedSessionRetentionApplicationStatus.md)
+ - [CompactedEventRetentionSettingsResponse](azentsadminclient/docs/CompactedEventRetentionSettingsResponse.md)
+ - [CompactedEventRetentionUpdateRequest](azentsadminclient/docs/CompactedEventRetentionUpdateRequest.md)
  - [CreatePasswordResetTokenRequest](azentsadminclient/docs/CreatePasswordResetTokenRequest.md)
  - [CreatePasswordResetTokenResponse](azentsadminclient/docs/CreatePasswordResetTokenResponse.md)
  - [CreateSignupTokenRequest](azentsadminclient/docs/CreateSignupTokenRequest.md)

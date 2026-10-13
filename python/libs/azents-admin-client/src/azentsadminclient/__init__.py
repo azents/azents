@@ -47,6 +47,8 @@ __all__ = [
     "ArchiveRetentionPreviewRequest",
     "ArchiveRetentionPreviewResponse",
     "ArchivedSessionRetentionApplicationStatus",
+    "CompactedEventRetentionSettingsResponse",
+    "CompactedEventRetentionUpdateRequest",
     "CreatePasswordResetTokenRequest",
     "CreatePasswordResetTokenResponse",
     "CreateSignupTokenRequest",
@@ -240,6 +242,8 @@ from azentsadminclient.models.archive_retention_application_response import Arch
 from azentsadminclient.models.archive_retention_preview_request import ArchiveRetentionPreviewRequest as ArchiveRetentionPreviewRequest
 from azentsadminclient.models.archive_retention_preview_response import ArchiveRetentionPreviewResponse as ArchiveRetentionPreviewResponse
 from azentsadminclient.models.archived_session_retention_application_status import ArchivedSessionRetentionApplicationStatus as ArchivedSessionRetentionApplicationStatus
+from azentsadminclient.models.compacted_event_retention_settings_response import CompactedEventRetentionSettingsResponse as CompactedEventRetentionSettingsResponse
+from azentsadminclient.models.compacted_event_retention_update_request import CompactedEventRetentionUpdateRequest as CompactedEventRetentionUpdateRequest
 from azentsadminclient.models.create_password_reset_token_request import CreatePasswordResetTokenRequest as CreatePasswordResetTokenRequest
 from azentsadminclient.models.create_password_reset_token_response import CreatePasswordResetTokenResponse as CreatePasswordResetTokenResponse
 from azentsadminclient.models.create_signup_token_request import CreateSignupTokenRequest as CreateSignupTokenRequest
