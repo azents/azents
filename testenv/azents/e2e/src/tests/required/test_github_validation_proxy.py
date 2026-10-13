@@ -45,6 +45,7 @@ def test_valid_and_invalid_oauth_scenarios_are_controllable(
         "id": 123,
         "client_id": "Iv1.azents-test",
         "slug": "azents-test",
+        "name": "Azents Test App",
     }
 
     scenario_response = requests.post(
