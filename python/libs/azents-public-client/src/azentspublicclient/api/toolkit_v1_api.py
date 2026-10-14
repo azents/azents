@@ -3497,7 +3497,7 @@ class ToolkitV1Api:
     ) -> ToolkitListResponse:
         """List Toolkits
 
-        Return the list of Toolkits provided by the platform.  Returns metadata for every tool registered in toolkit_registry. Accessible without authentication.
+        Return the list of Toolkits provided by the platform.  Returns creation metadata for locally available registered providers. Accessible without authentication.
 
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
@@ -3560,7 +3560,7 @@ class ToolkitV1Api:
     ) -> ApiResponse[ToolkitListResponse]:
         """List Toolkits
 
-        Return the list of Toolkits provided by the platform.  Returns metadata for every tool registered in toolkit_registry. Accessible without authentication.
+        Return the list of Toolkits provided by the platform.  Returns creation metadata for locally available registered providers. Accessible without authentication.
 
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
@@ -3623,7 +3623,7 @@ class ToolkitV1Api:
     ) -> RESTResponseType:
         """List Toolkits
 
-        Return the list of Toolkits provided by the platform.  Returns metadata for every tool registered in toolkit_registry. Accessible without authentication.
+        Return the list of Toolkits provided by the platform.  Returns creation metadata for locally available registered providers. Accessible without authentication.
 
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request

@@ -11,6 +11,12 @@ from azentsadminclient.api.system_settings_v1_api import SystemSettingsV1Api
 from azentsadminclient.models.google_application_patch_request import (
     GoogleApplicationPatchRequest,
 )
+from azentsadminclient.models.system_setting_secret_action_request import (
+    SystemSettingSecretActionRequest,
+)
+from azentsadminclient.models.system_setting_secret_action_type import (
+    SystemSettingSecretActionType,
+)
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.toolkit_v1_api import ToolkitV1Api
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
@@ -178,6 +184,47 @@ def final_settings(slug: str) -> dict[str, object]:
         "timeout": 30,
         "security_risk_acknowledged": True,
     }
+
+
+def test_google_catalog_follows_operator_configuration(
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+) -> None:
+    settings = SystemSettingsV1Api(admin_api_client)
+    catalog = ToolkitV1Api(public_api_client)
+    before = settings.system_settings_v1_get_google_oauth_setting()
+    cleared = settings.system_settings_v1_patch_google_oauth_setting(
+        GoogleApplicationPatchRequest(
+            expected_version=before.admin_version,
+            client_id=None,
+            client_secret=SystemSettingSecretActionRequest(
+                action=SystemSettingSecretActionType.CLEAR
+            ),
+        )
+    )
+    assert cleared.status == "not_configured"
+    hidden = catalog.toolkit_v1_list_toolkits()
+    hidden_slugs = [item.slug for item in hidden.items]
+    assert "google" not in hidden_slugs and "brave_search" in hidden_slugs
+    prepare_operator(admin_api_client)
+    visible = catalog.toolkit_v1_list_toolkits()
+    assert [item.slug for item in visible.items if item.slug != "google"] == (
+        hidden_slugs
+    )
+    assert any(item.slug == "google" for item in visible.items)
+    assert CLIENT_SECRET not in visible.to_json()
+    current = settings.system_settings_v1_get_google_oauth_setting()
+    settings.system_settings_v1_patch_google_oauth_setting(
+        GoogleApplicationPatchRequest(
+            expected_version=current.admin_version,
+            client_secret=SystemSettingSecretActionRequest(
+                action=SystemSettingSecretActionType.CLEAR
+            ),
+        )
+    )
+    assert not any(
+        item.slug == "google" for item in catalog.toolkit_v1_list_toolkits().items
+    )
 
 
 def test_google_review_publication_reconnect_and_exact_outcome(

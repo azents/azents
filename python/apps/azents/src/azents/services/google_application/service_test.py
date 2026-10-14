@@ -109,3 +109,45 @@ async def test_explicit_null_patch_is_distinct_from_omission() -> None:
     assert mutation.config_patch == {"client_id": None}
     assert mutation.secret_actions == {}
     assert mutation.actor_user_id == "admin"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "client,secret,web_url,available",
+    [
+        (None, None, "https://app.example.invalid", False),
+        ("client", None, "https://app.example.invalid", False),
+        (None, "secret", "https://app.example.invalid", False),
+        ("client", "secret", None, False),
+        ("client", "secret", "https://app.example.invalid?bad=callback", False),
+        ("client", "secret", "https://app.example.invalid", True),
+    ],
+)
+async def test_creation_requires_complete_effective_local_preparation(
+    client: str | None,
+    secret: str | None,
+    web_url: str | None,
+    available: bool,
+) -> None:
+    settings = create_autospec(SystemSettingsService, instance=True)
+    settings.resolve.return_value = _current(client, secret)
+    config = create_autospec(Config, instance=True)
+    config.web_url = web_url
+    assert await GoogleApplicationService(settings, config).creation_available() is (
+        available
+    )
+
+
+@pytest.mark.asyncio
+async def test_invalid_registration_hides_creation() -> None:
+    application = create_autospec(GoogleApplicationService, instance=True)
+    application.preparation.side_effect = GoogleApplicationUnavailable("Invalid.")
+    assert not await GoogleApplicationService.creation_available(application)
+
+
+@pytest.mark.asyncio
+async def test_unexpected_preparation_failure_stays_visible() -> None:
+    application = create_autospec(GoogleApplicationService, instance=True)
+    application.preparation.side_effect = RuntimeError("Unexpected storage failure.")
+    with pytest.raises(RuntimeError, match="Unexpected storage failure"):
+        await GoogleApplicationService.creation_available(application)

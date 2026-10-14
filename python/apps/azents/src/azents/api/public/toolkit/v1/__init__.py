@@ -18,6 +18,7 @@ from azents.core.toolkit_errors import (
 from azents.core.tools import ToolkitProvider
 from azents.engine.tools.deps import get_toolkit_registry
 from azents.services.agent.data import NotAdmin
+from azents.services.google_application.service import GoogleApplicationService
 from azents.services.toolkit import ToolkitService
 from azents.services.toolkit.data import (
     AgentNotBelongToWorkspace,
@@ -727,12 +728,14 @@ async def list_toolkits(
     toolkit_registry: Annotated[
         dict[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)
     ],
+    google_application: Annotated[GoogleApplicationService, Depends()],
 ) -> ToolkitListResponse:
     """Return the list of Toolkits provided by the platform.
 
-    Returns metadata for every tool registered in toolkit_registry.
+    Returns creation metadata for locally available registered providers.
     Accessible without authentication.
     """
+    google_available = await google_application.creation_available()
     items = [
         ToolkitResponse(
             slug=provider.slug,
@@ -742,6 +745,7 @@ async def list_toolkits(
             system_prompt=provider.system_prompt,
         )
         for provider in toolkit_registry.values()
+        if provider.slug != "google" or google_available
     ]
     return ToolkitListResponse(items=items)
 

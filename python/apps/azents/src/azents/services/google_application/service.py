@@ -67,6 +67,14 @@ class GoogleApplicationService:
             redirect_uri = None
         return google_preparation(current, redirect_uri)
 
+    async def creation_available(self) -> bool:
+        """Expose Google creation only when local operator preparation is complete."""
+        try:
+            preparation = await self.preparation()
+        except GoogleApplicationUnavailable:
+            return False
+        return preparation.status == "configured_unverified"
+
     async def detail(self) -> GoogleApplicationDetail:
         """Redact operator credentials while preserving field-source ownership."""
         current = await self._current()
