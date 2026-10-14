@@ -12,6 +12,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/google_oauth/**
   - python/apps/azents/src/azents/rdb/models/google_oauth.py
   - python/apps/azents/src/azents/api/public/toolkit/v1/google.py
+  - python/apps/azents/src/azents/api/public/toolkit/v1/__init__.py
   - python/apps/azents/src/azents/api/admin/system_setting/v1/google.py
   - python/apps/azents/src/azents/engine/tools/google.py
   - python/apps/azents/src/azents/engine/tools/deps.py
@@ -44,6 +45,15 @@ This Spec covers backend/API execution and the management surfaces. Live Google
 interoperability remains distinct from deterministic local verification.
 
 ## Management Surfaces
+
+The platform creation catalog (`GET /toolkit/v1/toolkits`), shared by Workspace
+and Agent Toolkit selection, includes Google only when effective operator client
+ID, secret and deployment callback preparation are complete. Missing, incomplete
+or invalid registration hides Google without hiding unrelated providers. Complete
+environment-owned registration remains supported. This local availability check
+does not assert Preview eligibility or live service access. Saved Google connections
+remain queryable and manageable; catalog filtering does not remove their provider
+from execution or replace current-grant authorization checks.
 
 Main Web routes Google creation through its unpublished lifecycle rather than
 generic Toolkit creation. Managers explicitly select tasks without write defaults,

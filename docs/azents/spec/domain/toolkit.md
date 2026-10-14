@@ -1360,7 +1360,7 @@ Role mapping: Manager has READ + WRITE, Member has READ only ([`core/auth/roles.
 
 Workspace-shared Toolkit OAuth connect, exchange, and disconnect require `TOOLKITS_WRITE` because that connection is Workspace-shared manager-owned state. Agent-owned OAuth uses the exact Agent Owner-or-Admin authority boundary.
 
-Unauthenticated endpoint: `GET /toolkits` (platform-provided ToolkitProvider catalog) — available even before login.
+Unauthenticated endpoint: `GET /toolkits` (platform-provided ToolkitProvider creation catalog) — available even before login. Google is included only when the effective operator OAuth client, secret and callback preparation are complete. Filtering this creation catalog preserves the executable provider registry and existing saved Toolkit management.
 
 ## Toolkit State
 

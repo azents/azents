@@ -1016,7 +1016,7 @@ List Toolkits
 
 Return the list of Toolkits provided by the platform.
 
-Returns metadata for every tool registered in toolkit_registry.
+Returns creation metadata for locally available registered providers.
 Accessible without authentication.
 
 ### Example

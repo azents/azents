@@ -15576,7 +15576,7 @@
           "Toolkit v1"
         ],
         "summary": "List Toolkits",
-        "description": "Return the list of Toolkits provided by the platform.\n\nReturns metadata for every tool registered in toolkit_registry.\nAccessible without authentication.",
+        "description": "Return the list of Toolkits provided by the platform.\n\nReturns creation metadata for locally available registered providers.\nAccessible without authentication.",
         "operationId": "toolkit_v1_list_toolkits",
         "responses": {
           "200": {
