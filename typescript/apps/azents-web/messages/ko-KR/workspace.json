@@ -1607,6 +1607,37 @@
     }
   },
   "toolkits": {
+    "management": {
+      "headline": "Workspace Toolkit",
+      "description": "이 Workspace의 Agent가 함께 사용하는 도구 연결을 관리합니다.",
+      "sharedScope": "Workspace 공유",
+      "sharedHint": "각 Agent에서 필요한 Toolkit을 연결해 사용합니다.",
+      "enabled": "사용 설정됨",
+      "disabled": "사용 중지됨",
+      "enabledLabel": "Toolkit 사용",
+      "reauthorizationRequired": "다시 인증 필요",
+      "reviewAuthorization": "인증 설정 확인",
+      "details": "상세 보기",
+      "detailTitle": "Toolkit 상세",
+      "edit": "설정 수정",
+      "catalogTitle": "Toolkit 추가",
+      "catalogHint": "이 Workspace에서 함께 사용할 서비스를 선택하세요.",
+      "catalogError": "사용 가능한 서비스를 불러오지 못했습니다.",
+      "configureTitle": "Toolkit 설정",
+      "back": "뒤로",
+      "retryRead": "새로고침",
+      "unavailable": "이 Toolkit을 불러오지 못했습니다. 목록을 새로고침해 현재 상태를 확인하세요.",
+      "refreshFailed": "저장된 상태를 새로 불러오지 못했습니다. 다음 작업 전에 새로고침해 현재 Toolkit을 확인하세요.",
+      "stateHint": "사용 설정은 실제 연결 상태나 접근 권한을 보장하지 않습니다.",
+      "settingOn": "사용",
+      "settingOff": "사용 안 함",
+      "authTypes": {
+        "github_app": "GitHub App (설치)",
+        "github_app_user": "GitHub App (개인 계정)",
+        "github_app_platform": "GitHub App (플랫폼 설치)",
+        "github_app_platform_user": "GitHub App (플랫폼 개인 계정)"
+      }
+    },
     "braveSearch": {
       "apiKey": "Brave Search API 키",
       "apiKeyRequired": "검색을 사용하려면 Brave Search API 키를 입력하세요.",

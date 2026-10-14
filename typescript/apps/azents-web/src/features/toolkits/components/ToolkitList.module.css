@@ -1,0 +1,68 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mantine-spacing-sm);
+  min-width: 0;
+  height: 100%;
+}
+
+.name {
+  overflow-wrap: anywhere;
+}
+
+.warningText {
+  color: var(--mantine-color-text);
+}
+
+.footer {
+  margin-top: auto;
+  padding-top: var(--mantine-spacing-sm);
+  border-top: 0.0625rem solid var(--mantine-color-default-border);
+}
+
+.fields {
+  margin: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: var(--mantine-spacing-xs) var(--mantine-spacing-md);
+}
+
+.fields dt {
+  color: var(--mantine-color-dimmed);
+}
+
+.fields dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.provider {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--mantine-spacing-xs);
+  padding: var(--mantine-spacing-md);
+  border: 0.0625rem solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-md);
+  min-width: 0;
+  background: var(--mantine-color-default);
+}
+
+.provider:hover {
+  border-color: var(--mantine-color-text);
+}
+
+.provider:focus-visible {
+  outline: 0.125rem solid var(--mantine-color-text);
+  outline-offset: 0.125rem;
+}
+
+@media (max-width: 40em) {
+  .fields {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--mantine-spacing-2xs);
+  }
+  .fields dd {
+    margin-bottom: var(--mantine-spacing-sm);
+  }
+}

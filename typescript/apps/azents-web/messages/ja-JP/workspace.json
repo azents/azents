@@ -1607,6 +1607,37 @@
     }
   },
   "toolkits": {
+    "management": {
+      "headline": "WorkspaceのToolkit",
+      "description": "このWorkspaceのAgentが共有するツール接続を管理します。",
+      "sharedScope": "Workspaceで共有",
+      "sharedHint": "必要なToolkitを各Agentに接続して使います。",
+      "enabled": "利用が有効",
+      "disabled": "利用停止中",
+      "enabledLabel": "Toolkitを利用",
+      "reauthorizationRequired": "再認証が必要",
+      "reviewAuthorization": "認証設定を確認",
+      "details": "詳細を見る",
+      "detailTitle": "Toolkitの詳細",
+      "edit": "設定を編集",
+      "catalogTitle": "Toolkitを追加",
+      "catalogHint": "このWorkspaceで共有するサービスを選んでください。",
+      "catalogError": "利用可能なサービスを読み込めませんでした。",
+      "configureTitle": "Toolkitの設定",
+      "back": "戻る",
+      "retryRead": "更新",
+      "unavailable": "このToolkitを読み込めませんでした。一覧を更新して現在の状態を確認してください。",
+      "refreshFailed": "保存された状態を再読み込みできませんでした。次の変更前に更新して現在のToolkitを確認してください。",
+      "stateHint": "利用が有効でも、実際の接続状態やアクセス権限は保証されません。",
+      "settingOn": "有効",
+      "settingOff": "無効",
+      "authTypes": {
+        "github_app": "GitHub App（インストール）",
+        "github_app_user": "GitHub App（個人アカウント）",
+        "github_app_platform": "GitHub App（プラットフォームのインストール）",
+        "github_app_platform_user": "GitHub App（プラットフォームの個人アカウント）"
+      }
+    },
     "braveSearch": {
       "apiKey": "Brave Search APIキー",
       "apiKeyRequired": "検索を有効にするにはBrave Search APIキーを入力してください。",

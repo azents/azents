@@ -432,3 +432,21 @@ export const MobileStandalone = {
     );
   },
 } satisfies Story;
+
+export const SavedProviderOperationPending = {
+  args: {
+    ...Editing.args,
+    operationPending: true,
+    onCancel: fn(),
+    onSubmitValues: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    await expect(canvas.getByRole("button", { name: "Save" })).toBeDisabled();
+    await userEvent.click(canvas.getByRole("button", { name: "Cancel" }));
+    await userEvent.click(canvas.getByRole("button", { name: "Save" }));
+    await expect(args.onCancel).not.toHaveBeenCalled();
+    await expect(args.onSubmitValues).not.toHaveBeenCalled();
+  },
+} satisfies Story;

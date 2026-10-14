@@ -86,6 +86,7 @@ export interface ToolkitFormContainerOutput {
   toolkitTypeLocked: boolean;
   formState: ToolkitConfigFormState;
   mutationState: MutationState;
+  operationPending: boolean;
   form: UseFormReturnType<ToolkitFormValues>;
   isEdit: boolean;
   backPath: string;
@@ -227,6 +228,7 @@ export function useToolkitFormContainer(
     type: "IDLE",
     error: null,
   });
+  const [providerPending, setProviderPending] = useState(false);
   useEffect(() => {
     if (isEditMode) {
       return;
@@ -252,10 +254,6 @@ export function useToolkitFormContainer(
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- restore entry selection only; the Wizard owns exact review hydration.
   }, [agentId, handle, isEditMode]);
-  useEffect(() => {
-    onPendingChange?.(mutationState.type === "SUBMITTING");
-  }, [mutationState.type, onPendingChange]);
-
   const definitionsQuery = trpc.toolkit.listToolkits.useQuery();
   const workspaceToolkitQuery = trpc.toolkit.getConfig.useQuery(
     { handle, toolkitId: toolkitId ?? "" },
@@ -427,8 +425,22 @@ export function useToolkitFormContainer(
       },
     });
 
+  const operationPending =
+    mutationState.type === "SUBMITTING" ||
+    providerPending ||
+    connectOauthMutation.isPending ||
+    connectAgentOauthMutation.isPending ||
+    disconnectOauthMutation.isPending ||
+    disconnectAgentOauthMutation.isPending;
+  useEffect(() => {
+    onPendingChange?.(operationPending);
+  }, [operationPending, onPendingChange]);
+
   const submitForm = useCallback(
     (values: ToolkitFormValues): void => {
+      if (operationPending) {
+        return;
+      }
       if (!isEditMode && usesToolkitCreationWizard(values.toolkitType)) {
         return;
       }
@@ -523,6 +535,7 @@ export function useToolkitFormContainer(
       formState,
       handle,
       isEditMode,
+      operationPending,
       t,
       toolkitId,
       updateAgentMutation,
@@ -739,6 +752,7 @@ export function useToolkitFormContainer(
     toolkitTypeLocked: initialToolkitType != null,
     formState,
     mutationState,
+    operationPending,
     form,
     isEdit: isEditMode,
     backPath,
@@ -756,14 +770,14 @@ export function useToolkitFormContainer(
         disconnectAgentOauthMutation.isPending,
     },
     onSubmit,
-    onUserSetupPendingChange: props.onPendingChange ?? (() => {}),
+    onUserSetupPendingChange: setProviderPending,
     onToolSelect,
     onConfigChange,
     onCredentialsChange,
     onConnectOauth,
     onDisconnectOauth,
     onCancel: () => {
-      if (mutationState.type === "SUBMITTING") {
+      if (operationPending) {
         return;
       }
       if (embedded) {
