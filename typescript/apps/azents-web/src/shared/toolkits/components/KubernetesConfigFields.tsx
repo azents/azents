@@ -33,18 +33,12 @@ import {
   IconTrash,
 } from "@tabler/icons-react";
 import { useCallback, useMemo } from "react";
-import {
-  getStringArray,
-  isStringArray,
-  parseJsonRecord,
-} from "@/shared/lib/unknown-value";
+import { parseJsonRecord } from "@/shared/lib/unknown-value";
 import {
   AUTH_TYPE_LABELS,
   AUTH_TYPE_OPTIONS,
   AWS_REGIONS,
   getClusterAuthType,
-  getClusterCredentials,
-  getClusters,
   GKE_LOCATIONS,
 } from "../kubernetes-fields";
 import { ProviderConnectionTestFeedback } from "./ProviderConnectionTestFeedback";
@@ -60,6 +54,7 @@ import type { KubernetesConfigFieldsProps } from "../types";
 
 export function KubernetesConfigFields({
   config,
+  view,
   onConfigChange,
   credentials,
   onCredentialsChange,
@@ -71,26 +66,14 @@ export function KubernetesConfigFields({
   storedClusterAuthTypes,
   onReplaceCluster,
 }: KubernetesConfigFieldsProps): React.ReactElement {
-  const clusters = useMemo(() => getClusters(config), [config]);
-  const clusterCredentials = useMemo(
-    () => getClusterCredentials(credentials),
-    [credentials],
-  );
-  const readOnly =
-    typeof config.read_only === "boolean" ? config.read_only : true;
-  const allowedNamespaces = useMemo(
-    () =>
-      Array.isArray(config.allowed_namespaces)
-        ? getStringArray(config.allowed_namespaces)
-        : null,
-    [config.allowed_namespaces],
-  );
-  const deniedKinds = useMemo(
-    () =>
-      isStringArray(config.denied_kinds) ? config.denied_kinds : ["Secret"],
-    [config.denied_kinds],
-  );
-  const timeoutValue = typeof config.timeout === "number" ? config.timeout : 30;
+  const {
+    clusters,
+    clusterCredentials,
+    read_only: readOnly,
+    allowed_namespaces: allowedNamespaces,
+    denied_kinds: deniedKinds,
+    timeout: timeoutValue,
+  } = view;
 
   // Connection test
 

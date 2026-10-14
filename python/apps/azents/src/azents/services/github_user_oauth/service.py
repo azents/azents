@@ -9,6 +9,7 @@ from typing import Annotated
 from urllib.parse import quote, urlencode
 
 import jwt
+from azcommon.logging import bind_extra
 from fastapi import Depends
 from pydantic import ConfigDict, TypeAdapter, ValidationError
 
@@ -479,6 +480,13 @@ class GitHubUserOAuthService:
         """Await bounded exact-token attempts; local completion is not proof."""
         for revocation in revocations:
             registration = revocation.registration
+            L = bind_extra(
+                logger,
+                {
+                    "app_source": registration.source,
+                    "app_id": registration.app_id,
+                },
+            )
             try:
                 async with asyncio.timeout(_REVOCATION_TIMEOUT_SECONDS):
                     client_secret = registration.client_secret
@@ -491,12 +499,10 @@ class GitHubUserOAuthService:
                         ):
                             client_secret = platform.client_secret
                     if client_secret is None:
-                        logger.warning(
+                        L.warning(
                             "GitHub token revocation was not attempted: "
                             "registration unavailable; local completion is unchanged.",
                             extra={
-                                "app_source": registration.source,
-                                "app_id": registration.app_id,
                                 "reason": "registration_unavailable",
                             },
                         )
@@ -509,12 +515,10 @@ class GitHubUserOAuthService:
             except asyncio.CancelledError:
                 raise
             except (GitHubUserProviderError, TimeoutError) as error:
-                logger.warning(
+                L.warning(
                     "GitHub token revocation attempt failed; "
                     "local completion is unchanged.",
                     extra={
-                        "app_source": registration.source,
-                        "app_id": registration.app_id,
                         "reason": (
                             error.reason
                             if isinstance(error, GitHubUserProviderError)

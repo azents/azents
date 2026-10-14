@@ -11,6 +11,7 @@ import struct
 import threading
 import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock
 from typing import ClassVar, NamedTuple
@@ -29,6 +30,756 @@ _BARRIER_OPERATIONS = frozenset(
         "conversations.replies",
     }
 )
+
+
+def _control(value: object, allowed: set[str]) -> dict[str, object]:
+    """Decode a closed private control without echoing input or credentials."""
+    if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
+        raise ValueError("Expected a private control object.")
+    if set(value) - allowed:
+        raise ValueError("Unsupported private control field.")
+    return value
+
+
+def _nullable_string(value: object, *, nonempty: bool = False) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or (nonempty and not value):
+        raise ValueError("Expected a configured string.")
+    return value
+
+
+def _configured_int(value: object, *, minimum: int, maximum: int) -> int:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not minimum <= value <= maximum
+    ):
+        raise ValueError("Configured integer is outside its supported bounds.")
+    return value
+
+
+def _string_list(
+    value: object, *, maximum: int | None = None, nonempty: bool = False
+) -> list[str]:
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError("Expected configured string list.")
+    if (nonempty and not value) or (maximum is not None and len(value) > maximum):
+        raise ValueError("Configured sequence is outside its supported bounds.")
+    return [item for item in value if isinstance(item, str)]
+
+
+def _optional_string(value: object) -> str | None:
+    """Validate one nonempty optional request string at ingress."""
+    return value if isinstance(value, str) and value else None
+
+
+def _objects(value: object) -> list[dict[str, object]]:
+    """Malformed optional object lists project to empty, including mixed lists."""
+    if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _scenario_map(value: object) -> dict[str, str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("Expected configured scenario map.")
+    # The existing private control explicitly stringifies map keys and values.
+    return {str(key): str(item) for key, item in value.items()}
+
+
+@dataclass(frozen=True)
+class OAuthConfiguration:
+    client_id: str | None
+    client_secret: str | None
+    redirect_uri: str | None
+    user_id: str | None
+    user_label: str | None
+    team_id: str | None
+    team_label: str | None
+    authorize_scenario: str | None
+    token_scenario: str | None
+    userinfo_scenario: str | None
+    delay_seconds: int | None
+
+
+def decode_oauth_configuration(value: object) -> OAuthConfiguration:
+    if isinstance(value, OAuthConfiguration):
+        return value
+    raw = _control(
+        value,
+        {
+            "client_id",
+            "client_secret",
+            "redirect_uri",
+            "user_id",
+            "user_label",
+            "team_id",
+            "team_label",
+            "authorize_scenario",
+            "token_scenario",
+            "userinfo_scenario",
+            "delay_seconds",
+        },
+    )
+    authorize = _nullable_string(raw.get("authorize_scenario"))
+    token = _nullable_string(raw.get("token_scenario"))
+    userinfo = _nullable_string(raw.get("userinfo_scenario"))
+    if authorize is not None and authorize not in {
+        "success",
+        "cancel",
+        "provider_error",
+        "delay",
+        "malformed",
+    }:
+        raise ValueError("Unsupported OAuth authorize scenario.")
+    if any(
+        item is not None and item not in {"success", "rejected", "malformed"}
+        for item in (token, userinfo)
+    ):
+        raise ValueError("Unsupported OAuth response scenario.")
+    delay = raw.get("delay_seconds")
+    return OAuthConfiguration(
+        client_id=_nullable_string(raw.get("client_id"), nonempty=True),
+        client_secret=_nullable_string(raw.get("client_secret"), nonempty=True),
+        redirect_uri=_nullable_string(raw.get("redirect_uri"), nonempty=True),
+        user_id=_nullable_string(raw.get("user_id"), nonempty=True),
+        user_label=_nullable_string(raw.get("user_label"), nonempty=True),
+        team_id=_nullable_string(raw.get("team_id"), nonempty=True),
+        team_label=_nullable_string(raw.get("team_label"), nonempty=True),
+        authorize_scenario=authorize,
+        token_scenario=token,
+        userinfo_scenario=userinfo,
+        delay_seconds=None
+        if delay is None
+        else _configured_int(delay, minimum=0, maximum=5),
+    )
+
+
+@dataclass(frozen=True)
+class ConfiguredFile:
+    """Validated file identity/content alongside opaque provider metadata."""
+
+    id: str
+    content: bytes
+    metadata: dict[str, object]
+
+
+def _configured_file(value: object) -> ConfiguredFile:
+    raw = _control(
+        value,
+        {
+            "id",
+            "name",
+            "title",
+            "mimetype",
+            "size",
+            "mode",
+            "external_type",
+            "file_access",
+            "is_external",
+            "deleted",
+            "content_base64",
+        },
+    )
+    file_id = _nullable_string(raw.get("id"), nonempty=True)
+    encoded = raw.get("content_base64")
+    if file_id is None or not isinstance(encoded, str):
+        raise ValueError("Configured Slack files require identity and content.")
+    try:
+        content = base64.b64decode(encoded, validate=True)
+    except ValueError as exc:
+        raise ValueError("Configured Slack file content is invalid.") from exc
+    if len(content) > 8 * 1024 * 1024:
+        raise ValueError("Configured Slack file content is too large.")
+    metadata = {key: item for key, item in raw.items() if key != "content_base64"}
+    metadata.setdefault("size", len(content))
+    return ConfiguredFile(id=file_id, content=content, metadata=metadata)
+
+
+@dataclass(frozen=True)
+class SocketEnvelope:
+    """Interpreted identity with an opaque provider envelope for egress."""
+
+    envelope_id: str | None
+    wire: dict[str, object]
+
+
+@dataclass(frozen=True)
+class SocketSession:
+    envelopes: list[SocketEnvelope]
+    disconnect_reason: str | None
+
+
+def _configured_socket_session(value: object) -> SocketSession:
+    raw = _control(value, {"envelopes", "disconnect_reason"})
+    envelopes = raw.get("envelopes")
+    if not isinstance(envelopes, list) or not all(
+        isinstance(item, dict) for item in envelopes
+    ):
+        raise ValueError("Socket envelopes must be an object list.")
+    projected: list[SocketEnvelope] = []
+    for envelope in envelopes:
+        if not isinstance(envelope, dict):
+            raise ValueError("Socket envelope must be an object.")
+        envelope_id = envelope.get("envelope_id")
+        projected.append(
+            SocketEnvelope(
+                envelope_id=envelope_id if isinstance(envelope_id, str) else None,
+                wire=envelope,
+            )
+        )
+    return SocketSession(
+        envelopes=projected,
+        disconnect_reason=_nullable_string(raw.get("disconnect_reason")),
+    )
+
+
+@dataclass(frozen=True)
+class FakeConfiguration:
+    oauth: OAuthConfiguration | None
+    auth_scenario: str | None
+    membership_scenario: str | None
+    history_scenario: str | None
+    permalink_scenario: str | None
+    provider_app_id: str | None
+    provider_team_id: str | None
+    provider_bot_user_id: str | None
+    granted_scopes: list[str] | None
+    delivery_scenarios: dict[str, str] | None
+    delivery_scenario_sequences: dict[str, list[str]] | None
+    presence_scenarios: dict[str, str] | None
+    file_scenarios: dict[str, str] | None
+    view_scenarios: dict[str, str] | None
+    files: list[ConfiguredFile] | None
+    history_pages: list[list[dict[str, object]]] | None
+    history_scenario_sequence: list[str] | None
+    history_retry_after_seconds: list[int] | None
+    socket_sessions: list[SocketSession] | None
+
+
+def decode_fake_configuration(value: object) -> FakeConfiguration:
+    raw = _control(
+        value,
+        {
+            "oauth",
+            "auth_scenario",
+            "membership_scenario",
+            "history_scenario",
+            "permalink_scenario",
+            "provider_app_id",
+            "provider_team_id",
+            "provider_bot_user_id",
+            "granted_scopes",
+            "delivery_scenarios",
+            "delivery_scenario_sequences",
+            "presence_scenarios",
+            "file_scenarios",
+            "view_scenarios",
+            "files",
+            "history_pages",
+            "history_scenario_sequence",
+            "history_retry_after_seconds",
+            "socket_sessions",
+        },
+    )
+    oauth = raw.get("oauth")
+    scopes = raw.get("granted_scopes")
+    sequences = raw.get("delivery_scenario_sequences")
+    sequence_map: dict[str, list[str]] | None = None
+    if sequences is not None:
+        if not isinstance(sequences, dict) or not all(
+            isinstance(key, str) for key in sequences
+        ):
+            raise ValueError("Delivery sequences must be a string-keyed object.")
+        sequence_map = {
+            key: _string_list(item, nonempty=True) for key, item in sequences.items()
+        }
+    files = raw.get("files")
+    configured_files: list[ConfiguredFile] | None = None
+    if files is not None:
+        if not isinstance(files, list):
+            raise ValueError("Configured files must be a list.")
+        configured_files = [_configured_file(item) for item in files]
+    pages = raw.get("history_pages")
+    history_pages: list[list[dict[str, object]]] | None = None
+    if pages is not None:
+        if not isinstance(pages, list):
+            raise ValueError("History pages must be a list.")
+        history_pages = []
+        for page in pages:
+            if not isinstance(page, list) or not all(
+                isinstance(item, dict) for item in page
+            ):
+                raise ValueError("History page must be an object list.")
+            history_pages.append([item for item in page if isinstance(item, dict)])
+    history_sequence = raw.get("history_scenario_sequence")
+    retry = raw.get("history_retry_after_seconds")
+    retry_sequence: list[int] | None = None
+    if retry is not None:
+        if not isinstance(retry, list) or not retry or len(retry) > 10:
+            raise ValueError("Retry sequence must have 1-10 integers.")
+        retry_sequence = [
+            _configured_int(item, minimum=1, maximum=300) for item in retry
+        ]
+    sockets = raw.get("socket_sessions")
+    socket_sessions: list[SocketSession] | None = None
+    if sockets is not None:
+        if not isinstance(sockets, list) or not sockets:
+            raise ValueError("Socket sessions must be a nonempty list.")
+        socket_sessions = [_configured_socket_session(item) for item in sockets]
+    return FakeConfiguration(
+        oauth=None if oauth is None else decode_oauth_configuration(oauth),
+        auth_scenario=_nullable_string(raw.get("auth_scenario")),
+        membership_scenario=_nullable_string(raw.get("membership_scenario")),
+        history_scenario=_nullable_string(raw.get("history_scenario")),
+        permalink_scenario=_nullable_string(raw.get("permalink_scenario")),
+        provider_app_id=_nullable_string(raw.get("provider_app_id")),
+        provider_team_id=_nullable_string(raw.get("provider_team_id")),
+        provider_bot_user_id=_nullable_string(raw.get("provider_bot_user_id")),
+        granted_scopes=None if scopes is None else _string_list(scopes),
+        delivery_scenarios=_scenario_map(raw.get("delivery_scenarios")),
+        delivery_scenario_sequences=sequence_map,
+        presence_scenarios=_scenario_map(raw.get("presence_scenarios")),
+        file_scenarios=_scenario_map(raw.get("file_scenarios")),
+        view_scenarios=_scenario_map(raw.get("view_scenarios")),
+        files=configured_files,
+        history_pages=history_pages,
+        history_scenario_sequence=None
+        if history_sequence is None
+        else _string_list(history_sequence, maximum=10, nonempty=True),
+        history_retry_after_seconds=retry_sequence,
+        socket_sessions=socket_sessions,
+    )
+
+
+@dataclass(frozen=True)
+class OperationBarrier:
+    operation: str
+    occurrence: int
+
+
+def decode_operation_barrier(value: object) -> OperationBarrier:
+    # Barrier controls historically allow ignored extensions.
+    if not isinstance(value, dict):
+        raise ValueError("Expected a barrier control object.")
+    operation = value.get("operation")
+    if not isinstance(operation, str):
+        raise ValueError("Expected a Slack operation.")
+    if operation not in {
+        "chat.update",
+        "conversations.history",
+        "conversations.replies",
+    }:
+        raise ValueError("Unsupported Slack barrier operation.")
+    occurrence = value.get("occurrence")
+    if (
+        isinstance(occurrence, bool)
+        or not isinstance(occurrence, int)
+        or occurrence < 1
+    ):
+        raise ValueError("Barrier occurrence must be positive.")
+    return OperationBarrier(operation=operation, occurrence=occurrence)
+
+
+@dataclass
+class UploadState:
+    expected_length: int
+    received_length: int | None
+    uploaded: bool
+    content_sha256: str | None
+
+
+@dataclass(frozen=True)
+class TextObservation:
+    text: str | None
+
+
+@dataclass(frozen=True)
+class OptionObservation:
+    value: str | None
+    text: TextObservation | None
+
+
+@dataclass(frozen=True)
+class ElementObservation:
+    type: str | None
+    action_id: str | None
+    url: str | None
+    value: str | None
+    options: list[OptionObservation]
+    initial_option: OptionObservation | None
+
+
+@dataclass(frozen=True)
+class BlockObservation:
+    type: str | None
+    block_id: str | None
+    text: TextObservation | None
+    element: ElementObservation | None
+    accessory: ElementObservation | None
+    elements: list[ElementObservation]
+
+
+@dataclass(frozen=True)
+class ViewObservation:
+    callback_id: str | None
+    private_metadata: str | None
+    has_submit: bool
+    blocks: list[BlockObservation]
+
+
+def _text(value: object) -> TextObservation | None:
+    if not isinstance(value, dict):
+        return None
+    # Empty text is a valid rendered string, even though it cannot classify presence.
+    text = value.get("text")
+    return TextObservation(text=text if isinstance(text, str) else None)
+
+
+def _option(value: object) -> OptionObservation | None:
+    if not isinstance(value, dict):
+        return None
+    return OptionObservation(
+        value=_optional_string(value.get("value")), text=_text(value.get("text"))
+    )
+
+
+def _element(value: object) -> ElementObservation | None:
+    if not isinstance(value, dict):
+        return None
+    return ElementObservation(
+        type=_optional_string(value.get("type")),
+        action_id=_optional_string(value.get("action_id")),
+        url=_optional_string(value.get("url")),
+        value=_optional_string(value.get("value")),
+        options=[
+            option
+            for item in _objects(value.get("options"))
+            if (option := _option(item)) is not None
+        ],
+        initial_option=_option(value.get("initial_option")),
+    )
+
+
+def _blocks(value: object) -> list[BlockObservation]:
+    return [
+        BlockObservation(
+            type=_optional_string(block.get("type")),
+            block_id=_optional_string(block.get("block_id")),
+            text=_text(block.get("text")),
+            element=_element(block.get("element")),
+            accessory=_element(block.get("accessory")),
+            elements=[
+                element
+                for item in _objects(block.get("elements"))
+                if (element := _element(item)) is not None
+            ],
+        )
+        for block in _objects(value)
+    ]
+
+
+@dataclass(frozen=True)
+class RequestMetadata:
+    channel: str | None
+    channel_id: str | None
+    thread_ts: str | None
+    ts: str | None
+    length: int | None
+    file_count: int | None
+
+    def evidence(self) -> dict[str, object]:
+        """Serialize only declared privacy-safe request fields."""
+        return {
+            key: value
+            for key, value in {
+                "channel": self.channel,
+                "channel_id": self.channel_id,
+                "thread_ts": self.thread_ts,
+                "ts": self.ts,
+                "length": self.length,
+                "file_count": self.file_count,
+            }.items()
+            if value is not None
+        }
+
+
+def decode_metadata(raw: dict[str, object]) -> RequestMetadata:
+    """Keep empty strings in metadata, unlike the optional control projections."""
+
+    def string(name: str) -> str | None:
+        value = raw.get(name)
+        return value if isinstance(value, str) else None
+
+    length = raw.get("length")
+    files = raw.get("files")
+    return RequestMetadata(
+        channel=string("channel"),
+        channel_id=string("channel_id"),
+        thread_ts=string("thread_ts"),
+        ts=string("ts"),
+        length=length
+        if isinstance(length, int) and not isinstance(length, bool)
+        else None,
+        file_count=len(files) if isinstance(files, list) else None,
+    )
+
+
+@dataclass(frozen=True)
+class MessageRequest:
+    channel: str | None
+    thread_ts: str | None
+    ts: str | None
+    text: str | None
+    blocks: list[BlockObservation]
+    has_plan: bool
+    blocks_wire: list[object] | None
+
+
+def decode_message(raw: dict[str, object]) -> MessageRequest:
+    blocks = raw.get("blocks")
+    return MessageRequest(
+        channel=_optional_string(raw.get("channel")),
+        thread_ts=_optional_string(raw.get("thread_ts")),
+        ts=_optional_string(raw.get("ts")),
+        text=_optional_string(raw.get("text")),
+        blocks=_blocks(blocks),
+        has_plan=isinstance(blocks, list)
+        and any(
+            isinstance(block, dict) and block.get("type") == "plan" for block in blocks
+        ),
+        blocks_wire=blocks if isinstance(blocks, list) else None,
+    )
+
+
+@dataclass(frozen=True)
+class PresenceRequest:
+    channel_id: str | None
+    thread_ts: str | None
+    status: str | None
+    initiator_user_id: str | None
+
+
+def decode_presence(raw: dict[str, object]) -> PresenceRequest:
+    return PresenceRequest(
+        channel_id=_optional_string(raw.get("channel_id")),
+        thread_ts=_optional_string(raw.get("thread_ts")),
+        status=_optional_string(raw.get("status")),
+        initiator_user_id=_optional_string(raw.get("initiator_user_id")),
+    )
+
+
+@dataclass(frozen=True)
+class ViewRequest:
+    view_id: str | None
+    view: ViewObservation
+
+
+def decode_view(raw: dict[str, object]) -> ViewRequest:
+    value = raw.get("view")
+    view = value if isinstance(value, dict) else {}
+    return ViewRequest(
+        view_id=_optional_string(raw.get("view_id")),
+        view=ViewObservation(
+            callback_id=_optional_string(view.get("callback_id")),
+            private_metadata=_optional_string(view.get("private_metadata")),
+            has_submit=isinstance(view.get("submit"), dict),
+            blocks=_blocks(view.get("blocks")),
+        ),
+    )
+
+
+@dataclass(frozen=True)
+class UploadAllocationRequest:
+    length: int | None
+
+
+def decode_upload_allocation(raw: dict[str, object]) -> UploadAllocationRequest:
+    length = raw.get("length")
+    return UploadAllocationRequest(
+        length=length
+        if isinstance(length, int) and not isinstance(length, bool) and length > 0
+        else None
+    )
+
+
+@dataclass(frozen=True)
+class UploadCompletionRequest:
+    file_ids: list[str | None]
+    channel_id: str | None
+    thread_ts: str | None
+    has_initial_comment: bool
+
+
+def decode_upload_completion(raw: dict[str, object]) -> UploadCompletionRequest:
+    return UploadCompletionRequest(
+        file_ids=[
+            _optional_string(item.get("id")) for item in _objects(raw.get("files"))
+        ],
+        channel_id=_optional_string(raw.get("channel_id")),
+        thread_ts=_optional_string(raw.get("thread_ts")),
+        has_initial_comment=_optional_string(raw.get("initial_comment")) is not None,
+    )
+
+
+@dataclass(frozen=True)
+class OAuthExchangeRequest:
+    code: str | None
+    client_id: str | None
+    client_secret: str | None
+    redirect_uri: str | None
+    pkce_present: bool
+
+
+@dataclass(frozen=True)
+class OAuthAuthorizeRequest:
+    """Validated single-valued SDK authorization query fields."""
+
+    client_id: str | None
+    redirect_uri: str | None
+    state: str | None
+    scope: str | None
+    response_type: str | None
+    pkce_present: bool
+
+
+def decode_oauth_authorize(query: dict[str, list[str]]) -> OAuthAuthorizeRequest:
+    """Project duplicate or absent query fields as invalid optional values."""
+    return OAuthAuthorizeRequest(
+        client_id=_query_one(query, "client_id"),
+        redirect_uri=_query_one(query, "redirect_uri"),
+        state=_query_one(query, "state"),
+        scope=_query_one(query, "scope"),
+        response_type=_query_one(query, "response_type"),
+        pkce_present=_query_one(query, "code_challenge") is not None,
+    )
+
+
+def decode_oauth_exchange(raw: dict[str, object]) -> OAuthExchangeRequest:
+    """Preserve empty credential strings so Basic fallback follows the SDK contract."""
+
+    def string(name: str) -> str | None:
+        value = raw.get(name)
+        return value if isinstance(value, str) else None
+
+    return OAuthExchangeRequest(
+        code=string("code"),
+        client_id=string("client_id"),
+        client_secret=string("client_secret"),
+        redirect_uri=string("redirect_uri"),
+        pkce_present=raw.get("code_verifier") is not None,
+    )
+
+
+@dataclass(frozen=True)
+class ControlHandoff:
+    """Declared private controls; field names track supplied egress keys."""
+
+    action_ids: list[str]
+    input_action_ids: list[str]
+    block_ids: list[str]
+    option_values: dict[str, list[str]]
+    option_labels: dict[str, dict[str, str]]
+    action_values: dict[str, str]
+    link_paths: list[str]
+    supplied_fields: frozenset[str]
+
+    def wire(self) -> dict[str, object]:
+        """Serialize private handoff only at the transient control egress."""
+        return {
+            key: value
+            for key, value in {
+                "action_ids": self.action_ids,
+                "input_action_ids": self.input_action_ids,
+                "block_ids": self.block_ids,
+                "option_values": self.option_values,
+                "option_labels": self.option_labels,
+                "action_values": self.action_values,
+                "link_paths": self.link_paths,
+            }.items()
+            if key in self.supplied_fields
+        }
+
+
+def decode_control_handoff(value: object) -> ControlHandoff:
+    if isinstance(value, ControlHandoff):
+        return value
+    raw = _control(
+        value,
+        {
+            "action_ids",
+            "input_action_ids",
+            "block_ids",
+            "option_values",
+            "option_labels",
+            "action_values",
+            "link_paths",
+        },
+    )
+
+    def strings(name: str) -> list[str]:
+        return _string_list(raw.get(name, []))
+
+    def string_map(value: object) -> dict[str, str]:
+        if not isinstance(value, dict) or not all(
+            isinstance(key, str) and isinstance(item, str)
+            for key, item in value.items()
+        ):
+            raise ValueError("Expected a private string map.")
+        return {
+            key: item
+            for key, item in value.items()
+            if isinstance(key, str) and isinstance(item, str)
+        }
+
+    options = raw.get("option_values", {})
+    if not isinstance(options, dict) or not all(
+        isinstance(key, str) for key in options
+    ):
+        raise ValueError("Expected a private option map.")
+    labels = raw.get("option_labels", {})
+    if not isinstance(labels, dict) or not all(isinstance(key, str) for key in labels):
+        raise ValueError("Expected a private label map.")
+    return ControlHandoff(
+        action_ids=strings("action_ids"),
+        input_action_ids=strings("input_action_ids"),
+        block_ids=strings("block_ids"),
+        option_values={key: _string_list(item) for key, item in options.items()},
+        option_labels={key: string_map(item) for key, item in labels.items()},
+        action_values=string_map(raw.get("action_values", {})),
+        link_paths=strings("link_paths"),
+        supplied_fields=frozenset(raw),
+    )
+
+
+@dataclass(frozen=True)
+class ActionHandoff:
+    action_id: str
+    block_id: str | None
+    value: str | None
+
+    def wire(self) -> dict[str, object]:
+        """Serialize transient action identities without visible message content."""
+        return {
+            key: value
+            for key, value in {
+                "action_id": self.action_id,
+                "block_id": self.block_id,
+                "value": self.value,
+            }.items()
+            if value is not None
+        }
+
+
+def decode_acknowledgement(raw: object) -> str | None:
+    """Validate the interpreted ACK identity; unrelated frames remain ignored."""
+    if not isinstance(raw, dict):
+        return None
+    value = raw.get("envelope_id")
+    return value if isinstance(value, str) else None
 
 
 class _UploadAllocation(NamedTuple):
@@ -96,84 +847,52 @@ class SlackOAuthState:
             self._handoff: dict[str, object] | None = None
             self._sequence = 0
 
-    def configure(self, payload: dict[str, object]) -> None:
+    def configure(self, payload: object) -> None:
         """Apply one bounded test-only OAuth configuration."""
-        allowed = {
-            "client_id",
-            "client_secret",
-            "redirect_uri",
-            "authorize_scenario",
-            "token_scenario",
-            "userinfo_scenario",
-            "delay_seconds",
-            "user_id",
-            "user_label",
-            "team_id",
-            "team_label",
-        }
-        if set(payload) - allowed:
-            raise ValueError("Unsupported Slack OAuth configuration field.")
+        config = decode_oauth_configuration(payload)
         with self.lock:
-            for name in (
-                "client_id",
-                "client_secret",
-                "redirect_uri",
-                "user_id",
-                "user_label",
-                "team_id",
-                "team_label",
-            ):
-                value = payload.get(name)
-                if value is not None:
-                    if not isinstance(value, str) or not value:
-                        raise ValueError(f"OAuth {name} must be a non-empty string.")
-                    setattr(self, name, value)
-            authorize_scenario = payload.get("authorize_scenario")
-            if authorize_scenario is not None:
-                if authorize_scenario not in {
-                    "success",
-                    "cancel",
-                    "provider_error",
-                    "delay",
-                    "malformed",
-                }:
-                    raise ValueError("Unsupported Slack OAuth authorize scenario.")
-                self.authorize_scenario = str(authorize_scenario)
-            for name in ("token_scenario", "userinfo_scenario"):
-                value = payload.get(name)
-                if value is not None:
-                    if value not in {"success", "rejected", "malformed"}:
-                        raise ValueError(f"Unsupported Slack OAuth {name}.")
-                    setattr(self, name, str(value))
-            delay_seconds = payload.get("delay_seconds")
-            if delay_seconds is not None:
-                if (
-                    not isinstance(delay_seconds, int)
-                    or isinstance(delay_seconds, bool)
-                    or not 0 <= delay_seconds <= 5
-                ):
-                    raise ValueError("OAuth delay_seconds must be from 0 to 5.")
-                self.delay_seconds = delay_seconds
+            if config.client_id is not None:
+                self.client_id = config.client_id
+            if config.client_secret is not None:
+                self.client_secret = config.client_secret
+            if config.redirect_uri is not None:
+                self.redirect_uri = config.redirect_uri
+            if config.user_id is not None:
+                self.user_id = config.user_id
+            if config.user_label is not None:
+                self.user_label = config.user_label
+            if config.team_id is not None:
+                self.team_id = config.team_id
+            if config.team_label is not None:
+                self.team_label = config.team_label
+            if config.authorize_scenario is not None:
+                self.authorize_scenario = config.authorize_scenario
+            if config.token_scenario is not None:
+                self.token_scenario = config.token_scenario
+            if config.userinfo_scenario is not None:
+                self.userinfo_scenario = config.userinfo_scenario
+            if config.delay_seconds is not None:
+                self.delay_seconds = config.delay_seconds
             self.requests = []
             self._codes = {}
             self._tokens = set()
             self._handoff = None
             self._sequence = 0
 
-    def authorize(self, query: dict[str, list[str]]) -> _OAuthResponse:
+    def authorize(self, query: OAuthAuthorizeRequest) -> _OAuthResponse:
         """Validate fixed Slack OpenID input and issue one callback."""
-        client_id = _query_one(query, "client_id")
-        redirect_uri = _query_one(query, "redirect_uri")
-        state = _query_one(query, "state")
+        client_id = query.client_id
+        redirect_uri = query.redirect_uri
+        state = query.state
         client_valid = client_id == self.client_id
         redirect_valid = redirect_uri == self.redirect_uri
-        scope_valid = _query_one(query, "scope") == "openid profile"
+        scope_valid = query.scope == "openid profile"
         valid = (
             client_valid
             and redirect_valid
             and scope_valid
-            and _query_one(query, "response_type") == "code"
-            and isinstance(state, str)
+            and query.response_type == "code"
+            and state is not None
             and bool(state)
         )
         if not valid:
@@ -184,7 +903,7 @@ class SlackOAuthState:
                 redirect_valid=redirect_valid,
                 scope_valid=scope_valid,
                 state_present=bool(state),
-                pkce_present=_query_one(query, "code_challenge") is not None,
+                pkce_present=query.pkce_present,
             )
             return _OAuthResponse(400, {"error": "invalid_request"}, None)
         scenario = self.authorize_scenario
@@ -234,20 +953,18 @@ class SlackOAuthState:
 
     def exchange(
         self,
-        body: dict[str, object],
+        body: OAuthExchangeRequest,
         authorization: str,
     ) -> _OAuthResponse:
         """Consume one authorization code and return one bearer token."""
-        code = body.get("code")
+        code = body.code
         client_id, client_secret = _oauth_client_credentials(body, authorization)
         client_valid = client_id == self.client_id
         secret_valid = client_secret == self.client_secret
-        redirect_valid = body.get("redirect_uri") == self.redirect_uri
+        redirect_valid = body.redirect_uri == self.redirect_uri
         with self.lock:
-            code_redirect = (
-                self._codes.pop(code, None) if isinstance(code, str) else None
-            )
-        code_valid = code_redirect == body.get("redirect_uri")
+            code_redirect = self._codes.pop(code, None) if code is not None else None
+        code_valid = code_redirect == body.redirect_uri
         valid = client_valid and secret_valid and redirect_valid and code_valid
         payload: dict[str, object]
         if not valid or self.token_scenario == "rejected":
@@ -272,9 +989,9 @@ class SlackOAuthState:
             client_valid=client_valid,
             secret_valid=secret_valid,
             redirect_valid=redirect_valid,
-            code_present=isinstance(code, str) and bool(code),
+            code_present=code is not None and bool(code),
             code_valid=code_valid,
-            pkce_present=body.get("code_verifier") is not None,
+            pkce_present=body.pkce_present,
         )
         return _OAuthResponse(200, payload, None)
 
@@ -350,31 +1067,6 @@ def _list(value: object) -> list[object]:
     return value
 
 
-def _mapping(value: object) -> dict[object, object]:
-    """Validate one provider mapping."""
-    if not isinstance(value, dict):
-        raise ValueError("Expected an object.")
-    return {key: item for key, item in value.items()}
-
-
-def _strings(value: object) -> list[str]:
-    """Validate one provider string list."""
-    values = _list(value)
-    if not all(isinstance(item, str) for item in values):
-        raise ValueError("Expected a list of strings.")
-    return [item for item in values if isinstance(item, str)]
-
-
-def _ints(value: object) -> list[int]:
-    """Validate one provider integer list."""
-    values = _list(value)
-    if not all(isinstance(item, int) and not isinstance(item, bool) for item in values):
-        raise ValueError("Expected a list of integers.")
-    return [
-        item for item in values if isinstance(item, int) and not isinstance(item, bool)
-    ]
-
-
 def _string(value: object) -> str:
     """Validate one provider string."""
     if not isinstance(value, str):
@@ -402,13 +1094,13 @@ class _OAuthClientCredentials(NamedTuple):
 
 
 def _oauth_client_credentials(
-    body: dict[str, object],
+    body: OAuthExchangeRequest,
     authorization: str,
 ) -> _OAuthClientCredentials:
     """Resolve form or Basic client credentials for Slack SDK exchange."""
-    client_id = body.get("client_id")
-    client_secret = body.get("client_secret")
-    if isinstance(client_id, str) and isinstance(client_secret, str):
+    client_id = body.client_id
+    client_secret = body.client_secret
+    if client_id is not None and client_secret is not None:
         return _OAuthClientCredentials(
             client_id=client_id,
             client_secret=client_secret,
@@ -491,19 +1183,17 @@ class FakeState:
                 "views.open": "available",
                 "views.update": "available",
             }
-            self.files: dict[str, dict[str, object]] = {}
-            self.uploads: dict[str, dict[str, object]] = {}
+            self.files: dict[str, ConfiguredFile] = {}
+            self.uploads: dict[str, UploadState] = {}
             self.history_pages: list[list[dict[str, object]]] = []
-            self.socket_sessions: list[dict[str, object]] = [
-                {"envelopes": [], "disconnect_reason": None}
-            ]
+            self.socket_sessions = [SocketSession(envelopes=[], disconnect_reason=None)]
             self.request_counts: dict[str, int] = {}
             self.requests: list[dict[str, object]] = []
             self.deliveries: list[dict[str, object]] = []
             self.presence: list[dict[str, object]] = []
             self.views: list[dict[str, object]] = []
             self._transient_views: dict[str, dict[str, object]] = {}
-            self._transient_actions: dict[str, dict[str, object]] = {}
+            self._transient_actions: dict[str, ActionHandoff] = {}
             self.socket_connections = 0
             self.socket_envelope_ids: list[str] = []
             self.socket_acknowledgements: list[str] = []
@@ -515,169 +1205,53 @@ class FakeState:
             self._operation_barrier_reached = threading.Event()
             self._operation_barrier_release = threading.Event()
 
-    def configure(self, payload: dict[str, object]) -> None:
-        """Apply one bounded deterministic provider scenario."""
-        allowed = {
-            "oauth",
-            "auth_scenario",
-            "membership_scenario",
-            "history_scenario",
-            "history_scenario_sequence",
-            "history_retry_after_seconds",
-            "permalink_scenario",
-            "provider_app_id",
-            "provider_team_id",
-            "provider_bot_user_id",
-            "granted_scopes",
-            "delivery_scenarios",
-            "delivery_scenario_sequences",
-            "presence_scenarios",
-            "file_scenarios",
-            "view_scenarios",
-            "files",
-            "history_pages",
-            "socket_sessions",
-        }
-        if set(payload) - allowed:
-            raise ValueError("Unsupported Slack fake configuration field.")
-        oauth = payload.get("oauth")
-        if oauth is not None:
-            self.oauth.configure(_object(oauth))
+    def configure(self, payload: object) -> None:
+        """Decode private controls once, then apply declared provider state."""
+        config = decode_fake_configuration(payload)
+        files = (
+            {item.id: item for item in config.files}
+            if config.files is not None
+            else None
+        )
+        if config.oauth is not None:
+            self.oauth.configure(config.oauth)
         with self.lock:
-            for name in (
-                "auth_scenario",
-                "membership_scenario",
-                "history_scenario",
-                "permalink_scenario",
-                "provider_app_id",
-                "provider_team_id",
-                "provider_bot_user_id",
-            ):
-                value = payload.get(name)
-                if value is None:
-                    continue
-                if not isinstance(value, str):
-                    raise ValueError(f"{name} must be a string.")
-                match name:
-                    case "auth_scenario":
-                        self.auth_scenario = value
-                    case "membership_scenario":
-                        self.membership_scenario = value
-                    case "history_scenario":
-                        self.history_scenario = value
-                    case "permalink_scenario":
-                        self.permalink_scenario = value
-                    case "provider_app_id":
-                        self.provider_app_id = value
-                    case "provider_team_id":
-                        self.provider_team_id = value
-                    case "provider_bot_user_id":
-                        self.provider_bot_user_id = value
-            granted_scopes = payload.get("granted_scopes")
-            if granted_scopes is not None:
-                if not isinstance(granted_scopes, list) or not all(
-                    isinstance(scope, str) for scope in _list(granted_scopes)
-                ):
-                    raise ValueError("granted_scopes must be a list of strings.")
-                self.granted_scopes = tuple(_strings(granted_scopes))
-            delivery_scenarios = payload.get("delivery_scenarios")
-            if delivery_scenarios is not None:
-                if not isinstance(delivery_scenarios, dict):
-                    raise ValueError("delivery_scenarios must be an object.")
-                self.delivery_scenarios = {
-                    str(key): str(value)
-                    for key, value in _mapping(delivery_scenarios).items()
-                }
-            delivery_scenario_sequences = payload.get("delivery_scenario_sequences")
-            if delivery_scenario_sequences is not None:
-                if not isinstance(delivery_scenario_sequences, dict):
-                    raise ValueError("delivery_scenario_sequences must be an object.")
-                sequences = _mapping(delivery_scenario_sequences)
-                typed_sequences: dict[str, list[str]] = {}
-                for key, value in sequences.items():
-                    if not isinstance(key, str) or not isinstance(value, list):
-                        raise ValueError(
-                            "delivery_scenario_sequences must contain string lists."
-                        )
-                    items = _list(value)
-                    if not items or not all(isinstance(item, str) for item in items):
-                        raise ValueError(
-                            "delivery_scenario_sequences must contain string lists."
-                        )
-                    typed_sequences[key] = [_string(item) for item in items]
-                self.delivery_scenario_sequences = typed_sequences
-            presence_scenarios = payload.get("presence_scenarios")
-            if presence_scenarios is not None:
-                if not isinstance(presence_scenarios, dict):
-                    raise ValueError("presence_scenarios must be an object.")
-                self.presence_scenarios = {
-                    str(key): str(value)
-                    for key, value in _mapping(presence_scenarios).items()
-                }
-            file_scenarios = payload.get("file_scenarios")
-            if file_scenarios is not None:
-                if not isinstance(file_scenarios, dict):
-                    raise ValueError("file_scenarios must be an object.")
-                self.file_scenarios = {
-                    str(key): str(value)
-                    for key, value in _mapping(file_scenarios).items()
-                }
-            view_scenarios = payload.get("view_scenarios")
-            if view_scenarios is not None:
-                if not isinstance(view_scenarios, dict):
-                    raise ValueError("view_scenarios must be an object.")
-                self.view_scenarios = {
-                    str(key): str(value)
-                    for key, value in _mapping(view_scenarios).items()
-                }
-            files = payload.get("files")
+            if config.auth_scenario is not None:
+                self.auth_scenario = config.auth_scenario
+            if config.membership_scenario is not None:
+                self.membership_scenario = config.membership_scenario
+            if config.history_scenario is not None:
+                self.history_scenario = config.history_scenario
+            if config.permalink_scenario is not None:
+                self.permalink_scenario = config.permalink_scenario
+            if config.provider_app_id is not None:
+                self.provider_app_id = config.provider_app_id
+            if config.provider_team_id is not None:
+                self.provider_team_id = config.provider_team_id
+            if config.provider_bot_user_id is not None:
+                self.provider_bot_user_id = config.provider_bot_user_id
+            if config.granted_scopes is not None:
+                self.granted_scopes = tuple(config.granted_scopes)
+            if config.delivery_scenarios is not None:
+                self.delivery_scenarios = config.delivery_scenarios
+            if config.delivery_scenario_sequences is not None:
+                self.delivery_scenario_sequences = config.delivery_scenario_sequences
+            if config.presence_scenarios is not None:
+                self.presence_scenarios = config.presence_scenarios
+            if config.file_scenarios is not None:
+                self.file_scenarios = config.file_scenarios
+            if config.view_scenarios is not None:
+                self.view_scenarios = config.view_scenarios
             if files is not None:
-                self.files = _configured_files(files)
-            history_pages = payload.get("history_pages")
-            if history_pages is not None:
-                self.history_pages = _object_pages(history_pages)
-            history_scenario_sequence = payload.get("history_scenario_sequence")
-            if history_scenario_sequence is not None:
-                if not isinstance(history_scenario_sequence, list):
-                    raise ValueError(
-                        "history_scenario_sequence must contain 1-10 strings."
-                    )
-                scenario_items = _list(history_scenario_sequence)
-                if (
-                    not scenario_items
-                    or len(scenario_items) > _MAX_SCENARIO_SEQUENCE_LENGTH
-                    or not all(isinstance(item, str) for item in scenario_items)
-                ):
-                    raise ValueError(
-                        "history_scenario_sequence must contain 1-10 strings."
-                    )
-                self.history_scenario_sequence = list(_strings(scenario_items))
-            retry_after_seconds = payload.get("history_retry_after_seconds")
-            if retry_after_seconds is not None:
-                if not isinstance(retry_after_seconds, list):
-                    raise ValueError(
-                        "history_retry_after_seconds must contain 1-10 integers "
-                        "from 1 to 300."
-                    )
-                retry_items = _list(retry_after_seconds)
-                if (
-                    not retry_items
-                    or len(retry_items) > _MAX_SCENARIO_SEQUENCE_LENGTH
-                    or not all(
-                        isinstance(item, int)
-                        and not isinstance(item, bool)
-                        and 0 < item <= _MAX_RETRY_AFTER_SECONDS
-                        for item in retry_items
-                    )
-                ):
-                    raise ValueError(
-                        "history_retry_after_seconds must contain 1-10 integers "
-                        "from 1 to 300."
-                    )
-                self.history_retry_after_seconds = list(_ints(retry_items))
-            socket_sessions = payload.get("socket_sessions")
-            if socket_sessions is not None:
-                self.socket_sessions = _socket_sessions(socket_sessions)
+                self.files = files
+            if config.history_pages is not None:
+                self.history_pages = config.history_pages
+            if config.history_scenario_sequence is not None:
+                self.history_scenario_sequence = config.history_scenario_sequence
+            if config.history_retry_after_seconds is not None:
+                self.history_retry_after_seconds = config.history_retry_after_seconds
+            if config.socket_sessions is not None:
+                self.socket_sessions = config.socket_sessions
             self.request_counts = {}
             self.requests = []
             self.deliveries = []
@@ -728,22 +1302,12 @@ class FakeState:
                 return self.history_retry_after_seconds.pop(0)
             return 1
 
-    def configure_operation_barrier(self, payload: Mapping[str, object]) -> None:
-        """Arm one exact provider operation barrier."""
-        operation = payload.get("operation")
-        occurrence = payload.get("occurrence")
-        if (
-            operation not in _BARRIER_OPERATIONS
-            or not isinstance(occurrence, int)
-            or isinstance(occurrence, bool)
-            or occurrence < 1
-        ):
-            raise ValueError(
-                "Barrier requires a supported Slack operation and positive occurrence."
-            )
+    def configure_operation_barrier(self, payload: object) -> None:
+        """Decode and arm one exact provider operation barrier."""
+        barrier = decode_operation_barrier(payload)
         with self.lock:
-            self._operation_barrier_operation = _string(operation)
-            self._operation_barrier_occurrence = occurrence
+            self._operation_barrier_operation = barrier.operation
+            self._operation_barrier_occurrence = barrier.occurrence
             self._operation_barrier_reached.clear()
             self._operation_barrier_release.clear()
 
@@ -792,11 +1356,12 @@ class FakeState:
             self._upload_sequence += 1
             file_id = f"F-UPLOAD-{self._upload_sequence}"
             upload_path = f"/upload/{file_id}"
-            self.uploads[file_id] = {
-                "expected_length": expected_length,
-                "received_length": None,
-                "uploaded": False,
-            }
+            self.uploads[file_id] = UploadState(
+                expected_length=expected_length,
+                received_length=None,
+                uploaded=False,
+                content_sha256=None,
+            )
             return _UploadAllocation(file_id, upload_path)
 
     def record_upload(
@@ -811,11 +1376,10 @@ class FakeState:
             upload = self.uploads.get(file_id)
             if upload is None:
                 return False
-            expected_length = upload.get("expected_length")
-            matched = expected_length == received_length
-            upload["received_length"] = received_length
-            upload["content_sha256"] = content_sha256
-            upload["uploaded"] = matched
+            matched = upload.expected_length == received_length
+            upload.received_length = received_length
+            upload.content_sha256 = content_sha256
+            upload.uploaded = matched
             return matched
 
     def record_view(
@@ -827,9 +1391,10 @@ class FakeState:
         private_metadata: str | None,
         route_ids: list[str],
         has_submit: bool,
-        control_handoff: dict[str, object],
+        control_handoff: ControlHandoff | dict[str, object],
     ) -> _RecordedView:
         """Record bounded view evidence without persisting signed metadata."""
+        controls = decode_control_handoff(control_handoff)
         with self.lock:
             self._view_sequence += 1
             view_id = requested_view_id or f"V-E2E-{self._view_sequence}"
@@ -843,23 +1408,10 @@ class FakeState:
                 "outcome": "delivered",
             }
             if control_scope == "model":
-                action_ids = control_handoff.get("action_ids")
-                input_action_ids = control_handoff.get("input_action_ids")
-                option_values = control_handoff.get("option_values")
-                evidence["control_count"] = (
-                    len(action_ids) if isinstance(action_ids, list) else 0
-                )
-                evidence["input_count"] = (
-                    len(input_action_ids) if isinstance(input_action_ids, list) else 0
-                )
-                evidence["option_count"] = (
-                    sum(
-                        len(values)
-                        for values in option_values.values()
-                        if isinstance(values, list)
-                    )
-                    if isinstance(option_values, dict)
-                    else 0
+                evidence["control_count"] = len(controls.action_ids)
+                evidence["input_count"] = len(controls.input_action_ids)
+                evidence["option_count"] = sum(
+                    len(values) for values in controls.option_values.values()
                 )
             self.views.append(evidence)
             self._transient_views[control_scope] = {
@@ -867,7 +1419,7 @@ class FakeState:
                 "view_hash": view_hash,
                 "private_metadata": private_metadata,
                 "route_ids": route_ids,
-                **control_handoff,
+                **controls.wire(),
             }
             return _RecordedView(view_id, view_hash)
 
@@ -879,20 +1431,18 @@ class FakeState:
 
     def record_transient_actions(
         self,
-        actions: list[dict[str, object]],
+        actions: list[ActionHandoff],
     ) -> None:
         """Retain signed Block Kit action values only in transient test state."""
         with self.lock:
             for action in actions:
-                action_id = action.get("action_id")
-                if isinstance(action_id, str):
-                    self._transient_actions[action_id] = dict(action)
+                self._transient_actions[action.action_id] = action
 
     def transient_action(self, action_id: str) -> dict[str, object] | None:
         """Return one signed action handoff without adding it to evidence."""
         with self.lock:
             action = self._transient_actions.get(action_id)
-            return dict(action) if action is not None else None
+            return action.wire() if action is not None else None
 
     def completed_uploads(
         self,
@@ -903,10 +1453,10 @@ class FakeState:
             total_bytes = 0
             for file_id in file_ids:
                 upload = self.uploads.get(file_id)
-                if upload is None or upload.get("uploaded") is not True:
+                if upload is None or not upload.uploaded:
                     return _CompletedUploads(False, 0)
-                received_length = upload.get("received_length")
-                if not isinstance(received_length, int):
+                received_length = upload.received_length
+                if received_length is None:
                     return _CompletedUploads(False, 0)
                 total_bytes += received_length
             return _CompletedUploads(True, total_bytes)
@@ -964,7 +1514,9 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         if parsed.path == "/oauth/authorize":
             self._oauth_response(
                 self.state.oauth.authorize(
-                    parse_qs(parsed.query, keep_blank_values=True)
+                    decode_oauth_authorize(
+                        parse_qs(parsed.query, keep_blank_values=True)
+                    )
                 )
             )
             return
@@ -1048,7 +1600,7 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         if parsed_path.path == "/api/openid.connect.token":
             self._oauth_response(
                 self.state.oauth.exchange(
-                    self._json_body(),
+                    decode_oauth_exchange(self._json_body()),
                     self.headers.get("Authorization", ""),
                 )
             )
@@ -1065,7 +1617,7 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         self.state.record_request(
             operation,
             method="POST",
-            metadata=_body_metadata(body),
+            metadata=decode_metadata(body).evidence(),
         )
         if not self.state.wait_for_operation_barrier(operation):
             self._close_connection()
@@ -1077,22 +1629,22 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             self._connections_open()
             return
         if operation in {"chat.postMessage", "chat.update", "chat.delete"}:
-            self._delivery(operation, body)
+            self._delivery(operation, decode_message(body))
             return
         if operation in {
             "assistant.threads.setStatus",
             "agents.sessions.setStatus",
         }:
-            self._presence(operation, body)
+            self._presence(operation, decode_presence(body))
             return
         if operation in {"views.open", "views.update"}:
-            self._view_mutation(operation, body)
+            self._view_mutation(operation, decode_view(body))
             return
         if operation == "files.getUploadURLExternal":
-            self._get_upload_url(body)
+            self._get_upload_url(decode_upload_allocation(body))
             return
         if operation == "files.completeUploadExternal":
-            self._complete_upload(body)
+            self._complete_upload(decode_upload_completion(body))
             return
         self._json_response(404, {"ok": False, "error": "not_found"})
 
@@ -1144,7 +1696,7 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
     def _view_mutation(
         self,
         operation: str,
-        body: dict[str, object],
+        body: ViewRequest,
     ) -> None:
         """Capture bounded selector state without retaining triggers or visible text."""
         with self.state.lock:
@@ -1157,19 +1709,18 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             return
         if self._common_failure(scenario):
             return
-        view = body.get("view")
-        typed_view = _object(view) if isinstance(view, dict) else {}
+        typed_view = body.view
         route_ids = _selector_route_ids(typed_view)
         control_handoff = _view_control_handoff(typed_view)
-        callback_id = _optional_string(typed_view, "callback_id")
-        private_metadata = _optional_string(typed_view, "private_metadata")
+        callback_id = typed_view.callback_id
+        private_metadata = typed_view.private_metadata
         view_id, view_hash = self.state.record_view(
             operation=operation,
-            requested_view_id=_optional_string(body, "view_id"),
+            requested_view_id=body.view_id,
             callback_id=callback_id,
             private_metadata=private_metadata,
             route_ids=route_ids,
-            has_submit=isinstance(typed_view.get("submit"), dict),
+            has_submit=typed_view.has_submit,
             control_handoff=control_handoff,
         )
         self._json_response(
@@ -1289,11 +1840,10 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         provider_file_id = query.get("file", [""])[0]
         with self.state.lock:
             configured = self.state.files.get(provider_file_id)
-            metadata = dict(configured) if configured is not None else None
+            metadata = dict(configured.metadata) if configured is not None else None
         if metadata is None:
             self._json_response(200, {"ok": False, "error": "file_not_found"})
             return
-        metadata.pop("_content", None)
         host = self.headers.get("Host") or f"slack-fake:{_HTTP_PORT}"
         metadata["url_private_download"] = f"http://{host}/files/{provider_file_id}"
         if scenario == "malformed":
@@ -1330,8 +1880,8 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             return
         with self.state.lock:
             configured = self.state.files.get(provider_file_id)
-            content = configured.get("_content") if configured is not None else None
-        if not isinstance(content, bytes):
+            content = configured.content if configured is not None else None
+        if content is None:
             self._json_response(404, {"ok": False, "error": "file_not_found"})
             return
         declared_length = len(content)
@@ -1343,15 +1893,15 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             headers={"Content-Length": str(declared_length)},
         )
 
-    def _get_upload_url(self, body: dict[str, object]) -> None:
+    def _get_upload_url(self, body: UploadAllocationRequest) -> None:
         scenario = self.state.file_scenarios.get(
             "files.getUploadURLExternal",
             "available",
         )
         if self._file_failure(scenario):
             return
-        length = body.get("length")
-        if isinstance(length, bool) or not isinstance(length, int) or length <= 0:
+        length = body.length
+        if length is None:
             self._json_response(200, {"ok": False, "error": "invalid_arguments"})
             return
         file_id, upload_path = self.state.next_upload(expected_length=length)
@@ -1401,7 +1951,7 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             return
         self._bytes_response(200, b"OK")
 
-    def _complete_upload(self, body: dict[str, object]) -> None:
+    def _complete_upload(self, body: UploadCompletionRequest) -> None:
         scenario = self.state.file_scenarios.get(
             "files.completeUploadExternal",
             "available",
@@ -1414,11 +1964,9 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             return
         if self._file_failure(scenario):
             return
-        files = _object_list_or_empty(body.get("files"))
         file_ids: list[str] = []
-        for item in files:
-            file_id = item.get("id")
-            if not isinstance(file_id, str) or not file_id:
+        for file_id in body.file_ids:
+            if file_id is None:
                 self._json_response(
                     200,
                     {"ok": False, "error": "file_not_found"},
@@ -1426,25 +1974,24 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
                 return
             file_ids.append(file_id)
         completed, total_bytes = self.state.completed_uploads(file_ids)
-        if not files or not completed:
+        if not file_ids or not completed:
             self._json_response(200, {"ok": False, "error": "file_not_found"})
             return
         delivery: dict[str, object] = {
             "operation": "files.completeUploadExternal",
-            "channel": _optional_string(body, "channel_id"),
-            "thread_ts": _optional_string(body, "thread_ts"),
+            "channel": body.channel_id,
+            "thread_ts": body.thread_ts,
             "file_ids": file_ids,
             "file_count": len(file_ids),
             "total_bytes": total_bytes,
-            "has_initial_comment": _optional_string(body, "initial_comment")
-            is not None,
+            "has_initial_comment": body.has_initial_comment,
             "outcome": "delivered",
         }
         with self.state.lock:
             self.state.deliveries.append(delivery)
         self._json_response(200, {"ok": True, "files": []})
 
-    def _delivery(self, operation: str, body: dict[str, object]) -> None:
+    def _delivery(self, operation: str, body: MessageRequest) -> None:
         with self.state.lock:
             sequence = self.state.delivery_scenario_sequences.get(operation)
             if sequence:
@@ -1466,14 +2013,14 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             return
         if self._common_failure(scenario):
             return
-        timestamp = _optional_string(body, "ts") or self.state.next_message_timestamp()
+        timestamp = body.ts or self.state.next_message_timestamp()
         approval_request_id = _approval_request_id(body)
         action_ids, selector_admission_id = _selector_control_evidence(body)
         self.state.record_transient_actions(_block_action_handoffs(body))
         delivery: dict[str, object] = {
             "operation": operation,
-            "channel": _optional_string(body, "channel"),
-            "thread_ts": _optional_string(body, "thread_ts"),
+            "channel": body.channel,
+            "thread_ts": body.thread_ts,
             "message_ts": timestamp,
             "outcome": "delivered",
             "approval_request_id": approval_request_id,
@@ -1490,23 +2037,14 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             delivery["action_ids"] = action_ids
         if selector_admission_id is not None:
             delivery["selector_admission_id"] = selector_admission_id
-        blocks = body.get("blocks")
-        typed_blocks = _list(blocks) if isinstance(blocks, list) else []
-        if (
-            operation == "chat.update"
-            and isinstance(blocks, list)
-            and any(
-                isinstance(block, dict) and _object(block).get("type") == "plan"
-                for block in typed_blocks
-            )
-        ):
-            delivery["text"] = _optional_string(body, "text")
-            delivery["blocks"] = blocks
+        if operation == "chat.update" and body.has_plan:
+            delivery["text"] = body.text
+            delivery["blocks"] = body.blocks_wire
         with self.state.lock:
             self.state.deliveries.append(delivery)
         self._json_response(200, {"ok": True, "ts": timestamp})
 
-    def _presence(self, operation: str, body: dict[str, object]) -> None:
+    def _presence(self, operation: str, body: PresenceRequest) -> None:
         """Record sanitized Slack Work status without retaining titles or users."""
         with self.state.lock:
             scenario = self.state.presence_scenarios.get(operation, "delivered")
@@ -1518,13 +2056,13 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             return
         if self._common_failure(scenario):
             return
-        status = _optional_string(body, "status")
+        status = body.status
         evidence: dict[str, object] = {
             "operation": operation,
-            "channel": _optional_string(body, "channel_id"),
-            "thread_ts": _optional_string(body, "thread_ts"),
+            "channel": body.channel_id,
+            "thread_ts": body.thread_ts,
             "desired_state": ("idle" if status in {"", "active"} else "processing"),
-            "has_initiator": _optional_string(body, "initiator_user_id") is not None,
+            "has_initiator": body.initiator_user_id is not None,
             "outcome": "delivered",
         }
         with self.state.lock:
@@ -1675,18 +2213,17 @@ class SlackWebSocketHandler(socketserver.BaseRequestHandler):
             )
             self.state.socket_connections += 1
             session = self.state.socket_sessions[session_index]
-            envelopes = _object_list(session.get("envelopes"))
-            disconnect_reason = session.get("disconnect_reason")
-            assert disconnect_reason is None or isinstance(disconnect_reason, str)
+            envelopes = session.envelopes
+            disconnect_reason = session.disconnect_reason
         _send_websocket_text(request, json.dumps({"type": "hello"}))
         for envelope in envelopes:
-            envelope_id = envelope.get("envelope_id")
-            if isinstance(envelope_id, str):
+            envelope_id = envelope.envelope_id
+            if envelope_id is not None:
                 with self.state.lock:
                     self.state.socket_envelope_ids.append(envelope_id)
             _send_websocket_text(
                 request,
-                json.dumps(envelope, separators=(",", ":")),
+                json.dumps(envelope.wire, separators=(",", ":")),
             )
             acknowledged_id = _receive_websocket_acknowledgement(request)
             if acknowledged_id is None:
@@ -1724,47 +2261,6 @@ class ThreadingSocketServer(socketserver.ThreadingTCPServer):
     daemon_threads = True
 
 
-def _object_list(value: object) -> list[dict[str, object]]:
-    if not isinstance(value, list):
-        raise ValueError("Expected a list of objects.")
-    result: list[dict[str, object]] = []
-    for item in _list(value):
-        if not isinstance(item, dict):
-            raise ValueError("Expected a list of objects.")
-        result.append(_object(item))
-    return result
-
-
-def _object_list_or_empty(value: object) -> list[dict[str, object]]:
-    """Return structured objects when a provider payload has the expected shape."""
-    try:
-        return _object_list(value)
-    except ValueError:
-        return []
-
-
-def _socket_sessions(value: object) -> list[dict[str, object]]:
-    """Validate bounded per-connection Socket Mode fake behavior."""
-    sessions = _object_list(value)
-    if not sessions:
-        raise ValueError("socket_sessions must contain at least one session.")
-    result: list[dict[str, object]] = []
-    for session in sessions:
-        if set(session) - {"envelopes", "disconnect_reason"}:
-            raise ValueError("Unsupported Socket Mode session field.")
-        envelopes = _object_list(session.get("envelopes"))
-        disconnect_reason = session.get("disconnect_reason")
-        if disconnect_reason is not None and not isinstance(disconnect_reason, str):
-            raise ValueError("Socket Mode disconnect reason must be a string.")
-        result.append(
-            {
-                "envelopes": envelopes,
-                "disconnect_reason": disconnect_reason,
-            }
-        )
-    return result
-
-
 def _form_value(key: str, values: list[str]) -> object:
     """Restore typed Slack form fields while preserving identifiers as strings."""
     if len(values) != 1:
@@ -1786,94 +2282,35 @@ def _form_value(key: str, values: list[str]) -> object:
         return value
 
 
-def _object_pages(value: object) -> list[list[dict[str, object]]]:
-    if not isinstance(value, list):
-        raise ValueError("history_pages must be a list.")
-    return [_object_list(page) for page in _list(value)]
-
-
-def _configured_files(value: object) -> dict[str, dict[str, object]]:
-    """Parse bounded fake file metadata and keep content outside evidence."""
-    allowed = {
-        "id",
-        "name",
-        "title",
-        "mimetype",
-        "size",
-        "mode",
-        "external_type",
-        "file_access",
-        "is_external",
-        "deleted",
-        "content_base64",
-    }
-    files: dict[str, dict[str, object]] = {}
-    for item in _object_list(value):
-        if set(item) - allowed:
-            raise ValueError("Unsupported configured Slack file field.")
-        provider_file_id = item.get("id")
-        if not isinstance(provider_file_id, str) or not provider_file_id:
-            raise ValueError("Configured Slack files require an ID.")
-        encoded_content = item.get("content_base64")
-        if not isinstance(encoded_content, str):
-            raise ValueError("Configured Slack files require base64 content.")
-        try:
-            content = base64.b64decode(encoded_content, validate=True)
-        except ValueError as error:
-            raise ValueError("Configured Slack file content is invalid.") from error
-        if len(content) > _MAX_CONFIGURED_FILE_BYTES:
-            raise ValueError("Configured Slack file content is too large.")
-        metadata: dict[str, object] = {
-            key: field for key, field in item.items() if key != "content_base64"
-        }
-        metadata.setdefault("size", len(content))
-        metadata["_content"] = content
-        files[provider_file_id] = metadata
-    return files
-
-
-def _optional_string(payload: dict[str, object], key: str) -> str | None:
-    value = payload.get(key)
-    return value if isinstance(value, str) and value else None
-
-
-def _approval_request_id(payload: dict[str, object]) -> str | None:
-    """Return the access-request ID from visible fallback text or Block Kit URLs."""
-    values = [_optional_string(payload, "text")]
-    for block in _object_list_or_empty(payload.get("blocks")):
-        for element in _object_list_or_empty(block.get("elements")):
-            url = element.get("url")
-            if isinstance(url, str):
-                values.append(url)
+def _approval_request_id(payload: MessageRequest) -> str | None:
+    """Read approval identity from typed visible text and Block Kit URLs."""
+    values = [payload.text]
+    values.extend(element.url for block in payload.blocks for element in block.elements)
     for value in values:
-        if value is None:
-            continue
-        match = _APPROVAL_PATH.search(value)
-        if match is not None:
+        if value is not None and (match := _APPROVAL_PATH.search(value)) is not None:
             return match.group(1)
     return None
 
 
-def _selector_control_evidence(
-    payload: dict[str, object],
-) -> _SelectorControlEvidence:
-    """Return selector action IDs and its opaque admission without visible copy."""
+def _selector_control_evidence(payload: MessageRequest) -> _SelectorControlEvidence:
+    """Return action IDs and opaque selector admission without visible copy."""
     action_ids: list[str] = []
     selector_admission_id: str | None = None
-    for block in _object_list_or_empty(payload.get("blocks")):
-        for element in _object_list_or_empty(block.get("elements")):
-            action_id = element.get("action_id")
-            if not isinstance(action_id, str) or not action_id:
+    for block in payload.blocks:
+        for element in block.elements:
+            if element.action_id is None:
                 continue
-            action_ids.append(action_id)
-            if action_id == "azents_agent_selector_open":
-                value = element.get("value")
-                if isinstance(value, str) and value:
-                    selector_admission_id = value
+            action_ids.append(element.action_id)
+            if (
+                element.action_id == "azents_agent_selector_open"
+                and element.value is not None
+            ):
+                selector_admission_id = element.value
     return _SelectorControlEvidence(action_ids, selector_admission_id)
 
 
 def _query_metadata(query: dict[str, list[str]]) -> dict[str, object]:
+    """Project only privacy-safe query fields parsed by the HTTP ingress."""
     return {
         key: values[0]
         for key, values in query.items()
@@ -1882,49 +2319,29 @@ def _query_metadata(query: dict[str, list[str]]) -> dict[str, object]:
     }
 
 
-def _body_metadata(body: dict[str, object]) -> dict[str, object]:
-    metadata: dict[str, object] = {
-        key: value
-        for key, value in body.items()
-        if key in {"channel", "channel_id", "thread_ts", "ts"}
-        and isinstance(value, str)
-    }
-    length = body.get("length")
-    if isinstance(length, int) and not isinstance(length, bool):
-        metadata["length"] = length
-    files = body.get("files")
-    if isinstance(files, list):
-        metadata["file_count"] = len(_list(files))
-    return metadata
-
-
-def _session_path(body: dict[str, object]) -> str | None:
-    """Extract only the relative Azents Session route from one control payload."""
-    for block in _object_list_or_empty(body.get("blocks")):
-        for element in _object_list_or_empty(block.get("elements")):
-            if element.get("action_id") != "view_azents_session":
+def _session_path(body: MessageRequest) -> str | None:
+    """Extract only the relative Azents Session route from a typed control."""
+    for block in body.blocks:
+        for element in block.elements:
+            if element.action_id != "view_azents_session":
                 continue
-            url = element.get("url")
-            if not isinstance(url, str):
+            if element.url is None:
                 return None
-            parsed = urlparse(url)
+            parsed = urlparse(element.url)
             if parsed.scheme not in {"http", "https"} or not parsed.netloc:
                 return None
             return parsed.path if parsed.path.startswith("/w/") else None
     return None
 
 
-def _session_presence_state(body: dict[str, object]) -> str | None:
-    """Classify Session presence without retaining Agent-authored display text."""
+def _session_presence_state(body: MessageRequest) -> str | None:
+    """Classify presence without retaining Agent-authored display text."""
     if _session_path(body) is None:
         return None
-    for block in _object_list_or_empty(body.get("blocks")):
-        text = block.get("text")
-        if not isinstance(text, dict):
+    for block in body.blocks:
+        if block.text is None or block.text.text is None:
             continue
-        rendered = _object(text).get("text")
-        if not isinstance(rendered, str):
-            continue
+        rendered = block.text.text
         if rendered.endswith(" joined this conversation."):
             return "joined"
         if rendered.endswith(" left this conversation."):
@@ -1932,23 +2349,19 @@ def _session_presence_state(body: dict[str, object]) -> str | None:
     return None
 
 
-def _selector_route_ids(view: dict[str, object]) -> list[str]:
-    """Extract only bounded selector option identities from one modal payload."""
-    route_ids: list[str] = []
-    for block in _object_list_or_empty(view.get("blocks")):
-        element = block.get("element")
-        if not isinstance(element, dict):
-            continue
-        options = _object(element).get("options")
-        for option in _object_list_or_empty(options):
-            value = option.get("value")
-            if isinstance(value, str) and value:
-                route_ids.append(value)
-    return route_ids
+def _selector_route_ids(view: ViewObservation) -> list[str]:
+    """Extract selector option identities from decoded modal controls."""
+    return [
+        option.value
+        for block in view.blocks
+        if block.element is not None
+        for option in block.element.options
+        if option.value is not None
+    ]
 
 
 def _view_control_scope(callback_id: str | None) -> str:
-    """Classify a supported Slack modal without retaining callback metadata."""
+    """Classify supported modal scope without retaining callback metadata."""
     if callback_id == "azents_agent_selector":
         return "selector"
     if callback_id == "azents_conversation_setup":
@@ -1960,8 +2373,8 @@ def _view_control_scope(callback_id: str | None) -> str:
     return "unknown"
 
 
-def _view_control_handoff(view: dict[str, object]) -> dict[str, object]:
-    """Extract opaque Slack control identities for the next signed callback."""
+def _view_control_handoff(view: ViewObservation) -> ControlHandoff:
+    """Extract opaque control identities for the next signed callback."""
     action_ids: list[str] = []
     input_action_ids: list[str] = []
     block_ids: list[str] = []
@@ -1969,93 +2382,75 @@ def _view_control_handoff(view: dict[str, object]) -> dict[str, object]:
     option_labels: dict[str, dict[str, str]] = {}
     action_values: dict[str, str] = {}
     link_paths: list[str] = []
-    for block in _object_list_or_empty(view.get("blocks")):
-        block_id = block.get("block_id")
-        if isinstance(block_id, str) and block_id:
-            block_ids.append(block_id)
-        raw_elements: list[dict[str, object]] = []
-        element = block.get("element")
-        if isinstance(element, dict):
-            raw_elements.append(_object(element))
-        accessory = block.get("accessory")
-        if isinstance(accessory, dict):
-            raw_elements.append(_object(accessory))
-        raw_elements.extend(_object_list_or_empty(block.get("elements")))
-        for raw_element in raw_elements:
-            url = raw_element.get("url")
-            if isinstance(url, str):
-                parsed = urlparse(url)
+    for block in view.blocks:
+        if block.block_id is not None:
+            block_ids.append(block.block_id)
+        elements = [block.element] if block.element is not None else []
+        elements.extend([block.accessory] if block.accessory is not None else [])
+        elements.extend(block.elements)
+        for element in elements:
+            if element.url is not None:
+                parsed = urlparse(element.url)
                 if parsed.scheme in {"http", "https"} and parsed.netloc:
                     link_paths.append(parsed.path)
-            action_id = raw_element.get("action_id")
-            if not isinstance(action_id, str) or not action_id:
+            action_id = element.action_id
+            if action_id is None:
                 continue
             action_ids.append(action_id)
-            if raw_element.get("type") == "plain_text_input":
+            if element.type == "plain_text_input":
                 input_action_ids.append(action_id)
-            value = raw_element.get("value")
-            if isinstance(value, str) and value:
-                action_values[action_id] = value
+            if element.value is not None:
+                action_values[action_id] = element.value
             values = [
-                option.get("value")
-                for option in _object_list_or_empty(raw_element.get("options"))
-                if isinstance(option.get("value"), str) and option.get("value")
+                option.value for option in element.options if option.value is not None
             ]
-            labels: dict[str, str] = {}
-            for option in _object_list_or_empty(raw_element.get("options")):
-                option_value = option.get("value")
-                text = option.get("text")
-                if (
-                    isinstance(option_value, str)
-                    and option_value
-                    and isinstance(text, dict)
-                ):
-                    label = _object(text).get("text")
-                    if isinstance(label, str) and label:
-                        labels[option_value] = label
-            initial_option = raw_element.get("initial_option")
-            if isinstance(initial_option, dict):
-                initial_value = _object(initial_option).get("value")
-                if (
-                    isinstance(initial_value, str)
-                    and initial_value
-                    and initial_value not in values
-                ):
-                    values.append(initial_value)
+            labels = {
+                option.value: option.text.text
+                for option in element.options
+                if option.value is not None
+                and option.text is not None
+                and option.text.text
+            }
+            if element.initial_option is not None:
+                initial = element.initial_option.value
+                if initial is not None and initial not in values:
+                    values.append(initial)
             if values:
-                option_values[action_id] = [
-                    option for option in values if isinstance(option, str)
-                ]
+                option_values[action_id] = values
             if labels:
                 option_labels[action_id] = labels
-    return {
-        "action_ids": action_ids,
-        "input_action_ids": input_action_ids,
-        "block_ids": block_ids,
-        "option_values": option_values,
-        "option_labels": option_labels,
-        "action_values": action_values,
-        "link_paths": link_paths,
-    }
+    return ControlHandoff(
+        action_ids=action_ids,
+        input_action_ids=input_action_ids,
+        block_ids=block_ids,
+        option_values=option_values,
+        option_labels=option_labels,
+        action_values=action_values,
+        link_paths=link_paths,
+        supplied_fields=frozenset(
+            {
+                "action_ids",
+                "input_action_ids",
+                "block_ids",
+                "option_values",
+                "option_labels",
+                "action_values",
+                "link_paths",
+            }
+        ),
+    )
 
 
-def _block_action_handoffs(payload: dict[str, object]) -> list[dict[str, object]]:
-    """Extract signed action values transiently without visible Block Kit copy."""
-    handoffs: list[dict[str, object]] = []
-    for block in _object_list_or_empty(payload.get("blocks")):
-        block_id = block.get("block_id")
-        for element in _object_list_or_empty(block.get("elements")):
-            action_id = element.get("action_id")
-            if not isinstance(action_id, str) or not action_id:
-                continue
-            handoff: dict[str, object] = {"action_id": action_id}
-            if isinstance(block_id, str) and block_id:
-                handoff["block_id"] = block_id
-            value = element.get("value")
-            if isinstance(value, str) and value:
-                handoff["value"] = value
-            handoffs.append(handoff)
-    return handoffs
+def _block_action_handoffs(payload: MessageRequest) -> list[ActionHandoff]:
+    """Retain signed action values transiently, without visible Block Kit copy."""
+    return [
+        ActionHandoff(
+            action_id=element.action_id, block_id=block.block_id, value=element.value
+        )
+        for block in payload.blocks
+        for element in block.elements
+        if element.action_id is not None
+    ]
 
 
 def _read_http_headers(connection: socket.socket) -> dict[str, str]:
@@ -2139,10 +2534,8 @@ def _receive_websocket_acknowledgement(connection: socket.socket) -> str | None:
                 payload: object = json.loads(acknowledgement)
             except json.JSONDecodeError:
                 continue
-            if not isinstance(payload, dict):
-                continue
-            acknowledged_id = _object(payload).get("envelope_id")
-            if isinstance(acknowledged_id, str):
+            acknowledged_id = decode_acknowledgement(payload)
+            if acknowledged_id is not None:
                 return acknowledged_id
     finally:
         connection.settimeout(previous_timeout)

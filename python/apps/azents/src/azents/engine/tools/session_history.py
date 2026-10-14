@@ -45,6 +45,8 @@ _TOOL_NAME_LIMIT = 160
 class SearchSessionsInput(BaseModel):
     """Find permitted Sessions or matching messages in one Session."""
 
+    model_config = ConfigDict(extra="forbid")
+
     query: str | None = Field(
         default=None,
         max_length=160,
@@ -71,6 +73,8 @@ class SearchSessionsInput(BaseModel):
 class ReadSessionHistoryInput(BaseModel):
     """Read one bounded page of visible events."""
 
+    model_config = ConfigDict(extra="forbid")
+
     session_id: str = Field(min_length=32, max_length=32)
     before: str | None = Field(default=None, min_length=32, max_length=32)
     after: str | None = Field(default=None, min_length=32, max_length=32)
@@ -92,6 +96,8 @@ class ReadSessionHistoryInput(BaseModel):
 
 class ReadSessionToolResultInput(BaseModel):
     """Read one selected tool result's text in bounded chunks."""
+
+    model_config = ConfigDict(extra="forbid")
 
     session_id: str = Field(min_length=32, max_length=32)
     event_id: str = Field(min_length=32, max_length=32)

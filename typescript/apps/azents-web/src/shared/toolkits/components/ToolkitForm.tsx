@@ -30,8 +30,6 @@ import { AwsConfigFieldsContainer } from "../AwsConfigFieldsContainer";
 import { BraveSearchConfigFieldsContainer } from "../BraveSearchConfigFieldsContainer";
 import { EnvVarConfigFieldsContainer } from "../EnvVarConfigFieldsContainer";
 import { GcpConfigFieldsContainer } from "../GcpConfigFieldsContainer";
-import { gitHubUserRegistrationDirty } from "../github-user-credentials";
-import { isGitHubUserMode } from "../github-user-oauth-state";
 import { GithubConfigFieldsContainer } from "../GithubConfigFieldsContainer";
 import { GitHubUserAuthorizationContainer } from "../GitHubUserAuthorizationContainer";
 import { GitHubWizardContainer } from "../GitHubWizardContainer";
@@ -42,6 +40,7 @@ import { McpConfigFieldsContainer } from "../McpConfigFieldsContainer";
 import { NotionConfigFieldsContainer } from "../NotionConfigFieldsContainer";
 import { SentryConfigFieldsContainer } from "../SentryConfigFieldsContainer";
 import { ShellConfigFields } from "./ShellConfigFields";
+import type { GitHubFormRegistration } from "../provider-config-views";
 import type { ToolkitFormValues } from "../schemas";
 import type { ToolkitConfigProjection } from "../toolkit-config-projection";
 import type { MutationState, ToolkitConfigFormState } from "../types";
@@ -49,6 +48,7 @@ import type { UseFormReturnType } from "@mantine/form";
 import type { FormEventHandler, ReactNode } from "react";
 
 export interface ToolkitFormProps {
+  githubRegistration: GitHubFormRegistration;
   onComplete?: () => void;
   onAbandonReady?: (abandon: (() => void) | null) => void;
   configProjection: ToolkitConfigProjection;
@@ -102,6 +102,7 @@ function oauthConnectionStatusTranslationKey(
 }
 
 export function ToolkitForm({
+  githubRegistration,
   onComplete,
   onAbandonReady,
   configProjection,
@@ -303,11 +304,7 @@ export function ToolkitForm({
 
                 {currentToolSlug === "github" && (
                   <GithubConfigFieldsContainer
-                    savedAuthType={
-                      formState.type === "EDIT"
-                        ? String(formState.config.config.github_auth_type)
-                        : void 0
-                    }
+                    savedAuthType={githubRegistration.savedAuthType}
                     config={form.getValues().config}
                     onConfigChange={onConfigChange}
                     credentials={form.getValues().credentials ?? null}
@@ -331,9 +328,7 @@ export function ToolkitForm({
 
                 {currentToolSlug === "github" &&
                   formState.type === "EDIT" &&
-                  isGitHubUserMode(
-                    formState.config.config.github_auth_type,
-                  ) && (
+                  githubRegistration.savedUserMode && (
                     <GitHubUserAuthorizationContainer
                       toolkit={formState.config}
                       onPendingChange={onUserSetupPendingChange}
@@ -347,11 +342,7 @@ export function ToolkitForm({
                             ? `/w/${handle}/toolkits/${formState.config.id}/edit`
                             : `/w/${handle}/agents/${agentId}/settings/capabilities#agent-toolkits`,
                       }}
-                      registrationDirty={gitHubUserRegistrationDirty(
-                        formState.config.config.github_auth_type,
-                        form.getValues().config.github_auth_type,
-                        form.getValues().credentials ?? null,
-                      )}
+                      registrationDirty={githubRegistration.registrationDirty}
                     />
                   )}
 

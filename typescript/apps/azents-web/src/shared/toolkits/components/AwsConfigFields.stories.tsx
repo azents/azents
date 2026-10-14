@@ -1,5 +1,6 @@
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { AwsConfigFieldsContainer } from "../AwsConfigFieldsContainer";
+import { projectAwsFields } from "../provider-config-views";
 import { AwsConfigFields } from "./AwsConfigFields";
 import { ProviderFieldStoryTransport } from "./provider-field-story-fixtures";
 import type { CredentialProviderFieldsProps } from "../types";
@@ -9,7 +10,12 @@ interface StoryProps extends CredentialProviderFieldsProps {
   onRequest: (input: unknown) => void;
 }
 function FieldStory(props: StoryProps): React.ReactElement {
-  return <AwsConfigFields {...props} />;
+  return (
+    <AwsConfigFields
+      {...props}
+      view={projectAwsFields(props.config, props.credentials)}
+    />
+  );
 }
 const meta = {
   title: "Toolkits/Provider fields/Aws",

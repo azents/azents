@@ -1,30 +1,17 @@
-"""Live chat helpers.
+"""Live Chat helpers using the current REST input and Chat action contracts."""
 
-`Chat` is constructed with `TestenvConfig` and exposes the following methods:
-
-- `start_session(user, agent)` returns a Session value object for the user and
-  agent. It does not open a WebSocket.
-- `stream(session, message)` commits a REST write and yields WebSocket events.
-- `collect(session, message)` wraps `stream` and returns when the `until` event
-  arrives.
-
-Server model: a REST write endpoint commits the turn, while WebSocket streaming
-receives live events. Since each turn starts with a REST write, `start_session`
-does not need to contact the devserver.
-
-Normally use this through `TestenvClient.chat`.
-
-Details: `docs/azents/design/llm-pipeline.md`
-"""
-
-import json
 import time
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
 
-import requests
+from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.chat_v1_api import ChatV1Api
+from azentspublicclient.exceptions import ApiException
+from azentspublicclient.models.chat_input_write_request import ChatInputWriteRequest
+from azentspublicclient.models.requested_inference_profile import RequestedInferenceProfile
+from pydantic import ValidationError
+from urllib3.exceptions import HTTPError
 from websockets.exceptions import WebSocketException
 from websockets.sync.client import connect as ws_connect
 
@@ -33,6 +20,7 @@ from testenv.seed.client import public_client
 from testenv.seed.types import Agent, User
 
 from .errors import ChatConnectionError, ChatTimeout
+from .events import ChatAction, event_name, terminal_run
 from .types import Session
 
 
@@ -47,49 +35,37 @@ def _ws_url(http_url: str) -> str:
 
 @dataclass(frozen=True)
 class Chat:
-    """Live chat helper used by `TestenvClient.chat`."""
+    """Live chat helper used by ``TestenvClient.chat``."""
 
     config: TestenvConfig
 
     def start_session(self, user: User, agent: Agent) -> Session:
-        """Return a `Session` value object for the agent's team primary session."""
+        """Resolve the agent's team primary session through the generated API."""
         try:
-            response = requests.get(
-                f"{self.config.public_url}/chat/v1/agents/{agent.id}/team-primary-session",
-                headers={"Authorization": f"Bearer {user.access_token}"},
-                timeout=10,
+            response = ChatV1Api(public_client(self.config)).chat_v1_get_team_primary_agent_session(
+                agent.id,
+                _headers={"Authorization": f"Bearer {user.access_token}"},
+                _request_timeout=10.0,
             )
-            response.raise_for_status()
-            payload = response.json()
-        except requests.RequestException as exc:
-            raise ChatConnectionError(
-                "failed to resolve team primary session. Is devserver up?\n"
-                "  uv run devserver.py status",
-            ) from exc
-        session_id = payload.get("id")
-        if not isinstance(session_id, str):
-            raise ChatConnectionError(
-                f"team primary session response did not include id: {payload!r}"
-            )
+        except (ApiException, HTTPError, ValidationError) as exc:
+            raise ChatConnectionError("failed to resolve team primary session") from exc
         return Session(
-            id=session_id,
+            id=response.id,
             user=user,
             agent=agent,
             public_url=self.config.public_url,
         )
 
     def _issue_ticket(self, user: User) -> str:
-        """Issue a WebSocket ticket for the user."""
-        chat_api = ChatV1Api(public_client(self.config))
+        """Issue a WebSocket ticket using the generated response contract."""
         try:
-            resp = chat_api.chat_v1_issue_ws_ticket(
+            response = ChatV1Api(public_client(self.config)).chat_v1_issue_ws_ticket(
                 _headers={"Authorization": f"Bearer {user.access_token}"},
+                _request_timeout=10.0,
             )
-        except Exception as exc:
-            raise ChatConnectionError(
-                "failed to issue ws ticket. Is devserver up?\n  uv run devserver.py status",
-            ) from exc
-        return resp.ticket
+        except (ApiException, HTTPError, ValidationError) as exc:
+            raise ChatConnectionError("failed to issue WebSocket ticket") from exc
+        return response.ticket
 
     def stream(
         self,
@@ -97,72 +73,67 @@ class Chat:
         message: str,
         *,
         timeout: float = 60.0,
-    ) -> Iterator[dict[str, object]]:
-        """Commit a message for a session and yield live events.
+    ) -> Iterator[ChatAction]:
+        """Subscribe before committing REST input, then yield typed Chat actions.
 
-        The REST write endpoint records the message, then a session WebSocket
-        connection streams live events. Because each turn is committed by REST,
-        `start_session` only needs to provide a Session value object.
-
-        Raises `ChatTimeout(collected_events=...)` on timeout and
-        `ChatConnectionError` for REST/WS failures.
+        Waiting for the subscription acknowledgement prevents fast runs from
+        completing between a REST write and WebSocket registration. The current
+        Agent main model label is authoritative for the requested profile.
         """
-        try:
-            response = requests.post(
-                f"{session.public_url}/chat/v1/sessions/{session.id}/messages",
-                headers={
-                    "Authorization": f"Bearer {session.user.access_token}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "agent_id": session.agent.id,
-                    "client_request_id": f"testenv-live-chat-{uuid.uuid4().hex}",
-                    "message": message,
-                },
-                timeout=10,
-            )
-            response.raise_for_status()
-        except requests.RequestException as exc:
-            raise ChatConnectionError(
-                "failed to commit chat write. Is devserver up?\n  uv run devserver.py status",
-            ) from exc
-        payload = response.json()
-        session_id = payload.get("session_id")
-        if not isinstance(session_id, str):
-            raise ChatConnectionError(
-                f"REST write response did not include session_id: {payload!r}",
-            )
-
-        ticket = self._issue_ticket(session.user)
-        ws_uri = f"{_ws_url(session.public_url)}/chat/v1/sessions/{session_id}?ticket={ticket}"
-
-        collected: list[dict[str, object]] = []
+        collected: list[ChatAction] = []
         deadline = time.monotonic() + timeout
-
+        headers = {"Authorization": f"Bearer {session.user.access_token}"}
         try:
-            with ws_connect(ws_uri) as ws:
-                yield {"type": "session_created", "session_id": session_id}
+            client = public_client(self.config)
+            agent = AgentV1Api(client).agent_v1_get_agent(
+                session.agent.id,
+                session.agent.workspace.handle,
+                _headers=headers,
+                _request_timeout=10.0,
+            )
+            profile = RequestedInferenceProfile(
+                model_target_label=agent.main_model_label,
+                reasoning_effort=None,
+                enabled_execution_options=[],
+            )
+            ticket = self._issue_ticket(session.user)
+            uri = f"{_ws_url(session.public_url)}/chat/v1/sessions/{session.id}?ticket={ticket}"
+            with ws_connect(uri, open_timeout=timeout) as ws:
+                committed = False
                 while True:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         raise ChatTimeout(
-                            f"no event received within {timeout}s",
-                            collected_events=collected,
+                            "timed out waiting for Chat action", collected_events=collected
                         )
                     try:
-                        raw = ws.recv(timeout=max(remaining, 0.1))
+                        raw = ws.recv(timeout=remaining)
                     except TimeoutError as exc:
                         raise ChatTimeout(
-                            f"no event received within {timeout}s",
+                            "timed out waiting for Chat action",
                             collected_events=collected,
                         ) from exc
-                    event: dict[str, object] = json.loads(raw)
-                    collected.append(event)
-                    yield event
-        except (WebSocketException, OSError) as exc:
-            raise ChatConnectionError(
-                f"ws error during stream ({ws_uri})",
-            ) from exc
+                    action = ChatAction.model_validate_json(raw)
+                    if action.session_id is not None and action.session_id != session.id:
+                        raise ChatConnectionError("received Chat action for another session")
+                    if action.type == "subscribed" and not committed:
+                        ChatV1Api(client).chat_v1_create_input(
+                            session.id,
+                            ChatInputWriteRequest(
+                                agent_id=session.agent.id,
+                                client_request_id=f"testenv-live-chat-{uuid.uuid4().hex}",
+                                message=message,
+                                inference_profile=profile,
+                            ),
+                            _headers=headers,
+                            _request_timeout=10.0,
+                        )
+                        committed = True
+                    collected.append(action)
+                    yield action
+        except (ApiException, HTTPError, ValidationError, WebSocketException, OSError) as exc:
+            # Do not include the ticket-bearing URL or provider response in messages.
+            raise ChatConnectionError("failed to commit or receive live Chat input") from exc
 
     def collect(
         self,
@@ -171,18 +142,18 @@ class Chat:
         *,
         until: str = "run_complete",
         timeout: float = 60.0,
-    ) -> list[dict[str, object]]:
-        """Collect events until the requested `until` event arrives.
+    ) -> list[ChatAction]:
+        """Collect until a terminal durable run marker or a canonical event name.
 
-        The default covers the common case: assert one completed turn. Use
-        `stream` directly when the caller needs incremental event handling.
+        The established ``run_complete`` completion selector means a terminal
+        run, including failed/interrupted dummy-key runs. Wire events retain
+        their canonical ``run_marker`` name and status.
         """
-        collected: list[dict[str, object]] = []
-        for event in self.stream(session, message, timeout=timeout):
-            collected.append(event)
-            if event.get("type") == until:
+        collected: list[ChatAction] = []
+        for action in self.stream(session, message, timeout=timeout):
+            collected.append(action)
+            if (until == "run_complete" and terminal_run(action)) or event_name(action) == until:
                 return collected
         raise ChatTimeout(
-            f"stream ended without reaching '{until}'",
-            collected_events=collected,
+            "Chat stream ended before the requested event", collected_events=collected
         )

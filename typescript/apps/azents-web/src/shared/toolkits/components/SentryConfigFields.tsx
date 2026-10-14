@@ -16,9 +16,9 @@ import {
   Text,
 } from "@mantine/core";
 import { IconPlugConnected, IconSettings } from "@tabler/icons-react";
-import { useCallback, useMemo } from "react";
-import { getArray, isOneOf } from "@/shared/lib/unknown-value";
+import { useCallback } from "react";
 import { ProviderConnectionTestFeedback } from "./ProviderConnectionTestFeedback";
+import type { SentrySkill } from "../provider-config-views";
 
 /** Sentry skill group definition */
 const SKILL_GROUPS = [
@@ -49,31 +49,17 @@ const SKILL_GROUPS = [
   },
 ] as const;
 
-const SKILL_VALUES = ["inspect", "seer", "docs", "triage", "manage"] as const;
-
-type SentrySkill = (typeof SKILL_VALUES)[number];
-
-function isSentrySkill(value: unknown): value is SentrySkill {
-  return isOneOf(value, SKILL_VALUES);
-}
-
-import type { SimpleProviderFieldsProps } from "../types";
+import type { SentryConfigFieldsProps } from "../types";
 
 export function SentryConfigFields({
   config,
+  view,
   onConfigChange,
   toolkitConfigId,
   testState,
   onTestConnection,
-}: SimpleProviderFieldsProps): React.ReactElement {
-  const timeoutValue = typeof config.timeout === "number" ? config.timeout : 30;
-  const enabledSkills = useMemo(
-    () =>
-      Array.isArray(config.enabled_skills)
-        ? getArray(config.enabled_skills, isSentrySkill)
-        : ["inspect", "seer"],
-    [config.enabled_skills],
-  );
+}: SentryConfigFieldsProps): React.ReactElement {
+  const { timeout: timeoutValue, enabled_skills: enabledSkills } = view;
 
   // Connection test
 

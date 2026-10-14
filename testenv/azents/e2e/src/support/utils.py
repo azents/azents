@@ -45,6 +45,7 @@ from azentspublicclient.models.selectable_model_candidate_input import (
 from azentspublicclient.models.selectable_model_option_input import (
     SelectableModelOptionInput,
 )
+from pydantic import BaseModel, ConfigDict, StrictStr, ValidationError
 
 from support.runtime_profiles import (
     create_workspace_runtime_profile,
@@ -117,6 +118,33 @@ class AgentSessionSetup:
     workspace_handle: str
     agent_id: str
     session_id: str
+
+
+class _TeamPrimarySessionIdentity(BaseModel):
+    """Project the required Session ID while allowing public API extensions."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    id: StrictStr
+
+
+def _decode_team_primary_session_response(
+    response: http_requests.Response,
+) -> _TeamPrimarySessionIdentity:
+    """Decode the current API identity without exposing response contents."""
+    response.raise_for_status()
+    try:
+        payload: object = response.json()
+    except ValueError:
+        raise RuntimeError(
+            "Team primary session response was not valid JSON."
+        ) from None
+    try:
+        return _TeamPrimarySessionIdentity.model_validate(payload)
+    except ValidationError:
+        raise RuntimeError(
+            "Team primary session response did not include a valid id."
+        ) from None
 
 
 def _json_object(value: object, *, label: str) -> dict[str, object]:
@@ -591,13 +619,7 @@ def create_agent_session_setup(
         headers={"Authorization": f"Bearer {setup.access_token}"},
         timeout=10,
     )
-    session_response.raise_for_status()
-    session_payload = session_response.json()
-    session_id = session_payload.get("id")
-    if not isinstance(session_id, str):
-        raise RuntimeError(
-            f"Team primary session response did not include id: {session_payload!r}"
-        )
+    session_id = _decode_team_primary_session_response(session_response).id
 
     response = http_requests.post(
         f"{server_url}/chat/v1/sessions/{session_id}/inputs",
@@ -723,13 +745,7 @@ def create_two_member_team_session(
         headers=owner_headers,
         timeout=10,
     )
-    session_response.raise_for_status()
-    session_payload = session_response.json()
-    session_id = session_payload.get("id")
-    if not isinstance(session_id, str):
-        raise RuntimeError(
-            f"Team primary session response did not include id: {session_payload!r}"
-        )
+    session_id = _decode_team_primary_session_response(session_response).id
 
     return TwoMemberTeamSession(
         owner_access_token=owner_token,

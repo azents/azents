@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import * as googleResume from "../../shared/toolkits/google-resume.ts";
 import * as googleTypes from "../../shared/toolkits/google-types.ts";
+import * as popupMessages from "../../shared/toolkits/popup-messages.ts";
+import * as providerConfigViews from "../../shared/toolkits/provider-config-views.ts";
 import * as projection from "../../shared/toolkits/toolkit-config-projection.ts";
 import * as formLifecycle from "../../shared/toolkits/toolkit-form-lifecycle.ts";
 import * as managementState from "../agents/agentToolkitManagementState.ts";
@@ -474,6 +476,8 @@ for (const agentOwned of [false, true]) {
           toolkitFormSchema: { safeParse: () => ({ success: true }) },
         },
         "../toolkit-config-projection": projection,
+        "../popup-messages": popupMessages,
+        "../provider-config-views": providerConfigViews,
         "../toolkit-form-lifecycle": formLifecycle,
         "../google-resume": googleResume,
       },

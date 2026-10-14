@@ -20,6 +20,24 @@ from azentspublicclient.models.agent_toolkit_attach_request import (
 )
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.chat_event_response import ChatEventResponse
+from azentspublicclient.models.git_hub_user_access_page import GitHubUserAccessPage
+from azentspublicclient.models.git_hub_user_candidate_summary import (
+    GitHubUserCandidateSummary,
+)
+from azentspublicclient.models.git_hub_user_connect_output import (
+    GitHubUserConnectOutput,
+)
+from azentspublicclient.models.git_hub_user_connection_summary import (
+    GitHubUserConnectionSummary,
+)
+from azentspublicclient.models.git_hub_user_created_output import (
+    GitHubUserCreatedOutput,
+)
+from azentspublicclient.models.git_hub_user_creation_review import (
+    GitHubUserCreationReview,
+)
+from azentspublicclient.models.git_hub_user_installation import GitHubUserInstallation
+from azentspublicclient.models.git_hub_user_status_output import GitHubUserStatusOutput
 from azentspublicclient.models.toolkit_config_create_request import (
     ToolkitConfigCreateRequest,
 )
@@ -27,8 +45,17 @@ from azentspublicclient.models.toolkit_config_response import ToolkitConfigRespo
 from azentspublicclient.models.toolkit_config_update_request import (
     ToolkitConfigUpdateRequest,
 )
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
+    ValidationError,
+)
 
-from support.observations import ToolResultObservation
+from support.observations import ExtensionObservation, ToolResultObservation
 from support.runtime_profiles import start_and_wait_for_agent_runtime
 from support.utils import single_candidate_model_options, unique
 from tests.required.admin.test_03_system_settings import (
@@ -37,7 +64,6 @@ from tests.required.admin.test_03_system_settings import (
 )
 from tests.required.public.test_agent_execution_persistence import (
     auth_headers,
-    json_object_payload,
 )
 from tests.required.public.test_brave_search import (
     _tool_events,
@@ -54,6 +80,69 @@ from tests.required.public.test_runtime_optional_capability import (
 E2E_PLANNER_FALLBACK_WEIGHT = 45.0
 
 
+class _Connect(GitHubUserConnectOutput):
+    model_config = ConfigDict(extra="allow")
+
+
+class _Candidate(GitHubUserCandidateSummary):
+    model_config = ConfigDict(extra="allow")
+
+
+class _Connection(GitHubUserConnectionSummary):
+    model_config = ConfigDict(extra="allow")
+
+
+class _Status(GitHubUserStatusOutput):
+    connection: _Connection | None
+    model_config = ConfigDict(extra="allow")
+
+
+class _CreationReview(GitHubUserCreationReview):
+    candidate: _Candidate
+    model_config = ConfigDict(extra="allow")
+
+
+class _Created(GitHubUserCreatedOutput):
+    model_config = ConfigDict(extra="allow")
+
+
+class _GitHubConfig(ExtensionObservation):
+    """Current creation options; omission retains the existing helper defaults."""
+
+    github_auth_type: StrictStr | None = None
+    toolsets: list[StrictStr] = ["repos", "issues", "pull_requests", "users"]
+    timeout: StrictInt | StrictFloat = 30
+    inject_runtime_environment: StrictBool = False
+
+
+class _ProxyEvidence(ExtensionObservation):
+    mcp_call_count: StrictInt
+    mcp_accounts: list[StrictStr]
+    revocation_request_count: StrictInt
+    app_request_count: StrictInt
+
+
+def _decode[ResponseT: BaseModel](
+    payload: object, model: type[ResponseT], *, label: str
+) -> ResponseT:
+    """Validate owned fields while retaining opaque public response extensions."""
+    try:
+        return model.model_validate(payload)
+    except ValidationError:
+        raise AssertionError(f"{label} did not match its response contract.") from None
+
+
+def _response[ResponseT: BaseModel](
+    response: requests.Response, model: type[ResponseT], *, label: str
+) -> ResponseT:
+    response.raise_for_status()
+    try:
+        payload: object = response.json()
+    except ValueError:
+        raise AssertionError(f"{label} was not valid JSON.") from None
+    return _decode(payload, model, label=label)
+
+
 def _scenario(proxy_url: str, scenario: str) -> None:
     response = requests.post(
         proxy_url + "/__testenv/scenario", json={"scenario": scenario}, timeout=5
@@ -61,40 +150,39 @@ def _scenario(proxy_url: str, scenario: str) -> None:
     response.raise_for_status()
 
 
-def _operation(
-    base: str, token: str, operation: str, *, body: dict[str, object] | None
-) -> dict[str, object]:
+def _operation[ResponseT: BaseModel](
+    base: str,
+    token: str,
+    operation: str,
+    *,
+    body: dict[str, object] | None,
+    model: type[ResponseT],
+) -> ResponseT:
     response = requests.post(
         base + "/" + operation, headers=auth_headers(token), json=body, timeout=15
     )
-    response.raise_for_status()
-    return (
-        {}
-        if response.status_code == 204
-        else json_object_payload(response.json(), label="GitHub user operation")
-    )
+    return _response(response, model, label="GitHub user operation")
 
 
-def _connect(base: str, token: str, label: str) -> dict[str, object]:
-    prepared = _operation(base, token, "connect", body=None)
-    authorization_url = prepared["authorization_url"]
-    assert isinstance(authorization_url, str)
+def _connect(base: str, token: str, label: str) -> _Candidate:
+    prepared = _operation(base, token, "connect", body=None, model=_Connect)
+    authorization_url = prepared.authorization_url
     state = parse_qs(urlsplit(authorization_url).query)["state"][0]
     reviewed = _operation(
         base,
         token,
         "exchange",
         body={"code": f"e2e-user-{label}-{unique()}", "state": state},
+        model=_Candidate,
     )
-    assert reviewed["account_login"] in {"connected-user", "replacement-user"}
-    assert "access_token" not in json.dumps(reviewed)
+    assert reviewed.account_login in {"connected-user", "replacement-user"}
+    assert "access_token" not in reviewed.model_dump_json(exclude_unset=True)
     return reviewed
 
 
-def _status(base: str, token: str) -> dict[str, object]:
+def _status(base: str, token: str) -> _Status:
     response = requests.get(base + "/status", headers=auth_headers(token), timeout=10)
-    response.raise_for_status()
-    return json_object_payload(response.json(), label="GitHub user status")
+    return _response(response, _Status, label="GitHub user status")
 
 
 def _create_confirmed(
@@ -106,9 +194,8 @@ def _create_confirmed(
 ) -> ToolkitConfigResponse:
     """Exercise unpublished authorization and explicit atomic creation via API."""
     base = f"{server}/toolkit/v1/workspaces/{handle}/github-user-creations"
-    prepared = _operation(base, token, "connect", body=body.to_dict())
-    authorization_url = prepared["authorization_url"]
-    assert isinstance(authorization_url, str)
+    prepared = _operation(base, token, "connect", body=body.to_dict(), model=_Connect)
+    authorization_url = prepared.authorization_url
     state = parse_qs(urlsplit(authorization_url).query)["state"][0]
     review = _operation(
         base,
@@ -118,6 +205,7 @@ def _create_confirmed(
             "code": "e2e-user-create-" + unique(),
             "state": state,
         },
+        model=_CreationReview,
     )
     api = ToolkitV1Api(client)
     assert not any(
@@ -126,14 +214,15 @@ def _create_confirmed(
             handle, _headers=auth_headers(token)
         ).items
     )
-    candidate = json_object_payload(review["candidate"], label="creation candidate")
-    assert candidate["account_login"] == "connected-user"
+    candidate = review.candidate
+    assert candidate.account_login == "connected-user"
+    config = _decode(body.config, _GitHubConfig, label="Creation settings")
     created = _operation(
         base,
         token,
         "confirm",
         body={
-            "attempt_id": candidate["attempt_id"],
+            "attempt_id": candidate.attempt_id,
             "settings": {
                 "name": body.name,
                 "slug": body.slug,
@@ -141,21 +230,15 @@ def _create_confirmed(
                 "prompt": body.prompt,
                 "enabled": body.enabled,
                 "always_expose_tools": body.always_expose_tools,
-                "toolsets": body.config.get(
-                    "toolsets", ["repos", "issues", "pull_requests", "users"]
-                ),
-                "timeout": body.config.get("timeout", 30),
-                "inject_runtime_environment": body.config.get(
-                    "inject_runtime_environment", False
-                ),
-                "runtime_risk_acknowledged": bool(
-                    body.config.get("inject_runtime_environment", False)
-                ),
+                "toolsets": config.toolsets,
+                "timeout": config.timeout,
+                "inject_runtime_environment": config.inject_runtime_environment,
+                "runtime_risk_acknowledged": config.inject_runtime_environment,
             },
         },
+        model=_Created,
     )
-    toolkit_id = created["toolkit_id"]
-    assert isinstance(toolkit_id, str)
+    toolkit_id = created.toolkit_id
     return api.toolkit_v1_get_toolkit_config(
         handle=handle, toolkit_config_id=toolkit_id, _headers=auth_headers(token)
     )
@@ -298,13 +381,12 @@ def test_staged_account_delegated_worker_and_fail_open_disconnect(
         f"{azents_public_server_url}/toolkit/v1/workspaces/{workspace.handle}"
         f"/toolkit-configs/{toolkit.id}/github-user"
     )
-    connected = json_object_payload(
-        _status(base, workspace.token)["connection"], label="Confirmed connection"
-    )
-    assert connected["account_login"] == "connected-user"
-    assert "access_token" not in json.dumps(connected)
+    connected = _status(base, workspace.token).connection
+    assert connected is not None
+    assert connected.account_login == "connected-user"
+    assert "access_token" not in connected.model_dump_json(exclude_unset=True)
 
-    owners: dict[str, dict[str, object]] = {}
+    owners: dict[str, GitHubUserInstallation] = {}
     cursor = None
     for _ in range(8):
         response = requests.get(
@@ -313,16 +395,10 @@ def test_staged_account_delegated_worker_and_fail_open_disconnect(
             params={} if cursor is None else {"cursor": cursor},
             timeout=10,
         )
-        response.raise_for_status()
-        page = json_object_payload(response.json(), label="GitHub access page")
-        entries = page["installations"]
-        assert isinstance(entries, list)
-        for raw in entries:
-            owner = json_object_payload(raw, label="GitHub owner")
-            login = owner["account_login"]
-            assert isinstance(login, str)
-            owners[login] = owner
-        cursor = page["next_cursor"]
+        page = _response(response, GitHubUserAccessPage, label="GitHub access page")
+        for owner in page.installations:
+            owners[owner.account_login] = owner
+        cursor = page.next_cursor
         if cursor is None:
             break
         assert isinstance(cursor, str)
@@ -334,8 +410,8 @@ def test_staged_account_delegated_worker_and_fail_open_disconnect(
         "ops-team",
         "restricted-team",
     } <= owners.keys()
-    assert owners["restricted-team"]["failure_reason"] is not None
-    assert _status(base, workspace.token)["connection"] is not None
+    assert owners["restricted-team"].failure_reason is not None
+    assert _status(base, workspace.token).connection is not None
 
     member = _invite_member(
         public_api_client=public_api_client,
@@ -376,12 +452,14 @@ def test_staged_account_delegated_worker_and_fail_open_disconnect(
             "call_github_user_mcp_3",
         }
     )
-    assert _status(base, workspace.token)["connection"] is not None
-    provider_state = requests.get(
-        github_validation_proxy_url + "/__testenv/state", timeout=5
-    ).json()
-    assert provider_state["mcp_call_count"] >= 5
-    assert set(provider_state["mcp_accounts"]) == {"connected-user"}
+    assert _status(base, workspace.token).connection is not None
+    provider_state = _response(
+        requests.get(github_validation_proxy_url + "/__testenv/state", timeout=5),
+        _ProxyEvidence,
+        label="Provider evidence",
+    )
+    assert provider_state.mcp_call_count >= 5
+    assert set(provider_state.mcp_accounts) == {"connected-user"}
 
     if platform:
         off_events = _run(
@@ -418,17 +496,23 @@ def test_staged_account_delegated_worker_and_fail_open_disconnect(
         )
 
     replacement = _connect(base, workspace.token, "replacement")
-    assert _status(base, workspace.token)["connection"] == connected
+    assert _status(base, workspace.token).connection == connected
     _scenario(github_validation_proxy_url, "user_cleanup_failure")
     active = _operation(
-        base, workspace.token, "confirm", body={"attempt_id": replacement["attempt_id"]}
+        base,
+        workspace.token,
+        "confirm",
+        body={"attempt_id": replacement.attempt_id},
+        model=_Connection,
     )
-    assert active["account_login"] == "replacement-user"
-    assert active["id"] != connected["id"]
-    attempted = requests.get(
-        github_validation_proxy_url + "/__testenv/state", timeout=5
-    ).json()
-    assert attempted["revocation_request_count"] >= 1
+    assert active.account_login == "replacement-user"
+    assert active.id != connected.id
+    attempted = _response(
+        requests.get(github_validation_proxy_url + "/__testenv/state", timeout=5),
+        _ProxyEvidence,
+        label="Revocation evidence",
+    )
+    assert attempted.revocation_request_count >= 1
     replaced_events = _run(
         azents_public_server_url,
         member.access_token,
@@ -460,20 +544,22 @@ def test_staged_account_delegated_worker_and_fail_open_disconnect(
         kind="replacement",
         session_id=None,
     )
-    failed_connection = json_object_payload(
-        _status(base, workspace.token)["connection"],
-        label="Current GitHub user authentication failure",
-    )
-    assert failed_connection["id"] == active["id"]
-    assert failed_connection["status"] == "reconnect_required"
+    failed_connection = _status(base, workspace.token).connection
+    assert failed_connection is not None
+    assert failed_connection.id == active.id
+    assert failed_connection.status == "reconnect_required"
     _scenario(github_validation_proxy_url, "user_cleanup_failure")
     disconnected = requests.delete(base + "/connection", headers=headers, timeout=15)
     assert disconnected.status_code == 204
-    assert _status(base, workspace.token) == {"connection": None}
-    final = requests.get(
-        github_validation_proxy_url + "/__testenv/state", timeout=5
-    ).json()
-    assert final["revocation_request_count"] >= 1
+    assert _status(base, workspace.token).model_dump(exclude_unset=True) == {
+        "connection": None
+    }
+    final = _response(
+        requests.get(github_validation_proxy_url + "/__testenv/state", timeout=5),
+        _ProxyEvidence,
+        label="Final revocation evidence",
+    )
+    assert final.revocation_request_count >= 1
     # Provider failure is an attempted cleanup, not a provider-revocation claim.
     toolkits.toolkit_v1_delete_toolkit_config(
         handle=workspace.handle, toolkit_config_id=toolkit.id, _headers=headers

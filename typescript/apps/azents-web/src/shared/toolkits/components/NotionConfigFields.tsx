@@ -11,16 +11,17 @@ import { Accordion, Button, NumberInput, Stack } from "@mantine/core";
 import { IconPlugConnected, IconSettings } from "@tabler/icons-react";
 
 import { ProviderConnectionTestFeedback } from "./ProviderConnectionTestFeedback";
-import type { SimpleProviderFieldsProps } from "../types";
+import type { NotionConfigFieldsProps } from "../types";
 
 export function NotionConfigFields({
   config,
+  view,
   onConfigChange,
   toolkitConfigId,
   testState,
   onTestConnection,
-}: SimpleProviderFieldsProps): React.ReactElement {
-  const timeoutValue = typeof config.timeout === "number" ? config.timeout : 30;
+}: NotionConfigFieldsProps): React.ReactElement {
+  const timeoutValue = view.timeout;
 
   // Connection test
 

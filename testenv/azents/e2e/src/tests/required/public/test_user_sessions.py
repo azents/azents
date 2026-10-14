@@ -7,16 +7,27 @@ from dataclasses import dataclass
 import azentsadminclient
 import azentspublicclient
 import requests
-from pydantic import TypeAdapter, ValidationError
+from pydantic import StrictStr, ValidationError
 
+from support.observations import ExtensionObservation
 from support.utils import (
     create_chat_session_with_agent,
     create_two_member_team_session,
     unique,
 )
 
-_JSON_OBJECT = TypeAdapter(dict[str, object])
-_JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
+
+class _SessionItem(ExtensionObservation):
+    id: StrictStr
+    primary_kind: StrictStr | None = None
+
+
+class _SessionPage(ExtensionObservation):
+    items: list[_SessionItem]
+
+
+class _CreatedSession(ExtensionObservation):
+    session_id: StrictStr
 
 
 @dataclass(frozen=True)
@@ -35,24 +46,17 @@ def _headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def _response_object(
+def _response_model[ResponseT: ExtensionObservation](
     response: requests.Response,
+    model: type[ResponseT],
     *,
     label: str,
-) -> dict[str, object]:
-    """Validate a JSON object response."""
+) -> ResponseT:
+    """Decode owned fields without exposing response contents."""
     try:
-        return _JSON_OBJECT.validate_json(response.text)
-    except ValidationError as exc:
-        raise AssertionError(f"{label} is not an object: {response.text!r}") from exc
-
-
-def _object_items(raw_items: object, *, label: str) -> list[dict[str, object]]:
-    """Validate a JSON object list."""
-    try:
-        return _JSON_OBJECT_LIST.validate_python(raw_items)
-    except ValidationError as exc:
-        raise AssertionError(f"{label} is not an object list: {raw_items!r}") from exc
+        return model.model_validate_json(response.text)
+    except ValidationError:
+        raise AssertionError(f"{label} did not match its response contract.") from None
 
 
 def _get_json(
@@ -61,8 +65,8 @@ def _get_json(
     token: str,
     path: str,
     expected_status: int = 200,
-) -> dict[str, object] | None:
-    """Call a public GET endpoint and optionally return a JSON object."""
+) -> _SessionPage | None:
+    """Call a public GET endpoint and decode its Session page."""
     response = requests.get(
         f"{server_url}{path}",
         headers=_headers(token),
@@ -70,12 +74,11 @@ def _get_json(
     )
     if response.status_code != expected_status:
         raise AssertionError(
-            f"GET {path} expected {expected_status}, got {response.status_code}: "
-            f"{response.text!r}"
+            f"GET {path} expected {expected_status}, got {response.status_code}."
         )
     if expected_status >= 400:
         return None
-    return _response_object(response, label=f"GET {path} response")
+    return _response_model(response, _SessionPage, label=f"GET {path} response")
 
 
 def _post_json(
@@ -85,8 +88,8 @@ def _post_json(
     path: str,
     payload: dict[str, object],
     expected_status: int = 200,
-) -> dict[str, object] | None:
-    """Call a public POST endpoint and optionally return a JSON object."""
+) -> _CreatedSession | None:
+    """Call a public POST endpoint and decode its created Session identity."""
     response = requests.post(
         f"{server_url}{path}",
         headers={**_headers(token), "Content-Type": "application/json"},
@@ -95,12 +98,11 @@ def _post_json(
     )
     if response.status_code != expected_status:
         raise AssertionError(
-            f"POST {path} expected {expected_status}, got {response.status_code}: "
-            f"{response.text!r}"
+            f"POST {path} expected {expected_status}, got {response.status_code}."
         )
     if expected_status >= 400:
         return None
-    return _response_object(response, label=f"POST {path} response")
+    return _response_model(response, _CreatedSession, label=f"POST {path} response")
 
 
 def _team_session_items(
@@ -108,7 +110,7 @@ def _team_session_items(
     server_url: str,
     token: str,
     agent_id: str,
-) -> list[dict[str, object]]:
+) -> list[_SessionItem]:
     """Fetch Team Session list items."""
     payload = _get_json(
         server_url=server_url,
@@ -116,7 +118,7 @@ def _team_session_items(
         path=f"/chat/v1/agents/{agent_id}/sessions",
     )
     assert payload is not None
-    return _object_items(payload.get("items"), label="team session list items")
+    return payload.items
 
 
 def _user_session_items(
@@ -124,7 +126,7 @@ def _user_session_items(
     server_url: str,
     token: str,
     agent_id: str,
-) -> list[dict[str, object]]:
+) -> list[_SessionItem]:
     """Fetch requester-owned User Session list items."""
     payload = _get_json(
         server_url=server_url,
@@ -132,7 +134,7 @@ def _user_session_items(
         path=f"/chat/v1/agents/{agent_id}/user-sessions",
     )
     assert payload is not None
-    return _object_items(payload.get("items"), label="user session list items")
+    return payload.items
 
 
 def _write_user_first_message(
@@ -142,7 +144,7 @@ def _write_user_first_message(
     agent_id: str,
     message: str,
     client_request_id: str,
-) -> dict[str, object]:
+) -> _CreatedSession:
     """Create a User Session with its first message."""
     payload = _post_json(
         server_url=server_url,
@@ -183,11 +185,7 @@ def _setup_owner_user_session(
         message=f"Owner private session {unique()}",
         client_request_id=f"user-session-owner-{unique()}",
     )
-    user_session_id = response.get("session_id")
-    if not isinstance(user_session_id, str):
-        raise AssertionError(
-            f"User first-message response missing session_id: {response!r}"
-        )
+    user_session_id = response.session_id
     return _UserSessionSetup(
         owner_token=setup.owner_access_token,
         member_token=setup.member_access_token,
@@ -225,10 +223,8 @@ def test_owner_can_create_two_user_sessions_isolated_from_team_list(
         message=second_message,
         client_request_id=f"user-session-second-{unique()}",
     )
-    first_id = first.get("session_id")
-    second_id = second.get("session_id")
-    if not isinstance(first_id, str) or not isinstance(second_id, str):
-        raise AssertionError(f"Missing session ids: {first!r} {second!r}")
+    first_id = first.session_id
+    second_id = second.session_id
     assert first_id != second_id
     assert first_id != primary_session_id
     assert second_id != primary_session_id
@@ -238,17 +234,17 @@ def test_owner_can_create_two_user_sessions_isolated_from_team_list(
         token=token,
         agent_id=agent_id,
     )
-    user_ids = {item.get("id") for item in user_items}
+    user_ids = {item.id for item in user_items}
     assert first_id in user_ids
     assert second_id in user_ids
-    assert all(item.get("primary_kind") is None for item in user_items)
+    assert all(item.primary_kind is None for item in user_items)
 
     team_items = _team_session_items(
         server_url=azents_public_server_url,
         token=token,
         agent_id=agent_id,
     )
-    team_ids = {item.get("id") for item in team_items}
+    team_ids = {item.id for item in team_items}
     assert primary_session_id in team_ids
     assert first_id not in team_ids
     assert second_id not in team_ids
@@ -271,17 +267,15 @@ def test_non_owner_member_cannot_discover_or_open_user_session(
         token=setup.member_token,
         agent_id=setup.agent_id,
     )
-    assert all(item.get("id") != setup.user_session_id for item in member_user_items)
+    assert all(item.id != setup.user_session_id for item in member_user_items)
 
     member_team_items = _team_session_items(
         server_url=azents_public_server_url,
         token=setup.member_token,
         agent_id=setup.agent_id,
     )
-    assert all(item.get("id") != setup.user_session_id for item in member_team_items)
-    assert any(
-        item.get("id") == setup.team_primary_session_id for item in member_team_items
-    )
+    assert all(item.id != setup.user_session_id for item in member_team_items)
+    assert any(item.id == setup.team_primary_session_id for item in member_team_items)
 
     _get_json(
         server_url=azents_public_server_url,
@@ -348,13 +342,11 @@ def test_team_first_message_path_remains_on_team_list(
         },
     )
     assert response is not None
-    created_session_id = response.get("session_id")
-    if not isinstance(created_session_id, str):
-        raise AssertionError(f"Team write missing session_id: {response!r}")
+    created_session_id = response.session_id
     assert created_session_id != primary_session_id
 
     team_ids = {
-        item.get("id")
+        item.id
         for item in _team_session_items(
             server_url=azents_public_server_url,
             token=token,
@@ -362,7 +354,7 @@ def test_team_first_message_path_remains_on_team_list(
         )
     }
     user_ids = {
-        item.get("id")
+        item.id
         for item in _user_session_items(
             server_url=azents_public_server_url,
             token=token,

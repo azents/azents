@@ -8,15 +8,15 @@ import pytest
 from azcommon.result import Failure, Result, Success
 from fastapi import HTTPException
 
-import azents.api.public.toolkit.v1.oauth as oauth_module
 import azents.services.toolkit_oauth.helpers as oauth_helpers
+import azents.services.toolkit_oauth.service as oauth_module
 from azents.api.public.toolkit.v1.oauth import (
     GitHubPlatformInstallationsRequest,
     OAuthExchangeRequest,
-    _authorize_agent_management_or_error,
     connect_agent_oauth,
     disconnect_agent_oauth_connection,
     exchange_agent_oauth_connection,
+    get_agent_github_platform_install_url,
     get_agent_github_platform_installations,
 )
 from azents.core.auth.deps import WorkspaceMember
@@ -267,9 +267,11 @@ async def test_agent_level_authorization_maps_missing_and_denied_separately() ->
     )
 
     with pytest.raises(HTTPException) as missing:
-        await _authorize_agent_management_or_error(
-            service,
+        await get_agent_github_platform_install_url(
             member,
+            service,
+            _PlatformRuntime(),
+            handle="workspace",
             agent_id="agent-1",
         )
 
@@ -279,9 +281,11 @@ async def test_agent_level_authorization_maps_missing_and_denied_separately() ->
         NotAdmin(agent_id="agent-1")
     )
     with pytest.raises(HTTPException) as denied:
-        await _authorize_agent_management_or_error(
-            service,
+        await get_agent_github_platform_install_url(
             member,
+            service,
+            _PlatformRuntime(),
+            handle="workspace",
             agent_id="agent-1",
         )
 

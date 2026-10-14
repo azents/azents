@@ -34,10 +34,14 @@ from azentspublicclient.models.llm_provider_integration_create_request import (
 )
 from azentspublicclient.models.secrets import Secrets
 from azentspublicclient.models.subagent_settings import SubagentSettings
+from azentspublicclient.models.subagent_tree_node_response import (
+    SubagentTreeNodeResponse,
+)
+from azentspublicclient.models.subagent_tree_response import SubagentTreeResponse
 from azentspublicclient.models.toolkit_config_create_request import (
     ToolkitConfigCreateRequest,
 )
-from pydantic import BaseModel, ConfigDict, StrictStr, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, StrictStr
 from testcontainers.core.container import DockerContainer
 
 from support.observations import (
@@ -126,8 +130,6 @@ _OVERFLOW_REJECT_RESPONSE = "Subagent active overflow rejection observed."
 _OVERFLOW_CONTRACTED_LIST_MESSAGE = "Subagent E2E active overflow contracted list"
 _OVERFLOW_CONTRACTED_LIST_CALL_ID = "call_subagent_active_overflow_contracted_list"
 _OVERFLOW_CONTRACTED_LIST_RESPONSE = "Subagent contracted list observed."
-_JSON_OBJECT = TypeAdapter(dict[str, object])
-_JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 
 
 class _AgentMessageObservation(ExtensionObservation):
@@ -144,6 +146,8 @@ class _OutputPartObservation(ExtensionObservation):
 
 
 class _WaitOutcomeObservation(ExtensionObservation):
+    """The native WaitToolkit outcome, decoded independently of its event."""
+
     outcome: StrictStr
     reason: StrictStr | None = None
 
@@ -155,6 +159,8 @@ class _ListedAgentObservation(BaseModel):
 
 
 class _ListedAgentsObservation(ExtensionObservation):
+    """Interpret bounded list items while preserving opaque tool extensions."""
+
     agents: list[_ListedAgentObservation]
 
 
@@ -189,56 +195,30 @@ class _SharedSubagentSetup:
     engine_worker_container: DockerContainer
 
 
-@dataclass(frozen=True)
-class _TreeNode:
-    """Projected Subagent Tree node fields used by the E2E."""
+class _TreeNode(SubagentTreeNodeResponse):
+    """Decode the API node contract and retain opaque wire extensions."""
 
-    session_agent_id: str
-    agent_session_id: str
-    name: str
-    status: str
-    unread_result: bool
-    latest_run_status: str | None
-    terminal_result_event_id: str | None
-    terminal_result_message: str | None
+    model_config = ConfigDict(extra="allow")
     children: list["_TreeNode"]
+
+
+class _TreeObservation(SubagentTreeResponse):
+    """Decode the API tree before navigation; preserve uninspected extensions."""
+
+    model_config = ConfigDict(extra="allow")
+    nodes: list[_TreeNode]
 
 
 class _ChildNodeObservation(NamedTuple):
     """Observed Subagent tree and the matching child node."""
 
-    tree: dict[str, object]
+    tree: _TreeObservation
     child: _TreeNode
 
 
 def _headers(token: str) -> dict[str, str]:
     """Return bearer auth headers."""
     return {"Authorization": f"Bearer {token}"}
-
-
-def _json_object_payload(payload: object, *, label: str) -> dict[str, object]:
-    """Validate a JSON object payload."""
-    try:
-        return _JSON_OBJECT.validate_python(payload)
-    except ValidationError as exc:
-        raise AssertionError(f"{label} is not an object: {payload!r}") from exc
-
-
-def _json_object_list_payload(
-    payload: object,
-    *,
-    label: str,
-) -> list[dict[str, object]]:
-    """Validate a JSON object list payload."""
-    try:
-        return _JSON_OBJECT_LIST.validate_python(payload)
-    except ValidationError as exc:
-        raise AssertionError(f"{label} is not an object list: {payload!r}") from exc
-
-
-def _json_object(response: requests.Response) -> dict[str, object]:
-    """Return a validated JSON object response."""
-    return _json_object_payload(response.json(), label="HTTP JSON response")
 
 
 def _setup_workspace(
@@ -432,9 +412,9 @@ def _history(
     return decode_history_page(response.json()).items
 
 
-def _event_order_key(event: dict[str, object]) -> str:
+def _event_order_key(event: ChatEventResponse) -> str:
     """Return the UUIDv7 ordering key for a persisted event."""
-    return ChatEventResponse.model_validate(event).id
+    return event.id
 
 
 def _history_contents(
@@ -484,7 +464,7 @@ def _wait_for_agent_result(
     source_path: str,
     run_status: str,
     timeout: float = 120,
-) -> dict[str, object]:
+) -> _AgentMessageObservation:
     """Wait for one terminal result from the expected source and status."""
     deadline = time.monotonic() + timeout
     last_payloads: list[_AgentMessageObservation] = []
@@ -502,7 +482,7 @@ def _wait_for_agent_result(
             and payload.run_status == run_status
         ]
         if len(matches) == 1:
-            return matches[0].model_dump(exclude_unset=True)
+            return matches[0]
         if len(matches) > 1:
             raise AssertionError(
                 f"duplicate terminal results for {source_path}: {matches!r}"
@@ -622,7 +602,7 @@ def _wait_for_tool_result_content(
     call_id: str,
     expected: str,
     timeout: float = 120,
-) -> dict[str, object]:
+) -> ChatEventResponse:
     """Wait until a client tool result contains expected text."""
     deadline = time.monotonic() + timeout
     last_outputs: list[str] = []
@@ -641,7 +621,7 @@ def _wait_for_tool_result_content(
                 continue
             last_outputs.append(output)
             if expected in output:
-                return event.model_dump(mode="json", exclude_unset=True)
+                return event
         time.sleep(0.5)
     raise TimeoutError(
         f"tool result content not observed: {call_id}, {expected}, {last_outputs!r}"
@@ -657,7 +637,7 @@ def _wait_for_tool_result_outcome(
     outcome: str,
     reason: str | None = None,
     timeout: float = 120,
-) -> dict[str, object]:
+) -> ChatEventResponse:
     """Wait until a WaitToolkit result contains the expected JSON outcome."""
     deadline = time.monotonic() + timeout
     last_outputs: list[str] = []
@@ -684,7 +664,7 @@ def _wait_for_tool_result_outcome(
                 if parsed_outcome.outcome == outcome and (
                     reason is None or parsed_outcome.reason == reason
                 ):
-                    return event.model_dump(mode="json", exclude_unset=True)
+                    return event
         time.sleep(0.5)
     raise TimeoutError(
         f"tool result outcome not observed: {call_id}, {(outcome, reason)!r}, "
@@ -692,15 +672,15 @@ def _wait_for_tool_result_outcome(
     )
 
 
-def _wait_for_tool_result_json(
+def _wait_for_listed_agents(
     *,
     public_url: str,
     token: str,
     session_id: str,
     call_id: str,
     timeout: float = 120,
-) -> dict[str, object]:
-    """Wait until a client tool result contains one JSON object."""
+) -> list[_ListedAgentObservation]:
+    """Decode the native list_agents result at its embedded JSON boundary."""
     deadline = time.monotonic() + timeout
     last_outputs: list[str] = []
     while time.monotonic() < deadline:
@@ -724,20 +704,9 @@ def _wait_for_tool_result_json(
             except json.JSONDecodeError:
                 continue
             if isinstance(parsed, dict):
-                return _json_object_payload(
-                    parsed,
-                    label=f"tool result {call_id}",
-                )
+                return _ListedAgentsObservation.model_validate(parsed).agents
         time.sleep(0.5)
     raise TimeoutError(f"JSON tool result not observed: {call_id}, {last_outputs!r}")
-
-
-def _listed_agents(payload: object) -> list[dict[str, object]]:
-    """Validate the exact canonical list_agents item contract."""
-    return [
-        agent.model_dump()
-        for agent in _ListedAgentsObservation.model_validate(payload).agents
-    ]
 
 
 def _run_marker_completed(event: ChatEventResponse) -> bool:
@@ -753,7 +722,7 @@ def _wait_for_run_complete(
     token: str,
     session_id: str,
     timeout: float = 120,
-) -> dict[str, object]:
+) -> ChatEventResponse:
     """Wait until a session history contains a completed run marker."""
     deadline = time.monotonic() + timeout
     last_kinds: list[object] = []
@@ -761,7 +730,7 @@ def _wait_for_run_complete(
         events = _history(public_url=public_url, token=token, session_id=session_id)
         for event in events:
             if _run_marker_completed(event):
-                return event.model_dump(mode="json", exclude_unset=True)
+                return event
         last_kinds = [event.kind for event in events]
         time.sleep(0.5)
     raise TimeoutError(f"completed run marker not observed: {last_kinds!r}")
@@ -790,57 +759,13 @@ def _wait_for_content(
     raise TimeoutError(f"history content not observed: {expected}, {last_contents!r}")
 
 
-def _tree_node(raw: dict[str, object]) -> _TreeNode:
-    """Convert a raw tree node to the fields asserted by the E2E."""
-    session_agent_id = raw.get("session_agent_id")
-    agent_session_id = raw.get("agent_session_id")
-    name = raw.get("name")
-    status = raw.get("status")
-    unread_result = raw.get("unread_result")
-    if not isinstance(session_agent_id, str):
-        raise AssertionError(f"tree node missing session_agent_id: {raw!r}")
-    if not isinstance(agent_session_id, str):
-        raise AssertionError(f"tree node missing agent_session_id: {raw!r}")
-    if not isinstance(name, str):
-        raise AssertionError(f"tree node missing name: {raw!r}")
-    if not isinstance(status, str):
-        raise AssertionError(f"tree node missing status: {raw!r}")
-    if not isinstance(unread_result, bool):
-        raise AssertionError(f"tree node missing unread_result: {raw!r}")
-    latest_run_status = raw.get("latest_run_status")
-    if latest_run_status is not None and not isinstance(latest_run_status, str):
-        raise AssertionError(f"tree node has invalid latest run status: {raw!r}")
-    terminal_event_id = raw.get("terminal_result_event_id")
-    if terminal_event_id is not None and not isinstance(terminal_event_id, str):
-        raise AssertionError(f"tree node has invalid terminal event ID: {raw!r}")
-    terminal = raw.get("terminal_result_message")
-    if terminal is not None and not isinstance(terminal, str):
-        raise AssertionError(f"tree node has invalid terminal result: {raw!r}")
-    return _TreeNode(
-        session_agent_id=session_agent_id,
-        agent_session_id=agent_session_id,
-        name=name,
-        status=status,
-        unread_result=unread_result,
-        latest_run_status=latest_run_status,
-        terminal_result_event_id=terminal_event_id,
-        terminal_result_message=terminal,
-        children=[
-            _tree_node(child)
-            for child in _json_object_list_payload(
-                raw.get("children"), label="children"
-            )
-        ],
-    )
-
-
 def _subagent_tree(
     *,
     public_url: str,
     token: str,
     agent_id: str,
     session_id: str,
-) -> dict[str, object]:
+) -> _TreeObservation:
     """Fetch the Subagent Tree projection."""
     response = requests.get(
         f"{public_url}/chat/v1/agents/{agent_id}/sessions/{session_id}/subagents/tree",
@@ -848,15 +773,12 @@ def _subagent_tree(
         timeout=10,
     )
     response.raise_for_status()
-    return _json_object(response)
+    return _TreeObservation.model_validate(response.json())
 
 
-def _tree_nodes(tree: dict[str, object]) -> list[_TreeNode]:
+def _tree_nodes(tree: _TreeObservation) -> list[_TreeNode]:
     """Return validated tree root nodes."""
-    return [
-        _tree_node(raw)
-        for raw in _json_object_list_payload(tree.get("nodes"), label="tree nodes")
-    ]
+    return tree.nodes
 
 
 def _find_node(nodes: list[_TreeNode], name: str) -> _TreeNode | None:
@@ -884,7 +806,7 @@ def _wait_for_child_node(
 ) -> _ChildNodeObservation:
     """Wait until a named child appears with the expected projected state."""
     deadline = time.monotonic() + timeout
-    last_tree: dict[str, object] | None = None
+    last_tree: _TreeObservation | None = None
     while time.monotonic() < deadline:
         tree = _subagent_tree(
             public_url=public_url,
@@ -1099,10 +1021,8 @@ class TestSubagents:
             expected_unread=True,
         )
 
-        assert root_tree.get("root_agent_session_id") == root_session_id
-        assert root_tree.get("current_session_agent_id") == root_tree.get(
-            "root_session_agent_id"
-        )
+        assert root_tree.root_agent_session_id == root_session_id
+        assert root_tree.current_session_agent_id == root_tree.root_session_agent_id
         assert child.terminal_result_message == _CHILD_RESPONSE
         assert child.agent_session_id not in _session_ids(
             public_url=azents_public_server_url,
@@ -1146,8 +1066,8 @@ class TestSubagents:
             agent_id=agent_id,
             session_id=child.agent_session_id,
         )
-        assert child_tree.get("root_agent_session_id") == root_session_id
-        assert child_tree.get("current_session_agent_id") == child.session_agent_id
+        assert child_tree.root_agent_session_id == root_session_id
+        assert child_tree.current_session_agent_id == child.session_agent_id
 
         _run_message(
             public_url=azents_public_server_url,
@@ -1187,7 +1107,7 @@ class TestSubagents:
             source_path="/root/child_qa",
             run_status="completed",
         )
-        assert completed_result.get("content") == _CHILD_RESPONSE
+        assert completed_result.content == _CHILD_RESPONSE
         _wait_for_content(
             public_url=azents_public_server_url,
             token=workspace.token,
@@ -1479,7 +1399,7 @@ class TestSubagents:
             source_path="/root/interrupt_child",
             run_status="stopped",
         )
-        assert stopped_result.get("content") == "The agent run was stopped."
+        assert stopped_result.content == "The agent run was stopped."
         _wait_for_child_node(
             public_url=azents_public_server_url,
             token=workspace.token,
@@ -1554,7 +1474,7 @@ class TestSubagents:
             source_path="/root/failed_child",
             run_status="failed",
         )
-        failed_content = failed_result.get("content")
+        failed_content = failed_result.content
         assert isinstance(failed_content, str)
         assert failed_content
         assert _FAILED_INTERNAL_MARKER not in failed_content
@@ -1831,15 +1751,13 @@ class SubagentCapacityScenarios:
             session_id=root_session_id,
             message=_BOUNDED_LIST_MESSAGE,
         )
-        first_list = _listed_agents(
-            _wait_for_tool_result_json(
-                public_url=azents_public_server_url,
-                token=workspace.token,
-                session_id=root_session_id,
-                call_id=_BOUNDED_LIST_CALL_ID,
-            )
+        first_list = _wait_for_listed_agents(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            call_id=_BOUNDED_LIST_CALL_ID,
         )
-        assert first_list == [
+        assert [agent.model_dump() for agent in first_list] == [
             {"agent_name": "/root", "agent_status": "running"},
             {
                 "agent_name": "/root/bounded_middle",
@@ -1908,22 +1826,18 @@ class SubagentCapacityScenarios:
             session_id=root_session_id,
             message=_BOUNDED_RELIST_MESSAGE,
         )
-        second_list = _listed_agents(
-            _wait_for_tool_result_json(
-                public_url=azents_public_server_url,
-                token=workspace.token,
-                session_id=root_session_id,
-                call_id=_BOUNDED_RELIST_CALL_ID,
-            )
+        second_list = _wait_for_listed_agents(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            call_id=_BOUNDED_RELIST_CALL_ID,
         )
         assert len(second_list) == 3
-        assert second_list[0] == {
+        assert second_list[0].model_dump() == {
             "agent_name": "/root",
             "agent_status": "running",
         }
-        assert any(
-            agent.get("agent_name") == "/root/bounded_oldest" for agent in second_list
-        )
+        assert any(agent.agent_name == "/root/bounded_oldest" for agent in second_list)
         _wait_for_content(
             public_url=azents_public_server_url,
             token=workspace.token,
@@ -2028,15 +1942,13 @@ class SubagentCapacityScenarios:
             session_id=root_session_id,
             message=_OVERFLOW_LIST_MESSAGE,
         )
-        active_list = _listed_agents(
-            _wait_for_tool_result_json(
-                public_url=azents_public_server_url,
-                token=workspace.token,
-                session_id=root_session_id,
-                call_id=_OVERFLOW_LIST_CALL_ID,
-            )
+        active_list = _wait_for_listed_agents(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            call_id=_OVERFLOW_LIST_CALL_ID,
         )
-        assert active_list == [
+        assert [agent.model_dump() for agent in active_list] == [
             {"agent_name": "/root", "agent_status": "running"},
             {"agent_name": "/root/overflow_one", "agent_status": "running"},
             {"agent_name": "/root/overflow_three", "agent_status": "running"},
@@ -2102,26 +2014,24 @@ class SubagentCapacityScenarios:
             session_id=root_session_id,
             message=_OVERFLOW_CONTRACTED_LIST_MESSAGE,
         )
-        contracted = _listed_agents(
-            _wait_for_tool_result_json(
-                public_url=azents_public_server_url,
-                token=workspace.token,
-                session_id=root_session_id,
-                call_id=_OVERFLOW_CONTRACTED_LIST_CALL_ID,
-            )
+        contracted = _wait_for_listed_agents(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            call_id=_OVERFLOW_CONTRACTED_LIST_CALL_ID,
         )
         assert len(contracted) == 2
-        assert contracted[0] == {
+        assert contracted[0].model_dump() == {
             "agent_name": "/root",
             "agent_status": "running",
         }
-        contracted_child_name = contracted[1].get("agent_name")
+        contracted_child_name = contracted[1].agent_name
         assert contracted_child_name in {
             "/root/overflow_one",
             "/root/overflow_two",
             "/root/overflow_three",
         }
-        assert contracted[1].get("agent_status") == "completed"
+        assert contracted[1].agent_status == "completed"
         _wait_for_content(
             public_url=azents_public_server_url,
             token=workspace.token,

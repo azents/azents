@@ -5,7 +5,7 @@ import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import Any, AsyncIterator, NamedTuple, cast
+from typing import Any, AsyncIterator, NamedTuple
 from unittest.mock import AsyncMock
 
 import pytest
@@ -17,7 +17,11 @@ from azents.core.enums import (
     AgentSessionProductMode,
     AgentSessionStatus,
     EventKind,
+    LLMProvider,
 )
+from azents.core.llm_catalog import ModelCapabilities, ModelToolCallingCapabilities
+from azents.engine.events.openai_responses import OpenAIResponsesLowerer
+from azents.engine.events.pydantic_ai_lowering import PydanticAILowerer
 from azents.engine.events.types import (
     Event,
     NativeArtifact,
@@ -28,8 +32,7 @@ from azents.engine.events.types import (
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tools import session_history as history_module
 from azents.rdb.models.event import RDBEvent
-from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.message import MessageRepository
 from azents.repos.session_history.operations import SessionHistoryOperationRepository
@@ -77,8 +80,9 @@ def _child(session_id: str) -> AgentSession:
 
 
 @asynccontextmanager
-async def _session_context() -> AsyncIterator[AsyncSession]:
-    yield cast(AsyncSession, AsyncMock())
+async def _session_context() -> AsyncIterator[WriteSession]:
+    async with AsyncSession() as session:
+        yield ReadWriteSession(session)
 
 
 class _HistoryToolFixture(NamedTuple):
@@ -116,7 +120,7 @@ def _tools(
         agent_id="agent-1",
         current_session_id=current.id,
         operations=SessionHistoryOperationRepository(
-            session_manager=cast(SessionManager[WriteSession], _session_context),
+            session_manager=_session_context,
             agent_session_repository=sessions,
             workspace_user_repository=users,
             history_repository=history,
@@ -144,6 +148,166 @@ async def _json_result(
 def _cursor(payload: dict[str, object]) -> str:
     """Encode a deliberately controlled cursor payload for validation tests."""
     return base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "arguments"),
+    [
+        ("search_sessions", {}),
+        ("read_session_history", {"session_id": _TARGET}),
+        (
+            "read_session_tool_result",
+            {"session_id": _TARGET, "event_id": _EVENT},
+        ),
+    ],
+)
+@pytest.mark.parametrize("unknown_field", ["agent_id", "unexpected_option"])
+async def test_history_handlers_reject_unknown_fields_before_repository_access(
+    tool_name: str, arguments: dict[str, object], unknown_field: str
+) -> None:
+    """The declared tool boundary rejects extras before authority or data reads."""
+    operations = AsyncMock(spec=SessionHistoryOperationRepository)
+    tools = history_module.make_session_history_tools(
+        agent_id="agent-1",
+        current_session_id=_CURRENT,
+        operations=operations,
+    )
+    tool = next(tool for tool in tools if tool.spec.name == tool_name)
+    with pytest.raises(FunctionToolError, match="Extra inputs are not permitted"):
+        await tool.handler(json.dumps({**arguments, unknown_field: "other-agent"}))
+    assert operations.mock_calls == []
+
+
+@pytest.mark.parametrize(
+    "tool_name",
+    ["search_sessions", "read_session_history", "read_session_tool_result"],
+)
+def test_history_tool_schema_declares_one_object_with_unknown_fields_forbidden(
+    tool_name: str,
+) -> None:
+    """Schemas expose the same closed object shape that their handlers accept."""
+    tools = history_module.make_session_history_tools(
+        agent_id="agent-1",
+        current_session_id=_CURRENT,
+        operations=AsyncMock(spec=SessionHistoryOperationRepository),
+    )
+    tool = next(tool for tool in tools if tool.spec.name == tool_name)
+    schema = tool.spec.input_schema
+    assert schema["type"] == "object"
+    assert schema["additionalProperties"] is False
+    assert isinstance(schema["properties"], dict)
+    assert "oneOf" not in schema
+    assert "anyOf" not in schema
+
+
+@pytest.mark.parametrize("provider", list(LLMProvider))
+@pytest.mark.parametrize(
+    "tool_name",
+    ["search_sessions", "read_session_history", "read_session_tool_result"],
+)
+def test_history_schema_is_preserved_through_every_provider_lowerer(
+    provider: LLMProvider, tool_name: str
+) -> None:
+    """Both lowering families retain the shared closed history-tool contract."""
+    tools = history_module.make_session_history_tools(
+        agent_id="agent-1",
+        current_session_id=_CURRENT,
+        operations=AsyncMock(spec=SessionHistoryOperationRepository),
+    )
+    tool = next(tool for tool in tools if tool.spec.name == tool_name)
+    declarations: list[dict[str, object]] = [
+        {
+            "type": "function",
+            "name": tool.spec.name,
+            "description": tool.spec.description,
+            "parameters": tool.spec.input_schema,
+        }
+    ]
+    capabilities = ModelCapabilities(
+        tool_calling=ModelToolCallingCapabilities(supported=True)
+    )
+    if provider in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
+        request = OpenAIResponsesLowerer(
+            provider=provider.value,
+            provider_id=provider,
+            model="selected",
+            tools=declarations,
+            model_capabilities=capabilities,
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            top_k=None,
+        ).lower([], model="selected", native_replay_context=None)
+        schema = request.tools[0]["parameters"]
+    else:
+        native = PydanticAILowerer(
+            provider=provider.value,
+            provider_id=provider,
+            model="selected",
+            tools=declarations,
+            model_capabilities=capabilities,
+            supported_execution_options=[],
+            enabled_execution_options=[],
+            top_k=None,
+        ).lower([], model="selected", native_replay_context=None)
+        schema = native.parameters.function_tools[0].parameters_json_schema
+    assert isinstance(schema, dict)
+    assert schema == tool.spec.input_schema
+    assert schema["type"] == "object"
+    assert schema["additionalProperties"] is False
+    assert "oneOf" not in schema
+    assert "anyOf" not in schema
+
+
+def test_history_inputs_preserve_omitted_and_explicit_null_options() -> None:
+    """Closing tool inputs preserves nullable search and navigation defaults."""
+    assert history_module.SearchSessionsInput().model_dump() == (
+        history_module.SearchSessionsInput(
+            query=None, session_id=None, cursor=None
+        ).model_dump()
+    )
+    assert history_module.ReadSessionHistoryInput(session_id=_TARGET).model_dump() == (
+        history_module.ReadSessionHistoryInput(
+            session_id=_TARGET, before=None, after=None, around_event_id=None
+        ).model_dump()
+    )
+    assert history_module.ReadSessionToolResultInput(
+        session_id=_TARGET, event_id=_EVENT
+    ).model_dump() == (
+        history_module.ReadSessionToolResultInput(
+            session_id=_TARGET, event_id=_EVENT, cursor=None
+        ).model_dump()
+    )
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "arguments", "message"),
+    [
+        (
+            "search_sessions",
+            {"session_id": "current"},
+            "Searching within a Session requires query text",
+        ),
+        (
+            "read_session_history",
+            {"session_id": _TARGET, "before": _EVENT, "after": _EVENT},
+            "Choose only before, after, or around_event_id",
+        ),
+    ],
+)
+async def test_history_handlers_preserve_runtime_cross_field_validation(
+    tool_name: str, arguments: dict[str, object], message: str
+) -> None:
+    """Runtime cross-field validation remains outside the provider schema."""
+    operations = AsyncMock(spec=SessionHistoryOperationRepository)
+    tools = history_module.make_session_history_tools(
+        agent_id="agent-1",
+        current_session_id=_CURRENT,
+        operations=operations,
+    )
+    tool = next(tool for tool in tools if tool.spec.name == tool_name)
+    with pytest.raises(FunctionToolError, match=message):
+        await tool.handler(json.dumps(arguments))
+    assert operations.mock_calls == []
 
 
 @pytest.mark.parametrize(

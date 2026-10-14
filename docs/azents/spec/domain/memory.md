@@ -85,7 +85,7 @@ api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id}
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/consolidated-memory
-last_verified_at: 2026-10-13
+last_verified_at: 2026-10-14
 spec_version: 24
 ---
 
@@ -446,6 +446,9 @@ execution is restricted to its associated User's Sessions. Scoped search can
 target the current concrete execution or a known permitted Session. Search and
 history pages contain at most ten entries, and exact tool-result reads return
 bounded text with continuation rather than raw payloads or hidden artifacts.
+All three input objects reject unknown fields before repository operations.
+Optional selectors retain their omission and explicit-null semantics; execution
+identity and access authority remain server-bound rather than caller-supplied.
 
 ## Public API and Settings UI
 

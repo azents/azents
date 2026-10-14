@@ -30,6 +30,8 @@ import {
   wizardCandidateRequiresRestart,
   wizardIdentity,
 } from "../github-wizard-state";
+import { decodeGitHubPopupMessage } from "../popup-messages";
+import { projectGitHubReviewSettings } from "../provider-config-views";
 import { useGitHubWizardProgression } from "./useGitHubWizardProgression";
 import type { GitHubWizardProps } from "../components/GitHubWizard";
 import type { GitHubUserCreationContext } from "../github-user-creation-state";
@@ -65,6 +67,7 @@ const EMPTY_CREDENTIALS: GitHubWizardCredentials = {
 function restoredSettings(
   review: GitHubUserCreationReview,
 ): GitHubWizardSettings {
+  const config = projectGitHubReviewSettings(review.config);
   return {
     name: review.name,
     slug: review.slug,
@@ -72,14 +75,9 @@ function restoredSettings(
     prompt: review.prompt ?? "",
     enabled: review.enabled,
     alwaysExposeTools: review.always_expose_tools,
-    toolsets: Array.isArray(review.config.toolsets)
-      ? review.config.toolsets.filter(
-          (item): item is string => typeof item === "string",
-        )
-      : DEFAULT_GITHUB_WIZARD_SETTINGS.toolsets,
-    timeout:
-      typeof review.config.timeout === "number" ? review.config.timeout : 30,
-    injectRuntimeEnvironment: review.config.inject_runtime_environment === true,
+    toolsets: config.toolsets,
+    timeout: config.timeout,
+    injectRuntimeEnvironment: config.inject_runtime_environment,
     runtimeRiskAcknowledged: false,
   };
 }
@@ -553,32 +551,25 @@ export function useGitHubWizardContainer({
   }
   useWindowEvent("message", (event: MessageEvent<unknown>): void => {
     const operation = popupEpoch.current;
-    if (
-      !epoch.current.isCurrent(operation) ||
-      popup.current == null ||
-      event.source !== popup.current ||
-      event.origin !== window.location.origin ||
-      !isRecord(event.data)
-    ) {
+    const message = decodeGitHubPopupMessage(
+      event,
+      window.location.origin,
+      popup.current,
+      epoch.current.isCurrent(operation),
+    );
+    if (message == null) {
       return;
     }
-    if (event.data.type === "azents-github-app-installed") {
+    if (message.type === "azents-github-app-installed") {
       stopPopupWatch();
       popup.current = null;
       void connectInstallations();
       return;
     }
-    if (
-      event.data.type !== "azents-github-installations-code" ||
-      typeof event.data.code !== "string" ||
-      typeof event.data.state !== "string"
-    ) {
-      return;
-    }
     popup.current = null;
     stopPopupWatch();
     void installationsMutation
-      .mutateAsync({ ...scope, code: event.data.code, state: event.data.state })
+      .mutateAsync({ ...scope, code: message.code, state: message.state })
       .then((result) => {
         if (!epoch.current.isCurrent(operation) || closed.current) {
           return;

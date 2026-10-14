@@ -12,6 +12,11 @@ import requests
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from testcontainers.core.container import DockerContainer
 
+from support.discord_fake_observations import (
+    DiscordCommandIdentity,
+    DiscordDeliveryBarrier,
+    DiscordOAuthToken,
+)
 from support.discord_provider_fake import (
     STATE,
     DiscordHTTPHandler,
@@ -311,8 +316,9 @@ def test_discord_fake_reconciles_guild_commands_without_body_evidence(
         timeout=5,
     )
     settings.raise_for_status()
+    settings_identity = DiscordCommandIdentity.model_validate_json(settings.content)
     assert unrelated.json()["id"] == "500000000000000001"
-    assert settings.json()["id"] == "500000000000000002"
+    assert settings_identity.id == "500000000000000002"
     message_action = requests.post(
         commands_url,
         json={
@@ -353,13 +359,13 @@ def test_discord_fake_reconciles_guild_commands_without_body_evidence(
     updated = _sdk_call(
         discord_fake_url,
         "update_guild_command",
-        command_id=settings.json()["id"],
+        command_id=settings_identity.id,
         name="Private updated settings command",
         command_type=1,
         description="Current description.",
     )
     updated.raise_for_status()
-    assert updated.json()["id"] == settings.json()["id"]
+    assert updated.json()["id"] == settings_identity.id
     assert updated.json()["name"] == "Private updated settings command"
     assert updated.json()["type"] == 1
     assert updated.json()["application_id"] == "100000000000000001"
@@ -369,7 +375,7 @@ def test_discord_fake_reconciles_guild_commands_without_body_evidence(
     deleted = _sdk_call(
         discord_fake_url,
         "delete_guild_command",
-        command_id=settings.json()["id"],
+        command_id=settings_identity.id,
     )
     assert deleted.status_code == 200
     remaining = _sdk_call(
@@ -699,7 +705,7 @@ def test_discord_fake_oauth_success_pkce_replay_and_redaction(
         timeout=5,
     )
     token.raise_for_status()
-    access_token = token.json()["access_token"]
+    access_token = DiscordOAuthToken.model_validate_json(token.content).access_token
     userinfo = requests.get(
         f"{discord_fake_url}/api/users/@me",
         headers={"Authorization": f"Bearer {access_token}"},
@@ -1618,17 +1624,19 @@ def test_discord_fake_sequences_retry_after_and_blocks_provider_work(
     thread = threading.Thread(target=request_message)
     thread.start()
     for _ in range(50):
-        barrier = requests.get(
+        barrier_response = requests.get(
             f"{discord_fake_url}/__testenv/barrier",
             timeout=5,
-        ).json()
-        if barrier["reached"]:
+        )
+        barrier_response.raise_for_status()
+        barrier = DiscordDeliveryBarrier.model_validate_json(barrier_response.content)
+        if barrier.reached:
             break
         threading.Event().wait(0.02)
     else:
         pytest.fail("Discord exact-message barrier was not reached.")
     assert responses == []
-    assert barrier == {
+    assert barrier.model_dump() == {
         "operation": "get_message",
         "occurrence": 1,
         "request_count": 1,
@@ -1671,17 +1679,19 @@ def test_discord_fake_sequences_retry_after_and_blocks_provider_work(
     create_thread = threading.Thread(target=request_thread_creation)
     create_thread.start()
     for _ in range(50):
-        barrier = requests.get(
+        barrier_response = requests.get(
             f"{discord_fake_url}/__testenv/barrier",
             timeout=5,
-        ).json()
-        if barrier["reached"]:
+        )
+        barrier_response.raise_for_status()
+        barrier = DiscordDeliveryBarrier.model_validate_json(barrier_response.content)
+        if barrier.reached:
             break
         threading.Event().wait(0.02)
     else:
         pytest.fail("Discord thread-create barrier was not reached.")
     assert thread_responses == []
-    assert barrier == {
+    assert barrier.model_dump() == {
         "operation": "create_thread",
         "occurrence": 1,
         "request_count": 1,

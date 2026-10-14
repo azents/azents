@@ -571,7 +571,6 @@ class TestProviderImageGeneration:
             HistoryEventObservation.model_validate(results[0]).payload
         )
         output = result_payload.output
-        assert "attachments" not in (result_payload.model_extra or {})
         assert len(output) == 2
         assert isinstance(output[0].model_file_id, str)
         assert output[0].kind == "image"

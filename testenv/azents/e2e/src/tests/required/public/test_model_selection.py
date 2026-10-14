@@ -11,6 +11,8 @@ from azentspublicclient.api.llm_provider_integration_v1_api import (
 from azentspublicclient.api.workspace_v1_api import (
     WorkspaceV1Api as PublicWorkspaceV1Api,
 )
+from azentspublicclient.models.agent_response import AgentResponse
+from azentspublicclient.models.agent_session_response import AgentSessionResponse
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
 from azentspublicclient.models.create_workspace_request import (
     CreateWorkspaceRequest as PublicCreateWorkspaceRequest,
@@ -22,10 +24,23 @@ from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
 )
+from azentspublicclient.models.model_capabilities import ModelCapabilities
 from azentspublicclient.models.model_catalog_entry_list_response import (
     ModelCatalogEntryListResponse,
 )
+from azentspublicclient.models.model_catalog_entry_response import (
+    ModelCatalogEntryResponse,
+)
+from azentspublicclient.models.model_catalog_sync_status_response import (
+    ModelCatalogSyncStatusResponse,
+)
+from azentspublicclient.models.model_context_window import ModelContextWindow
+from azentspublicclient.models.model_modalities import ModelModalities
 from azentspublicclient.models.secrets import Secrets
+from azentspublicclient.models.workspace_model_settings_response import (
+    WorkspaceModelSettingsResponse,
+)
+from pydantic import ConfigDict
 
 from support.observations import (
     TurnMarkerObservation,
@@ -45,6 +60,44 @@ class _DeterministicWorkspace(NamedTuple):
     token: str
     handle: str
     integration_id: str
+
+
+class _CatalogSyncObservation(ModelCatalogSyncStatusResponse):
+    """Retain wire extensions for sync-status absence and equality evidence."""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class _ModalitiesObservation(ModelModalities):
+    """Preserve every wire key for the existing whole-object equality check."""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class _ContextWindowObservation(ModelContextWindow):
+    """Preserve omitted, null, and extra keys in whole-object equality evidence."""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class _CapabilitiesObservation(ModelCapabilities):
+    """Keep typed capability fields and equality-checked wire extensions."""
+
+    modalities: _ModalitiesObservation | None = None
+    context_window: _ContextWindowObservation | None = None
+
+
+class _CatalogEntryObservation(ModelCatalogEntryResponse):
+    """Retain generated entry fields and typed nested capability observations."""
+
+    normalized_capabilities: _CapabilitiesObservation
+
+
+class _CatalogObservation(ModelCatalogEntryListResponse):
+    """Generated catalog fields while retaining sync-status wire extensions."""
+
+    latest_sync: _CatalogSyncObservation | None
+    entries: list[_CatalogEntryObservation]
 
 
 def _workspace_with_deterministic_integration(
@@ -98,10 +151,10 @@ def _wait_for_initial_catalog_sync(
     token: str,
     handle: str,
     integration_id: str,
-) -> requests.Response:
+) -> _CatalogObservation:
     """Wait for the create-triggered deterministic catalog sync to finish."""
 
-    def terminal_sync() -> requests.Response | None:
+    def terminal_sync() -> _CatalogObservation | None:
         response = requests.get(
             f"{server_url}/llm-provider-integration/v1/workspaces/"
             f"{handle}/llm-provider-integrations/{integration_id}/catalog-entries",
@@ -110,7 +163,7 @@ def _wait_for_initial_catalog_sync(
         )
         if response.status_code != 200:
             return None
-        payload = ModelCatalogEntryListResponse.model_validate(response.json())
+        payload = _CatalogObservation.model_validate(response.json())
         if payload.catalog_scope != "integration":
             return None
         if payload.latest_sync is None or payload.latest_sync.status not in {
@@ -118,7 +171,7 @@ def _wait_for_initial_catalog_sync(
             "failed",
         }:
             return None
-        return response
+        return payload
 
     response = wait_until(
         terminal_sync,
@@ -136,10 +189,10 @@ def _wait_for_image_catalog_sync(
     token: str,
     handle: str,
     integration_id: str,
-) -> dict[str, object]:
+) -> ImageGenerationModelCatalogResponse:
     """Wait for the create-triggered image catalog projection."""
 
-    def populated_catalog() -> dict[str, object] | None:
+    def populated_catalog() -> ImageGenerationModelCatalogResponse | None:
         response = requests.get(
             f"{server_url}/llm-provider-integration/v1/workspaces/"
             f"{handle}/llm-provider-integrations/{integration_id}/"
@@ -155,7 +208,7 @@ def _wait_for_image_catalog_sync(
         identifiers = [entry.provider_model_identifier for entry in payload.entries]
         if identifiers != ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst"]:
             return None
-        return payload.to_dict()
+        return payload
 
     payload = wait_until(
         populated_catalog,
@@ -265,13 +318,14 @@ class TestModelSelectionReadiness:
             token,
             handle,
             integration_id,
-        ).json()
-        initial_sync = initial["latest_sync"]
-        initial_catalog = ModelCatalogEntryListResponse.model_validate(initial)
+        )
+        initial_sync = initial.latest_sync
+        assert initial_sync is not None
+        initial_catalog = initial
         assert initial_catalog.latest_sync is not None
         initial_started_at = initial_catalog.latest_sync.started_at
         assert initial_started_at is not None
-        assert "id" not in initial_sync
+        assert "id" not in initial_sync.model_dump()
         integration_url = (
             f"{azents_public_server_url}/llm-provider-integration/v1/workspaces/"
             f"{handle}/llm-provider-integrations/{integration_id}"
@@ -291,7 +345,10 @@ class TestModelSelectionReadiness:
             timeout=10,
         )
         after_rename.raise_for_status()
-        assert after_rename.json()["latest_sync"] == initial_sync
+        assert (
+            _CatalogObservation.model_validate(after_rename.json()).latest_sync
+            == initial_sync
+        )
 
         updated = requests.patch(
             integration_url,
@@ -314,9 +371,7 @@ class TestModelSelectionReadiness:
             )
             if response.status_code != 200:
                 return None
-            sync = ModelCatalogEntryListResponse.model_validate(
-                response.json()
-            ).latest_sync
+            sync = _CatalogObservation.model_validate(response.json()).latest_sync
             if sync is None or sync.started_at == initial_started_at:
                 return None
             if sync.status != "succeeded":
@@ -359,13 +414,14 @@ class TestModelSelectionReadiness:
         )
 
         assert response.status_code == 200
-        body = response.json()
-        assert [entry["provider_model_identifier"] for entry in body["entries"]] == [
+        body = _CatalogObservation.model_validate(response.json())
+        assert [entry.provider_model_identifier for entry in body.entries] == [
             "gpt-5.5",
             "gpt-5.5-mini",
         ]
-        assert body["latest_sync"]["status"] == "succeeded"
-        assert body["latest_sync"]["skipped_count"] == 1
+        assert body.latest_sync is not None
+        assert body.latest_sync.status == "succeeded"
+        assert body.latest_sync.skipped_count == 1
 
     def test_openrouter_catalog_and_unknown_publisher_selection(
         self,
@@ -390,32 +446,31 @@ class TestModelSelectionReadiness:
 
         listing = requests.get(catalog_url, headers=_headers(token), timeout=10)
         listing.raise_for_status()
-        body = listing.json()
-        entries = {
-            entry["provider_model_identifier"]: entry for entry in body["entries"]
-        }
+        body = _CatalogObservation.model_validate(listing.json())
+        entries = {entry.provider_model_identifier: entry for entry in body.entries}
 
-        assert body["catalog_scope"] == "integration"
-        assert body["latest_sync"]["status"] == "succeeded"
-        assert body["latest_sync"]["skipped_count"] == 1
+        assert body.catalog_scope == "integration"
+        assert body.latest_sync is not None
+        assert body.latest_sync.status == "succeeded"
+        assert body.latest_sync.skipped_count == 1
         assert set(entries) == {
             "anthropic/claude-sonnet-4.6",
             "new-publisher/frontier-text",
         }
-        assert entries["anthropic/claude-sonnet-4.6"]["publisher"] == "anthropic"
+        assert entries["anthropic/claude-sonnet-4.6"].publisher == "anthropic"
         unknown = entries["new-publisher/frontier-text"]
-        assert unknown["provider"] == "openrouter"
-        assert unknown["publisher"] == "other"
-        assert unknown["provider_model_identifier"] == "new-publisher/frontier-text"
-        assert all(
-            "runtime_model_identifier" not in entry and "lowerer_target" not in entry
-            for entry in entries.values()
-        )
-        assert unknown["normalized_capabilities"]["modalities"] == {
+        assert unknown.provider == "openrouter"
+        assert unknown.publisher == "other"
+        assert unknown.provider_model_identifier == "new-publisher/frontier-text"
+        assert unknown.normalized_capabilities.modalities is not None
+        assert unknown.normalized_capabilities.built_in_tools is not None
+        assert unknown.normalized_capabilities.modalities.model_dump(
+            mode="json", exclude_unset=True
+        ) == {
             "input": ["text", "image"],
             "output": ["text"],
         }
-        assert unknown["normalized_capabilities"]["built_in_tools"]["supported"] == [
+        assert unknown.normalized_capabilities.built_in_tools.supported == [
             "web_search"
         ]
 
@@ -426,10 +481,10 @@ class TestModelSelectionReadiness:
             timeout=10,
         )
         searched.raise_for_status()
-        assert searched.json()["total"] == 1
-        assert searched.json()["entries"][0]["provider_model_identifier"] == (
-            "new-publisher/frontier-text"
-        )
+        assert _CatalogObservation.model_validate(searched.json()).total == 1
+        assert _CatalogObservation.model_validate(searched.json()).entries[
+            0
+        ].provider_model_identifier == ("new-publisher/frontier-text")
 
         selection = {
             "llm_provider_integration_id": integration_id,
@@ -453,12 +508,18 @@ class TestModelSelectionReadiness:
             timeout=10,
         )
         assert workspace_update.status_code == 200
-        workspace_selection = workspace_update.json()[
-            "default_selectable_model_options"
-        ][0]["candidates"][0]["model_selection"]
-        assert workspace_selection["provider"] == "openrouter"
-        assert workspace_selection["model_identifier"] == "new-publisher/frontier-text"
-        assert workspace_selection["model_developer"] == "other"
+        workspace_settings = WorkspaceModelSettingsResponse.model_validate(
+            workspace_update.json()
+        )
+        assert workspace_settings.default_selectable_model_options is not None
+        workspace_selection = (
+            workspace_settings.default_selectable_model_options[0]
+            .candidates[0]
+            .model_selection
+        )
+        assert workspace_selection.provider == "openrouter"
+        assert workspace_selection.model_identifier == "new-publisher/frontier-text"
+        assert workspace_selection.model_developer == "other"
 
         created = requests.post(
             f"{azents_public_server_url}/agent/v1/workspaces/{handle}/agents",
@@ -467,12 +528,15 @@ class TestModelSelectionReadiness:
             timeout=10,
         )
         assert created.status_code == 201
-        agent_selection = created.json()["selectable_model_options"][0]["candidates"][
-            0
-        ]["model_selection"]
-        assert agent_selection["provider"] == "openrouter"
-        assert agent_selection["model_identifier"] == "new-publisher/frontier-text"
-        assert agent_selection["model_developer"] == "other"
+        agent_selection = (
+            AgentResponse.model_validate(created.json())
+            .selectable_model_options[0]
+            .candidates[0]
+            .model_selection
+        )
+        assert agent_selection.provider == "openrouter"
+        assert agent_selection.model_identifier == "new-publisher/frontier-text"
+        assert agent_selection.model_developer == "other"
 
     def test_user_catalog_failure_is_visible_without_snapshot(
         self,
@@ -498,11 +562,12 @@ class TestModelSelectionReadiness:
         )
 
         assert response.status_code == 200
-        body = response.json()
-        assert body["last_success_at"] is None
-        assert body["entries"] == []
-        assert body["latest_sync"]["status"] == "failed"
-        assert body["latest_sync"]["action_hint"]
+        body = _CatalogObservation.model_validate(response.json())
+        assert body.last_success_at is None
+        assert body.entries == []
+        assert body.latest_sync is not None
+        assert body.latest_sync.status == "failed"
+        assert body.latest_sync.action_hint
 
     def test_workspace_model_settings_update_from_listing_candidate(
         self,
@@ -531,9 +596,7 @@ class TestModelSelectionReadiness:
             message="Stored catalog entries did not become readable",
         )
         listing.raise_for_status()
-        candidate = ModelCatalogEntryListResponse.model_validate(
-            listing.json()
-        ).entries[0]
+        candidate = _CatalogObservation.model_validate(listing.json()).entries[0]
         selection = {
             "llm_provider_integration_id": integration_id,
             "model_identifier": candidate.provider_model_identifier,
@@ -564,9 +627,10 @@ class TestModelSelectionReadiness:
             timeout=10,
         )
         assert fetched.status_code == 200
-        body = fetched.json()
-        candidate = body["default_selectable_model_options"][0]["candidates"][0]
-        assert candidate["model_selection"]["model_identifier"] == "gpt-5.5"
+        body = WorkspaceModelSettingsResponse.model_validate(fetched.json())
+        assert body.default_selectable_model_options is not None
+        candidate = body.default_selectable_model_options[0].candidates[0]
+        assert candidate.model_selection.model_identifier == "gpt-5.5"
 
     def test_context_range_default_and_maximum_resolution(
         self,
@@ -591,17 +655,23 @@ class TestModelSelectionReadiness:
         )
         listing.raise_for_status()
         entries = {
-            entry["provider_model_identifier"]: entry
-            for entry in listing.json()["entries"]
+            entry.provider_model_identifier: entry
+            for entry in _CatalogObservation.model_validate(listing.json()).entries
         }
         main = entries["gpt-5.5"]
         lightweight = entries["gpt-5.5-mini"]
-        assert main["normalized_capabilities"]["context_window"] == {
+        assert main.normalized_capabilities.context_window is not None
+        assert lightweight.normalized_capabilities.context_window is not None
+        assert main.normalized_capabilities.context_window.model_dump(
+            mode="json", exclude_unset=True
+        ) == {
             "default_input_tokens": 96_000,
             "max_input_tokens": 256_000,
             "max_output_tokens": 16_000,
         }
-        assert lightweight["normalized_capabilities"]["context_window"] == {
+        assert lightweight.normalized_capabilities.context_window.model_dump(
+            mode="json", exclude_unset=True
+        ) == {
             "default_input_tokens": None,
             "max_input_tokens": 512_000,
             "max_output_tokens": 16_000,
@@ -656,9 +726,9 @@ class TestModelSelectionReadiness:
         )
 
         assert created.status_code == 201, created.text
-        body = created.json()
-        assert body["effective_context_window_tokens"] == 96_000
-        agent_id = body["id"]
+        body = AgentResponse.model_validate(created.json())
+        assert body.effective_context_window_tokens == 96_000
+        agent_id = body.id
         start_and_wait_for_agent_runtime(
             public_api_client,
             token=token,
@@ -671,7 +741,7 @@ class TestModelSelectionReadiness:
             timeout=10,
         )
         session.raise_for_status()
-        session_id = session.json()["id"]
+        session_id = AgentSessionResponse.model_validate(session.json()).id
 
         for label, _, _, expected_effective in scenarios:
             submitted = requests.post(
@@ -720,8 +790,8 @@ class TestModelSelectionReadiness:
             handle,
             integration_id,
         )
-        assert image_catalog["default_available"] is True
-        assert image_catalog["explicit_selection_supported"] is True
+        assert image_catalog.default_available is True
+        assert image_catalog.explicit_selection_supported is True
         listing = wait_until(
             lambda: requests.get(
                 f"{azents_public_server_url}/llm-provider-integration/v1/workspaces/"
@@ -735,16 +805,16 @@ class TestModelSelectionReadiness:
         )
         listing.raise_for_status()
         entries = {
-            entry["provider_model_identifier"]: entry
-            for entry in listing.json()["entries"]
+            entry.provider_model_identifier: entry
+            for entry in _CatalogObservation.model_validate(listing.json()).entries
         }
         main_selection = {
             "llm_provider_integration_id": integration_id,
-            "model_identifier": entries["gpt-5.5"]["provider_model_identifier"],
+            "model_identifier": entries["gpt-5.5"].provider_model_identifier,
         }
         lightweight_selection = {
             "llm_provider_integration_id": integration_id,
-            "model_identifier": entries["gpt-5.5-mini"]["provider_model_identifier"],
+            "model_identifier": entries["gpt-5.5-mini"].provider_model_identifier,
         }
 
         default_option = {
@@ -809,22 +879,20 @@ class TestModelSelectionReadiness:
             timeout=10,
         )
         assert update.status_code == 200
-        settings = update.json()
+        settings = WorkspaceModelSettingsResponse.model_validate(update.json())
+        assert settings.default_selectable_model_options is not None
         assert [
-            option["label"] for option in settings["default_selectable_model_options"]
+            option.label for option in settings.default_selectable_model_options
         ] == ["default", "lightweight"]
-        stored_default = settings["default_selectable_model_options"][0]
-        assert len(stored_default["candidates"]) == 2
+        stored_default = settings.default_selectable_model_options[0]
+        assert len(stored_default.candidates) == 2
+        assert stored_default.candidates[0].settings.context_window_tokens == 100_000
         assert (
-            stored_default["candidates"][0]["settings"]["context_window_tokens"]
-            == 100_000
-        )
-        assert (
-            stored_default["candidates"][1]["model_selection"]["model_identifier"]
+            stored_default.candidates[1].model_selection.model_identifier
             == "gpt-5.5-mini"
         )
-        assert stored_default["subagent_enabled"] is False
-        assert stored_default["subagent_guidance"] == ("Reserve for complex synthesis.")
+        assert stored_default.subagent_enabled is False
+        assert stored_default.subagent_guidance == ("Reserve for complex synthesis.")
 
         created = requests.post(
             f"{azents_public_server_url}/agent/v1/workspaces/{handle}/agents",
@@ -833,23 +901,20 @@ class TestModelSelectionReadiness:
             timeout=10,
         )
         assert created.status_code == 201
-        agent = created.json()
-        assert [option["label"] for option in agent["selectable_model_options"]] == [
+        agent = AgentResponse.model_validate(created.json())
+        assert [option.label for option in agent.selectable_model_options] == [
             "default",
             "lightweight",
         ]
-        agent_default = agent["selectable_model_options"][0]
-        assert len(agent_default["candidates"]) == 2
+        agent_default = agent.selectable_model_options[0]
+        assert len(agent_default.candidates) == 2
+        assert agent_default.candidates[0].model_selection.model_identifier == "gpt-5.5"
         assert (
-            agent_default["candidates"][0]["model_selection"]["model_identifier"]
-            == "gpt-5.5"
-        )
-        assert (
-            agent_default["candidates"][1]["model_selection"]["model_identifier"]
+            agent_default.candidates[1].model_selection.model_identifier
             == "gpt-5.5-mini"
         )
-        assert agent["main_model_label"] == "default"
-        assert agent["lightweight_model_label"] == "lightweight"
+        assert agent.main_model_label == "default"
+        assert agent.lightweight_model_label == "lightweight"
 
         changed_defaults = requests.put(
             f"{azents_public_server_url}/workspace-model-settings/v1/workspaces/{handle}",
@@ -863,18 +928,22 @@ class TestModelSelectionReadiness:
         )
         changed_defaults.raise_for_status()
         unchanged_agent = requests.get(
-            f"{azents_public_server_url}/agent/v1/workspaces/{handle}/agents/{agent['id']}",
+            f"{azents_public_server_url}/agent/v1/workspaces/{handle}/agents/{agent.id}",
             headers=_headers(token),
             timeout=10,
         )
         unchanged_agent.raise_for_status()
         assert (
-            len(unchanged_agent.json()["selectable_model_options"][0]["candidates"])
+            len(
+                AgentResponse.model_validate(unchanged_agent.json())
+                .selectable_model_options[0]
+                .candidates
+            )
             == 2
         )
 
         normalization_update = requests.patch(
-            f"{azents_public_server_url}/agent/v1/workspaces/{handle}/agents/{agent['id']}",
+            f"{azents_public_server_url}/agent/v1/workspaces/{handle}/agents/{agent.id}",
             headers=_headers(token),
             json={
                 "selectable_model_options": [
@@ -897,12 +966,12 @@ class TestModelSelectionReadiness:
             timeout=10,
         )
         assert normalization_update.status_code == 200
-        updated_agent = normalization_update.json()
-        assert updated_agent["main_model_label"] == "fast"
-        assert updated_agent["lightweight_model_label"] == "fast"
+        updated_agent = AgentResponse.model_validate(normalization_update.json())
+        assert updated_agent.main_model_label == "fast"
+        assert updated_agent.lightweight_model_label == "fast"
         assert (
-            updated_agent["selectable_model_options"][0]["candidates"][0][
-                "model_selection"
-            ]["model_identifier"]
+            updated_agent.selectable_model_options[0]
+            .candidates[0]
+            .model_selection.model_identifier
             == "gpt-5.5-mini"
         )

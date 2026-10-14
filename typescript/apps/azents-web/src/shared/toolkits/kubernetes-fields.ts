@@ -1,4 +1,4 @@
-import { getString, isOneOf, isRecord } from "@/shared/lib/unknown-value";
+import { getString, isOneOf, isRecord } from "../lib/unknown-value.ts";
 import type { ClusterAuthType } from "./types";
 type KubernetesConfig = Record<string, unknown>;
 type KubernetesCredentials = Record<string, unknown> | null;

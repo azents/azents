@@ -13,9 +13,8 @@ from testenv.seed.types import Agent, User
 class Session:
     """Live chat session value object for server-side state.
 
-    `start_session` performs the WebSocket handshake and init message, then
-    returns this session object. The WebSocket itself is not kept open; `collect`
-    and `stream` open their own connections for subsequent calls.
+    `start_session` resolves the team primary session through REST. `collect`
+    and `stream` open a confirmed WebSocket subscription before committing input.
     """
 
     id: str

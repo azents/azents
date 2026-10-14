@@ -1,5 +1,6 @@
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { NotionConfigFieldsContainer } from "../NotionConfigFieldsContainer";
+import { projectNotionFields } from "../provider-config-views";
 import { NotionConfigFields } from "./NotionConfigFields";
 import { ProviderFieldStoryTransport } from "./provider-field-story-fixtures";
 import type { SimpleProviderFieldsProps } from "../types";
@@ -9,7 +10,9 @@ interface StoryProps extends SimpleProviderFieldsProps {
   onRequest: (input: unknown) => void;
 }
 function FieldStory(props: StoryProps): React.ReactElement {
-  return <NotionConfigFields {...props} />;
+  return (
+    <NotionConfigFields {...props} view={projectNotionFields(props.config)} />
+  );
 }
 const meta = {
   title: "Toolkits/Provider fields/Notion",

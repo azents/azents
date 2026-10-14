@@ -929,9 +929,9 @@ async def test_agent_installation_finally_revoke_preserves_error_cancel_asymmetr
     async def revoke(*args: object, client_factory: GitHubClientFactory) -> None:
         harness.boundary.external("revoke")
 
-    monkeypatch.setattr(oauth, "exchange_oauth_code", exchange)
-    monkeypatch.setattr(oauth, "list_user_installations", installations)
-    monkeypatch.setattr(oauth, "revoke_oauth_token", revoke)
+    monkeypatch.setattr(service_module, "exchange_oauth_code", exchange)
+    monkeypatch.setattr(service_module, "list_user_installations", installations)
+    monkeypatch.setattr(service_module, "revoke_oauth_token", revoke)
     state = create_agent_github_platform_oauth_state(
         "state-secret",
         effective_generation="generation-1",
@@ -1025,7 +1025,7 @@ async def test_platform_installation_sdk_routing_requires_both_testenv_settings(
         }
     )
     service = dataclasses.replace(harness.service, config=config)
-    module = service_module if scope == "shared" else oauth
+    module = service_module
     observed: list[GitHubClientFactory] = []
 
     def fixture_factory(*args: object) -> NoReturn:

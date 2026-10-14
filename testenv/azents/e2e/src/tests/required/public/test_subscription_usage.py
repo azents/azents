@@ -2,6 +2,7 @@
 
 import json
 from dataclasses import dataclass
+from typing import Literal
 
 import azentsadminclient
 import azentspublicclient
@@ -14,20 +15,55 @@ from azentspublicclient.api.llm_provider_integration_v1_api import (
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
 from azentspublicclient.models.create_invitation_request import CreateInvitationRequest
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest
-from pydantic import TypeAdapter
+from azentspublicclient.models.subscription_usage_available_response import (
+    SubscriptionUsageAvailableResponse,
+)
+from azentspublicclient.models.subscription_usage_external_response import (
+    SubscriptionUsageExternalResponse,
+)
+from azentspublicclient.models.subscription_usage_limit_response import (
+    SubscriptionUsageLimitResponse,
+)
+from azentspublicclient.models.subscription_usage_unavailable_response import (
+    SubscriptionUsageUnavailableResponse,
+)
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    StrictBool,
+    StrictInt,
+    StrictStr,
+    TypeAdapter,
+)
 from testcontainers.core.container import DockerContainer
 
 from support.oauth_connections import connect_chatgpt_oauth, connect_xai_oauth
-from support.subscription_usage_evidence import (
-    json_object as _json_object,
-)
+from support.subscription_usage_evidence import json_object as _json_object
 from support.subscription_usage_evidence import (
     subscription_usage_log_records as _subscription_usage_log_records,
 )
 from support.utils import authenticate_user, unique
 
 _SUBSCRIPTION_USAGE_JOURNAL_PATH = "/v1/_subscription_usage_requests"
-_JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
+
+
+class _UsageJournalEntry(BaseModel):
+    """Sanitized fixture journal has exactly these authoritative fields."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    scenario: StrictStr
+    path: StrictStr
+    sequence: StrictInt
+    status: StrictInt | Literal["transport_close"]
+    required_headers: dict[str, StrictBool]
+
+
+_USAGE_JOURNAL = TypeAdapter(list[_UsageJournalEntry])
+type _UsageResponse = (
+    SubscriptionUsageAvailableResponse
+    | SubscriptionUsageUnavailableResponse
+    | SubscriptionUsageExternalResponse
+)
 
 
 @dataclass(frozen=True)
@@ -141,8 +177,8 @@ def _usage(
     integration_id: str,
     *,
     token: str,
-) -> dict[str, object]:
-    """Read and JSON-normalize one generated-client usage response."""
+) -> _UsageResponse:
+    """Retain the operation-specific generated usage response at ingress."""
     response = api.llm_provider_integration_v1_get_subscription_usage(
         integration_id=integration_id,
         handle=workspace.handle,
@@ -150,17 +186,17 @@ def _usage(
     )
     actual = response.actual_instance
     assert actual is not None
-    return _json_object(actual.to_dict())
+    return actual
 
 
-def subscription_usage_journal(proxy_url: str) -> list[dict[str, object]]:
+def subscription_usage_journal(proxy_url: str) -> list[_UsageJournalEntry]:
     """Read the sanitized subscription usage proxy journal."""
     response = requests.get(
         f"{proxy_url}{_SUBSCRIPTION_USAGE_JOURNAL_PATH}",
         timeout=10,
     )
     response.raise_for_status()
-    return _JSON_OBJECT_LIST.validate_python(response.json())
+    return _USAGE_JOURNAL.validate_python(response.json())
 
 
 def clear_subscription_usage_journal(proxy_url: str) -> None:
@@ -173,7 +209,16 @@ def clear_subscription_usage_journal(proxy_url: str) -> None:
 
 def _assert_no_sensitive_source_values(value: object) -> None:
     """Reject deterministic credentials and account metadata from output."""
-    serialized = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    if isinstance(
+        value,
+        (
+            SubscriptionUsageAvailableResponse,
+            SubscriptionUsageUnavailableResponse,
+            SubscriptionUsageExternalResponse,
+        ),
+    ):
+        value = _json_object(value.to_dict())
+    serialized = json.dumps(value, ensure_ascii=False, sort_keys=True)
     for forbidden in (
         "test-chatgpt-access-token",
         "test-chatgpt-refresh-token",
@@ -189,10 +234,11 @@ def _assert_no_sensitive_source_values(value: object) -> None:
         assert forbidden not in serialized
 
 
-def _assert_safe_subscription_usage_journal(journal: list[dict[str, object]]) -> None:
+def _assert_safe_subscription_usage_journal(journal: list[_UsageJournalEntry]) -> None:
     """Verify the proxy journal contains classifications, not source values."""
-    _assert_no_sensitive_source_values(journal)
-    serialized = json.dumps(journal, ensure_ascii=False, sort_keys=True)
+    wire = [entry.model_dump(mode="json") for entry in journal]
+    _assert_no_sensitive_source_values(wire)
+    serialized = json.dumps(wire, ensure_ascii=False, sort_keys=True)
     for forbidden in (
         "120 credits",
         "500 credits",
@@ -206,12 +252,13 @@ def _assert_safe_subscription_usage_journal(journal: list[dict[str, object]]) ->
     ):
         assert forbidden not in serialized
     allowed_keys = {"scenario", "path", "sequence", "status", "required_headers"}
-    assert all(set(entry) == allowed_keys for entry in journal)
+    assert all(set(entry.model_dump()) == allowed_keys for entry in journal)
 
 
-def _limits(payload: dict[str, object]) -> list[dict[str, object]]:
-    """Return validated normalized usage limits."""
-    return _JSON_OBJECT_LIST.validate_python(payload.get("limits"))
+def _limits(payload: _UsageResponse) -> list[SubscriptionUsageLimitResponse]:
+    """Return declared limits only from an available usage response."""
+    assert isinstance(payload, SubscriptionUsageAvailableResponse)
+    return payload.limits
 
 
 class TestChatGPTSubscriptionUsage:
@@ -244,11 +291,14 @@ class TestChatGPTSubscriptionUsage:
         member = _usage(api, workspace, normal_id, token=workspace.member_token)
         exhausted = _usage(api, workspace, exhausted_id, token=workspace.owner_token)
 
-        assert owner["type"] == "available"
-        assert owner["provider"] == "chatgpt_oauth"
-        assert owner["plan_label"] == "Pro"
+        assert isinstance(owner, SubscriptionUsageAvailableResponse)
+        assert isinstance(member, SubscriptionUsageAvailableResponse)
+        assert owner.type == "available"
+        assert owner.provider == "chatgpt_oauth"
+        assert owner.plan_label == "Pro"
         assert len(_limits(owner)) == 2
-        assert owner["financial_details"] == {
+        assert owner.financial_details is not None
+        assert _json_object(owner.to_dict())["financial_details"] == {
             "type": "chatgpt",
             "has_credits": True,
             "unlimited": False,
@@ -259,13 +309,16 @@ class TestChatGPTSubscriptionUsage:
             "spend_resets_at": "2026-08-01T00:00:00Z",
             "reached_type": None,
         }
-        assert member["type"] == "available"
-        assert member["plan_label"] == owner["plan_label"]
-        assert member["limits"] == owner["limits"]
-        assert member["financial_details"] is None
+        assert member.type == "available"
+        assert member.plan_label == owner.plan_label
+        assert member.limits == owner.limits
+        assert member.financial_details is None
         exhausted_limits = _limits(exhausted)
-        assert exhausted_limits[0]["used_percent"] == 100.0
-        assert all("remaining" not in limit for limit in exhausted_limits)
+        assert exhausted_limits[0].used_percent == 100.0
+        assert all(
+            "remaining" not in _json_object(limit.to_dict())
+            for limit in exhausted_limits
+        )
         _assert_no_sensitive_source_values(owner)
         _assert_no_sensitive_source_values(member)
         _assert_safe_subscription_usage_journal(
@@ -298,15 +351,16 @@ class TestChatGPTSubscriptionUsage:
             token=workspace.owner_token,
         )
 
-        assert payload["type"] == "available"
-        assert _limits(payload)[0]["used_percent"] == 35.0
+        assert isinstance(payload, SubscriptionUsageAvailableResponse)
+        assert payload.type == "available"
+        assert _limits(payload)[0].used_percent == 35.0
         journal = subscription_usage_journal(openai_proxy_url)
-        assert [(entry["path"], entry["status"]) for entry in journal] == [
+        assert [(entry.path, entry.status) for entry in journal] == [
             ("/backend-api/wham/usage", 401),
             ("/chatgpt/oauth/token", 200),
             ("/backend-api/wham/usage", 200),
         ]
-        assert [entry["sequence"] for entry in journal] == [1, 1, 2]
+        assert [entry.sequence for entry in journal] == [1, 1, 2]
         _assert_no_sensitive_source_values(payload)
         _assert_safe_subscription_usage_journal(journal)
 
@@ -334,10 +388,14 @@ class TestChatGPTSubscriptionUsage:
             token=workspace.owner_token,
         )
 
-        assert payload["type"] == "unavailable"
-        assert payload["reason"] == "temporarily_unavailable"
-        assert payload["retryable"] is True
-        assert "error" not in json.dumps(payload, sort_keys=True).lower()
+        assert isinstance(payload, SubscriptionUsageUnavailableResponse)
+        assert payload.type == "unavailable"
+        assert payload.reason == "temporarily_unavailable"
+        assert payload.retryable is True
+        assert (
+            "error"
+            not in json.dumps(_json_object(payload.to_dict()), sort_keys=True).lower()
+        )
         _assert_no_sensitive_source_values(payload)
         _assert_safe_subscription_usage_journal(
             subscription_usage_journal(openai_proxy_url)
@@ -367,12 +425,15 @@ class TestXaiSubscriptionUsage:
         owner = _usage(api, workspace, integration_id, token=workspace.owner_token)
         member = _usage(api, workspace, integration_id, token=workspace.member_token)
 
-        assert owner["type"] == "available"
-        assert owner["provider"] == "xai_oauth"
-        assert owner["plan_label"] == "SuperGrok"
+        assert isinstance(owner, SubscriptionUsageAvailableResponse)
+        assert isinstance(member, SubscriptionUsageAvailableResponse)
+        assert owner.type == "available"
+        assert owner.provider == "xai_oauth"
+        assert owner.plan_label == "SuperGrok"
         assert len(_limits(owner)) == 1
-        assert _limits(owner)[0]["used_percent"] == 42.0
-        assert owner["financial_details"] == {
+        assert _limits(owner)[0].used_percent == 42.0
+        assert owner.financial_details is not None
+        assert _json_object(owner.to_dict())["financial_details"] == {
             "type": "xai",
             "prepaid_balance_cents": 2540,
             "payg_cap_cents": 10000,
@@ -381,10 +442,10 @@ class TestXaiSubscriptionUsage:
             "auto_top_up_amount_cents": 2000,
             "auto_top_up_monthly_maximum_cents": 10000,
         }
-        assert member["limits"] == owner["limits"]
-        assert member["financial_details"] is None
+        assert member.limits == owner.limits
+        assert member.financial_details is None
         journal = subscription_usage_journal(openai_proxy_url)
-        assert [entry["path"] for entry in journal] == [
+        assert [entry.path for entry in journal] == [
             "/v1/settings",
             "/v1/billing",
             "/v1/auto-topup-rule",
@@ -433,13 +494,15 @@ class TestXaiSubscriptionUsage:
             token=workspace.owner_token,
         )
 
-        assert payload["type"] == expected_type
+        assert payload.type == expected_type
         if expected_reason is not None:
-            assert payload["reason"] == expected_reason
-            assert "url" not in payload
+            assert isinstance(payload, SubscriptionUsageUnavailableResponse)
+            assert payload.reason == expected_reason
+            assert "url" not in _json_object(payload.to_dict())
         if scenario == "test-xai-external":
-            assert payload["url"] == "https://grok.com/usage"
-            assert "financial_details" not in payload
+            assert isinstance(payload, SubscriptionUsageExternalResponse)
+            assert payload.url == "https://grok.com/usage"
+            assert "financial_details" not in _json_object(payload.to_dict())
         if scenario == "test-xai-billing-denied":
             integration = api.llm_provider_integration_v1_get_integration(
                 integration_id=integration_id,
@@ -448,7 +511,7 @@ class TestXaiSubscriptionUsage:
             )
             assert integration.enabled is True
         journal = subscription_usage_journal(openai_proxy_url)
-        assert [entry["path"] for entry in journal] == expected_paths
+        assert [entry.path for entry in journal] == expected_paths
         _assert_no_sensitive_source_values(payload)
         _assert_safe_subscription_usage_journal(journal)
 
@@ -493,17 +556,19 @@ class TestSubscriptionUsageIsolation:
             disabled_id,
             token=workspace.owner_token,
         )
-        assert disabled["type"] == "unavailable"
-        assert disabled["reason"] == "disabled"
+        assert isinstance(disabled, SubscriptionUsageUnavailableResponse)
+        assert disabled.type == "unavailable"
+        assert disabled.reason == "disabled"
         assert subscription_usage_journal(openai_proxy_url) == []
 
         broken = _usage(api, workspace, broken_id, token=workspace.owner_token)
         healthy = _usage(api, workspace, healthy_id, token=workspace.owner_token)
-        assert broken["type"] == "unavailable"
-        assert broken["reason"] == "invalid_provider_response"
-        assert healthy["type"] == "available"
+        assert isinstance(broken, SubscriptionUsageUnavailableResponse)
+        assert broken.type == "unavailable"
+        assert broken.reason == "invalid_provider_response"
+        assert healthy.type == "available"
         journal = subscription_usage_journal(openai_proxy_url)
-        assert [entry["scenario"] for entry in journal] == [
+        assert [entry.scenario for entry in journal] == [
             "chatgpt_malformed",
             "xai_normal",
             "xai_normal",

@@ -4,6 +4,8 @@ Callers can import specific exceptions with
 `from testenv.live.errors import ChatTimeout, ChatConnectionError`.
 """
 
+from .events import ChatAction
+
 
 class ChatError(Exception):
     """Base exception for live.chat helpers."""
@@ -24,6 +26,6 @@ class ChatTimeout(ChatError):
     happened before the timeout.
     """
 
-    def __init__(self, message: str, *, collected_events: list[dict[str, object]]) -> None:
+    def __init__(self, message: str, *, collected_events: list[ChatAction]) -> None:
         super().__init__(message)
         self.collected_events = collected_events

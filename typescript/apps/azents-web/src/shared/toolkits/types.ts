@@ -1,6 +1,14 @@
 /** Toolkit feature state type */
 
 import type {
+  AwsFieldsView,
+  GcpFieldsView,
+  GoogleAnalyticsFieldsView,
+  KubernetesFieldsView,
+  NotionFieldsView,
+  SentryFieldsView,
+} from "./provider-config-views";
+import type {
   GitHubSetupAvailability,
   GitHubUserCandidateSummary,
   GitHubUserConnectionSummary,
@@ -148,6 +156,22 @@ export type CredentialProviderFieldsProps = ToolkitConfigFieldsInput &
   };
 export type SimpleProviderFieldsProps = ToolkitConfigFieldsInput &
   ProviderConnectionTestControl;
+export type AwsConfigFieldsProps = CredentialProviderFieldsProps & {
+  view: AwsFieldsView;
+};
+export type GcpConfigFieldsProps = ServiceAccountProviderFieldsProps & {
+  view: GcpFieldsView;
+};
+export type GoogleAnalyticsConfigFieldsProps =
+  ServiceAccountProviderFieldsProps & {
+    view: GoogleAnalyticsFieldsView;
+  };
+export type NotionConfigFieldsProps = SimpleProviderFieldsProps & {
+  view: NotionFieldsView;
+};
+export type SentryConfigFieldsProps = SimpleProviderFieldsProps & {
+  view: SentryFieldsView;
+};
 export type EnvVarConfigFieldsInput = Omit<
   ToolkitConfigFieldsInput,
   "handle" | "agentId" | "toolkitConfigId"
@@ -164,6 +188,7 @@ export type McpConfigFieldsProps = McpConfigFieldsInput &
 export type ClusterAuthType = "kubeconfig" | "token" | "eks" | "gke";
 export type KubernetesConfigFieldsProps = ToolkitConfigFieldsInput &
   ProviderConnectionTestControl & {
+    view: KubernetesFieldsView;
     replacingCreds: ReadonlySet<string>;
     storedClusterAuthTypes: ReadonlyMap<string, ClusterAuthType>;
     onReplaceCluster: (name: string) => void;

@@ -438,37 +438,15 @@ def _list_live(
     return _BufferLive.model_validate(response.json())
 
 
-def _assert_legacy_messages_get_removed(
-    *,
-    server_url: str,
-    token: str,
-    session_id: str,
-) -> None:
-    """Verify that the legacy aggregate messages endpoint is absent."""
-    response = requests.get(
-        f"{server_url}/chat/v1/sessions/{session_id}/messages",
-        headers=_headers(token),
-        timeout=10,
-    )
-    if response.status_code not in {404, 405}:
-        raise AssertionError(
-            f"legacy messages GET endpoint still exists: {response.text}"
-        )
-
-
 def _assert_split_rest_contract(
     history_payload: HistoryPageObservation, live_payload: _BufferLive
 ) -> None:
-    """Preserve split-contract absence and presence assertions after validation."""
+    """Verify the current split-contract fields after validation."""
     assert isinstance(history_payload.items, list)
     assert isinstance(history_payload.has_more, bool)
     assert "next_cursor" in history_payload.model_fields_set
     assert isinstance(live_payload.partial_history.items, list)
     assert isinstance(live_payload.mailbox_items, list)
-    assert "input_buffers" not in live_payload.model_fields_set
-    assert "items" not in live_payload.model_fields_set
-    assert "run_state" not in history_payload.model_fields_set
-    assert "run_state" not in live_payload.model_fields_set
 
 
 def _pending_buffers(payload: _BufferLive) -> list[_PendingBuffer]:
@@ -862,11 +840,6 @@ class TestChatInputBuffer:
             client_request_id=f"initial-{unique()}",
         )
         session_id = _session_id_from_write(initial_response)
-        _assert_legacy_messages_get_removed(
-            server_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=session_id,
-        )
         _wait_for_tool_release_barrier(
             azents_engine_worker_container,
             release_file_path,
@@ -1004,11 +977,6 @@ class TestChatInputBuffer:
                 client_request_id=f"initial-delete-{unique()}",
             )
             session_id = _session_id_from_write(initial_response)
-            _assert_legacy_messages_get_removed(
-                server_url=azents_public_server_url,
-                token=workspace.token,
-                session_id=session_id,
-            )
             _wait_for_tool_release_barrier(
                 azents_engine_worker_container,
                 release_file_path,

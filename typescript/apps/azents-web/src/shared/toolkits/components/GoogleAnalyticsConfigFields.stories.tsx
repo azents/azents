@@ -1,5 +1,6 @@
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { GoogleAnalyticsConfigFieldsContainer } from "../GoogleAnalyticsConfigFieldsContainer";
+import { projectGoogleAnalyticsFields } from "../provider-config-views";
 import { GoogleAnalyticsConfigFields } from "./GoogleAnalyticsConfigFields";
 import { ProviderFieldStoryTransport } from "./provider-field-story-fixtures";
 import type { ServiceAccountProviderFieldsProps } from "../types";
@@ -9,7 +10,12 @@ interface StoryProps extends ServiceAccountProviderFieldsProps {
   onRequest: (input: unknown) => void;
 }
 function FieldStory(props: StoryProps): React.ReactElement {
-  return <GoogleAnalyticsConfigFields {...props} />;
+  return (
+    <GoogleAnalyticsConfigFields
+      {...props}
+      view={projectGoogleAnalyticsFields(props.config, props.credentials)}
+    />
+  );
 }
 const meta = {
   title: "Toolkits/Provider fields/GoogleAnalytics",

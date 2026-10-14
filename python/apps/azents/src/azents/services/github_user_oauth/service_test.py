@@ -347,6 +347,14 @@ async def test_disconnect_failure_still_completes_locally_without_probe(
     assert "old-token" not in caplog.text and "client-secret" not in caplog.text
     assert "revocation attempt failed" in caplog.text
     assert "revoke:provider" not in h.state.events
+    records = [
+        record for record in caplog.records if record.name == service_module.logger.name
+    ]
+    assert len(records) == 1
+    assert records[0].__dict__["app_source"] == h.registration.source
+    assert records[0].__dict__["app_id"] == h.registration.app_id
+    assert records[0].__dict__["reason"] == _failure().reason
+    assert records[0].exc_info is not None
 
 
 async def test_replacement_failure_keeps_new_connection_and_old_cleanup_target() -> (
@@ -467,6 +475,13 @@ async def test_missing_platform_registration_does_not_block_disconnect(
     h.provider.revoke.assert_not_awaited()
     h.provider.identity.assert_not_awaited()
     assert "registration unavailable" in caplog.text
+    records = [
+        record for record in caplog.records if record.name == service_module.logger.name
+    ]
+    assert len(records) == 1
+    assert records[0].__dict__["app_source"] == h.registration.source
+    assert records[0].__dict__["app_id"] == h.registration.app_id
+    assert records[0].__dict__["reason"] == "registration_unavailable"
 
 
 async def test_late_parent_removal_cannot_activate_and_uses_captured_cleanup() -> None:

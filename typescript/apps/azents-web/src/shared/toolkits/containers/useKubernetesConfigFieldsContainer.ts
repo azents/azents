@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { getClusters } from "../kubernetes-fields";
+import { projectKubernetesFields } from "../provider-config-views";
 import { useProviderConnectionTest } from "./useProviderConnectionTest";
 import type {
   KubernetesConfigFieldsProps,
@@ -9,17 +9,19 @@ import type {
 export function useKubernetesConfigFieldsContainer(
   props: ToolkitConfigFieldsInput,
 ): KubernetesConfigFieldsProps {
+  const view = projectKubernetesFields(props.config, props.credentials);
   const [replacingCreds, setReplacingCreds] = useState<Set<string>>(new Set());
   const [storedClusterAuthTypes] = useState(
     () =>
       new Map(
-        getClusters(props.config)
+        view.clusters
           .filter((cluster) => cluster.name !== "")
           .map((cluster) => [cluster.name, cluster.auth_type]),
       ),
   );
   return {
     ...props,
+    view,
     ...useProviderConnectionTest(props, "kubernetes"),
     replacingCreds,
     storedClusterAuthTypes,

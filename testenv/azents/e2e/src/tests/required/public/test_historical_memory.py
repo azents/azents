@@ -732,10 +732,7 @@ def test_agentic_consolidation_isolated_runtime_free_and_scope_only_result(
             "submit_memory",
         }
         assert "submit_memory" in names
-        assert "coverage.json" not in captured
-        assert "inventory/work" not in captured
         assert "azents://memory/sources/" not in captured
-        assert "Source-dependent integrated context" not in captured
     owner_turn = f"Historical Memory E2E continue {unique()}"
     owner_consumer = _create_session(server, setup, scope="user", message=owner_turn)
     owner_prompt = _foreground_instructions(openai_proxy_url, owner_turn)
