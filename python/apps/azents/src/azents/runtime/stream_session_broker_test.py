@@ -7,9 +7,11 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from azents_runtime_control.runtime_stream_session import (
+    BrowserStreamAuthority,
     OwnerSessionEpoch,
     StreamAuthority,
     StreamProtocol,
+    WebStreamAuthority,
 )
 from azents_runtime_control.runtime_web_capacity import (
     ActiveCapacityStream,
@@ -35,9 +37,9 @@ def _owner(*, desired_generation: int = 1) -> OwnerSessionEpoch:
     )
 
 
-def _authority() -> StreamAuthority:
+def _authority() -> WebStreamAuthority:
     now = datetime.now(UTC)
-    return StreamAuthority(
+    return WebStreamAuthority(
         correlation_id="correlation",
         service_id="endpoint",
         service_revision=1,
@@ -220,3 +222,40 @@ async def test_broker_rolls_back_pending_capacity_on_failure(
     assert snapshot.pending_opens == 0
     assert snapshot.active_streams == 0
     assert key in broker.tombstone_set
+
+
+def _browser_authority() -> BrowserStreamAuthority:
+    web = _authority()
+    return BrowserStreamAuthority(
+        correlation_id=web.correlation_id,
+        authentication_session_id=web.authentication_session_id,
+        user_id=web.user_id,
+        agent_id=web.agent_id,
+        runtime_id=web.runtime_id,
+        desired_generation=web.desired_generation,
+        runner_generation=web.runner_generation,
+        open_deadline_at=web.open_deadline_at,
+        transport_deadline_at=web.transport_deadline_at,
+        session_id="session",
+        task_id="task",
+        page_id="page",
+        resource_incarnation="incarnation",
+        allow_input=False,
+    )
+
+
+async def test_web_capacity_rejects_browser_before_routing_or_reservation() -> None:
+    capacity = _capacity()
+    broker = RuntimeStreamSessionBroker(router=_Router(None), capacity=capacity)
+    with pytest.raises(ValueError, match="requires Web authority"):
+        await broker.admit(
+            key=BrokerStreamKey("gateway", 1),
+            # Adversarial domain input intentionally violates the Web-only API.
+            authority=_browser_authority(),  # ty: ignore[invalid-argument-type]
+            protocol=StreamProtocol.HTTP,
+        )
+    snapshot = await capacity.snapshot()
+    assert snapshot.pending_opens == 0
+    assert snapshot.active_streams == 0
+    assert broker.next_capacity_stream_id == 1
+    assert broker.admissions == {}

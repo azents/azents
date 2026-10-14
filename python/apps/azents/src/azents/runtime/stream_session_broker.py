@@ -12,6 +12,7 @@ from azents_runtime_control.runtime_stream_session import (
     OwnerSessionEpoch,
     StreamAuthority,
     StreamProtocol,
+    WebStreamAuthority,
 )
 from azents_runtime_control.runtime_web_capacity import (
     ActiveCapacityStream,
@@ -76,10 +77,12 @@ class RuntimeStreamSessionBroker:
         self,
         *,
         key: BrokerStreamKey,
-        authority: StreamAuthority,
+        authority: WebStreamAuthority,
         protocol: StreamProtocol,
     ) -> BrokerAdmission | None:
         """Admit one exact authority and allocate Owner-scoped capacity identity."""
+        if not isinstance(authority, WebStreamAuthority):
+            raise ValueError("Runtime Web capacity admission requires Web authority")
         target = await self.router.resolve(authority)
         if target is None:
             return None

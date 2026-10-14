@@ -1,4 +1,4 @@
-"""Typed foundation for the Runtime Web persistent session protocol."""
+"""Typed foundation shared by admitted Runtime HTTP/WebSocket domains."""
 
 from __future__ import annotations
 
@@ -326,52 +326,89 @@ class Header:
 
 
 @dataclasses.dataclass(frozen=True)
-class StreamAuthority:
-    """Immutable service, Runtime, port, and deadline authority."""
+class TransportStreamAuthority:
+    """Domain-neutral identity and bounds for an admitted logical stream."""
 
     correlation_id: str
-    service_id: str
-    service_revision: int
-    identity_id: str
     authentication_session_id: str
     user_id: str
     agent_id: str
     runtime_id: str
     desired_generation: int
     runner_generation: int
-    port: int
     open_deadline_at: datetime
-    exposure_deadline_at: datetime
     transport_deadline_at: datetime
 
     def __post_init__(self) -> None:
-        """Reject incomplete or inconsistent logical-stream authority."""
+        """Reject incomplete identity or inconsistent transport bounds."""
         for name, value in (
             ("correlation_id", self.correlation_id),
-            ("service_id", self.service_id),
-            ("identity_id", self.identity_id),
             ("authentication_session_id", self.authentication_session_id),
             ("user_id", self.user_id),
             ("agent_id", self.agent_id),
             ("runtime_id", self.runtime_id),
         ):
             _validate_text(value, name, _MAX_IDENTIFIER_BYTES)
-        if self.service_revision < 0:
-            raise ValueError("Runtime Web service revision must not be negative")
         if self.desired_generation <= 0 or self.runner_generation <= 0:
-            raise ValueError("Runtime Web authority generations must be positive")
-        if not 1 <= self.port <= 65_535:
-            raise ValueError("Runtime Web port must be between 1 and 65535")
+            raise ValueError("Runtime stream authority generations must be positive")
         for name, value in (
             ("open_deadline_at", self.open_deadline_at),
-            ("exposure_deadline_at", self.exposure_deadline_at),
             ("transport_deadline_at", self.transport_deadline_at),
         ):
             _validate_deadline(value, name)
         if self.open_deadline_at > self.transport_deadline_at:
             raise ValueError("Open deadline must not exceed transport deadline")
+
+
+@dataclasses.dataclass(frozen=True)
+class WebStreamAuthority(TransportStreamAuthority):
+    """Web-domain service exposure and loopback forwarding authority."""
+
+    service_id: str
+    service_revision: int
+    identity_id: str
+    port: int
+    exposure_deadline_at: datetime
+
+    def __post_init__(self) -> None:
+        """Validate Web-specific authority independently from Browser."""
+        super().__post_init__()
+        _validate_text(self.service_id, "service_id", _MAX_IDENTIFIER_BYTES)
+        _validate_text(self.identity_id, "identity_id", _MAX_IDENTIFIER_BYTES)
+        if self.service_revision < 0:
+            raise ValueError("Runtime Web service revision must not be negative")
+        if not 1 <= self.port <= 65_535:
+            raise ValueError("Runtime Web port must be between 1 and 65535")
+        _validate_deadline(self.exposure_deadline_at, "exposure_deadline_at")
         if self.transport_deadline_at > self.exposure_deadline_at:
             raise ValueError("Transport deadline must not exceed exposure deadline")
+
+
+@dataclasses.dataclass(frozen=True)
+class BrowserStreamAuthority(TransportStreamAuthority):
+    """Browser-domain access to one concrete current Session/task/page."""
+
+    session_id: str
+    task_id: str
+    page_id: str
+    resource_incarnation: str
+    allow_input: bool
+
+    def __post_init__(self) -> None:
+        """Reject incomplete resource scope without Web exposure semantics."""
+        super().__post_init__()
+        for name, value in (
+            ("session_id", self.session_id),
+            ("task_id", self.task_id),
+            ("page_id", self.page_id),
+            ("resource_incarnation", self.resource_incarnation),
+        ):
+            _validate_text(value, name, _MAX_IDENTIFIER_BYTES)
+        if not isinstance(self.allow_input, bool):
+            raise ValueError("Browser input authority must be a boolean")
+
+
+type StreamAuthority = WebStreamAuthority | BrowserStreamAuthority
 
 
 @dataclasses.dataclass(frozen=True)

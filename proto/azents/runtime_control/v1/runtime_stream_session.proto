@@ -148,19 +148,36 @@ message RuntimeStreamSessionHeader {
 
 message RuntimeStreamSessionAuthority {
   string correlation_id = 1;
-  string service_id = 2;
-  uint64 service_revision = 3;
-  string identity_id = 4;
+  reserved 2, 3, 4, 11, 12;
+  reserved "service_id", "service_revision", "identity_id", "port", "exposure_deadline_at";
   string authentication_session_id = 5;
   string user_id = 6;
   string agent_id = 7;
   string runtime_id = 8;
   uint64 desired_generation = 9;
   uint64 runner_generation = 10;
-  uint32 port = 11;
-  google.protobuf.Timestamp exposure_deadline_at = 12;
   google.protobuf.Timestamp transport_deadline_at = 13;
   google.protobuf.Timestamp open_deadline_at = 14;
+  oneof domain {
+    RuntimeStreamSessionWebAuthority web = 15;
+    RuntimeStreamSessionBrowserAuthority browser = 16;
+  }
+}
+
+message RuntimeStreamSessionWebAuthority {
+  string service_id = 1;
+  uint64 service_revision = 2;
+  string identity_id = 3;
+  uint32 port = 4;
+  google.protobuf.Timestamp exposure_deadline_at = 5;
+}
+
+message RuntimeStreamSessionBrowserAuthority {
+  string session_id = 1;
+  string task_id = 2;
+  string page_id = 3;
+  string resource_incarnation = 4;
+  bool allow_input = 5;
 }
 
 message RuntimeStreamSessionRequestHead {

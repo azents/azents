@@ -20,6 +20,9 @@ from azents_runtime_control.grpc_runner_stream_session_client import (
     RunnerStreamResourceExhausted,
 )
 from azents_runtime_control.proto import runtime_stream_session_pb2
+from azents_runtime_control.runtime_stream_authority_codec import (
+    decode_stream_authority,
+)
 from azents_runtime_control.runtime_stream_flow import (
     AbsoluteCreditWindow,
     HierarchicalCredit,
@@ -34,10 +37,10 @@ from azents_runtime_control.runtime_stream_session import (
     Header,
     RequestHead,
     RunnerSessionOffer,
-    StreamAuthority,
     StreamDirection,
     StreamProtocol,
     WebSocketOpcode,
+    WebStreamAuthority,
 )
 from azents_runtime_control.system_metrics import (
     RunnerRuntimeWebMetrics,
@@ -650,7 +653,7 @@ class _RunnerInboundQueue:
 class _Stream:
     offer: RunnerSessionOffer
     client: GrpcRunnerStreamSessionClient
-    authority: StreamAuthority
+    authority: WebStreamAuthority
     head: RequestHead
     inbound: _RunnerInboundQueue
     response_credit: HierarchicalCredit
@@ -906,7 +909,12 @@ class RunnerWebSessionDispatcher:
         started_at = self.monotonic_clock()
         stream_id = envelope.stream_id
         self._claim_stream_id(stream_id)
-        authority = _authority(envelope.open.authority)
+        authority = decode_stream_authority(envelope.open.authority)
+        if not isinstance(authority, WebStreamAuthority):
+            self.resources.record_open_rejected(CloseReason.PROTOCOL_VIOLATION)
+            await self._reset(stream_id, CloseReason.PROTOCOL_VIOLATION)
+            self._retire(stream_id)
+            return
         head = _head(envelope.open.request_head)
         offer = self.manager.offer
         client = self.manager.client
@@ -1448,27 +1456,6 @@ def _matches_offer(
         and envelope.owner_boot_id == owner.owner_boot_id
         and envelope.session_lease_id == owner.session_lease_id
         and envelope.lease_generation == owner.lease_generation
-    )
-
-
-def _authority(
-    message: runtime_stream_session_pb2.RuntimeStreamSessionAuthority,
-) -> StreamAuthority:
-    return StreamAuthority(
-        correlation_id=message.correlation_id,
-        service_id=message.service_id,
-        service_revision=message.service_revision,
-        identity_id=message.identity_id,
-        authentication_session_id=message.authentication_session_id,
-        user_id=message.user_id,
-        agent_id=message.agent_id,
-        runtime_id=message.runtime_id,
-        desired_generation=message.desired_generation,
-        runner_generation=message.runner_generation,
-        port=message.port,
-        open_deadline_at=message.open_deadline_at.ToDatetime(tzinfo=UTC),
-        exposure_deadline_at=message.exposure_deadline_at.ToDatetime(tzinfo=UTC),
-        transport_deadline_at=message.transport_deadline_at.ToDatetime(tzinfo=UTC),
     )
 
 

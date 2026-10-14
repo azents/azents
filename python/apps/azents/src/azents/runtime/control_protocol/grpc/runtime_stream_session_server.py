@@ -18,6 +18,9 @@ from azents_runtime_control.proto import (
     runtime_stream_session_pb2,
     runtime_stream_session_pb2_grpc,
 )
+from azents_runtime_control.runtime_stream_authority_codec import (
+    decode_stream_authority,
+)
 from azents_runtime_control.runtime_stream_session import (
     APPROVED_SESSION_PROFILE,
     MAX_ENVELOPE_BYTES,
@@ -30,6 +33,7 @@ from azents_runtime_control.runtime_stream_session import (
     StreamAuthority,
     StreamDirection,
     StreamProtocol,
+    WebStreamAuthority,
 )
 from azents_runtime_control.runtime_web_capacity import (
     BufferGrant,
@@ -2058,7 +2062,19 @@ class RuntimeStreamControlDataPlane:
         key: BrokerStreamKey,
         envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
-        authority = _authority(envelope.open.authority)
+        authority = decode_stream_authority(envelope.open.authority)
+        # Browser admission and its Runner consumer are introduced separately.
+        # The current Web path cannot admit Browser authority to Web capacity.
+        if not isinstance(authority, WebStreamAuthority):
+            await source.queue.put(
+                _rejection(
+                    source,
+                    self.control_boot_id,
+                    envelope.stream_id,
+                    CloseReason.PROTOCOL_VIOLATION,
+                )
+            )
+            return
         head = _request_head(envelope.open.request_head)
         if source.owner is None:
             route = await self._resolve_route(
@@ -3047,31 +3063,6 @@ def _owner_envelope(
     envelope.lease_generation = owner.lease_generation
     envelope.stream_id = stream_id
     return envelope
-
-
-def _authority(
-    message: runtime_stream_session_pb2.RuntimeStreamSessionAuthority,
-) -> StreamAuthority:
-    return StreamAuthority(
-        correlation_id=message.correlation_id,
-        service_id=message.service_id,
-        service_revision=message.service_revision,
-        identity_id=message.identity_id,
-        authentication_session_id=message.authentication_session_id,
-        user_id=message.user_id,
-        agent_id=message.agent_id,
-        runtime_id=message.runtime_id,
-        desired_generation=message.desired_generation,
-        runner_generation=message.runner_generation,
-        port=message.port,
-        open_deadline_at=message.open_deadline_at.ToDatetime(tzinfo=datetime.UTC),
-        exposure_deadline_at=message.exposure_deadline_at.ToDatetime(
-            tzinfo=datetime.UTC
-        ),
-        transport_deadline_at=message.transport_deadline_at.ToDatetime(
-            tzinfo=datetime.UTC
-        ),
-    )
 
 
 def _request_head(

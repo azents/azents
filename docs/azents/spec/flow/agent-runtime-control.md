@@ -109,8 +109,8 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
-last_verified_at: 2026-10-11
-spec_version: 105
+last_verified_at: 2026-10-15
+spec_version: 106
 ---
 
 # Agent Runtime Control
@@ -299,6 +299,22 @@ generation.
 
 Each persistent session multiplexes monotonic logical stream IDs. `OPEN` carries one
 immutable authority snapshot plus the normalized HTTP or WebSocket request head.
+The shared authority envelope carries common transport identity, generations and
+open/transport deadlines plus exactly one typed domain. `WebStreamAuthority` owns
+service ID/revision, browser identity, loopback port and exposure deadline.
+`BrowserStreamAuthority` carries concrete Session/task/page/resource incarnation
+and observation/input scope without Web service or exposure fields. Shared peer
+state validates either variant against its exact Owner epoch; the strict shared
+codec rejects an absent/unknown domain and does not interpret retired flat Web
+fields as a compatibility path. Web retains its exposure/deadline ordering checks.
+
+Current Web Gateway allocation, Control Web admission, Owner Web capacity broker
+and Runner loopback dispatch accept only the Web variant, rejecting a Browser
+variant before route/capacity/resource or application forwarding side effects.
+Browser authority representation alone does not activate a Browser consumer,
+public admission route, Agent tool or Session viewer. Their product implementation
+is separate from this transport contract.
+
 Typed session and stream frames carry raw application bytes without text or base64
 conversion. DATA frames are 256 KiB under the mandatory profile, envelopes are
 bounded to 1 MiB, directional stream credit is 1 MiB, and directional hop-session

@@ -23,11 +23,20 @@ document_type: supporting-plan
 
 | Workstream | Owner | Owned paths | Depends on | Output | Validation |
 | --- | --- | --- | --- | --- | --- |
-| Shared authority/protocol/core and all dependent Web consumers | root assigns bounded implementation owner after research | proto/azents/runtime_control/v1/runtime_stream_session.proto; python/libs/azents-runtime-control; dependent backend runtime/stream and runtime_web_gateway; Runner web_session_dispatcher; related tests | Approved boundary and complete call-site map | Complete coherent authority replacement, wire generation, domain guards | Focused tests and quality checks, handed to root |
+| Shared authority/protocol/core and all dependent Web consumers | /root/browser-transport-implementation | proto/azents/runtime_control/v1/runtime_stream_session.proto; python/libs/azents-runtime-control; dependent backend runtime/stream and runtime_web_gateway; Runner web_session_dispatcher; related tests | Approved boundary and complete call-site map | Complete coherent authority replacement, wire generation, domain guards | Focused tests and quality checks, handed to root |
 | Requirements/approval, plan, environment and integration | /root | docs/azents and Session-owned evidence/environment outside Git | Approved documents | Plans, regenerated/integrated evidence and phase checkpoint | docs_catalog, diff, root package checks and independent review |
 
 - Integration order: authority types/wire schema → generated codecs/common consumers → Web-boundary adapters/current routing/capacity guards → focused regression → root checks → single stable read-only review → corrections/revalidation → commit/PR.
 - Independent review: `/root/browser-feature-reviewer`; root requests only after all integrated implementation and validation finish.
 - Final validation: configured runtime-control/Runner/backend ruff and ty; related stream/codec/bridge/pool/broker/Runner tests; docs_catalog validate; diff/absence checks. Existing required Runtime Web E2E remains regression obligation under the complete feature plan; record what is actually executed here.
 - Scope-drift check: M3/M13 extraction is complete in touched surface; preserve all Web exposure/access/network/scheduling semantics. No application authority from common bytes, fallback/version map or unapproved Browser endpoint.
-- Context checkpoint: phase initially planned, implementation not yet complete. Root will record exact results, reviewer, commit/PR and remaining feature work before advancing phase 2.
+## Phase 1 Checkpoint
+
+- Implemented: common TransportStreamAuthority and explicit Web/Browser closed union; strict shared codec; source-generated wire oneof; Web-only admission before routing/capacity/loopback; shared Browser peer identity support without Browser activation.
+- Root-owned validation: runtime-control 347 tests plus full Ruff/format/typecheck and generator; Runner 419 tests plus full Ruff/format/typecheck; backend 575 related tests plus whole-project typecheck and changed-file Ruff/format. Focused backend boundary rerun is separately recorded in root execution evidence. Documentation validation and diff checks passed.
+- Independent reviewer: `/root/browser-feature-reviewer`, exact base fdb34e87dacef7c061497168b44b2ef560771f55; no material findings. Reviewer independently ran 35 library/shared-state, 107 backend, 30 Runner dispatcher tests and byte-verified isolated generated outputs.
+- Design delta: None. No current Browser tool/manager/UI/public consumer and no Web policy changes.
+- Removal evidence: retired flat fields reserved with no decode fallback, all old direct constructors/duplicate codecs replaced, generic core has no service/exposure forwarding fields; wrong Browser variants have no Web capacity/routing/task effects.
+- Runtime Control Spec updated only for reachable typed authority/shared contract and current Web-only consumers.
+- Session devenv became ready after explicit private object-init helper/Runner build repair. Clone-to-ready 75.45 seconds, target not met; actual product Browser E2E not yet available and not claimed complete. No source data reset or production deployment.
+- Next: commit this stable integrated phase and open PR to main before phase 2. PR identity and exact head are reported in the phase handoff. Phase 2 owns actual browser manager/commands/SDK/image and Agent tool integration.
