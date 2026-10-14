@@ -83,22 +83,20 @@ def test_google_same_context_partial_review_and_metadata_preservation(
         )
     )
     browser_driver.set_window_size(430, 900)
-    browser_driver.get(azents_main_web_url + path)
+    browser_driver.get(
+        azents_main_web_url
+        + (f"/w/{workspace.handle}/toolkits" if agent_id is None else path)
+    )
+    _click_button(browser_driver, "Add Toolkit")
     if agent_id is not None:
-        _click_button(browser_driver, "Add Toolkit")
         _click_button(browser_driver, "Google")
     else:
         _wait(browser_driver).until(
             ec.element_to_be_clickable(
                 (
                     By.XPATH,
-                    '//label[starts-with(., "Tool")]/following::input[1]',
+                    '//*[@role="dialog"]//button[.//*[normalize-space()="Google"]]',
                 )
-            )
-        ).click()
-        _wait(browser_driver).until(
-            ec.element_to_be_clickable(
-                (By.XPATH, '//*[@role="option" and normalize-space()="Google"]')
             )
         ).click()
     _assert_visible_text(browser_driver, "1. Choose tasks")

@@ -1607,6 +1607,37 @@
     }
   },
   "toolkits": {
+    "management": {
+      "headline": "Toolkits de l'espace de travail",
+      "description": "Gérez les connexions partagées utilisées par les Agents de cet espace de travail.",
+      "sharedScope": "Partagé dans l'espace de travail",
+      "sharedHint": "Associez chaque Toolkit aux Agents qui en ont besoin.",
+      "enabled": "Utilisation activée",
+      "disabled": "Désactivé",
+      "enabledLabel": "Activer le Toolkit",
+      "reauthorizationRequired": "Autorisation requise",
+      "reviewAuthorization": "Vérifier l'autorisation",
+      "details": "Voir les détails",
+      "detailTitle": "Détails du Toolkit",
+      "edit": "Modifier",
+      "catalogTitle": "Ajouter un Toolkit",
+      "catalogHint": "Choisissez un service à partager dans cet espace de travail.",
+      "catalogError": "Impossible de charger les services disponibles.",
+      "configureTitle": "Configurer le Toolkit",
+      "back": "Retour",
+      "retryRead": "Actualiser",
+      "unavailable": "Impossible de lire ce Toolkit. Actualisez la liste pour vérifier son état actuel.",
+      "refreshFailed": "Impossible d'actualiser l'état enregistré. Actualisez avant de modifier à nouveau le Toolkit.",
+      "stateHint": "L'activation ne confirme ni la connexion en direct ni les droits d'accès.",
+      "settingOn": "Activé",
+      "settingOff": "Désactivé",
+      "authTypes": {
+        "github_app": "GitHub App (installation)",
+        "github_app_user": "GitHub App (compte personnel)",
+        "github_app_platform": "GitHub App (installation de la plateforme)",
+        "github_app_platform_user": "GitHub App (compte personnel via la plateforme)"
+      }
+    },
     "braveSearch": {
       "apiKey": "Clé API Brave Search",
       "apiKeyRequired": "Saisissez votre clé API Brave Search pour activer la recherche.",

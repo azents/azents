@@ -59,6 +59,7 @@ export interface ToolkitFormProps {
   toolkitTypeLocked: boolean;
   formState: ToolkitConfigFormState;
   mutationState: MutationState;
+  operationPending?: boolean;
   form: UseFormReturnType<ToolkitFormValues>;
   isEdit: boolean;
   backPath: string;
@@ -113,6 +114,7 @@ export function ToolkitForm({
   toolkitTypeLocked,
   formState,
   mutationState,
+  operationPending = false,
   form,
   isEdit,
   backPath,
@@ -586,12 +588,15 @@ export function ToolkitForm({
                 type="button"
                 variant="default"
                 onClick={onCancel}
-                disabled={mutationState.type === "SUBMITTING"}
+                disabled={
+                  operationPending || mutationState.type === "SUBMITTING"
+                }
               >
                 {t("cancel")}
               </Button>
               <Button
                 type="submit"
+                disabled={operationPending}
                 loading={mutationState.type === "SUBMITTING"}
               >
                 {isEdit ? t("save") : t("create")}

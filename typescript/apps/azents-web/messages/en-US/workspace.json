@@ -1607,6 +1607,37 @@
     }
   },
   "toolkits": {
+    "management": {
+      "headline": "Workspace Toolkits",
+      "description": "Manage the shared tool connections used by this Workspace's Agents.",
+      "sharedScope": "Workspace shared",
+      "sharedHint": "Attach each Toolkit to the Agents that need it.",
+      "enabled": "Enabled for use",
+      "disabled": "Disabled",
+      "enabledLabel": "Toolkit enabled",
+      "reauthorizationRequired": "Authorization required",
+      "reviewAuthorization": "Review authorization",
+      "details": "View details",
+      "detailTitle": "Toolkit details",
+      "edit": "Edit",
+      "catalogTitle": "Add Toolkit",
+      "catalogHint": "Choose a service to configure a shared Toolkit for this Workspace.",
+      "catalogError": "Available services could not be loaded.",
+      "configureTitle": "Configure Toolkit",
+      "back": "Back",
+      "retryRead": "Refresh",
+      "unavailable": "This Toolkit could not be read. Refresh the list to check its current state.",
+      "refreshFailed": "The saved state could not be refreshed. Refresh to check the current Toolkit before making another change.",
+      "stateHint": "Enabled for use does not confirm live connectivity or access permissions.",
+      "settingOn": "On",
+      "settingOff": "Off",
+      "authTypes": {
+        "github_app": "GitHub App (installation)",
+        "github_app_user": "GitHub App (personal account)",
+        "github_app_platform": "GitHub App (platform installation)",
+        "github_app_platform_user": "GitHub App (platform personal account)"
+      }
+    },
     "braveSearch": {
       "apiKey": "Brave Search API key",
       "apiKeyRequired": "Enter your Brave Search API key to enable search.",
