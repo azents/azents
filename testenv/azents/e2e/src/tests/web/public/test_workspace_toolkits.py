@@ -77,7 +77,12 @@ def test_workspace_toolkit_catalog_details_and_mutations_are_persisted(
     _fill_text_input(browser_driver, "Slug", "workspace_browser_service")
     _click_button(browser_driver, "Add")
     _assert_visible_text(browser_driver, name)
-    saved = next(item for item in configs() if item.name == name)
+    # The form's settings review already displays the name before save completes.
+    created = _wait(browser_driver).until(
+        lambda _: next((item for item in configs() if item.name == name), None)
+    )
+    assert created is not None
+    saved = created
     assert saved.toolkit_type == "mcp"
     assert saved.slug == "workspace_browser_service"
     assert saved.enabled is True
@@ -90,8 +95,18 @@ def test_workspace_toolkit_catalog_details_and_mutations_are_persisted(
     _fill_text_input(browser_driver, "Name", renamed)
     _click_button(browser_driver, "Save")
     _assert_visible_text(browser_driver, renamed)
-    assert next(item for item in configs() if item.id == saved.id).name == renamed
-    assert next(item for item in configs() if item.id == saved.id).slug == saved.slug
+    updated = _wait(browser_driver).until(
+        lambda _: next(
+            (
+                item
+                for item in configs()
+                if item.id == saved.id and item.name == renamed
+            ),
+            None,
+        )
+    )
+    assert updated is not None
+    assert updated.slug == saved.slug
     # Saving an edit returns to the exact Toolkit's details dialog.
     toggle = _wait(browser_driver).until(
         ec.element_to_be_clickable(
