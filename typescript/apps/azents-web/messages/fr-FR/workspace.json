@@ -1299,6 +1299,8 @@
       "unknown": "La configuration d’exécution actuelle est indisponible."
     },
     "runtimeSettings": {
+      "browserLabel": "Navigateur de session",
+      "browserDescription": "Autoriser les outils navigateur de l'Agent et le panneau en direct. La désactivation conserve l'état des sites et laisse les autres fonctions du Runtime disponibles.",
       "environmentVariables": {
         "workspaceTitle": "Variables d'environnement du Workspace",
         "workspaceDescription": "Valeurs partagées que chaque Agent peut choisir d'utiliser.",

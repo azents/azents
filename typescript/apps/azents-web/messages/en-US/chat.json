@@ -48,6 +48,7 @@
     "sendTab": "Send Tab",
     "sendShiftTab": "Send Shift+Tab",
     "runtimeUnavailable": "Start the Session Runtime to use its browser.",
+    "browserDisabled": "Enable the session browser in Agent Runtime settings to use it.",
     "workingFolderUnavailable": "The Session working folder is not ready. Refresh after the Runtime finishes preparing it.",
     "capabilityUnavailable": "The current Runtime does not have an available browser.",
     "transportUnavailable": "The live browser stream is unavailable. Refresh to check the connection. Page selection and permitted page closure remain available."
@@ -587,6 +588,7 @@
     "categorySkill": "Skill",
     "categoryExplore": "Explore",
     "categoryShell": "Shell",
+    "categoryBrowser": "Browser",
     "categoryEdit": "Edit",
     "categoryFile": "File",
     "categoryImage": "Image",

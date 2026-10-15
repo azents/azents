@@ -1299,6 +1299,8 @@
       "unknown": "現在のRuntime構成は利用できません。"
     },
     "runtimeSettings": {
+      "browserLabel": "セッションブラウザー",
+      "browserDescription": "Agentのブラウザーツールとライブパネルを有効にします。無効にしても保存済みのサイト状態は保持され、他のRuntime機能は引き続き利用できます。",
       "environmentVariables": {
         "workspaceTitle": "Workspace環境変数",
         "workspaceDescription": "Agentが選択して使用する共通の値を管理します。",

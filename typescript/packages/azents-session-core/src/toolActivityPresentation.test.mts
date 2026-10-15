@@ -73,6 +73,25 @@ function activityAt(
   return item.activity;
 }
 
+for (const name of ["browser_open", "browser_observe", "browser_act"]) {
+  void test(`groups ${name} as Browser`, () => {
+    const items = projectChatPresentationItems(
+      [
+        event("call-1", "client_tool_call", {
+          call_id: "call-1",
+          name,
+          arguments: "{}",
+        }),
+      ],
+      [clientToolMessage("tool-message", "call-1", name)],
+    );
+    assert.deepEqual(activityAt(items, 0).events[0]?.category, {
+      key: "browser",
+      label: "browser",
+    });
+  });
+}
+
 void test("preserves reasoning and client tool chronology from raw events", () => {
   const tool = clientToolMessage("tool-message", "call-1");
   const items = projectChatPresentationItems(

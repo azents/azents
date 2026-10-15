@@ -48,6 +48,7 @@
     "sendTab": "Tabを送信",
     "sendShiftTab": "Shift+Tabを送信",
     "runtimeUnavailable": "セッションのRuntimeを起動するとブラウザーを利用できます。",
+    "browserDisabled": "AgentのRuntime設定でセッションブラウザーを有効にしてください。",
     "workingFolderUnavailable": "セッションの作業フォルダーを準備中です。Runtimeの準備が完了してから更新してください。",
     "capabilityUnavailable": "現在のRuntimeではブラウザーを利用できません。",
     "transportUnavailable": "ブラウザーのライブ配信を利用できません。更新して接続を確認してください。ページの選択と、権限のあるページの終了は引き続き利用できます。"
@@ -587,6 +588,7 @@
     "categorySkill": "Skill",
     "categoryExplore": "探索",
     "categoryShell": "Shell",
+    "categoryBrowser": "ブラウザー",
     "categoryEdit": "編集",
     "categoryFile": "ファイル",
     "categoryImage": "画像",

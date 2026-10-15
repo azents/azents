@@ -42,13 +42,14 @@ class AgentUpdateRequest(BaseModel):
     type: Optional[AgentType] = Field(default=None, description="Visibility scope")
     runtime_profile_id: Optional[StrictStr] = None
     expected_runtime_profile_selection_version: Optional[Annotated[int, Field(strict=True, ge=1)]] = Field(default=None, description="Required optimistic version when replacing the selection")
+    browser_enabled: Optional[StrictBool] = Field(default=None, description="Session Browser enabled state")
     terminal_enabled: Optional[StrictBool] = Field(default=None, description="Interactive Terminal enabled state")
     memory_enabled: Optional[StrictBool] = Field(default=None, description="Memory enabled state")
     tool_search_enabled: Optional[StrictBool] = Field(default=None, description="Tool Search enabled state")
     max_turns: Optional[StrictInt] = None
     auto_archive_ttl_days: Optional[StrictInt] = Field(default=None, description="Inactivity period before automatic Session archive")
     subagent_settings: Optional[SubagentSettings] = Field(default=None, description="Subagent execution settings")
-    __properties: ClassVar[List[str]] = ["name", "description", "selectable_model_options", "main_model_label", "lightweight_model_label", "model_parameters", "system_prompt", "enabled", "type", "runtime_profile_id", "expected_runtime_profile_selection_version", "terminal_enabled", "memory_enabled", "tool_search_enabled", "max_turns", "auto_archive_ttl_days", "subagent_settings"]
+    __properties: ClassVar[List[str]] = ["name", "description", "selectable_model_options", "main_model_label", "lightweight_model_label", "model_parameters", "system_prompt", "enabled", "type", "runtime_profile_id", "expected_runtime_profile_selection_version", "browser_enabled", "terminal_enabled", "memory_enabled", "tool_search_enabled", "max_turns", "auto_archive_ttl_days", "subagent_settings"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -167,6 +168,7 @@ class AgentUpdateRequest(BaseModel):
             "type": obj.get("type"),
             "runtime_profile_id": obj.get("runtime_profile_id"),
             "expected_runtime_profile_selection_version": obj.get("expected_runtime_profile_selection_version"),
+            "browser_enabled": obj.get("browser_enabled"),
             "terminal_enabled": obj.get("terminal_enabled"),
             "memory_enabled": obj.get("memory_enabled"),
             "tool_search_enabled": obj.get("tool_search_enabled"),

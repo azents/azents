@@ -356,7 +356,9 @@ def _make_mock_session_manager() -> SessionManager[AsyncMock]:
 
     @asynccontextmanager
     async def _session_manager() -> AsyncGenerator[AsyncMock, None]:
-        yield AsyncMock()
+        session = AsyncMock()
+        session.read_session.scalar.return_value = True
+        yield session
 
     return _session_manager
 
@@ -1605,6 +1607,43 @@ class TestRuntimeToolkitUpdateContext:
             "browser_observe",
             "browser_act",
         } <= names
+
+    @pytest.mark.asyncio
+    async def test_disabled_browser_omits_tools_and_revokes_prebuilt_handlers(
+        self,
+    ) -> None:
+        toolkit = _make_toolkit()
+        authority = SessionResourceAuthority(
+            workspace_id="ws-1",
+            agent_id="agent-1",
+            session_id="session-1",
+            root_session_id="session-1",
+            run_id="run-1",
+            run_index=1,
+            owner_generation=1,
+        )
+        state = await toolkit.update_context(
+            _make_context(resource_authority=authority)
+        )
+        tool = _find_tool(state.tools, "browser_open")
+
+        # Use a fixed completed read scope so the setting change is current.
+        @asynccontextmanager
+        async def disabled_session() -> AsyncGenerator[AsyncMock, None]:
+            disabled = AsyncMock()
+            disabled.read_session.scalar.return_value = False
+            yield disabled
+
+        toolkit.repositories.runtime.session_manager = disabled_session
+        with pytest.raises(FunctionToolError):
+            await tool.handler("{}")
+        assert not _runner_operations(toolkit).browser_calls
+        disabled = await toolkit.update_context(
+            _make_context(resource_authority=authority)
+        )
+        assert not {"browser_open", "browser_observe", "browser_act"} & {
+            candidate.spec.name for candidate in disabled.tools
+        }
 
     @pytest.mark.asyncio
     async def test_browser_binding_uses_concrete_session_not_runtime_owner(

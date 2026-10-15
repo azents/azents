@@ -19,6 +19,7 @@ import {
   Select,
   SimpleGrid,
   Stack,
+  Switch,
   Text,
   ThemeIcon,
 } from "@mantine/core";
@@ -60,6 +61,8 @@ interface AgentRuntimeSettingsProps {
   removalAcknowledged: boolean;
   isAdding: boolean;
   isUpdatingProfile: boolean;
+  isUpdatingBrowser: boolean;
+  onBrowserEnabledChange: (enabled: boolean) => void;
   isRemoving: boolean;
   lifecycleAction: "start" | "stop" | "restart" | "reset" | null;
   onSelectProfile: (profileId: string | null) => void;
@@ -674,6 +677,7 @@ function RemovingView({
 }
 
 export function AgentRuntimeSettings({
+  agent,
   environmentVariables,
   state,
   metricsState,
@@ -707,6 +711,8 @@ export function AgentRuntimeSettings({
   onConfirmRestart,
   onConfirmReset,
   onRefresh,
+  isUpdatingBrowser,
+  onBrowserEnabledChange,
 }: AgentRuntimeSettingsProps): React.ReactElement {
   const t = useTranslations("workspace.agents.runtimeSettings");
 
@@ -781,6 +787,21 @@ export function AgentRuntimeSettings({
             onCloseAddConfirm={onCloseAddConfirm}
             onConfirmAdd={onConfirmAdd}
           />
+        ) : null}
+        {runtime.capability === "managed" ? (
+          <Paper withBorder radius="lg" p="lg">
+            <Switch
+              label={t("browserLabel")}
+              description={t("browserDescription")}
+              checked={agent.browser_enabled}
+              disabled={
+                isUpdatingBrowser || !agent.toolkit_management_available
+              }
+              onChange={(event) =>
+                onBrowserEnabledChange(event.currentTarget.checked)
+              }
+            />
+          </Paper>
         ) : null}
         {runtime.capability === "managed" ? (
           <ManagedView

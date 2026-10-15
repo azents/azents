@@ -91,6 +91,17 @@ with socketserver.TCPServer(('127.0.0.1', 8766), Handler) as server:
 '''
 
 
+def _enable_browser(public_url: str, handle: str, agent_id: str, token: str) -> None:
+    response = requests.patch(
+        f"{public_url}/agent/v1/workspaces/{handle}/agents/{agent_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"browser_enabled": True},
+        timeout=10,
+    )
+    response.raise_for_status()
+    assert response.json()["browser_enabled"] is True
+
+
 def _projection(
     public_url: str, resource_path: str, token: str
 ) -> BrowserProjectionResponse:
@@ -369,6 +380,12 @@ def test_session_browser_engine_native_input_dialog_and_reconnect(
         f"/sessions/{workspace.session_id}"
     )
     headers = {"Authorization": f"Bearer {workspace.token}"}
+    disabled = _projection(azents_public_server_url, resource_path, workspace.token)
+    assert not disabled.available
+    assert disabled.tasks == []
+    _enable_browser(
+        azents_public_server_url, workspace.handle, workspace.agent_id, workspace.token
+    )
     commands = _RuntimeApplicationCommands(
         public_api_client=public_api_client,
         workspace=_TerminalWorkspace(

@@ -208,6 +208,7 @@ def _make_agent(
         [ModelExecutionOptionId.FAST] if fast_supported else []
     )
     return Agent(
+        browser_enabled=True,
         id="agent-1",
         workspace_id="ws-1",
         name="agent",

@@ -689,6 +689,7 @@ def _default_agent() -> Agent:
     fast_selection = selection
     planning_selection = selection
     return Agent(
+        browser_enabled=True,
         id="agent-001",
         workspace_id="workspace-001",
         name="Executor test Agent",

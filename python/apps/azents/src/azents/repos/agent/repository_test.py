@@ -102,6 +102,7 @@ async def test_create_uses_enabled_tool_search_default() -> None:
     rdb_agent = _raw_session.add.call_args.args[0]
     assert isinstance(rdb_agent, RDBAgent)
     assert rdb_agent.tool_search_enabled is True
+    assert rdb_agent.browser_enabled is False
 
 
 async def test_create_maps_explicit_tool_search_opt_out_to_rdb_agent() -> None:
@@ -153,6 +154,18 @@ async def test_create_does_not_add_legacy_execution_setting() -> None:
         )
 
     assert len(_raw_session.add.call_args_list) == 2
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+async def test_update_maps_browser_opt_in_to_update_statement(enabled: bool) -> None:
+    raw = AsyncMock(spec=AsyncSession)
+    raw.execute.side_effect = _StopAfterWrite
+    with pytest.raises(_StopAfterWrite):
+        await AgentRepository().update_by_id(
+            ReadWriteSession(raw), "agent-1", AgentUpdate(browser_enabled=enabled)
+        )
+    statement = raw.execute.call_args.args[0]
+    assert statement.compile().params["browser_enabled"] is enabled
 
 
 async def test_update_maps_tool_search_enabled_to_update_statement() -> None:

@@ -44,6 +44,8 @@ export interface AgentRuntimeSettingsContainerOutput {
   removalAcknowledged: boolean;
   isAdding: boolean;
   isUpdatingProfile: boolean;
+  isUpdatingBrowser: boolean;
+  onBrowserEnabledChange: (enabled: boolean) => void;
   isRemoving: boolean;
   lifecycleAction: "start" | "stop" | "restart" | "reset" | null;
   onSelectProfile: (profileId: string | null) => void;
@@ -75,6 +77,10 @@ export function useAgentRuntimeSettingsContainer({
   agent,
 }: AgentRuntimeSettingsContainerProps): AgentRuntimeSettingsContainerOutput {
   const utils = trpc.useUtils();
+  const agentQuery = trpc.agent.get.useQuery(
+    { handle, agentId: agent.id },
+    { initialData: agent },
+  );
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(
     agent.runtime_profile_id,
   );
@@ -157,6 +163,13 @@ export function useAgentRuntimeSettingsContainer({
       setSelectedProfileId(updatedAgent.runtime_profile_id);
       setActionError(null);
       setActionNotice("profileUpdated");
+      await invalidateRuntime();
+    },
+    onError: (error) => setActionError(errorMessage(error)),
+  });
+  const browserMutation = trpc.agent.update.useMutation({
+    onSuccess: async () => {
+      setActionError(null);
       await invalidateRuntime();
     },
     onError: (error) => setActionError(errorMessage(error)),
@@ -257,7 +270,7 @@ export function useAgentRuntimeSettingsContainer({
 
   return {
     handle,
-    agent,
+    agent: agentQuery.data,
     state,
     metricsState: metrics.state,
     selectedProfileId,
@@ -270,6 +283,21 @@ export function useAgentRuntimeSettingsContainer({
     removalAcknowledged,
     isAdding: addMutation.isPending,
     isUpdatingProfile: updateProfileMutation.isPending,
+    isUpdatingBrowser: browserMutation.isPending,
+    onBrowserEnabledChange: (enabled) => {
+      if (
+        !agent.toolkit_management_available ||
+        readyRuntime?.capability !== "managed"
+      ) {
+        return;
+      }
+      setActionError(null);
+      browserMutation.mutate({
+        handle,
+        agentId: agent.id,
+        browser_enabled: enabled,
+      });
+    },
     isRemoving: removeMutation.isPending,
     lifecycleAction,
     onSelectProfile: (profileId) => {

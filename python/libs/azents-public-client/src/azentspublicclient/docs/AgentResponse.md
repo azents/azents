@@ -29,6 +29,7 @@ Name | Type | Description | Notes
 **runtime_remove_available** | **bool** |  | 
 **toolkit_management_available** | **bool** |  | 
 **terminal_enabled** | **bool** |  | 
+**browser_enabled** | **bool** |  | 
 **infrastructure_terminal_enabled** | **bool** |  | 
 **workspace_terminal_enabled** | **bool** |  | 
 **effective_terminal_enabled** | **bool** |  | 

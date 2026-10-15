@@ -50,7 +50,16 @@ spec_version: 1
 
 The Agent has three Runtime-backed browser tool roles: `browser_open`, `browser_observe`, and `browser_act`. They execute through the existing authenticated Runner operation path, not an MCP server or Agent-installed CLI. Public Session Browser projection and scoped page closure use that same command boundary. An independent authenticated live attachment connects the Session Browser panel through the API-owned Browser source to the current Runner. The release-bundled browser Skill guides observation, interaction and original capture publication through existing image and file services.
 
-Browser tools require a current managed Runtime and concrete Session/Run resource authority. Runtime capability guards enforce process/workspace availability, and image observation additionally requires current transfer authority. Projection without current execution authority omits these tools. Each call revalidates access and resolves its actual Session working folder independently of any scheduling/root alias.
+Browser tools require a current managed Runtime, explicit Agent `browser_enabled`
+opt-in and concrete Session/Run resource authority. Existing and new Agents default
+to disabled; an authorized manager enables Browser in Agent Runtime settings.
+Disabled Agents omit all three Browser tools. Already projected handlers recheck
+the current setting before dispatch, and API/Control live admission and periodic
+revalidation use that same current setting. Disabling does not delete profiles or
+stop unrelated Runtime features. It is a product capability switch, not a sandbox
+against arbitrary Runtime shell access.
+
+Runtime capability guards enforce process/workspace availability, and image observation additionally requires current transfer authority. Projection without current execution authority omits these tools. Each call revalidates access and resolves its actual Session working folder independently of any scheduling/root alias.
 
 ## Public Session Projection and Page Closure
 

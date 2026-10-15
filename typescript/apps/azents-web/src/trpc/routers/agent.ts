@@ -169,6 +169,7 @@ export const agentRouter = router({
             enabled: input.enabled ?? true,
             type: input.type ?? "public",
             runtime_profile_id: input.runtime_profile_id ?? null,
+            browser_enabled: input.browser_enabled,
             terminal_enabled: input.terminal_enabled,
             memory_enabled: input.memory_enabled,
             tool_search_enabled: input.tool_search_enabled,
@@ -220,6 +221,7 @@ export const agentRouter = router({
                     input.expected_runtime_profile_selection_version,
                 }
               : {}),
+            browser_enabled: input.browser_enabled,
             terminal_enabled: input.terminal_enabled,
             memory_enabled: input.memory_enabled,
             tool_search_enabled: input.tool_search_enabled,

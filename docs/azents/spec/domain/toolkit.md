@@ -476,6 +476,10 @@ open/observe, actions/human-help and captures/files references. The three fixed
 Session/Runtime authority; neither model arguments nor Skill instructions select
 another Session or profile. The Skill is guidance inside the existing immutable
 Run projection, not a new permission, ToolkitConfig or Runtime installer.
+Browser tools are projected only after the Agent's default-off `browser_enabled`
+setting is explicitly enabled. Their current setting is checked again on
+invocation. Chat activities categorize all three public names under the dedicated
+localized Browser group rather than Other.
 See the [Session Browser flow](../flow/session-browser.md).
 
 Azents-managed Skill packages use a read-only virtual filesystem distinct from the Agent Runtime filesystem. The first registered mount is `skills`, and every managed Skill entrypoint has the canonical form:

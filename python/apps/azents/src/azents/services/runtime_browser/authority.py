@@ -95,6 +95,8 @@ class DatabaseRuntimeBrowserAuthorityResolver:
                     raise RuntimeBrowserRequestError(403, "Browser access is denied.")
                 case "not_found":
                     raise RuntimeBrowserRequestError(404, "Session not found.")
+        if not snapshot.agent.browser_enabled:
+            return RuntimeBrowserUnavailable("browser_disabled")
         runtime = snapshot.runtime
         applied = snapshot.applied_configuration
         if (

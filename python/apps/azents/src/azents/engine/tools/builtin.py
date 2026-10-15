@@ -1201,7 +1201,17 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         if context.resource_authority is not None:
             authority = context.resource_authority
 
+            async def browser_allowed() -> bool:
+                return await self.repositories.runtime.browser_enabled(
+                    agent_id=authority.agent_id
+                )
+
+            async def revalidate_browser_authority() -> bool:
+                return await revalidate_resource_authority() and await browser_allowed()
+
             async def resolve_browser_target() -> BrowserExecutionTarget:
+                if not await browser_allowed():
+                    raise FunctionToolError("Session Browser is disabled.")
                 runtime = await resolve_exact_runtime_target()
                 try:
                     await capability_resolver.require(RuntimeCapability.WORKSPACE)
@@ -1236,14 +1246,15 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                         "Browser image transfer capability is unavailable."
                     ) from exc
 
-            browser_tools = make_browser_tools(
-                runner_operations=self.runner_operations,
-                authority=authority,
-                resolve_execution_target=resolve_browser_target,
-                revalidate_authority=revalidate_resource_authority,
-                require_image_transfer=require_browser_image_transfer,
-                runtime_image_read_service=self.runtime_image_read_service,
-            )
+            if await browser_allowed():
+                browser_tools = make_browser_tools(
+                    runner_operations=self.runner_operations,
+                    authority=authority,
+                    resolve_execution_target=resolve_browser_target,
+                    revalidate_authority=revalidate_browser_authority,
+                    require_image_transfer=require_browser_image_transfer,
+                    runtime_image_read_service=self.runtime_image_read_service,
+                )
             self._run_tool_to_file_context = RunToolToFileRuntimeContext(
                 session_storage=file_ss,
                 exchange_file_service=self.exchange_file_service,

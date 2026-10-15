@@ -21848,6 +21848,12 @@
             "title": "Runtime Profile Id",
             "description": "Selected Workspace Runtime Profile ID"
           },
+          "browser_enabled": {
+            "type": "boolean",
+            "title": "Browser Enabled",
+            "description": "Session Browser enabled state",
+            "default": false
+          },
           "terminal_enabled": {
             "type": "boolean",
             "title": "Terminal Enabled",
@@ -22341,6 +22347,10 @@
             "type": "boolean",
             "title": "Terminal Enabled"
           },
+          "browser_enabled": {
+            "type": "boolean",
+            "title": "Browser Enabled"
+          },
           "infrastructure_terminal_enabled": {
             "anyOf": [
               {
@@ -22458,6 +22468,7 @@
           "runtime_remove_available",
           "toolkit_management_available",
           "terminal_enabled",
+          "browser_enabled",
           "infrastructure_terminal_enabled",
           "workspace_terminal_enabled",
           "effective_terminal_enabled",
@@ -24541,6 +24552,11 @@
             "minimum": 1.0,
             "title": "Expected Runtime Profile Selection Version",
             "description": "Required optimistic version when replacing the selection"
+          },
+          "browser_enabled": {
+            "type": "boolean",
+            "title": "Browser Enabled",
+            "description": "Session Browser enabled state"
           },
           "terminal_enabled": {
             "type": "boolean",
@@ -37445,6 +37461,7 @@
         "enum": [
           "runtime_unavailable",
           "browser_unavailable",
+          "browser_disabled",
           "working_folder_unavailable"
         ]
       },

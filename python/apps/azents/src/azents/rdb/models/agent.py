@@ -142,6 +142,12 @@ class RDBAgent(RDBModel):
         default=1,
         server_default="1",
     )
+    browser_enabled: Mapped[bool] = mapped_column(
+        sa.Boolean,
+        nullable=False,
+        default=False,
+        server_default=sa.false(),
+    )
     # Enable human interactive Terminal access independently of Worker tools.
     terminal_enabled: Mapped[bool] = mapped_column(
         sa.Boolean,

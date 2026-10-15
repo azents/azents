@@ -114,6 +114,8 @@ function categoryLabel(
       return t("categoryExplore");
     case "shell":
       return t("categoryShell");
+    case "browser":
+      return t("categoryBrowser");
     case "edit":
       return t("categoryEdit");
     case "file":

@@ -75,6 +75,7 @@ export const agentCreateInputSchema = z
     enabled: z.boolean().optional(),
     type: agentTypeEnum.optional(),
     runtime_profile_id: z.string().min(1).nullable().optional(),
+    browser_enabled: z.boolean().optional(),
     terminal_enabled: z.boolean().optional(),
     memory_enabled: z.boolean().optional(),
     tool_search_enabled: z.boolean().optional(),
@@ -105,6 +106,7 @@ export const agentUpdateInputSchema = z
       .int()
       .positive()
       .optional(),
+    browser_enabled: z.boolean().optional(),
     terminal_enabled: z.boolean().optional(),
     memory_enabled: z.boolean().optional(),
     tool_search_enabled: z.boolean().optional(),
