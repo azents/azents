@@ -21,6 +21,7 @@ code_paths:
   - python/apps/azents-runtime-runner/Dockerfile
   - python/apps/azents/src/azents/engine/tools/browser.py
   - python/apps/azents/src/azents/engine/tools/builtin.py
+  - python/apps/azents/src/azents/resources/vfs/global/skills/browser/SKILL.md
   - python/apps/azents/src/azents/engine/tools/runtime_io.py
   - python/apps/azents/src/azents/runtime/control_protocol/runner_operations.py
   - python/apps/azents/src/azents/runtime/control_protocol/grpc/runner_server.py
@@ -105,6 +106,26 @@ ACK only within the same attachment, target, navigation and dimensions, includin
 the interval before React rerenders after a displayed ACK changes.
 If safe cleanup cannot be sent, the attachment closes and Runner releases its
 native held state. Spatial effects retain exact displayed-frame fencing.
+
+## Managed Browser Skill
+
+The release-bundled `browser` Skill is projected from the global `release:azents`
+source into each immutable Run VFS projection at
+`azents://skills/azents/browser/SKILL.md`. Its focused references explain
+open/observe, actions/human help and captures/files. Discovery and `load_skill`
+use the existing Run authorization and content hash; adding the package does
+not install Runtime files or update an older Run's projected content.
+
+The Skill teaches current returned identities, fresh observation after human
+interaction, bounded view selection, untrusted page content and separating
+dispatched actions from verified outcomes. Native state remains Session-owned;
+there is no persistent acquire/return mode or end-of-turn profile cleanup.
+
+Image observation supplies model-visible imagery and an intentional original
+PNG. User delivery calls the existing `present_file` path with the actual
+returned Runtime path; capture, model materialization and publication have
+separate completion/failure semantics. Schema examples are checked against
+the strict Browser codecs and all supported provider lowerers.
 
 ## Typed Command and Result Boundary
 

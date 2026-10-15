@@ -50,7 +50,22 @@ document_type: supporting-plan
 2. Complete representative file/model/publication E2E and scoped provisioning,
    network and sandbox evidence; investigate concrete failures without weakening
    assertions, extending acceptance deadlines or adding fallbacks.
-3. Check Phase 3 CI in the background. Its prepared local E2E completed with
+3. Check Phase 3 CI in the background. Current CI exposed a render-to-ACK race:
+   keyboard/composition events from the same attachment/navigation can reach the
+   connection after its displayed ACK advances but before React rerenders. Rebind
+   these non-spatial actions to the latest actually displayed ACK only when the
+   target/navigation/dimensions are identical, preserving exact-frame spatial
+   fencing and no replay. Add focused regression and inspect content-free native
+   capture failure categories rather than retrying effect-bearing input.
+   CI's subscription-usage log regression was traced to Phase 3 overriding the
+   shared public API fixture's Runtime environment to `local`, which changed
+   deployed JSON logging. Restore the shared fixture's deployed environment and
+   compose Browser transport from the existing ordinary Control endpoint/CA and
+   explicit insecure opt-in, like the existing API clients. Keep the Browser-only
+   proof/audience and fail-closed missing-TLS default; no new setting, automatic
+   downgrade, source bypass or credential reuse. Validate deployed JSON logging
+   and normal Browser ingress together, and require targeted security re-review.
+   Its prepared local E2E completed with
    `4500 Browser is unavailable` at the final revocation assertion instead of
    `4401/4403`; that remains unresolved and is not acceptance evidence.
 4. Consolidate all requirement/mechanism evidence and limitations. Run final
