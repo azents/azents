@@ -1,0 +1,198 @@
+"""Browser source admission traverses the actual shared Owner and current fence."""
+
+import asyncio
+from datetime import UTC, datetime
+
+import grpc
+from azents_runtime_control.browser_source_contract import (
+    BrowserSourceCredentialRequest,
+)
+from azents_runtime_control.grpc_browser_source_client import (
+    BrowserSourceScopeRevoked,
+    BrowserSourceUnavailable,
+    GrpcBrowserSourceClient,
+)
+from azents_runtime_control.proto import runtime_stream_session_pb2 as pb
+from azents_runtime_control.runtime_stream_authority_codec import (
+    decode_stream_authority,
+)
+from azents_runtime_control.runtime_stream_session import (
+    APPROVED_SESSION_PROFILE,
+    RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
+    BrowserStreamAuthority,
+    WebSocketOpcode,
+)
+
+from azents.core.runtime_browser_source_credential import (
+    RuntimeBrowserSourceCredentialVerifier,
+)
+from azents.core.runtime_browser_source_credential_test import KEY, source_request
+from azents.runtime.control_protocol.grpc.browser_source_server import (
+    add_runtime_browser_source_servicer,
+)
+from azents.runtime.control_protocol.grpc.runtime_stream_session_server_test import (
+    _local_data_plane,
+    _owner,
+)
+from azents.runtime.stream_session_owner import RuntimeStreamAcceptedRunnerSession
+
+
+async def test_api_source_actual_owner_current_fence_and_fresh_connection_proof() -> (
+    None
+):
+    plane, _ = _local_data_plane()
+    owner = _owner()
+    accepted = RuntimeStreamAcceptedRunnerSession(
+        owner, "runner-boot", APPROVED_SESSION_PROFILE, datetime.now(UTC)
+    )
+    runner = await plane.register_runner(accepted)
+    current = True
+
+    async def validate(authority: BrowserStreamAuthority) -> bool:
+        del authority
+        return current
+
+    plane.browser_scope_validator = validate
+    server = grpc.aio.server()
+    verifier = RuntimeBrowserSourceCredentialVerifier(
+        KEY, clock=lambda: datetime.now(UTC)
+    )
+    add_runtime_browser_source_servicer(
+        server,
+        data_plane=plane,
+        verifier=verifier,
+        validate_scope=validate,
+        clock=lambda: datetime.now(UTC),
+    )
+    port = server.add_insecure_port("localhost:0")
+    await server.start()
+    proofs: list[str] = []
+
+    async def supplier(request: BrowserSourceCredentialRequest) -> str:
+        proof = verifier.issue(request)
+        proofs.append(proof)
+        return proof
+
+    client = GrpcBrowserSourceClient.from_endpoint(
+        f"localhost:{port}", credential_supplier=supplier, tls=None, allow_insecure=True
+    )
+    reset = asyncio.Event()
+    effects: list[bytes] = []
+
+    async def native_peer() -> None:
+        async for envelope in runner.queue:
+            kind = envelope.WhichOneof("payload")
+            if kind == "open":
+
+                def response(stream_id: int) -> pb.RuntimeStreamSessionEnvelope:
+                    return pb.RuntimeStreamSessionEnvelope(
+                        protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
+                        session_id=owner.session_lease_id,
+                        peer_boot_id="runner-boot",
+                        owner_boot_id=owner.owner_boot_id,
+                        session_lease_id=owner.session_lease_id,
+                        lease_generation=owner.lease_generation,
+                        stream_id=stream_id,
+                    )
+
+                opened = response(envelope.stream_id)
+                opened.open_accepted.CopyFrom(
+                    pb.RuntimeStreamSessionOpenAccepted(
+                        data_frame_bytes=APPROVED_SESSION_PROFILE.data_frame_bytes,
+                        request_credit_bytes=APPROVED_SESSION_PROFILE.request_stream_window_bytes,
+                        response_credit_bytes=APPROVED_SESSION_PROFILE.response_stream_window_bytes,
+                        route_path=pb.RUNTIME_STREAM_SESSION_ROUTE_PATH_LOCAL,
+                    )
+                )
+                await plane.runner_response(opened)
+                head = response(envelope.stream_id)
+                head.response_head.status = 101
+                await plane.runner_response(head)
+                frame = response(envelope.stream_id)
+                frame.frame_sequence = 1
+                frame.websocket.CopyFrom(
+                    pb.RuntimeStreamSessionWebSocketFrame(
+                        direction=pb.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE,
+                        opcode=pb.RUNTIME_STREAM_SESSION_WEBSOCKET_OPCODE_BINARY,
+                        final=True,
+                        data=b"volatile-browser-frame",
+                    )
+                )
+                await plane.runner_response(frame)
+            elif kind == "websocket":
+                effects.append(envelope.websocket.data)
+            elif kind == "reset":
+                reset.set()
+
+    task = asyncio.create_task(native_peer())
+    request = source_request(datetime.now(UTC))
+    request.open_envelope.open.authority.runner_generation = owner.runner_generation
+    authority = decode_stream_authority(request.open_envelope.open.authority)
+    assert isinstance(authority, BrowserStreamAuthority)
+    connection = None
+    replay_client = None
+    try:
+        connection = await client.connect(authority=authority)
+        received = await asyncio.wait_for(connection.receive_websocket(), 5)
+        assert received.payload == b"volatile-browser-frame"
+        current = False
+        await connection.send_websocket(
+            opcode=WebSocketOpcode.TEXT, payload=b"must-not-reach-native-input"
+        )
+        try:
+            await asyncio.wait_for(connection.receive_websocket(), 5)
+        except BrowserSourceScopeRevoked as error:
+            assert error.reason == "access_revoked"
+        else:
+            raise AssertionError("Current access revocation must purge Browser content")
+        await asyncio.wait_for(reset.wait(), 5)
+        assert effects == []
+        assert not plane.bindings
+        current = True
+
+        async def reused(request: BrowserSourceCredentialRequest) -> str:
+            return proofs[0]
+
+        replay_client = GrpcBrowserSourceClient.from_endpoint(
+            f"localhost:{port}",
+            credential_supplier=reused,
+            tls=None,
+            allow_insecure=True,
+        )
+        try:
+            await replay_client.connect(authority=authority)
+        except BrowserSourceScopeRevoked as error:
+            assert error.reason == "unauthenticated"
+        else:
+            raise AssertionError(
+                "A proof cannot authenticate a fresh connection challenge"
+            )
+        fresh = await client.connect(authority=authority)
+        try:
+            await asyncio.wait_for(fresh.receive_websocket(), 5)
+            reset.clear()
+            second_open = fresh.envelope()
+            second_open.open.CopyFrom(request.open_envelope.open)
+            await fresh.call.write(second_open)
+            try:
+                await asyncio.wait_for(fresh.receive_websocket(), 5)
+            except BrowserSourceUnavailable:
+                pass
+            else:
+                raise AssertionError("A source must never accept a second OPEN")
+            await asyncio.wait_for(reset.wait(), 5)
+            assert effects == []
+        finally:
+            await fresh.close()
+    finally:
+        if connection is not None:
+            await connection.close()
+        if replay_client is not None:
+            await replay_client.close()
+        await client.close()
+        await server.stop(None)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await plane.unregister_runner(accepted)
+        await plane.close()
+    assert not plane.sources and not plane.browser_guards

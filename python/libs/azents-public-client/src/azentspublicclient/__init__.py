@@ -21,6 +21,7 @@ __all__ = [
     "AgentRuntimeV1Api",
     "AgentV1Api",
     "AuthV1Api",
+    "BrowserV1Api",
     "ChatGPTOAuthV1Api",
     "ChatV1Api",
     "ExternalChannelV1Api",
@@ -175,6 +176,11 @@ __all__ = [
     "AwsConfig",
     "AwsSecrets",
     "Body",
+    "BrowserClosePageRequest",
+    "BrowserFrameResponse",
+    "BrowserPageResponse",
+    "BrowserProjectionResponse",
+    "BrowserTaskResponse",
     "BuiltinToolConfig",
     "CatalogOffPeakRule",
     "CatalogPriceIssue",
@@ -485,6 +491,7 @@ __all__ = [
     "ResponseModeRequest",
     "RunnerSystemMetricAvailability",
     "RunnerSystemMetricsScope",
+    "RuntimeBrowserReasonCode",
     "RuntimeConfigurationNetworkResponse",
     "RuntimeConfigurationStateResponse",
     "RuntimeConfigurationStatus",
@@ -669,6 +676,7 @@ __all__ = [
 from azentspublicclient.api.agent_runtime_v1_api import AgentRuntimeV1Api as AgentRuntimeV1Api
 from azentspublicclient.api.agent_v1_api import AgentV1Api as AgentV1Api
 from azentspublicclient.api.auth_v1_api import AuthV1Api as AuthV1Api
+from azentspublicclient.api.browser_v1_api import BrowserV1Api as BrowserV1Api
 from azentspublicclient.api.chat_gpto_auth_v1_api import ChatGPTOAuthV1Api as ChatGPTOAuthV1Api
 from azentspublicclient.api.chat_v1_api import ChatV1Api as ChatV1Api
 from azentspublicclient.api.external_channel_v1_api import ExternalChannelV1Api as ExternalChannelV1Api
@@ -827,6 +835,11 @@ from azentspublicclient.models.avatar_upload_ticket_response import AvatarUpload
 from azentspublicclient.models.aws_config import AwsConfig as AwsConfig
 from azentspublicclient.models.aws_secrets import AwsSecrets as AwsSecrets
 from azentspublicclient.models.body import Body as Body
+from azentspublicclient.models.browser_close_page_request import BrowserClosePageRequest as BrowserClosePageRequest
+from azentspublicclient.models.browser_frame_response import BrowserFrameResponse as BrowserFrameResponse
+from azentspublicclient.models.browser_page_response import BrowserPageResponse as BrowserPageResponse
+from azentspublicclient.models.browser_projection_response import BrowserProjectionResponse as BrowserProjectionResponse
+from azentspublicclient.models.browser_task_response import BrowserTaskResponse as BrowserTaskResponse
 from azentspublicclient.models.builtin_tool_config import BuiltinToolConfig as BuiltinToolConfig
 from azentspublicclient.models.catalog_off_peak_rule import CatalogOffPeakRule as CatalogOffPeakRule
 from azentspublicclient.models.catalog_price_issue import CatalogPriceIssue as CatalogPriceIssue
@@ -1137,6 +1150,7 @@ from azentspublicclient.models.response_llm_provider_integration_v1_get_subscrip
 from azentspublicclient.models.response_mode_request import ResponseModeRequest as ResponseModeRequest
 from azentspublicclient.models.runner_system_metric_availability import RunnerSystemMetricAvailability as RunnerSystemMetricAvailability
 from azentspublicclient.models.runner_system_metrics_scope import RunnerSystemMetricsScope as RunnerSystemMetricsScope
+from azentspublicclient.models.runtime_browser_reason_code import RuntimeBrowserReasonCode as RuntimeBrowserReasonCode
 from azentspublicclient.models.runtime_configuration_network_response import RuntimeConfigurationNetworkResponse as RuntimeConfigurationNetworkResponse
 from azentspublicclient.models.runtime_configuration_state_response import RuntimeConfigurationStateResponse as RuntimeConfigurationStateResponse
 from azentspublicclient.models.runtime_configuration_status import RuntimeConfigurationStatus as RuntimeConfigurationStatus

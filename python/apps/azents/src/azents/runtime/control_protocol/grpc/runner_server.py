@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 import grpc
+from azents_runtime_control.browser_runner_wire import browser_command_to_wire
 from azents_runtime_control.grpc_runner_client import (
     runner_event_from_message,
     runner_runtime_configuration_evidence_from_message,
@@ -1290,6 +1291,11 @@ def _copy_operation_payload(
     operation_type: str,
     payload: dict[str, JsonValue],
 ) -> None:
+    if operation_type.startswith("browser."):
+        message.browser.canonical_command = browser_command_to_wire(
+            operation_type, payload
+        )
+        return
     if operation_type == "bash":
         message.bash.command = _str_payload(payload, "command")
         timeout_seconds = _optional_int_payload(payload, "timeout_seconds")

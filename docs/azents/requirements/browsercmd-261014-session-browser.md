@@ -116,6 +116,19 @@ Native browser sandbox availability is not a prerequisite for providing the brow
 - This policy does not automatically broaden Runtime privileges or modify infrastructure to enable native sandboxing.
 - Session-native state separation remains functional isolation, not a guarantee against browser exploit access within the same Runtime.
 
+### REQ-15. Provide Ordinary Browser Navigation in the Session Panel
+
+An authorized participant can use the Session browser as a browser rather than only a remote image with page input.
+
+**Acceptance criteria**
+
+- The browser surface uses recognizable page tabs, address/navigation controls and a dominant page viewport within the existing Session panel.
+- The participant can enter a supported web address and navigate the current page, go back or forward through that page's native history, and reload the page.
+- A connection-refresh action is distinguishable from reloading the site.
+- Address navigation and history/reload actions obey the same current Session/task/page, input-access and actual-conflict boundaries as other manipulation.
+- Read-only participants cannot perform these navigation effects. Lost, stale or uncertain actions are not replayed.
+- Page input works by focusing the page surface without a separate visible text-entry form, including supported keyboard and composition input.
+
 ## Fixed Constraints
 
 The preceding baseline's complete fixed constraints remain applicable: one Runtime may serve multiple Sessions; state is Session-specific and contention task-specific; existing side-panel/access/lifecycle authority remains intact; independently installed Agent tools are not product dependencies; no separate help, permission, retention, or user-visible versioning system is introduced; runtime contracts remain portable beyond Linux.
@@ -137,3 +150,5 @@ On the same date at 19:59 KST the requester confirmed the REQ-5/REQ-6 clarificat
 At 20:15 KST on the same date the requester confirmed built-in browser guidance as a required delivery artifact, including the scope represented by REQ-13.
 
 At 21:12 KST on the same date the requester confirmed REQ-14: use native browser sandboxing only where supported; it is not mandatory for browser availability.
+
+On 2026-10-15 at 12:23 KST the requester directed a proper browser-like interface aligned with the mock rather than the added standalone input form. At 12:44 KST the requester identified missing address editing and navigation. REQ-15 records the ordinary browser controls expected by that direction without changing the existing access, Session, lifecycle or uncertainty boundaries.

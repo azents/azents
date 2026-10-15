@@ -9,6 +9,7 @@ from typing import Protocol
 
 from azents_runtime_control.runtime_stream_session import (
     MAX_STREAM_TOMBSTONES,
+    BrowserStreamAuthority,
     OwnerSessionEpoch,
     StreamAuthority,
     StreamProtocol,
@@ -77,11 +78,14 @@ class RuntimeStreamSessionBroker:
         self,
         *,
         key: BrokerStreamKey,
-        authority: WebStreamAuthority,
+        authority: StreamAuthority,
         protocol: StreamProtocol,
+        browser_admitted: bool = False,
     ) -> BrokerAdmission | None:
         """Admit one exact authority and allocate Owner-scoped capacity identity."""
-        if not isinstance(authority, WebStreamAuthority):
+        if not isinstance(authority, WebStreamAuthority) and not (
+            browser_admitted and isinstance(authority, BrowserStreamAuthority)
+        ):
             raise ValueError("Runtime Web capacity admission requires Web authority")
         target = await self.router.resolve(authority)
         if target is None:

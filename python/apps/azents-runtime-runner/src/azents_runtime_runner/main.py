@@ -42,6 +42,7 @@ from azents_runtime_control.transfer import (
 )
 
 from azents_runtime_runner.browser import BrowserFailure, RunnerBrowserManager
+from azents_runtime_runner.browser_viewer import RunnerBrowserViewer
 from azents_runtime_runner.diagnostics import (
     RunnerDiagnosticReason,
     bind_extra,
@@ -71,9 +72,9 @@ from azents_runtime_runner.trust import (
     runner_http_ssl_context,
 )
 from azents_runtime_runner.web_session_dispatcher import (
+    RunnerStreamSessionDispatcher,
     RunnerWebHardLimits,
     RunnerWebResourceTracker,
-    RunnerWebSessionDispatcher,
 )
 from azents_runtime_runner.workspace import Workspace
 
@@ -478,10 +479,11 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                     )
                 ),
             )
-            web_dispatcher = RunnerWebSessionDispatcher(
+            web_dispatcher = RunnerStreamSessionDispatcher(
                 web_manager,
                 resources=web_resources,
                 monotonic_clock=time.monotonic,
+                browser=RunnerBrowserViewer(browser_manager, web_resources),
             )
             transfer_manager = RunnerTransferManager(
                 control=client,

@@ -28,6 +28,7 @@ from azents_runtime_control.browser_contract import (
     BrowserTarget,
     BrowserTask,
 )
+from azents_runtime_control.runtime_stream_session import BrowserStreamAuthority
 from markdownify import markdownify
 from playwright.async_api import (
     BrowserContext,
@@ -145,7 +146,7 @@ class _Page:
     dialog_id: str | None = None
     dialog_ready: asyncio.Event = field(default_factory=asyncio.Event)
     pending: asyncio.Task[_ActionOutcome] | None = None
-    entered_values: set[str] = field(default_factory=set)
+    navigation_id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 
 @dataclass
@@ -196,6 +197,31 @@ class RunnerBrowserManager:
                 "browser_stale_generation",
                 "Browser Runtime generation is no longer current",
             )
+
+    def viewer_authority(self, authority: BrowserStreamAuthority) -> BrowserAuthority:
+        """Resolve only an existing Session binding; attachment never creates state."""
+        self.validate_operation(authority.runtime_id, authority.runner_generation)
+        task = self.tasks.get(authority.task_id)
+        if self.closed or task is None or task.session_id != authority.session_id:
+            raise BrowserFailure(
+                "browser_stale_target", "Browser viewer target is unavailable"
+            )
+        bound = self.session_directories.get(authority.session_id)
+        if bound is None or bound != task.working_directory:
+            raise BrowserFailure(
+                "browser_invalid_authority", "Browser Session binding is unavailable"
+            )
+        concrete = BrowserAuthority(task.session_id, str(bound))
+        self.target(
+            concrete,
+            BrowserTarget(
+                authority.task_id,
+                authority.page_id,
+                authority.resource_incarnation,
+                None,
+            ),
+        )
+        return concrete
 
     async def initialize(self) -> None:
         """Establish product engine availability without opening a Session page."""
@@ -362,6 +388,7 @@ class RunnerBrowserManager:
             }
 
         def navigated(frame: Frame) -> None:
+            resource.navigation_id = uuid.uuid4().hex
             resource.refs = {
                 key: value
                 for key, value in resource.refs.items()
@@ -401,7 +428,7 @@ class RunnerBrowserManager:
             BrowserFrame(
                 key,
                 safe_browser_url(frame.url),
-                _safe_page_text(frame.name, page.entered_values)[:64],
+                _safe_page_text(frame.name)[:64],
             )
             for key, frame in page.frames.items()
             if not frame.is_detached()
@@ -412,7 +439,7 @@ class RunnerBrowserManager:
             task.id,
             task.incarnation,
             safe_browser_url(page.page.url),
-            _safe_page_text(title, page.entered_values),
+            _safe_page_text(title),
             frames,
         )
 
@@ -448,7 +475,7 @@ class RunnerBrowserManager:
         dialog = None
         if page is not None and page.dialog is not None:
             assert page.dialog_id is not None
-            message = _safe_page_text(page.dialog.message, page.entered_values)
+            message = _safe_page_text(page.dialog.message)
             dialog = BrowserDialog(page.dialog_id, page.dialog.type, message)
         if page is not None and page.pending is not None and action_state == "none":
             action_state = "dialog_pending"
@@ -673,11 +700,7 @@ class RunnerBrowserManager:
                         "browser_observation_failed",
                         "Browser element description is invalid",
                     )
-                if tag in {"input", "textarea"}:
-                    value = await handle.input_value()
-                    if value:
-                        page.entered_values.add(value)
-                label = _safe_page_text(label, page.entered_values)
+                label = _safe_page_text(label)
                 page.refs[ref] = _Reference(handle, observation, frame)
                 entries.append(
                     BrowserElementRef(ref, observation, frame_id, tag, label or tag)
@@ -707,7 +730,9 @@ class RunnerBrowserManager:
                 else markdownify(html, heading_style="ATX", strip=["img"])
             )
         if content is not None:
-            content = _redact_page_text(content, page.entered_values)
+            content = re.sub(
+                r"https?://[^\s<>\"]+\?[^\s<>\"]+", "[URL omitted]", content
+            )
         if content is not None and len(content) > command.max_characters:
             content = content[: command.max_characters]
             truncated = True
@@ -779,8 +804,6 @@ class RunnerBrowserManager:
                 page.dialog_ready.clear()
                 try:
                     if action.accept is True:
-                        if action.text:
-                            page.entered_values.add(action.text)
                         await dialog.accept(action.text)
                     else:
                         await dialog.dismiss()
@@ -914,8 +937,6 @@ class RunnerBrowserManager:
                 await handle.click(timeout=action.timeout_ms)
             case "fill":
                 assert handle is not None and action.text is not None
-                if action.text:
-                    page.entered_values.add(action.text)
                 await handle.fill(action.text, timeout=action.timeout_ms)
             case "select":
                 assert handle is not None and action.values is not None
@@ -1057,19 +1078,9 @@ def _observe_pending_failure(operation: asyncio.Task[_ActionOutcome]) -> None:
         operation.exception()
 
 
-def _safe_page_text(text: str, entered_values: set[str]) -> str:
-    """Bound page descriptions and omit private URLs/known entered values."""
-    return re.sub(
-        r"https?://[^\s<>]+", "[URL omitted]", _redact_page_text(text, entered_values)
-    )[:512]
-
-
-def _redact_page_text(text: str, entered_values: set[str]) -> str:
-    text = re.sub(r"https?://[^\s<>\"]+\?[^\s<>\"]+", "[URL omitted]", text)
-    for value in sorted(entered_values, key=len, reverse=True):
-        if value:
-            text = text.replace(value, "[input omitted]")
-    return text
+def _safe_page_text(text: str) -> str:
+    """Bound page descriptions and omit private URLs."""
+    return re.sub(r"https?://[^\s<>]+", "[URL omitted]", text)[:512]
 
 
 def _sandbox_unavailable(message: str) -> bool:

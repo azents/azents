@@ -4,6 +4,7 @@
 from azentspublicclient.api.agent_runtime_v1_api import AgentRuntimeV1Api
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.auth_v1_api import AuthV1Api
+from azentspublicclient.api.browser_v1_api import BrowserV1Api
 from azentspublicclient.api.chat_gpto_auth_v1_api import ChatGPTOAuthV1Api
 from azentspublicclient.api.chat_v1_api import ChatV1Api
 from azentspublicclient.api.external_channel_v1_api import ExternalChannelV1Api

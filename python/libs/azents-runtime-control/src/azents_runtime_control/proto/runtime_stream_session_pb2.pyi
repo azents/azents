@@ -42,6 +42,9 @@ class _RuntimeStreamSessionPeerRoleEnumTypeWrapper(
     RUNTIME_STREAM_SESSION_PEER_ROLE_RUNNER: (
         _RuntimeStreamSessionPeerRole.ValueType
     )  # 3
+    RUNTIME_STREAM_SESSION_PEER_ROLE_API_BROWSER: (
+        _RuntimeStreamSessionPeerRole.ValueType
+    )  # 4
 
 class RuntimeStreamSessionPeerRole(
     _RuntimeStreamSessionPeerRole,
@@ -54,6 +57,9 @@ RUNTIME_STREAM_SESSION_PEER_ROLE_UNSPECIFIED: (
 RUNTIME_STREAM_SESSION_PEER_ROLE_GATEWAY: RuntimeStreamSessionPeerRole.ValueType  # 1
 RUNTIME_STREAM_SESSION_PEER_ROLE_CONTROL: RuntimeStreamSessionPeerRole.ValueType  # 2
 RUNTIME_STREAM_SESSION_PEER_ROLE_RUNNER: RuntimeStreamSessionPeerRole.ValueType  # 3
+RUNTIME_STREAM_SESSION_PEER_ROLE_API_BROWSER: (
+    RuntimeStreamSessionPeerRole.ValueType
+)  # 4
 Global___RuntimeStreamSessionPeerRole: _TypeAlias = RuntimeStreamSessionPeerRole
 
 class _RuntimeStreamSessionProtocol:
@@ -313,6 +319,8 @@ class RuntimeStreamSessionEnvelope(_message.Message):
     HEARTBEAT_ACK_FIELD_NUMBER: _builtins.int
     GO_AWAY_FIELD_NUMBER: _builtins.int
     SESSION_ERROR_FIELD_NUMBER: _builtins.int
+    BROWSER_SOURCE_CHALLENGE_FIELD_NUMBER: _builtins.int
+    BROWSER_SOURCE_PROOF_FIELD_NUMBER: _builtins.int
     OPEN_FIELD_NUMBER: _builtins.int
     OPEN_ACCEPTED_FIELD_NUMBER: _builtins.int
     OPEN_REJECTED_FIELD_NUMBER: _builtins.int
@@ -346,6 +354,10 @@ class RuntimeStreamSessionEnvelope(_message.Message):
     def go_away(self) -> Global___RuntimeStreamSessionGoAway: ...
     @_builtins.property
     def session_error(self) -> Global___RuntimeStreamSessionError: ...
+    @_builtins.property
+    def browser_source_challenge(self) -> Global___RuntimeBrowserSourceChallenge: ...
+    @_builtins.property
+    def browser_source_proof(self) -> Global___RuntimeBrowserSourceProof: ...
     @_builtins.property
     def open(self) -> Global___RuntimeStreamSessionOpen: ...
     @_builtins.property
@@ -386,6 +398,8 @@ class RuntimeStreamSessionEnvelope(_message.Message):
         | None = ...,
         go_away: Global___RuntimeStreamSessionGoAway | None = ...,
         session_error: Global___RuntimeStreamSessionError | None = ...,
+        browser_source_challenge: Global___RuntimeBrowserSourceChallenge | None = ...,
+        browser_source_proof: Global___RuntimeBrowserSourceProof | None = ...,
         open: Global___RuntimeStreamSessionOpen | None = ...,
         open_accepted: Global___RuntimeStreamSessionOpenAccepted | None = ...,
         open_rejected: Global___RuntimeStreamSessionOpenRejected | None = ...,
@@ -405,6 +419,10 @@ class RuntimeStreamSessionEnvelope(_message.Message):
         b"_owner_boot_id",
         "_session_lease_id",
         b"_session_lease_id",
+        "browser_source_challenge",
+        b"browser_source_challenge",
+        "browser_source_proof",
+        b"browser_source_proof",
         "cancel",
         b"cancel",
         "data",
@@ -456,6 +474,10 @@ class RuntimeStreamSessionEnvelope(_message.Message):
         b"_owner_boot_id",
         "_session_lease_id",
         b"_session_lease_id",
+        "browser_source_challenge",
+        b"browser_source_challenge",
+        "browser_source_proof",
+        b"browser_source_proof",
         "cancel",
         b"cancel",
         "data",
@@ -533,6 +555,8 @@ class RuntimeStreamSessionEnvelope(_message.Message):
         "heartbeat_ack",
         "go_away",
         "session_error",
+        "browser_source_challenge",
+        "browser_source_proof",
         "open",
         "open_accepted",
         "open_rejected",
@@ -1077,6 +1101,75 @@ class RuntimeStreamSessionRequestHead(_message.Message):
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___RuntimeStreamSessionRequestHead: _TypeAlias = RuntimeStreamSessionRequestHead
+
+@_typing.final
+class RuntimeBrowserSourceChallenge(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    NONCE_FIELD_NUMBER: _builtins.int
+    CONTROL_BOOT_ID_FIELD_NUMBER: _builtins.int
+    DEADLINE_AT_FIELD_NUMBER: _builtins.int
+    nonce: _builtins.str
+    control_boot_id: _builtins.str
+    @_builtins.property
+    def deadline_at(self) -> _timestamp_pb2.Timestamp: ...
+    def __init__(
+        self,
+        *,
+        nonce: _builtins.str = ...,
+        control_boot_id: _builtins.str = ...,
+        deadline_at: _timestamp_pb2.Timestamp | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["deadline_at", b"deadline_at"]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "control_boot_id",
+        b"control_boot_id",
+        "deadline_at",
+        b"deadline_at",
+        "nonce",
+        b"nonce",
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___RuntimeBrowserSourceChallenge: _TypeAlias = RuntimeBrowserSourceChallenge
+
+@_typing.final
+class RuntimeBrowserSourceProof(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    HELLO_FIELD_NUMBER: _builtins.int
+    ADMITTED_OPEN_FIELD_NUMBER: _builtins.int
+    CREDENTIAL_FIELD_NUMBER: _builtins.int
+    credential: _builtins.str
+    @_builtins.property
+    def hello(self) -> Global___RuntimeStreamSessionEnvelope: ...
+    @_builtins.property
+    def admitted_open(self) -> Global___RuntimeStreamSessionEnvelope: ...
+    def __init__(
+        self,
+        *,
+        hello: Global___RuntimeStreamSessionEnvelope | None = ...,
+        admitted_open: Global___RuntimeStreamSessionEnvelope | None = ...,
+        credential: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal[
+        "admitted_open", b"admitted_open", "hello", b"hello"
+    ]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "admitted_open",
+        b"admitted_open",
+        "credential",
+        b"credential",
+        "hello",
+        b"hello",
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___RuntimeBrowserSourceProof: _TypeAlias = RuntimeBrowserSourceProof
 
 @_typing.final
 class RuntimeStreamSessionOpen(_message.Message):

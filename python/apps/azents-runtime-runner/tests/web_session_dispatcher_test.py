@@ -41,9 +41,9 @@ from azents_runtime_runner.stream_session import (
     RunnerWebSocket,
 )
 from azents_runtime_runner.web_session_dispatcher import (
+    RunnerStreamSessionDispatcher,
     RunnerWebHardLimits,
     RunnerWebResourceTracker,
-    RunnerWebSessionDispatcher,
     _head,
     _RunnerInboundQueue,
     _Stream,
@@ -214,11 +214,12 @@ def _resources(
     )
 
 
-def _dispatcher(manager: RunnerStreamSessionManager) -> RunnerWebSessionDispatcher:
-    return RunnerWebSessionDispatcher(
+def _dispatcher(manager: RunnerStreamSessionManager) -> RunnerStreamSessionDispatcher:
+    return RunnerStreamSessionDispatcher(
         manager,
         resources=_resources(),
         monotonic_clock=lambda: 1.0,
+        browser=None,
     )
 
 
@@ -903,10 +904,11 @@ async def test_runner_inbound_queue_rejects_without_blocking_other_streams() -> 
     manager.offer = offer
     manager.client = client
     resources = _resources(maximum_queued_envelopes=1)
-    dispatcher = RunnerWebSessionDispatcher(
+    dispatcher = RunnerStreamSessionDispatcher(
         manager,
         resources=resources,
         monotonic_clock=lambda: 1.0,
+        browser=None,
     )
     dispatcher.accepting_envelopes = True
     stream = _stream(

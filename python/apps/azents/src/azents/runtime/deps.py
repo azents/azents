@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
+from azents_runtime_control.grpc_browser_source_client import GrpcBrowserSourceClient
 from azents_runtime_control.grpc_tls import GrpcClientTlsConfig
 from azents_runtime_control.grpc_transfer_coordinator_client import (
     GrpcRuntimeTransferCoordinatorClient,
@@ -17,6 +18,10 @@ from fastapi import Depends
 from azents.core.config import Config
 from azents.core.deps import get_appctx, get_config
 from azents.core.redis import create_redis_client
+from azents.core.runtime_browser_source_credential import (
+    RuntimeBrowserSourceCredentialSupplier,
+    RuntimeBrowserSourceCredentialVerifier,
+)
 from azents.core.runtime_transfer_coordinator_credential import (
     RuntimeTransferCoordinatorCredentialSupplier,
     RuntimeTransferCoordinatorCredentialVerifier,
@@ -189,6 +194,45 @@ def get_runtime_runner_operation_client(
         control_protocol=control_protocol,
         coordination_store=store,
         metrics=metrics,
+    )
+
+
+async def get_api_runtime_browser_source_client(
+    appctx: Annotated[AppContext[Config], Depends(get_appctx)],
+    config: Annotated[Config, Depends(get_config)],
+) -> GrpcBrowserSourceClient | None:
+    """Own Browser-only source channels using the existing Control listener trust."""
+    control = config.runtime_transfer_coordinator
+    if not control.enabled:
+        return None
+    endpoint = control.endpoint
+    if endpoint is None or not endpoint.strip():
+        raise ValueError("Runtime Control endpoint is required for Browser sources")
+
+    async def create() -> AsyncIterator[GrpcBrowserSourceClient]:
+        tls = _coordinator_tls_config(control.tls_ca_file)
+        if tls is None and not control.allow_insecure:
+            raise ValueError(
+                "Runtime Control TLS trust is required for Browser sources"
+            )
+        supplier = RuntimeBrowserSourceCredentialSupplier(
+            verifier=RuntimeBrowserSourceCredentialVerifier(
+                config.credential_encryption.key, clock=_utc_now
+            )
+        )
+        client = GrpcBrowserSourceClient.from_endpoint(
+            endpoint,
+            credential_supplier=supplier,
+            tls=tls,
+            allow_insecure=control.allow_insecure,
+        )
+        try:
+            yield client
+        finally:
+            await client.close()
+
+    return await appctx.get_variable(
+        f"{__name__}.runtime_browser_source_client.{_API_SERVICE_IDENTITY}", create
     )
 
 

@@ -1917,6 +1917,7 @@ class RunnerOperationRequest(_message.Message):
     GIT_DISCOVER_MANAGED_WORKTREES_FIELD_NUMBER: _builtins.int
     GIT_REMOVE_DISCOVERED_WORKTREE_FIELD_NUMBER: _builtins.int
     FILE_READ_TEXT_FIELD_NUMBER: _builtins.int
+    BROWSER_FIELD_NUMBER: _builtins.int
     runtime_id: _builtins.str
     runner_generation: _builtins.int
     operation_type: _builtins.str
@@ -1985,6 +1986,8 @@ class RunnerOperationRequest(_message.Message):
     ) -> Global___GitRemoveDiscoveredWorktreeOperationPayload: ...
     @_builtins.property
     def file_read_text(self) -> Global___FileReadTextOperationPayload: ...
+    @_builtins.property
+    def browser(self) -> Global___BrowserOperationPayload: ...
     def __init__(
         self,
         *,
@@ -2024,12 +2027,15 @@ class RunnerOperationRequest(_message.Message):
         git_remove_discovered_worktree: Global___GitRemoveDiscoveredWorktreeOperationPayload
         | None = ...,
         file_read_text: Global___FileReadTextOperationPayload | None = ...,
+        browser: Global___BrowserOperationPayload | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
         "_owner_session_id",
         b"_owner_session_id",
         "bash",
         b"bash",
+        "browser",
+        b"browser",
         "deadline_at",
         b"deadline_at",
         "file_apply_patch",
@@ -2095,6 +2101,8 @@ class RunnerOperationRequest(_message.Message):
         b"body_chunks",
         "body_stream_id",
         b"body_stream_id",
+        "browser",
+        b"browser",
         "deadline_at",
         b"deadline_at",
         "file_apply_patch",
@@ -2191,6 +2199,7 @@ class RunnerOperationRequest(_message.Message):
         "git_discover_managed_worktrees",
         "git_remove_discovered_worktree",
         "file_read_text",
+        "browser",
     ]
     _WhichOneofArgType_payload: _TypeAlias = _typing.Literal["payload", b"payload"]
     @_typing.overload
@@ -2203,6 +2212,31 @@ class RunnerOperationRequest(_message.Message):
     ) -> _WhichOneofReturnType_payload | None: ...
 
 Global___RunnerOperationRequest: _TypeAlias = RunnerOperationRequest
+
+@_typing.final
+class BrowserOperationPayload(_message.Message):
+    """Browser-only canonical UTF-8 JSON, bounded to 1 MiB and validated through
+    the closed browser command codec on both sides. This is not a generic payload.
+    """
+
+    DESCRIPTOR: _descriptor.Descriptor
+
+    CANONICAL_COMMAND_FIELD_NUMBER: _builtins.int
+    canonical_command: _builtins.bytes
+    def __init__(
+        self,
+        *,
+        canonical_command: _builtins.bytes = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "canonical_command", b"canonical_command"
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___BrowserOperationPayload: _TypeAlias = BrowserOperationPayload
 
 @_typing.final
 class BashOperationPayload(_message.Message):
@@ -3341,6 +3375,7 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
     GIT_DISCOVER_MANAGED_WORKTREES_FIELD_NUMBER: _builtins.int
     GIT_REMOVE_DISCOVERED_WORKTREE_FIELD_NUMBER: _builtins.int
     FILE_READ_TEXT_FIELD_NUMBER: _builtins.int
+    BROWSER_FIELD_NUMBER: _builtins.int
     @_builtins.property
     def bash(self) -> Global___BashFinalSuccess: ...
     @_builtins.property
@@ -3391,6 +3426,8 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
     ) -> Global___GitRemoveDiscoveredWorktreeFinalSuccess: ...
     @_builtins.property
     def file_read_text(self) -> Global___FileReadTextFinalSuccess: ...
+    @_builtins.property
+    def browser(self) -> Global___BrowserFinalSuccess: ...
     def __init__(
         self,
         *,
@@ -3419,10 +3456,13 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
         git_remove_discovered_worktree: Global___GitRemoveDiscoveredWorktreeFinalSuccess
         | None = ...,
         file_read_text: Global___FileReadTextFinalSuccess | None = ...,
+        browser: Global___BrowserFinalSuccess | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
         "bash",
         b"bash",
+        "browser",
+        b"browser",
         "file_apply_patch",
         b"file_apply_patch",
         "file_bulk_delete",
@@ -3474,6 +3514,8 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
     _ClearFieldArgType: _TypeAlias = _typing.Literal[
         "bash",
         b"bash",
+        "browser",
+        b"browser",
         "file_apply_patch",
         b"file_apply_patch",
         "file_bulk_delete",
@@ -3546,6 +3588,7 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
         "git_discover_managed_worktrees",
         "git_remove_discovered_worktree",
         "file_read_text",
+        "browser",
     ]
     _WhichOneofArgType_result: _TypeAlias = _typing.Literal["result", b"result"]
     def WhichOneof(
@@ -3555,6 +3598,29 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
 Global___RunnerOperationFinalSuccessPayload: _TypeAlias = (
     RunnerOperationFinalSuccessPayload
 )
+
+@_typing.final
+class BrowserFinalSuccess(_message.Message):
+    """Completed BrowserResult only; same size bound and strict codec as commands."""
+
+    DESCRIPTOR: _descriptor.Descriptor
+
+    CANONICAL_RESULT_FIELD_NUMBER: _builtins.int
+    canonical_result: _builtins.bytes
+    def __init__(
+        self,
+        *,
+        canonical_result: _builtins.bytes = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "canonical_result", b"canonical_result"
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___BrowserFinalSuccess: _TypeAlias = BrowserFinalSuccess
 
 @_typing.final
 class RunnerOperationFinalErrorPayload(_message.Message):

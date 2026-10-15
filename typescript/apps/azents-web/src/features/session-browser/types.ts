@@ -1,0 +1,158 @@
+export interface BrowserTarget {
+  task_id: string;
+  page_id: string;
+  resource_incarnation: string;
+}
+
+export interface BrowserViewport {
+  width: number;
+  height: number;
+}
+
+export interface BrowserDialog {
+  id: string;
+  type: string;
+  message: string;
+}
+
+export interface BrowserStatus {
+  type: "status";
+  attachment_id: string;
+  target: BrowserTarget;
+  state: "connected" | "unavailable" | "closed";
+  allow_input: boolean;
+  viewport: BrowserViewport;
+  navigation_id: string;
+  dialog: BrowserDialog | null;
+  conflict: boolean;
+}
+
+export interface BrowserFrame extends BrowserViewport {
+  type: "frame";
+  attachment_id: string;
+  target: BrowserTarget;
+  frame_sequence: number;
+  navigation_id: string;
+  media_type: "image/jpeg";
+}
+
+export type BrowserInputReason =
+  | "browser_read_only"
+  | "browser_stale_input"
+  | "browser_stale_frame"
+  | "browser_stale_target"
+  | "browser_stale_generation"
+  | "browser_invalid_authority"
+  | "browser_invalid_url"
+  | "browser_input_conflict"
+  | "browser_dialog_pending"
+  | "browser_stale_dialog"
+  | "browser_resource_exhausted"
+  | "browser_unavailable"
+  | "browser_deadline"
+  | "browser_outcome_unknown";
+
+export interface BrowserInputAck {
+  type: "input_ack";
+  attachment_id: string;
+  sequence: number;
+  accepted: boolean;
+  reason_code: BrowserInputReason | null;
+  outcome: "dispatched" | "rejected" | "outcome_unknown";
+}
+
+export type BrowserInputAction =
+  | {
+      kind: "pointer";
+      phase: "move" | "down" | "up" | "cancel";
+      x: number;
+      y: number;
+      button: "left" | "middle" | "right" | null;
+    }
+  | {
+      kind: "wheel";
+      x: number;
+      y: number;
+      delta_x: number;
+      delta_y: number;
+    }
+  | { kind: "key"; phase: "down" | "up"; key: string }
+  | {
+      kind: "composition";
+      phase: "start" | "commit" | "cancel";
+      text: string | null;
+    }
+  | { kind: "dialog"; dialog_id: string; accept: boolean; text: string | null }
+  | { kind: "navigation"; action: "navigate"; url: string }
+  | {
+      kind: "navigation";
+      action: "back" | "forward" | "reload";
+      url: null;
+    };
+
+export type BrowserNavigationAction = Extract<
+  BrowserInputAction,
+  { kind: "navigation" }
+>;
+
+export type BrowserDialogAction = Extract<
+  BrowserInputAction,
+  { kind: "dialog" }
+>;
+export type BrowserCoordinateAction = Exclude<
+  BrowserInputAction,
+  BrowserDialogAction
+>;
+
+export type BrowserInput = {
+  type: "input";
+  attachment_id: string;
+  sequence: number;
+} & (
+  | {
+      source: BrowserViewport & {
+        frame_sequence: number;
+        navigation_id: string;
+      };
+      action: BrowserCoordinateAction;
+    }
+  | {
+      source: null;
+      action: BrowserDialogAction;
+    }
+);
+
+export interface BrowserPageChoice {
+  target: BrowserTarget;
+  taskLabel: string;
+  title: string;
+  url: string;
+}
+
+export interface BrowserImage {
+  url: string;
+  frame: BrowserFrame;
+}
+
+export type BrowserViewState =
+  | { type: "LOADING" }
+  | { type: "UNAVAILABLE"; reason: string }
+  | { type: "ERROR" }
+  | { type: "ACCESS_CHANGED" }
+  | { type: "EMPTY" }
+  | { type: "CLOSED_TARGET"; pages: readonly BrowserPageChoice[] }
+  | { type: "SELECT_PAGE"; pages: readonly BrowserPageChoice[] }
+  | {
+      type: "READY";
+      pages: readonly BrowserPageChoice[];
+      selected: BrowserPageChoice;
+      connection:
+        "connecting" | "connected" | "stale" | "closed" | "unavailable";
+      image: BrowserImage | null;
+      status: BrowserStatus | null;
+      canInput: boolean;
+      canClose: boolean;
+      dialog: BrowserDialog | null;
+      conflict: boolean;
+      outcomeUnknown: boolean;
+    };

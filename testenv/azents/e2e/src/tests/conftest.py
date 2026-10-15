@@ -3084,7 +3084,7 @@ server {
     ssl_certificate /etc/nginx/tls/tls.crt;
     ssl_certificate_key /etc/nginx/tls/tls.key;
 
-    location /chat/ {
+    location ~ ^/(chat|browser)/ {
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-Host $http_host;

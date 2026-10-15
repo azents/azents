@@ -32,11 +32,14 @@ from azents_runtime_control.runtime_stream_session import (
     MANDATORY_DATA_FRAME_BYTES,
     MAX_ENVELOPE_BYTES,
     MAX_STREAM_TOMBSTONES,
+    MAX_WEBSOCKET_MESSAGE_BYTES,
     RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
+    BrowserStreamAuthority,
     CloseReason,
     Header,
     RequestHead,
     RunnerSessionOffer,
+    StreamAuthority,
     StreamDirection,
     StreamProtocol,
     WebSocketOpcode,
@@ -59,6 +62,8 @@ from wsproto.events import (
 from wsproto.utilities import LocalProtocolError as WsprotoLocalProtocolError
 from wsproto.utilities import RemoteProtocolError as WsprotoRemoteProtocolError
 
+from azents_runtime_runner.browser import BrowserFailure
+from azents_runtime_runner.browser_viewer import RunnerBrowserViewer
 from azents_runtime_runner.diagnostics import (
     RunnerDiagnosticReason,
     runner_exception_diagnostic,
@@ -242,6 +247,24 @@ class RunnerWebResourceTracker:
         if count <= 0 or count > self.pending_tasks:
             raise ValueError("Runner Web task release is invalid")
         self.pending_tasks -= count
+
+    def try_reserve_browser_frame(self, size: int) -> bool:
+        """Account volatile Browser image bytes under the common process ceiling."""
+        if (
+            size <= 0
+            or self.application_buffer_bytes + size
+            > self.limits.maximum_application_buffer_bytes
+            or not self.pressure_acceptable()
+        ):
+            return False
+        self.application_buffer_bytes += size
+        return True
+
+    def release_browser_frame(self, size: int) -> None:
+        """Release exactly one current frame or in-progress send allocation."""
+        if size <= 0 or size > self.application_buffer_bytes:
+            raise ValueError("Browser frame byte release is invalid")
+        self.application_buffer_bytes -= size
 
     def try_reserve_envelope(
         self,
@@ -653,7 +676,7 @@ class _RunnerInboundQueue:
 class _Stream:
     offer: RunnerSessionOffer
     client: GrpcRunnerStreamSessionClient
-    authority: WebStreamAuthority
+    authority: StreamAuthority
     head: RequestHead
     inbound: _RunnerInboundQueue
     response_credit: HierarchicalCredit
@@ -667,7 +690,7 @@ class _Stream:
     resources_reserved: bool = False
 
 
-class RunnerWebSessionDispatcher:
+class RunnerStreamSessionDispatcher:
     """Translate one persistent Runner session into bounded loopback exchanges."""
 
     def __init__(
@@ -676,7 +699,9 @@ class RunnerWebSessionDispatcher:
         *,
         resources: RunnerWebResourceTracker,
         monotonic_clock: Callable[[], float],
+        browser: RunnerBrowserViewer | None,
     ) -> None:
+        self.browser = browser
         self.manager = manager
         self.resources = resources
         self.monotonic_clock = monotonic_clock
@@ -855,6 +880,19 @@ class RunnerWebSessionDispatcher:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        for stream in active:
+            if stream.resources_reserved:
+                # Cancellation before the coroutine starts cannot run its finally.
+                stream.response_credit.close()
+                await stream.inbound.close()
+                self.resources.end_tasks()
+                self.resources.close_stream(stream.head.protocol)
+                stream.resources_reserved = False
+                self.resources.record_close(
+                    stream.close_reason,
+                    duration_seconds=self.monotonic_clock() - stream.started_at,
+                    application_bytes=stream.application_bytes,
+                )
         self.streams.clear()
         self.tombstones.clear()
         self.tombstone_set.clear()
@@ -910,12 +948,25 @@ class RunnerWebSessionDispatcher:
         stream_id = envelope.stream_id
         self._claim_stream_id(stream_id)
         authority = decode_stream_authority(envelope.open.authority)
-        if not isinstance(authority, WebStreamAuthority):
+        if isinstance(authority, BrowserStreamAuthority) and self.browser is None:
             self.resources.record_open_rejected(CloseReason.PROTOCOL_VIOLATION)
             await self._reset(stream_id, CloseReason.PROTOCOL_VIOLATION)
             self._retire(stream_id)
             return
         head = _head(envelope.open.request_head)
+        if isinstance(authority, BrowserStreamAuthority):
+            if self.browser is None or head.protocol is not StreamProtocol.WEBSOCKET:
+                self.resources.record_open_rejected(CloseReason.PROTOCOL_VIOLATION)
+                await self._reset(stream_id, CloseReason.PROTOCOL_VIOLATION)
+                self._retire(stream_id)
+                return
+            try:
+                self.browser.validate(authority)
+            except BrowserFailure:
+                self.resources.record_open_rejected(CloseReason.AUTHORITY_REVOKED)
+                await self._reset(stream_id, CloseReason.AUTHORITY_REVOKED)
+                self._retire(stream_id)
+                return
         offer = self.manager.offer
         client = self.manager.client
         if offer is None or client is None:
@@ -992,7 +1043,9 @@ class RunnerWebSessionDispatcher:
 
     async def _run(self, stream_id: int, stream: _Stream) -> None:
         try:
-            if stream.head.protocol is StreamProtocol.HTTP:
+            if isinstance(stream.authority, BrowserStreamAuthority):
+                await self._browser(stream_id, stream, stream.authority)
+            elif stream.head.protocol is StreamProtocol.HTTP:
                 await self._http(stream_id, stream)
             else:
                 await self._websocket(stream_id, stream)
@@ -1096,13 +1149,148 @@ class RunnerWebSessionDispatcher:
             if stream.resources_reserved:
                 self.resources.end_tasks()
                 self.resources.close_stream(stream.head.protocol)
+                stream.resources_reserved = False
                 self.resources.record_close(
                     stream.close_reason,
                     duration_seconds=self.monotonic_clock() - stream.started_at,
                     application_bytes=stream.application_bytes,
                 )
 
+    async def _browser(
+        self, stream_id: int, stream: _Stream, authority: BrowserStreamAuthority
+    ) -> None:
+        """Dispatch Browser bytes to the owned consumer without loopback sockets."""
+        if self.browser is None:
+            raise ValueError("Browser consumer is unavailable")
+        head = self._envelope(stream_id=stream_id, offer=stream.offer)
+        head.response_head.status = 101
+        await self._send(head, client=stream.client)
+        self.resources.record_ttfb(self.monotonic_clock() - stream.started_at)
+        sequence = 0
+        message_lock = asyncio.Lock()
+
+        def current() -> None:
+            if (
+                authority.runtime_id != self.manager.runtime_id
+                or authority.desired_generation
+                != self.manager.accepted_desired_generation()
+                or authority.runner_generation != self.manager.accepted_generation()
+            ):
+                raise BrowserFailure(
+                    "browser_stale_generation",
+                    "Browser stream Runtime generation is no longer current",
+                )
+
+        async def send(opcode: WebSocketOpcode, data: bytes) -> None:
+            async with message_lock:
+                current()
+                await send_message(opcode, data)
+
+        async def send_message(opcode: WebSocketOpcode, data: bytes) -> None:
+            nonlocal sequence
+            if len(data) > MAX_WEBSOCKET_MESSAGE_BYTES:
+                raise ValueError("Browser message exceeds the common WebSocket bound")
+            for offset in range(0, max(1, len(data)), MANDATORY_DATA_FRAME_BYTES):
+                part = data[offset : offset + MANDATORY_DATA_FRAME_BYTES]
+                if part and opcode in {WebSocketOpcode.TEXT, WebSocketOpcode.BINARY}:
+                    await self._reserve(stream, len(part))
+                sequence += 1
+                envelope = self._envelope(stream_id=stream_id, offer=stream.offer)
+                envelope.frame_sequence = sequence
+                envelope.websocket.direction = (
+                    runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
+                )
+                envelope.websocket.opcode = _opcode_proto(
+                    opcode if offset == 0 else WebSocketOpcode.CONTINUATION
+                )
+                envelope.websocket.final = offset + len(part) == len(data)
+                envelope.websocket.data = part
+                await self._send(envelope, client=stream.client)
+                self.resources.record_frame(stream.head.protocol, "response", len(part))
+                stream.application_bytes += len(part)
+
+        async def receive() -> bytes | None:
+            current()
+            message = bytearray()
+            fragmented = False
+            while True:
+                envelope = await stream.inbound.get()
+                current()
+                payload = envelope.WhichOneof("payload")
+                if payload == "direction_end":
+                    if (
+                        envelope.direction_end.direction
+                        != runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
+                        or envelope.direction_end.final_sequence
+                        != stream.request_sequence
+                    ):
+                        raise ValueError("Browser request direction end is invalid")
+                    if fragmented:
+                        raise ValueError(
+                            "Browser message ended before its final fragment"
+                        )
+                    return None
+                if (
+                    payload != "websocket"
+                    or envelope.websocket.direction
+                    != runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
+                    or envelope.frame_sequence != stream.request_sequence + 1
+                ):
+                    raise ValueError("Browser request envelope is invalid")
+                stream.request_sequence = envelope.frame_sequence
+                opcode = _opcode(envelope.websocket.opcode)
+                data = bytes(envelope.websocket.data)
+                if opcode is WebSocketOpcode.CLOSE:
+                    return None
+                if opcode is WebSocketOpcode.PONG:
+                    continue
+                if opcode is WebSocketOpcode.PING:
+                    await send(WebSocketOpcode.PONG, data)
+                    continue
+                if (
+                    (opcode is WebSocketOpcode.TEXT and fragmented)
+                    or (opcode is WebSocketOpcode.CONTINUATION and not fragmented)
+                    or opcode
+                    not in {WebSocketOpcode.TEXT, WebSocketOpcode.CONTINUATION}
+                ):
+                    raise ValueError(
+                        "Browser accepts only bounded text application requests"
+                    )
+                if len(message) + len(data) > 64 * 1024:
+                    raise ValueError("Browser request message exceeds its bound")
+                message.extend(data)
+                fragmented = not envelope.websocket.final
+                stream.request_consumed_total += len(data)
+                self.request_session_consumed_total += len(data)
+                self.resources.request_consumed_bytes += len(data)
+                update = self._envelope(stream_id=stream_id, offer=stream.offer)
+                update.window_update.direction = (
+                    runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
+                )
+                update.window_update.stream_consumed_total = (
+                    stream.request_consumed_total
+                )
+                update.window_update.session_consumed_total = (
+                    self.request_session_consumed_total
+                )
+                await self._send(update, client=stream.client)
+                if not fragmented:
+                    return bytes(message)
+
+        if not self.resources.try_begin_tasks(3):
+            raise RunnerStreamResourceExhausted(
+                "Browser consumer task budget is exhausted"
+            )
+        try:
+            async with asyncio.timeout(_remaining(authority.transport_deadline_at)):
+                await self.browser.run(authority, receive, send)
+                await self._stream_end(stream_id, stream)
+        finally:
+            self.resources.end_tasks(3)
+
     async def _http(self, stream_id: int, stream: _Stream) -> None:
+        if not isinstance(stream.authority, WebStreamAuthority):
+            raise ValueError("Browser authority cannot open Web loopback HTTP")
         remaining = _remaining(stream.authority.transport_deadline_at)
         async with self.manager.loopback.request(
             method=stream.head.method,
@@ -1173,6 +1361,8 @@ class RunnerWebSessionDispatcher:
             await self._send(update, client=stream.client)
 
     async def _websocket(self, stream_id: int, stream: _Stream) -> None:
+        if not isinstance(stream.authority, WebStreamAuthority):
+            raise ValueError("Browser authority cannot open Web loopback WebSocket")
         websocket = await self.manager.loopback.websocket(
             target=stream.head.target,
             headers=tuple(

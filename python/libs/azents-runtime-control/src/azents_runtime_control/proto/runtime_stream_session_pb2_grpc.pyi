@@ -28,6 +28,42 @@ class _ServicerContext(_grpc.ServicerContext, _aio.ServicerContext):  # type: ig
 GRPC_GENERATED_VERSION: str
 GRPC_VERSION: str
 
+class RuntimeBrowserSourceSessionStub:
+    @_typing.overload
+    def __new__(cls, channel: _grpc.Channel) -> _Self: ...
+    @_typing.overload
+    def __new__(cls, channel: _aio.Channel) -> RuntimeBrowserSourceSessionAsyncStub: ...
+    Connect: _grpc.StreamStreamMultiCallable[
+        _runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
+        _runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
+    ]
+
+@_typing.type_check_only
+class RuntimeBrowserSourceSessionAsyncStub(RuntimeBrowserSourceSessionStub):
+    def __init__(self, channel: _aio.Channel) -> None: ...
+    Connect: _aio.StreamStreamMultiCallable[
+        _runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
+        _runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
+    ]  # type: ignore[assignment]
+
+class RuntimeBrowserSourceSessionServicer(metaclass=_abc_1.ABCMeta):
+    @_abc_1.abstractmethod
+    def Connect(
+        self,
+        request_iterator: _MaybeAsyncIterator[
+            _runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+        ],
+        context: _ServicerContext,
+    ) -> _typing.Union[
+        _abc.Iterator[_runtime_stream_session_pb2.RuntimeStreamSessionEnvelope],
+        _abc.AsyncIterator[_runtime_stream_session_pb2.RuntimeStreamSessionEnvelope],
+    ]: ...
+
+def add_RuntimeBrowserSourceSessionServicer_to_server(
+    servicer: RuntimeBrowserSourceSessionServicer,
+    server: _typing.Union[_grpc.Server, _aio.Server],
+) -> None: ...
+
 class RuntimeStreamGatewaySessionStub:
     @_typing.overload
     def __new__(cls, channel: _grpc.Channel) -> _Self: ...

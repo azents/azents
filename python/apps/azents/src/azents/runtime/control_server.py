@@ -54,6 +54,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from azents.core.config import PostgreSQLConfig
 from azents.core.file_transfer import GENERAL_FILE_MAXIMUM_BYTES
 from azents.core.redis import create_redis_client
+from azents.core.runtime_browser_source_credential import (
+    RuntimeBrowserSourceCredentialVerifier,
+)
 from azents.core.runtime_provider_credential import RuntimeProviderCredentialVerifier
 from azents.core.runtime_runner_credential import RuntimeRunnerCredentialVerifier
 from azents.core.runtime_transfer_coordinator_credential import (
@@ -116,6 +119,9 @@ from azents.runtime.control_protocol.data import RuntimeRunnerRegistration
 from azents.runtime.control_protocol.grpc.auth import (
     RuntimeTransferCoordinatorCredentialGrpcAuth,
 )
+from azents.runtime.control_protocol.grpc.browser_source_server import (
+    add_runtime_browser_source_servicer,
+)
 from azents.runtime.control_protocol.grpc.provider_server import (
     add_runtime_provider_control_servicer,
 )
@@ -156,6 +162,9 @@ from azents.runtime.control_protocol.reconciler import (
     RuntimeLifecycleDispatchConfig,
     RuntimeLifecycleReconciler,
 )
+from azents.runtime.control_protocol.runner_operations import (
+    RuntimeRunnerOperationClient,
+)
 from azents.runtime.control_protocol.service import (
     RuntimeControlProtocolService,
 )
@@ -164,6 +173,7 @@ from azents.runtime.coordination.redis import (
     RedisRuntimeCoordinationStore,
 )
 from azents.runtime.coordination.store import RuntimeCoordinationStore
+from azents.runtime.observability import RuntimeReplyDeliveryMetrics
 from azents.runtime.stream_session_owner import (
     RuntimeStreamOwnedSession,
     RuntimeStreamOwnerSessionRegistry,
@@ -227,6 +237,9 @@ from azents.runtime.transfer.workspace_upload_reconciliation import (
 from azents.runtime.transfer.workspace_upload_redis import (
     RedisWorkspaceUploadStore,
     _RedisClient,
+)
+from azents.services.runtime_browser.deps import (
+    build_runtime_browser_stream_scope_validator,
 )
 from azents.services.runtime_connection_registration.service import (
     RuntimeProviderConnectionRegistrationService,
@@ -913,6 +926,16 @@ async def runtime_control_server_lifespan(
     transport = runtime_control_transport(settings)
     engine = _create_engine(settings)
     session_manager = _session_manager(engine)
+    browser_scope_validator = build_runtime_browser_stream_scope_validator(
+        session_manager=session_manager,
+        read_session_manager=create_read_only_session_manager(engine),
+        runtime_coordination=coordination_store,
+        runner_operations=RuntimeRunnerOperationClient(
+            control_protocol=control_protocol,
+            coordination_store=coordination_store,
+            metrics=RuntimeReplyDeliveryMetrics(),
+        ),
+    )
     generation_repository = RuntimeConnectionGenerationRepository()
     runtime_repository = AgentRuntimeRepository()
     control_read_repository = RuntimeControlReadRepository(
@@ -1116,6 +1139,7 @@ async def runtime_control_server_lifespan(
             finite_grace_seconds=120,
             hard_limits=_runtime_web_control_hard_limits(settings),
             resident_memory_bytes=resident_memory_sampler.current_bytes,
+            browser_scope_validator=browser_scope_validator,
         )
     reconciler = RuntimeLifecycleReconciler(
         repository=RuntimeReconciliationOperationRepository(
@@ -1313,6 +1337,15 @@ async def runtime_control_server_lifespan(
         credential_auth=RuntimeTransferCoordinatorCredentialGrpcAuth(
             coordinator_credential_verifier
         ),
+    )
+    add_runtime_browser_source_servicer(
+        server,
+        data_plane=web_data_plane,
+        verifier=RuntimeBrowserSourceCredentialVerifier(
+            settings.credential_encryption_key, clock=clock
+        ),
+        validate_scope=browser_scope_validator,
+        clock=clock,
     )
     listen_address = f"0.0.0.0:{settings.runtime_control_port}"
     if transport.server_credentials is None:

@@ -1,5 +1,6 @@
 "use client";
 import { Component } from "react";
+import { BrowserToolResultLink } from "@/features/session-browser/BrowserToolResultLink";
 import { createReactContainer } from "@/shared/lib/createReactContainer";
 import {
   GenericToolCallCard,
@@ -83,7 +84,20 @@ export function ToolCallCardContainer({
     />
   );
   if (result.type === "generic") {
-    return generic;
+    return (
+      <>
+        {generic}
+        {toolCall.status === "completed" &&
+          ["browser_open", "browser_observe", "browser_act"].includes(
+            toolCall.name,
+          ) && (
+            <BrowserToolResultLink
+              name={toolCall.name}
+              result={toolCall.result ?? null}
+            />
+          )}
+      </>
+    );
   }
   return (
     <SpecializedToolCallBoundary

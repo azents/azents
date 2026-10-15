@@ -96,6 +96,7 @@ def _stream(protocol: StreamProtocol = StreamProtocol.HTTP) -> LogicalStreamStat
 
 def test_schema_and_fingerprint_are_exact() -> None:
     assert set(runtime_stream_session_pb2.DESCRIPTOR.services_by_name) == {
+        "RuntimeBrowserSourceSession",
         "RuntimeRunnerStreamSession",
         "RuntimeStreamControlSession",
         "RuntimeStreamGatewaySession",
@@ -103,7 +104,7 @@ def test_schema_and_fingerprint_are_exact() -> None:
     assert RUNTIME_WEB_CAPABILITY == "runtime-web-http"
     assert (
         RUNTIME_STREAM_PROTOCOL_FINGERPRINT
-        == "5d7fdb780c8abb9c324e8239ed953e9052fb5caca12092e338554e706ed28b76"
+        == "6fd2ba066e7d185890dafdfe8a8fd5b1f6983000c875b3611e8f06256903321f"
     )
     assert (
         protocol_fingerprint(descriptor=b"different")

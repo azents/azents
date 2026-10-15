@@ -9,6 +9,12 @@ from typing import TYPE_CHECKING, Protocol
 import grpc
 from google.protobuf import timestamp_pb2
 
+from azents_runtime_control.browser_contract import BrowserContractError
+from azents_runtime_control.browser_runner_wire import (
+    browser_command_from_wire,
+    browser_result_from_wire,
+    browser_result_to_wire,
+)
 from azents_runtime_control.grpc_runner_stream_session_client import (
     GrpcRunnerStreamSessionClient,
     RunnerStreamEnvelopeResources,
@@ -1100,6 +1106,12 @@ def _operation_payload(
     operation: runtime_runner_control_pb2.RunnerOperationRequest,
 ) -> dict[str, JsonValue]:
     payload_kind = operation.WhichOneof("payload")
+    if payload_kind == "browser":
+        return browser_command_from_wire(
+            operation.operation_type, operation.browser.canonical_command
+        )
+    if operation.operation_type.startswith("browser."):
+        raise BrowserContractError("Browser Runner command payload is missing")
     if payload_kind == "bash":
         payload = operation.bash
         result: dict[str, JsonValue] = {"command": payload.command}
@@ -1303,6 +1315,9 @@ def _copy_final_success(
     message: runtime_runner_control_pb2.RunnerOperationFinalSuccessPayload,
     payload: Mapping[str, JsonValue],
 ) -> None:
+    if "tasks" in payload or "action_state" in payload:
+        message.browser.canonical_result = browser_result_to_wire(payload)
+        return
     if "process_id" in payload or "status" in payload:
         process = message.process
         process.process_id = _str_payload(payload, "process_id")
@@ -1499,6 +1514,8 @@ def _final_success_payload(
     message: runtime_runner_control_pb2.RunnerOperationFinalSuccessPayload,
 ) -> dict[str, JsonValue]:
     result_kind = message.WhichOneof("result")
+    if result_kind == "browser":
+        return browser_result_from_wire(message.browser.canonical_result)
     if result_kind == "bash":
         return {"exit_code": message.bash.exit_code}
     if result_kind == "file_read":

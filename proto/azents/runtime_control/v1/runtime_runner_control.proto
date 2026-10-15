@@ -349,7 +349,14 @@ message RunnerOperationRequest {
     GitDiscoverManagedWorktreesOperationPayload git_discover_managed_worktrees = 42;
     GitRemoveDiscoveredWorktreeOperationPayload git_remove_discovered_worktree = 43;
     FileReadTextOperationPayload file_read_text = 44;
+    BrowserOperationPayload browser = 45;
   }
+}
+
+// Browser-only canonical UTF-8 JSON, bounded to 1 MiB and validated through
+// the closed browser command codec on both sides. This is not a generic payload.
+message BrowserOperationPayload {
+  bytes canonical_command = 1;
 }
 
 message BashOperationPayload {
@@ -576,7 +583,13 @@ message RunnerOperationFinalSuccessPayload {
     GitDiscoverManagedWorktreesFinalSuccess git_discover_managed_worktrees = 21;
     GitRemoveDiscoveredWorktreeFinalSuccess git_remove_discovered_worktree = 22;
     FileReadTextFinalSuccess file_read_text = 23;
+    BrowserFinalSuccess browser = 24;
   }
+}
+
+// Completed BrowserResult only; same size bound and strict codec as commands.
+message BrowserFinalSuccess {
+  bytes canonical_result = 1;
 }
 
 message RunnerOperationFinalErrorPayload {

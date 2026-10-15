@@ -22,6 +22,9 @@ from azents.runtime.terminal_coordination.memory import (
     InMemoryRuntimeTerminalCoordinationStore,
 )
 from azents.runtime.transfer.object_store import RuntimeTransferOrphanRepairResult
+from azents.services.runtime_browser.authority import (
+    DatabaseRuntimeBrowserStreamScopeValidator,
+)
 
 
 class _RedisPipeline:
@@ -299,6 +302,11 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
         "add_runtime_workspace_upload_coordinator_servicer",
         lambda _server, **kwargs: registrations.append(("workspace-upload", kwargs)),
     )
+    monkeypatch.setattr(
+        control_server,
+        "add_runtime_browser_source_servicer",
+        lambda _server, **kwargs: registrations.append(("browser-source", kwargs)),
+    )
 
     @asynccontextmanager
     async def s3_service(_: RuntimeControlSettings) -> AsyncIterator[_S3]:
@@ -374,6 +382,7 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
             "transfer",
             "coordinator",
             "workspace-upload",
+            "browser-source",
         ]
         transfer = dict(registrations)["transfer"]
         provider = dict(registrations)["provider"]
@@ -395,7 +404,14 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
         assert isinstance(
             owner_registry, control_server.RuntimeStreamOwnerSessionRegistry
         )
-        assert read_factory_engines == [engine, engine, engine, engine]
+        assert read_factory_engines == [engine, engine, engine, engine, engine]
+        browser_source = dict(registrations)["browser-source"]
+        browser_scope = browser_source["validate_scope"]
+        assert isinstance(browser_scope, DatabaseRuntimeBrowserStreamScopeValidator)
+        assert (
+            browser_scope.authority_repository.session_manager is read_session_manager
+        )
+        assert browser_source["data_plane"] is sessions["data_plane"]
         runner_authenticator = runner["runner_authenticator"]
         assert isinstance(
             runner_authenticator, control_server.RuntimeRunnerAuthenticationService

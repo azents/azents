@@ -50,6 +50,7 @@ PROTOCOL_STATE_SCHEMA = (
 class SessionPeerRole(enum.StrEnum):
     """Authenticated role attached to one persistent session."""
 
+    API_BROWSER = "api_browser"
     GATEWAY = "gateway"
     CONTROL = "control"
     RUNNER = "runner"
@@ -299,7 +300,7 @@ class SessionIdentity:
         _validate_text(self.peer_boot_id, "peer_boot_id", _MAX_IDENTIFIER_BYTES)
         _validate_text(self.session_nonce, "session_nonce", _MAX_NONCE_BYTES)
         _validate_deadline(self.deadline_at, "deadline_at")
-        if self.role is SessionPeerRole.GATEWAY:
+        if self.role in {SessionPeerRole.GATEWAY, SessionPeerRole.API_BROWSER}:
             if self.owner is not None:
                 raise ValueError("Gateway peer session must not carry an Owner epoch")
         elif self.owner is None:

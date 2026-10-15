@@ -4,6 +4,11 @@ package azents.runtime_control.v1;
 
 import "google/protobuf/timestamp.proto";
 
+service RuntimeBrowserSourceSession {
+  rpc Connect(stream RuntimeStreamSessionEnvelope)
+      returns (stream RuntimeStreamSessionEnvelope);
+}
+
 service RuntimeStreamGatewaySession {
   rpc Connect(stream RuntimeStreamSessionEnvelope)
       returns (stream RuntimeStreamSessionEnvelope);
@@ -24,6 +29,7 @@ enum RuntimeStreamSessionPeerRole {
   RUNTIME_STREAM_SESSION_PEER_ROLE_GATEWAY = 1;
   RUNTIME_STREAM_SESSION_PEER_ROLE_CONTROL = 2;
   RUNTIME_STREAM_SESSION_PEER_ROLE_RUNNER = 3;
+  RUNTIME_STREAM_SESSION_PEER_ROLE_API_BROWSER = 4;
 }
 
 enum RuntimeStreamSessionProtocol {
@@ -86,6 +92,8 @@ message RuntimeStreamSessionEnvelope {
     RuntimeStreamSessionHeartbeatAcknowledgement heartbeat_ack = 23;
     RuntimeStreamSessionGoAway go_away = 24;
     RuntimeStreamSessionError session_error = 25;
+    RuntimeBrowserSourceChallenge browser_source_challenge = 26;
+    RuntimeBrowserSourceProof browser_source_proof = 27;
     RuntimeStreamSessionOpen open = 30;
     RuntimeStreamSessionOpenAccepted open_accepted = 31;
     RuntimeStreamSessionOpenRejected open_rejected = 32;
@@ -185,6 +193,18 @@ message RuntimeStreamSessionRequestHead {
   bytes method = 2;
   bytes target = 3;
   repeated RuntimeStreamSessionHeader headers = 4;
+}
+
+message RuntimeBrowserSourceChallenge {
+  string nonce = 1;
+  string control_boot_id = 2;
+  google.protobuf.Timestamp deadline_at = 3;
+}
+
+message RuntimeBrowserSourceProof {
+  RuntimeStreamSessionEnvelope hello = 1;
+  RuntimeStreamSessionEnvelope admitted_open = 2;
+  string credential = 3;
 }
 
 message RuntimeStreamSessionOpen {
