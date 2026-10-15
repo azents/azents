@@ -197,7 +197,7 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
 last_verified_at: 2026-10-15
-spec_version: 190
+spec_version: 191
 ---
 
 # Conversation & Events
@@ -1173,6 +1173,14 @@ tools (`request_web_service`, `list_web_services`, and `close_web_service`) use
 Web service. Both `channel_action` and `download_external_file` use Channel,
 and `tool_search` uses Explore. Explicit persisted Toolkit source identity retains
 precedence over these source-less name mappings.
+
+`run_tool_to_file` uses the actual target Tool's Activity category and the same
+client-tool renderer as a direct call. An immutable catalog-derived target snapshot
+preserves Toolkit source and JSON-function/plaintext-custom dialect through live,
+active, and durable events. A compact output-file icon indicates pending, stored,
+partial, or unsuccessful output storage; the Raw dialog retains the outer wrapper
+name, arguments, and storage result. Only bounded target output is retained in
+UI result metadata; the model-visible result remains the Runtime storage summary.
 
 Reasoning, Skill, client-tool, provider-tool, and non-interactive control events use one canonical
 Activity-row grid for vertical padding, disclosure-chevron space, icon size, text baseline, status, and

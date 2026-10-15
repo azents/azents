@@ -757,6 +757,12 @@ export type InputActionDefinition = Omit<
 // --- UI status type ---
 
 /** in-progress tool call status */
+export interface DelegatedToolSnapshot {
+  name: string;
+  wireDialect: ClientToolWireDialect;
+  toolkitSource: ToolkitSourceSnapshot | InvalidToolkitSource | null;
+}
+
 export interface ActiveToolCall {
   id: string;
   callId?: string;
@@ -764,6 +770,7 @@ export interface ActiveToolCall {
   arguments: string;
   wireDialect?: ClientToolWireDialect;
   toolkitSource?: ToolkitSourceSnapshot | InvalidToolkitSource | null;
+  delegatedTool?: DelegatedToolSnapshot | null;
   result?: string;
   resultMetadata?: Record<string, unknown>;
   status: "preparing" | "running" | ToolResultStatus;

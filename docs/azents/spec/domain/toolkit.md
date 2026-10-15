@@ -410,6 +410,13 @@ and save it through authorized Runtime transfer. Target failure cannot be reclas
 output. Stored parts are suppressed from the outer result; only failed parts and a final
 already-executed notice remain model-visible after partial Runtime storage failure.
 
+The outer call retains an authoritative target identity snapshot for presentation,
+including its selected wire dialect and persisted Toolkit source when present.
+Result metadata retains a target-output preview under the ordinary 30,000-character
+text cap plus its existing semantic metadata for the target's UI renderer. This
+presentation metadata is not included in model-visible output; full output parts
+remain in Runtime files.
+
 Dynamic prompt preparation may return visible text plus server-only native replay
 compatibility metadata in one result. Ordinary toolkit strings are unchanged.
 Memory binds native replay compatibility to the actual authorized context text.

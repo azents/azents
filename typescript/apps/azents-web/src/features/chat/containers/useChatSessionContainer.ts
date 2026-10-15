@@ -9,6 +9,7 @@
  */
 
 import { isLivePartialHistoryEvent } from "@azents/session-core/chatLiveHistoryProjection";
+import { delegatedToolFromValue } from "@azents/session-core/delegatedToolPresentation";
 import {
   liveRunForDisplay,
   resolveDismissedLiveRetryKey,
@@ -1137,6 +1138,7 @@ function mapEvents(
             arguments: stringField(payload, "arguments") ?? "",
             wireDialect: clientToolWireDialectFromValue(payload.wire_dialect),
             toolkitSource: toolkitSourceFromValue(payload.toolkit_source),
+            delegatedTool: delegatedToolFromValue(payload.delegated_tool),
             status: "running",
           },
           event.id,

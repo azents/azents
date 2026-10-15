@@ -1,6 +1,7 @@
 """Event tool catalog tests."""
 
 import asyncio
+import json
 import logging
 
 import pytest
@@ -365,6 +366,39 @@ async def test_catalog_enriches_registered_tool_call_with_source_snapshot() -> N
         "toolkit_namespace": "github",
         "source_identity": {},
     }
+
+    catalog = _prepare_json_catalog(catalog)
+    wrapped = catalog.enrich_client_tool_call(
+        ClientToolCallPayload(
+            call_id="wrapped",
+            name="run_tool_to_file",
+            arguments=json.dumps(
+                {
+                    "tool_name": "github__echo",
+                    "arguments": "{}",
+                    "directory": "/tmp/output",
+                }
+            ),
+            native_artifact=_artifact(),
+            wire_dialect="json_function",
+        )
+    )
+    assert wrapped.toolkit_source is None
+    assert wrapped.delegated_tool is not None
+    assert wrapped.delegated_tool.name == enriched.name
+    assert wrapped.delegated_tool.toolkit_source == enriched.toolkit_source
+    assert wrapped.delegated_tool.wire_dialect == "json_function"
+    invalid = catalog.enrich_client_tool_call(
+        wrapped.model_copy(update={"arguments": "{"})
+    )
+    assert invalid.delegated_tool is None
+    builtin_snapshot = wrapped.delegated_tool.model_copy(
+        update={"toolkit_source": None}
+    )
+    builtin_call = wrapped.model_copy(update={"delegated_tool": builtin_snapshot})
+    serialized = builtin_call.model_dump(mode="json", exclude_none=True)
+    recovered = ClientToolCallPayload.model_validate(serialized)
+    assert recovered.delegated_tool == builtin_snapshot
 
 
 async def test_catalog_uses_effective_namespace_and_source_qualifier() -> None:

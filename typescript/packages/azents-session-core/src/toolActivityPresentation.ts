@@ -1,3 +1,4 @@
+import { toolCallForDisplay } from "./delegatedToolPresentation.ts";
 import type {
   ActiveToolCall,
   ChatMessage,
@@ -202,6 +203,9 @@ function messageHasAttachments(message: ChatMessage | null): boolean {
 }
 
 function activityCategoryForTool(call: ToolActivityCall): ActivityCategory {
+  if (call.type === "client") {
+    call = { ...call, toolCall: toolCallForDisplay(call.toolCall) };
+  }
   if (
     call.type === "client" &&
     [

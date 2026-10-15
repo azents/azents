@@ -10,6 +10,7 @@ import {
   preparingToolCall,
   runningToolCall,
 } from "../story-fixtures";
+import type { ActiveToolCall } from "@azents/session-core/types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const meta = {
@@ -53,6 +54,107 @@ export const Running = {
 export const Completed = {
   args: {
     toolCall: completedToolCall,
+  },
+} satisfies Story;
+
+const fileOutputCall = {
+  id: "file-output",
+  name: "run_tool_to_file",
+  arguments: JSON.stringify({
+    tool_name: "read",
+    arguments: '{"path":"/tmp/research.md"}',
+    directory: "/tmp/output",
+  }),
+  delegatedTool: {
+    name: "read",
+    wireDialect: "json_function",
+    toolkitSource: null,
+  },
+  status: "completed",
+  result: "Ran read and stored 1 output part in /tmp/output.",
+  resultMetadata: {
+    failed_part_count: 0,
+    manifest_stored: true,
+    delegated_result: {
+      output: "Research output stored in Runtime",
+      metadata: {},
+    },
+  },
+} satisfies ActiveToolCall;
+
+export const OutputToFile = {
+  args: { toolCall: fileOutputCall },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByLabelText("Output saved to files")).toBeVisible();
+    await userEvent.click(
+      canvas.getByRole("button", { name: /^Read · research.md/ }),
+    );
+    await waitFor(() =>
+      expect(canvasElement).toHaveTextContent(
+        "Research output stored in Runtime",
+      ),
+    );
+    await userEvent.click(
+      canvas.getByRole("button", { name: /View raw data/ }),
+    );
+    const dialog = await within(document.body).findByRole("dialog");
+    await expect(
+      await within(dialog).findByText("run_tool_to_file", { exact: true }),
+    ).toBeVisible();
+  },
+} satisfies Story;
+
+export const OutputToFileRunning = {
+  args: {
+    toolCall: {
+      ...fileOutputCall,
+      status: "running",
+      result: "",
+      resultMetadata: {},
+    },
+  },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByLabelText("Saving output to files"),
+    ).toBeVisible();
+  },
+} satisfies Story;
+
+export const OutputToFilePartial = {
+  args: {
+    toolCall: {
+      ...fileOutputCall,
+      resultMetadata: {
+        ...fileOutputCall.resultMetadata,
+        failed_part_count: 1,
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByLabelText(
+        "Some output files could not be saved",
+      ),
+    ).toBeVisible();
+  },
+} satisfies Story;
+
+export const OutputToFileFailed = {
+  args: {
+    toolCall: {
+      ...fileOutputCall,
+      status: "failed",
+      result: "Target failed. No Runtime output was stored.",
+      resultMetadata: {},
+    },
+  },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByLabelText(
+        "Output-to-file call did not complete",
+      ),
+    ).toBeVisible();
   },
 } satisfies Story;
 

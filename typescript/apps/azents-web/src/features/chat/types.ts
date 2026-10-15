@@ -21,6 +21,8 @@ export interface ToolCallCardInput {
 }
 export interface GenericToolCallCardViewProps extends RawToolDialogProps {
   toolCall: ActiveToolCall;
+  rawToolCall?: ActiveToolCall;
+  outputFileState?: OutputFileState | null;
   hiddenAttachmentUris: readonly string[];
 }
 export interface StandardToolCallCardInput extends ToolCallCardInput {
@@ -37,3 +39,4 @@ export interface ProviderToolCallCardViewProps
   extends ProviderToolCallCardInput, RawToolDialogProps {}
 
 import type { KnownToolPresentation } from "./knownToolPresentation";
+import type { OutputFileState } from "@azents/session-core/delegatedToolPresentation";

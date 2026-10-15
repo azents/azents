@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Protocol, assert_never, runtime_checkable
 
 from azcommon.result import Failure
+from azcommon.types import JSONObject
 from azcommon.uuid import uuid7
 from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorSourceTransport,
@@ -27,7 +28,11 @@ from azents.engine.events.generated_files import (
     GeneratedFileOutput,
     PendingGeneratedFileOutput,
 )
-from azents.engine.events.output_parts import iter_output_parts, lower_output_to_text
+from azents.engine.events.output_parts import (
+    enforce_tool_output_text_hard_cap,
+    iter_output_parts,
+    lower_output_to_text,
+)
 from azents.engine.events.tool_invocation import (
     ClientToolInvoker,
     PreparedClientToolInvocation,
@@ -288,13 +293,23 @@ def make_run_tool_to_file_tool(
             tool_name=input.tool_name,
             arguments=input.arguments,
         )
+        delegated_result: JSONObject = {
+            "output": lower_output_to_text(
+                enforce_tool_output_text_hard_cap(lower_output_to_text(result.output))
+            ),
+            "metadata": dict(result.metadata),
+        }
         if result.status == "failed" or not result.execution_succeeded:
             message = lower_output_to_text(result.output).strip()
             if not message:
                 message = f"Target tool failed: {input.tool_name}"
+                delegated_result["output"] = message
             raise FunctionToolError(
                 f"{message}\n{_TARGET_FAILURE_NOTICE}",
-                metadata=dict(result.metadata),
+                metadata={
+                    **dict(result.metadata),
+                    "delegated_result": delegated_result,
+                },
             )
 
         planned = _plan_parts(result)
@@ -493,6 +508,7 @@ def make_run_tool_to_file_tool(
                 "stored_part_count": len(stored),
                 "failed_part_count": len(failed),
                 "manifest_stored": manifest_failure is None,
+                "delegated_result": delegated_result,
             },
             generated_files=failed_generated,
             terminal_run=result.terminal_run,
