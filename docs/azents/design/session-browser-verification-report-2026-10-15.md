@@ -19,9 +19,12 @@ Current behavior belongs in the [Session Browser flow](../spec/flow/session-brow
 - Phase 2: [Runner/tools PR #2263](https://github.com/azents/azents/pull/2263).
 - Phase 3: [authenticated viewer PR #2268](https://github.com/azents/azents/pull/2268)
   at `15ae00a18f18d32ef2a4d885db0a09bb1c4c9c10` after the reviewed CI corrections.
-- Phase 4 completes managed guidance and file/model/publication verification.
-  Final feature acceptance and CI remain pending; this report does not mark
-  Requirements or Design implemented.
+- Phase 4: [managed guidance and file/model/publication PR #2272](https://github.com/azents/azents/pull/2272)
+  at `6f7cba00c24df0f1f60ee0ed259cb776f690e455` passed functional CI before
+  this final documentation-only completion and plan cleanup.
+- Scoped implementation and delivery validation completed on 2026-10-15.
+  Requirements and Design carry the same implementation date; current behavior
+  is promoted to Living Specs and temporary execution plans are removed.
 - Design delta: None. Merge, deployment and infrastructure mutations are not
   part of this verification authorization.
 
@@ -78,14 +81,28 @@ Phase 4's complete-diff review covered the Skill, fixtures, non-spatial ACK
 correction and adjacent Specs. Independent checks passed 85 cases. The reviewer
 identified the journal-isolation evidence defect; its correction was confirmed
 with four independent proxy checks and the isolated 51.58-second actual E2E.
-The subsequent transport-composition correction requires targeted security
-re-review and current integrated validation. Earlier review is not acceptance
-of later changes.
+The same reviewer completed targeted security re-review of the subsequent
+transport-composition correction with 42 passing checks. Root's focused
+trust/source validation passed 138 checks. The complete updated phase review
+includes REQ-15 and navigation; final authenticated viewer and CI evidence
+is recorded below.
 
-## Unresolved acceptance and CI
+## Final CI and Resolved Regressions
 
-Phase 3 CI completed with 31 successful checks, one skipped and four failed
-checks (including aggregates). Two underlying failures remain:
+All four PRs remain open and unmerged. At the completion checkpoint:
+
+- PR #2262: 38 successful checks, two conditionally skipped.
+- PR #2263: 36 successful checks, none unfinished.
+- PR #2268 at `15ae00a18f18d32ef2a4d885db0a09bb1c4c9c10`:
+  35 successful checks, two conditionally skipped.
+- PR #2272 at `6f7cba00c24df0f1f60ee0ed259cb776f690e455`:
+  34 successful checks, two conditionally skipped.
+
+These results include all required E2E shards and Web E2E. Final documentation
+cleanup triggers its own CI; the checkpoint above identifies the tested functional
+head rather than claiming a result for an as-yet-uncreated documentation commit.
+
+Earlier Phase 3 CI exposed two underlying regressions, now corrected:
 
 1. Browser Web E2E did not observe the full keyboard text. A same-scope
    render-to-ACK race was identified and corrected in Phase 4. A subsequent
@@ -102,14 +119,21 @@ checks (including aggregates). Two underlying failures remain:
    Missing trust still fails without opt-in, a configured CA always selects TLS,
    and Browser-only proof/source admission remains mandatory. No new transport
    setting, default plaintext, credential reuse or automatic downgrade is added.
-   Corrected subscription and Browser journeys must pass together before CI is
-   considered resolved.
+   The corrected deployed-API integrated run reported passing subscription,
+   viewer and file-publication assertions. Its process/teardown summary was not
+   returned, so only those individual assertions are evidence. Subsequent
+   complete CI passed the corrected subscription and Browser journeys together.
+
+## Historical Failures and Remaining Diagnostic Limits
 
 A prior completed local viewer E2E reached final revocation but closed with
 `4500 Browser is unavailable` instead of the expected authentication/access
 close code. This is not passing revocation evidence. Current bounded,
 content-free capture diagnostics support the next investigation without
 logging the underlying page or typed content.
+Later successful same-build viewer runs and CI satisfy scoped delivery acceptance,
+but do not establish the root cause or definitive correction of that earlier
+intermittent SDK capture failure.
 
 Other final E2E attempts were interrupted by Runtime replacement/process loss
 and have no result. Kubernetes events established one host replacement as

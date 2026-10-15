@@ -2,6 +2,7 @@
 title: "Session Browser Runtime Commands and Observation Design"
 created: 2026-10-14
 updated: 2026-10-15
+implemented: 2026-10-15
 tags: [browser, session, runtime, engine, frontend, architecture, security]
 document_role: primary
 document_type: design
@@ -355,3 +356,19 @@ This historical approval authorizes the unchanged baseline mechanisms and is not
 Proceed with M18 implementation under this exact revision/authority set and the existing implementation request. Preserve prior delivery evidence and normal material-scope boundaries. Merge and deployment remain separately unauthorized.
 
 On 2026-10-15 at 12:23 and 12:44 KST the requester directed the browser-like UI correction and identified missing address editing/navigation. REQ-15 records that product clarification. Its implementation reuses existing M5 structured navigation through M16's current admitted input/guard boundary; the closed application action and UI controls do not introduce another material mechanism, authority, persistence or operational mode. The authority ID set is unchanged. This clarification is not included in the earlier read-only audit claim; the complete updated phase diff and REQ-15 must be checked in the final independent phase review and actual navigation E2E before delivery.
+
+## Completed Delivery Verification
+
+Implementation and scoped delivery validation completed on 2026-10-15 against
+approved revision 3/M1-M18 and REQ-1 through REQ-15. Design delta: None.
+The research, feasibility and approval checkpoints above preserve their
+historical evidence boundaries; final results are recorded in the
+[delivery verification report](session-browser-verification-report-2026-10-15.md).
+
+All four delivery PRs passed CI, including authenticated viewer/navigation and
+original-file/model/publication journeys. The same independent reviewer checked
+the complete phase diffs, REQ-15 clarification and targeted security corrections.
+Current behavior is recorded in the [Session Browser flow](../spec/flow/session-browser.md)
+and adjacent Living Specs. Temporary execution plans are removed after verified
+promotion. This completion records implementation and validation, not merge,
+deployment, real-site acceptance, real iPhone Safari or OS-mobile IME validation.
