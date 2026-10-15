@@ -48,6 +48,17 @@ export type KnownToolAction =
   | "deleteScheduledTask"
   | "submitScheduledTaskResult"
   | "toolSearch"
+  | "searchSessions"
+  | "readSessionHistory"
+  | "readSessionToolResult"
+  | "channelContinue"
+  | "channelFinish"
+  | "channelRequestInput"
+  | "channelIgnore"
+  | "downloadExternalFile"
+  | "browserOpen"
+  | "browserObserve"
+  | "browserAct"
   | "runtimeWeb";
 
 export type KnownToolDetailLabel =
@@ -352,6 +363,123 @@ const toolSearchInputSchema = z.object({
   query: z.string().min(1),
   limit: z.number().int().min(1).max(10).optional(),
 });
+const searchSessionsInputSchema = z.object({
+  query: z.string().max(160).nullable().optional(),
+  session_id: z.string().max(32).nullable().optional(),
+  cursor: z.string().max(500).nullable().optional(),
+});
+const sessionHistoryInputSchema = z.object({
+  session_id: z.string().length(32),
+  before: z.string().length(32).nullable().optional(),
+  after: z.string().length(32).nullable().optional(),
+  around_event_id: z.string().length(32).nullable().optional(),
+});
+const sessionToolResultInputSchema = z.object({
+  session_id: z.string().length(32),
+  event_id: z.string().length(32),
+  cursor: z.string().max(500).nullable().optional(),
+});
+const channelActionInputSchema = z.object({
+  mode: z.enum(["continue", "finish", "request_input", "ignore"]),
+  binding: z.string().min(1).max(80),
+  message: z.string().min(1).nullable().optional(),
+  title: z.string().min(1).nullable().optional(),
+  files: z.array(z.string().min(1)).nullable().optional(),
+});
+const downloadExternalFileInputSchema = z.object({
+  file: z.string().min(1),
+  path: z.string().startsWith("/"),
+  overwrite: z.boolean().optional(),
+});
+const sessionSearchResultSchema = z.union([
+  z.object({
+    sessions: z.array(
+      z.object({
+        session_id: z.string(),
+        title: z.string().nullable(),
+      }),
+    ),
+  }),
+  z.object({
+    session_id: z.string(),
+    matches: z.array(
+      z.object({
+        event_id: z.string(),
+        kind: z.string(),
+        snippet: z.string(),
+      }),
+    ),
+  }),
+]);
+const sessionHistoryResultSchema = z.object({
+  session_id: z.string(),
+  events: z.array(
+    z.object({
+      event_id: z.string(),
+      kind: z.string(),
+      text: z.string().optional(),
+      tool: z.string().optional(),
+    }),
+  ),
+});
+const sessionToolResultSchema = z.object({
+  session_id: z.string(),
+  event_id: z.string(),
+  tool: z.string(),
+  text: z.string(),
+  next_cursor: z.string().nullable(),
+});
+const downloadedFileResultSchema = z.object({
+  path: z.string(),
+  filename: z.string(),
+  media_type: z.string(),
+  bytes: z.number().int().nonnegative(),
+});
+const browserOpenInputSchema = z.object({
+  task_id: z.string().nullable().optional(),
+  url: z.string().max(32768).nullable().optional(),
+  label: z.string().max(200).nullable().optional(),
+});
+const browserObserveInputSchema = z.object({
+  task_id: z.string().nullable().optional(),
+  page_id: z.string().nullable().optional(),
+  view: z.enum(["status", "dom", "raw_dom", "glance", "image"]).optional(),
+});
+const browserActInputSchema = z.object({
+  task_id: z.string().min(1),
+  page_id: z.string().min(1),
+  resource_incarnation: z.string().min(1),
+  action: z.enum([
+    "navigate",
+    "back",
+    "forward",
+    "reload",
+    "click",
+    "fill",
+    "select",
+    "check",
+    "press",
+    "scroll",
+    "close_page",
+    "dialog",
+    "upload",
+    "wait",
+    "hover",
+    "drag",
+  ]),
+  url: z.string().nullable().optional(),
+});
+const browserResultSchema = z.object({
+  page: z
+    .object({
+      id: z.string().min(1),
+      task_id: z.string().min(1),
+      resource_incarnation: z.string().min(1),
+      url: z.string(),
+    })
+    .nullable(),
+  content: z.string().nullable(),
+});
 const addScheduledTaskInputSchema = z.object({
   title: z.string().min(1),
   objective: z.string().min(1),
@@ -531,6 +659,18 @@ function patchSubject(paths: readonly string[]): string | null {
   return remainingCount > 0
     ? `${firstFileName} +${remainingCount}`
     : firstFileName;
+}
+
+function browserHost(url?: string | null): string | null {
+  if (!url) {
+    return null;
+  }
+  try {
+    const parsed = new URL(url);
+    return ["http:", "https:"].includes(parsed.protocol) ? parsed.host : null;
+  } catch {
+    return null;
+  }
 }
 
 function sourceKind(uri: string): string {
@@ -917,6 +1057,227 @@ export function knownToolPresentation(
   }
   try {
     switch (toolCall.name) {
+      case "browser_open":
+      case "browser_observe":
+      case "browser_act": {
+        const open =
+          toolCall.name === "browser_open"
+            ? browserOpenInputSchema.safeParse(argumentsResult.value)
+            : null;
+        const observe =
+          toolCall.name === "browser_observe"
+            ? browserObserveInputSchema.safeParse(argumentsResult.value)
+            : null;
+        const act =
+          toolCall.name === "browser_act"
+            ? browserActInputSchema.safeParse(argumentsResult.value)
+            : null;
+        if (!(open?.success || observe?.success || act?.success)) {
+          return generic("invalid-arguments");
+        }
+        const result = completed(toolCall)
+          ? parsedResult(toolCall, browserResultSchema)
+          : null;
+        if (completed(toolCall) && result === null) {
+          return generic("invalid-output");
+        }
+        const action =
+          toolCall.name === "browser_open"
+            ? "browserOpen"
+            : toolCall.name === "browser_observe"
+              ? "browserObserve"
+              : "browserAct";
+        const inputUrl = open?.success
+          ? open.data.url
+          : act?.success
+            ? act.data.url
+            : null;
+        const pageId =
+          result?.page?.id ??
+          (observe?.success
+            ? observe.data.page_id
+            : act?.success
+              ? act.data.page_id
+              : null);
+        const operation = observe?.success
+          ? (observe.data.view ?? "dom")
+          : act?.success
+            ? act.data.action
+            : null;
+        return presentation(
+          action,
+          browserHost(result?.page?.url ?? inputUrl) ??
+            pageId?.slice(-8) ??
+            null,
+          null,
+          semanticDetail({
+            fields: [
+              ...(pageId ? [{ label: "target" as const, value: pageId }] : []),
+              ...(operation
+                ? [{ label: "operation" as const, value: operation }]
+                : []),
+            ],
+            sections: result?.content
+              ? [{ label: "result", content: result.content }]
+              : [],
+          }),
+        );
+      }
+      case "search_sessions": {
+        const input = searchSessionsInputSchema.safeParse(
+          argumentsResult.value,
+        );
+        if (!input.success) {
+          return generic("invalid-arguments");
+        }
+        const result = completed(toolCall)
+          ? parsedResult(toolCall, sessionSearchResultSchema)
+          : null;
+        if (completed(toolCall) && result === null) {
+          return generic("invalid-output");
+        }
+        const items: SemanticItem[] =
+          result === null
+            ? []
+            : "sessions" in result
+              ? result.sessions.map((session) => ({
+                  title: session.title ?? session.session_id,
+                  subtitle: session.session_id,
+                  content: null,
+                }))
+              : result.matches.map((match) => ({
+                  title: match.kind,
+                  subtitle: match.event_id,
+                  content: match.snippet,
+                }));
+        return presentation(
+          "searchSessions",
+          null,
+          result === null ? null : String(items.length),
+          semanticDetail({
+            fields: [
+              ...(input.data.query
+                ? [{ label: "query" as const, value: input.data.query }]
+                : []),
+              ...(input.data.session_id
+                ? [{ label: "target" as const, value: input.data.session_id }]
+                : []),
+            ],
+            items,
+          }),
+        );
+      }
+      case "read_session_history": {
+        const input = sessionHistoryInputSchema.safeParse(
+          argumentsResult.value,
+        );
+        if (!input.success) {
+          return generic("invalid-arguments");
+        }
+        const result = completed(toolCall)
+          ? parsedResult(toolCall, sessionHistoryResultSchema)
+          : null;
+        if (completed(toolCall) && result === null) {
+          return generic("invalid-output");
+        }
+        return presentation(
+          "readSessionHistory",
+          input.data.session_id.slice(-8),
+          result === null ? null : String(result.events.length),
+          semanticDetail({
+            fields: [{ label: "target", value: input.data.session_id }],
+            items:
+              result?.events.map((event) => ({
+                title: event.tool ?? event.kind,
+                subtitle: event.event_id,
+                content: event.text ?? null,
+              })) ?? [],
+          }),
+        );
+      }
+      case "read_session_tool_result": {
+        const input = sessionToolResultInputSchema.safeParse(
+          argumentsResult.value,
+        );
+        if (!input.success) {
+          return generic("invalid-arguments");
+        }
+        const result = completed(toolCall)
+          ? parsedResult(toolCall, sessionToolResultSchema)
+          : null;
+        if (completed(toolCall) && result === null) {
+          return generic("invalid-output");
+        }
+        return presentation(
+          "readSessionToolResult",
+          input.data.event_id.slice(-8),
+          null,
+          semanticDetail({
+            fields: [
+              { label: "source", value: input.data.session_id },
+              { label: "target", value: input.data.event_id },
+            ],
+            sections:
+              result === null
+                ? []
+                : [{ label: "result", content: result.text }],
+          }),
+        );
+      }
+      case "channel_action": {
+        const input = channelActionInputSchema.safeParse(argumentsResult.value);
+        if (!input.success) {
+          return generic("invalid-arguments");
+        }
+        const actions = {
+          continue: "channelContinue",
+          finish: "channelFinish",
+          request_input: "channelRequestInput",
+          ignore: "channelIgnore",
+        } as const;
+        return presentation(
+          actions[input.data.mode],
+          null,
+          null,
+          semanticDetail({
+            fields: [{ label: "target", value: input.data.binding }],
+            sections: input.data.message
+              ? [{ label: "message", content: input.data.message }]
+              : [],
+          }),
+        );
+      }
+      case "download_external_file": {
+        const input = downloadExternalFileInputSchema.safeParse(
+          argumentsResult.value,
+        );
+        if (!input.success) {
+          return generic("invalid-arguments");
+        }
+        const result = completed(toolCall)
+          ? parsedResult(toolCall, downloadedFileResultSchema)
+          : null;
+        if (completed(toolCall) && result === null) {
+          return generic("invalid-output");
+        }
+        return presentation(
+          "downloadExternalFile",
+          displayPath(input.data.path),
+          null,
+          semanticDetail({
+            fields: [
+              { label: "destination", value: detailPath(input.data.path) },
+              {
+                label: "overwrite",
+                value: String(input.data.overwrite ?? false),
+              },
+              ...(result === null
+                ? []
+                : [{ label: "type" as const, value: result.media_type }]),
+            ],
+          }),
+        );
+      }
       case "request_web_service": {
         const input = runtimeWebPortInputSchema.safeParse(
           argumentsResult.value,

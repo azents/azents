@@ -494,7 +494,18 @@
       "listScheduledTasks": "Listed Scheduled Tasks",
       "deleteScheduledTask": "Deleted Scheduled Task",
       "submitScheduledTaskResult": "Submitted Scheduled Task result",
-      "runtimeWeb": "Managed web service"
+      "runtimeWeb": "Managed web service",
+      "searchSessions": "Searched Session history",
+      "readSessionHistory": "Read Session history",
+      "readSessionToolResult": "Read previous tool result",
+      "channelContinue": "Updated channel progress",
+      "channelFinish": "Sent channel reply",
+      "channelRequestInput": "Requested channel input",
+      "channelIgnore": "Completed channel work silently",
+      "downloadExternalFile": "Downloaded channel file",
+      "browserOpen": "Opened browser",
+      "browserObserve": "Observed browser",
+      "browserAct": "Interacted with browser"
     },
     "actionRunning": {
       "read": "Reading file",
@@ -535,7 +546,18 @@
       "listScheduledTasks": "Listing Scheduled Tasks",
       "deleteScheduledTask": "Deleting Scheduled Task",
       "submitScheduledTaskResult": "Submitting Scheduled Task result",
-      "runtimeWeb": "Managing web service"
+      "runtimeWeb": "Managing web service",
+      "searchSessions": "Searching Session history",
+      "readSessionHistory": "Reading Session history",
+      "readSessionToolResult": "Reading previous tool result",
+      "channelContinue": "Updating channel progress",
+      "channelFinish": "Sending channel reply",
+      "channelRequestInput": "Requesting channel input",
+      "channelIgnore": "Completing channel work silently",
+      "downloadExternalFile": "Downloading channel file",
+      "browserOpen": "Opening browser",
+      "browserObserve": "Observing browser",
+      "browserAct": "Interacting with browser"
     },
     "field": {
       "source": "Source",
