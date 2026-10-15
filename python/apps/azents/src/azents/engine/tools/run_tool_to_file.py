@@ -303,6 +303,7 @@ def make_run_tool_to_file_tool(
             message = lower_output_to_text(result.output).strip()
             if not message:
                 message = f"Target tool failed: {input.tool_name}"
+                delegated_result["output"] = message
             raise FunctionToolError(
                 f"{message}\n{_TARGET_FAILURE_NOTICE}",
                 metadata={

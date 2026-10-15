@@ -443,6 +443,18 @@ async def test_saves_full_text_without_engine_cap() -> None:
     ]
 
 
+async def test_empty_target_failure_keeps_visible_error_preview() -> None:
+    """Retain the target failure identity even when its output is empty."""
+    with pytest.raises(FunctionToolError) as raised:
+        await _call(
+            result=_target_result("", status="failed", execution_succeeded=False)
+        )
+    assert raised.value.metadata is not None
+    preview = raised.value.metadata["delegated_result"]
+    assert isinstance(preview, dict)
+    assert preview["output"] == "Target tool failed: service__target"
+
+
 async def test_target_validation_failure_never_starts_storage() -> None:
     """Treat target input failure as failure instead of storable output."""
     returned = _target_result(
