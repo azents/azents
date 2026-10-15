@@ -25,6 +25,7 @@ export type RuntimeEnvironmentVariablesState =
     };
 
 export interface RuntimeEnvironmentVariablesProps {
+  scope?: "agent" | "workspace";
   state: RuntimeEnvironmentVariablesState;
   onAdd: () => void;
   onNameChange: (id: string, name: string) => void;

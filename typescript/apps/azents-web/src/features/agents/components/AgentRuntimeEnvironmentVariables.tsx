@@ -23,6 +23,7 @@ import type { RuntimeEnvironmentVariablesProps } from "../runtime-environment-ty
 
 /** Agent-scoped secret editor; values and mutations are supplied by its container. */
 export function AgentRuntimeEnvironmentVariables({
+  scope = "agent",
   state,
   onAdd,
   onNameChange,
@@ -50,18 +51,22 @@ export function AgentRuntimeEnvironmentVariables({
       radius="lg"
       p="lg"
       component="section"
-      aria-label={t("title")}
+      aria-label={t(scope === "workspace" ? "workspaceTitle" : "title")}
     >
       <Stack gap="md">
         <Group justify="space-between" align="flex-start" gap="sm">
           <Stack gap={4}>
-            <Text fw={700}>{t("title")}</Text>
+            <Text fw={700}>
+              {t(scope === "workspace" ? "workspaceTitle" : "title")}
+            </Text>
             <Text c="dimmed" size="sm">
-              {t("description")}
+              {t(
+                scope === "workspace" ? "workspaceDescription" : "description",
+              )}
             </Text>
           </Stack>
           <Badge variant="light" color="gray">
-            {t("scope")}
+            {t(scope === "workspace" ? "workspaceScope" : "scope")}
           </Badge>
         </Group>
 
@@ -105,7 +110,12 @@ export function AgentRuntimeEnvironmentVariables({
                   <div className={classes.row} key={entry.id}>
                     <TextInput
                       className={classes.name}
-                      classNames={{ input: classes.nameInput }}
+                      classNames={{
+                        input: classes.nameInput,
+                        label: classes.nameLabel,
+                        wrapper: classes.nameControl,
+                        error: classes.nameError,
+                      }}
                       label={t("name")}
                       aria-label={t("nameFor", {
                         name: entry.name || t("newVariable"),
@@ -123,6 +133,12 @@ export function AgentRuntimeEnvironmentVariables({
                     />
                     <PasswordInput
                       className={classes.value}
+                      classNames={{
+                        label: classes.valueLabel,
+                        wrapper: classes.valueControl,
+                        description: classes.valueDescription,
+                        error: classes.valueError,
+                      }}
                       label={t("value")}
                       aria-label={t("valueFor", {
                         name: entry.name || t("newVariable"),
@@ -191,7 +207,9 @@ export function AgentRuntimeEnvironmentVariables({
               </Button>
             ) : null}
             <Text size="xs" c="dimmed">
-              {t("protectionNotice")}
+              {t(
+                scope === "workspace" ? "workspaceNotice" : "protectionNotice",
+              )}
             </Text>
             {ready.status.type === "ERROR" ? (
               <Alert color="red" role="alert">

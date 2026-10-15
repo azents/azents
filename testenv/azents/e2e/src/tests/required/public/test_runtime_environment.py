@@ -7,6 +7,10 @@ import azentsadminclient
 import azentspublicclient
 import requests
 from azentspublicclient.api.agent_runtime_v1_api import AgentRuntimeV1Api
+from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
+from azentspublicclient.models.agent_workspace_environment_replace import (
+    AgentWorkspaceEnvironmentReplace,
+)
 from azentspublicclient.models.replace_runtime_environment_request import (
     ReplaceRuntimeEnvironmentRequest,
 )
@@ -17,6 +21,12 @@ from azentspublicclient.models.runtime_environment_entry_edit import (
     RuntimeEnvironmentEntryEdit,
 )
 from azentspublicclient.models.value import Value
+from azentspublicclient.models.workspace_environment_entry_edit import (
+    WorkspaceEnvironmentEntryEdit,
+)
+from azentspublicclient.models.workspace_environment_replace import (
+    WorkspaceEnvironmentReplace,
+)
 from docker.models.containers import Container
 from pydantic import SecretStr
 
@@ -155,3 +165,129 @@ def test_agent_environment_settings_apply_to_subsequent_runtime_commands(
             else hashlib.sha256(fake_value.encode()).hexdigest()
         ) in output
         assert fake_value is None or fake_value not in output
+
+    workspace_api = WorkspaceV1Api(public_api_client)
+    catalog = workspace_api.workspace_v1_replace_workspace_environment(
+        handle=setup.workspace_handle,
+        workspace_environment_replace=WorkspaceEnvironmentReplace(
+            entries=[
+                WorkspaceEnvironmentEntryEdit(
+                    id=None,
+                    name="E2E_AGENT_SECRET",
+                    value=Value(
+                        actual_instance=ReplacementRuntimeEnvironmentValue(
+                            type="replace", value=SecretStr("fake-workspace-first")
+                        )
+                    ),
+                ),
+            ]
+        ),
+        _headers=headers,
+    )
+    identity = catalog.entries[0].id
+    default = workspace_api.workspace_v1_get_agent_environment_selection(
+        handle=setup.workspace_handle,
+        agent_id=setup.agent_id,
+        _headers=headers,
+    )
+    assert default.selected_ids == []
+
+    def verify_shared_command(step: str, expected: str | None) -> None:
+        response = requests.post(
+            f"{azents_public_server_url}/chat/v1/sessions/{setup.session_id}/inputs",
+            headers=headers,
+            json={
+                "agent_id": setup.agent_id,
+                "client_request_id": f"we-{step}-{setup.session_id}",
+                "message": f"{RUNTIME_ENVIRONMENT_PROMPT_PREFIX}{step}",
+                "inference_profile": {
+                    "model_target_label": "default",
+                    "reasoning_effort": None,
+                    "enabled_execution_options": [],
+                },
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        output = wait_until(
+            partial(completed_output, f"call_runtime_environment_{step}"),
+            timeout=120,
+            interval=0.5,
+            message=f"Workspace environment {step} failed",
+        )
+        assert output is not None
+        assert (
+            "ABSENT"
+            if expected is None
+            else hashlib.sha256(expected.encode()).hexdigest()
+        ) in output
+        assert expected is None or expected not in output
+
+    verify_shared_command("workspace-default", None)
+    workspace_api.workspace_v1_replace_agent_environment_selection(
+        handle=setup.workspace_handle,
+        agent_id=setup.agent_id,
+        agent_workspace_environment_replace=AgentWorkspaceEnvironmentReplace(
+            selected_ids=[identity]
+        ),
+        _headers=headers,
+    )
+    verify_shared_command("workspace-selected", "fake-workspace-first")
+    workspace_api.workspace_v1_replace_workspace_environment(
+        handle=setup.workspace_handle,
+        workspace_environment_replace=WorkspaceEnvironmentReplace(
+            entries=[
+                WorkspaceEnvironmentEntryEdit(
+                    id=identity,
+                    name="E2E_AGENT_SECRET",
+                    value=Value(
+                        actual_instance=ReplacementRuntimeEnvironmentValue(
+                            type="replace", value=SecretStr("fake-workspace-next")
+                        )
+                    ),
+                ),
+            ]
+        ),
+        _headers=headers,
+    )
+    verify_shared_command("workspace-updated", "fake-workspace-next")
+    workspace_api.workspace_v1_replace_agent_environment_selection(
+        handle=setup.workspace_handle,
+        agent_id=setup.agent_id,
+        agent_workspace_environment_replace=AgentWorkspaceEnvironmentReplace(
+            selected_ids=[]
+        ),
+        _headers=headers,
+    )
+    verify_shared_command("workspace-unselected", None)
+    workspace_api.workspace_v1_replace_agent_environment_selection(
+        handle=setup.workspace_handle,
+        agent_id=setup.agent_id,
+        agent_workspace_environment_replace=AgentWorkspaceEnvironmentReplace(
+            selected_ids=[identity]
+        ),
+        _headers=headers,
+    )
+    workspace_api.workspace_v1_replace_workspace_environment(
+        handle=setup.workspace_handle,
+        workspace_environment_replace=WorkspaceEnvironmentReplace(entries=[]),
+        _headers=headers,
+    )
+    workspace_api.workspace_v1_replace_workspace_environment(
+        handle=setup.workspace_handle,
+        workspace_environment_replace=WorkspaceEnvironmentReplace(
+            entries=[
+                WorkspaceEnvironmentEntryEdit(
+                    id=None,
+                    name="E2E_AGENT_SECRET",
+                    value=Value(
+                        actual_instance=ReplacementRuntimeEnvironmentValue(
+                            type="replace", value=SecretStr("fake-workspace-recreated")
+                        )
+                    ),
+                ),
+            ]
+        ),
+        _headers=headers,
+    )
+    verify_shared_command("workspace-recreated", None)

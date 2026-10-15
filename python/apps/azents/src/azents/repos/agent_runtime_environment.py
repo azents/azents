@@ -21,9 +21,14 @@ from azents.core.runtime_environment import (
     RuntimeEnvironmentEntryEdit,
     merge_runtime_environment,
     parse_runtime_environment,
+    validate_runtime_environment,
 )
 from azents.rdb.deps import get_read_only_session_manager, get_session_manager
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.workspace_environment import (
+    RDBAgentWorkspaceEnvironmentSelection,
+    RDBWorkspaceEnvironmentVariable,
+)
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_admin import AgentAdminRepository
@@ -50,7 +55,7 @@ class AgentRuntimeEnvironmentRepository:
     cipher: Annotated[CredentialCipher, Depends(get_credential_cipher)]
     admin_repository: Annotated[AgentAdminRepository, Depends(AgentAdminRepository)]
 
-    async def _authorize(
+    async def authorize(
         self,
         session: ReadSession,
         agent: RDBAgent | None,
@@ -95,7 +100,7 @@ class AgentRuntimeEnvironmentRepository:
         """Read variable names without returning secret values to the caller."""
         async with self.read_session_manager() as session:
             agent = await session.read_session.get(RDBAgent, agent_id)
-            access = await self._authorize(
+            access = await self.authorize(
                 session,
                 agent,
                 agent_id=agent_id,
@@ -130,7 +135,7 @@ class AgentRuntimeEnvironmentRepository:
                     sa.select(RDBAgent).where(RDBAgent.id == agent_id).with_for_update()
                 )
             ).scalar_one_or_none()
-            access = await self._authorize(
+            access = await self.authorize(
                 session,
                 agent,
                 agent_id=agent_id,
@@ -156,13 +161,40 @@ class AgentRuntimeEnvironmentRepository:
     async def read_values(self, agent_id: str) -> dict[str, str]:
         """Read fresh secrets for the managed Runtime owner before command launch."""
         async with self.read_session_manager() as session:
-            encrypted = (
+            rows = (
                 await session.read_session.execute(
-                    sa.select(RDBAgent.encrypted_runtime_environment).where(
+                    sa.select(
+                        RDBAgent.encrypted_runtime_environment,
+                        RDBWorkspaceEnvironmentVariable.name,
+                        RDBWorkspaceEnvironmentVariable.encrypted_value,
+                    )
+                    .outerjoin(
+                        RDBAgentWorkspaceEnvironmentSelection,
+                        RDBAgentWorkspaceEnvironmentSelection.agent_id == RDBAgent.id,
+                    )
+                    .outerjoin(
+                        RDBWorkspaceEnvironmentVariable,
+                        sa.and_(
+                            RDBWorkspaceEnvironmentVariable.id
+                            == RDBAgentWorkspaceEnvironmentSelection.variable_id,
+                            RDBWorkspaceEnvironmentVariable.workspace_id
+                            == RDBAgent.workspace_id,
+                        ),
+                    )
+                    .where(
                         RDBAgent.id == agent_id,
                         RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
                         RDBAgent.runtime_capability == AgentRuntimeCapability.MANAGED,
                     )
                 )
-            ).scalar_one_or_none()
-        return self._decode(encrypted)
+            ).all()
+        if not rows:
+            return {}
+        shared = {
+            row.name: self.cipher.decrypt(row.encrypted_value)
+            for row in rows
+            if row.name is not None and row.encrypted_value is not None
+        }
+        validate_runtime_environment(shared)
+        shared.update(self._decode(rows[0].encrypted_runtime_environment))
+        return shared

@@ -50,6 +50,25 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+export const WorkspaceCatalog = {
+  args: { scope: "workspace" },
+} satisfies Story;
+
+export const DeleteInputAlignment = {
+  play: async ({ canvasElement }): Promise<void> => {
+    const canvas = within(canvasElement);
+    const input = canvas
+      .getByRole("textbox", { name: "변수명: OPENAI_API_KEY" })
+      .getBoundingClientRect();
+    const remove = canvas
+      .getByRole("button", { name: "OPENAI_API_KEY 삭제" })
+      .getBoundingClientRect();
+    await expect(
+      Math.abs(input.top + input.height / 2 - remove.top - remove.height / 2),
+    ).toBeLessThan(1);
+  },
+} satisfies Story;
+
 export const Registered = {
   render: (): React.ReactElement => <RuntimeEnvironmentPreview />,
 } satisfies Story;

@@ -33,6 +33,13 @@ class TestWorkspaceV1Api(unittest.TestCase):
         """
         pass
 
+    def test_workspace_v1_get_agent_environment_selection(self) -> None:
+        """Test case for workspace_v1_get_agent_environment_selection
+
+        Get Agent Environment Selection
+        """
+        pass
+
     def test_workspace_v1_get_workspace_by_handle(self) -> None:
         """Test case for workspace_v1_get_workspace_by_handle
 
@@ -40,10 +47,31 @@ class TestWorkspaceV1Api(unittest.TestCase):
         """
         pass
 
+    def test_workspace_v1_get_workspace_environment(self) -> None:
+        """Test case for workspace_v1_get_workspace_environment
+
+        Get Workspace Environment
+        """
+        pass
+
     def test_workspace_v1_list_workspaces(self) -> None:
         """Test case for workspace_v1_list_workspaces
 
         List Workspaces
+        """
+        pass
+
+    def test_workspace_v1_replace_agent_environment_selection(self) -> None:
+        """Test case for workspace_v1_replace_agent_environment_selection
+
+        Replace Agent Environment Selection
+        """
+        pass
+
+    def test_workspace_v1_replace_workspace_environment(self) -> None:
+        """Test case for workspace_v1_replace_workspace_environment
+
+        Replace Workspace Environment
         """
         pass
 

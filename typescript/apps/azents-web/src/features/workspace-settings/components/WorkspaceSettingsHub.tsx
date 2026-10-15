@@ -77,8 +77,17 @@ export function WorkspaceSettingsHub({
   handle,
 }: WorkspaceSettingsHubProps): React.ReactElement {
   const t = useTranslations("workspace.settings.hub");
+  const environment = useTranslations(
+    "workspace.agents.runtimeSettings.environmentVariables",
+  );
   const basePath = `/w/${handle}/settings`;
   const rows: SettingsRow[] = [
+    {
+      href: `${basePath}/environment`,
+      icon: <IconServer size={rem(18)} />,
+      label: environment("workspaceTitle"),
+      description: environment("workspaceDescription"),
+    },
     {
       href: `${basePath}/models`,
       icon: <IconAdjustments size={rem(18)} />,

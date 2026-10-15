@@ -20167,6 +20167,232 @@
         ]
       }
     },
+    "/workspace/v1/workspaces/{handle}/environment": {
+      "get": {
+        "tags": [
+          "Workspace v1"
+        ],
+        "summary": "Get Workspace Environment",
+        "description": "List shared variable names without revealing values.",
+        "operationId": "workspace_v1_get_workspace_environment",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceEnvironmentSettings"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Workspace v1"
+        ],
+        "summary": "Replace Workspace Environment",
+        "description": "Atomically replace the Workspace catalog under Owner/Manager authority.",
+        "operationId": "workspace_v1_replace_workspace_environment",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceEnvironmentReplace"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceEnvironmentSettings"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspace/v1/workspaces/{handle}/agents/{agent_id}/environment-selection": {
+      "get": {
+        "tags": [
+          "Workspace v1"
+        ],
+        "summary": "Get Agent Environment Selection",
+        "description": "Get opt-in metadata for an accessible Agent in this Workspace.",
+        "operationId": "workspace_v1_get_agent_environment_selection",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentWorkspaceEnvironmentSettings"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Workspace v1"
+        ],
+        "summary": "Replace Agent Environment Selection",
+        "description": "Choose exact shared identities; never implicitly opt in to new keys.",
+        "operationId": "workspace_v1_replace_agent_environment_selection",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentWorkspaceEnvironmentReplace"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentWorkspaceEnvironmentSettings"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/workspace/v1/workspaces/{handle}": {
       "get": {
         "tags": [
@@ -24554,6 +24780,63 @@
         ],
         "title": "AgentWorkspaceEntryResponse",
         "description": "Agent Workspace directory entry response."
+      },
+      "AgentWorkspaceEnvironmentReplace": {
+        "properties": {
+          "selected_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Selected Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "selected_ids"
+        ],
+        "title": "AgentWorkspaceEnvironmentReplace",
+        "description": "Complete explicit opt-in set."
+      },
+      "AgentWorkspaceEnvironmentSettings": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceEnvironmentEntry"
+            },
+            "type": "array",
+            "title": "Entries"
+          },
+          "selected_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Selected Ids"
+          },
+          "overridden_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Overridden Names"
+          },
+          "can_manage": {
+            "type": "boolean",
+            "title": "Can Manage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "entries",
+          "selected_ids",
+          "overridden_names",
+          "can_manage"
+        ],
+        "title": "AgentWorkspaceEnvironmentSettings",
+        "description": "Catalog and explicit selection; defaults contain no selected IDs."
       },
       "AgentWorkspaceFileResponse": {
         "properties": {
@@ -41539,6 +41822,117 @@
         ],
         "title": "VerifyCodeResponse",
         "description": "Authentication code verification response."
+      },
+      "WorkspaceEnvironmentEntry": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "has_value": {
+            "type": "boolean",
+            "title": "Has Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "has_value"
+        ],
+        "title": "WorkspaceEnvironmentEntry",
+        "description": "Public catalog metadata without a secret value."
+      },
+      "WorkspaceEnvironmentEntryEdit": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "value": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/StoredRuntimeEnvironmentValue"
+              },
+              {
+                "$ref": "#/components/schemas/ReplacementRuntimeEnvironmentValue"
+              }
+            ],
+            "title": "Value",
+            "discriminator": {
+              "propertyName": "type",
+              "mapping": {
+                "replace": "#/components/schemas/ReplacementRuntimeEnvironmentValue",
+                "stored": "#/components/schemas/StoredRuntimeEnvironmentValue"
+              }
+            }
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "value",
+          "id"
+        ],
+        "title": "WorkspaceEnvironmentEntryEdit",
+        "description": "Exact stored identity or new entry, preventing name-based stale consent."
+      },
+      "WorkspaceEnvironmentReplace": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceEnvironmentEntryEdit"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Entries"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "entries"
+        ],
+        "title": "WorkspaceEnvironmentReplace",
+        "description": "Complete desired catalog."
+      },
+      "WorkspaceEnvironmentSettings": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceEnvironmentEntry"
+            },
+            "type": "array",
+            "title": "Entries"
+          },
+          "can_manage": {
+            "type": "boolean",
+            "title": "Can Manage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "entries",
+          "can_manage"
+        ],
+        "title": "WorkspaceEnvironmentSettings",
+        "description": "Redacted shared configuration and editing authority."
       },
       "WorkspaceListResponse": {
         "properties": {

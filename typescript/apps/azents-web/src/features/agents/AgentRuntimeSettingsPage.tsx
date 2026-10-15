@@ -4,6 +4,7 @@
 
 import { createReactContainer } from "@/shared/lib/createReactContainer";
 import { AgentRuntimeEnvironmentVariablesSection } from "./AgentRuntimeEnvironmentVariablesSection";
+import { AgentWorkspaceEnvironmentSection } from "./AgentWorkspaceEnvironmentSection";
 import { AgentRuntimeSettings } from "./components/AgentRuntimeSettings";
 import { AgentSettingsLayout } from "./components/AgentSettingsLayout";
 import { useAgentRuntimeSettingsContainer } from "./containers/useAgentRuntimeSettingsContainer";
@@ -21,10 +22,16 @@ function AgentRuntimeSettingsWithHeader(
       <AgentRuntimeSettings
         {...props}
         environmentVariables={
-          <AgentRuntimeEnvironmentVariablesSection
-            handle={props.handle}
-            agentId={props.agent.id}
-          />
+          <>
+            <AgentRuntimeEnvironmentVariablesSection
+              handle={props.handle}
+              agentId={props.agent.id}
+            />
+            <AgentWorkspaceEnvironmentSection
+              handle={props.handle}
+              agentId={props.agent.id}
+            />
+          </>
         }
       />
     </AgentSettingsLayout>
