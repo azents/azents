@@ -4,10 +4,15 @@ title: "Keep SwiftUI views declarative: pass display values and actions; put net
 
 # Declarative SwiftUI Views
 
-- Views describe presentation from explicit inputs and emit user actions.
-- Put side effects and coordination in feature-owned state, injected at the
-  screen boundary. Keep pure display state local when no side effect is involved.
-- Do not start networking, token access, or persistence from a view's `body`.
+- Split a feature into screen composition, feature-owned state/coordination, and
+  declarative views receiving values and actions. Do not mandate an extra
+  ViewModel for static content or purely local presentation state.
+- For observable reference state on the supported iOS baseline, use Observation
+  (`@Observable`), `@State` at the owner, and `@Bindable` only where binding is
+  needed. Children receive the same owned state rather than constructing copies.
+- Keep networking, credentials, persistence, and coordination out of leaf views.
+  Attach lifecycle work at the screen boundary and delegate to feature state;
+  do not perform side effects while evaluating `body`.
 
 ## Bad
 
@@ -24,3 +29,5 @@ var body: some View {
   Text(title)
 }
 ```
+
+Reference: [Apple: Discover Observation](https://developer.apple.com/videos/play/wwdc2023/10149/).

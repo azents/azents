@@ -62,8 +62,9 @@ Open a completed workflow run's **Artifacts** section:
   - `Azents-iOS-Unsigned.xcarchive.zip`: device archive without code signing.
   - `manifest.json`: actual checked-out source commit, selected Xcode, ZIP hashes,
     and an explicit non-installable marker.
-- `ios-diagnostics-<commit>` (7 days): build/test logs and `.xcresult`, including
-  the Hello World test screenshot. Diagnostics are attempted even after failure.
+- `ios-diagnostics-<commit>` (7 days): build/test logs, `.xcresult`, and exported
+  test attachments including the Hello World PNG. Diagnostics are attempted even
+  after failure; PNG export runs after successful UI tests.
 
 Pull-request runs build the checked-out merge commit, not necessarily the branch
 head; the manifest records that exact source. GitHub artifact downloads require
@@ -83,3 +84,27 @@ CI has read-only repository permission, uses commit-pinned Actions, and requests
 no signing or store secrets. The existing server/web release workflow is
 unchanged. Linux hosts can inspect source/configuration and run shell syntax
 checks, but real iOS compilation and UI validation happen on macOS.
+
+## Convention Baseline
+
+The Swift rule index is `.claude/rules/swift-conventions.md`. Its bodies retain
+the repository's existing engineering posture rather than importing a complete
+third-party architecture:
+
+- Python app/library and dependency-injection rules become Swift library
+  boundaries and explicitly injected collaborators, without protocol inflation.
+- TypeScript container/component and ADT rules become screen composition,
+  observable feature state, declarative views, and associated-value state enums.
+- Python type-safety/error-transparency and the global typed-ingress policy
+  become validated typed boundaries, explicit failures/cancellation, and
+  design-first diagnostic resolution.
+- Swift-specific actor isolation, Observation ownership, value semantics, and
+  call-site naming adapt those principles to Swift instead of copying syntax.
+
+Primary references are the [Swift API Design Guidelines](https://www.swift.org/documentation/api-design-guidelines/),
+[The Swift Programming Language](https://docs.swift.org/swift-book/documentation/the-swift-programming-language/),
+and Apple's [Discover Observation](https://developer.apple.com/videos/play/wwdc2023/10149/).
+The [Google Swift Style Guide](https://google.github.io/swift/) is an additional
+community reference, not a mandatory alternative formatter or architecture.
+Each rule links its relevant external grounding where applicable. These
+references guide local conventions; they do not create app/server behavior.

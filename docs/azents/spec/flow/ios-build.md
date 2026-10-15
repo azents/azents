@@ -79,7 +79,9 @@ Successful runs retain `ios-app-builds-<checked-out-commit>` for 14 days:
 - `manifest.json`, with checked-out source commit, Xcode, ZIP SHA-256 hashes, and
   `personal_device_installable: false`.
 
-`ios-diagnostics-<checked-out-commit>` retains logs and `.xcresult` for seven days.
+`ios-diagnostics-<checked-out-commit>` retains logs, `.xcresult`, and exported
+test attachments for seven days. Upload explicitly includes these known build
+outputs under the hidden `.build` directory, not arbitrary hidden source files.
 Pull-request checkout normally uses a merge commit; the manifest records that
 actual commit. Artifacts expire and require GitHub artifact access; they are not
 permanent GitHub Releases. A failed upload or missing successful-build directory

@@ -104,6 +104,9 @@ print(matches[0])
     -resultBundlePath "$BUILD_ROOT/UITests.xcresult" \
     CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
     2>&1 | tee "$BUILD_ROOT/test.log"
+  rm -rf "$BUILD_ROOT/screenshots"
+  xcrun xcresulttool export attachments --path "$BUILD_ROOT/UITests.xcresult" \
+    --output-path "$BUILD_ROOT/screenshots"
 )
 
 build_app() {

@@ -40,6 +40,7 @@ jobs:
           name: ios-app-builds-${{ github.sha }}
           path: swift/.build/artifacts/
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 14
       - name: Upload test results and build diagnostics
         if: always()
@@ -49,5 +50,7 @@ jobs:
           path: |
             swift/.build/*.log
             swift/.build/*.xcresult
+            swift/.build/screenshots/
           if-no-files-found: warn
+          include-hidden-files: true
           retention-days: 7
