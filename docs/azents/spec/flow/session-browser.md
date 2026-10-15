@@ -14,6 +14,8 @@ code_paths:
   - python/libs/azents-runtime-control/src/azents_runtime_control/browser_source_contract.py
   - python/libs/azents-runtime-control/src/azents_runtime_control/grpc_browser_source_client.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_viewer.py
+  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_editables.py
+  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_popups.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/operations.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/main.py
@@ -36,6 +38,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/runtime_browser_authority_read.py
   - typescript/apps/azents-web/src/features/session-browser/SessionBrowserPage.tsx
   - typescript/apps/azents-web/src/features/session-browser/containers/useSessionBrowserContainer.ts
+  - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserPaste.ts
   - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserConnection.ts
   - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserInteraction.ts
   - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserTouchView.ts
@@ -104,9 +107,15 @@ text input on an unchanged main page.
 
 Focused viewing is an independent body-level modal that covers the global app bar and fills the visual viewport, without outer margins. Safe-area padding and visual viewport resize/scroll observations keep its explicit text Exit focused view button reachable when the mobile keyboard changes available space. That control is separate from per-tab closure. Focus is contained locally and Escape exits unless an IME composition is active. Modal presentation does not reopen the Browser attachment or resize the native page. Local viewer zoom ranges from 100% fitted width to 300%, through continuous pinch or 25% menu steps. Scrollbars reveal the enlarged image and coordinates use its actual geometry. The image keeps its native aspect ratio without input-active letterbox space.
 
-Touch input has an attachment/navigation-scoped tap/pan/pinch state machine. A stationary single-finger tap synchronously focuses the native text receiver during trusted pointerup activation, then sends one source-fenced remote down/up pair. No remote press is held while waiting to distinguish a tap from a gesture. One-finger movement scrolls the remote page at 100% or pans the local enlarged image above 100%. Two fingers pinch the local image around their midpoint, sending no remote click. Pinch completion, cancellation, target/navigation changes, access changes and disconnect discard incomplete gestures. Only completed finger taps show the brief circular feedback; mouse clicks and pinch/pan do not. A fixed-size central dot marks the exact tap coordinate while the surrounding ring expands; the dot holds its position and size until fading out with the feedback. Feedback never intercepts input and reduced motion uses a static fade. The feedback denotes the physical tap, not confirmed remote action success.
+Touch input has an attachment/navigation-scoped tap/pan/pinch state machine. A stationary single-finger tap sends one source-fenced remote down/up pair. Only a directly touched known editable receiver uses native trusted touch focus; other image taps do not request the software keyboard. Repeated input taps do not blur/refocus the receiver. No remote press is held while waiting to distinguish a tap from a gesture. One-finger movement scrolls the remote page at 100% or pans the local enlarged image above 100%. Two fingers pinch the local image around their midpoint, sending no remote click. Pinch completion, cancellation, target/navigation changes, access changes and disconnect discard incomplete gestures. Only completed finger taps show the brief circular feedback; mouse clicks and pinch/pan do not. A fixed-size central dot marks the exact tap coordinate while the surrounding ring expands; the dot holds its position and size until fading out with the feedback. Feedback never intercepts input and reduced motion uses a static fade. The feedback denotes the physical tap, not confirmed remote action success.
 
-Pointer coordinates are transformed against the displayed image and its acknowledged source, excluding letterbox/outside/stale positions. A valid viewport pointer interaction focuses a visually hidden native textarea inside the same focus boundary for text, IME and mobile keyboard events. This receiver is the viewport's single keyboard stop; forward/reverse physical Tab leaves it naturally. Local printable-text modifiers are separated from remote effect-bearing key chords so mixed-case text does not conflict with a held SDK Shift key. Shift+Arrow and Ctrl/Meta/Alt shortcuts still send typed key events.
+Pointer coordinates are transformed against the displayed image and its acknowledged source, excluding letterbox/outside/stale positions. Each frame carries at most sixteen content-free native editable rectangles with document-local identity and input mode. Bounded open-shadow and untransformed iframe traversal excludes disabled, read-only, occluded, clipped-away and uncertain targets. Unstable capture geometry omits receivers while streaming the image. Local transparent textareas retain identity across ordinary frame/visual-viewport updates and retire on document/attachment changes. The visually hidden desktop receiver uses `inputmode=none`; it remains the viewport's keyboard stop and physical Tab leaves it naturally. Local printable-text modifiers are separated from remote effect-bearing key chords so mixed-case text does not conflict with a held SDK Shift key.
+
+Plain unmodified viewer clicks nominate only their initiating attachment for a one-shot native popup selection hint. Other attachments/reconnections do not receive that preference. Modifier/middle-click background intent does not nominate a foreground selection. The web refreshes projection and selects the opened tab only while the originating tab remains selected; explicit user tab choice cancels pending preference.
+
+Native target-creation IDs correlate only popups created during the active pointer operation with their later SDK popup event, including a slow initial response. The private source-owned SDK CDP session filters the exact managed opener; it exposes no public CDP interface. Pointer eligibility ends at mouseup/cancel, and bounded one-shot target records retire on destruction, new manipulation, navigation and cleanup. A later unrelated script popup cannot inherit an old click. Pending web preference also requires the same current resource, attachment, navigation and hint when projection refresh completes.
+
+The address-bar Paste button requires a selected current native editable and has no application confirmation dialog. It invokes a feature-detected clipboard read directly in the click gesture; browser/OS consent remains native. Local keyboard/callout `paste` consumes only authorized `text/plain`, clears the receiver, prevents duplicate local insertion and does not forward Ctrl/Cmd+V to the remote clipboard. Both routes submit a typed paste action with the editable ID and unchanged text on the existing direct Browser stream. Runner verifies acknowledged-region membership, current native focus through the frame/shadow chain and existing input authority immediately before `keyboard.insert_text`. A delayed read cannot follow a changed receiver, document, attachment or target. Clipboard text is not stored in React state, telemetry, files, Agent events or history. Empty/oversized/denied/unsupported/stale outcomes are content-free, and insertion is never automatically retried. The existing 32,768-character and 64-KiB whole-message bounds apply without truncation. A sent notice is transport feedback, not proof of site-workflow success. Native text insertion emits input rather than a custom remote paste event; rich clipboard/editor semantics and remote-to-local copy are not implemented.
 
 Keyboard, pointer and composition events carry the current acknowledged source; exact dialog responses carry explicit null source and remain available before a first image. Accessible Send Tab and Send Shift+Tab commands in the compact keyboard menu address the remote page without trapping local focus. Native beforeinput covers mobile Backspace/Delete/Enter. Blur, pointer cancellation and disconnect clean up the attachment's held input and composition without committing cancelled text. Internal viewport/receiver focus transitions do not cancel the interaction.
 
@@ -126,8 +135,8 @@ input message. Runner independently fences the existing native Session binding,
 exact target, generation and acknowledged source immediately before effects.
 
 An in-flight image from an obsolete navigation or viewport is retired so it
-cannot block the new scope's first image. A capture whose credential-mask locators
-lose their native execution context or frame is discarded even before the
+cannot block the new scope's first image. A capture whose native document
+loses its execution context or frame is discarded even before the
 navigation event arrives; the regular next frame observes the current document,
 without replaying input. Other capture errors still fail the source.
 Each attachment retains at most 128
@@ -208,7 +217,7 @@ Help and continuation are ordinary Agent conversation/execution behavior: stop t
 
 ## Captures and Existing Delivery
 
-Image observation saves an original PNG in the current Session working context, with exact size/dimensions and bounded capture limits. Credential/password/one-time-code fields are masked in intentional captures. This does not claim universal detection of sensitive page content or alter the live site's account state. Model normalization never overwrites the original.
+Image observation saves an original PNG in the current Session working context, with exact size/dimensions and bounded capture limits. Live frames and intentional captures preserve native website rendering, including the site's own password bullets; no credential/password/one-time-code masking layer is added. Model normalization never overwrites the original.
 
 The Engine uses the existing RuntimeImageReadService and ModelFile-backed FilePart to return actual model-visible image input. A path alone, missing transfer service, oversized image or failed materialization is not successful image observation. The Agent can explicitly invoke existing `present_file` to publish the original through verified Exchange transfer; this command layer does not claim user publication merely because capture succeeded.
 

@@ -17,6 +17,7 @@ const status = {
   navigation_id: "nav",
   dialog: null,
   conflict: false,
+  opened_target: null,
 };
 const frame = {
   type: "frame",
@@ -27,6 +28,7 @@ const frame = {
   width: 1280,
   height: 800,
   media_type: "image/jpeg",
+  editables: [],
 };
 
 function binary(

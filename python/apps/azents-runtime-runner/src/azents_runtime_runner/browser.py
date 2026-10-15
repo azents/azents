@@ -28,6 +28,7 @@ from azents_runtime_control.browser_contract import (
     BrowserTarget,
     BrowserTask,
 )
+from azents_runtime_control.browser_viewer_contract import ViewerTarget
 from azents_runtime_control.runtime_stream_session import BrowserStreamAuthority
 from markdownify import markdownify
 from playwright.async_api import (
@@ -45,17 +46,14 @@ from playwright.async_api import (
     TimeoutError as PlaywrightTimeoutError,
 )
 
+from azents_runtime_runner.browser_popups import BrowserPopupTracker
+
 _MAX_TASKS = 64
 _MAX_PAGES = 8
 _MAX_SESSION_TASKS = 8
 _MAX_FRAMES = 16
 _MAX_REFS = 1000
 _MAX_CAPTURE_BYTES = 20 * 1024 * 1024
-_CREDENTIAL_FIELDS = (
-    'input[type="password"], input[autocomplete="one-time-code"], '
-    'input[autocomplete="current-password"], input[autocomplete="new-password"], '
-    'input[name="otp"], input[name="verification_code"]'
-)
 
 
 class BrowserFailure(RuntimeError):
@@ -136,10 +134,19 @@ class _ActionOutcome:
     download: BrowserCapture | None
 
 
+@dataclass(frozen=True)
+class _PopupSelection:
+    owner: str
+    target: ViewerTarget
+
+
 @dataclass
 class _Page:
     id: str
     page: Page
+    popup_owner: str | None
+    popup_selection: _PopupSelection | None
+    popup_tracker: BrowserPopupTracker | None
     frames: dict[str, Frame] = field(default_factory=dict)
     refs: dict[str, _Reference] = field(default_factory=dict)
     dialog: Dialog | None = None
@@ -368,7 +375,7 @@ class RunnerBrowserManager:
             raise BrowserFailure(
                 "browser_resource_exhausted", "Browser task page limit reached"
             )
-        resource = _Page(uuid.uuid4().hex, page)
+        resource = _Page(uuid.uuid4().hex, page, None, None, None)
         task.pages[resource.id] = resource
         for frame in page.frames[:_MAX_FRAMES]:
             resource.frames[uuid.uuid4().hex] = frame
@@ -390,6 +397,10 @@ class RunnerBrowserManager:
         def navigated(frame: Frame) -> None:
             if frame == page.main_frame:
                 resource.navigation_id = uuid.uuid4().hex
+                resource.popup_owner = None
+                resource.popup_selection = None
+                if resource.popup_tracker is not None:
+                    resource.popup_tracker.clear()
             resource.refs = {
                 key: value
                 for key, value in resource.refs.items()
@@ -407,10 +418,22 @@ class RunnerBrowserManager:
         page.on("dialog", dialog)
 
         async def popup(value: Page) -> None:
+            if value.is_closed():
+                return
             if self.tasks.get(task.id) is not task or len(task.pages) >= _MAX_PAGES:
                 await value.close()
                 return
-            self._register(task, value)
+            opened = self._register(task, value)
+            owner = (
+                await resource.popup_tracker.consume(value)
+                if resource.popup_tracker is not None
+                else None
+            )
+            if owner is not None:
+                resource.popup_selection = _PopupSelection(
+                    owner,
+                    ViewerTarget(task.id, opened.id, task.incarnation),
+                )
 
         def closed(value: Page) -> None:
             del value
@@ -631,23 +654,14 @@ class RunnerBrowserManager:
                         "Full-page capture exceeds the pixel bound",
                     )
             path = self._output_path(task, "capture", ".png")
-            masks = [
-                f.locator(_CREDENTIAL_FIELDS)
-                for f in page.page.frames
-                if not f.is_detached()
-            ]
             if command.target.frame_id is None:
                 data = await page.page.screenshot(
                     path=path,
                     type="png",
                     full_page=command.capture_full_page,
-                    mask=masks,
-                    mask_color="#000000",
                 )
             else:
-                data = await frame.locator("body").screenshot(
-                    path=path, type="png", mask=masks, mask_color="#000000"
-                )
+                data = await frame.locator("body").screenshot(path=path, type="png")
             if len(data) > _MAX_CAPTURE_BYTES:
                 raise BrowserFailure(
                     "browser_capture_oversized",
@@ -849,6 +863,9 @@ class RunnerBrowserManager:
         actor = uuid.uuid4().hex
         async with task.guard.interaction(actor):
             self.target(command.authority, command.target)
+            page.popup_owner = None
+            if page.popup_tracker is not None:
+                page.popup_tracker.clear()
             outcome = await self._dispatch_or_dialog(task, page, frame, action)
         return await self._result(
             command.authority,

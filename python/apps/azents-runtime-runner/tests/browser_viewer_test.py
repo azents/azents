@@ -3,7 +3,7 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator, Mapping
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -28,6 +28,7 @@ from browser_test import _action
 from playwright.async_api import Error
 
 from azents_runtime_runner.browser import BrowserFailure, RunnerBrowserManager
+from azents_runtime_runner.browser_editables import BrowserEditableRegions
 from azents_runtime_runner.browser_viewer import (
     RunnerBrowserViewer,
     _capture_error_code,
@@ -625,3 +626,359 @@ async def test_dialog_continuation_and_budget_failure(
         await bounded
     assert not limited.sources
     assert authority.task_id in manager.tasks
+
+
+async def test_editable_geometry_is_stable_content_free_and_document_local(
+    manager: RunnerBrowserManager, tmp_path: Path, site: str
+) -> None:
+    authority = await scope(manager, tmp_path, site)
+    native = manager.tasks[authority.task_id].pages[authority.page_id].page
+    await native.set_content("""<style>
+        input,textarea {display:block;width:200px;height:30px;margin:8px}
+        </style><input id=plain><input type=password value=synthetic-only>
+        <input disabled><input readonly><input style='display:none'>
+        <div id=shadow></div><iframe srcdoc='<input id=child>'></iframe>
+        <script>document.querySelector('#shadow').attachShadow({mode:'open'})
+        .innerHTML='<input id=inside>';</script>""")
+    child = native.frames[-1]
+    await child.wait_for_load_state()
+    regions = BrowserEditableRegions(native)
+    try:
+        first = await regions.read()
+        assert len(first) == 4
+        assert first == await regions.read()
+        assert all(
+            set(asdict(region)) == {"id", "x", "y", "width", "height", "input_mode"}
+            for region in first
+        )
+        await native.locator("#plain").focus()
+        assert await regions.focused(first[0].id)
+        await child.locator("#child").focus()
+        assert not await regions.focused(first[0].id)
+        assert await regions.focused(first[-1].id)
+        await child.goto(site + "/replacement")
+        assert await regions.read() == first[:-1]
+        updated = await regions.read()
+        # Replaced child documents cannot retain a previous native receiver ID.
+        assert first[-1].id not in {region.id for region in updated}
+        child_ids = {region.id for region in updated} - {
+            region.id for region in first[:-1]
+        }
+        assert child_ids
+        await native.locator("iframe").evaluate(
+            "element => element.style.transform='scale(0.8)'"
+        )
+        assert child_ids.isdisjoint(region.id for region in await regions.read())
+    finally:
+        await regions.close()
+
+
+@pytest.mark.parametrize("destination", ["password", "textarea", "shadow", "iframe"])
+async def test_native_plaintext_paste_uses_current_focused_editable(
+    manager: RunnerBrowserManager, tmp_path: Path, site: str, destination: str
+) -> None:
+    authority = await scope(manager, tmp_path, site)
+    native = manager.tasks[authority.task_id].pages[authority.page_id].page
+    await native.set_content("""<input type=password id=password>
+        <textarea id=textarea></textarea><div id=shadow></div>
+        <iframe srcdoc='<input id=inside>'></iframe><script>
+        document.querySelector('#shadow').attachShadow({mode:'open'})
+        .innerHTML='<input id=inside>';</script>""")
+    await native.frames[-1].wait_for_load_state()
+    field = (
+        native.frame_locator("iframe").locator("#inside")
+        if destination == "iframe"
+        else native.locator("#shadow #inside")
+        if destination == "shadow"
+        else native.locator(f"#{destination}")
+    )
+    await field.focus()
+    viewer = RunnerBrowserViewer(manager, Budget())
+    transport = Transport()
+    running = asyncio.create_task(
+        viewer.run(authority, transport.receive, transport.send)
+    )
+    try:
+        frame = await transport.frame()
+        probe = viewer.sources[authority.page_id].editables
+        identifier = None
+        for region in frame.editables:
+            if await probe.focused(region.id):
+                identifier = region.id
+                break
+        assert identifier is not None
+        text = '  Synthetic 한글 🔑 "\\  '
+        if destination == "textarea":
+            text += "\nsecond line\n"
+        action = {"kind": "paste", "editable_id": identifier, "text": text}
+        assert (await transport.input(1, action))["accepted"] is True
+        assert await field.input_value() == text
+        assert (await transport.input(1, action))[
+            "reason_code"
+        ] == "browser_stale_input"
+        assert await field.input_value() == text
+        await field.evaluate("element => element.blur()")
+        assert (await transport.input(2, action))[
+            "reason_code"
+        ] == "browser_stale_input"
+        assert await field.input_value() == text
+        await field.focus()
+        guard = manager.tasks[authority.task_id].guard
+        guard.begin("another-actor")
+        try:
+            assert (await transport.input(3, action))[
+                "reason_code"
+            ] == "browser_input_conflict"
+        finally:
+            guard.end("another-actor")
+        await field.evaluate("element => element.remove()")
+        assert (await transport.input(4, action))[
+            "reason_code"
+        ] == "browser_stale_input"
+    finally:
+        await stop(running, transport)
+
+
+async def test_rotated_shadow_host_cannot_project_child_frame_input(
+    manager: RunnerBrowserManager, tmp_path: Path, site: str
+) -> None:
+    authority = await scope(manager, tmp_path, site)
+    native = manager.tasks[authority.task_id].pages[authority.page_id].page
+    await native.set_content("""<input id=main>
+        <div id=host style='position:absolute;left:100px;top:100px;
+        width:300px;height:300px'></div>""")
+    await native.locator("#host").evaluate("""host => {
+        host.attachShadow({mode:'open'}).innerHTML =
+            `<iframe style="width:300px;height:300px;border:0"
+                srcdoc="<input id=child>"></iframe>`;
+    }""")
+    await native.frames[-1].wait_for_load_state()
+    regions = BrowserEditableRegions(native)
+    try:
+        original = await regions.read()
+        assert len(original) == 2
+        await native.locator("#host").evaluate(
+            "host => host.style.transform='rotate(90deg)'"
+        )
+        assert await regions.read() == original[:1]
+    finally:
+        await regions.close()
+
+
+async def test_paste_does_not_bypass_readonly_or_navigation(
+    manager: RunnerBrowserManager, tmp_path: Path, site: str
+) -> None:
+    authority = await scope(manager, tmp_path, site)
+    native = manager.tasks[authority.task_id].pages[authority.page_id].page
+    await native.locator("#text").focus()
+    viewer = RunnerBrowserViewer(manager, Budget())
+    active, readonly = Transport(), Transport()
+    first = asyncio.create_task(viewer.run(authority, active.receive, active.send))
+    second = asyncio.create_task(
+        viewer.run(
+            replace(authority, allow_input=False), readonly.receive, readonly.send
+        )
+    )
+    try:
+        frame = await active.frame()
+        await readonly.frame()
+        action = {
+            "kind": "paste",
+            "editable_id": frame.editables[0].id,
+            "text": "synthetic",
+        }
+        assert (await readonly.input(1, action))["reason_code"] == "browser_read_only"
+        await native.goto(site + "/changed")
+        assert (await active.input(1, action, frame))[
+            "reason_code"
+        ] == "browser_stale_frame"
+        assert await native.locator("#text").input_value() == ""
+    finally:
+        await stop(first, active)
+        await stop(second, readonly)
+
+
+@pytest.mark.parametrize("intent", ["plain", "control", "middle"])
+async def test_popup_selection_belongs_only_to_plain_click_initiator(
+    manager: RunnerBrowserManager, tmp_path: Path, site: str, intent: str
+) -> None:
+    authority = await scope(manager, tmp_path, site)
+    resource = manager.tasks[authority.task_id].pages[authority.page_id]
+    native = resource.page
+    await native.set_content(f"<a href='{site}/popup' target=_blank>Open tab</a>")
+    viewer = RunnerBrowserViewer(manager, Budget())
+    active, other = Transport(), Transport()
+    first = asyncio.create_task(viewer.run(authority, active.receive, active.send))
+    second = asyncio.create_task(viewer.run(authority, other.receive, other.send))
+    try:
+        await active.frame()
+        await other.frame()
+        box = await native.locator("a").bounding_box()
+        assert box is not None
+        sequence = 1
+        if intent == "control":
+            await active.input(
+                sequence, {"kind": "key", "phase": "down", "key": "Control"}
+            )
+            sequence += 1
+        button = "middle" if intent == "middle" else "left"
+        async with native.context.expect_page() as opened:
+            for phase in ["down", "up"]:
+                await active.input(
+                    sequence,
+                    {
+                        "kind": "pointer",
+                        "phase": phase,
+                        "button": button,
+                        "x": box["x"] + 4,
+                        "y": box["y"] + 4,
+                    },
+                )
+                sequence += 1
+        await (await opened.value).wait_for_load_state()
+        if intent == "control":
+            await active.input(
+                sequence, {"kind": "key", "phase": "up", "key": "Control"}
+            )
+        if intent == "plain":
+            async with asyncio.timeout(5):
+                while (event := await active.event("status"))["opened_target"] is None:
+                    pass
+            assert resource.popup_selection is not None
+            assert resource.popup_selection.owner == active.attachment
+            assert event["opened_target"] == asdict(resource.popup_selection.target)
+        else:
+            assert resource.popup_selection is None
+        # A fresh attachment must not receive the prior actor's foreground hint.
+        assert (await other.event("status"))["opened_target"] is None
+        assert resource.popup_owner is None
+    finally:
+        await stop(first, active)
+        await stop(second, other)
+
+
+@dataclass(frozen=True)
+class _SlowPopupSite:
+    url: str
+    entered: asyncio.Event
+    release: asyncio.Event
+
+
+@pytest.fixture
+async def slow_popup_site() -> AsyncIterator[_SlowPopupSite]:
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def handler(request: web.Request) -> web.Response:
+        if request.path == "/popup":
+            entered.set()
+            await release.wait()
+        return web.Response(
+            text="<title>Delayed popup</title>", content_type="text/html"
+        )
+
+    app = web.Application()
+    app.router.add_get("/{path:.*}", handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    server = web.TCPSite(runner, "127.0.0.1", 0)
+    await server.start()
+    try:
+        yield _SlowPopupSite(
+            f"http://127.0.0.1:{runner.addresses[0][1]}", entered, release
+        )
+    finally:
+        release.set()
+        await runner.cleanup()
+
+
+@pytest.mark.parametrize("rel", ["", "noopener"])
+async def test_slow_popup_is_exactly_correlated_after_pointer_eligibility_ends(
+    manager: RunnerBrowserManager,
+    tmp_path: Path,
+    site: str,
+    slow_popup_site: _SlowPopupSite,
+    rel: str,
+) -> None:
+    authority = await scope(manager, tmp_path, site)
+    resource = manager.tasks[authority.task_id].pages[authority.page_id]
+    native = resource.page
+    await native.set_content(
+        f"<a target=_blank rel='{rel}' href='{slow_popup_site.url}/popup'>Open tab</a>"
+    )
+    viewer = RunnerBrowserViewer(manager, Budget())
+    transport = Transport()
+    running = asyncio.create_task(
+        viewer.run(authority, transport.receive, transport.send)
+    )
+    try:
+        await transport.frame()
+        box = await native.locator("a").bounding_box()
+        assert box is not None
+        async with native.expect_popup() as opened:
+            for sequence, phase in enumerate(["down", "up"], 1):
+                assert (
+                    await transport.input(
+                        sequence,
+                        {
+                            "kind": "pointer",
+                            "phase": phase,
+                            "button": "left",
+                            "x": box["x"] + 4,
+                            "y": box["y"] + 4,
+                        },
+                    )
+                )["accepted"]
+            async with asyncio.timeout(5):
+                await slow_popup_site.entered.wait()
+            assert resource.popup_owner is None
+            assert resource.popup_selection is None
+            assert len(viewer.sources[authority.page_id].popups.pending) == 1
+            slow_popup_site.release.set()
+        await (await opened.value).wait_for_load_state()
+        async with asyncio.timeout(5):
+            while (await transport.event("status"))["opened_target"] is None:
+                pass
+        assert resource.popup_selection is not None
+        assert resource.popup_selection.owner == transport.attachment
+        assert not viewer.sources[authority.page_id].popups.pending
+        # An unrelated later script popup is not attributed to the completed click.
+        for sequence, phase in enumerate(["down", "up"], 3):
+            await transport.input(
+                sequence,
+                {
+                    "kind": "pointer",
+                    "phase": phase,
+                    "button": "left",
+                    "x": 500,
+                    "y": 400,
+                },
+            )
+        assert resource.popup_owner is None
+        async with native.expect_popup() as unrelated:
+            await native.evaluate("window.open('about:blank')")
+        await (await unrelated.value).wait_for_load_state()
+        assert resource.popup_selection is None
+    finally:
+        slow_popup_site.release.set()
+        await stop(running, transport)
+
+
+async def test_native_page_close_releases_source_and_private_popup_session(
+    manager: RunnerBrowserManager, tmp_path: Path, site: str
+) -> None:
+    authority = await scope(manager, tmp_path, site)
+    resource = manager.tasks[authority.task_id].pages[authority.page_id]
+    budget = Budget()
+    viewer = RunnerBrowserViewer(manager, budget)
+    transport = Transport()
+    running = asyncio.create_task(
+        viewer.run(authority, transport.receive, transport.send)
+    )
+    await transport.frame()
+    source = viewer.sources[authority.page_id]
+    assert source.popups.session is not None
+    await resource.page.close()
+    async with asyncio.timeout(5):
+        await running
+    assert source.popups.session is None
+    assert not viewer.sources and budget.bytes == 0

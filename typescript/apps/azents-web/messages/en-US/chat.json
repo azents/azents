@@ -14,6 +14,18 @@
     "refresh": "Refresh",
     "refreshConnection": "Refresh browser connection",
     "keyboardActions": "Browser actions",
+    "paste": "Paste",
+    "pasteSelectInput": "Select an input first",
+    "pasteDismiss": "Dismiss paste notice",
+    "pasteNotice": {
+      "sent": "Text sent to the selected input.",
+      "unavailable": "Use your keyboard or the input’s native Paste menu; clipboard access is unavailable here.",
+      "denied": "Clipboard access was cancelled or denied. You can use the input’s native Paste menu.",
+      "empty": "The clipboard has no plain text to paste.",
+      "tooLarge": "The text exceeds the paste size limit. Nothing was sent.",
+      "targetChanged": "The input changed. Select it again before pasting.",
+      "notSent": "Paste was not sent. Check the page and connection before trying again."
+    },
     "address": "Browser address",
     "addressPlaceholder": "Enter a web address",
     "invalidAddress": "Enter an HTTP or HTTPS address without embedded credentials.",

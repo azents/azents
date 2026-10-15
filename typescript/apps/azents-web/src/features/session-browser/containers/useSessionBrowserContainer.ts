@@ -9,6 +9,7 @@ import {
   browserFrameMatchesStatus,
   sameBrowserTarget,
 } from "../input";
+import { browserPopupHintCurrent } from "../popup";
 import { browserProjectionState } from "../projection";
 import { recentBrowserTargets } from "../recentTargets";
 import { browserPanelHref, parseBrowserTarget } from "../route";
@@ -19,6 +20,7 @@ import {
 import { useBrowserInteraction } from "./useBrowserInteraction";
 import { useBrowserTouchView } from "./useBrowserTouchView";
 import type { SessionBrowserPanelProps } from "../components/SessionBrowserPanel";
+import type { BrowserPopupHint } from "../popup";
 import type {
   BrowserNavigationAction,
   BrowserPageChoice,
@@ -234,6 +236,66 @@ export function useSessionBrowserContainer(
   const [addressError, setAddressError] = useState(false);
   const source = live.state.displayed;
   const status = live.state.status;
+  const popup = useRef<
+    | (BrowserPopupHint & {
+        key: string;
+        pending: boolean;
+      })
+    | null
+  >(null);
+  useEffect(() => {
+    const opened = status?.opened_target;
+    if (status !== null && opened != null && query.data?.allow_input) {
+      const key = `${resourceKey}:${status.attachment_id}:${JSON.stringify(opened)}`;
+      if (popup.current?.key !== key) {
+        popup.current = {
+          key,
+          resourceKey,
+          attachment: status.attachment_id,
+          navigation: status.navigation_id,
+          origin: status.target,
+          target: opened,
+          pending: true,
+        };
+        void utils.browser.projection.invalidate(resource);
+      }
+    }
+    const candidate = popup.current;
+    if (candidate?.pending && query.data?.available) {
+      if (
+        !browserPopupHintCurrent(
+          candidate,
+          resourceKey,
+          status,
+          selectedRef.current,
+          live.state.connection === "connected",
+        )
+      ) {
+        candidate.pending = false;
+      } else if (
+        pages(query.data).some((page) =>
+          sameBrowserTarget(page.target, candidate.target),
+        )
+      ) {
+        candidate.pending = false;
+        cancel.current();
+        router.replace(
+          browserPanelHref(pathname, search.toString(), candidate.target),
+          { scroll: false },
+        );
+      }
+    }
+  }, [
+    status,
+    query.data,
+    resourceKey,
+    resource,
+    utils.browser.projection,
+    router,
+    pathname,
+    search,
+    live.state.connection,
+  ]);
   const dialogId = status?.dialog?.id;
   useEffect(() => {
     setDialogText("");
@@ -247,6 +309,12 @@ export function useSessionBrowserContainer(
   }, [resourceKey, selectedPage]);
   const mutationPending = close.isPending || create.isPending;
   const interaction = useBrowserInteraction({
+    readClipboard:
+      typeof navigator !== "undefined" &&
+      typeof navigator.clipboard !== "undefined" &&
+      typeof navigator.clipboard.readText === "function"
+        ? () => navigator.clipboard.readText()
+        : null,
     enabled:
       focused &&
       state.type === "READY" &&
@@ -409,6 +477,9 @@ export function useSessionBrowserContainer(
       }
     },
     onSelect: (target) => {
+      if (popup.current !== null) {
+        popup.current.pending = false;
+      }
       interaction.cancel();
       if (!close.isPending) {
         close.reset();
@@ -466,5 +537,6 @@ export function useSessionBrowserContainer(
     keyboardRef: interaction.keyboardRef,
     interaction: interaction.interaction,
     touchView,
+    paste: interaction.paste,
   };
 }
