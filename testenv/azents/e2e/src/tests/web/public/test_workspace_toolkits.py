@@ -69,10 +69,17 @@ def test_workspace_toolkit_catalog_details_and_mutations_are_persisted(
     ).click()
     _fill_text_input(browser_driver, "Name", name)
     _fill_text_input(browser_driver, "Server URL", "https://example.com/mcp")
+    _wait(browser_driver).until(
+        ec.element_to_be_clickable(
+            (By.XPATH, '//summary[.="Advanced naming and instructions"]')
+        )
+    ).click()
+    _fill_text_input(browser_driver, "Slug", "workspace_browser_service")
     _click_button(browser_driver, "Add")
     _assert_visible_text(browser_driver, name)
     saved = next(item for item in configs() if item.name == name)
     assert saved.toolkit_type == "mcp"
+    assert saved.slug == "workspace_browser_service"
     assert saved.enabled is True
     assert saved.config["server_url"] == "https://example.com/mcp"
     assert browser_driver.current_url == azents_main_web_url + path
@@ -84,6 +91,7 @@ def test_workspace_toolkit_catalog_details_and_mutations_are_persisted(
     _click_button(browser_driver, "Save")
     _assert_visible_text(browser_driver, renamed)
     assert next(item for item in configs() if item.id == saved.id).name == renamed
+    assert next(item for item in configs() if item.id == saved.id).slug == saved.slug
     # Saving an edit returns to the exact Toolkit's details dialog.
     toggle = _wait(browser_driver).until(
         ec.element_to_be_clickable(
@@ -105,6 +113,15 @@ def test_workspace_toolkit_catalog_details_and_mutations_are_persisted(
 
     _click_button(browser_driver, "Delete")
     _click_button(browser_driver, "Cancel")
+    _wait(browser_driver).until(
+        ec.invisibility_of_element_located(
+            (
+                By.XPATH,
+                '//*[@role="dialog"][.//*[normalize-space()='
+                '"Are you sure you want to delete this toolkit?"]]',
+            )
+        )
+    )
     assert any(item.id == saved.id for item in configs())
     _click_button(browser_driver, "Delete")
     _wait(browser_driver).until(

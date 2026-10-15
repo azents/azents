@@ -123,8 +123,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/github-setup.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-10-14
-spec_version: 147
+last_verified_at: 2026-10-15
+spec_version: 148
 ---
 
 # Toolkit
@@ -531,7 +531,31 @@ azents-web provides Workspace-shared Toolkit management screens and an authority
 
 `shared/toolkits` owns the reusable form and authorization containers, props-driven views, projections, and shared state types used by Toolkit and Agent management. Feature route pages retain their entry wiring and import the shared defining modules directly. The form branches config fields per toolkit type for GitHub, Kubernetes, MCP, Google Analytics, Notion, Sentry, GCP, AWS, Brave Search, Shell, and EnvVar. Google uses the staged selection, OAuth and review surface described in [Google Connection](google-connection.md). `features/toolkit-setup` executes setup action returned by backend, and if account link must come first it follows `next_toolkit` handoff from [`../flow/account-linking.md`](../../design/account-260315-account-linking.md).
 
-Provider-field container hooks own transient credential replacement, acknowledgement, connection-test mutations, and MCP discovery updates. Their views receive shared typed lifecycle states and callbacks; API-free stories exercise the same container input projection without live provider requests. Provider-specific copy, form clearing, test-result visibility, and discovered OAuth field handling remain unchanged.
+Provider-field container hooks own transient credential replacement, acknowledgement, connection-test mutations, and MCP discovery updates. Their views receive shared typed lifecycle states and callbacks; API-free stories exercise the same container input projection without live provider requests. Form clearing, test-result visibility, and discovered OAuth field handling retain their provider-specific behavior.
+
+Ordinary creation and saved editing use three numbered sections: preparation,
+access configuration, and review/save. A fixed Provider is shown with its icon
+and catalog name; unrestricted creation retains the server-backed selector.
+Provider-specific preparation, expandable setup order and recovery advice, and
+public documentation links are available in all four supported locales. This help
+metadata does not define Provider availability. New GitHub and Google creation
+retain their specialized authorization and publication journeys.
+
+The existing Provider fields stay mounted while optional alias/custom-prompt
+settings are disclosed. Required fields remain visible; alias/prompt errors open
+their disclosure. Final review accepts only Provider name, connection name,
+ownership, enabled setting, and tool visibility; it receives no config,
+credentials, or resource URLs. Connection tests remain optional explicit
+observations rather than save prerequisites or persistent readiness. Generic
+OAuth creation explains the existing save-then-connect sequence. Service-account
+emails parsed from supplied keys are identified as key metadata, not verified
+account identities.
+
+AWS, GCP, and Google Analytics saved-credential notices and replacement controls
+use the server's credential-presence flag even when key identifiers or email
+metadata are redacted. Merely opening replacement inputs does not write or clear
+credentials. A saved AWS connection does not require re-entering keys for an
+ordinary metadata edit.
 
 AWS, GCP, Google Analytics, Kubernetes, Notion, and Sentry Connection tests display transport-error feedback alongside successful or rejected test-result feedback, preserving existing copy, button gates, and credential replacement policy.
 

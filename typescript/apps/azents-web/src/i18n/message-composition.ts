@@ -25,6 +25,7 @@ export const MESSAGE_NAMESPACES = [
   "runtimeWeb",
   "security",
   "skills",
+  "toolkitSetup",
   "workspace",
   "workspaces",
 ] as const;

@@ -1,0 +1,130 @@
+{
+  "prepareTitle": "Prepare your connection",
+  "prepareDescription": "Choose the service and check what you need before entering settings.",
+  "configureTitle": "Configure access",
+  "configureDescription": "Use only the resources and permissions this Agent needs. Follow the service settings below to configure its access.",
+  "reviewTitle": "Review and save",
+  "reviewDescription": "Name this connection and decide how it is available to Agents. Save only when these settings are right.",
+  "beforeYouStart": "Before you start",
+  "setupOrder": "Setup order",
+  "ifItFails": "If the connection fails",
+  "officialGuide": "Open official setup documentation",
+  "advanced": "Advanced naming and instructions",
+  "advancedHint": "Optional tool alias and additional instructions. Most connections can keep the defaults.",
+  "summary": "Settings to save",
+  "provider": "Service",
+  "name": "Connection name",
+  "scope": "Who can use it",
+  "workspaceScope": "Workspace shared — attach it to the Agents that need it",
+  "agentScope": "Only this Agent",
+  "availability": "Availability",
+  "enabled": "Enabled for use",
+  "disabled": "Disabled",
+  "discovery": "Tool visibility",
+  "search": "Discover through Tool Search",
+  "always": "Always expose tools",
+  "secretsOmitted": "Credentials are not shown in this summary. Existing credentials stay unchanged unless you replace them.",
+  "saveHint": "Add or Save stores these settings. A connection test is a separate, explicit action; it does not grant access or save changes.",
+  "localSaveHint": "Add or Save stores these settings. Runtime access and risk acknowledgement remain governed by the controls above.",
+  "testHint": "Test results describe that request, not permanent health or every allowed operation. After changing settings, test again when you want to verify them.",
+  "oauthNext": "For OAuth, first add this Toolkit, then open its settings and choose Connect. Saving alone does not authorize an account.",
+  "savedHint": "You are editing a saved Toolkit. Replace credentials only when needed; account connection actions can take effect separately from saving settings.",
+  "keyIdentity": "Service account in the supplied key",
+  "storedCredentials": "Credentials are saved. Their values are hidden; leave them unchanged to keep using this connection.",
+  "replaceKey": "Replace Key",
+  "replaceCredentials": "Replace Credentials",
+  "analyticsRuntime": "This Toolkit runs in the Agent Runtime. Starting an inactive Runtime can take time; connection testing and tool execution are separate actions.",
+  "guides": {
+    "mcp": {
+      "purpose": "Connect tools offered by a remote MCP server.",
+      "prepare": "Get the MCP endpoint and supported authentication method from the server owner. Use a trusted server: it will receive the requests sent to its tools.",
+      "configure": "Enter the server URL, choose the matching authentication method, and supply credentials only in the credential fields. Advanced endpoints and timeout are optional.",
+      "verify": "Run Test Connection explicitly to check the server response or discover OAuth metadata. OAuth discovery does not sign you in.",
+      "recovery": "Check the endpoint, network reachability and authentication method. For OAuth, confirm the saved connection is authorized; changing discovery fields does not grant access."
+    },
+    "github": {
+      "purpose": "Manage a GitHub connection using its existing account or App identity.",
+      "prepare": "Know whether tools should act as a person or an App installation. Use the existing setup controls for the selected mode.",
+      "configure": "Keep the existing identity unless you intend to replace its registration or credentials. Select only the feature groups and repositories needed.",
+      "verify": "Review the connection evidence returned by GitHub. Runtime token injection is a separate opt-in with its own acknowledgement.",
+      "recovery": "Check token expiry, App settings, installation access and organization approval. Reauthorize through the connection controls; do not paste a secret into the name or description."
+    },
+    "google": {
+      "purpose": "Connect Google tasks to the account and access you explicitly approve.",
+      "prepare": "Use a Google account with access to the required files, calendars or mail. Available tasks are provided by the existing Google setup.",
+      "configure": "Choose tasks, authorize the account, then review the actual granted access in the Google setup. Reconnection is separate from editing this connection's name.",
+      "verify": "Use the returned account and access review. Selected tasks alone are not evidence of granted permissions.",
+      "recovery": "If access is partial or expired, review the missing tasks and reconnect. Organization policies may require an administrator's approval."
+    },
+    "notion": {
+      "purpose": "Let Agents work with Notion content you authorize.",
+      "prepare": "Have a Notion account with access to the workspace and content you want to use. This connection uses Notion's OAuth service; no integration token is required here.",
+      "configure": "Add the Toolkit first. Reopen its settings and choose Connect to authorize Notion. Keep the default timeout unless requests need longer.",
+      "verify": "After authorization, use the saved connection's Test Connection action. Adding the Toolkit does not by itself give access to Notion content.",
+      "recovery": "Reconnect if authorization expires. Check the chosen Notion workspace and content access if expected pages are missing."
+    },
+    "sentry": {
+      "purpose": "Investigate Sentry issues and enable only the actions you need.",
+      "prepare": "Use a Sentry account with access to the intended organizations and projects. Triage and management features can change issue or project state.",
+      "configure": "Select the skill groups, add the Toolkit, then reopen settings and Connect to Sentry. Feature selection does not grant Sentry permissions.",
+      "verify": "After authorization, test the saved connection. Confirm the account can access the intended projects before asking an Agent to change anything.",
+      "recovery": "Check account permissions and project access, then reconnect if required. Reduce selected features if the intended workflow is read-only."
+    },
+    "aws": {
+      "purpose": "Use AWS Managed MCP with the AWS permissions you explicitly provide.",
+      "prepare": "Prepare an access key ID and secret for an IAM identity with only the required downstream AWS service permissions. Choose the region where the work should run.",
+      "configure": "Enter the key pair in the credential fields. If assuming a role, add its ARN and required external ID; both the caller and role trust policy must allow that assumption.",
+      "verify": "Use Test Connection to check the supplied or saved credentials. A successful test does not certify permission for every AWS service action.",
+      "recovery": "Check the key pair, region, IAM policy, role trust and external ID. Do not add broad administrator permissions just to make a test pass."
+    },
+    "gcp": {
+      "purpose": "Choose Google Cloud services and the access an Agent may request.",
+      "prepare": "Prepare a project ID and a service-account JSON key. Enable the required services and grant the account the roles appropriate to the selected tools.",
+      "configure": "Select services, opt into write access only where needed, and paste or upload the key. The role list below describes configuration needs, not permissions already granted.",
+      "verify": "Run Test Connection after entering the project and key. The email parsed from a key is input metadata until the provider verifies the request.",
+      "recovery": "Check the project ID, JSON key, enabled APIs and IAM roles. If write calls fail, review the specific service permission instead of broadening all access."
+    },
+    "google_analytics": {
+      "purpose": "Read Google Analytics reports through a service account.",
+      "prepare": "Enable the Google Analytics Data and Admin APIs, create a service-account key, and grant that account access to the Analytics property.",
+      "configure": "Paste or upload the JSON key. Optionally enter a default numeric property ID; leave it empty when you want to select from accessible properties later.",
+      "verify": "Test the connection after granting property access. A valid Google Cloud key alone does not grant access to an Analytics property.",
+      "recovery": "Check API enablement, the service-account email in property access management, and the property ID. Account access and Analytics property access are separate."
+    },
+    "brave_search": {
+      "purpose": "Search the web with your Brave Search API subscription.",
+      "prepare": "Create an API key in the Brave Search API dashboard and confirm the subscription has quota.",
+      "configure": "Enter the API key and choose country, language and Safe Search defaults. These defaults affect results, not which account is authorized.",
+      "verify": "Test Connection sends an explicit request that may consume quota. It does not save the key or guarantee future quota availability.",
+      "recovery": "Check the key, subscription quota and rate limit. If the key was rotated, use Replace Key and save the new value."
+    },
+    "kubernetes": {
+      "purpose": "Give Agents scoped access to selected Kubernetes clusters.",
+      "prepare": "Prepare a kubeconfig, service-account token, or the supported cloud credentials for each cluster. Ensure the cluster API is reachable from the service.",
+      "configure": "Choose each cluster's authentication method, then restrict namespaces and resource kinds. Keep read-only mode unless mutations are intended; Secret access is denied by default.",
+      "verify": "Test the configured cluster access explicitly. UI restrictions are additional controls and do not replace Kubernetes RBAC or cloud IAM.",
+      "recovery": "Check the API endpoint, certificate, token or cloud identity, and RBAC. Do not disable TLS validation or grant cluster-admin just to bypass an error."
+    },
+    "envvar": {
+      "purpose": "Provide environment variables to an Agent's Runtime processes.",
+      "prepare": "Decide which variables the Runtime actually needs. Processes and commands with access to that environment may read their values.",
+      "configure": "Enter valid variable names and values, then review the existing risk notice before acknowledging it. Stored values stay masked; replace only those you intend to change.",
+      "verify": "There is no external connection test for environment variables. Review the names, exposure and acknowledgement before saving.",
+      "recovery": "Correct name, size or acknowledgement errors shown by the form. Keep secrets in value fields, never in connection names or descriptions."
+    },
+    "shell": {
+      "purpose": "Review the existing shell network restrictions.",
+      "prepare": "Determine which domains the Runtime needs to contact. This settings surface does not create or authorize a new Runtime.",
+      "configure": "Use the existing allow and deny controls. Keep the current defaults unless the intended network access requires a change.",
+      "verify": "These are configuration rules, not a live connection test or evidence that commands have succeeded.",
+      "recovery": "Review the exact requested domain and current Runtime policy. Do not relax unrelated restrictions to bypass a denied request."
+    },
+    "other": {
+      "purpose": "Configure the service selected from the Workspace catalog.",
+      "prepare": "Follow this provider's documentation and use only the access required for your workflow.",
+      "configure": "Use the available settings below. The server catalog determines which providers can be created.",
+      "verify": "Use a connection test only when the provider offers one. Saving settings does not prove live connectivity.",
+      "recovery": "Review the error and provider requirements. Keep credentials in their designated fields."
+    }
+  }
+}
