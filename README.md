@@ -30,6 +30,7 @@ The main implementation areas are:
 - `python/apps/azents-runtime-*`: runtime runner and provider packages
 - `typescript/apps/azents-web/`: Azents web application
 - `typescript/apps/azents-site/`: public Azents website
+- `swift/apps/azents-ios/`: native iOS application and build foundation
 - `docs/azents/`: ADRs, design notes, and living specs
 - `infra/charts/azents/`: Helm chart
 - `proto/azents/`: runtime control protobuf definitions
