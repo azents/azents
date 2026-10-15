@@ -412,8 +412,12 @@ Class | Method | HTTP request | Description
 *WorkspaceModelSettingsV1Api* | [**workspace_model_settings_v1_get_workspace_model_settings**](azentspublicclient/docs/WorkspaceModelSettingsV1Api.md#workspace_model_settings_v1_get_workspace_model_settings) | **GET** /workspace-model-settings/v1/workspaces/{handle} | Get Workspace Model Settings
 *WorkspaceModelSettingsV1Api* | [**workspace_model_settings_v1_update_workspace_model_settings**](azentspublicclient/docs/WorkspaceModelSettingsV1Api.md#workspace_model_settings_v1_update_workspace_model_settings) | **PUT** /workspace-model-settings/v1/workspaces/{handle} | Update Workspace Model Settings
 *WorkspaceV1Api* | [**workspace_v1_create_workspace**](azentspublicclient/docs/WorkspaceV1Api.md#workspace_v1_create_workspace) | **POST** /workspace/v1/workspaces | Create Workspace
+*WorkspaceV1Api* | [**workspace_v1_get_agent_environment_selection**](azentspublicclient/docs/WorkspaceV1Api.md#workspace_v1_get_agent_environment_selection) | **GET** /workspace/v1/workspaces/{handle}/agents/{agent_id}/environment-selection | Get Agent Environment Selection
 *WorkspaceV1Api* | [**workspace_v1_get_workspace_by_handle**](azentspublicclient/docs/WorkspaceV1Api.md#workspace_v1_get_workspace_by_handle) | **GET** /workspace/v1/workspaces/{handle} | Get Workspace By Handle
+*WorkspaceV1Api* | [**workspace_v1_get_workspace_environment**](azentspublicclient/docs/WorkspaceV1Api.md#workspace_v1_get_workspace_environment) | **GET** /workspace/v1/workspaces/{handle}/environment | Get Workspace Environment
 *WorkspaceV1Api* | [**workspace_v1_list_workspaces**](azentspublicclient/docs/WorkspaceV1Api.md#workspace_v1_list_workspaces) | **GET** /workspace/v1/workspaces | List Workspaces
+*WorkspaceV1Api* | [**workspace_v1_replace_agent_environment_selection**](azentspublicclient/docs/WorkspaceV1Api.md#workspace_v1_replace_agent_environment_selection) | **PUT** /workspace/v1/workspaces/{handle}/agents/{agent_id}/environment-selection | Replace Agent Environment Selection
+*WorkspaceV1Api* | [**workspace_v1_replace_workspace_environment**](azentspublicclient/docs/WorkspaceV1Api.md#workspace_v1_replace_workspace_environment) | **PUT** /workspace/v1/workspaces/{handle}/environment | Replace Workspace Environment
 *XAIOAuthV1Api* | [**xai_oauth_v1_cancel_device**](azentspublicclient/docs/XAIOAuthV1Api.md#xai_oauth_v1_cancel_device) | **DELETE** /llm-provider-integration/v1/workspaces/{handle}/xai-oauth/device/{session_id} | Cancel Device
 *XAIOAuthV1Api* | [**xai_oauth_v1_poll_device**](azentspublicclient/docs/XAIOAuthV1Api.md#xai_oauth_v1_poll_device) | **GET** /llm-provider-integration/v1/workspaces/{handle}/xai-oauth/device/{session_id} | Poll Device
 *XAIOAuthV1Api* | [**xai_oauth_v1_start_device**](azentspublicclient/docs/XAIOAuthV1Api.md#xai_oauth_v1_start_device) | **POST** /llm-provider-integration/v1/workspaces/{handle}/xai-oauth/device/start | Start Device
@@ -508,6 +512,8 @@ Class | Method | HTTP request | Description
  - [AgentWorkspaceDeleteRequest](azentspublicclient/docs/AgentWorkspaceDeleteRequest.md)
  - [AgentWorkspaceDirectoryResponse](azentspublicclient/docs/AgentWorkspaceDirectoryResponse.md)
  - [AgentWorkspaceEntryResponse](azentspublicclient/docs/AgentWorkspaceEntryResponse.md)
+ - [AgentWorkspaceEnvironmentReplace](azentspublicclient/docs/AgentWorkspaceEnvironmentReplace.md)
+ - [AgentWorkspaceEnvironmentSettings](azentspublicclient/docs/AgentWorkspaceEnvironmentSettings.md)
  - [AgentWorkspaceFileResponse](azentspublicclient/docs/AgentWorkspaceFileResponse.md)
  - [AgentWorkspaceManifestResponse](azentspublicclient/docs/AgentWorkspaceManifestResponse.md)
  - [AgentWorkspaceMkdirRequest](azentspublicclient/docs/AgentWorkspaceMkdirRequest.md)
@@ -981,6 +987,10 @@ Class | Method | HTTP request | Description
  - [VerifyCodeRequest](azentspublicclient/docs/VerifyCodeRequest.md)
  - [VerifyCodeResponse](azentspublicclient/docs/VerifyCodeResponse.md)
  - [Workspace](azentspublicclient/docs/Workspace.md)
+ - [WorkspaceEnvironmentEntry](azentspublicclient/docs/WorkspaceEnvironmentEntry.md)
+ - [WorkspaceEnvironmentEntryEdit](azentspublicclient/docs/WorkspaceEnvironmentEntryEdit.md)
+ - [WorkspaceEnvironmentReplace](azentspublicclient/docs/WorkspaceEnvironmentReplace.md)
+ - [WorkspaceEnvironmentSettings](azentspublicclient/docs/WorkspaceEnvironmentSettings.md)
  - [WorkspaceListResponse](azentspublicclient/docs/WorkspaceListResponse.md)
  - [WorkspaceModelSettingsResponse](azentspublicclient/docs/WorkspaceModelSettingsResponse.md)
  - [WorkspaceModelSettingsUpdateRequest](azentspublicclient/docs/WorkspaceModelSettingsUpdateRequest.md)

@@ -23,6 +23,11 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent.py
   - python/apps/azents/src/azents/core/runtime_environment.py
   - python/apps/azents/src/azents/repos/agent_runtime_environment.py
+  - python/apps/azents/src/azents/repos/workspace_environment.py
+  - python/apps/azents/src/azents/core/workspace_environment.py
+  - python/apps/azents/src/azents/rdb/models/workspace_environment.py
+  - python/apps/azents/src/azents/services/workspace_environment.py
+  - python/apps/azents/src/azents/api/public/workspace/v1/environment.py
   - python/apps/azents/src/azents/services/agent_runtime_environment.py
   - python/apps/azents/src/azents/engine/tools/builtin.py
   - python/apps/azents/src/azents/core/runtime_profile.py
@@ -64,6 +69,12 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/components/AgentRuntimeSettings.tsx
   - typescript/apps/azents-web/src/features/agents/AgentRuntimeSettingsPage.tsx
   - typescript/apps/azents-web/src/features/agents/AgentRuntimeEnvironmentVariablesSection.tsx
+  - typescript/apps/azents-web/src/features/agents/AgentWorkspaceEnvironmentSection.tsx
+  - typescript/apps/azents-web/src/features/agents/components/AgentWorkspaceEnvironmentSelection*
+  - typescript/apps/azents-web/src/features/agents/containers/useAgentWorkspaceEnvironmentSelection.ts
+  - typescript/apps/azents-web/src/features/workspace-settings/WorkspaceEnvironmentPage.tsx
+  - typescript/apps/azents-web/src/features/workspace-settings/containers/useWorkspaceEnvironmentContainer.ts
+  - typescript/apps/azents-web/src/trpc/routers/workspace.ts
   - typescript/apps/azents-web/src/features/agents/components/AgentRuntimeEnvironmentVariables*
   - typescript/apps/azents-web/src/features/agents/containers/useAgentRuntimeEnvironmentVariablesContainer.ts
   - typescript/apps/azents-web/src/trpc/routers/agent.ts
@@ -71,7 +82,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
-last_verified_at: 2026-10-13
+last_verified_at: 2026-10-15
 spec_version: 42
 ---
 
@@ -126,6 +137,46 @@ and capability fence subsequent use. Explicit environment deletion or Agent
 deletion owns removal of this setting. Existing environment-variable Toolkits
 remain available with unchanged credentials and APIs; no deprecation or Toolkit
 data migration occurs.
+
+## Workspace environment variables and Agent opt-in
+
+Workspace settings → Environment variables provides a shared catalog. Workspace
+Owners and Managers can replace the desired catalog, including deletion; members
+receive only name/ID/value-presence metadata. Agent settings → Runtime separately
+lists shared keys with checkboxes. Workspace Owners and exact Agent administrators
+can replace an Agent's selected-ID set. Manager role alone cannot edit Agent
+selection. Existing public/private Agent visibility rules remain in force.
+
+The catalog stores immutable `workspace_environment_variables` identities with
+Workspace/name uniqueness and encrypted values. Default-empty
+`agent_workspace_environment_selections` rows record explicit opt-in; there is no
+automatic inheritance or select-all default. New catalog entries do not acquire
+selections. Value replacement retains identity; rename deletes the old identity
+and creates a new one, cascading old selections. Deletion followed by same-name
+creation never restores selections. Stale deleted/renamed references and foreign
+Workspace IDs are rejected rather than looked up by name.
+
+Catalog writes lock Workspace; selection writes lock Workspace then Agent and
+revalidate all IDs and management authority in the same completed DB transaction.
+Whole-list replacement uses ordinary last-accepted-writer settings semantics, not
+versions or history. Each source independently keeps the existing variable
+count/name/UTF-8/value limits, leaving Agent-only limits unchanged.
+
+Runtime owner resolution reads selected same-Workspace rows and Agent-local values
+in one SQL statement snapshot. Final composition is Toolkit → selected Workspace
+→ Agent-local. Shared changes apply at the next command preparation without
+restart; already-prepared/running process environments are not revoked. An Agent
+override hides the shared value; removing it reveals the selected shared value.
+Unselecting removes only the shared contribution, not Agent-local or Toolkit
+configuration. The Agent selection UI annotates local override names and explains
+future shared-value updates. Reads, writes and errors never return secret values.
+
+Workspace v1 exposes GET/PUT `/workspaces/{handle}/environment` and GET/PUT
+`/workspaces/{handle}/agents/{agent_id}/environment-selection`. Generated clients
+and existing secret-safe validation routes own the wire boundary. Migration adds
+empty tables only; no existing Agent is opted in and no Toolkit credentials move.
+Session pages, Interactive Terminal, Runner global environment and Provider
+configuration remain unchanged.
 
 ## Runtime Profile binding and current configuration state
 

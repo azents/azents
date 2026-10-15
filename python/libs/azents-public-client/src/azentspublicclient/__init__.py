@@ -143,6 +143,8 @@ __all__ = [
     "AgentWorkspaceDeleteRequest",
     "AgentWorkspaceDirectoryResponse",
     "AgentWorkspaceEntryResponse",
+    "AgentWorkspaceEnvironmentReplace",
+    "AgentWorkspaceEnvironmentSettings",
     "AgentWorkspaceFileResponse",
     "AgentWorkspaceManifestResponse",
     "AgentWorkspaceMkdirRequest",
@@ -616,6 +618,10 @@ __all__ = [
     "VerifyCodeRequest",
     "VerifyCodeResponse",
     "Workspace",
+    "WorkspaceEnvironmentEntry",
+    "WorkspaceEnvironmentEntryEdit",
+    "WorkspaceEnvironmentReplace",
+    "WorkspaceEnvironmentSettings",
     "WorkspaceListResponse",
     "WorkspaceModelSettingsResponse",
     "WorkspaceModelSettingsUpdateRequest",
@@ -789,6 +795,8 @@ from azentspublicclient.models.agent_workspace_control_unavailable_access_respon
 from azentspublicclient.models.agent_workspace_delete_request import AgentWorkspaceDeleteRequest as AgentWorkspaceDeleteRequest
 from azentspublicclient.models.agent_workspace_directory_response import AgentWorkspaceDirectoryResponse as AgentWorkspaceDirectoryResponse
 from azentspublicclient.models.agent_workspace_entry_response import AgentWorkspaceEntryResponse as AgentWorkspaceEntryResponse
+from azentspublicclient.models.agent_workspace_environment_replace import AgentWorkspaceEnvironmentReplace as AgentWorkspaceEnvironmentReplace
+from azentspublicclient.models.agent_workspace_environment_settings import AgentWorkspaceEnvironmentSettings as AgentWorkspaceEnvironmentSettings
 from azentspublicclient.models.agent_workspace_file_response import AgentWorkspaceFileResponse as AgentWorkspaceFileResponse
 from azentspublicclient.models.agent_workspace_manifest_response import AgentWorkspaceManifestResponse as AgentWorkspaceManifestResponse
 from azentspublicclient.models.agent_workspace_mkdir_request import AgentWorkspaceMkdirRequest as AgentWorkspaceMkdirRequest
@@ -1262,6 +1270,10 @@ from azentspublicclient.models.value import Value as Value
 from azentspublicclient.models.verify_code_request import VerifyCodeRequest as VerifyCodeRequest
 from azentspublicclient.models.verify_code_response import VerifyCodeResponse as VerifyCodeResponse
 from azentspublicclient.models.workspace import Workspace as Workspace
+from azentspublicclient.models.workspace_environment_entry import WorkspaceEnvironmentEntry as WorkspaceEnvironmentEntry
+from azentspublicclient.models.workspace_environment_entry_edit import WorkspaceEnvironmentEntryEdit as WorkspaceEnvironmentEntryEdit
+from azentspublicclient.models.workspace_environment_replace import WorkspaceEnvironmentReplace as WorkspaceEnvironmentReplace
+from azentspublicclient.models.workspace_environment_settings import WorkspaceEnvironmentSettings as WorkspaceEnvironmentSettings
 from azentspublicclient.models.workspace_list_response import WorkspaceListResponse as WorkspaceListResponse
 from azentspublicclient.models.workspace_model_settings_response import WorkspaceModelSettingsResponse as WorkspaceModelSettingsResponse
 from azentspublicclient.models.workspace_model_settings_update_request import WorkspaceModelSettingsUpdateRequest as WorkspaceModelSettingsUpdateRequest

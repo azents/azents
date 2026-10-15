@@ -1,24 +1,56 @@
 .row {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) auto;
-  grid-template-areas: "name value remove";
-  gap: var(--mantine-spacing-sm);
+  grid-template-rows: auto auto auto auto;
+  column-gap: var(--mantine-spacing-sm);
+  row-gap: 0.25rem;
   align-items: start;
 }
 
-.name {
-  grid-area: name;
+.name,
+.value {
+  display: contents;
+}
+
+.nameLabel,
+.nameControl,
+.nameError {
+  grid-column: 1;
   min-width: 0;
 }
 
-.value {
-  grid-area: value;
+.valueLabel,
+.valueControl,
+.valueDescription,
+.valueError {
+  grid-column: 2;
   min-width: 0;
+}
+
+.nameLabel,
+.valueLabel {
+  grid-row: 1;
+}
+
+.nameControl,
+.valueControl {
+  grid-row: 2;
+  margin-block: 0;
+}
+
+.valueDescription {
+  grid-row: 3;
+}
+
+.nameError,
+.valueError {
+  grid-row: 4;
 }
 
 .remove {
-  grid-area: remove;
-  margin-top: calc(1.5rem + var(--mantine-spacing-xs));
+  grid-column: 3;
+  grid-row: 2;
+  align-self: center;
 }
 
 .nameInput {
@@ -29,9 +61,39 @@
 @media (max-width: 48em) {
   .row {
     grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas:
-      "name remove"
-      "value value";
+    grid-template-rows: auto auto auto auto auto auto auto;
+  }
+
+  .remove {
+    grid-column: 2;
+  }
+
+  .nameError {
+    grid-row: 3;
+  }
+
+  .valueLabel,
+  .valueControl,
+  .valueDescription,
+  .valueError {
+    grid-column: 1 / -1;
+  }
+
+  .valueLabel {
+    grid-row: 4;
+    margin-top: var(--mantine-spacing-sm);
+  }
+
+  .valueControl {
+    grid-row: 5;
+  }
+
+  .valueDescription {
+    grid-row: 6;
+  }
+
+  .valueError {
+    grid-row: 7;
   }
 
   .row + .row {

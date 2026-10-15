@@ -35,6 +35,7 @@ export function useAgentRuntimeEnvironmentVariablesContainer({
       setDraft(null);
       setSaved(true);
       await utils.agent.getRuntimeEnvironment.invalidate(input);
+      await utils.workspace.getAgentEnvironmentSelection.invalidate(input);
     },
   });
 
