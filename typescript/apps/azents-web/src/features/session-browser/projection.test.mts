@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { browserProjectionState } from "./projection.ts";
+import { browserPanelHref, parseBrowserTarget } from "./route.ts";
 
 const target = {
   task_id: "task",
@@ -44,6 +45,29 @@ void test("explicit live tab selection is retained over Agent preference", () =>
   );
   assert.equal(state.type, "READY");
   assert.deepEqual(state.selected.target, target);
+});
+void test("closing the selected new tab restores a live Agent tab and keeps the Browser panel route", () => {
+  const blank = {
+    ...other,
+    title: "about:blank",
+    url: "about:blank",
+  };
+  const linked = { type: "TARGET", target: blank.target } as const;
+  const created = browserProjectionState([page, blank], linked, true, [target]);
+  assert.equal(created.type, "READY");
+  assert.deepEqual(created.selected.target, blank.target);
+  const closed = browserProjectionState([page], linked, true, [target]);
+  assert.equal(closed.type, "READY");
+  assert.deepEqual(closed.selected.target, target);
+  const href = browserPanelHref(
+    "/w/workspace/agents/agent/sessions/session",
+    "page=browser&other=value",
+    closed.selected.target,
+  );
+  const search = href.split("?")[1] ?? "";
+  assert.equal(new URLSearchParams(search).get("page"), "browser");
+  assert.equal(new URLSearchParams(search).get("other"), "value");
+  assert.deepEqual(parseBrowserTarget(search), { type: "TARGET", target });
 });
 void test("empty tab lists guide creation regardless of an obsolete link", () => {
   assert.deepEqual(

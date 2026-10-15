@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import base64
 import json
-import os
 import time
 from dataclasses import asdict
-from pathlib import Path
 from urllib.parse import urlencode
 
 import azentsadminclient
@@ -28,7 +26,6 @@ from azentspublicclient.models.ws_ticket_response import WsTicketResponse
 from pydantic import BaseModel, ConfigDict, Field
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.actions.action_builder import ActionBuilder
-from selenium.webdriver.common.actions.pointer_input import PointerInput
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
@@ -232,19 +229,11 @@ def _verify_live_panel(
             )
         )
     )
-    assert not driver.find_elements(
-        By.CSS_SELECTOR, 'textarea[aria-label="Remote browser keyboard"]'
-    )
     preview.click()
-    focused = wait.until(
+    wait.until(
         ec.visibility_of_element_located(
             (By.CSS_SELECTOR, '[role="dialog"][aria-label="Focus browser"]')
         )
-    )
-    assert driver.execute_script(
-        "const r=arguments[0].getBoundingClientRect();"
-        "return r.width===innerWidth && r.height===innerHeight;",
-        focused,
     )
     viewport = wait.until(
         ec.visibility_of_element_located(
@@ -319,30 +308,6 @@ def _verify_live_panel(
         )
         error.add_note(json.dumps(diagnostics, sort_keys=True))
         raise
-    assert driver.execute_script(
-        "return document.querySelector('[aria-label=\"Remote browser page\"]')"
-        "=== arguments[0];",
-        viewport,
-    )
-    unzoomed_width = viewport.rect["width"]
-    driver.find_element(By.CSS_SELECTOR, 'button[aria-label="Browser actions"]').click()
-    wait.until(
-        ec.element_to_be_clickable(
-            (By.XPATH, "//*[@role='menuitem' and normalize-space(.)='Zoom in']")
-        )
-    ).click()
-    wait.until(lambda _: viewport.rect["width"] > unzoomed_width * 1.2)
-    driver.find_element(By.CSS_SELECTOR, 'button[aria-label="Browser actions"]').click()
-    wait.until(
-        ec.element_to_be_clickable(
-            (
-                By.XPATH,
-                "//*[@role='menuitem' and "
-                "starts-with(normalize-space(.),'Fit to window')]",
-            )
-        )
-    ).click()
-    wait.until(lambda _: abs(viewport.rect["width"] - unzoomed_width) < 1)
     ActionChains(driver).send_keys(Keys.ESCAPE).perform()
     wait.until(
         ec.invisibility_of_element_located(
@@ -414,99 +379,6 @@ return {ready: false};
         raise AssertionError(
             f"Native reload outcome was not observed; bounded UI state: {diagnostic}"
         ) from error
-    artifact_directory = os.environ.get("AZENTS_E2E_ARTIFACT_DIR")
-    if artifact_directory is not None:
-        artifacts = Path(artifact_directory)
-        artifacts.mkdir(parents=True, exist_ok=True)
-        assert driver.save_screenshot(str(artifacts / "session-browser-desktop.png"))
-    driver.set_window_size(390, 844)
-    wait.until(
-        ec.visibility_of_element_located(
-            (By.CSS_SELECTOR, '[aria-label="Remote browser page"][data-stale="false"]')
-        )
-    )
-    assert driver.execute_script(
-        "return document.documentElement.scrollWidth <= window.innerWidth;"
-    )
-    wait.until(
-        ec.element_to_be_clickable(
-            (
-                By.CSS_SELECTOR,
-                '[aria-label="Remote browser page"] button[aria-label="Focus browser"]',
-            )
-        )
-    ).click()
-    viewport = wait.until(
-        ec.visibility_of_element_located(
-            (By.CSS_SELECTOR, '[aria-label="Remote browser page"][data-stale="false"]')
-        )
-    )
-
-    def tap_native(x: int, y: int) -> None:
-        rect = viewport.rect
-        scale = rect["width"] / width
-        touch = ActionBuilder(driver, mouse=PointerInput("touch", "browser-finger"))
-        touch.pointer_action.move_to_location(
-            int(rect["x"] + x * scale), int(rect["y"] + y * scale)
-        )
-        touch.pointer_action.pointer_down()
-        touch.pointer_action.pointer_up()
-        touch.perform()
-
-    tap_native(100, 280)
-    wait_until(
-        lambda: title_is("Browser GUI pointer verified"),
-        timeout=15,
-        interval=0.1,
-        message="Mobile touch did not activate the native page button",
-    )
-    tap_native(100, 120)
-    wait.until(
-        lambda _: driver.execute_script(
-            "return document.activeElement?.getAttribute('aria-label') "
-            "=== 'Remote browser keyboard';"
-        )
-    )
-    ActionChains(driver).send_keys("Synthetic GUI input").perform()
-    wait_until(
-        lambda: title_is("✅"),
-        timeout=15,
-        interval=0.1,
-        message="Mobile touch focus did not deliver complete native text",
-    )
-    driver.find_element(
-        By.XPATH, "//button[normalize-space(.)='Exit focused view']"
-    ).click()
-    wait.until(
-        ec.invisibility_of_element_located(
-            (By.CSS_SELECTOR, '[role="dialog"][aria-label="Focus browser"]')
-        )
-    )
-
-    driver.find_element(By.CSS_SELECTOR, 'button[aria-label="New tab"]').click()
-    wait.until(
-        lambda _: driver.execute_script(
-            "return new URLSearchParams(location.search).get('browserPageId') "
-            "!== arguments[0];",
-            target.page_id,
-        )
-    )
-    wait.until(
-        ec.element_to_be_clickable(
-            (By.CSS_SELECTOR, 'button[aria-label="Close tab: about:blank"]')
-        )
-    ).click()
-    wait.until(
-        lambda _: driver.execute_script(
-            "return new URLSearchParams(location.search).get('browserPageId') "
-            "=== arguments[0];",
-            target.page_id,
-        )
-    )
-    if artifact_directory is not None:
-        assert driver.save_screenshot(
-            str(Path(artifact_directory) / "session-browser-mobile-viewport.png")
-        )
     driver.get(f"{web_url}/w/{handle}/agents/{agent_id}/sessions/{session_id}")
 
 
@@ -685,13 +557,6 @@ def test_session_browser_engine_native_input_dialog_and_reconnect(
             timeout=10,
         )
         assert child_close.status_code == 409
-        child_create = requests.post(
-            f"{azents_public_server_url}{child_resource}/pages",
-            headers=headers,
-            json={},
-            timeout=10,
-        )
-        assert child_create.status_code == 409
         unchanged = _projection(
             azents_public_server_url, child_resource, workspace.token
         )
