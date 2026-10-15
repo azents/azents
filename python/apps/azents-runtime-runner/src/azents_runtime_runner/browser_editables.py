@@ -87,9 +87,12 @@ _PROBE = """() => {
 }"""
 
 _FRAME_PROJECT = """(element, regions) => {
-    for (let parent=element;parent;parent=parent.parentElement) {
+    for (let parent=element;parent;) {
         const style=getComputedStyle(parent);
         if (style.transform !== 'none' || Number(style.zoom || 1) !== 1) return [];
+        const root=parent.getRootNode();
+        parent=parent.parentElement ||
+            (root instanceof ShadowRoot ? root.host : null);
     }
     const rect = element.getBoundingClientRect();
     if (Math.abs(rect.width - element.offsetWidth) >= 0.5 ||

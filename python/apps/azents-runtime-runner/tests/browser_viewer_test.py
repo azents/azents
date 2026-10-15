@@ -739,6 +739,32 @@ async def test_native_plaintext_paste_uses_current_focused_editable(
         await stop(running, transport)
 
 
+async def test_rotated_shadow_host_cannot_project_child_frame_input(
+    manager: RunnerBrowserManager, tmp_path: Path, site: str
+) -> None:
+    authority = await scope(manager, tmp_path, site)
+    native = manager.tasks[authority.task_id].pages[authority.page_id].page
+    await native.set_content("""<input id=main>
+        <div id=host style='position:absolute;left:100px;top:100px;
+        width:300px;height:300px'></div>""")
+    await native.locator("#host").evaluate("""host => {
+        host.attachShadow({mode:'open'}).innerHTML =
+            `<iframe style="width:300px;height:300px;border:0"
+                srcdoc="<input id=child>"></iframe>`;
+    }""")
+    await native.frames[-1].wait_for_load_state()
+    regions = BrowserEditableRegions(native)
+    try:
+        original = await regions.read()
+        assert len(original) == 2
+        await native.locator("#host").evaluate(
+            "host => host.style.transform='rotate(90deg)'"
+        )
+        assert await regions.read() == original[:1]
+    finally:
+        await regions.close()
+
+
 async def test_paste_does_not_bypass_readonly_or_navigation(
     manager: RunnerBrowserManager, tmp_path: Path, site: str
 ) -> None:
