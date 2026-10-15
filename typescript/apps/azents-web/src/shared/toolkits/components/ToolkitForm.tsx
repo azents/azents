@@ -40,6 +40,11 @@ import { McpConfigFieldsContainer } from "../McpConfigFieldsContainer";
 import { NotionConfigFieldsContainer } from "../NotionConfigFieldsContainer";
 import { SentryConfigFieldsContainer } from "../SentryConfigFieldsContainer";
 import { ShellConfigFields } from "./ShellConfigFields";
+import { ToolkitPreparationGuide } from "./ToolkitPreparationGuide";
+import { ToolkitSettingsReview } from "./ToolkitSettingsReview";
+import setupClasses from "./ToolkitSetup.module.css";
+import { ToolkitSetupSection } from "./ToolkitSetupSection";
+import { ToolkitTypeIcon } from "./ToolkitTypeIcon";
 import type { GitHubFormRegistration } from "../provider-config-views";
 import type { ToolkitFormValues } from "../schemas";
 import type { ToolkitConfigProjection } from "../toolkit-config-projection";
@@ -135,6 +140,7 @@ export function ToolkitForm({
   onCancel,
 }: ToolkitFormProps): React.ReactElement {
   const t = useTranslations("workspace.toolkits");
+  const setup = useTranslations("toolkitSetup");
   const handleSubmit: FormEventHandler<HTMLFormElement> = (event) => {
     event.stopPropagation();
     onSubmit(event);
@@ -215,393 +221,460 @@ export function ToolkitForm({
 
         <form onSubmit={handleSubmit}>
           <Stack gap="md">
-            <Select
-              label={t("toolLabel")}
-              placeholder={t("toolPlaceholder")}
-              data={toolOptions}
-              required
-              disabled={isEdit || toolkitTypeLocked}
-              value={form.getValues().toolkitType || null}
-              onChange={onToolSelect}
-              error={form.errors.toolkitType}
-            />
+            <ToolkitSetupSection
+              number={1}
+              title={setup("prepareTitle")}
+              description={setup("prepareDescription")}
+            >
+              {(isEdit || toolkitTypeLocked) && currentToolSlug ? (
+                <Group gap="sm">
+                  <ToolkitTypeIcon toolkitType={currentToolSlug} />
+                  <Text fw={600}>
+                    {toolOptions.find(
+                      (option) => option.value === currentToolSlug,
+                    )?.label ?? currentToolSlug}
+                  </Text>
+                </Group>
+              ) : (
+                <Select
+                  label={t("toolLabel")}
+                  placeholder={t("toolPlaceholder")}
+                  data={toolOptions}
+                  required
+                  disabled={isEdit || toolkitTypeLocked}
+                  value={form.getValues().toolkitType || null}
+                  onChange={onToolSelect}
+                  error={form.errors.toolkitType}
+                />
+              )}
+              <ToolkitPreparationGuide toolkitType={currentToolSlug} />
+            </ToolkitSetupSection>
 
-            <TextInput
-              label={t("nameLabel")}
-              placeholder={
-                currentToolSlug === "mcp"
-                  ? t("mcpNamePlaceholder")
-                  : namePlaceholder
-              }
-              required={nameRequired}
-              key={form.key("name")}
-              {...form.getInputProps("name")}
-            />
-
-            <TextInput
-              label={t("slugLabel")}
-              description={
-                agentId == null
-                  ? t("slugDescription")
-                  : t("agentSlugDescription")
-              }
-              placeholder={slugPlaceholder || t("slugPlaceholder")}
-              key={form.key("slug")}
-              {...form.getInputProps("slug")}
-            />
-
-            <Textarea
-              label={t("descriptionLabel")}
-              placeholder={t("descriptionPlaceholder")}
-              key={form.key("description")}
-              {...form.getInputProps("description")}
-            />
-
-            <Textarea
-              label={t("customPromptLabel")}
-              description={t("customPromptDescription")}
-              placeholder={t("customPromptPlaceholder")}
-              key={form.key("prompt")}
-              {...form.getInputProps("prompt")}
-            />
-
-            {/* Tool-specific settings form */}
-            {configurationFields !== void 0 ? (
-              configurationFields
-            ) : (
-              <>
-                {currentToolSlug === "shell" && (
-                  <ShellConfigFields
-                    value={{
-                      allowed_domains:
-                        configProjection.type === "shell"
-                          ? configProjection.config.allowed_domains
-                          : [],
-                      denied_domains:
-                        configProjection.type === "shell"
-                          ? configProjection.config.denied_domains
-                          : [],
-                    }}
-                    onChange={onConfigChange}
-                  />
-                )}
-
-                {currentToolSlug === "mcp" && (
-                  <McpConfigFieldsContainer
-                    config={form.getValues().config}
-                    onConfigChange={onConfigChange}
-                    credentials={form.getValues().credentials ?? null}
-                    onCredentialsChange={onCredentialsChange}
-                    hasCredentials={
-                      formState.type === "EDIT" &&
-                      formState.config.has_credentials === true
-                    }
-                    handle={handle}
-                    {...(agentId != null && { agentId })}
-                    {...(formState.type === "EDIT" && {
-                      toolkitConfigId: formState.config.id,
-                    })}
-                  />
-                )}
-
-                {currentToolSlug === "github" && (
-                  <GithubConfigFieldsContainer
-                    savedAuthType={githubRegistration.savedAuthType}
-                    config={form.getValues().config}
-                    onConfigChange={onConfigChange}
-                    credentials={form.getValues().credentials ?? null}
-                    onCredentialsChange={onCredentialsChange}
-                    hasCredentials={
-                      formState.type === "EDIT" &&
-                      formState.config.has_credentials === true
-                    }
-                    authorizationState={
-                      formState.type === "EDIT"
-                        ? (formState.config.authorization_state ?? null)
-                        : null
-                    }
-                    handle={handle}
-                    {...(agentId != null && { agentId })}
-                    {...(formState.type === "EDIT" && {
-                      toolkitConfigId: formState.config.id,
-                    })}
-                  />
-                )}
-
-                {currentToolSlug === "github" &&
-                  formState.type === "EDIT" &&
-                  githubRegistration.savedUserMode && (
-                    <GitHubUserAuthorizationContainer
-                      toolkit={formState.config}
-                      onPendingChange={onUserSetupPendingChange}
-                      context={{
-                        handle,
-                        toolkitId: formState.config.id,
-                        agentId,
-                        returnView: "EDIT",
-                        returnPath:
-                          agentId == null
-                            ? `/w/${handle}/toolkits/${formState.config.id}/edit`
-                            : `/w/${handle}/agents/${agentId}/settings/capabilities#agent-toolkits`,
+            <ToolkitSetupSection
+              number={2}
+              title={setup("configureTitle")}
+              description={setup("configureDescription")}
+            >
+              {isEdit && <Text size="sm">{setup("savedHint")}</Text>}
+              {/* Tool-specific settings form */}
+              {configurationFields !== void 0 ? (
+                configurationFields
+              ) : (
+                <>
+                  {currentToolSlug === "shell" && (
+                    <ShellConfigFields
+                      value={{
+                        allowed_domains:
+                          configProjection.type === "shell"
+                            ? configProjection.config.allowed_domains
+                            : [],
+                        denied_domains:
+                          configProjection.type === "shell"
+                            ? configProjection.config.denied_domains
+                            : [],
                       }}
-                      registrationDirty={githubRegistration.registrationDirty}
+                      onChange={onConfigChange}
                     />
                   )}
 
-                {currentToolSlug === "notion" && (
-                  <NotionConfigFieldsContainer
-                    config={form.getValues().config}
-                    onConfigChange={onConfigChange}
-                    credentials={form.getValues().credentials ?? null}
-                    onCredentialsChange={onCredentialsChange}
-                    hasCredentials={
-                      formState.type === "EDIT" &&
-                      formState.config.has_credentials === true
-                    }
-                    handle={handle}
-                    {...(agentId != null && { agentId })}
-                    {...(formState.type === "EDIT" && {
-                      toolkitConfigId: formState.config.id,
-                    })}
-                  />
-                )}
-
-                {currentToolSlug === "sentry" && (
-                  <SentryConfigFieldsContainer
-                    config={form.getValues().config}
-                    onConfigChange={onConfigChange}
-                    credentials={form.getValues().credentials ?? null}
-                    onCredentialsChange={onCredentialsChange}
-                    hasCredentials={
-                      formState.type === "EDIT" &&
-                      formState.config.has_credentials === true
-                    }
-                    handle={handle}
-                    {...(agentId != null && { agentId })}
-                    {...(formState.type === "EDIT" && {
-                      toolkitConfigId: formState.config.id,
-                    })}
-                  />
-                )}
-
-                {currentToolSlug === "gcp" && (
-                  <GcpConfigFieldsContainer
-                    config={form.getValues().config}
-                    onConfigChange={onConfigChange}
-                    credentials={form.getValues().credentials ?? null}
-                    onCredentialsChange={onCredentialsChange}
-                    hasCredentials={
-                      formState.type === "EDIT" &&
-                      formState.config.has_credentials === true
-                    }
-                    handle={handle}
-                    {...(agentId != null && { agentId })}
-                    {...(formState.type === "EDIT" && {
-                      toolkitConfigId: formState.config.id,
-                    })}
-                  />
-                )}
-
-                {currentToolSlug === "aws" && (
-                  <AwsConfigFieldsContainer
-                    config={form.getValues().config}
-                    onConfigChange={onConfigChange}
-                    credentials={form.getValues().credentials ?? null}
-                    onCredentialsChange={onCredentialsChange}
-                    hasCredentials={
-                      formState.type === "EDIT" &&
-                      formState.config.has_credentials === true
-                    }
-                    handle={handle}
-                    {...(agentId != null && { agentId })}
-                    {...(formState.type === "EDIT" && {
-                      toolkitConfigId: formState.config.id,
-                    })}
-                  />
-                )}
-
-                {currentToolSlug === "google_analytics" && (
-                  <GoogleAnalyticsConfigFieldsContainer
-                    config={form.getValues().config}
-                    onConfigChange={onConfigChange}
-                    credentials={form.getValues().credentials ?? null}
-                    onCredentialsChange={onCredentialsChange}
-                    hasCredentials={
-                      formState.type === "EDIT" &&
-                      formState.config.has_credentials === true
-                    }
-                    handle={handle}
-                    {...(agentId != null && { agentId })}
-                    {...(formState.type === "EDIT" && {
-                      toolkitConfigId: formState.config.id,
-                    })}
-                  />
-                )}
-
-                {currentToolSlug === "google" && formState.type === "EDIT" && (
-                  <GoogleSetupContainer
-                    key={`google:${handle}:${agentId ?? "shared"}:${formState.config.id}`}
-                    handle={handle}
-                    agentId={agentId}
-                    toolkitId={formState.config.id}
-                    embedded
-                    onPendingChange={onUserSetupPendingChange}
-                  />
-                )}
-
-                {currentToolSlug === "brave_search" && (
-                  <BraveSearchConfigFieldsContainer
-                    config={form.getValues().config}
-                    onConfigChange={onConfigChange}
-                    credentials={form.getValues().credentials ?? null}
-                    onCredentialsChange={onCredentialsChange}
-                    hasCredentials={
-                      formState.type === "EDIT" &&
-                      formState.config.has_credentials === true
-                    }
-                    handle={handle}
-                    {...(agentId != null && { agentId })}
-                    {...(formState.type === "EDIT" && {
-                      toolkitConfigId: formState.config.id,
-                    })}
-                  />
-                )}
-
-                {currentToolSlug === "kubernetes" && (
-                  <KubernetesConfigFieldsContainer
-                    config={form.getValues().config}
-                    onConfigChange={onConfigChange}
-                    credentials={form.getValues().credentials ?? null}
-                    onCredentialsChange={onCredentialsChange}
-                    hasCredentials={
-                      formState.type === "EDIT" &&
-                      formState.config.has_credentials === true
-                    }
-                    handle={handle}
-                    {...(agentId != null && { agentId })}
-                    {...(formState.type === "EDIT" && {
-                      toolkitConfigId: formState.config.id,
-                    })}
-                  />
-                )}
-
-                {currentToolSlug === "envvar" && (
-                  <EnvVarConfigFieldsContainer
-                    config={form.getValues().config}
-                    onConfigChange={onConfigChange}
-                    credentials={form.getValues().credentials ?? null}
-                    onCredentialsChange={onCredentialsChange}
-                    hasCredentials={
-                      formState.type === "EDIT" &&
-                      formState.config.has_credentials === true
-                    }
-                  />
-                )}
-              </>
-            )}
-
-            {formState.type === "EDIT" && showOauthConnection && (
-              <Card withBorder>
-                <Stack gap="xs">
-                  <Group justify="space-between">
-                    <Text fw={600}>{t("oauthConnection.title")}</Text>
-                    <Badge>
-                      {t(
-                        `oauthConnection.${oauthConnectionStatusTranslationKey(
-                          formState.config.oauth_connection?.status ?? null,
-                        )}`,
-                      )}
-                    </Badge>
-                  </Group>
-                  {formState.config.oauth_connection?.issuer != null && (
-                    <Text size="sm" c="dimmed">
-                      {t("oauthConnection.issuer")}:{" "}
-                      {formState.config.oauth_connection.issuer}
-                    </Text>
+                  {currentToolSlug === "mcp" && (
+                    <McpConfigFieldsContainer
+                      config={form.getValues().config}
+                      onConfigChange={onConfigChange}
+                      credentials={form.getValues().credentials ?? null}
+                      onCredentialsChange={onCredentialsChange}
+                      hasCredentials={
+                        formState.type === "EDIT" &&
+                        formState.config.has_credentials === true
+                      }
+                      handle={handle}
+                      {...(agentId != null && { agentId })}
+                      {...(formState.type === "EDIT" && {
+                        toolkitConfigId: formState.config.id,
+                      })}
+                    />
                   )}
-                  {formState.config.oauth_connection?.resource != null && (
-                    <Text size="sm" c="dimmed">
-                      {t("oauthConnection.resource")}:{" "}
-                      {formState.config.oauth_connection.resource}
-                    </Text>
+
+                  {currentToolSlug === "github" && (
+                    <GithubConfigFieldsContainer
+                      savedAuthType={githubRegistration.savedAuthType}
+                      config={form.getValues().config}
+                      onConfigChange={onConfigChange}
+                      credentials={form.getValues().credentials ?? null}
+                      onCredentialsChange={onCredentialsChange}
+                      hasCredentials={
+                        formState.type === "EDIT" &&
+                        formState.config.has_credentials === true
+                      }
+                      authorizationState={
+                        formState.type === "EDIT"
+                          ? (formState.config.authorization_state ?? null)
+                          : null
+                      }
+                      handle={handle}
+                      {...(agentId != null && { agentId })}
+                      {...(formState.type === "EDIT" && {
+                        toolkitConfigId: formState.config.id,
+                      })}
+                    />
                   )}
-                  {formState.config.oauth_connection?.scope != null && (
-                    <Text size="sm" c="dimmed">
-                      {t("oauthConnection.scope")}:{" "}
-                      {formState.config.oauth_connection.scope}
-                    </Text>
+
+                  {currentToolSlug === "github" &&
+                    formState.type === "EDIT" &&
+                    githubRegistration.savedUserMode && (
+                      <GitHubUserAuthorizationContainer
+                        toolkit={formState.config}
+                        onPendingChange={onUserSetupPendingChange}
+                        context={{
+                          handle,
+                          toolkitId: formState.config.id,
+                          agentId,
+                          returnView: "EDIT",
+                          returnPath:
+                            agentId == null
+                              ? `/w/${handle}/toolkits/${formState.config.id}/edit`
+                              : `/w/${handle}/agents/${agentId}/settings/capabilities#agent-toolkits`,
+                        }}
+                        registrationDirty={githubRegistration.registrationDirty}
+                      />
+                    )}
+
+                  {currentToolSlug === "notion" && (
+                    <NotionConfigFieldsContainer
+                      config={form.getValues().config}
+                      onConfigChange={onConfigChange}
+                      credentials={form.getValues().credentials ?? null}
+                      onCredentialsChange={onCredentialsChange}
+                      hasCredentials={
+                        formState.type === "EDIT" &&
+                        formState.config.has_credentials === true
+                      }
+                      handle={handle}
+                      {...(agentId != null && { agentId })}
+                      {...(formState.type === "EDIT" && {
+                        toolkitConfigId: formState.config.id,
+                      })}
+                    />
                   )}
-                  {formState.config.oauth_connection?.expires_at != null && (
-                    <Text size="sm" c="dimmed">
-                      {t("oauthConnection.expiresAt")}:{" "}
-                      {formState.config.oauth_connection.expires_at}
-                    </Text>
+
+                  {currentToolSlug === "sentry" && (
+                    <SentryConfigFieldsContainer
+                      config={form.getValues().config}
+                      onConfigChange={onConfigChange}
+                      credentials={form.getValues().credentials ?? null}
+                      onCredentialsChange={onCredentialsChange}
+                      hasCredentials={
+                        formState.type === "EDIT" &&
+                        formState.config.has_credentials === true
+                      }
+                      handle={handle}
+                      {...(agentId != null && { agentId })}
+                      {...(formState.type === "EDIT" && {
+                        toolkitConfigId: formState.config.id,
+                      })}
+                    />
                   )}
-                  <Group>
-                    <Button
-                      type="button"
-                      variant="light"
-                      onClick={onConnectOauth}
-                      loading={oauthConnectionPending.connect}
-                    >
-                      {formState.config.oauth_connection == null
-                        ? t("oauthConnection.connect")
-                        : t("oauthConnection.reconnect")}
-                    </Button>
-                    {formState.config.oauth_connection != null && (
+
+                  {currentToolSlug === "gcp" && (
+                    <GcpConfigFieldsContainer
+                      config={form.getValues().config}
+                      onConfigChange={onConfigChange}
+                      credentials={form.getValues().credentials ?? null}
+                      onCredentialsChange={onCredentialsChange}
+                      hasCredentials={
+                        formState.type === "EDIT" &&
+                        formState.config.has_credentials === true
+                      }
+                      handle={handle}
+                      {...(agentId != null && { agentId })}
+                      {...(formState.type === "EDIT" && {
+                        toolkitConfigId: formState.config.id,
+                      })}
+                    />
+                  )}
+
+                  {currentToolSlug === "aws" && (
+                    <AwsConfigFieldsContainer
+                      config={form.getValues().config}
+                      onConfigChange={onConfigChange}
+                      credentials={form.getValues().credentials ?? null}
+                      onCredentialsChange={onCredentialsChange}
+                      hasCredentials={
+                        formState.type === "EDIT" &&
+                        formState.config.has_credentials === true
+                      }
+                      handle={handle}
+                      {...(agentId != null && { agentId })}
+                      {...(formState.type === "EDIT" && {
+                        toolkitConfigId: formState.config.id,
+                      })}
+                    />
+                  )}
+
+                  {currentToolSlug === "google_analytics" && (
+                    <GoogleAnalyticsConfigFieldsContainer
+                      config={form.getValues().config}
+                      onConfigChange={onConfigChange}
+                      credentials={form.getValues().credentials ?? null}
+                      onCredentialsChange={onCredentialsChange}
+                      hasCredentials={
+                        formState.type === "EDIT" &&
+                        formState.config.has_credentials === true
+                      }
+                      handle={handle}
+                      {...(agentId != null && { agentId })}
+                      {...(formState.type === "EDIT" && {
+                        toolkitConfigId: formState.config.id,
+                      })}
+                    />
+                  )}
+
+                  {currentToolSlug === "google" &&
+                    formState.type === "EDIT" && (
+                      <GoogleSetupContainer
+                        key={`google:${handle}:${agentId ?? "shared"}:${formState.config.id}`}
+                        handle={handle}
+                        agentId={agentId}
+                        toolkitId={formState.config.id}
+                        embedded
+                        onPendingChange={onUserSetupPendingChange}
+                      />
+                    )}
+
+                  {currentToolSlug === "brave_search" && (
+                    <BraveSearchConfigFieldsContainer
+                      config={form.getValues().config}
+                      onConfigChange={onConfigChange}
+                      credentials={form.getValues().credentials ?? null}
+                      onCredentialsChange={onCredentialsChange}
+                      hasCredentials={
+                        formState.type === "EDIT" &&
+                        formState.config.has_credentials === true
+                      }
+                      handle={handle}
+                      {...(agentId != null && { agentId })}
+                      {...(formState.type === "EDIT" && {
+                        toolkitConfigId: formState.config.id,
+                      })}
+                    />
+                  )}
+
+                  {currentToolSlug === "kubernetes" && (
+                    <KubernetesConfigFieldsContainer
+                      config={form.getValues().config}
+                      onConfigChange={onConfigChange}
+                      credentials={form.getValues().credentials ?? null}
+                      onCredentialsChange={onCredentialsChange}
+                      hasCredentials={
+                        formState.type === "EDIT" &&
+                        formState.config.has_credentials === true
+                      }
+                      handle={handle}
+                      {...(agentId != null && { agentId })}
+                      {...(formState.type === "EDIT" && {
+                        toolkitConfigId: formState.config.id,
+                      })}
+                    />
+                  )}
+
+                  {currentToolSlug === "envvar" && (
+                    <EnvVarConfigFieldsContainer
+                      config={form.getValues().config}
+                      onConfigChange={onConfigChange}
+                      credentials={form.getValues().credentials ?? null}
+                      onCredentialsChange={onCredentialsChange}
+                      hasCredentials={
+                        formState.type === "EDIT" &&
+                        formState.config.has_credentials === true
+                      }
+                    />
+                  )}
+                </>
+              )}
+
+              {formState.type === "EDIT" && showOauthConnection && (
+                <Card withBorder>
+                  <Stack gap="xs">
+                    <Group justify="space-between">
+                      <Text fw={600}>{t("oauthConnection.title")}</Text>
+                      <Badge>
+                        {t(
+                          `oauthConnection.${oauthConnectionStatusTranslationKey(
+                            formState.config.oauth_connection?.status ?? null,
+                          )}`,
+                        )}
+                      </Badge>
+                    </Group>
+                    {formState.config.oauth_connection?.issuer != null && (
+                      <Text size="sm" c="dimmed">
+                        {t("oauthConnection.issuer")}:{" "}
+                        {formState.config.oauth_connection.issuer}
+                      </Text>
+                    )}
+                    {formState.config.oauth_connection?.resource != null && (
+                      <Text size="sm" c="dimmed">
+                        {t("oauthConnection.resource")}:{" "}
+                        {formState.config.oauth_connection.resource}
+                      </Text>
+                    )}
+                    {formState.config.oauth_connection?.scope != null && (
+                      <Text size="sm" c="dimmed">
+                        {t("oauthConnection.scope")}:{" "}
+                        {formState.config.oauth_connection.scope}
+                      </Text>
+                    )}
+                    {formState.config.oauth_connection?.expires_at != null && (
+                      <Text size="sm" c="dimmed">
+                        {t("oauthConnection.expiresAt")}:{" "}
+                        {formState.config.oauth_connection.expires_at}
+                      </Text>
+                    )}
+                    <Group>
                       <Button
                         type="button"
-                        variant="subtle"
-                        color="red"
-                        onClick={onDisconnectOauth}
-                        loading={oauthConnectionPending.disconnect}
+                        variant="light"
+                        onClick={onConnectOauth}
+                        loading={oauthConnectionPending.connect}
                       >
-                        {t("oauthConnection.disconnect")}
+                        {formState.config.oauth_connection == null
+                          ? t("oauthConnection.connect")
+                          : t("oauthConnection.reconnect")}
                       </Button>
-                    )}
-                  </Group>
-                </Stack>
-              </Card>
-            )}
+                      {formState.config.oauth_connection != null && (
+                        <Button
+                          type="button"
+                          variant="subtle"
+                          color="red"
+                          onClick={onDisconnectOauth}
+                          loading={oauthConnectionPending.disconnect}
+                        >
+                          {t("oauthConnection.disconnect")}
+                        </Button>
+                      )}
+                    </Group>
+                  </Stack>
+                </Card>
+              )}
 
-            <Switch
-              label={t("alwaysExposeToolsLabel")}
-              description={t("alwaysExposeToolsDescription")}
-              key={form.key("alwaysExposeTools")}
-              {...form.getInputProps("alwaysExposeTools", {
-                type: "checkbox",
-              })}
-            />
+              {!isEdit &&
+                (currentToolSlug === "notion" ||
+                  currentToolSlug === "sentry" ||
+                  (currentToolSlug === "mcp" &&
+                    form.getValues().config.auth_type === "oauth2")) && (
+                  <Alert color="blue">{setup("oauthNext")}</Alert>
+                )}
+              {currentToolSlug !== "envvar" &&
+                currentToolSlug !== "shell" &&
+                currentToolSlug !== "google" && (
+                  <Text size="sm">{setup("testHint")}</Text>
+                )}
+            </ToolkitSetupSection>
 
-            <Switch
-              label={t("enabledLabel")}
-              key={form.key("enabled")}
-              {...form.getInputProps("enabled", { type: "checkbox" })}
-            />
-
-            {mutationState.type === "IDLE" && mutationState.error && (
-              <Alert color="red">{mutationState.error}</Alert>
-            )}
-
-            <Group justify="flex-end">
-              <Button
-                type="button"
-                variant="default"
-                onClick={onCancel}
-                disabled={
-                  operationPending || mutationState.type === "SUBMITTING"
+            <ToolkitSetupSection
+              number={3}
+              title={setup("reviewTitle")}
+              description={setup("reviewDescription")}
+            >
+              <TextInput
+                label={t("nameLabel")}
+                placeholder={
+                  currentToolSlug === "mcp"
+                    ? t("mcpNamePlaceholder")
+                    : namePlaceholder
                 }
+                required={nameRequired}
+                key={form.key("name")}
+                {...form.getInputProps("name")}
+              />
+              <Textarea
+                label={t("descriptionLabel")}
+                placeholder={t("descriptionPlaceholder")}
+                key={form.key("description")}
+                {...form.getInputProps("description")}
+              />
+              <details
+                className={setupClasses.disclosure}
+                open={Boolean(form.errors.slug || form.errors.prompt) || void 0}
               >
-                {t("cancel")}
-              </Button>
-              <Button
-                type="submit"
-                disabled={operationPending}
-                loading={mutationState.type === "SUBMITTING"}
-              >
-                {isEdit ? t("save") : t("create")}
-              </Button>
-            </Group>
+                <summary>{setup("advanced")}</summary>
+                <Stack gap="md" mt="md">
+                  <Text size="sm">{setup("advancedHint")}</Text>
+                  <TextInput
+                    label={t("slugLabel")}
+                    description={
+                      agentId == null
+                        ? t("slugDescription")
+                        : t("agentSlugDescription")
+                    }
+                    placeholder={slugPlaceholder || t("slugPlaceholder")}
+                    key={form.key("slug")}
+                    {...form.getInputProps("slug")}
+                  />
+                  <Textarea
+                    label={t("customPromptLabel")}
+                    description={t("customPromptDescription")}
+                    placeholder={t("customPromptPlaceholder")}
+                    key={form.key("prompt")}
+                    {...form.getInputProps("prompt")}
+                  />
+                </Stack>
+              </details>
+              <Switch
+                label={t("alwaysExposeToolsLabel")}
+                description={t("alwaysExposeToolsDescription")}
+                key={form.key("alwaysExposeTools")}
+                {...form.getInputProps("alwaysExposeTools", {
+                  type: "checkbox",
+                })}
+              />
+
+              <Switch
+                label={t("enabledLabel")}
+                key={form.key("enabled")}
+                {...form.getInputProps("enabled", { type: "checkbox" })}
+              />
+              <ToolkitSettingsReview
+                provider={
+                  toolOptions.find((option) => option.value === currentToolSlug)
+                    ?.label ?? currentToolSlug
+                }
+                name={form.getValues().name}
+                agentOwned={agentId != null}
+                enabled={form.getValues().enabled}
+                alwaysExposeTools={form.getValues().alwaysExposeTools}
+              />
+              <Text size="sm">
+                {setup(
+                  currentToolSlug === "envvar" || currentToolSlug === "shell"
+                    ? "localSaveHint"
+                    : "saveHint",
+                )}
+              </Text>
+
+              {mutationState.type === "IDLE" && mutationState.error && (
+                <Alert color="red">{mutationState.error}</Alert>
+              )}
+
+              <Group justify="flex-end">
+                <Button
+                  type="button"
+                  variant="default"
+                  onClick={onCancel}
+                  disabled={
+                    operationPending || mutationState.type === "SUBMITTING"
+                  }
+                >
+                  {t("cancel")}
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={operationPending}
+                  loading={mutationState.type === "SUBMITTING"}
+                >
+                  {isEdit ? t("save") : t("create")}
+                </Button>
+              </Group>
+            </ToolkitSetupSection>
           </Stack>
         </form>
       </Stack>

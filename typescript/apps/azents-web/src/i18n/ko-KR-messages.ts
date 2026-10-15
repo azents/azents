@@ -18,6 +18,7 @@ import runtimeMetrics from "../../messages/ko-KR/runtimeMetrics.json";
 import runtimeWeb from "../../messages/ko-KR/runtimeWeb.json";
 import security from "../../messages/ko-KR/security.json";
 import skills from "../../messages/ko-KR/skills.json";
+import toolkitSetup from "../../messages/ko-KR/toolkitSetup.json";
 import workspace from "../../messages/ko-KR/workspace.json";
 import workspaces from "../../messages/ko-KR/workspaces.json";
 import { composeMessages } from "./message-composition";
@@ -44,6 +45,7 @@ const messages = composeMessages([
   ["runtimeWeb", runtimeWeb],
   ["security", security],
   ["skills", skills],
+  ["toolkitSetup", toolkitSetup],
   ["workspace", workspace],
   ["workspaces", workspaces],
 ]);

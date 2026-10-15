@@ -153,9 +153,7 @@ export const ExistingCredentials: Story = {
 
 export const ContainerCredentialReplacement: Story = {
   args: {
-    credentials: {
-      service_account_key: { client_email: "fixture@example.com" },
-    },
+    credentials: null,
     hasCredentials: true,
   },
   render: (args) => (
@@ -166,12 +164,18 @@ export const ContainerCredentialReplacement: Story = {
       <GoogleAnalyticsConfigFieldsContainer {...args} />
     </ProviderFieldStoryTransport>
   ),
-  play: async ({ canvasElement }) => {
+  play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
+    await expect(canvas.getByText(/Credentials are saved/)).toBeVisible();
+    await expect(
+      canvas.queryByPlaceholderText(/Paste Service Account Key JSON/),
+    ).not.toBeInTheDocument();
+    await expect(args.onCredentialsChange).not.toHaveBeenCalled();
     await userEvent.click(canvas.getByRole("button", { name: "Replace Key" }));
     await expect(
       canvas.getByPlaceholderText(/Paste Service Account Key JSON/),
     ).toBeVisible();
+    await expect(args.onCredentialsChange).not.toHaveBeenCalled();
   },
 };
 
