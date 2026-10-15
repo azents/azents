@@ -697,6 +697,8 @@ Always-on required CI does not depend on external credentials.
   tests, Docker-free support tests and Helm pytest, using the shared
   `scripts/ci/pytest_timing.py` plugin. It records only test identifiers, phases,
   durations, outcomes and fixture scope, not fixture values or captured logs.
+  The observer binds its performance clock and output path at startup so application
+  clock/environment mocks cannot consume mock values or redirect hook evidence.
   Existing E2E image/browser diagnostics and the E2E duration gate remain separate.
 - Same-repository pull requests receive one sticky CI observability comment combining
   safe pytest counts, failed node IDs, phase/fixture timing and all CI job/step

@@ -290,6 +290,52 @@ class WorkflowReportTest(unittest.TestCase):
             stamp_provenance(roots[1], 2)
             self.assertFalse(analyze(roots, "experiment")["same_sha_acceptance_ready"])
 
+    def test_plugin_does_not_consume_application_clock_or_env_mocks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "test_clock.py").write_text(
+                "import time\nfrom unittest.mock import Mock\nimport pytest\n"
+                "@pytest.fixture\ndef clocks(monkeypatch):\n"
+                "    monkeypatch.setattr(time, 'monotonic', Mock(side_effect=[1,2]))\n"
+                "    monkeypatch.setattr(time, 'perf_counter',\n"
+                "                        Mock(side_effect=[3,4]))\n"
+                "    monkeypatch.setenv('AZENTS_CI_ARTIFACT_DIR',\n"
+                f"                       {str(root / 'other')!r})\n"
+                "def test_clock(clocks):\n"
+                "    assert [time.monotonic(), time.monotonic()] == [1,2]\n"
+                "    assert [time.perf_counter(), time.perf_counter()] == [3,4]\n"
+            )
+            evidence = root / "evidence"
+            result = subprocess.run(
+                [
+                    str(ROOT / "testenv/azents/e2e/.venv/bin/python"),
+                    "-m",
+                    "pytest",
+                    "-q",
+                    "-p",
+                    "scripts.ci.pytest_timing",
+                    str(root / "test_clock.py"),
+                ],
+                env=dict(
+                    os.environ,
+                    PYTHONPATH=str(ROOT),
+                    AZENTS_CI_ARTIFACT_DIR=str(evidence),
+                ),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            records = [
+                json.loads(line)
+                for line in (evidence / "pytest-timings.jsonl").read_text().splitlines()
+            ]
+            self.assertEqual(
+                {r["phase"] for r in records if r["record_type"] == "test_phase"},
+                {"setup", "call", "teardown"},
+            )
+            self.assertFalse((root / "other").exists())
+
     def test_shared_plugin_preserves_failure_and_safe_fixture_evidence(self) -> None:
         # An actual subprocess exercises plugin discovery outside the E2E conftest.
         with tempfile.TemporaryDirectory() as tmp:

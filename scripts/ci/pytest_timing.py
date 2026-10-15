@@ -2,10 +2,10 @@
 
 import json
 import os
-import time
 from collections.abc import Generator
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from time import perf_counter
 
 import pytest
 
@@ -49,20 +49,25 @@ class FixtureTeardownState:
 
 
 class TimingObservabilityPlugin:
-    """Globally observe pytest phases, including session-scoped fixtures."""
+    """Observe pytest using startup-bound evidence and performance-clock authority."""
 
-    def __init__(self) -> None:
+    def __init__(self, artifact_path: Path) -> None:
+        self.artifact_path = artifact_path
         self.fixture_teardown_states: dict[int, FixtureTeardownState] = {}
 
     def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
         """Record every test setup, call, and teardown phase."""
         if report.when is None:
             return
-        record_test_phase(
-            node_id=report.nodeid,
-            phase=report.when,
-            duration_seconds=report.duration,
-            outcome=report.outcome,
+        _append_timing(
+            TestPhaseTiming(
+                record_type="test_phase",
+                node_id=report.nodeid,
+                phase=report.when,
+                duration_seconds=round(report.duration, 6),
+                outcome=report.outcome,
+            ),
+            self.artifact_path,
         )
 
     @pytest.hookimpl(wrapper=True)
@@ -71,12 +76,12 @@ class TimingObservabilityPlugin:
         fixturedef: pytest.FixtureDef[object],
         request: pytest.FixtureRequest,
     ) -> Generator[None, object, object]:
-        """Measure one real fixture setup without serializing fixture values."""
+        """Measure real fixture setup without serializing values or consuming mocks."""
         started_at = monotonic_time()
         try:
             result = yield
         except BaseException:
-            record_fixture_phase(
+            self.record_fixture_phase(
                 fixture=fixturedef.argname,
                 scope=fixturedef.scope,
                 node_id=request.node.nodeid,
@@ -85,8 +90,7 @@ class TimingObservabilityPlugin:
                 outcome="failed",
             )
             raise
-
-        record_fixture_phase(
+        self.record_fixture_phase(
             fixture=fixturedef.argname,
             scope=fixturedef.scope,
             node_id=request.node.nodeid,
@@ -105,25 +109,49 @@ class TimingObservabilityPlugin:
         request: pytest.FixtureRequest,
     ) -> None:
         """Record fixture teardown after its finalizers have completed."""
-        teardown_state = self.fixture_teardown_states.get(id(fixturedef))
-        if teardown_state is None or teardown_state.started_at is None:
+        state = self.fixture_teardown_states.get(id(fixturedef))
+        if state is None or state.started_at is None:
             return
-        record_fixture_phase(
+        self.record_fixture_phase(
             fixture=fixturedef.argname,
             scope=fixturedef.scope,
             node_id=request.node.nodeid,
             phase="teardown",
-            duration_seconds=monotonic_time() - teardown_state.started_at,
+            duration_seconds=monotonic_time() - state.started_at,
             outcome="completed",
         )
         del self.fixture_teardown_states[id(fixturedef)]
 
+    def record_fixture_phase(
+        self,
+        *,
+        fixture: str,
+        scope: str,
+        node_id: str,
+        phase: str,
+        duration_seconds: float,
+        outcome: str,
+    ) -> None:
+        """Retain the observer destination even when a unit test mocks environment."""
+        _append_timing(
+            _fixture_timing(
+                fixture=fixture,
+                scope=scope,
+                node_id=node_id,
+                phase=phase,
+                duration_seconds=duration_seconds,
+                outcome=outcome,
+            ),
+            self.artifact_path,
+        )
+
 
 def pytest_configure(config: pytest.Config) -> None:
     """Enable the same observer for unit, migration, support, and E2E tests."""
-    if timing_path() is not None:
+    path = timing_path()
+    if path is not None:
         config.pluginmanager.register(
-            TimingObservabilityPlugin(), "azents-ci-timing-observability"
+            TimingObservabilityPlugin(path), "azents-ci-timing-observability"
         )
 
 
@@ -134,7 +162,7 @@ def record_test_phase(
     duration_seconds: float,
     outcome: str,
 ) -> None:
-    """Append one test phase timing when artifact capture is enabled."""
+    """Append explicitly reported timing to the caller's current evidence path."""
     _append_timing(
         TestPhaseTiming(
             record_type="test_phase",
@@ -142,7 +170,28 @@ def record_test_phase(
             phase=phase,
             duration_seconds=round(duration_seconds, 6),
             outcome=outcome,
-        )
+        ),
+        timing_path(),
+    )
+
+
+def _fixture_timing(
+    *,
+    fixture: str,
+    scope: str,
+    node_id: str,
+    phase: str,
+    duration_seconds: float,
+    outcome: str,
+) -> FixtureTiming:
+    return FixtureTiming(
+        record_type="fixture",
+        fixture=fixture,
+        scope=scope,
+        node_id=node_id,
+        phase=phase,
+        duration_seconds=round(duration_seconds, 6),
+        outcome=outcome,
     )
 
 
@@ -155,35 +204,36 @@ def record_fixture_phase(
     duration_seconds: float,
     outcome: str,
 ) -> None:
-    """Append one fixture phase timing when artifact capture is enabled."""
+    """Append manually reported fixture timing when artifact capture is enabled."""
     _append_timing(
-        FixtureTiming(
-            record_type="fixture",
+        _fixture_timing(
             fixture=fixture,
             scope=scope,
             node_id=node_id,
             phase=phase,
-            duration_seconds=round(duration_seconds, 6),
+            duration_seconds=duration_seconds,
             outcome=outcome,
-        )
+        ),
+        timing_path(),
     )
 
 
 def monotonic_time() -> float:
-    """Return a monotonic timestamp for hook-level duration measurement."""
-    return time.monotonic()
+    """Use the startup-bound performance clock, not application clock mocks."""
+    return perf_counter()
 
 
 def timing_path() -> Path | None:
     """Return the configured pytest timing artifact path."""
     artifact_dir = os.environ.get(_ARTIFACT_DIR_ENV)
-    if artifact_dir is None:
-        return None
-    return Path(artifact_dir) / _PYTEST_TIMINGS_FILENAME
+    return (
+        Path(artifact_dir) / _PYTEST_TIMINGS_FILENAME
+        if artifact_dir is not None
+        else None
+    )
 
 
-def _append_timing(timing: TestPhaseTiming | FixtureTiming) -> None:
-    path = timing_path()
+def _append_timing(timing: TestPhaseTiming | FixtureTiming, path: Path | None) -> None:
     if path is None:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
