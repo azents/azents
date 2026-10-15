@@ -10,14 +10,14 @@ document_type: supporting-plan
 
 ## Approved inputs and authority
 
-- [Requirements](../requirements/browsercmd-261014-session-browser.md): REQ-1 through REQ-14, including the complete inherited baseline.
-- [ADR](../adr/browsercmd-261014-session-browser.md): accepted D1-D4, unchanged earlier browser transport/resource/admission authorities.
-- [Design](../design/browsercmd-261014-session-browser.md): revision 2, exact approved IDs M1-M17, requester approval 2026-10-14 at 22:06 KST.
+- [Requirements](../requirements/browsercmd-261014-session-browser.md): REQ-1 through REQ-15, including the complete inherited baseline.
+- [ADR](../adr/browsercmd-261014-session-browser.md): accepted D1-D5, including the API-owned Browser source.
+- [Design](../design/browsercmd-261014-session-browser.md): revision 3, exact approved IDs M1-M18, requester approval 2026-10-15 at 10:53 KST; REQ-15 navigation clarification retains M5/M16 authority.
 - Implementation explicitly requested 2026-10-15 at 08:03 KST.
 - Design delta: None.
 - Primary owner: `/root`.
 - Mandatory independent read-only reviewer for EVERY stable integrated phase: `/root/browser-feature-reviewer`.
-- Research/implementation support stays within root-assigned non-overlapping paths; reviewer never edits. Root requests reviews, integrates all outputs, fixes findings, executes final checks and owns all PR/CI follow-through.
+- Root directly owns all remaining implementation and validation; no implementation delegation. The same mandatory reviewer remains read-only. Root requests reviews, fixes findings and owns all PR/CI follow-through.
 
 ## Delivery shape
 
@@ -27,8 +27,8 @@ Four sequential reviewable PRs, titled `Session Browser [n/4]: <phase>`. Open ea
 | --- | --- | --- | --- |
 | 1 | `feat/session-browser-261015-transport` / `main` | M3, transport portion M13; retain M2/M12 current fences | Extract explicit Web/Browser authority variants and domain admission/dispatch boundaries through protocol, shared transport and existing Web consumers. Preserve all Web behavior; Browser public routes remain absent until phase 3. Include approved source documents and this plan. |
 | 2 | `feat/session-browser-261015-runner` / phase 1 | M4-M12, M15, M17 | Product browser SDK/engine provisioning, Runner manager and Session/task/page/frame registry, current-target typed browser commands, actual input conflict admission, image/rawDOM/glance/capture and file interactions; Engine three tools and lowerer-compatible schema projection. |
-| 3 | `feat/session-browser-261015-viewer` / phase 2 | M1, M2, M3, M9, M10, M12, M13, M16 | Browser-domain public admission/current revocation, authenticated common-stream Runner consumer, supporting-panel Browser UI with task/page selection, bounded frames and keyboard/pointer/IME; no takeover/return controls. Public clients source-generated. |
-| 4 | `feat/session-browser-261015-verification` / phase 3 | M1-M17 | Managed Skill/references, complete real Engine/Web/Runtime E2E, file/model/publication and provisioning/network/sandbox evidence, final drift/spec audit and temporary plan cleanup. Mark implemented only after actual verified implementation. |
+| 3 | `feat/session-browser-261015-viewer` / phase 2 | M1, M2, M3, M9, M10, M12, M13, M16, M18 | Browser-domain public admission/current revocation, authenticated common-stream Runner consumer, supporting-panel Browser UI with task/page selection, bounded frames and keyboard/pointer/IME; no takeover/return controls. Public clients source-generated. |
+| 4 | `feat/session-browser-261015-verification` / phase 3 | M1-M18 | Managed Skill/references, complete real Engine/Web/Runtime E2E, file/model/publication and provisioning/network/sandbox evidence, final drift/spec audit and temporary plan cleanup. Mark implemented only after actual verified implementation. |
 
 Local execution decomposition may refine within approved contracts; no new tool/control/permission/retention/configuration/compatibility mode. Move a dependent integration unit to the earliest coherent phase when necessary and record the reason, without changing Design authority.
 
