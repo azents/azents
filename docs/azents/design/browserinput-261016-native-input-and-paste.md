@@ -1,6 +1,7 @@
 ---
 title: "Browser Native Input and Paste Design"
 created: 2026-10-16
+implemented: 2026-10-16
 document_role: primary
 document_type: design
 snapshot_id: browserinput-261016
@@ -63,3 +64,11 @@ Every mechanism maps to confirmed Requirements or unchanged Browser authority; n
 - Scope authorization: The requester reviewed the actual-component prototype, requested no confirmation popup, then explicitly instructed implementation of that flow and the previously confirmed repairs.
 - Revision and mechanism set recorded for that bounded implementation: revision `1`, `M1–M5`.
 - No separate document-review approval is claimed; the direct implementation instruction authorizes the reviewed behavior and its necessary existing-authority fences. Any broader clipboard or new product behavior requires a new decision.
+
+## Verification Evidence
+
+Source commit `42d5433386ffc5ad0188151c725373f8d7e6dae9` passed [required CI](https://github.com/azents/azents/actions/runs/38777825524): 39 successful checks and one conditional Helm skip. All five E2E lanes passed. The web-lane JUnit artifact records `test_session_browser_engine_native_input_dialog_and_reconnect` passing in 24.934 seconds (including the synthetic authorized local-paste event through the actual Web/backend/Runner password insertion boundary) and `test_session_browser_capture_model_image_and_original_publication` passing in 16.283 seconds, neither skipped.
+
+Local validation passed 63 Runner Browser/popup tests, 39 runtime-control contract tests, 28 backend socket tests, 543 web unit tests, and all 60 actual-component stories with automatic accessibility checks. Ruff/Ty, web formatting/lint/typecheck, Storybook build, E2E-substrate static checks, documentation validation and commit hooks passed. Independent read-only review findings were corrected and targeted re-review found no remaining issue.
+
+Physical iPhone product integration and native OS clipboard-consent/callout UI remain unverified; the earlier physical receiver-primitive experiment and desktop/component automation do not establish those results. No merge, deployment or Runtime restart was performed.

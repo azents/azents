@@ -1,6 +1,7 @@
 ---
 title: "Browser Native Input and Paste Requirements"
 created: 2026-10-16
+implemented: 2026-10-16
 document_role: primary
 document_type: requirements
 snapshot_id: browserinput-261016
