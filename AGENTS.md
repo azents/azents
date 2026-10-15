@@ -143,19 +143,18 @@ When modifying azents-scoped areas:
 
 Detailed documentation rules: `docs/azents/AGENTS.md`.
 
-## Agent Teams Guidelines
+## Subagent Use
 
-Consider using an agent team for complex work, especially when changes span three or more independent modules, multiple apps, or require security/performance/test review.
+Subagent use is discouraged. The primary agent performs the work directly by
+default. Only consider subagents for the following exceptions. Even when an
+exception applies, reconsider whether the primary agent can solve the task directly.
 
-File ownership guidance:
+- **Independent opinions:** A separate persona, such as an independent reviewer,
+  provides read-only, one-way opinions rather than collaborating on the work.
+  The primary agent evaluates the opinions and makes any changes directly.
+- **Fully self-contained tasks:** The task can be completed from design through
+  final output without parent conversation or feedback-driven follow-up changes,
+  and is clearly faster than direct primary execution, including coordination and
+  handoff costs. Tasks that leave the parent waiting for the result do not qualify.
 
-- Backend modules under `python/apps/azents/src/azents/` can be split by domain (`core`, `repos`, `services`, `api`, `engine`, `worker`).
-- Runtime providers should be assigned separately from backend domain work.
-- TypeScript app work should be assigned separately from backend work.
-- Shared libraries such as `python/libs/az-common/` should be coordinated by the lead.
-
-Operational rules:
-
-- The lead coordinates and integrates; independent implementation can be delegated.
-- Avoid assigning the same files to multiple teammates.
-- Run quality checks after integration.
+The primary agent owns integration and runs integrated quality checks directly.
