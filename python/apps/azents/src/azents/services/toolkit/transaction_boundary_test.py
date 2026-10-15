@@ -27,12 +27,11 @@ from azents.services.github_platform_system_setting.runtime import (
 )
 from azents.services.github_user_oauth.provider import GitHubUserProvider
 from azents.services.github_user_oauth.service import GitHubUserOAuthService
-from azents.services.toolkit import ToolkitService, merge_envvar_credentials
+from azents.services.toolkit import ToolkitService
 from azents.services.toolkit.data import (
     InvalidConfig,
     InvalidCredentials,
     ToolkitCreateInput,
-    ToolkitUpdateInput,
 )
 
 
@@ -128,114 +127,6 @@ class _DatabaseFreeProvider(ToolkitProvider[_DatabaseFreeConfig]):
         assert credentials["app_id"] == "123"
         self.events.append("provider")
         return None
-
-
-def test_envvar_merge_retains_historical_malformed_entry_skip_policy() -> None:
-    """Decode only valid name identities without rejecting irrelevant metadata."""
-    merged = merge_envvar_credentials(
-        None,
-        {"values": {"VALID": "secret", "REMOVED": "discard"}},
-        {
-            "entries": [{"name": "VALID", "masked": "historic"}, {"name": 1}, {}, None],
-            "unknown_historical_metadata": {"unchanged": True},
-        },
-    )
-    assert merged == {"values": {"VALID": "secret"}}
-
-
-class TestMergeEnvVarCredentials:
-    """EnvVar credential update behavior."""
-
-    def test_preserves_existing_value_for_blank_edit(self) -> None:
-        """Keep a stored value when its edit field is empty."""
-        merged = merge_envvar_credentials(
-            '{"values":{"AZENTS_POSTGRES_USER":"old-user","AZENTS_POSTGRES_PASSWORD":"old-password","AZENTS_POSTGRES_HOST":"old-host"}}',
-            {
-                "values": {
-                    "AZENTS_POSTGRES_USER": "new-user",
-                    "AZENTS_POSTGRES_PASSWORD": "new-password",
-                    "AZENTS_POSTGRES_HOST": "",
-                }
-            },
-            {
-                "entries": [
-                    {"name": "AZENTS_POSTGRES_USER"},
-                    {"name": "AZENTS_POSTGRES_PASSWORD"},
-                    {"name": "AZENTS_POSTGRES_HOST"},
-                ]
-            },
-        )
-
-        assert merged == {
-            "values": {
-                "AZENTS_POSTGRES_USER": "new-user",
-                "AZENTS_POSTGRES_PASSWORD": "new-password",
-                "AZENTS_POSTGRES_HOST": "old-host",
-            }
-        }
-
-    def test_removes_value_when_its_entry_is_removed(self) -> None:
-        """Discard stored values that no longer have a configured entry."""
-        merged = merge_envvar_credentials(
-            '{"values":{"AZENTS_POSTGRES_USER":"user","AZENTS_POSTGRES_HOST":"host"}}',
-            {"values": {}},
-            {"entries": [{"name": "AZENTS_POSTGRES_USER"}]},
-        )
-
-        assert merged == {"values": {"AZENTS_POSTGRES_USER": "user"}}
-
-    async def test_config_only_update_removes_deleted_value(self) -> None:
-        """Prune removed entry credentials without requiring a credentials payload."""
-        old_config = {
-            "entries": [
-                {"name": "AZENTS_POSTGRES_USER"},
-                {"name": "AZENTS_POSTGRES_HOST"},
-            ]
-        }
-        new_config = {"entries": [{"name": "AZENTS_POSTGRES_USER"}]}
-        existing = ToolkitConfig(
-            owner_agent_id=None,
-            id="toolkit-1",
-            workspace_id="workspace-1",
-            toolkit_type="envvar",
-            slug="database",
-            name="Database",
-            config=old_config,
-            credentials='{"values":{"AZENTS_POSTGRES_USER":"user","AZENTS_POSTGRES_HOST":"host"}}',
-            enabled=True,
-            always_expose_tools=False,
-            revision=1,
-            created_at=datetime.datetime.now(datetime.UTC),
-            updated_at=datetime.datetime.now(datetime.UTC),
-        )
-        operations_repository = MagicMock()
-        operations_repository.load_update_context = AsyncMock(
-            return_value=Success(existing)
-        )
-        operations_repository.update = AsyncMock(return_value=Success(existing))
-        operations_repository.get_oauth_summary = AsyncMock(return_value=None)
-        service = ToolkitService(
-            owned_operations=AsyncMock(spec=AgentToolkitOperationsRepository),
-            operations_repository=operations_repository,
-            toolkit_registry={},
-            github_runtime=MagicMock(),
-            github_user_oauth=AsyncMock(spec=GitHubUserOAuthService),
-        )
-        update: ToolkitUpdateInput = {"config": new_config}
-
-        await service.update_by_id(
-            "toolkit-1",
-            update,
-            workspace_id="workspace-1",
-            user_id="user-1",
-        )
-
-        await_args = operations_repository.update.await_args
-        assert await_args is not None
-        repo_update = await_args.args[1]
-        assert (
-            repo_update["credentials"] == '{"values": {"AZENTS_POSTGRES_USER": "user"}}'
-        )
 
 
 async def test_create_external_validation_sees_no_repository_transaction() -> None:

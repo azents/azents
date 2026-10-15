@@ -2920,40 +2920,6 @@ class TestProcessToolHandler:
         ]
 
     @pytest.mark.asyncio
-    async def test_exec_command_injects_envvar_peer_toolkit(self) -> None:
-        """EnvVarToolkit peer is passed to runtime runner operation env.
-
-        ``Toolkit.expose_env()`` → ``_collect_secret_env`` → runner operation env
-        Prove path directly without LLM.
-        """
-        from azents.engine.tools.envvar import (  # noqa: PLC0415
-            EnvEntryMeta,
-            EnvVarToolkit,
-            EnvVarToolkitConfig,
-        )
-
-        marker = "testenv-envvar-marker-001"
-        envvar_peer = EnvVarToolkit(
-            config=EnvVarToolkitConfig(entries=[EnvEntryMeta(name="MY_TEST_KEY")]),
-            values={"MY_TEST_KEY": marker},
-            toolkit_name="QA EnvVar",
-        )
-
-        toolkit = _make_toolkit()
-        runner_operations = _runner_operations(toolkit)
-        toolkit.set_peer_toolkits([envvar_peer])
-
-        ctx = _make_context()
-        state = await toolkit.update_context(ctx)
-        tool = _find_tool(state.tools, "exec_command")
-
-        await tool.handler(json.dumps({"command": "echo $MY_TEST_KEY"}))
-
-        assert runner_operations.process_start_calls[-1]["env"] == {
-            "MY_TEST_KEY": marker
-        }
-
-    @pytest.mark.asyncio
     async def test_exec_command_rechecks_before_collecting_peer_credentials(
         self,
     ) -> None:

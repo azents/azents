@@ -124,7 +124,7 @@ code_paths:
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-10-15
-spec_version: 148
+spec_version: 149
 ---
 
 # Toolkit
@@ -270,18 +270,16 @@ erDiagram
 
 ### Enum / Type
 
-- `ToolkitType` (code-level) — one of `shell`, `mcp`, `github`, `notion`, `gcp`, `aws`, `sentry`, `google_analytics`, `google`, `kubernetes`, `envvar`, `brave_search`. DB column is free string but runtime must match key registered in `get_toolkit_registry`. `shell` remains the internal built-in Provider slug; Public API creation of a persisted Shell ToolkitConfig is rejected. Google publication uses its reviewed candidate flow instead of plain Toolkit CRUD. ([`core/tools.py`](../../../../python/apps/azents/src/azents/core/tools.py))
+- `ToolkitType` (code-level) — one of `shell`, `mcp`, `github`, `notion`, `gcp`, `aws`, `sentry`, `google_analytics`, `google`, `kubernetes`, `brave_search`. DB column is free string but runtime must match key registered in `get_toolkit_registry`. `shell` remains the internal built-in Provider slug; Public API creation of a persisted Shell ToolkitConfig is rejected. Google publication uses its reviewed candidate flow instead of plain Toolkit CRUD. ([`core/tools.py`](../../../../python/apps/azents/src/azents/core/tools.py))
 
-  `envvar` is a generic environment variable injection toolkit. Long-lived API tokens (Notion / OpenAI / Sentry, etc.) can be stored and injected as child process env during agent shell execution. It implements `Toolkit.expose_env()` protocol. Unlike MCP-based toolkit, credentials are exposed inside Runtime. See [sandbox-credential-injection design (archived)](../../design/sandbox-260421-sandbox-credential-injection-2026.md).
-
-  When an existing `envvar` Toolkit is edited, non-empty submitted values replace only their matching stored values. Empty submitted values preserve the stored value, while values whose names are removed from `config.entries` are removed from encrypted credentials. This lets the redacted edit form preserve values that a manager leaves blank while retaining explicit entry deletion semantics.
-
-  Agent Runtime settings independently provide encrypted per-Agent environment
-  variables through the built-in Runtime Toolkit. At command launch, this mapping
-  is read for the owning Runtime Agent and merged after active peer Toolkit maps;
-  Agent settings win duplicate names. Empty Agent settings preserve existing
-  Toolkit behavior. These settings do not deprecate, migrate, remove or restrict
-  `envvar`. See [Per-Agent Runtime environment variables](../flow/agent-runtime-persistence.md#per-agent-runtime-environment-variables).
+  General-purpose environment variables are configured through Agent Runtime
+  settings or the Workspace catalog with explicit Agent selections. The retired
+  `envvar` Provider and its form are removed. The online Alembic cutover moves
+  allowlisted Agent-owned secrets to their owner's Runtime settings and shared
+  secrets to Workspace identities selected only by previously attached Agents.
+  Service-specific credential Providers continue to supply `Toolkit.expose_env()`;
+  selected Workspace and Agent-local values override those maps in that order.
+  See [Runtime environment variables and cutover](../flow/agent-runtime-persistence.md#environment-toolkit-data-cutover).
 
   Redacted Toolkit edit and unsaved Connection test forms omit credential
   placeholders that contain no secret value. Stored credentials remain authoritative
@@ -529,7 +527,7 @@ azents-web provides Workspace-shared Toolkit management screens and an authority
 - `/w/[handle]/toolkits/[toolkitId]/edit` — edit existing ToolkitConfig.
 - `/w/[handle]/toolkit/[toolkitId]/setup` — connection status check and authorize redirect for toolkit requiring per-user OAuth/setup.
 
-`shared/toolkits` owns the reusable form and authorization containers, props-driven views, projections, and shared state types used by Toolkit and Agent management. Feature route pages retain their entry wiring and import the shared defining modules directly. The form branches config fields per toolkit type for GitHub, Kubernetes, MCP, Google Analytics, Notion, Sentry, GCP, AWS, Brave Search, Shell, and EnvVar. Google uses the staged selection, OAuth and review surface described in [Google Connection](google-connection.md). `features/toolkit-setup` executes setup action returned by backend, and if account link must come first it follows `next_toolkit` handoff from [`../flow/account-linking.md`](../../design/account-260315-account-linking.md).
+`shared/toolkits` owns the reusable form and authorization containers, props-driven views, projections, and shared state types used by Toolkit and Agent management. Feature route pages retain their entry wiring and import the shared defining modules directly. The form branches config fields per toolkit type for GitHub, Kubernetes, MCP, Google Analytics, Notion, Sentry, GCP, AWS, Brave Search, and Shell. Google uses the staged selection, OAuth and review surface described in [Google Connection](google-connection.md). `features/toolkit-setup` executes setup action returned by backend, and if account link must come first it follows `next_toolkit` handoff from [`../flow/account-linking.md`](../../design/account-260315-account-linking.md).
 
 Provider-field container hooks own transient credential replacement, acknowledgement, connection-test mutations, and MCP discovery updates. Their views receive shared typed lifecycle states and callbacks; API-free stories exercise the same container input projection without live provider requests. Form clearing, test-result visibility, and discovered OAuth field handling retain their provider-specific behavior.
 
@@ -1610,6 +1608,10 @@ an admitted trigger/cycle with its Task. Channel registration and deletion
 notification execute only after the operation returns.
 
 ## Changelog
+
+- **2026-10-15** (spec_version 149) — Removed the general-purpose environment
+  Toolkit and migrated allowlisted encrypted values and exact Agent access into
+  Runtime settings and the Workspace environment catalog.
 
 - **2026-10-13** — Refined the GitHub Wizard with explicit selection states, gesture-driven page/modal progression, authoritative single-option selection, multilingual manual previews and a localized read-only App registration guide. Provider authority and explicit final publication remain unchanged.
 - **2026-10-13** — Replaced new GitHub creation with a progressive identity/method/verification/features/Runtime/final-review Wizard. Added exact-scope SDK-backed display/verification projections, per-mode readiness, required final settings in atomic user creation, and explicit candidate abandonment with final-publication-only close gating. Saved editing, five execution modes, generic MCP tests, existing encrypted attempts and Worker/Runtime authority remain.

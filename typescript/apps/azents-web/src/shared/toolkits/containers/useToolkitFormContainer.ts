@@ -151,9 +151,6 @@ const DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
     denied_kinds: ["Secret"],
     timeout: 30,
   },
-  envvar: {
-    entries: [],
-  },
 };
 
 /** Default credentials initial value by tool. */
@@ -166,7 +163,6 @@ const DEFAULT_CREDENTIALS: Record<string, Record<string, unknown> | null> = {
   brave_search: null,
   github: { type: "pat" },
   kubernetes: { clusters: {} },
-  envvar: { values: {} },
 };
 
 export function useToolkitFormContainer(

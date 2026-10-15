@@ -32,17 +32,6 @@ export const Gcp: Story = { args: { toolkitType: "gcp" } };
 export const Analytics: Story = { args: { toolkitType: "google_analytics" } };
 export const Brave: Story = { args: { toolkitType: "brave_search" } };
 export const Kubernetes: Story = { args: { toolkitType: "kubernetes" } };
-export const Environment: Story = {
-  args: { toolkitType: "envvar" },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    await expect(canvas.queryByRole("link")).not.toBeInTheDocument();
-    await userEvent.click(canvas.getByText("Setup order"));
-    await expect(
-      canvas.getByText(/There is no external connection test/),
-    ).toBeVisible();
-  },
-};
 export const UnknownProvider: Story = {
   args: { toolkitType: "test-only-provider" },
 };

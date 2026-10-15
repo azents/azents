@@ -83,7 +83,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
 last_verified_at: 2026-10-15
-spec_version: 42
+spec_version: 43
 ---
 
 # Agent Runtime Persistence
@@ -134,9 +134,9 @@ processes, Interactive Terminal, Runner environment, Provider configuration and
 Runtime configuration digests are unchanged. Agent settings survive Runtime
 stop/restart/reset, Profile changes and managed Runtime removal; Agent lifecycle
 and capability fence subsequent use. Explicit environment deletion or Agent
-deletion owns removal of this setting. Existing environment-variable Toolkits
-remain available with unchanged credentials and APIs; no deprecation or Toolkit
-data migration occurs.
+deletion owns removal of this setting. General-purpose environment-variable
+Toolkits are retired by the data cutover below; service-specific credential
+Providers remain available.
 
 ## Workspace environment variables and Agent opt-in
 
@@ -173,10 +173,38 @@ future shared-value updates. Reads, writes and errors never return secret values
 
 Workspace v1 exposes GET/PUT `/workspaces/{handle}/environment` and GET/PUT
 `/workspaces/{handle}/agents/{agent_id}/environment-selection`. Generated clients
-and existing secret-safe validation routes own the wire boundary. Migration adds
-empty tables only; no existing Agent is opted in and no Toolkit credentials move.
+and existing secret-safe validation routes own the wire boundary. The initial
+catalog migration adds empty tables only; the subsequent Toolkit cutover below
+preserves explicitly configured legacy access.
 Session pages, Interactive Terminal, Runner global environment and Provider
 configuration remain unchanged.
+
+## Environment Toolkit data cutover
+
+Online Alembic revision `409e9e3cb85a` requires drained API/Workers and the existing
+application `AZ_CREDENTIAL_ENCRYPTION_KEY`. It decrypts each `envvar` Toolkit's
+`values` document and filters it through `config.entries`; undeclared secrets are
+not resurrected. Agent ownership, rather than attachment rows, determines local
+destination. Workspace secrets create/reuse Workspace variable identities and
+only previously attached Agents receive selections. Unattached shared entries
+remain available in the catalog without selecting any Agent. No unrelated Agent
+is opted in. Existing unrelated settings, selections, and Toolkits are retained.
+
+Identical same-name values deduplicate; conflicting values within one destination
+abort rather than overwrite. Agent-local values still override migrated shared
+values. A move that would invert an existing selected Workspace override also
+aborts. Nonempty disabled Toolkits abort because neither destination can retain
+disabled Agent-local settings without activating them. Operators must resolve
+these blockers explicitly before retrying; errors never disclose values.
+Invalid encryption, malformed payloads, cross-Workspace relationships and
+destination-limit violations likewise roll back the entire revision.
+
+Success deletes only `toolkit_type = 'envvar'` configurations; attachment rows
+cascade and namespace reservations remain consumed tombstones. A custom slug
+does not change migration eligibility, and unrelated Toolkit types using the
+slug `envvar` are not deleted. Alembic re-invocation at head is a no-op. Offline
+SQL generation is unsupported for this data-dependent revision. Downgrade refuses
+to invent deleted Toolkit identities/metadata and requires a pre-cutover backup.
 
 ## Runtime Profile binding and current configuration state
 

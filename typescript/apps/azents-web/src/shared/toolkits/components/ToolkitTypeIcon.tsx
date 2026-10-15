@@ -6,7 +6,6 @@ import {
   IconBrandNotion,
   IconBrandSentry,
   IconTool,
-  IconVariable,
 } from "@tabler/icons-react";
 import type { ReactElement } from "react";
 
@@ -37,9 +36,6 @@ export function ToolkitTypeIcon({
       break;
     case "google_analytics":
       mark = <IconBrandGoogleAnalytics size={markSize} stroke={1.7} />;
-      break;
-    case "envvar":
-      mark = <IconVariable size={markSize} stroke={1.7} />;
       break;
     case "gcp":
     case "brave_search":

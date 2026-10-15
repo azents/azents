@@ -15,7 +15,6 @@ export interface ToolkitDetailField {
     | "region"
     | "project"
     | "clusters"
-    | "variables"
     | "runtimeInjection"
     | "writeServices"
     | "readOnly"
@@ -56,7 +55,6 @@ const kubernetes = z.object({
   allowed_namespaces: strings,
   denied_kinds: strings,
 });
-const envvar = z.object({ entries: names });
 const analytics = z.object({ default_property_id: text });
 const brave = z.object({ country: text, search_lang: text, safesearch: text });
 
@@ -149,16 +147,6 @@ export function projectToolkitDetails(
       }
       add("allowedNamespaces", displayList(config.allowed_namespaces));
       add("deniedKinds", displayList(config.denied_kinds));
-      break;
-    }
-    case "envvar": {
-      const config = envvar.parse(toolkit.config);
-      add(
-        "variables",
-        displayList(
-          config.entries?.flatMap((entry) => (entry.name ? [entry.name] : [])),
-        ),
-      );
       break;
     }
     case "google_analytics": {

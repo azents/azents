@@ -11,7 +11,6 @@ from azents.core.tools import ToolkitProvider
 from azents.engine.tools.aws import AwsToolkitProvider
 from azents.engine.tools.brave_search import BraveSearchToolkitProvider
 from azents.engine.tools.brave_search_testenv import make_brave_testenv_transport
-from azents.engine.tools.envvar import EnvVarToolkitProvider
 from azents.engine.tools.external_channel import ExternalChannelToolkitProvider
 from azents.engine.tools.gcp import GcpToolkitProvider
 from azents.engine.tools.github import GitHubToolkitProvider
@@ -151,7 +150,6 @@ def get_toolkit_registry(
             else None
         ),
         "kubernetes": KubernetesToolkitProvider(),
-        "envvar": EnvVarToolkitProvider(),
     }
     if config.testenv_runtime_hook_qa_enabled:
         registry[TestenvRuntimeHookQAProvider.slug] = TestenvRuntimeHookQAProvider()

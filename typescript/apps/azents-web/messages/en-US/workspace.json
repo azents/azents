@@ -1978,23 +1978,6 @@
         "runtimeSummary": "Runtime token use"
       }
     },
-    "envvar": {
-      "warningTitle": "Long-lived credential warning",
-      "warningBody": "Values stored here will be injected into runtime shell commands as child-process env. The exposure cannot be fully prevented — prefer short-lived tokens where possible.",
-      "acknowledgeLabel": "I understand the exposure risk",
-      "entriesLabel": "Environment variables",
-      "entriesCountLabel": "{count}/{max}",
-      "emptyState": "No environment variables yet. Add one with the button below.",
-      "namePlaceholder": "NOTION_TOKEN",
-      "valuePlaceholder": "Value",
-      "valueEditPlaceholder": "Leave empty to keep existing",
-      "invalidNameError": "Only A-Z, a-z, 0-9, and _ allowed (^[a-zA-Z_][a-zA-Z0-9_]*$)",
-      "nameTooLongError": "Name must be at most {max} characters",
-      "valueTooLongError": "Value must be at most {max} characters",
-      "removeEntry": "Remove entry",
-      "addEntry": "Add variable",
-      "entryLimitReached": "At most {max} entries allowed"
-    },
     "oauthConnection": {
       "title": "OAuth connection",
       "statusNotConnected": "Not connected",

@@ -1704,10 +1704,7 @@ async def resolve_agent_tools(
                         instruction_context_store
                     )
                     # Register peer toolkits to collect env when runtime tools run.
-                    # DB-registered toolkits are already in pending. In current
-                    # structure, credential injection into runtime is limited to
-                    # DB-registered toolkits such as EnvVarToolkit, so including
-                    # peers up to here is sufficient.
+                    # DB-registered credential providers are already in pending.
                     peer_toolkits = [
                         resolved for _, resolved, _, _, _, _, _, _ in pending
                     ]

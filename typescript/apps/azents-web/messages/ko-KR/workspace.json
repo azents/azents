@@ -1978,23 +1978,6 @@
         "runtimeSummary": "git·gh 명령에서 사용"
       }
     },
-    "envvar": {
-      "warningTitle": "장기 credential 경고",
-      "warningBody": "여기 저장한 환경변수는 runtime shell 명령에 자식 프로세스 env 로 주입됩니다. 유출 위험을 완전히 막을 수 없으므로 가능한 한 짧은 수명의 토큰을 사용하세요.",
-      "acknowledgeLabel": "유출 위험을 인지했습니다",
-      "entriesLabel": "환경변수 항목",
-      "entriesCountLabel": "{count}/{max}",
-      "emptyState": "등록된 환경변수가 없습니다. 아래 버튼으로 추가하세요.",
-      "namePlaceholder": "NOTION_TOKEN",
-      "valuePlaceholder": "값",
-      "valueEditPlaceholder": "비워두면 기존 값 유지",
-      "invalidNameError": "영문(대/소)/숫자/_ 만 허용 (^[a-zA-Z_][a-zA-Z0-9_]*$)",
-      "nameTooLongError": "이름은 최대 {max}자까지",
-      "valueTooLongError": "값은 최대 {max}자까지",
-      "removeEntry": "항목 삭제",
-      "addEntry": "환경변수 추가",
-      "entryLimitReached": "최대 {max}개까지 등록 가능합니다"
-    },
     "oauthConnection": {
       "title": "OAuth 연결",
       "statusNotConnected": "연결되지 않음",

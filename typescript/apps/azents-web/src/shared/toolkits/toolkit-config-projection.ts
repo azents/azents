@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import { isRecord, isString } from "../lib/unknown-value.ts";
+import { isString } from "../lib/unknown-value.ts";
 
 const text = z.string().catch("");
 const historicalNumber = z
@@ -49,18 +49,11 @@ const githubSchema = z.object({
   timeout: historicalNumber,
   inject_runtime_environment: z.unknown().optional().transform(Boolean),
 });
-const envvarSchema = z.object({
-  entries: z.preprocess(
-    (value) => (Array.isArray(value) ? value.filter(isRecord) : []),
-    z.array(z.object({ name: text, masked: z.boolean().catch(true) })),
-  ),
-});
 
 export type ToolkitConfigProjection =
   | { type: "shell"; config: z.infer<typeof shellSchema> }
   | { type: "mcp"; config: z.infer<typeof mcpSchema> }
   | { type: "github"; config: z.infer<typeof githubSchema> }
-  | { type: "envvar"; config: z.infer<typeof envvarSchema> }
   | { type: "other"; toolkitType: string };
 
 /** Decode only the known form projection; preserve historical normalization defaults. */
@@ -75,8 +68,6 @@ export function projectToolkitConfig(
       return { type: "mcp", config: mcpSchema.parse(value) };
     case "github":
       return { type: "github", config: githubSchema.parse(value) };
-    case "envvar":
-      return { type: "envvar", config: envvarSchema.parse(value) };
     default:
       return { type: "other", toolkitType };
   }
@@ -125,8 +116,6 @@ export function hydrateToolkitConfig(
             ? null
             : { type: projection.config.github_auth_type },
       };
-    case "envvar":
-      return { config: projection.config, credentials: { values: {} } };
     case "other":
       return { config: value, credentials: null };
   }

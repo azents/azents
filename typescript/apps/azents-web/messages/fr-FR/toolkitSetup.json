@@ -105,13 +105,6 @@
       "verify": "Testez explicitement les accès. Les restrictions de l’interface complètent Kubernetes RBAC et IAM, sans les remplacer.",
       "recovery": "Vérifiez l’URL de l’API, le certificat, le jeton ou l’identité cloud et RBAC. Ne désactivez pas TLS et n’accordez pas cluster-admin pour contourner une erreur."
     },
-    "envvar": {
-      "purpose": "Fournir des variables d’environnement aux processus du Runtime.",
-      "prepare": "Déterminez les variables réellement nécessaires. Les processus et commandes ayant accès à cet environnement peuvent lire leurs valeurs.",
-      "configure": "Saisissez des noms et valeurs valides, puis lisez et acceptez l’avertissement existant. Les valeurs enregistrées restent masquées ; remplacez uniquement celles à modifier.",
-      "verify": "Aucun test de connexion externe ne s’applique. Vérifiez les noms, l’exposition et l’acceptation du risque avant d’enregistrer.",
-      "recovery": "Corrigez les erreurs de nom, taille ou confirmation affichées. Placez les secrets uniquement dans les valeurs, jamais dans le nom ou la description de la connexion."
-    },
     "shell": {
       "purpose": "Examiner les restrictions réseau Shell existantes.",
       "prepare": "Identifiez les domaines nécessaires au Runtime. Cet écran ne crée et n’autorise aucun Runtime.",

@@ -36,7 +36,6 @@ from azents.core.toolkit_identifiers import (
 )
 from azents.core.tools import McpToolkitConfig, ToolkitProvider, ToolkitType
 from azents.engine.tools.deps import get_toolkit_registry
-from azents.engine.tools.envvar import EnvVarToolkitSecrets
 from azents.engine.tools.kubernetes_auth import KubernetesCredentials
 from azents.repos.toolkit.data import ToolkitConfig, ToolkitCreate, ToolkitUpdate
 from azents.repos.toolkit_operations import ToolkitOperationsRepository
@@ -91,9 +90,6 @@ _mcp_secrets_adapter: TypeAdapter[McpSecrets] = TypeAdapter(McpSecrets)
 _github_secrets_adapter: TypeAdapter[GitHubSecrets] = TypeAdapter(
     GitHubSecrets, config=ConfigDict(hide_input_in_errors=True)
 )
-_envvar_secrets_adapter: TypeAdapter[EnvVarToolkitSecrets] = TypeAdapter(
-    EnvVarToolkitSecrets
-)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -126,58 +122,6 @@ def _resolve_mcp_config(
         return provider.to_mcp_config(typed_config)
     except ValidationError:
         return None
-
-
-@dataclasses.dataclass(frozen=True)
-class _EnvVarCredentialConfig:
-    """Validated membership identities relevant to an EnvVar credential edit."""
-
-    entry_names: frozenset[str]
-
-
-def _decode_envvar_credential_config(config: dict[str, Any]) -> _EnvVarCredentialConfig:
-    """Retain the historical entry-skip and irrelevant-metadata compatibility."""
-    entries = config.get("entries")
-    names = (
-        frozenset(
-            entry["name"]
-            for entry in entries
-            if isinstance(entry, dict) and isinstance(entry.get("name"), str)
-        )
-        if isinstance(entries, list)
-        else frozenset()
-    )
-    return _EnvVarCredentialConfig(entry_names=names)
-
-
-def merge_envvar_credentials(
-    existing_credentials: str | None,
-    submitted_credentials: dict[str, object],
-    config: dict[str, Any],
-) -> dict[str, object]:
-    """Merge non-empty EnvVar edits into values allowed by current config."""
-    submitted = _envvar_secrets_adapter.validate_python(submitted_credentials)
-    existing_values: dict[str, str] = {}
-    if existing_credentials is not None:
-        try:
-            existing_values = _envvar_secrets_adapter.validate_json(
-                existing_credentials
-            ).values
-        except ValidationError:
-            pass
-
-    merged_values = dict(existing_values)
-    merged_values.update(
-        {name: value for name, value in submitted.values.items() if value != ""}
-    )
-    typed_config = _decode_envvar_credential_config(config)
-    return {
-        "values": {
-            name: value
-            for name, value in merged_values.items()
-            if name in typed_config.entry_names
-        }
-    }
 
 
 @dataclasses.dataclass
@@ -398,20 +342,7 @@ class ToolkitService:
                     return Failure(prepared)
                 normalized_credentials = prepared.credentials
                 platform = prepared.platform
-                if existing.toolkit_type == ToolkitType.ENVVAR:
-                    if normalized_credentials is None:
-                        return Failure(
-                            InvalidCredentials(
-                                "EnvVar credential updates require credentials."
-                            )
-                        )
-                    config = update["config"] if "config" in update else existing.config
-                    normalized_credentials = merge_envvar_credentials(
-                        existing.credentials,
-                        normalized_credentials,
-                        config,
-                    )
-                elif existing.toolkit_type == ToolkitType.KUBERNETES:
+                if existing.toolkit_type == ToolkitType.KUBERNETES:
                     config = update["config"] if "config" in update else existing.config
                     normalized_credentials = merge_kubernetes_credentials(
                         existing.credentials,
@@ -430,16 +361,6 @@ class ToolkitService:
                 )
                 if provider_error is not None:
                     return Failure(provider_error)
-        elif (
-            existing.toolkit_type == ToolkitType.ENVVAR
-            and "config" in update
-            and existing.credentials is not None
-        ):
-            normalized_credentials = merge_envvar_credentials(
-                existing.credentials,
-                {"values": {}},
-                update["config"],
-            )
         elif (
             existing.toolkit_type == ToolkitType.KUBERNETES
             and "config" in update
@@ -1360,20 +1281,7 @@ class ToolkitService:
                     return Failure(preparation)
                 prepared = preparation
                 normalized_credentials = prepared.credentials
-                if existing.toolkit_type == ToolkitType.ENVVAR:
-                    if normalized_credentials is None:
-                        return Failure(
-                            InvalidCredentials(
-                                "EnvVar credential updates require credentials."
-                            )
-                        )
-                    config = update["config"] if "config" in update else existing.config
-                    normalized_credentials = merge_envvar_credentials(
-                        existing.credentials,
-                        normalized_credentials,
-                        config,
-                    )
-                elif existing.toolkit_type == ToolkitType.KUBERNETES:
+                if existing.toolkit_type == ToolkitType.KUBERNETES:
                     config = update["config"] if "config" in update else existing.config
                     normalized_credentials = merge_kubernetes_credentials(
                         existing.credentials,
@@ -1392,16 +1300,6 @@ class ToolkitService:
                 )
                 if provider_error is not None:
                     return Failure(provider_error)
-        elif (
-            existing.toolkit_type == ToolkitType.ENVVAR
-            and "config" in update
-            and existing.credentials is not None
-        ):
-            normalized_credentials = merge_envvar_credentials(
-                existing.credentials,
-                {"values": {}},
-                update["config"],
-            )
         elif (
             existing.toolkit_type == ToolkitType.KUBERNETES
             and "config" in update
