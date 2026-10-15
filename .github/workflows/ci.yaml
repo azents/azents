@@ -900,6 +900,7 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       actions: read
       pull-requests: write
     steps:
