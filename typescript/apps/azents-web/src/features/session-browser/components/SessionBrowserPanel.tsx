@@ -702,7 +702,7 @@ export function SessionBrowserPanel({
             onContextMenu={handlers?.onContextMenu}
           >
             {image === null ? (
-              <Text c="dimmed" p="md" role="status">
+              <Text c="gray.2" p="md" role="status">
                 {state.connection === "unavailable"
                   ? t("transportUnavailable")
                   : t("waitingFrame")}
