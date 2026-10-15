@@ -24,9 +24,30 @@ from azents_runtime_control.runtime_stream_session import (
     WebSocketOpcode,
 )
 from browser_test import _action
+from playwright.async_api import Error
 
 from azents_runtime_runner.browser import BrowserFailure, RunnerBrowserManager
-from azents_runtime_runner.browser_viewer import RunnerBrowserViewer
+from azents_runtime_runner.browser_viewer import (
+    RunnerBrowserViewer,
+    _capture_error_code,
+)
+
+
+@pytest.mark.parametrize(
+    "message,code",
+    [
+        ("Execution context was destroyed", "browser_capture_context_destroyed"),
+        ("Cannot find context with specified id", "browser_capture_context_missing"),
+        ("Frame was detached", "browser_capture_frame_detached"),
+        ("Unable to capture screenshot", "browser_capture_unavailable"),
+        ("Protocol error in screenshot", "browser_capture_protocol_error"),
+        ("unexpected synthetic page content", "browser_capture_sdk_error"),
+    ],
+)
+def test_live_capture_error_diagnostics_are_fixed_codes(
+    message: str, code: str
+) -> None:
+    assert _capture_error_code(Error(message)) == code
 
 
 class Budget:

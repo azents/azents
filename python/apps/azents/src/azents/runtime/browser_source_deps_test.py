@@ -45,9 +45,11 @@ def _config(
     )
 
 
+@pytest.mark.parametrize("insecure", [False, True])
 async def test_browser_client_reuses_process_channel_and_has_browser_only_supplier(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    insecure: bool,
 ) -> None:
     ca = tmp_path / "trusted-ca"
     ca.write_bytes(b"synthetic-ca")
@@ -61,7 +63,7 @@ async def test_browser_client_reuses_process_channel_and_has_browser_only_suppli
 
     monkeypatch.setattr(GrpcBrowserSourceClient, "from_endpoint", create)
     config = _config(
-        endpoint="runtime-control:8030", local=False, insecure=False, ca=ca
+        endpoint="runtime-control:8030", local=False, insecure=insecure, ca=ca
     )
     appctx = AppContext(config)
     first = await get_api_runtime_browser_source_client(appctx, config)
@@ -72,13 +74,15 @@ async def test_browser_client_reuses_process_channel_and_has_browser_only_suppli
         captured["credential_supplier"], RuntimeBrowserSourceCredentialSupplier
     )
     assert isinstance(captured["tls"], GrpcClientTlsConfig)
-    assert captured["allow_insecure"] is False
+    assert captured["allow_insecure"] is insecure
     await appctx.close()
     assert client.closed
 
 
-async def test_local_docker_endpoint_uses_explicit_insecure_with_proof(
+@pytest.mark.parametrize("local", [False, True])
+async def test_explicit_ordinary_control_trust_keeps_browser_only_proof(
     monkeypatch: pytest.MonkeyPatch,
+    local: bool,
 ) -> None:
     client = _Client()
     captured: dict[str, object] = {}
@@ -90,7 +94,7 @@ async def test_local_docker_endpoint_uses_explicit_insecure_with_proof(
 
     monkeypatch.setattr(GrpcBrowserSourceClient, "from_endpoint", create)
     config = _config(
-        endpoint="runtime-control:8030", local=True, insecure=True, ca=None
+        endpoint="runtime-control:8030", local=local, insecure=True, ca=None
     )
     appctx = AppContext(config)
     assert await get_api_runtime_browser_source_client(appctx, config) is client
@@ -101,16 +105,6 @@ async def test_local_docker_endpoint_uses_explicit_insecure_with_proof(
     await appctx.close()
 
 
-async def test_insecure_transport_is_rejected_outside_local_environment() -> None:
-    config = _config(
-        endpoint="runtime-control:8030", local=False, insecure=True, ca=None
-    )
-    appctx = AppContext(config)
-    with pytest.raises(ValueError, match="local environments"):
-        await get_api_runtime_browser_source_client(appctx, config)
-    await appctx.close()
-
-
 async def test_no_implicit_endpoint_or_local_source_fallback() -> None:
     config = _config(endpoint=None, local=True, insecure=False, ca=None)
     appctx = AppContext(config)
@@ -118,9 +112,10 @@ async def test_no_implicit_endpoint_or_local_source_fallback() -> None:
     await appctx.close()
 
 
-async def test_missing_tls_trust_does_not_downgrade_to_insecure() -> None:
+@pytest.mark.parametrize("local", [False, True])
+async def test_missing_tls_trust_does_not_downgrade_to_insecure(local: bool) -> None:
     config = _config(
-        endpoint="runtime-control:8030", local=False, insecure=False, ca=None
+        endpoint="runtime-control:8030", local=local, insecure=False, ca=None
     )
     appctx = AppContext(config)
     with pytest.raises(ValueError, match="TLS trust"):

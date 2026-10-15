@@ -5,7 +5,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
-from azcommon.logging import RuntimeEnvironment
 from azents_runtime_control.grpc_browser_source_client import GrpcBrowserSourceClient
 from azents_runtime_control.grpc_tls import GrpcClientTlsConfig
 from azents_runtime_control.grpc_transfer_coordinator_client import (
@@ -206,10 +205,6 @@ async def get_api_runtime_browser_source_client(
     control = config.runtime_transfer_coordinator
     if not control.enabled:
         return None
-    if control.allow_insecure and config.runtime_env is not RuntimeEnvironment.LOCAL:
-        raise ValueError(
-            "Insecure Browser sources are restricted to local environments"
-        )
     endpoint = control.endpoint
     if endpoint is None or not endpoint.strip():
         raise ValueError("Runtime Control endpoint is required for Browser sources")

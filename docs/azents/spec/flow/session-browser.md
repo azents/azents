@@ -71,7 +71,7 @@ Only `azents-api` can open a Browser-purpose source on the existing ordinary Run
 
 Connection proof/setup expiry and active attachment lifetime are distinct. The live attachment lasts no longer than one hour or the authenticated Session's expiry, whichever comes first. API and Owner revalidate current joined authority at least every five seconds, with API checks before forwarding input and Owner checks before effect-bearing application frames. Current target/generation checks remain in the Runner. Read-only subagent viewers may acknowledge frames but cannot send input, answer dialogs or close pages.
 
-The source uses existing Owner/relay routing, flow control, capacity, lease/fingerprint and drain boundaries. Local insecure transport is allowed only by the existing local environment policy and still requires Browser proof. Auth/resource/expiry/stale-target termination is distinguished from ordinary source loss. Disconnect or revocation resets only the attachment, releases transient input and volatile frame state, and preserves native tabs, Session profiles and unrelated attachments.
+The source uses existing Owner/relay routing, flow control, capacity, lease/fingerprint and drain boundaries. API source composition reuses the ordinary Control endpoint and CA trust: a configured CA selects TLS even when the existing explicit insecure flag is true; absent CA requires that flag rather than an automatic downgrade. Browser-only proof remains mandatory in every case. Global API Runtime environment/logging does not authorize the source; the isolated Docker fixture retains its normal API environment. Auth/resource/expiry/stale-target termination is distinguished from ordinary source loss. Disconnect or revocation resets only the attachment, releases transient input and volatile frame state, and preserves native tabs, Session profiles and unrelated attachments.
 
 ## Live Panel and Input
 
@@ -100,8 +100,9 @@ cannot block the new scope's first image. Each attachment retains at most 128
 retired sent-frame sequence numbers solely to ignore delayed ACKs; these ACKs
 never establish displayed authority. Unknown ACKs remain invalid.
 
-Cleanup-only pointer/composition cancellation and key release can use the newest
-displayed ACK only within the same attachment, target, navigation and dimensions.
+Non-spatial keyboard/composition input and cleanup can use the newest displayed
+ACK only within the same attachment, target, navigation and dimensions, including
+the interval before React rerenders after a displayed ACK changes.
 If safe cleanup cannot be sent, the attachment closes and Runner releases its
 native held state. Spatial effects retain exact displayed-frame fencing.
 

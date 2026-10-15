@@ -289,7 +289,13 @@ void test("one URL is replaced; a newer capture does not invalidate current ackn
   assert.ok(second);
   connection.displayed(second);
   assert.equal(
-    connection.coordinate(frame, { kind: "key", phase: "down", key: "Enter" }),
+    connection.coordinate(frame, {
+      kind: "pointer",
+      phase: "down",
+      x: 10,
+      y: 10,
+      button: "left",
+    }),
     false,
   );
   assert.equal(
@@ -532,6 +538,45 @@ void test("cleanup that cannot use the same live scope closes the attachment", (
     assert.equal(connection.snapshot().connection, "stale");
     assert.equal(sent.length, 1);
   }
+});
+
+void test("native text and keys use the latest displayed ACK across a React render boundary", () => {
+  const { connection, sent } = fixture();
+  connection.receiveText(JSON.stringify(status));
+  connection.receiveFrame(binary(frame));
+  const initial = connection.snapshot().image;
+  assert.ok(initial);
+  connection.displayed(initial);
+  connection.receiveFrame(binary({ ...frame, frame_sequence: 2 }));
+  const next = connection.snapshot().image;
+  assert.ok(next);
+  connection.displayed(next);
+  for (const action of [
+    { kind: "composition", phase: "start", text: null },
+    { kind: "composition", phase: "commit", text: "S" },
+    { kind: "key", phase: "down", key: "ArrowLeft" },
+    { kind: "key", phase: "up", key: "ArrowLeft" },
+  ] as const) {
+    assert.equal(connection.coordinate(frame, action), true);
+    assert.match(sent.at(-1) ?? "", /"frame_sequence":2/u);
+  }
+  assert.equal(
+    connection.coordinate(
+      { ...frame, navigation_id: "previous" },
+      { kind: "composition", phase: "commit", text: "unexpected" },
+    ),
+    false,
+  );
+  assert.equal(
+    connection.coordinate(frame, {
+      kind: "pointer",
+      phase: "down",
+      x: 10,
+      y: 20,
+      button: "left",
+    }),
+    false,
+  );
 });
 
 void test("only bounded ordinary observation reconnects; denial and closure never auto-retry", () => {

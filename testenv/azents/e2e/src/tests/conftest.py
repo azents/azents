@@ -1764,13 +1764,9 @@ def azents_core_service_containers(
         credential_encryption_key,
         system_bootstrap_setup_token,
     )
-    # This Docker fixture uses the local ordinary Control listener, not deployed TLS.
-    # Browser proof and normal user/resource authentication remain mandatory.
-    public_container = (
-        public_container.with_env("AZ_RUNTIME_ENV", "local")
-        .with_env("AZ_RUNTIME_TRANSFER_COORDINATOR_ENDPOINT", "runtime-control:8030")
-        .with_env("AZ_RUNTIME_TRANSFER_COORDINATOR_ALLOW_INSECURE", "true")
-    )
+    public_container = public_container.with_env(
+        "AZ_RUNTIME_TRANSFER_COORDINATOR_ENDPOINT", "runtime-control:8030"
+    ).with_env("AZ_RUNTIME_TRANSFER_COORDINATOR_ALLOW_INSECURE", "true")
     public_container = public_container.with_env(
         "AZ_WORKSPACE_S3_PUBLIC_ENDPOINT_URL", azents_browser_s3_endpoint_url
     )

@@ -95,6 +95,21 @@ No additional obsolete product behavior is authorized for removal. Preserve exis
 
 ## PR-First Delivery Checkpoint (2026-10-15)
 
+- PR #2268 follow-up fixes the two reproduced CI regressions: same-scope
+  keyboard/composition events now use the current displayed ACK across a React
+  render boundary; shared API fixtures retain deployed logging while Browser
+  composition honors existing ordinary Control trust rather than an extra
+  environment gate. The same reviewer independently checked the security
+  correction with 42 tests; root focused composition/authority tests passed 138.
+- Two prepared-image complete viewer runs passed in 75.48 and 75.46 seconds.
+  Corrected deployed-API integration reported passing subscription, viewer and
+  file assertions; its final process/teardown summary was not returned, so it is
+  not reported as a completed successful execution. Required CI is rerun.
+- Atomic positive image dimensions prevent a test-side Blob replacement race.
+  Native capture diagnostics emit fixed categories only, never SDK error text.
+  A previous capture SDK failure is retained as an unresolved diagnostic event,
+  not claimed fixed by later successful runs.
+
 - The requester explicitly directed opening the Phase 3 PR first, running CI in
   the background, and continuing the remaining implementation without waiting
   for the local assembled E2E. This changes execution order, not acceptance.

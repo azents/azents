@@ -25,6 +25,7 @@ from azentspublicclient.models.subagent_tree_node_response import (
 )
 from azentspublicclient.models.subagent_tree_response import SubagentTreeResponse
 from azentspublicclient.models.ws_ticket_response import WsTicketResponse
+from pydantic import BaseModel, ConfigDict, Field
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -46,6 +47,14 @@ from tests.web.public.test_runtime_web_gateway import (
 
 _ORIGIN = "https://azents-web-gateway:8443"
 _MESSAGE = "Open the synthetic Session Browser handoff"
+
+
+class _DisplayedImage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    width: int = Field(ge=1)
+    height: int = Field(ge=1)
+
+
 _APP = '''
 import http.server
 import socketserver
@@ -208,14 +217,17 @@ def _verify_live_panel(
         )
     )
     image_query = "document.querySelector('[aria-label=\"Remote browser page\"] img')"
-    wait.until(
-        lambda _: driver.execute_script(
-            f"const image = {image_query}; "
-            "return image !== null && image.complete && image.naturalWidth > 0;"
+    dimensions = _DisplayedImage.model_validate(
+        wait.until(
+            lambda _: driver.execute_script(
+                f"const image = {image_query}; "
+                "return image !== null && image.complete && "
+                "image.naturalWidth > 0 && image.naturalHeight > 0 "
+                "? {width: image.naturalWidth, height: image.naturalHeight} : null;"
+            )
         )
     )
-    width = float(driver.execute_script(f"return {image_query}.naturalWidth;"))
-    height = float(driver.execute_script(f"return {image_query}.naturalHeight;"))
+    width, height = dimensions.width, dimensions.height
     scale = min(viewport.size["width"] / width, viewport.size["height"] / height)
 
     def click_native(x: int, y: int) -> None:

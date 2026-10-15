@@ -245,6 +245,8 @@ export class BrowserConnection {
       displayed === null ||
       this.current.status === null ||
       (action.kind !== "navigation" &&
+        action.kind !== "key" &&
+        action.kind !== "composition" &&
         !cleanup &&
         displayed.frame_sequence !== frame.frame_sequence) ||
       displayed.attachment_id !== frame.attachment_id ||

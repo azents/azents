@@ -65,6 +65,25 @@ type ViewerSend = Callable[[WebSocketOpcode, bytes], Awaitable[None]]
 type ViewerReceive = Callable[[], Awaitable[bytes | None]]
 
 
+def _capture_error_code(error: Error) -> str:
+    """Classify fixed native failure signatures without logging page content."""
+    message = error.message.lower()
+    for signature, code in (
+        ("execution context was destroyed", "browser_capture_context_destroyed"),
+        ("cannot find context", "browser_capture_context_missing"),
+        ("frame was detached", "browser_capture_frame_detached"),
+        ("frame has been detached", "browser_capture_frame_detached"),
+        ("target page, context or browser has been closed", "browser_capture_closed"),
+        ("unable to capture screenshot", "browser_capture_unavailable"),
+        ("cannot take screenshot", "browser_capture_invalid_dimensions"),
+        ("timeout", "browser_capture_timeout"),
+        ("protocol error", "browser_capture_protocol_error"),
+    ):
+        if signature in message:
+            return code
+    return "browser_capture_sdk_error"
+
+
 @dataclass(frozen=True)
 class _Image:
     source: ViewerSource
@@ -90,8 +109,19 @@ class _LatestPage:
                 await asyncio.sleep(0.25)
         except asyncio.CancelledError:
             raise
-        except Error, BrowserFailure:
+        except (Error, BrowserFailure) as error:
             self.failed = True
+            logging.getLogger(__name__).warning(
+                "Browser live capture stopped",
+                extra={
+                    "page_id": self.page.id,
+                    "reason_code": (
+                        error.code
+                        if isinstance(error, BrowserFailure)
+                        else _capture_error_code(error)
+                    ),
+                },
+            )
         finally:
             async with self.changed:
                 self.changed.notify_all()
