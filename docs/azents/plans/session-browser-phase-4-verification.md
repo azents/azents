@@ -10,7 +10,7 @@ document_type: supporting-plan
 
 - Phase: 4, managed Browser Skill and complete delivery verification.
 - Branch/base: `feat/session-browser-261015-verification` →
-  `feat/session-browser-261015-viewer` at `c78a5cd3043e014b49d9f4316a1f7a7527bcc63e`.
+  `feat/session-browser-261015-viewer` at `15ae00a18f18d32ef2a4d885db0a09bb1c4c9c10`.
 - PR boundary: `Session Browser [4/4]`, based on [Phase 3 PR #2268](https://github.com/azents/azents/pull/2268).
 - Inputs: [Requirements](../requirements/browsercmd-261014-session-browser.md)
   REQ-1–15, accepted [ADR](../adr/browsercmd-261014-session-browser.md) D1–D5,
@@ -77,6 +77,26 @@ document_type: supporting-plan
    stack CI. No merge/deployment is authorized.
 
 ## Execution checkpoint
+
+- Phase 3 CI corrections were moved into PR #2268 at `15ae00a18` and this
+  branch was rebased with the repository stack script; the Phase 4 diff retains
+  only its own Skill, file verification, current Specs and evidence.
+- Complete Phase 4 review found one evidence-isolation issue. Root clears only
+  the Browser fixture journal immediately before the handoff; the actual DELETE
+  regression proves older image evidence cannot satisfy a current zero-image
+  run. The same reviewer confirmed the correction with four checks. Actual
+  run-isolated file E2E passed in 51.58 seconds.
+- The same reviewer passed the complete remaining diff with 85 independent
+  checks and the later trust correction with 42 security checks. Root focused
+  checks passed 136 Skill/file-service cases, 138 trust/source cases, 522 Web
+  cases, and the existing 40 real component stories.
+- Two complete prepared-image viewer runs passed in 75.48 and 75.46 seconds.
+  The corrected deployed-API run reported passing subscription, viewer and file
+  assertions, but its process/teardown summary was not returned; it is not
+  reported as a completed successful execution. CI remains authoritative.
+- Requirements/Design completion dates and temporary-plan cleanup remain pending
+  final stack CI. No earlier capture SDK failure is claimed fixed merely because
+  later runs passed; its bounded diagnostic event remains in the QA report.
 
 - Phase 3 PR #2268 is open and CI is running. The requester explicitly directed
   CI-first parallel delivery rather than waiting for local E2E before opening it.

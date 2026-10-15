@@ -18,7 +18,7 @@ Current behavior belongs in the [Session Browser flow](../spec/flow/session-brow
 - Phase 1: [shared transport PR #2262](https://github.com/azents/azents/pull/2262).
 - Phase 2: [Runner/tools PR #2263](https://github.com/azents/azents/pull/2263).
 - Phase 3: [authenticated viewer PR #2268](https://github.com/azents/azents/pull/2268)
-  at `c78a5cd3043e014b49d9f4316a1f7a7527bcc63e`.
+  at `15ae00a18f18d32ef2a4d885db0a09bb1c4c9c10` after the reviewed CI corrections.
 - Phase 4 completes managed guidance and file/model/publication verification.
   Final feature acceptance and CI remain pending; this report does not mark
   Requirements or Design implemented.
@@ -30,12 +30,12 @@ Current behavior belongs in the [Session Browser flow](../spec/flow/session-brow
 | Boundary | Result and interpretation |
 | --- | --- |
 | Shared control | 450 tests passed, including propagating child cancellation followed by new work on the same Runner. Parent cancellation and unexpected task failures still propagate. |
-| Runner resources/viewer | 473 tests passed, including actual SDK navigation/resize before old-image display, stale source denial, dialogs/composition and cleanup. |
+| Runner resources/viewer | 479 tests passed, including actual SDK navigation/resize before old-image display, stale source denial, dialogs/composition, cleanup and fixed-category capture diagnostics. |
 | API/Control authority | 469 integrated tests passed, including 63 focused source/Owner checks. Validation stalls remain attachment-local, source setup expires as a whole, and held-input cleanup cannot cross scope. |
 | Web | 522 tests passed after adding a same-scope render-to-ACK keyboard/composition regression. Spatial input retains exact-frame fencing. |
 | Real components | 40 story plays passed at DPR 1 and scale 1 with loaded product fonts, zero axe violations and horizontal overflow. This is component evidence, not OS-mobile acceptance. |
 | Managed Skill and file services | 136 tests passed across real release packaging, projection/load, schema examples/provider lowerers, existing immutable Skill projection semantics and image/publication/transfer services. |
-| E2E fixture support | 1,278 Docker-free support tests passed before the additional journal-isolation case; all four focused Browser proxy cases passed afterward. |
+| E2E fixture support | 1,279 Docker-free support tests passed, including the journal-isolation regression and both native text and multimodal Browser result parsing. |
 | Original-file journey | Run-isolated normal-authentication Engine E2E passed in 51.58 seconds: actual `load_skill` → `browser_open` → `browser_observe(image)` → model image → Runtime original inspection → `present_file` → authorized Exchange download. Download SHA-256, size, PNG header and dimensions equal the saved original. |
 | Authenticated live viewer | Two same-build prepared-image E2Es passed in 75.48 and 75.46 seconds, including complete mixed-case text, address/history/reload, reconnect, final authentication revocation and stale target denial. They do not prove a previous intermittent SDK capture failure's cause was fixed. |
 
