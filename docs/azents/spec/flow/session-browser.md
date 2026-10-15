@@ -42,7 +42,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/session-browser/recentTargets.ts
   - typescript/apps/azents-web/src/features/session-browser/components/SessionBrowserPanel.tsx
   - typescript/apps/azents-web/src/trpc/routers/browser.ts
-last_verified_at: 2026-10-15
+last_verified_at: 2026-10-16
 spec_version: 1
 ---
 
@@ -87,6 +87,10 @@ The source uses existing Owner/relay routing, flow control, capacity, lease/fing
 
 ## Live Panel and Input
 
+The address field requests the native URL keyboard through URL type/input mode,
+with capitalization, autocorrect and spellcheck disabled. Exact shortcut keys
+remain an OS/keyboard choice.
+
 The panel validates the first status against its exact selected target and attachment before treating the stream as connected. Binary frames carry typed dimensions, navigation and source identity. Image decoding must match those dimensions, and only a displayed current image is acknowledged. The image element is retained across live frame replacement. The displayed Blob URL remains valid while at most one replacement decodes; the old URL is released after successful display, and both are released on clear/disposal. The serial inbox remains bounded; frame bytes are not saved as intentional captures, files, transcripts or image history.
 
 The supporting panel presents browser-style tabs above address/navigation chrome and an unframed live image. Controls retain internal padding; the image has no outer margin or decorative border. Preview content does not send remote input: activation opens focused viewing and consumes that gesture locally. Authorized input participants can enter an HTTP(S) address, go back or forward in the selected page's native history, and reload the actual page. The address field smoothly expands while focused by collapsing the preceding navigation controls and restores on blur/submission; reduced motion disables the transition. Address drafts are volatile, cleared on blur/target change/submission, and never form an input history. Unsupported schemes and embedded user credentials are rejected. Read-only viewers cannot edit or navigate. Connection refresh is separately labelled and does not claim to reload the site. No standalone page-text entry form is shown.
@@ -100,7 +104,7 @@ text input on an unchanged main page.
 
 Focused viewing is an independent body-level modal that covers the global app bar and fills the visual viewport, without outer margins. Safe-area padding and visual viewport resize/scroll observations keep its explicit text Exit focused view button reachable when the mobile keyboard changes available space. That control is separate from per-tab closure. Focus is contained locally and Escape exits unless an IME composition is active. Modal presentation does not reopen the Browser attachment or resize the native page. Local viewer zoom ranges from 100% fitted width to 300%, through continuous pinch or 25% menu steps. Scrollbars reveal the enlarged image and coordinates use its actual geometry. The image keeps its native aspect ratio without input-active letterbox space.
 
-Touch input has an attachment/navigation-scoped tap/pan/pinch state machine. A stationary single-finger tap synchronously focuses the native text receiver during trusted pointerup activation, then sends one source-fenced remote down/up pair. No remote press is held while waiting to distinguish a tap from a gesture. One-finger movement scrolls the remote page at 100% or pans the local enlarged image above 100%. Two fingers pinch the local image around their midpoint, sending no remote click. Pinch completion, cancellation, target/navigation changes, access changes and disconnect discard incomplete gestures. Only completed finger taps show the brief circular feedback; mouse clicks and pinch/pan do not. Feedback never intercepts input and reduced motion uses a static fade. The feedback denotes the physical tap, not confirmed remote action success.
+Touch input has an attachment/navigation-scoped tap/pan/pinch state machine. A stationary single-finger tap synchronously focuses the native text receiver during trusted pointerup activation, then sends one source-fenced remote down/up pair. No remote press is held while waiting to distinguish a tap from a gesture. One-finger movement scrolls the remote page at 100% or pans the local enlarged image above 100%. Two fingers pinch the local image around their midpoint, sending no remote click. Pinch completion, cancellation, target/navigation changes, access changes and disconnect discard incomplete gestures. Only completed finger taps show the brief circular feedback; mouse clicks and pinch/pan do not. A fixed-size central dot marks the exact tap coordinate while the surrounding ring expands; the dot holds its position and size until fading out with the feedback. Feedback never intercepts input and reduced motion uses a static fade. The feedback denotes the physical tap, not confirmed remote action success.
 
 Pointer coordinates are transformed against the displayed image and its acknowledged source, excluding letterbox/outside/stale positions. A valid viewport pointer interaction focuses a visually hidden native textarea inside the same focus boundary for text, IME and mobile keyboard events. This receiver is the viewport's single keyboard stop; forward/reverse physical Tab leaves it naturally. Local printable-text modifiers are separated from remote effect-bearing key chords so mixed-case text does not conflict with a held SDK Shift key. Shift+Arrow and Ctrl/Meta/Alt shortcuts still send typed key events.
 

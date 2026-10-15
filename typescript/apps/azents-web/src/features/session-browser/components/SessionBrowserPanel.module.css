@@ -262,31 +262,59 @@
   position: absolute;
   width: rem(36px);
   height: rem(36px);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  animation: touch-marker-fade 400ms ease-out forwards;
+}
+
+.touchFeedback::before {
+  content: "";
+  position: absolute;
+  inset: 0;
   border: rem(2px) solid var(--mantine-color-blue-5);
   border-radius: 50%;
   background: color-mix(in srgb, var(--mantine-color-blue-5) 20%, transparent);
-  pointer-events: none;
   animation: touch-ripple 400ms ease-out forwards;
 }
 
+.touchFeedback::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: rem(6px);
+  height: rem(6px);
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--mantine-color-blue-5);
+  box-shadow: 0 0 0 rem(2px) var(--mantine-color-white);
+}
+
+@keyframes touch-marker-fade {
+  0%,
+  65% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
 @keyframes touch-ripple {
   from {
-    transform: translate(-50%, -50%) scale(0.5);
+    transform: scale(0.5);
     opacity: 1;
   }
   to {
-    transform: translate(-50%, -50%) scale(1.5);
+    transform: scale(1.5);
     opacity: 0;
   }
 }
 @keyframes touch-fade {
   from {
     opacity: 1;
-    transform: translate(-50%, -50%);
   }
   to {
     opacity: 0;
-    transform: translate(-50%, -50%);
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -294,7 +322,7 @@
   .navigationControls {
     transition: none;
   }
-  .touchFeedback {
+  .touchFeedback::before {
     animation-name: touch-fade;
   }
 }
