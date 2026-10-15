@@ -7,9 +7,14 @@ from unittest.mock import MagicMock, Mock
 
 import psycopg
 import pytest
+from azentspublicclient.models.agent_runtime_raw_state_response import (
+    AgentRuntimeRawStateResponse,
+)
+from pydantic import ValidationError
 
 from support.runtime_web_route_observations import (
     RuntimeWebRouteObservation,
+    runtime_web_runner_generation,
     wait_for_renewed_runtime_web_route,
 )
 from tests.web.public.test_runtime_web_gateway import _read_runtime_web_route
@@ -36,6 +41,36 @@ _JOINED = replace(
     lease_generation=2,
 )
 _RENEWED = replace(_JOINED, lease_expires_at=_NOW + timedelta(seconds=13))
+
+
+def _public_runtime(generation: object) -> AgentRuntimeRawStateResponse:
+    """Validate the real generated SDK model with the public producer's shape."""
+    return AgentRuntimeRawStateResponse.model_validate(
+        {
+            "id": "target-runtime",
+            "workspace_id": "workspace",
+            "agent_id": "agent",
+            "runtime_provider_id": "provider",
+            "runtime_provider_resource_id": "resource",
+            "configuration_sequence": 1,
+            "desired_state": "running",
+            "desired_generation": 1,
+            "last_lifecycle_command": None,
+            "reset_final_desired_state": None,
+            "provider_observed_state": "running",
+            "provider_observed_generation": 1,
+            "provider_connection_state": "connected",
+            "runner_state": "ready",
+            "runner_generation": generation,
+            "workspace_path": None,
+            "failure_generation": None,
+            "failure_code": None,
+            "failure_message": None,
+            "last_state_change_at": _NOW,
+            "created_at": _NOW,
+            "updated_at": _NOW,
+        }
+    )
 
 
 class _Receipts:
@@ -68,6 +103,73 @@ class _Receipts:
             timeout_seconds=1,
             interval_seconds=0.25,
         )
+
+
+def test_actual_public_sdk_generation_drives_previous_comparison_and_new_barrier() -> (
+    None
+):
+    previous_public = _public_runtime("1")
+    next_public = _public_runtime("2")
+    assert previous_public.runner_generation == "1"
+    assert next_public.runner_generation == "2"
+    previous_generation = runtime_web_runner_generation(previous_public)
+    assert _PREVIOUS.runner_generation == previous_generation
+    next_generation = runtime_web_runner_generation(next_public)
+    assert next_generation != previous_generation
+    receipts = _Receipts([_JOINED, _RENEWED])
+    result = wait_for_renewed_runtime_web_route(
+        read=receipts.read,
+        previous=_PREVIOUS,
+        runner_generation=next_generation,
+        clock=receipts.clock,
+        pause=receipts.pause,
+        timeout_seconds=1,
+        interval_seconds=0.25,
+    )
+    assert result == _RENEWED
+    assert receipts.reads == 2
+
+
+@pytest.mark.parametrize("generation", ["1", "9007199254740993", "9223372036854775807"])
+def test_public_generation_preserves_exact_bigint(generation: str) -> None:
+    assert runtime_web_runner_generation(_public_runtime(generation)) == int(generation)
+
+
+@pytest.mark.parametrize(
+    "generation",
+    [
+        None,
+        "",
+        "0",
+        "00",
+        "01",
+        "-1",
+        "+1",
+        "1.0",
+        "1e3",
+        " 1",
+        "1 ",
+        "１",
+        "١",
+        "9223372036854775808",
+        "9" * 5000,
+    ],
+)
+def test_public_generation_rejects_noncanonical_or_unready_values(
+    generation: str | None,
+) -> None:
+    with pytest.raises(ValueError, match="canonical positive signed-BIGINT") as error:
+        runtime_web_runner_generation(_public_runtime(generation))
+    assert str(error.value) == (
+        "Runtime Web ready Runner generation must be a canonical "
+        "positive signed-BIGINT public string"
+    )
+
+
+@pytest.mark.parametrize("generation", [1, True, 1.0, b"1"])
+def test_actual_sdk_rejects_nonstring_generation_types(generation: object) -> None:
+    with pytest.raises(ValidationError):
+        _public_runtime(generation)
 
 
 def test_waits_through_old_lease_offer_join_and_subsequent_renewal() -> None:

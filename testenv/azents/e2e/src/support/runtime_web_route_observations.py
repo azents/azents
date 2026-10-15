@@ -4,6 +4,29 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
+from azentspublicclient.models.agent_runtime_raw_state_response import (
+    AgentRuntimeRawStateResponse,
+)
+
+
+def runtime_web_runner_generation(state: AgentRuntimeRawStateResponse) -> int:
+    """Decode the public canonical positive signed-BIGINT generation string."""
+    value: object = state.runner_generation
+    if (
+        not isinstance(value, str)
+        or not value
+        or not value.isascii()
+        or not value.isdigit()
+        or value.startswith("0")
+        or len(value) > 19
+        or (len(value) == 19 and value > "9223372036854775807")
+    ):
+        raise ValueError(
+            "Runtime Web ready Runner generation must be a canonical "
+            "positive signed-BIGINT public string"
+        )
+    return int(value)
+
 
 @dataclass(frozen=True, repr=False)
 class RuntimeWebRouteObservation:

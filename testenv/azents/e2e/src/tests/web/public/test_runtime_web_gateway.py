@@ -77,6 +77,7 @@ from support.observations import (
 from support.runtime_profiles import create_workspace_runtime_profile
 from support.runtime_web_route_observations import (
     RuntimeWebRouteObservation,
+    runtime_web_runner_generation,
     wait_for_renewed_runtime_web_route,
 )
 from support.system_bootstrap import SystemBootstrapEvidence
@@ -2511,8 +2512,9 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
                 _headers=_headers(workspace.token),
             )
             assert previous_runtime.runtime is not None
-            previous_runner_generation = previous_runtime.runtime.runner_generation
-            assert previous_runner_generation is not None
+            previous_runner_generation = runtime_web_runner_generation(
+                previous_runtime.runtime
+            )
             previous_route = _read_runtime_web_route(
                 runtime_web_stack_factory.postgres, previous_runtime.runtime.id
             )
@@ -2546,7 +2548,8 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
                 predicate=lambda runtime: (
                     runtime.runtime is not None
                     and runtime.runtime.runner_generation is not None
-                    and runtime.runtime.runner_generation != previous_runner_generation
+                    and runtime_web_runner_generation(runtime.runtime)
+                    != previous_runner_generation
                     and runtime.lifecycle is not None
                     and runtime.lifecycle.availability == "ready"
                     and runtime.lifecycle.runner.state == "ready"
@@ -2555,8 +2558,9 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
                 message="Runtime Web Runner did not become ready in a new generation",
             )
             assert reconnected_runtime.runtime is not None
-            reconnected_generation = reconnected_runtime.runtime.runner_generation
-            assert reconnected_generation is not None
+            reconnected_generation = runtime_web_runner_generation(
+                reconnected_runtime.runtime
+            )
             wait_for_renewed_runtime_web_route(
                 read=lambda: _read_runtime_web_route(
                     runtime_web_stack_factory.postgres, previous_route.runtime_id
