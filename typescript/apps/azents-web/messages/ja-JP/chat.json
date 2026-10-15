@@ -596,7 +596,9 @@
     "categoryWait": "待機",
     "categoryOther": "その他",
     "categoryGit": "Git",
-    "categorySchedule": "スケジュール"
+    "categorySchedule": "スケジュール",
+    "categoryWebService": "Webサービス",
+    "categoryChannel": "チャンネル"
   },
   "authorization": {
     "authorizationRequired": "認証が必要",

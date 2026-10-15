@@ -596,7 +596,9 @@
     "categoryWait": "Wait",
     "categoryOther": "Other",
     "categoryGit": "Git",
-    "categorySchedule": "Schedule"
+    "categorySchedule": "Schedule",
+    "categoryWebService": "Web service",
+    "categoryChannel": "Channel"
   },
   "authorization": {
     "authorizationRequired": "Authorization required",

@@ -596,7 +596,9 @@
     "categoryWait": "Attente",
     "categoryOther": "Autre",
     "categoryGit": "Git",
-    "categorySchedule": "Planification"
+    "categorySchedule": "Planification",
+    "categoryWebService": "Service web",
+    "categoryChannel": "Canal"
   },
   "authorization": {
     "authorizationRequired": "Autorisation requise",
