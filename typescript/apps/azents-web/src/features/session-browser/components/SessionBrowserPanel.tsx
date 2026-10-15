@@ -6,6 +6,7 @@ import {
   Badge,
   Box,
   Button,
+  FocusTrap,
   Group,
   Loader,
   Menu,
@@ -20,10 +21,14 @@ import {
   IconArrowLeft,
   IconArrowRight,
   IconDots,
+  IconMaximize,
+  IconMinimize,
   IconRefresh,
   IconReload,
   IconWorld,
   IconX,
+  IconZoomIn,
+  IconZoomOut,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useId } from "react";
@@ -65,6 +70,10 @@ export interface BrowserInteractionHandlers {
 }
 
 export interface SessionBrowserPanelProps {
+  focused: boolean;
+  zoom: number;
+  onToggleFocus: () => void;
+  onZoomChange: (zoom: number) => void;
   state: BrowserViewState;
   closeError: boolean;
   onSelect: (target: BrowserTarget) => void;
@@ -88,6 +97,10 @@ export interface SessionBrowserPanelProps {
 }
 
 export function SessionBrowserPanel({
+  focused,
+  zoom,
+  onToggleFocus,
+  onZoomChange,
   state,
   closeError,
   onSelect,
@@ -201,364 +214,424 @@ export function SessionBrowserPanel({
         ? t("readOnlyDescription")
         : t("inputDescription");
   return (
-    <Box className={classes.panel}>
-      <Stack gap="sm" className={classes.header}>
-        <Group gap="xs" justify="space-between" wrap="nowrap">
-          <Text size="xs" c="dimmed" truncate className={classes.taskLabel}>
-            {selected?.taskLabel || t("selectPage")}
-          </Text>
-          <Group gap="xs" wrap="nowrap">
-            <Badge
-              variant="filled"
-              autoContrast
-              color={connected ? "teal.9" : "gray.7"}
-              role="status"
-              size="sm"
-            >
-              {state.type === "READY"
-                ? t(state.connection)
-                : state.type === "CLOSED_TARGET"
-                  ? t("closed")
-                  : t("selectPage")}
-            </Badge>
-            {state.type === "READY" && !state.canInput && !state.canClose && (
-              <Badge variant="filled" autoContrast color="gray.7" size="sm">
-                {t("readOnly")}
-              </Badge>
-            )}
-          </Group>
-        </Group>
-        <div
-          className={classes.tabs}
-          role="tablist"
-          aria-label={t("page")}
-          onKeyDown={(event) => {
-            const tabs = Array.from(
-              event.currentTarget.querySelectorAll<HTMLButtonElement>(
-                '[role="tab"]',
-              ),
-            );
-            const index = tabs.findIndex((tab) => tab === event.target);
-            const next =
-              event.key === "ArrowRight"
-                ? (index + 1) % tabs.length
-                : event.key === "ArrowLeft"
-                  ? (index + tabs.length - 1) % tabs.length
-                  : event.key === "Home"
-                    ? 0
-                    : event.key === "End"
-                      ? tabs.length - 1
-                      : null;
-            if (index >= 0 && next !== null) {
-              event.preventDefault();
-              tabs[next]?.focus();
-              tabs[next]?.click();
+    <FocusTrap active={focused}>
+      <Box
+        className={classes.panel}
+        data-focused={focused}
+        {...(focused
+          ? {
+              role: "dialog",
+              "aria-modal": true,
+              "aria-label": t("focusBrowser"),
             }
-          }}
-        >
-          {pages.map((page) => (
-            <button
-              key={JSON.stringify(page.target)}
-              type="button"
-              role="tab"
-              aria-selected={
-                selected !== null &&
-                sameBrowserTarget(page.target, selected.target)
-              }
-              tabIndex={
-                selected === null ||
-                sameBrowserTarget(page.target, selected.target)
-                  ? 0
-                  : -1
-              }
-              className={classes.tab}
-              title={`${page.taskLabel} · ${page.title || page.url || t("untitled")}`}
-              onClick={() => onSelect(page.target)}
-            >
-              {page.title || page.url || t("untitled")}
-            </button>
-          ))}
-        </div>
-      </Stack>
-      <div className={classes.browser}>
-        <Group gap={rem(4)} wrap="nowrap" className={classes.addressBar}>
-          <Tooltip label={t("back")}>
-            <ActionIcon
-              variant="subtle"
-              color="gray"
-              aria-label={t("back")}
-              disabled={!(navigationEnabled && inputEnabled)}
-              onClick={() =>
-                onNavigate({ kind: "navigation", action: "back", url: null })
-              }
-            >
-              <IconArrowLeft size={16} aria-hidden />
-            </ActionIcon>
-          </Tooltip>
-          <Tooltip label={t("forward")}>
-            <ActionIcon
-              variant="subtle"
-              color="gray"
-              aria-label={t("forward")}
-              disabled={!(navigationEnabled && inputEnabled)}
-              onClick={() =>
-                onNavigate({ kind: "navigation", action: "forward", url: null })
-              }
-            >
-              <IconArrowRight size={16} aria-hidden />
-            </ActionIcon>
-          </Tooltip>
-          <Tooltip label={t("reloadPage")}>
-            <ActionIcon
-              variant="subtle"
-              color="gray"
-              aria-label={t("reloadPage")}
-              disabled={!(navigationEnabled && inputEnabled)}
-              onClick={() =>
-                onNavigate({ kind: "navigation", action: "reload", url: null })
-              }
-            >
-              <IconReload size={16} aria-hidden />
-            </ActionIcon>
-          </Tooltip>
-          <TextInput
-            size="xs"
-            variant="unstyled"
-            className={classes.address}
-            aria-label={t("address")}
-            placeholder={t("addressPlaceholder")}
-            leftSection={<IconWorld size={14} aria-hidden />}
-            value={addressValue}
-            readOnly={!(navigationEnabled && inputEnabled)}
-            aria-invalid={addressError}
-            onChange={(event) => onAddressChange(event.currentTarget.value)}
-            onFocus={onAddressFocus}
-            onBlur={onAddressBlur}
+          : {})}
+      >
+        <Stack gap="sm" className={classes.header}>
+          <Group gap="xs" justify="space-between" wrap="nowrap">
+            <Text size="xs" c="dimmed" truncate className={classes.taskLabel}>
+              {selected?.taskLabel || t("selectPage")}
+            </Text>
+            <Group gap="xs" wrap="nowrap">
+              <Tooltip label={focused ? t("exitFocus") : t("focusBrowser")}>
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  aria-label={focused ? t("exitFocus") : t("focusBrowser")}
+                  onClick={onToggleFocus}
+                >
+                  {focused ? (
+                    <IconMinimize size={16} aria-hidden />
+                  ) : (
+                    <IconMaximize size={16} aria-hidden />
+                  )}
+                </ActionIcon>
+              </Tooltip>
+              <Badge
+                variant="filled"
+                autoContrast
+                color={connected ? "teal.9" : "gray.7"}
+                role="status"
+                size="sm"
+              >
+                {state.type === "READY"
+                  ? t(state.connection)
+                  : state.type === "CLOSED_TARGET"
+                    ? t("closed")
+                    : t("selectPage")}
+              </Badge>
+              {state.type === "READY" && !state.canInput && !state.canClose && (
+                <Badge variant="filled" autoContrast color="gray.7" size="sm">
+                  {t("readOnly")}
+                </Badge>
+              )}
+            </Group>
+          </Group>
+          <div
+            className={classes.tabs}
+            role="tablist"
+            aria-label={t("page")}
             onKeyDown={(event) => {
-              if (event.key === "Enter" && navigationEnabled && inputEnabled) {
+              const tabs = Array.from(
+                event.currentTarget.querySelectorAll<HTMLButtonElement>(
+                  '[role="tab"]',
+                ),
+              );
+              const index = tabs.findIndex((tab) => tab === event.target);
+              const next =
+                event.key === "ArrowRight"
+                  ? (index + 1) % tabs.length
+                  : event.key === "ArrowLeft"
+                    ? (index + tabs.length - 1) % tabs.length
+                    : event.key === "Home"
+                      ? 0
+                      : event.key === "End"
+                        ? tabs.length - 1
+                        : null;
+              if (index >= 0 && next !== null) {
                 event.preventDefault();
-                onAddressSubmit();
+                tabs[next]?.focus();
+                tabs[next]?.click();
               }
             }}
-          />
-          <Menu
-            withinPortal
-            position="bottom-end"
-            returnFocus={false}
-            trapFocus={false}
-            withInitialFocusPlaceholder={false}
           >
-            <Menu.Target>
+            {pages.map((page) => (
+              <button
+                key={JSON.stringify(page.target)}
+                type="button"
+                role="tab"
+                aria-selected={
+                  selected !== null &&
+                  sameBrowserTarget(page.target, selected.target)
+                }
+                tabIndex={
+                  selected === null ||
+                  sameBrowserTarget(page.target, selected.target)
+                    ? 0
+                    : -1
+                }
+                className={classes.tab}
+                title={`${page.taskLabel} · ${page.title || page.url || t("untitled")}`}
+                onClick={() => onSelect(page.target)}
+              >
+                {page.title || page.url || t("untitled")}
+              </button>
+            ))}
+          </div>
+        </Stack>
+        <div className={classes.browser}>
+          <Group gap={rem(4)} wrap="nowrap" className={classes.addressBar}>
+            <Tooltip label={t("back")}>
               <ActionIcon
                 variant="subtle"
                 color="gray"
-                aria-label={t("keyboardActions")}
-              >
-                <IconDots size={16} aria-hidden />
-              </ActionIcon>
-            </Menu.Target>
-            <Menu.Dropdown>
-              <Menu.Item
-                onClick={onRetry}
-                leftSection={<IconRefresh size={14} aria-hidden />}
-              >
-                {t("refreshConnection")}
-              </Menu.Item>
-              {handlers !== null && (
-                <>
-                  <Menu.Item
-                    onClick={() => {
-                      handlers.onSendTab(false);
-                      keyboardRef?.current?.focus({ preventScroll: true });
-                    }}
-                  >
-                    {t("sendTab")}
-                  </Menu.Item>
-                  <Menu.Item
-                    onClick={() => {
-                      handlers.onSendTab(true);
-                      keyboardRef?.current?.focus({ preventScroll: true });
-                    }}
-                  >
-                    {t("sendShiftTab")}
-                  </Menu.Item>
-                </>
-              )}
-            </Menu.Dropdown>
-          </Menu>
-          <Tooltip label={t("closePage")}>
-            <ActionIcon
-              variant="subtle"
-              color="gray"
-              aria-label={t("closePage")}
-              disabled={state.type !== "READY" || !state.canClose}
-              onClick={onClosePage}
-            >
-              <IconX size={16} aria-hidden />
-            </ActionIcon>
-          </Tooltip>
-        </Group>
-        <Stack gap="xs" className={classes.notices}>
-          {addressError && (
-            <Alert color="yellow" role="alert">
-              {t("invalidAddress")}
-            </Alert>
-          )}
-          {state.type === "CLOSED_TARGET" && (
-            <Alert color="yellow">{t("closedTarget")}</Alert>
-          )}
-          {closeError && (
-            <Alert color="yellow" role="alert">
-              {t("closeFailed")}
-            </Alert>
-          )}
-          {state.type === "READY" && state.conflict && (
-            <Alert color="yellow" role="status">
-              {t("conflict")}
-            </Alert>
-          )}
-          {state.type === "READY" && state.outcomeUnknown && (
-            <Alert color="yellow" role="status">
-              {t("unknownOutcome")}
-            </Alert>
-          )}
-          {state.type === "READY" && state.dialog !== null && (
-            <Stack
-              gap="xs"
-              p="xs"
-              className={classes.dialog}
-              role="group"
-              aria-label={t("dialog")}
-            >
-              <Text fw={600} size="sm">
-                {t("dialog")}
-              </Text>
-              <Text size="sm" style={{ overflowWrap: "anywhere" }}>
-                {state.dialog.message}
-              </Text>
-              {state.dialog.type === "prompt" && (
-                <TextInput
-                  maxLength={32768}
-                  label={t("dialogText")}
-                  value={dialogText}
-                  onChange={(event) =>
-                    onDialogTextChange(event.currentTarget.value)
-                  }
-                  disabled={!dialogEnabled}
-                />
-              )}
-              <Group gap="xs">
-                <Button
-                  size="xs"
-                  disabled={!dialogEnabled}
-                  onClick={() => onDialogResponse(true)}
-                >
-                  {t("accept")}
-                </Button>
-                <Button
-                  size="xs"
-                  variant="default"
-                  disabled={!dialogEnabled}
-                  onClick={() => onDialogResponse(false)}
-                >
-                  {t("dismiss")}
-                </Button>
-              </Group>
-            </Stack>
-          )}
-        </Stack>
-        <div
-          className={classes.viewport}
-          data-stale={!connected || !imageCurrent}
-          data-input={handlers !== null}
-          role="region"
-          aria-label={t("viewport")}
-          aria-describedby={descriptionId}
-          tabIndex={-1}
-          onPointerDown={handlers?.onPointerDown}
-          onPointerMove={handlers?.onPointerMove}
-          onPointerUp={handlers?.onPointerUp}
-          onPointerCancel={handlers?.onPointerCancel}
-          onLostPointerCapture={handlers?.onLostPointerCapture}
-          onWheel={handlers?.onWheel}
-          onBlur={handlers?.onBlur}
-          onContextMenu={handlers?.onContextMenu}
-        >
-          {image === null ? (
-            <Text c="dimmed" p="md" role="status">
-              {state.type === "CLOSED_TARGET"
-                ? t("closedTarget")
-                : state.type === "SELECT_PAGE"
-                  ? t("selectPage")
-                  : state.connection === "unavailable"
-                    ? t("transportUnavailable")
-                    : t("waitingFrame")}
-            </Text>
-          ) : (
-            // eslint-disable-next-line @next/next/no-img-element -- Ephemeral live Blob frames bypass Next image optimization.
-            <img
-              key={image.url}
-              className={classes.image}
-              src={image.url}
-              alt={t("frameAlt", { title: selected?.title || t("untitled") })}
-              draggable={false}
-              onLoad={(event) => {
-                if (
-                  event.currentTarget.naturalWidth !== image.frame.width ||
-                  event.currentTarget.naturalHeight !== image.frame.height
-                ) {
-                  onFrameError(image);
-                  return;
+                aria-label={t("back")}
+                disabled={!(navigationEnabled && inputEnabled)}
+                onClick={() =>
+                  onNavigate({ kind: "navigation", action: "back", url: null })
                 }
+              >
+                <IconArrowLeft size={16} aria-hidden />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label={t("forward")}>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                aria-label={t("forward")}
+                disabled={!(navigationEnabled && inputEnabled)}
+                onClick={() =>
+                  onNavigate({
+                    kind: "navigation",
+                    action: "forward",
+                    url: null,
+                  })
+                }
+              >
+                <IconArrowRight size={16} aria-hidden />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label={t("reloadPage")}>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                aria-label={t("reloadPage")}
+                disabled={!(navigationEnabled && inputEnabled)}
+                onClick={() =>
+                  onNavigate({
+                    kind: "navigation",
+                    action: "reload",
+                    url: null,
+                  })
+                }
+              >
+                <IconReload size={16} aria-hidden />
+              </ActionIcon>
+            </Tooltip>
+            <TextInput
+              size="xs"
+              variant="unstyled"
+              className={classes.address}
+              aria-label={t("address")}
+              placeholder={t("addressPlaceholder")}
+              leftSection={<IconWorld size={14} aria-hidden />}
+              value={addressValue}
+              readOnly={!(navigationEnabled && inputEnabled)}
+              aria-invalid={addressError}
+              onChange={(event) => onAddressChange(event.currentTarget.value)}
+              onFocus={onAddressFocus}
+              onBlur={onAddressBlur}
+              onKeyDown={(event) => {
                 if (
-                  status !== null &&
-                  browserFrameMatchesStatus(image.frame, status)
+                  event.key === "Enter" &&
+                  navigationEnabled &&
+                  inputEnabled
                 ) {
-                  onFrameDisplayed(image);
+                  event.preventDefault();
+                  onAddressSubmit();
                 }
               }}
-              onError={() => onFrameError(image)}
             />
-          )}
-          {image !== null && (!connected || !imageCurrent) && (
-            <Text size="sm" className={classes.overlay} role="status">
-              {connected ? t("oldImageDescription") : t("staleDescription")}
-            </Text>
-          )}
-          {handlers !== null && (
-            <textarea
-              maxLength={32768}
-              ref={keyboardRef}
-              className={classes.keyboard}
-              rows={1}
-              tabIndex={0}
-              aria-label={t("keyboard")}
+            <Menu
+              withinPortal
+              position="bottom-end"
+              returnFocus={false}
+              trapFocus={false}
+              withInitialFocusPlaceholder={false}
+            >
+              <Menu.Target>
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  aria-label={t("keyboardActions")}
+                >
+                  <IconDots size={16} aria-hidden />
+                </ActionIcon>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Item
+                  disabled={zoom <= 1}
+                  onClick={() => onZoomChange(Math.max(1, zoom - 0.25))}
+                  leftSection={<IconZoomOut size={14} aria-hidden />}
+                >
+                  {t("zoomOut")}
+                </Menu.Item>
+                <Menu.Item
+                  disabled={zoom >= 3}
+                  onClick={() => onZoomChange(Math.min(3, zoom + 0.25))}
+                  leftSection={<IconZoomIn size={14} aria-hidden />}
+                >
+                  {t("zoomIn")}
+                </Menu.Item>
+                <Menu.Item onClick={() => onZoomChange(1)}>
+                  {t("resetZoom", { percent: Math.round(zoom * 100) })}
+                </Menu.Item>
+                <Menu.Divider />
+                <Menu.Item
+                  onClick={onRetry}
+                  leftSection={<IconRefresh size={14} aria-hidden />}
+                >
+                  {t("refreshConnection")}
+                </Menu.Item>
+                {handlers !== null && (
+                  <>
+                    <Menu.Item
+                      onClick={() => {
+                        handlers.onSendTab(false);
+                        keyboardRef?.current?.focus({ preventScroll: true });
+                      }}
+                    >
+                      {t("sendTab")}
+                    </Menu.Item>
+                    <Menu.Item
+                      onClick={() => {
+                        handlers.onSendTab(true);
+                        keyboardRef?.current?.focus({ preventScroll: true });
+                      }}
+                    >
+                      {t("sendShiftTab")}
+                    </Menu.Item>
+                  </>
+                )}
+              </Menu.Dropdown>
+            </Menu>
+            <Tooltip label={t("closePage")}>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                aria-label={t("closePage")}
+                disabled={state.type !== "READY" || !state.canClose}
+                onClick={onClosePage}
+              >
+                <IconX size={16} aria-hidden />
+              </ActionIcon>
+            </Tooltip>
+          </Group>
+          <Stack gap="xs" className={classes.notices}>
+            {addressError && (
+              <Alert color="yellow" role="alert">
+                {t("invalidAddress")}
+              </Alert>
+            )}
+            {state.type === "CLOSED_TARGET" && (
+              <Alert color="yellow">{t("closedTarget")}</Alert>
+            )}
+            {closeError && (
+              <Alert color="yellow" role="alert">
+                {t("closeFailed")}
+              </Alert>
+            )}
+            {state.type === "READY" && state.conflict && (
+              <Alert color="yellow" role="status">
+                {t("conflict")}
+              </Alert>
+            )}
+            {state.type === "READY" && state.outcomeUnknown && (
+              <Alert color="yellow" role="status">
+                {t("unknownOutcome")}
+              </Alert>
+            )}
+            {state.type === "READY" && state.dialog !== null && (
+              <Stack
+                gap="xs"
+                p="xs"
+                className={classes.dialog}
+                role="group"
+                aria-label={t("dialog")}
+              >
+                <Text fw={600} size="sm">
+                  {t("dialog")}
+                </Text>
+                <Text size="sm" style={{ overflowWrap: "anywhere" }}>
+                  {state.dialog.message}
+                </Text>
+                {state.dialog.type === "prompt" && (
+                  <TextInput
+                    maxLength={32768}
+                    label={t("dialogText")}
+                    value={dialogText}
+                    onChange={(event) =>
+                      onDialogTextChange(event.currentTarget.value)
+                    }
+                    disabled={!dialogEnabled}
+                  />
+                )}
+                <Group gap="xs">
+                  <Button
+                    size="xs"
+                    disabled={!dialogEnabled}
+                    onClick={() => onDialogResponse(true)}
+                  >
+                    {t("accept")}
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="default"
+                    disabled={!dialogEnabled}
+                    onClick={() => onDialogResponse(false)}
+                  >
+                    {t("dismiss")}
+                  </Button>
+                </Group>
+              </Stack>
+            )}
+          </Stack>
+          <div className={classes.viewWindow}>
+            <div
+              className={classes.viewport}
+              style={{ width: `${zoom * 100}%`, height: `${zoom * 100}%` }}
+              data-stale={!connected || !imageCurrent}
+              data-input={handlers !== null}
+              role="region"
+              aria-label={t("viewport")}
               aria-describedby={descriptionId}
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="off"
-              spellCheck={false}
-              onCompositionStart={handlers.onCompositionStart}
-              onCompositionEnd={handlers.onCompositionEnd}
-              onInput={handlers.onKeyboardInput}
-              onKeyDown={handlers.onKeyDown}
-              onKeyUp={handlers.onKeyUp}
-            />
-          )}
+              tabIndex={-1}
+              onPointerDown={handlers?.onPointerDown}
+              onPointerMove={handlers?.onPointerMove}
+              onPointerUp={handlers?.onPointerUp}
+              onPointerCancel={handlers?.onPointerCancel}
+              onLostPointerCapture={handlers?.onLostPointerCapture}
+              onWheel={handlers?.onWheel}
+              onBlur={handlers?.onBlur}
+              onContextMenu={handlers?.onContextMenu}
+            >
+              {image === null ? (
+                <Text c="dimmed" p="md" role="status">
+                  {state.type === "CLOSED_TARGET"
+                    ? t("closedTarget")
+                    : state.type === "SELECT_PAGE"
+                      ? t("selectPage")
+                      : state.connection === "unavailable"
+                        ? t("transportUnavailable")
+                        : t("waitingFrame")}
+                </Text>
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element -- Ephemeral live Blob frames bypass Next image optimization.
+                <img
+                  className={classes.image}
+                  src={image.url}
+                  alt={t("frameAlt", {
+                    title: selected?.title || t("untitled"),
+                  })}
+                  draggable={false}
+                  onLoad={(event) => {
+                    if (
+                      event.currentTarget.naturalWidth !== image.frame.width ||
+                      event.currentTarget.naturalHeight !== image.frame.height
+                    ) {
+                      onFrameError(image);
+                      return;
+                    }
+                    if (
+                      status !== null &&
+                      browserFrameMatchesStatus(image.frame, status)
+                    ) {
+                      onFrameDisplayed(image);
+                    }
+                  }}
+                  onError={() => onFrameError(image)}
+                />
+              )}
+              {image !== null && (!connected || !imageCurrent) && (
+                <Text size="sm" className={classes.overlay} role="status">
+                  {connected ? t("oldImageDescription") : t("staleDescription")}
+                </Text>
+              )}
+              {handlers !== null && (
+                <textarea
+                  maxLength={32768}
+                  ref={keyboardRef}
+                  className={classes.keyboard}
+                  rows={1}
+                  tabIndex={0}
+                  aria-label={t("keyboard")}
+                  aria-describedby={descriptionId}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  onCompositionStart={handlers.onCompositionStart}
+                  onCompositionEnd={handlers.onCompositionEnd}
+                  onInput={handlers.onKeyboardInput}
+                  onKeyDown={handlers.onKeyDown}
+                  onKeyUp={handlers.onKeyUp}
+                />
+              )}
+            </div>
+          </div>
         </div>
-      </div>
-      {showDescription ? (
-        <Text
-          id={descriptionId}
-          size="xs"
-          c="dimmed"
-          className={classes.footer}
-        >
-          {description}
-        </Text>
-      ) : (
-        <VisuallyHidden id={descriptionId}>{description}</VisuallyHidden>
-      )}
-    </Box>
+        {showDescription ? (
+          <Text
+            id={descriptionId}
+            size="xs"
+            c="dimmed"
+            className={classes.footer}
+          >
+            {description}
+          </Text>
+        ) : (
+          <VisuallyHidden id={descriptionId}>{description}</VisuallyHidden>
+        )}
+      </Box>
+    </FocusTrap>
   );
 }

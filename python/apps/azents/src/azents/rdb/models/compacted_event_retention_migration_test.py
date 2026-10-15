@@ -2,6 +2,7 @@
 
 import asyncio
 import datetime
+import json
 from pathlib import Path
 from uuid import uuid4
 
@@ -10,8 +11,11 @@ from alembic import command
 from alembic.config import Config as AlembicConfig
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
-from azents.rdb.session_capabilities import ReadWriteSession
-from azents.services.archived_session_retention_test import _create_root
+from azents.core.enums import LLMProvider
+from azents.testing.model_selection import (
+    make_test_model_selection_dict,
+    make_test_selectable_model_option_dicts,
+)
 
 
 async def test_existing_history_recovers_first_displacement(
@@ -36,7 +40,50 @@ async def test_existing_history_recovers_first_displacement(
     try:
         await asyncio.to_thread(command.upgrade, config, "d4bf6286235d")
         async with AsyncSession(engine, expire_on_commit=False) as raw:
-            session_id = await _create_root(ReadWriteSession(raw), suffix="migration")
+            # Seed the historical schema directly: current ORM models can contain
+            # columns introduced after this migration's predecessor.
+            workspace_id, agent_id, session_id = (uuid4().hex for _ in range(3))
+            selection = make_test_model_selection_dict(
+                integration_id=uuid4().hex,
+                provider=LLMProvider.ANTHROPIC,
+                model_identifier="retention-migration",
+            )
+            options = make_test_selectable_model_option_dicts(
+                model_selection=selection, lightweight_model_selection=selection
+            )
+            await raw.execute(
+                sa.text(
+                    "INSERT INTO workspaces(id,name,handle) "
+                    "VALUES (:id,'Retention migration','retention-migration')"
+                ),
+                {"id": workspace_id},
+            )
+            await raw.execute(
+                sa.text(
+                    "INSERT INTO agents(id,workspace_id,name,model_selection,"
+                    "lightweight_model_selection,selectable_model_options,"
+                    "main_model_label,lightweight_model_label,"
+                    "enabled,type,memory_enabled) "
+                    "VALUES (:id,:workspace,'Retention migration',"
+                    "CAST(:selection AS jsonb),CAST(:selection AS jsonb),"
+                    "CAST(:options AS jsonb),"
+                    "'default','lightweight',true,'public',true)"
+                ),
+                {
+                    "id": agent_id,
+                    "workspace": workspace_id,
+                    "selection": json.dumps(selection),
+                    "options": json.dumps(options),
+                },
+            )
+            await raw.execute(
+                sa.text(
+                    "INSERT INTO agent_sessions(id,workspace_id,agent_id,"
+                    "status,start_reason) "
+                    "VALUES (:id,:workspace,:agent,'active','initial')"
+                ),
+                {"id": session_id, "workspace": workspace_id, "agent": agent_id},
+            )
             for ordinal, kind, created_at in (
                 (1, "user_message", first_at - datetime.timedelta(days=100)),
                 (2, "compaction_summary", first_at),

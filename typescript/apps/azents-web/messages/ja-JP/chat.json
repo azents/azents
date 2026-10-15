@@ -1,5 +1,10 @@
 {
   "browser": {
+    "focusBrowser": "ブラウザーに集中",
+    "exitFocus": "集中表示を終了",
+    "zoomIn": "拡大",
+    "zoomOut": "縮小",
+    "resetZoom": "ウィンドウに合わせる（{percent}%）",
     "title": "ブラウザー",
     "open": "ブラウザーで開く",
     "loading": "ブラウザーのタスクを読み込み中…",

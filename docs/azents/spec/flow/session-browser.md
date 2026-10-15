@@ -85,11 +85,23 @@ The source uses existing Owner/relay routing, flow control, capacity, lease/fing
 
 ## Live Panel and Input
 
-The panel validates the first status against its exact selected target and attachment before treating the stream as connected. Binary frames carry typed dimensions, navigation and source identity. Image decoding must match those dimensions, and only a displayed current image is acknowledged. One volatile Blob URL and bounded serial inbox are retained; frame bytes are not saved as intentional captures, files, transcripts or image history.
+The panel validates the first status against its exact selected target and attachment before treating the stream as connected. Binary frames carry typed dimensions, navigation and source identity. Image decoding must match those dimensions, and only a displayed current image is acknowledged. The image element is retained across live frame replacement. The displayed Blob URL remains valid while at most one replacement decodes; the old URL is released after successful display, and both are released on clear/disposal. The serial inbox remains bounded; frame bytes are not saved as intentional captures, files, transcripts or image history.
 
 The existing supporting panel presents pages as compact tabs above address/navigation chrome and the framed live viewport. Authorized input participants can enter an HTTP(S) address, go back or forward in the selected page's native history, and reload the actual page. Address drafts are volatile, cleared on blur/target change/submission, and never form an input history. Unsupported schemes and embedded user credentials are rejected. Read-only viewers cannot edit or navigate. Connection refresh is separately labelled and does not claim to reload the site. No standalone page-text entry form is shown.
 
 Navigation is one closed admitted viewer input carrying the same current acknowledged source and sequence. The Runner checks input permission, current source/target/generation and actual held-input conflict before invoking its existing structured navigation/dialog handler. In-flight input blocks another UI navigation without queuing it. New navigation invalidates prior displayed-frame input until the current image is acknowledged; lost actions are not replayed.
+
+Main-page navigation changes the viewer navigation identity. Subframe navigation
+invalidates that frame's element references without replacing the main-page viewer
+identity, so an independently navigating embedded frame does not invalidate
+text input on an unchanged main page.
+
+The focus control expands the same panel to fill the application viewport, with
+local focus containment and Escape/exit controls. It does not reopen the Browser
+attachment or resize the native page. Local viewer zoom ranges from fit-to-window
+to 300% in 25% steps; scrollbars reveal the enlarged image and coordinates use
+the enlarged viewport's actual geometry. Zoom and focus changes cancel held input
+without replay, and retain the same read-only/current-source restrictions.
 
 Pointer coordinates are transformed against the displayed image and its acknowledged source, excluding letterbox/outside/stale positions. A valid viewport pointer interaction focuses a visually hidden native textarea inside the same focus boundary for text, IME and mobile keyboard events. This receiver is the viewport's single keyboard stop; forward/reverse physical Tab leaves it naturally. Local printable-text modifiers are separated from remote effect-bearing key chords so mixed-case text does not conflict with a held SDK Shift key. Shift+Arrow and Ctrl/Meta/Alt shortcuts still send typed key events.
 

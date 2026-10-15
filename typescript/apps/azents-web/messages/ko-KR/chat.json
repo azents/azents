@@ -1,5 +1,10 @@
 {
   "browser": {
+    "focusBrowser": "브라우저 전체화면",
+    "exitFocus": "전체화면 나가기",
+    "zoomIn": "확대",
+    "zoomOut": "축소",
+    "resetZoom": "창에 맞추기 ({percent}%)",
     "title": "브라우저",
     "open": "브라우저에서 열기",
     "loading": "브라우저 작업을 불러오는 중…",

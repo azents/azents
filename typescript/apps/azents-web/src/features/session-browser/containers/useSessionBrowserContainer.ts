@@ -136,6 +136,13 @@ export function useSessionBrowserContainer(
     cancelInteraction: () => cancel.current(),
   });
   const [dialogText, setDialogText] = useState("");
+  const [focused, setFocused] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  useEffect(() => {
+    if (state.type !== "READY") {
+      setFocused(false);
+    }
+  }, [state.type]);
   const [addressDraft, setAddressDraft] = useState<string | null>(null);
   const [addressError, setAddressError] = useState(false);
   const dialogId = live.state.status?.dialog?.id;
@@ -189,6 +196,26 @@ export function useSessionBrowserContainer(
     };
   }
   const currentState = state;
+  useEffect(() => {
+    if (!focused) {
+      return;
+    }
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const escape = (event: KeyboardEvent): void => {
+      if (event.key === "Escape" && !event.isComposing) {
+        event.preventDefault();
+        event.stopPropagation();
+        cancel.current();
+        setFocused(false);
+      }
+    };
+    window.addEventListener("keydown", escape, true);
+    return () => {
+      window.removeEventListener("keydown", escape, true);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [focused]);
   const navigationEnabled =
     currentState.type === "READY" &&
     currentState.canInput &&
@@ -210,6 +237,18 @@ export function useSessionBrowserContainer(
   };
   return {
     state,
+    focused,
+    zoom,
+    onToggleFocus: () => {
+      interaction.cancel();
+      setFocused((value) => !value);
+    },
+    onZoomChange: (value) => {
+      if (Number.isFinite(value) && value >= 1 && value <= 3) {
+        interaction.cancel();
+        setZoom(value);
+      }
+    },
     addressValue: addressDraft ?? selectedAddress,
     addressError,
     navigationEnabled,

@@ -40,13 +40,14 @@ export interface BrowserImageUrls {
   revoke: (url: string) => void;
 }
 
-/** One attachment owns bounded metadata and one volatile image, never input payload history. */
+/** One attachment owns the displayed image plus at most one decoding replacement. */
 export class BrowserConnection {
   private current: BrowserLiveState = { ...emptyBrowserLiveState };
   private active = true;
   private nextSequence = 1;
   private lastAcknowledged = 0;
   private lastFrame = 0;
+  private displayedImageUrl: string | null = null;
   private readonly target: BrowserTarget;
   private readonly send: (message: string) => boolean;
   private readonly images: BrowserImageUrls;
@@ -169,8 +170,11 @@ export class BrowserConnection {
       return false;
     }
     this.lastFrame = message.frame.frame_sequence;
-    // Revoke before creating the replacement: at most one live object URL.
-    if (this.current.image !== null) {
+    // Keep the displayed raster available until its replacement actually loads.
+    if (
+      this.current.image !== null &&
+      this.current.image.url !== this.displayedImageUrl
+    ) {
       this.images.revoke(this.current.image.url);
     }
     const url = this.images.create(message.jpeg);
@@ -201,6 +205,13 @@ export class BrowserConnection {
     ) {
       return false;
     }
+    if (
+      this.displayedImageUrl !== null &&
+      this.displayedImageUrl !== image.url
+    ) {
+      this.images.revoke(this.displayedImageUrl);
+    }
+    this.displayedImageUrl = image.url;
     this.update({ displayed: image.frame });
     return true;
   }
@@ -298,6 +309,16 @@ export class BrowserConnection {
     if (clear && this.current.image !== null) {
       this.images.revoke(this.current.image.url);
     }
+    if (
+      clear &&
+      this.displayedImageUrl !== null &&
+      this.displayedImageUrl !== this.current.image?.url
+    ) {
+      this.images.revoke(this.displayedImageUrl);
+    }
+    if (clear) {
+      this.displayedImageUrl = null;
+    }
     this.update({
       connection,
       status: null,
@@ -314,6 +335,13 @@ export class BrowserConnection {
     if (this.current.image !== null) {
       this.images.revoke(this.current.image.url);
     }
+    if (
+      this.displayedImageUrl !== null &&
+      this.displayedImageUrl !== this.current.image?.url
+    ) {
+      this.images.revoke(this.displayedImageUrl);
+    }
+    this.displayedImageUrl = null;
     this.current = { ...emptyBrowserLiveState };
   }
 }

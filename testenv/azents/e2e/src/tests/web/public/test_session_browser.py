@@ -267,11 +267,69 @@ def _verify_live_panel(
         )
     )
     ActionChains(driver).send_keys("Synthetic GUI input").perform()
-    wait_until(
-        lambda: title_is("✅"),
-        timeout=15,
-        interval=0.1,
-        message="The Web panel did not deliver the complete keyboard text",
+    try:
+        wait_until(
+            lambda: title_is("✅"),
+            timeout=15,
+            interval=0.1,
+            message="The Web panel did not deliver the complete keyboard text",
+        )
+    except TimeoutError as error:
+        # Content-free UI evidence distinguishes input loss from route/focus loss.
+        diagnostics = driver.execute_script(
+            """return {
+                targetSelected: new URLSearchParams(location.search)
+                    .has('browserPageId'),
+                keyboardFocused: document.activeElement?.getAttribute('aria-label')
+                    === 'Remote browser keyboard',
+                keyboardPresent: !!document.querySelector(
+                    'textarea[aria-label="Remote browser keyboard"]'),
+                imagePresent: !!document.querySelector(
+                    '[aria-label="Remote browser page"] img')
+            };"""
+        )
+        error.add_note(json.dumps(diagnostics, sort_keys=True))
+        raise
+    driver.find_element(By.CSS_SELECTOR, 'button[aria-label="Focus browser"]').click()
+    focused = wait.until(
+        ec.visibility_of_element_located(
+            (By.CSS_SELECTOR, '[role="dialog"][aria-label="Focus browser"]')
+        )
+    )
+    assert driver.execute_script(
+        "const r=arguments[0].getBoundingClientRect();"
+        "return r.width===innerWidth && r.height===innerHeight;",
+        focused,
+    )
+    assert driver.execute_script(
+        "return document.querySelector('[aria-label=\"Remote browser page\"]')"
+        "=== arguments[0];",
+        viewport,
+    )
+    unzoomed_width = viewport.rect["width"]
+    driver.find_element(By.CSS_SELECTOR, 'button[aria-label="Browser actions"]').click()
+    wait.until(
+        ec.element_to_be_clickable(
+            (By.XPATH, "//*[@role='menuitem' and normalize-space(.)='Zoom in']")
+        )
+    ).click()
+    wait.until(lambda _: viewport.rect["width"] > unzoomed_width * 1.2)
+    driver.find_element(By.CSS_SELECTOR, 'button[aria-label="Browser actions"]').click()
+    wait.until(
+        ec.element_to_be_clickable(
+            (
+                By.XPATH,
+                "//*[@role='menuitem' and "
+                "starts-with(normalize-space(.),'Fit to window')]",
+            )
+        )
+    ).click()
+    wait.until(lambda _: abs(viewport.rect["width"] - unzoomed_width) < 1)
+    ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+    wait.until(
+        ec.invisibility_of_element_located(
+            (By.CSS_SELECTOR, '[role="dialog"][aria-label="Focus browser"]')
+        )
     )
     address = wait.until(
         ec.element_to_be_clickable(

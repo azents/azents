@@ -1,5 +1,10 @@
 {
   "browser": {
+    "focusBrowser": "Focus browser",
+    "exitFocus": "Exit focused view",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "resetZoom": "Fit to window ({percent}%)",
     "title": "Browser",
     "open": "Open in Browser",
     "loading": "Loading browser tasks…",

@@ -388,7 +388,8 @@ class RunnerBrowserManager:
             }
 
         def navigated(frame: Frame) -> None:
-            resource.navigation_id = uuid.uuid4().hex
+            if frame == page.main_frame:
+                resource.navigation_id = uuid.uuid4().hex
             resource.refs = {
                 key: value
                 for key, value in resource.refs.items()
