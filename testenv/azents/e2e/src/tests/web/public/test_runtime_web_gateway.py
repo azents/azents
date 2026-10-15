@@ -23,6 +23,7 @@ from typing import NamedTuple
 
 import azentsadminclient
 import azentspublicclient
+import psycopg
 import pytest
 import requests
 from azentspublicclient.api.agent_runtime_v1_api import AgentRuntimeV1Api
@@ -52,6 +53,7 @@ from azentspublicclient.models.runtime_web_service_response import (
     RuntimeWebServiceResponse,
 )
 from azentspublicclient.models.secrets import Secrets
+from psycopg.rows import class_row
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.chrome.options import Options as ChromeOptions
@@ -73,6 +75,10 @@ from support.observations import (
     decode_session,
 )
 from support.runtime_profiles import create_workspace_runtime_profile
+from support.runtime_web_route_observations import (
+    RuntimeWebRouteObservation,
+    wait_for_renewed_runtime_web_route,
+)
 from support.system_bootstrap import SystemBootstrapEvidence
 from support.utils import (
     authenticate_user,
@@ -1602,6 +1608,40 @@ def _delete_existing_runtime_web_services(
     assert current.total_count == 0
 
 
+def _read_runtime_web_route(
+    postgres: PostgresContainer, runtime_id: str
+) -> RuntimeWebRouteObservation | None:
+    """Read one target route without opening any product mutation authority."""
+    with psycopg.Connection[RuntimeWebRouteObservation].connect(
+        host=postgres.get_container_host_ip(),
+        port=postgres.get_exposed_port(5432),
+        user=postgres.username,
+        password=postgres.password,
+        dbname=postgres.dbname,
+        connect_timeout=5,
+        options="-c default_transaction_read_only=on -c statement_timeout=5000",
+        row_factory=class_row(RuntimeWebRouteObservation),
+    ) as connection:
+        return connection.execute(
+            """
+            SELECT runtime_id, desired_generation, runner_generation,
+                   owner_boot_id, session_lease_id, lease_generation,
+                   protocol_fingerprint,
+                   join_nonce_hash = encode(
+                       sha256(convert_to(
+                           'consumed:' || session_lease_id || ':' ||
+                           lease_generation::text, 'UTF8'
+                       )), 'hex'
+                   ) AS join_consumed,
+                   lease_expires_at, now() AS database_now,
+                   draining_at IS NOT NULL AS draining
+            FROM runtime_web_session_routes
+            WHERE runtime_id = %s
+            """,
+            (runtime_id,),
+        ).fetchone()
+
+
 def _assert_operations_ready(stack: _RuntimeWebStack) -> str:
     """Wait for exact replacement readiness and return its metrics."""
     deadline = time.monotonic() + 30
@@ -2473,6 +2513,11 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
             assert previous_runtime.runtime is not None
             previous_runner_generation = previous_runtime.runtime.runner_generation
             assert previous_runner_generation is not None
+            previous_route = _read_runtime_web_route(
+                runtime_web_stack_factory.postgres, previous_runtime.runtime.id
+            )
+            assert previous_route is not None
+            assert previous_route.runner_generation == previous_runner_generation
             runtime_web_stack_factory.owner_control.get_wrapped_container().restart(
                 timeout=5,
             )
@@ -2490,7 +2535,7 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
                 ),
             )
             _assert_operations_ready(stack)
-            _wait_runtime(
+            reconnected_runtime = _wait_runtime(
                 runtime_api=runtime_api,
                 workspace=_TerminalWorkspace(
                     token=workspace.token,
@@ -2508,6 +2553,20 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
                     and runtime.actions.use_runner
                 ),
                 message="Runtime Web Runner did not become ready in a new generation",
+            )
+            assert reconnected_runtime.runtime is not None
+            reconnected_generation = reconnected_runtime.runtime.runner_generation
+            assert reconnected_generation is not None
+            wait_for_renewed_runtime_web_route(
+                read=lambda: _read_runtime_web_route(
+                    runtime_web_stack_factory.postgres, previous_route.runtime_id
+                ),
+                previous=previous_route,
+                runner_generation=reconnected_generation,
+                clock=time.monotonic,
+                pause=time.sleep,
+                timeout_seconds=30,
+                interval_seconds=0.2,
             )
             _browser_neutral_transport_evidence(
                 stack=stack,
