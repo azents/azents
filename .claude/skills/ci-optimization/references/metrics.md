@@ -31,6 +31,11 @@ extensible GitHub input decoded at the
 boundary. Exact run/attempt/SHA and enabled scope govern acceptance, not PR context
 color or artifacts from another commit. Baseline may contain several main SHAs;
 experiment must have one SHA, equal enabled jobs and equal testcase evidence.
+Compare testcase multisets across numbered lanes within Required and Web separately:
+the existing planner may redistribute cases without changing scope. Preserve
+multiplicity, the Required/Web boundary, general pytest producer identity, all
+enabled lane jobs, and each lane's original metrics. Redistribution is not a
+coverage reduction or by itself evidence of a causal performance improvement.
 
 ## Metric scopes
 

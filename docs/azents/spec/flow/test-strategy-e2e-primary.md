@@ -719,7 +719,11 @@ Always-on required CI does not depend on external credentials.
   named separately. The `ci-optimization` Skill and shared collection/analysis/chart
   tools cover general CI; iOS/native diagnostics are analyzed as a separate workflow.
   Same-SHA experiments require identical enabled scope, complete test evidence and
-  two successful complete attempts. Historical E2E-only history is retained under
+  two successful complete attempts. Testcase multisets are compared across numbered
+  lanes within Required and Web separately because the planner may rebalance lane
+  assignments; multiplicity, suite boundaries, general pytest producer identities,
+  enabled lane jobs and original per-lane metrics are preserved. Historical
+  E2E-only history is retained under
   its original scope, never relabeled as whole-CI performance. Daily charts show only
   the most recent 30 KST dates with mean/median/min–max/n and explicit failed/missing
   gaps. No branch-protection, failing duration threshold or test selection is changed.

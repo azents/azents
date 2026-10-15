@@ -71,8 +71,15 @@ def analyze(roots: list[Path], cohort: str) -> dict[str, object]:
             if summary.tests == 0:
                 evidence_complete = False
             failed_tests = failed_tests or bool(summary.failures or summary.errors)
+            # The planner may rebalance numbered lanes without changing coverage.
+            lane_scope, _, lane_number = identity.rpartition("-")
+            coverage_identity = (
+                lane_scope
+                if lane_scope in {"e2e-required", "e2e-web"} and lane_number.isdecimal()
+                else identity
+            )
             for case in summary.cases:
-                case_keys[(identity, case.node_id)] += 1
+                case_keys[(coverage_identity, case.node_id)] += 1
                 if case.outcome in {"failed", "error"}:
                     failures[f"{identity}:{case.node_id}"] += 1
             timing_records = parse_timings(timing)

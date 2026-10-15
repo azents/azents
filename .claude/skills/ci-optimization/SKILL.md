@@ -45,6 +45,10 @@ head SHA, run and attempt; later-attempt artifacts must not be attached to earli
 attempts. Reject duplicate attempts and mixed-SHA experiment samples. Compare identical
 enabled jobs, test selections, assertions and lifecycle boundaries, not historical case
 counts when main legitimately moved exhaustive cases into unit tests.
+For dynamically planned E2E lanes, compare the full testcase multiset within Required
+and Web separately, retaining multiplicity and enabled lane jobs. Numbered lane
+redistribution does not change coverage; keep original per-lane metrics and do not
+attribute planner-driven timing differences to a candidate mechanism.
 
 Include Python matrix unit/integration pytest, migrations, Docker-free support tests,
 Helm tests, E2E/Web, and TypeScript/Swift tests and all lint/typecheck/build steps. The

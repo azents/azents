@@ -108,6 +108,65 @@ def stamp_provenance(root: Path, attempt: int) -> None:
     )
 
 
+def lane_sample(root: Path, attempt: int, assignments: dict[str, list[str]]) -> None:
+    """Write complete immutable evidence for the chosen numbered lane coverage."""
+    root.mkdir()
+    raw = sample(attempt)
+    raw["jobs"] = [
+        job("ci-python-e2e", "00:00:50", "00:00:55"),
+        *(job(f"ci-e2e-{lane}", "00:00:10", "00:00:50") for lane in assignments),
+    ]
+    (root / "run.json").write_text(json.dumps(raw))
+    names = []
+    inventory = []
+    for index, (lane, cases) in enumerate(assignments.items(), 1):
+        name = f"e2e-observability-{lane}"
+        names.append(name)
+        artifact = root / "artifacts" / name
+        artifact.mkdir(parents=True)
+        (artifact / "junit.xml").write_text(
+            "<testsuite>"
+            + "".join(f'<testcase classname="x" name="{case}"/>' for case in cases)
+            + "</testsuite>"
+        )
+        (artifact / "pytest-timings.jsonl").write_text(
+            json.dumps(
+                {
+                    "record_type": "test_phase",
+                    "node_id": f"x::{cases[0]}",
+                    "phase": "call",
+                    "outcome": "passed",
+                    "duration_seconds": 1,
+                }
+            )
+            + "\n"
+        )
+        inventory.append(
+            {
+                "id": attempt * 10 + index,
+                "name": name,
+                "created_at": "2026-10-15T00:00:49Z",
+                "expired": False,
+                "workflow_run": {"id": 100, "head_sha": "a" * 40},
+            }
+        )
+    (root / "artifact-inventory.json").write_text(
+        json.dumps([{"artifacts": inventory}])
+    )
+    (root / "collection.json").write_text(
+        json.dumps(
+            {
+                "workflow_run_id": 100,
+                "workflow_attempt": attempt,
+                "head_sha": "a" * 40,
+                "artifact_names": names,
+                "artifact_identity_verified": True,
+                "file_hashes": file_hashes(root / "artifacts"),
+            }
+        )
+    )
+
+
 class WorkflowReportTest(unittest.TestCase):
     def test_dependency_elapsed_is_not_longest_parallel_job(self) -> None:
         run = decode_run(sample())
@@ -335,6 +394,56 @@ class WorkflowReportTest(unittest.TestCase):
                 {"setup", "call", "teardown"},
             )
             self.assertFalse((root / "other").exists())
+
+    def test_same_scope_accepts_dynamic_lane_redistribution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = [Path(tmp) / str(attempt) for attempt in (1, 2)]
+            lane_sample(
+                roots[0],
+                1,
+                {"required-1": ["a"], "required-2": ["b"], "web-1": ["c"]},
+            )
+            lane_sample(
+                roots[1],
+                2,
+                {"required-1": ["b"], "required-2": ["a"], "web-1": ["c"]},
+            )
+            result = analyze(roots, "experiment")
+            self.assertTrue(result["same_sha_acceptance_ready"])
+            self.assertEqual(result["successful_samples"], 2)
+
+    def test_lane_redistribution_rejects_changed_coverage_and_multiplicity(
+        self,
+    ) -> None:
+        for assignments in [
+            {"required-1": ["a"], "required-2": ["new"], "web-1": ["c"]},
+            {"required-1": ["a"], "required-2": ["a"], "web-1": ["c"]},
+            {"required-1": ["a"], "required-2": ["a", "b"], "web-1": ["c"]},
+            {"required-1": ["a"], "required-2": ["c"], "web-1": ["b"]},
+        ]:
+            with self.subTest(assignments=assignments):
+                with tempfile.TemporaryDirectory() as tmp:
+                    roots = [Path(tmp) / str(attempt) for attempt in (1, 2)]
+                    lane_sample(
+                        roots[0],
+                        1,
+                        {"required-1": ["a"], "required-2": ["b"], "web-1": ["c"]},
+                    )
+                    lane_sample(roots[1], 2, assignments)
+                    with self.assertRaisesRegex(ValueError, "testcase evidence"):
+                        analyze(roots, "experiment")
+
+    def test_lane_redistribution_preserves_enabled_job_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = [Path(tmp) / str(attempt) for attempt in (1, 2)]
+            lane_sample(
+                roots[0],
+                1,
+                {"required-1": ["a"], "required-2": ["b"], "web-1": ["c"]},
+            )
+            lane_sample(roots[1], 2, {"required-1": ["a", "b"], "web-1": ["c"]})
+            with self.assertRaisesRegex(ValueError, "enabled CI scope"):
+                analyze(roots, "experiment")
 
     def test_shared_plugin_preserves_failure_and_safe_fixture_evidence(self) -> None:
         # An actual subprocess exercises plugin discovery outside the E2E conftest.
