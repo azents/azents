@@ -274,19 +274,21 @@ class DatabaseRuntimeBrowserStreamScopeValidator:
         if handle is None:
             return False
         try:
-            current = await self.admit(
+            # Native page admission belongs to admit(); live frames already reach
+            # Runner's exact binding/target/source fence before any SDK effect.
+            # Re-entering Browser operations here serializes every key behind
+            # Control RPCs, including while Control is forwarding that input.
+            current = await self.authority_resolver.resolve(
                 resource=RuntimeBrowserResource(
                     handle, authority.agent_id, authority.session_id
                 ),
                 user_id=authority.user_id,
                 authentication_session_id=authority.authentication_session_id,
-                target=ViewerTarget(
-                    authority.task_id,
-                    authority.page_id,
-                    authority.resource_incarnation,
-                ),
+                resolved_at=now,
             )
-        except RuntimeBrowserRequestError, RuntimeBrowserOperationError:
+        except RuntimeBrowserRequestError:
+            return False
+        if isinstance(current, RuntimeBrowserUnavailable):
             return False
         return (
             current.target.id == authority.runtime_id

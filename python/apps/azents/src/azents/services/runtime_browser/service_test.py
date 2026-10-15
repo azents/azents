@@ -11,6 +11,7 @@ import pytest
 from azents_runtime_control.browser_contract import (
     BrowserActCommand,
     BrowserObserveCommand,
+    BrowserOpenCommand,
     BrowserPage,
     BrowserResult,
     BrowserTask,
@@ -27,6 +28,7 @@ from azents.services.agent_runtime.lifecycle_data import RuntimeOperationTarget
 from azents.services.runtime_browser.authority import RuntimeBrowserAuthorityResolver
 from azents.services.runtime_browser.data import (
     RuntimeBrowserAuthority,
+    RuntimeBrowserCreatedPage,
     RuntimeBrowserOperationError,
     RuntimeBrowserProjection,
     RuntimeBrowserReasonCode,
@@ -86,6 +88,71 @@ async def _close(service: RuntimeBrowserService) -> RuntimeBrowserProjection:
         page_id="page-1",
         resource_incarnation="inc-1",
     )
+
+
+async def _create(service: RuntimeBrowserService) -> RuntimeBrowserCreatedPage:
+    return await service.create_page(
+        user_id="user-1", authentication_session_id="auth-1", resource=_RESOURCE
+    )
+
+
+async def test_create_blank_page_uses_current_authority_and_confirmed_page() -> None:
+    service, resolver, runner = _service()
+    runner.run_browser_command.return_value = dataclasses.replace(_RESULT, page=_PAGE)
+    created = await _create(service)
+    assert created.page == _PAGE and created.projection.tasks == (_TASK,)
+    command = runner.run_browser_command.call_args.kwargs["command"]
+    assert isinstance(command, BrowserOpenCommand)
+    assert command.task_id is None and command.url is None
+    assert command.authority.session_id == _RESOURCE.session_id
+    assert command.authority.working_directory == _AUTHORITY.working_directory
+    assert resolver.resolve.await_count == 2
+
+
+@pytest.mark.parametrize("read_only", [False, True])
+async def test_create_denies_unavailable_and_read_only_before_allocation(
+    read_only: bool,
+) -> None:
+    service, resolver, runner = _service()
+    resolver.resolve.return_value = (
+        dataclasses.replace(_AUTHORITY, allow_input=False)
+        if read_only
+        else RuntimeBrowserUnavailable("browser_disabled")
+    )
+    with pytest.raises(RuntimeBrowserRequestError):
+        await _create(service)
+    runner.run_browser_command.assert_not_awaited()
+
+
+async def test_create_rejects_unconfirmed_result_and_never_retries() -> None:
+    service, _, runner = _service()
+    with pytest.raises(RuntimeBrowserOperationError, match="not confirmed"):
+        await _create(service)
+    assert runner.run_browser_command.await_count == 1
+
+
+async def test_create_capacity_failure_is_a_conflict_without_retry() -> None:
+    service, _, runner = _service()
+    runner.run_browser_command.side_effect = RuntimeRunnerOperationFailedError(
+        "private", code="browser_resource_exhausted"
+    )
+    with pytest.raises(RuntimeBrowserRequestError) as error:
+        await _create(service)
+    assert error.value.status_code == 409
+    assert "private" not in str(error.value)
+    assert runner.run_browser_command.await_count == 1
+
+
+async def test_create_revalidates_authority_after_dispatch() -> None:
+    service, resolver, runner = _service()
+    runner.run_browser_command.return_value = dataclasses.replace(_RESULT, page=_PAGE)
+    resolver.resolve.side_effect = [
+        _AUTHORITY,
+        RuntimeBrowserUnavailable("browser_disabled"),
+    ]
+    with pytest.raises(RuntimeBrowserRequestError, match="authority changed"):
+        await _create(service)
+    assert runner.run_browser_command.await_count == 1
 
 
 async def test_projection_uses_only_status_and_concrete_bound_session() -> None:

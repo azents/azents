@@ -140,8 +140,6 @@ export type BrowserViewState =
   | { type: "ERROR" }
   | { type: "ACCESS_CHANGED" }
   | { type: "EMPTY" }
-  | { type: "CLOSED_TARGET"; pages: readonly BrowserPageChoice[] }
-  | { type: "SELECT_PAGE"; pages: readonly BrowserPageChoice[] }
   | {
       type: "READY";
       pages: readonly BrowserPageChoice[];

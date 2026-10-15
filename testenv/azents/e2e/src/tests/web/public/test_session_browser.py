@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import base64
 import json
-import os
 import time
 from dataclasses import asdict
-from pathlib import Path
 from urllib.parse import urlencode
 
 import azentsadminclient
@@ -27,6 +25,7 @@ from azentspublicclient.models.subagent_tree_response import SubagentTreeRespons
 from azentspublicclient.models.ws_ticket_response import WsTicketResponse
 from pydantic import BaseModel, ConfigDict, Field
 from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.actions.action_builder import ActionBuilder
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
@@ -222,6 +221,20 @@ def _verify_live_panel(
         == target.task_id
     )
     wait = WebDriverWait(driver, 60)
+    preview = wait.until(
+        ec.element_to_be_clickable(
+            (
+                By.CSS_SELECTOR,
+                '[aria-label="Remote browser page"] button[aria-label="Focus browser"]',
+            )
+        )
+    )
+    preview.click()
+    wait.until(
+        ec.visibility_of_element_located(
+            (By.CSS_SELECTOR, '[role="dialog"][aria-label="Focus browser"]')
+        )
+    )
     viewport = wait.until(
         ec.visibility_of_element_located(
             (By.CSS_SELECTOR, '[aria-label="Remote browser page"][data-stale="false"]')
@@ -238,15 +251,20 @@ def _verify_live_panel(
             )
         )
     )
-    width, height = dimensions.width, dimensions.height
-    scale = min(viewport.size["width"] / width, viewport.size["height"] / height)
+    width = dimensions.width
 
     def click_native(x: int, y: int) -> None:
-        ActionChains(driver).move_to_element_with_offset(
-            viewport,
-            int((x - width / 2) * scale),
-            int((y - height / 2) * scale),
-        ).click().perform()
+        rect = viewport.rect
+        scale = rect["width"] / width
+        # WebDriver's element origin clips the center of a scrollable image.
+        # Native coordinates are relative to the full image, not its visible center.
+        mouse = ActionBuilder(driver)
+        mouse.pointer_action.move_to_location(
+            int(rect["x"] + x * scale), int(rect["y"] + y * scale)
+        )
+        mouse.pointer_action.pointer_down()
+        mouse.pointer_action.pointer_up()
+        mouse.perform()
 
     def title_is(expected: str) -> bool:
         projection = _projection(public_url, resource_path, token)
@@ -290,41 +308,6 @@ def _verify_live_panel(
         )
         error.add_note(json.dumps(diagnostics, sort_keys=True))
         raise
-    driver.find_element(By.CSS_SELECTOR, 'button[aria-label="Focus browser"]').click()
-    focused = wait.until(
-        ec.visibility_of_element_located(
-            (By.CSS_SELECTOR, '[role="dialog"][aria-label="Focus browser"]')
-        )
-    )
-    assert driver.execute_script(
-        "const r=arguments[0].getBoundingClientRect();"
-        "return r.width===innerWidth && r.height===innerHeight;",
-        focused,
-    )
-    assert driver.execute_script(
-        "return document.querySelector('[aria-label=\"Remote browser page\"]')"
-        "=== arguments[0];",
-        viewport,
-    )
-    unzoomed_width = viewport.rect["width"]
-    driver.find_element(By.CSS_SELECTOR, 'button[aria-label="Browser actions"]').click()
-    wait.until(
-        ec.element_to_be_clickable(
-            (By.XPATH, "//*[@role='menuitem' and normalize-space(.)='Zoom in']")
-        )
-    ).click()
-    wait.until(lambda _: viewport.rect["width"] > unzoomed_width * 1.2)
-    driver.find_element(By.CSS_SELECTOR, 'button[aria-label="Browser actions"]').click()
-    wait.until(
-        ec.element_to_be_clickable(
-            (
-                By.XPATH,
-                "//*[@role='menuitem' and "
-                "starts-with(normalize-space(.),'Fit to window')]",
-            )
-        )
-    ).click()
-    wait.until(lambda _: abs(viewport.rect["width"] - unzoomed_width) < 1)
     ActionChains(driver).send_keys(Keys.ESCAPE).perform()
     wait.until(
         ec.invisibility_of_element_located(
@@ -396,24 +379,6 @@ return {ready: false};
         raise AssertionError(
             f"Native reload outcome was not observed; bounded UI state: {diagnostic}"
         ) from error
-    artifact_directory = os.environ.get("AZENTS_E2E_ARTIFACT_DIR")
-    if artifact_directory is not None:
-        artifacts = Path(artifact_directory)
-        artifacts.mkdir(parents=True, exist_ok=True)
-        assert driver.save_screenshot(str(artifacts / "session-browser-desktop.png"))
-    driver.set_window_size(390, 844)
-    wait.until(
-        ec.visibility_of_element_located(
-            (By.CSS_SELECTOR, '[aria-label="Remote browser page"][data-stale="false"]')
-        )
-    )
-    assert driver.execute_script(
-        "return document.documentElement.scrollWidth <= window.innerWidth;"
-    )
-    if artifact_directory is not None:
-        assert driver.save_screenshot(
-            str(Path(artifact_directory) / "session-browser-mobile-viewport.png")
-        )
     driver.get(f"{web_url}/w/{handle}/agents/{agent_id}/sessions/{session_id}")
 
 

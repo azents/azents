@@ -33,6 +33,13 @@ class TestBrowserV1Api(unittest.TestCase):
         """
         pass
 
+    def test_browser_v1_create_browser_page(self) -> None:
+        """Test case for browser_v1_create_browser_page
+
+        Create Browser Page
+        """
+        pass
+
     def test_browser_v1_get_browser_projection(self) -> None:
         """Test case for browser_v1_get_browser_projection
 

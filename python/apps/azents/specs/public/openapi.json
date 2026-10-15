@@ -2816,6 +2816,82 @@
         }
       }
     },
+    "/browser/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/pages": {
+      "post": {
+        "tags": [
+          "Browser v1"
+        ],
+        "summary": "Create Browser Page",
+        "description": "Create a blank tab using the current directing Session authority.",
+        "operationId": "browser_v1_create_browser_page",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserCreatePageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserCreatePageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/start": {
       "post": {
         "tags": [
@@ -25960,6 +26036,29 @@
           "resource_incarnation"
         ],
         "title": "BrowserClosePageRequest"
+      },
+      "BrowserCreatePageRequest": {
+        "properties": {},
+        "additionalProperties": false,
+        "type": "object",
+        "title": "BrowserCreatePageRequest"
+      },
+      "BrowserCreatePageResponse": {
+        "properties": {
+          "projection": {
+            "$ref": "#/components/schemas/BrowserProjectionResponse"
+          },
+          "page": {
+            "$ref": "#/components/schemas/BrowserPageResponse"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "projection",
+          "page"
+        ],
+        "title": "BrowserCreatePageResponse"
       },
       "BrowserFrameResponse": {
         "properties": {

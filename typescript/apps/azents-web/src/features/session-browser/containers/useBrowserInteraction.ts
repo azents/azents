@@ -143,12 +143,14 @@ export function useBrowserInteraction({
     [send],
   );
   useEffect(() => {
-    const field = keyboardRef.current;
-    if (!enabled || field === null) {
+    if (!enabled) {
       return;
     }
     const beforeInput = (event: InputEvent): void => {
+      const field = keyboardRef.current;
       if (
+        field === null ||
+        event.target !== field ||
         document.activeElement !== field ||
         event.isComposing ||
         composing.current !== null
@@ -167,8 +169,9 @@ export function useBrowserInteraction({
         event.preventDefault();
       }
     };
-    field.addEventListener("beforeinput", beforeInput);
-    return () => field.removeEventListener("beforeinput", beforeInput);
+    // Portal mounting can follow this effect; bind by the current receiver at event time.
+    document.addEventListener("beforeinput", beforeInput, true);
+    return () => document.removeEventListener("beforeinput", beforeInput, true);
   }, [enabled, softwareKey]);
 
   const interaction: BrowserInteractionHandlers = {
@@ -208,7 +211,6 @@ export function useBrowserInteraction({
         return;
       }
       event.preventDefault();
-      keyboardRef.current?.focus({ preventScroll: true });
       event.currentTarget.setPointerCapture(event.pointerId);
       pointer.current = { id: event.pointerId, ...point, frame: source };
     },
@@ -260,7 +262,9 @@ export function useBrowserInteraction({
           button: null,
         });
       } else {
-        if (!send({ kind: "pointer", phase: "up", ...point, button })) {
+        if (send({ kind: "pointer", phase: "up", ...point, button })) {
+          keyboardRef.current?.focus({ preventScroll: true });
+        } else {
           latest.current.onAction(held.frame, {
             kind: "pointer",
             phase: "cancel",

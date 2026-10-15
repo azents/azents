@@ -27,6 +27,7 @@ from azents.services.runtime_browser.data import (
     RuntimeBrowserAuthority,
     RuntimeBrowserRequestError,
     RuntimeBrowserResource,
+    RuntimeBrowserTargetUnavailable,
     RuntimeBrowserUnavailable,
 )
 
@@ -93,13 +94,44 @@ def _harness() -> _Harness:
     )
 
 
-async def test_owner_callback_uses_joined_handle_and_typed_selected_status() -> None:
+async def test_live_scope_checks_authority_without_reentrant_browser_rpc() -> None:
+    h = _harness()
+    h.runner.run_browser_command.side_effect = AssertionError(
+        "An input authority check must not issue a nested Browser operation"
+    )
+    assert await h.validator(_scope())
+    h.resolver.resolve.assert_awaited_once_with(
+        resource=_RESOURCE,
+        user_id="user-a",
+        authentication_session_id="auth-a",
+        resolved_at=_NOW,
+    )
+    h.resolver.resolve.return_value = RuntimeBrowserUnavailable("browser_disabled")
+    assert not await h.validator(_scope())
+    assert h.resolver.resolve.await_count == 2
+    h.runner.run_browser_command.assert_not_awaited()
+
+
+async def test_owner_callback_uses_current_joined_resource() -> None:
     h = _harness()
     assert await h.validator(_scope())
     h.repository.read_stream_workspace_handle.assert_awaited_once_with(
         agent_id="agent-1", session_id="concrete-session"
     )
     assert h.resolver.resolve.call_args.kwargs["resource"] == _RESOURCE
+
+
+async def test_admission_uses_typed_selected_status() -> None:
+    h = _harness()
+    assert (
+        await h.validator.admit(
+            resource=_RESOURCE,
+            user_id="user-a",
+            authentication_session_id="auth-a",
+            target=_TARGET,
+        )
+        == _CURRENT
+    )
     call = h.runner.run_browser_command.call_args.kwargs
     assert call["owner_session_id"] == "concrete-session"
     assert call["runtime_id"] == "runtime-1" and call["runner_generation"] == 5
@@ -181,7 +213,13 @@ async def test_selected_page_status_must_match_all_target_identifiers(
         None,
         "none",
     )
-    assert not await h.validator(_scope())
+    with pytest.raises(RuntimeBrowserTargetUnavailable):
+        await h.validator.admit(
+            resource=_RESOURCE,
+            user_id="user-a",
+            authentication_session_id="auth-a",
+            target=_TARGET,
+        )
     assert h.runner.run_browser_command.await_count == 1
 
 
@@ -215,18 +253,25 @@ async def test_admission_revalidates_account_after_status_before_source_content(
     assert h.runner.run_browser_command.await_count == 1
 
 
-async def test_runner_failure_denies_scope_without_retry_or_raw_error() -> None:
+async def test_runner_failure_denies_admission_without_retry_or_raw_error() -> None:
     h = _harness()
     h.runner.run_browser_command.side_effect = RuntimeRunnerOperationFailedError(
         "private signed URL", code="browser_stale_target"
     )
-    assert not await h.validator(_scope())
+    with pytest.raises(RuntimeBrowserTargetUnavailable):
+        await h.validator.admit(
+            resource=_RESOURCE,
+            user_id="user-a",
+            authentication_session_id="auth-a",
+            target=_TARGET,
+        )
     assert h.runner.run_browser_command.await_count == 1
 
 
 async def test_cancelled_scope_check_propagates_without_replay() -> None:
     h = _harness()
-    h.runner.run_browser_command.side_effect = asyncio.CancelledError()
+    h.resolver.resolve.side_effect = asyncio.CancelledError()
     with pytest.raises(asyncio.CancelledError):
         await h.validator(_scope())
-    assert h.runner.run_browser_command.await_count == 1
+    h.resolver.resolve.assert_awaited_once()
+    h.runner.run_browser_command.assert_not_awaited()

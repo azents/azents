@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
-from azents_runtime_control.browser_contract import BrowserTask
+from azents_runtime_control.browser_contract import BrowserPage, BrowserTask
 
 from azents.services.agent_runtime.lifecycle_data import RuntimeOperationTarget
 
@@ -50,6 +50,12 @@ class RuntimeBrowserProjection:
     reason_code: RuntimeBrowserReasonCode | None
     allow_input: bool
     tasks: tuple[BrowserTask, ...]
+
+
+@dataclass(frozen=True)
+class RuntimeBrowserCreatedPage:
+    projection: RuntimeBrowserProjection
+    page: BrowserPage
 
 
 class RuntimeBrowserRequestError(RuntimeError):

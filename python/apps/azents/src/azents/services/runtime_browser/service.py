@@ -12,6 +12,7 @@ from azents_runtime_control.browser_contract import (
     BrowserAuthority,
     BrowserCommand,
     BrowserObserveCommand,
+    BrowserOpenCommand,
     BrowserResult,
     BrowserTarget,
 )
@@ -25,6 +26,7 @@ from azents.runtime.control_protocol.runner_operations import (
 from azents.services.runtime_browser.authority import RuntimeBrowserAuthorityResolver
 from azents.services.runtime_browser.data import (
     RuntimeBrowserAuthority,
+    RuntimeBrowserCreatedPage,
     RuntimeBrowserOperationError,
     RuntimeBrowserProjection,
     RuntimeBrowserRequestError,
@@ -78,6 +80,46 @@ class RuntimeBrowserService:
         )
         await self._revalidate(admission)
         return self._projection(admission, result)
+
+    async def create_page(
+        self,
+        *,
+        user_id: str,
+        authentication_session_id: str,
+        resource: RuntimeBrowserResource,
+    ) -> RuntimeBrowserCreatedPage:
+        """Create one blank tab without replaying uncertain allocation."""
+        admission = await self.authority_resolver.resolve(
+            user_id=user_id,
+            authentication_session_id=authentication_session_id,
+            resource=resource,
+            resolved_at=self.clock(),
+        )
+        if isinstance(admission, RuntimeBrowserUnavailable):
+            raise RuntimeBrowserRequestError(409, "Browser is unavailable.")
+        if not admission.allow_input:
+            raise RuntimeBrowserRequestError(409, "Subagent sessions are read-only.")
+        result = await self._dispatch(
+            admission,
+            BrowserOpenCommand(
+                authority=BrowserAuthority(
+                    resource.session_id, admission.working_directory
+                ),
+                task_id=None,
+                url=None,
+                label="Browser",
+            ),
+        )
+        projection = self._projection(admission, result)
+        page = result.page
+        if page is None or not any(
+            page == current for task in result.tasks for current in task.pages
+        ):
+            raise RuntimeBrowserOperationError(
+                "Browser tab creation was not confirmed; do not replay the action."
+            )
+        await self._revalidate(admission)
+        return RuntimeBrowserCreatedPage(projection, page)
 
     async def close_page(
         self,
@@ -179,6 +221,7 @@ class RuntimeBrowserService:
                 "browser_dialog_pending",
                 "browser_stale_generation",
                 "browser_invalid_authority",
+                "browser_resource_exhausted",
             }:
                 raise RuntimeBrowserRequestError(
                     409, "Browser target is unavailable or conflicting; refresh state."
