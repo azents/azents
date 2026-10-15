@@ -1,6 +1,7 @@
 """Discord SDK attachment metadata and G3 byte transport tests."""
 
 import contextlib
+import gzip
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from unittest.mock import AsyncMock
@@ -95,6 +96,67 @@ async def test_missing_sdk_attachment_maps_to_not_found() -> None:
                 message_id="444",
                 attachment_id="555",
             )
+
+
+@pytest.mark.asyncio
+async def test_g3_requests_identity_for_both_length_and_body() -> None:
+    """CDN compression must not remove the length required for verified transfer."""
+    url = "https://cdn.discordapp.com/attachments/333/555/report.txt"
+    methods: list[str] = []
+    body = b"attachment content"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        methods.append(request.method)
+        if request.headers["Accept-Encoding"] != "identity":
+            return httpx.Response(
+                200,
+                headers={"Content-Encoding": "gzip", "Transfer-Encoding": "chunked"},
+                stream=httpx.ByteStream(gzip.compress(body)),
+            )
+        return httpx.Response(
+            200,
+            headers={"Content-Length": str(len(body))},
+            stream=httpx.ByteStream(b"" if request.method == "HEAD" else body),
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        headers={"Accept-Encoding": "gzip"},
+    ) as http:
+        transport = DiscordAttachmentByteTransport(http)
+        size = await transport.fetch_content_length(
+            download_url=url, max_bytes=len(body)
+        )
+        async with transport.open_stream(
+            download_url=url, max_bytes=size, maximum_chunk_size=3
+        ) as response:
+            chunks = [chunk async for chunk in response.chunks]
+
+    assert methods == ["HEAD", "GET"]
+    assert size == response.content_length == len(body)
+    assert b"".join(chunks) == body
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["HEAD", "GET"])
+async def test_g3_still_requires_content_length(method: str) -> None:
+    """Identity negotiation does not bypass missing-length validation."""
+    url = "https://cdn.discordapp.com/attachments/333/555/report.txt"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["Accept-Encoding"] == "identity"
+        return httpx.Response(200, stream=httpx.ByteStream(b"abc"))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        transport = DiscordAttachmentByteTransport(http)
+        with pytest.raises(DiscordFileRequestRejected, match="invalid content length"):
+            if method == "HEAD":
+                await transport.fetch_content_length(download_url=url, max_bytes=3)
+            else:
+                async with transport.open_stream(
+                    download_url=url, max_bytes=3, maximum_chunk_size=2
+                ):
+                    pytest.fail("Missing length must be rejected before streaming.")
 
 
 @pytest.mark.asyncio

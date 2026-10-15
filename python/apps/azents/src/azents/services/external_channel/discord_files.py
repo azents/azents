@@ -81,7 +81,11 @@ class DiscordAttachmentByteTransport:
                 "Discord returned an invalid attachment download URL."
             )
         try:
-            response = await self.http_client.head(download_url, follow_redirects=False)
+            response = await self.http_client.head(
+                download_url,
+                headers={"Accept-Encoding": "identity"},
+                follow_redirects=False,
+            )
         except httpx.RequestError as error:
             raise DiscordFileTemporaryError(
                 "Discord attachment download is temporarily unavailable."
@@ -127,7 +131,10 @@ class DiscordAttachmentByteTransport:
             )
         try:
             async with self.http_client.stream(
-                "GET", download_url, follow_redirects=False
+                "GET",
+                download_url,
+                headers={"Accept-Encoding": "identity"},
+                follow_redirects=False,
             ) as response:
                 if response.status_code == 404:
                     raise DiscordFileNotFound(

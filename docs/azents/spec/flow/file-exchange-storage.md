@@ -89,8 +89,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-10-05
-spec_version: 60
+last_verified_at: 2026-10-15
+spec_version: 61
 ---
 
 # File Exchange Storage
@@ -294,6 +294,12 @@ Runner receives the immutable object through its exact-attempt direct GET rather
 a Control body stream. Runtime admission does not impose an unrelated lower per-file
 capacity gate. The Tool result retains only Runtime path, filename, media type, and
 verified byte count.
+
+Discord CDN HEAD and GET requests explicitly use `Accept-Encoding: identity` so
+the declared length and streamed body refer to the same uncompressed representation.
+Missing or invalid `Content-Length` remains a transfer failure. Controlled Discord
+provider failures preserve their safe internal cause and detail in structured
+download diagnostics while retaining the existing public error message.
 
 A file-bearing `channel_action` accepts absolute Runtime paths and `exchange://` URIs.
 Runtime paths are statted before commit and move through the trusted Runtime
@@ -528,6 +534,9 @@ later `import_file` must explicitly copy them into the new Runtime.
 - Tool execution follows [`agent-execution-loop.md`](agent-execution-loop.md).
 
 ## Changelog
+
+- **2026-10-15** (spec_version 61) — Request uncompressed Discord CDN attachment
+  bytes for exact length verification and retain controlled provider failure diagnostics.
 
 - **2026-10-05** (spec_version 60) — Made file cleanup and archived-root purge
   metadata preparation/settlement repository-owned, retaining exact lease/cursor
