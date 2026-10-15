@@ -26,9 +26,9 @@ from azents_runtime_control.runtime_stream_session import (
     CloseReason,
     Header,
     RequestHead,
-    StreamAuthority,
     StreamProtocol,
     WebSocketOpcode,
+    WebStreamAuthority,
 )
 from mypy_boto3_rds import RDSClient
 from sqlalchemy import event
@@ -1149,14 +1149,14 @@ def _stream_authority(
     authority: RuntimeWebGatewayAuthorityData,
     protocol: StreamProtocol,
     now: datetime.datetime,
-) -> StreamAuthority:
+) -> WebStreamAuthority:
     """Create one exact non-replayable replacement stream authority."""
     transport_deadline = (
         min(authority.exposure_deadline_at, now + datetime.timedelta(minutes=30))
         if protocol is StreamProtocol.HTTP
         else authority.exposure_deadline_at
     )
-    return StreamAuthority(
+    return WebStreamAuthority(
         correlation_id=secrets.token_hex(32),
         service_id=authority.service.id,
         service_revision=authority.service.revision,

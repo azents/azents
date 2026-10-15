@@ -859,61 +859,57 @@ class RuntimeStreamSessionAuthority(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     CORRELATION_ID_FIELD_NUMBER: _builtins.int
-    SERVICE_ID_FIELD_NUMBER: _builtins.int
-    SERVICE_REVISION_FIELD_NUMBER: _builtins.int
-    IDENTITY_ID_FIELD_NUMBER: _builtins.int
     AUTHENTICATION_SESSION_ID_FIELD_NUMBER: _builtins.int
     USER_ID_FIELD_NUMBER: _builtins.int
     AGENT_ID_FIELD_NUMBER: _builtins.int
     RUNTIME_ID_FIELD_NUMBER: _builtins.int
     DESIRED_GENERATION_FIELD_NUMBER: _builtins.int
     RUNNER_GENERATION_FIELD_NUMBER: _builtins.int
-    PORT_FIELD_NUMBER: _builtins.int
-    EXPOSURE_DEADLINE_AT_FIELD_NUMBER: _builtins.int
     TRANSPORT_DEADLINE_AT_FIELD_NUMBER: _builtins.int
     OPEN_DEADLINE_AT_FIELD_NUMBER: _builtins.int
+    WEB_FIELD_NUMBER: _builtins.int
+    BROWSER_FIELD_NUMBER: _builtins.int
     correlation_id: _builtins.str
-    service_id: _builtins.str
-    service_revision: _builtins.int
-    identity_id: _builtins.str
     authentication_session_id: _builtins.str
     user_id: _builtins.str
     agent_id: _builtins.str
     runtime_id: _builtins.str
     desired_generation: _builtins.int
     runner_generation: _builtins.int
-    port: _builtins.int
-    @_builtins.property
-    def exposure_deadline_at(self) -> _timestamp_pb2.Timestamp: ...
     @_builtins.property
     def transport_deadline_at(self) -> _timestamp_pb2.Timestamp: ...
     @_builtins.property
     def open_deadline_at(self) -> _timestamp_pb2.Timestamp: ...
+    @_builtins.property
+    def web(self) -> Global___RuntimeStreamSessionWebAuthority: ...
+    @_builtins.property
+    def browser(self) -> Global___RuntimeStreamSessionBrowserAuthority: ...
     def __init__(
         self,
         *,
         correlation_id: _builtins.str = ...,
-        service_id: _builtins.str = ...,
-        service_revision: _builtins.int = ...,
-        identity_id: _builtins.str = ...,
         authentication_session_id: _builtins.str = ...,
         user_id: _builtins.str = ...,
         agent_id: _builtins.str = ...,
         runtime_id: _builtins.str = ...,
         desired_generation: _builtins.int = ...,
         runner_generation: _builtins.int = ...,
-        port: _builtins.int = ...,
-        exposure_deadline_at: _timestamp_pb2.Timestamp | None = ...,
         transport_deadline_at: _timestamp_pb2.Timestamp | None = ...,
         open_deadline_at: _timestamp_pb2.Timestamp | None = ...,
+        web: Global___RuntimeStreamSessionWebAuthority | None = ...,
+        browser: Global___RuntimeStreamSessionBrowserAuthority | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
-        "exposure_deadline_at",
-        b"exposure_deadline_at",
+        "browser",
+        b"browser",
+        "domain",
+        b"domain",
         "open_deadline_at",
         b"open_deadline_at",
         "transport_deadline_at",
         b"transport_deadline_at",
+        "web",
+        b"web",
     ]
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal[
@@ -921,35 +917,124 @@ class RuntimeStreamSessionAuthority(_message.Message):
         b"agent_id",
         "authentication_session_id",
         b"authentication_session_id",
+        "browser",
+        b"browser",
         "correlation_id",
         b"correlation_id",
         "desired_generation",
         b"desired_generation",
-        "exposure_deadline_at",
-        b"exposure_deadline_at",
-        "identity_id",
-        b"identity_id",
+        "domain",
+        b"domain",
         "open_deadline_at",
         b"open_deadline_at",
-        "port",
-        b"port",
         "runner_generation",
         b"runner_generation",
         "runtime_id",
         b"runtime_id",
-        "service_id",
-        b"service_id",
-        "service_revision",
-        b"service_revision",
         "transport_deadline_at",
         b"transport_deadline_at",
         "user_id",
         b"user_id",
+        "web",
+        b"web",
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    _WhichOneofReturnType_domain: _TypeAlias = _typing.Literal["web", "browser"]
+    _WhichOneofArgType_domain: _TypeAlias = _typing.Literal["domain", b"domain"]
+    def WhichOneof(
+        self, oneof_group: _WhichOneofArgType_domain
+    ) -> _WhichOneofReturnType_domain | None: ...
+
+Global___RuntimeStreamSessionAuthority: _TypeAlias = RuntimeStreamSessionAuthority
+
+@_typing.final
+class RuntimeStreamSessionWebAuthority(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    SERVICE_ID_FIELD_NUMBER: _builtins.int
+    SERVICE_REVISION_FIELD_NUMBER: _builtins.int
+    IDENTITY_ID_FIELD_NUMBER: _builtins.int
+    PORT_FIELD_NUMBER: _builtins.int
+    EXPOSURE_DEADLINE_AT_FIELD_NUMBER: _builtins.int
+    service_id: _builtins.str
+    service_revision: _builtins.int
+    identity_id: _builtins.str
+    port: _builtins.int
+    @_builtins.property
+    def exposure_deadline_at(self) -> _timestamp_pb2.Timestamp: ...
+    def __init__(
+        self,
+        *,
+        service_id: _builtins.str = ...,
+        service_revision: _builtins.int = ...,
+        identity_id: _builtins.str = ...,
+        port: _builtins.int = ...,
+        exposure_deadline_at: _timestamp_pb2.Timestamp | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal[
+        "exposure_deadline_at", b"exposure_deadline_at"
+    ]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "exposure_deadline_at",
+        b"exposure_deadline_at",
+        "identity_id",
+        b"identity_id",
+        "port",
+        b"port",
+        "service_id",
+        b"service_id",
+        "service_revision",
+        b"service_revision",
     ]
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
-Global___RuntimeStreamSessionAuthority: _TypeAlias = RuntimeStreamSessionAuthority
+Global___RuntimeStreamSessionWebAuthority: _TypeAlias = RuntimeStreamSessionWebAuthority
+
+@_typing.final
+class RuntimeStreamSessionBrowserAuthority(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    SESSION_ID_FIELD_NUMBER: _builtins.int
+    TASK_ID_FIELD_NUMBER: _builtins.int
+    PAGE_ID_FIELD_NUMBER: _builtins.int
+    RESOURCE_INCARNATION_FIELD_NUMBER: _builtins.int
+    ALLOW_INPUT_FIELD_NUMBER: _builtins.int
+    session_id: _builtins.str
+    task_id: _builtins.str
+    page_id: _builtins.str
+    resource_incarnation: _builtins.str
+    allow_input: _builtins.bool
+    def __init__(
+        self,
+        *,
+        session_id: _builtins.str = ...,
+        task_id: _builtins.str = ...,
+        page_id: _builtins.str = ...,
+        resource_incarnation: _builtins.str = ...,
+        allow_input: _builtins.bool = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "allow_input",
+        b"allow_input",
+        "page_id",
+        b"page_id",
+        "resource_incarnation",
+        b"resource_incarnation",
+        "session_id",
+        b"session_id",
+        "task_id",
+        b"task_id",
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___RuntimeStreamSessionBrowserAuthority: _TypeAlias = (
+    RuntimeStreamSessionBrowserAuthority
+)
 
 @_typing.final
 class RuntimeStreamSessionRequestHead(_message.Message):

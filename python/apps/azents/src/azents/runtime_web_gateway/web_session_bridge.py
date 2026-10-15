@@ -11,6 +11,9 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 from azents_runtime_control.proto import runtime_stream_session_pb2
+from azents_runtime_control.runtime_stream_authority_codec import (
+    encode_stream_authority,
+)
 from azents_runtime_control.runtime_stream_flow import (
     AbsoluteCreditWindow,
     FairFrameScheduler,
@@ -28,10 +31,10 @@ from azents_runtime_control.runtime_stream_session import (
     CloseReason,
     Header,
     RequestHead,
-    StreamAuthority,
     StreamDirection,
     StreamProtocol,
     WebSocketOpcode,
+    WebStreamAuthority,
 )
 
 from azents.runtime_web_gateway.operations import RuntimeWebGatewayResourceTracker
@@ -736,10 +739,12 @@ class RuntimeWebBrowserStreamBridge:
         *,
         pool: RuntimeWebGatewaySessionPool,
         stream_id: int,
-        authority: StreamAuthority,
+        authority: WebStreamAuthority,
         request_head: RequestHead,
     ) -> RuntimeWebBrowserStreamBridge:
         """Bind and send one exact OPEN without consuming browser body data."""
+        if not isinstance(authority, WebStreamAuthority):
+            raise ValueError("Runtime Web bridge requires Web authority")
         binding = await pool.open(
             stream_id=stream_id,
             authority=authority,
@@ -1470,28 +1475,9 @@ def _open_envelope(
     authority = binding.state.authority
     head = binding.state.request_head
     envelope = _base_envelope(binding)
-    envelope.open.authority.CopyFrom(
-        runtime_stream_session_pb2.RuntimeStreamSessionAuthority(
-            correlation_id=authority.correlation_id,
-            service_id=authority.service_id,
-            service_revision=authority.service_revision,
-            identity_id=authority.identity_id,
-            authentication_session_id=authority.authentication_session_id,
-            user_id=authority.user_id,
-            agent_id=authority.agent_id,
-            runtime_id=authority.runtime_id,
-            desired_generation=authority.desired_generation,
-            runner_generation=authority.runner_generation,
-            port=authority.port,
-        )
-    )
-    envelope.open.authority.open_deadline_at.FromDatetime(authority.open_deadline_at)
-    envelope.open.authority.transport_deadline_at.FromDatetime(
-        authority.transport_deadline_at
-    )
-    envelope.open.authority.exposure_deadline_at.FromDatetime(
-        authority.exposure_deadline_at
-    )
+    if not isinstance(authority, WebStreamAuthority):
+        raise ValueError("Runtime Web bridge requires Web authority")
+    envelope.open.authority.CopyFrom(encode_stream_authority(authority))
     envelope.open.request_head.protocol = (
         runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_PROTOCOL_WEBSOCKET
         if head.protocol is StreamProtocol.WEBSOCKET

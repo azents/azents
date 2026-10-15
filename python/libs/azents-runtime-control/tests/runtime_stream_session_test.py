@@ -26,10 +26,10 @@ from azents_runtime_control.runtime_stream_session import (
     SessionPeerRole,
     SessionProfile,
     SessionState,
-    StreamAuthority,
     StreamDirection,
     StreamProtocol,
     WebSocketOpcode,
+    WebStreamAuthority,
     protocol_fingerprint,
 )
 
@@ -57,8 +57,8 @@ def _identity(role: SessionPeerRole = SessionPeerRole.RUNNER) -> SessionIdentity
     )
 
 
-def _authority() -> StreamAuthority:
-    return StreamAuthority(
+def _authority() -> WebStreamAuthority:
+    return WebStreamAuthority(
         correlation_id="correlation-1",
         service_id="endpoint-1",
         service_revision=4,
@@ -103,7 +103,7 @@ def test_schema_and_fingerprint_are_exact() -> None:
     assert RUNTIME_WEB_CAPABILITY == "runtime-web-http"
     assert (
         RUNTIME_STREAM_PROTOCOL_FINGERPRINT
-        == "08b7e14af4ec64ba18029fe279f0ecfa2e60e63c154b7f350ac9ca678f60014f"
+        == "5d7fdb780c8abb9c324e8239ed953e9052fb5caca12092e338554e706ed28b76"
     )
     assert (
         protocol_fingerprint(descriptor=b"different")

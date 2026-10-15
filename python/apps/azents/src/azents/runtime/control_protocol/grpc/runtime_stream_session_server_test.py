@@ -559,20 +559,19 @@ def _open_envelope(
     now = datetime.now(UTC)
     authority = runtime_stream_session_pb2.RuntimeStreamSessionAuthority(
         correlation_id="correlation",
-        service_id="endpoint",
-        service_revision=1,
-        identity_id="identity",
+        web=runtime_stream_session_pb2.RuntimeStreamSessionWebAuthority(
+            service_id="endpoint", service_revision=1, identity_id="identity", port=8765
+        ),
         authentication_session_id="authentication",
         user_id="user",
         agent_id="agent-session",
         runtime_id="runtime",
         desired_generation=1,
         runner_generation=1,
-        port=8765,
     )
     authority.open_deadline_at.FromDatetime(now + timedelta(seconds=10))
     authority.transport_deadline_at.FromDatetime(now + timedelta(minutes=1))
-    authority.exposure_deadline_at.FromDatetime(now + timedelta(hours=1))
+    authority.web.exposure_deadline_at.FromDatetime(now + timedelta(hours=1))
     return runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
         protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
         session_id=session_id,
@@ -2502,3 +2501,42 @@ async def test_join_registration_failure_closes_pg_and_releases_only_original_ep
     assert not registry.sessions
     assert await stored_route(fixture) == current
     fixture.manager.assert_closed()
+
+
+@pytest.mark.asyncio
+async def test_web_control_rejects_browser_domain_before_route_or_capacity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_plane, _lifecycle = _local_data_plane()
+    source = await data_plane.register_source(
+        session_id="gateway-session", peer_boot_id="gateway-boot", owner=None
+    )
+
+    async def forbidden_route(
+        *, runtime_id: str, desired_generation: int, runner_generation: int
+    ) -> RuntimeWebSessionRoute | None:
+        raise AssertionError("Browser authority must not reach Web routing")
+
+    monkeypatch.setattr(data_plane, "_resolve_route", forbidden_route)
+    envelope = _open_envelope(
+        session_id="gateway-session", peer_boot_id="gateway-boot", stream_id=1
+    )
+    envelope.open.authority.browser.CopyFrom(
+        runtime_stream_session_pb2.RuntimeStreamSessionBrowserAuthority(
+            session_id="session",
+            task_id="task",
+            page_id="page",
+            resource_incarnation="incarnation",
+            allow_input=False,
+        )
+    )
+    await data_plane.handle(source, envelope)
+    rejected = await anext(source.queue.__aiter__())
+    assert rejected.WhichOneof("payload") == "open_rejected"
+    assert rejected.open_rejected.reason == (
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_PROTOCOL_VIOLATION
+    )
+    assert data_plane.bindings == {}
+    assert await data_plane.capacity_registry.snapshots() == ()
+    await data_plane.unregister_source(source)
+    await data_plane.close()

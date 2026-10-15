@@ -19,7 +19,7 @@ from azents_runtime_control.runtime_stream_session import (
     SessionPeerRole,
     SessionProfile,
     SessionState,
-    StreamAuthority,
+    WebStreamAuthority,
 )
 
 from azents.runtime_web_gateway.operations import RuntimeWebGatewayResourceTracker
@@ -145,10 +145,12 @@ class RuntimeWebGatewaySessionPool:
         self,
         *,
         stream_id: int,
-        authority: StreamAuthority,
+        authority: WebStreamAuthority,
         request_head: RequestHead,
     ) -> GatewayStreamBinding:
         """Bind a new stream to the least-loaded active session."""
+        if not isinstance(authority, WebStreamAuthority):
+            raise ValueError("Runtime Web Gateway requires Web authority")
         async with self.lock:
             candidates = [
                 session

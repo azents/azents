@@ -28,8 +28,8 @@ from azents_runtime_control.runtime_stream_session import (
     OwnerSessionEpoch,
     RequestHead,
     RunnerSessionOffer,
-    StreamAuthority,
     StreamProtocol,
+    WebStreamAuthority,
 )
 from wsproto.events import Event
 from wsproto.utilities import RemoteProtocolError as WsprotoRemoteProtocolError
@@ -233,7 +233,7 @@ def _stream(
     return _Stream(
         offer=offer,
         client=client,
-        authority=StreamAuthority(
+        authority=WebStreamAuthority(
             correlation_id="correlation-a",
             service_id="service-a",
             service_revision=1,
@@ -994,3 +994,45 @@ def test_runner_openmetrics_are_bounded_content_free_aggregates() -> None:
 def _require_set(event: asyncio.Event) -> None:
     if not event.is_set():
         raise AssertionError("old Runner Web stream must finish before replacement")
+
+
+async def test_web_dispatcher_rejects_browser_before_loopback_allocation() -> None:
+    offer = _offer()
+    client = _RecordingClient()
+    manager = _manager(client_factory=None)
+    manager.offer = offer
+    manager.client = client
+    dispatcher = _dispatcher(manager)
+    dispatcher.accepting_envelopes = True
+    dispatcher.accepting_streams = True
+    opening = _envelope(offer, stream_id=1)
+    authority = opening.open.authority
+    authority.correlation_id = "correlation"
+    authority.authentication_session_id = "authentication"
+    authority.user_id = "user"
+    authority.agent_id = "agent"
+    authority.runtime_id = "runtime-a"
+    authority.desired_generation = 3
+    authority.runner_generation = 4
+    now = datetime.datetime.now(datetime.UTC)
+    authority.open_deadline_at.FromDatetime(now + datetime.timedelta(seconds=10))
+    authority.transport_deadline_at.FromDatetime(now + datetime.timedelta(minutes=1))
+    authority.browser.CopyFrom(
+        runtime_stream_session_pb2.RuntimeStreamSessionBrowserAuthority(
+            session_id="session",
+            task_id="task",
+            page_id="page",
+            resource_incarnation="incarnation",
+            allow_input=True,
+        )
+    )
+    await dispatcher(opening)
+    assert len(client.sent) == 1
+    assert client.sent[0].reset.reason == (
+        runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_CLOSE_REASON_PROTOCOL_VIOLATION
+    )
+    assert dispatcher.streams == {}
+    assert dispatcher.resources.active_streams == 0
+    assert dispatcher.resources.pending_tasks == 0
+    assert 1 in dispatcher.tombstone_set
+    await dispatcher.close()

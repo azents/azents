@@ -17,14 +17,15 @@ from azents_runtime_control.runtime_stream_session import (
     MAX_ENVELOPE_BYTES,
     RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
     SESSION_WINDOW_BYTES,
+    BrowserStreamAuthority,
     CloseReason,
     Header,
     RequestHead,
     SessionIdentity,
     SessionPeerRole,
-    StreamAuthority,
     StreamProtocol,
     WebSocketOpcode,
+    WebStreamAuthority,
 )
 
 from azents.runtime_web_gateway import (
@@ -62,9 +63,9 @@ def _identity(session_id: str = "gateway-session") -> SessionIdentity:
     )
 
 
-def _authority() -> StreamAuthority:
+def _authority() -> WebStreamAuthority:
     now = datetime.now(UTC)
-    return StreamAuthority(
+    return WebStreamAuthority(
         correlation_id="correlation",
         service_id="endpoint",
         service_revision=3,
@@ -2224,3 +2225,36 @@ async def test_receiver_identity_failure_retires_pool_session_automatically() ->
     assert terminal.terminal_reason is CloseReason.TRANSPORT_UNAVAILABLE
     assert "gateway-session" not in pool.sessions
     assert await transport.close() == ()
+
+
+def _browser_authority() -> BrowserStreamAuthority:
+    web = _authority()
+    return BrowserStreamAuthority(
+        correlation_id=web.correlation_id,
+        authentication_session_id=web.authentication_session_id,
+        user_id=web.user_id,
+        agent_id=web.agent_id,
+        runtime_id=web.runtime_id,
+        desired_generation=web.desired_generation,
+        runner_generation=web.runner_generation,
+        open_deadline_at=web.open_deadline_at,
+        transport_deadline_at=web.transport_deadline_at,
+        session_id="session",
+        task_id="task",
+        page_id="page",
+        resource_incarnation="incarnation",
+        allow_input=False,
+    )
+
+
+async def test_web_bridge_rejects_browser_authority_before_binding() -> None:
+    pool = RuntimeWebGatewaySessionPool(maximum_sessions=1)
+    with pytest.raises(ValueError, match="bridge requires Web authority"):
+        await RuntimeWebBrowserStreamBridge.open(
+            pool=pool,
+            stream_id=1,
+            # Adversarial domain input intentionally violates the Web-only API.
+            authority=_browser_authority(),  # ty: ignore[invalid-argument-type]
+            request_head=_head(),
+        )
+    assert pool.sessions == {}

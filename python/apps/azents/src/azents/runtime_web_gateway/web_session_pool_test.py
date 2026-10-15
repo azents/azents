@@ -12,6 +12,7 @@ from azents_runtime_control.runtime_stream_flow import AbsoluteCreditWindow
 from azents_runtime_control.runtime_stream_session import (
     APPROVED_SESSION_PROFILE,
     SESSION_WINDOW_BYTES,
+    BrowserStreamAuthority,
     CloseReason,
     Header,
     OwnerSessionEpoch,
@@ -19,9 +20,9 @@ from azents_runtime_control.runtime_stream_session import (
     SessionIdentity,
     SessionPeerRole,
     SessionState,
-    StreamAuthority,
     StreamDirection,
     StreamProtocol,
+    WebStreamAuthority,
 )
 
 from azents.runtime_web_gateway.operations import (
@@ -87,9 +88,9 @@ def _identity(session_id: str, *, nonce: str | None = None) -> SessionIdentity:
     )
 
 
-def _authority() -> StreamAuthority:
+def _authority() -> WebStreamAuthority:
     now = datetime.now(UTC)
-    return StreamAuthority(
+    return WebStreamAuthority(
         correlation_id="correlation",
         service_id="endpoint",
         service_revision=1,
@@ -329,3 +330,42 @@ async def test_pool_rejects_non_gateway_and_missing_active_session() -> None:
             authority=_authority(),
             request_head=_head(),
         )
+
+
+def _browser_authority() -> BrowserStreamAuthority:
+    web = _authority()
+    return BrowserStreamAuthority(
+        correlation_id=web.correlation_id,
+        authentication_session_id=web.authentication_session_id,
+        user_id=web.user_id,
+        agent_id=web.agent_id,
+        runtime_id=web.runtime_id,
+        desired_generation=web.desired_generation,
+        runner_generation=web.runner_generation,
+        open_deadline_at=web.open_deadline_at,
+        transport_deadline_at=web.transport_deadline_at,
+        session_id="session",
+        task_id="task",
+        page_id="page",
+        resource_incarnation="incarnation",
+        allow_input=False,
+    )
+
+
+async def test_web_pool_rejects_browser_authority_before_session_selection() -> None:
+    pool = RuntimeWebGatewaySessionPool(maximum_sessions=1)
+    registration = await pool.register(
+        identity=_identity("gateway"),
+        profile=APPROVED_SESSION_PROFILE,
+        transport=_TRANSPORT,
+    )
+    with pytest.raises(ValueError, match="requires Web authority"):
+        await pool.open(
+            stream_id=1,
+            # Adversarial domain input intentionally violates the Web-only API.
+            authority=_browser_authority(),  # ty: ignore[invalid-argument-type]
+            request_head=_head(),
+        )
+    assert pool.sessions[registration.session_id].state.streams == {}
+    assert pool.sessions[registration.session_id].state.last_stream_id == 0
+    await pool.close_session(registration)
