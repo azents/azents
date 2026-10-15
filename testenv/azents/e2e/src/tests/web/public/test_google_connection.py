@@ -7,6 +7,7 @@ from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.toolkit_v1_api import ToolkitV1Api
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
 from azentspublicclient.models.agent_type import AgentType
+from azentspublicclient.models.toolkit_config_response import ToolkitConfigResponse
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as ec
@@ -187,18 +188,24 @@ def test_google_same_context_partial_review_and_metadata_preservation(
     else:
         _click_button(browser_driver, "Save")
     _assert_visible_text(browser_driver, "Renamed after reconnect")
-    current = (
-        api.toolkit_v1_get_toolkit_config(
-            handle=workspace.handle, toolkit_config_id=saved.id, _headers=headers
+
+    def saved_metadata(_: WebDriver) -> ToolkitConfigResponse | None:
+        current = (
+            api.toolkit_v1_get_toolkit_config(
+                handle=workspace.handle, toolkit_config_id=saved.id, _headers=headers
+            )
+            if agent_id is None
+            else api.toolkit_v1_get_agent_toolkit_config(
+                handle=workspace.handle,
+                agent_id=agent_id,
+                toolkit_config_id=saved.id,
+                _headers=headers,
+            )
         )
-        if agent_id is None
-        else api.toolkit_v1_get_agent_toolkit_config(
-            handle=workspace.handle,
-            agent_id=agent_id,
-            toolkit_config_id=saved.id,
-            _headers=headers,
-        )
-    )
+        return current if current.name == "Renamed after reconnect" else None
+
+    current = _wait(browser_driver).until(saved_metadata)
+    assert current is not None
     assert current.config["timeout"] == 12
     assert current.name == "Renamed after reconnect"
     base = f"{azents_public_server_url}/toolkit/v1/workspaces/{workspace.handle}" + (
