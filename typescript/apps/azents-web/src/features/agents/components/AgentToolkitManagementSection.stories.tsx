@@ -281,7 +281,6 @@ export const NewToolkitCatalog = {
         { value: "google_analytics", label: "Google Analytics" },
         { value: "kubernetes", label: "Kubernetes" },
         { value: "brave_search", label: "Brave Search" },
-        { value: "envvar", label: "Environment variables" },
       ],
     },
   },

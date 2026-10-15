@@ -14,7 +14,6 @@ const types = [
   "brave_search",
   "kubernetes",
   "mcp",
-  "envvar",
   "test-only-provider",
 ];
 const meta = {

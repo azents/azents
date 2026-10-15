@@ -26,7 +26,7 @@ from azents.core.toolkit_identifiers import (
     ResolvedToolkitIdentifiers,
     resolve_create_identifiers,
 )
-from azents.engine.tools.envvar import EnvVarToolkitProvider
+from azents.engine.tools.github import GitHubToolkitProvider
 from azents.engine.tools.mcp import McpToolkitProvider
 from azents.services.toolkit import ToolkitService
 from azents.services.toolkit.data import (
@@ -116,14 +116,12 @@ def _owner() -> WorkspaceMember:
 
 def test_identifier_defaults_use_registered_provider_metadata() -> None:
     result = resolve_create_identifiers(
-        toolkit_type="envvar",
-        canonical_name=EnvVarToolkitProvider.name,
+        toolkit_type="github",
+        canonical_name=GitHubToolkitProvider.name,
         submitted_name=None,
         submitted_slug=None,
     )
-    assert result == ResolvedToolkitIdentifiers(
-        name="Environment Variables", slug="environment_variables"
-    )
+    assert result == ResolvedToolkitIdentifiers(name="GitHub", slug="github")
 
 
 def test_generic_mcp_non_latin_name_retains_name_and_uses_provider_slug() -> None:

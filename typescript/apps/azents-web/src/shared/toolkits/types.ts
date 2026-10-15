@@ -172,14 +172,6 @@ export type NotionConfigFieldsProps = SimpleProviderFieldsProps & {
 export type SentryConfigFieldsProps = SimpleProviderFieldsProps & {
   view: SentryFieldsView;
 };
-export type EnvVarConfigFieldsInput = Omit<
-  ToolkitConfigFieldsInput,
-  "handle" | "agentId" | "toolkitConfigId"
->;
-export type EnvVarConfigFieldsProps = EnvVarConfigFieldsInput & {
-  acknowledged: boolean;
-  onAcknowledgedChange: (value: boolean) => void;
-};
 export type McpConfigFieldsInput = Omit<ToolkitConfigFieldsInput, "handle"> & {
   handle?: string;
 };

@@ -28,7 +28,6 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { AwsConfigFieldsContainer } from "../AwsConfigFieldsContainer";
 import { BraveSearchConfigFieldsContainer } from "../BraveSearchConfigFieldsContainer";
-import { EnvVarConfigFieldsContainer } from "../EnvVarConfigFieldsContainer";
 import { GcpConfigFieldsContainer } from "../GcpConfigFieldsContainer";
 import { GithubConfigFieldsContainer } from "../GithubConfigFieldsContainer";
 import { GitHubUserAuthorizationContainer } from "../GitHubUserAuthorizationContainer";
@@ -476,19 +475,6 @@ export function ToolkitForm({
                       })}
                     />
                   )}
-
-                  {currentToolSlug === "envvar" && (
-                    <EnvVarConfigFieldsContainer
-                      config={form.getValues().config}
-                      onConfigChange={onConfigChange}
-                      credentials={form.getValues().credentials ?? null}
-                      onCredentialsChange={onCredentialsChange}
-                      hasCredentials={
-                        formState.type === "EDIT" &&
-                        formState.config.has_credentials === true
-                      }
-                    />
-                  )}
                 </>
               )}
 
@@ -563,11 +549,9 @@ export function ToolkitForm({
                     form.getValues().config.auth_type === "oauth2")) && (
                   <Alert color="blue">{setup("oauthNext")}</Alert>
                 )}
-              {currentToolSlug !== "envvar" &&
-                currentToolSlug !== "shell" &&
-                currentToolSlug !== "google" && (
-                  <Text size="sm">{setup("testHint")}</Text>
-                )}
+              {currentToolSlug !== "shell" && currentToolSlug !== "google" && (
+                <Text size="sm">{setup("testHint")}</Text>
+              )}
             </ToolkitSetupSection>
 
             <ToolkitSetupSection
@@ -645,9 +629,7 @@ export function ToolkitForm({
               />
               <Text size="sm">
                 {setup(
-                  currentToolSlug === "envvar" || currentToolSlug === "shell"
-                    ? "localSaveHint"
-                    : "saveHint",
+                  currentToolSlug === "shell" ? "localSaveHint" : "saveHint",
                 )}
               </Text>
 

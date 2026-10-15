@@ -53,18 +53,6 @@ void test("detail projection never dumps credentials or unknown config fields", 
   );
 });
 
-void test("environment entries reveal names only, including unmasked entries", () => {
-  const view = projectToolkitDetails(
-    toolkit("envvar", {
-      entries: [{ name: "API_KEY", value: "hidden-value", masked: false }],
-    }),
-  );
-  assert.deepEqual(view, [
-    { label: "slug", value: "test" },
-    { label: "variables", value: "API_KEY" },
-  ]);
-});
-
 void test("configured scopes remain distinct from granted OAuth token scope", () => {
   const github = toolkit("github", {
     github_auth_type: "github_app_user",

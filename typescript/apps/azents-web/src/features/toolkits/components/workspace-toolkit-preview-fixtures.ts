@@ -38,11 +38,6 @@ export const previewProviders = [
     label: "Google Analytics",
     description: "사이트와 앱의 분석 보고서 조회",
   },
-  {
-    type: "envvar",
-    label: "환경 변수",
-    description: "Agent 실행 환경에 변수 전달",
-  },
 ];
 
 function toolkit(

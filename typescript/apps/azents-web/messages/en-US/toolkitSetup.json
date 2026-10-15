@@ -105,13 +105,6 @@
       "verify": "Test the configured cluster access explicitly. UI restrictions are additional controls and do not replace Kubernetes RBAC or cloud IAM.",
       "recovery": "Check the API endpoint, certificate, token or cloud identity, and RBAC. Do not disable TLS validation or grant cluster-admin just to bypass an error."
     },
-    "envvar": {
-      "purpose": "Provide environment variables to an Agent's Runtime processes.",
-      "prepare": "Decide which variables the Runtime actually needs. Processes and commands with access to that environment may read their values.",
-      "configure": "Enter valid variable names and values, then review the existing risk notice before acknowledging it. Stored values stay masked; replace only those you intend to change.",
-      "verify": "There is no external connection test for environment variables. Review the names, exposure and acknowledgement before saving.",
-      "recovery": "Correct name, size or acknowledgement errors shown by the form. Keep secrets in value fields, never in connection names or descriptions."
-    },
     "shell": {
       "purpose": "Review the existing shell network restrictions.",
       "prepare": "Determine which domains the Runtime needs to contact. This settings surface does not create or authorize a new Runtime.",

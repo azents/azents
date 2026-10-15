@@ -17,7 +17,6 @@ void test("all currently registered production providers have specific preparati
     "google",
     "brave_search",
     "kubernetes",
-    "envvar",
   ]) {
     assert.equal(getToolkitSetupGuide(provider), provider);
   }

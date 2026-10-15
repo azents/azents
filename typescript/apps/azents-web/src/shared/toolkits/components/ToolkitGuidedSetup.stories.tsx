@@ -16,7 +16,6 @@ import {
 import { projectToolkitConfig } from "../toolkit-config-projection";
 import { AwsConfigFields } from "./AwsConfigFields";
 import { BraveSearchFieldsView } from "./BraveSearchFieldsView";
-import { EnvVarConfigFields } from "./EnvVarConfigFields";
 import { GcpConfigFields } from "./GcpConfigFields";
 import { GoogleAnalyticsConfigFields } from "./GoogleAnalyticsConfigFields";
 import { KubernetesConfigFields } from "./KubernetesConfigFields";
@@ -37,7 +36,6 @@ type Provider =
   | "kubernetes"
   | "sentry"
   | "notion"
-  | "envvar"
   | "brave_search";
 const providers: Record<
   Provider,
@@ -59,7 +57,6 @@ const providers: Record<
   },
   sentry: { name: "Sentry", config: { enabled_skills: ["inspect"] } },
   notion: { name: "Notion", config: {} },
-  envvar: { name: "Environment variables", config: { entries: [] } },
   brave_search: { name: "Brave Search", config: {} },
 };
 const noOp = (): void => {};
@@ -130,14 +127,6 @@ function Fields({
           replacingCreds={new Set()}
           storedClusterAuthTypes={new Map()}
           onReplaceCluster={noOp}
-        />
-      );
-    case "envvar":
-      return (
-        <EnvVarConfigFields
-          {...input}
-          acknowledged={false}
-          onAcknowledgedChange={noOp}
         />
       );
     case "brave_search":
@@ -271,7 +260,6 @@ export const Analytics: Story = { args: { provider: "google_analytics" } };
 export const Kubernetes: Story = { args: { provider: "kubernetes" } };
 export const Sentry: Story = { args: { provider: "sentry" } };
 export const Notion: Story = { args: { provider: "notion" } };
-export const Environment: Story = { args: { provider: "envvar" } };
 export const Brave: Story = { args: { provider: "brave_search" } };
 export const MobileAgent: Story = {
   args: { provider: "mcp", embedded: true, agentOwned: true },

@@ -1978,23 +1978,6 @@
         "runtimeSummary": "Jetons pour les commandes Runtime"
       }
     },
-    "envvar": {
-      "warningTitle": "Avertissement credential à long terme",
-      "warningBody": "Les valeurs enregistrées ici seront injectées dans les commandes shell de runtime via l'env du processus enfant. L'exposition ne peut être totalement évitée — préférez des jetons à courte durée de vie.",
-      "acknowledgeLabel": "Je comprends le risque d'exposition",
-      "entriesLabel": "Variables d'environnement",
-      "entriesCountLabel": "{count}/{max}",
-      "emptyState": "Aucune variable d'environnement. Ajoutez-en une avec le bouton ci-dessous.",
-      "namePlaceholder": "NOTION_TOKEN",
-      "valuePlaceholder": "Valeur",
-      "valueEditPlaceholder": "Laisser vide pour conserver",
-      "invalidNameError": "A-Z, a-z, 0-9 et _ uniquement (^[a-zA-Z_][a-zA-Z0-9_]*$)",
-      "nameTooLongError": "Nom limité à {max} caractères",
-      "valueTooLongError": "Valeur limitée à {max} caractères",
-      "removeEntry": "Supprimer l'entrée",
-      "addEntry": "Ajouter une variable",
-      "entryLimitReached": "{max} entrées maximum"
-    },
     "oauthConnection": {
       "title": "Connexion OAuth",
       "statusNotConnected": "Non connecté",

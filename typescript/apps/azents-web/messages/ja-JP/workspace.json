@@ -1978,23 +1978,6 @@
         "runtimeSummary": "Runtime コマンドでの利用"
       }
     },
-    "envvar": {
-      "warningTitle": "長期クレデンシャル警告",
-      "warningBody": "ここに保存された環境変数は、サンドボックス シェルコマンドの子プロセス setting として注入されます。漏洩リスクを完全に防ぐことはできないため、可能な限り短命のトークンを使用してください。",
-      "acknowledgeLabel": "漏洩リスクを理解しました",
-      "entriesLabel": "環境変数",
-      "entriesCountLabel": "{count}/{max}",
-      "emptyState": "登録された環境変数はありません。下のボタンから追加してください。",
-      "namePlaceholder": "NOTION_TOKEN",
-      "valuePlaceholder": "値",
-      "valueEditPlaceholder": "空のままで既存値を維持",
-      "invalidNameError": "英字(大/小)/数字/_ のみ (^[a-zA-Z_][a-zA-Z0-9_]*$)",
-      "nameTooLongError": "名前は最大{max}文字まで",
-      "valueTooLongError": "値は最大{max}文字まで",
-      "removeEntry": "項目を削除",
-      "addEntry": "変数を追加",
-      "entryLimitReached": "最大{max}件まで登録できます"
-    },
     "oauthConnection": {
       "title": "OAuth 接続",
       "statusNotConnected": "未接続",

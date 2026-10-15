@@ -126,7 +126,6 @@ class ToolkitType(enum.StrEnum):
     GOOGLE_ANALYTICS = "google_analytics"
     BRAVE_SEARCH = "brave_search"
     KUBERNETES = "kubernetes"
-    ENVVAR = "envvar"
 
 
 class ToolkitExecutionMode(enum.StrEnum):

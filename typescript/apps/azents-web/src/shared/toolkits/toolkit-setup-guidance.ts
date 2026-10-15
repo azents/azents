@@ -16,7 +16,6 @@ export const toolkitSetupGuides = {
   kubernetes: {
     docs: "https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/",
   },
-  envvar: { docs: null },
   shell: { docs: null },
 } satisfies Record<string, { docs: string | null }>;
 
@@ -36,7 +35,6 @@ export function getToolkitSetupGuide(
     case "google_analytics":
     case "brave_search":
     case "kubernetes":
-    case "envvar":
     case "shell":
       return type;
     default:

@@ -99,7 +99,7 @@ void test("GitHub projection preserves explicit empty lists, truthiness and auth
   ]);
 });
 
-void test("Shell and envvar projections preserve filtered members and explicit false", () => {
+void test("Shell projection preserves filtered members", () => {
   assert.deepEqual(
     hydrateToolkitConfig("shell", {
       allowed_domains: ["example.com", 5],
@@ -108,25 +108,6 @@ void test("Shell and envvar projections preserve filtered members and explicit f
     {
       config: { allowed_domains: ["example.com"], denied_domains: [] },
       credentials: null,
-    },
-  );
-  assert.deepEqual(
-    hydrateToolkitConfig("envvar", {
-      entries: [
-        { name: "TOKEN", masked: false },
-        null,
-        [],
-        { name: 5, masked: "invalid" },
-      ],
-    }),
-    {
-      config: {
-        entries: [
-          { name: "TOKEN", masked: false },
-          { name: "", masked: true },
-        ],
-      },
-      credentials: { values: {} },
     },
   );
 });
