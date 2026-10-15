@@ -1,4 +1,4 @@
-import type { ProviderToolCall } from "../types";
+import type { ProviderToolCall } from "./types.ts";
 
 const SEMANTIC_NAMES: Record<string, string> = {
   code_interpreter: "Code interpreter",

@@ -1,4 +1,4 @@
-import type { ChatEventResponse } from "@azents/public-client";
+import type { ChatEventResponse } from "@azents/public-client/types";
 
 export function isLivePartialHistoryEvent(
   kind: ChatEventResponse["kind"],

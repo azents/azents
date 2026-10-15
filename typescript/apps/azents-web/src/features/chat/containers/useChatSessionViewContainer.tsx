@@ -36,7 +36,6 @@ import { useChatSessionContainer } from "./useChatSessionContainer";
 import { useSubscriptionUsageContainer } from "./useSubscriptionUsageContainer";
 import type { CurrentWorkspaceProfile } from "../senderPresentation";
 import type { SessionPanelState } from "../session-panel/useSessionPanelState";
-import type { ConnectionStatus } from "../types";
 import type { WorkspacePanelContainerOutput } from "../workspace/containers/useWorkspacePanelContainer";
 import type { RuntimeTerminalContainerOutput } from "@/shared/runtime-terminal/types";
 import type { ComposerSubscriptionUsagePresentationProps } from "@/shared/subscription-usage/ComposerSubscriptionUsage";
@@ -45,6 +44,7 @@ import type {
   AgentSessionResponse,
   RequestedInferenceProfile,
 } from "@azents/public-client";
+import type { ConnectionStatus } from "@azents/session-core/types";
 import type { ReactNode } from "react";
 
 export interface ChatSessionViewContainerProps {

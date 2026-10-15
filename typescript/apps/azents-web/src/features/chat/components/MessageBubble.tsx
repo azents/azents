@@ -45,7 +45,7 @@ import classes from "./MessageBubble.module.css";
 import { MessageMetadataSurface } from "./MessageMetadataFooter";
 import { RunRetryCard } from "./RunRetryCard";
 import { ScheduledTaskMessageDisclosure } from "./ScheduledTaskMessageDisclosure";
-import type { ChatMessage } from "../types";
+import type { ChatMessage } from "@azents/session-core/types";
 
 interface FailedRunRetryAction {
   canRetry: boolean;

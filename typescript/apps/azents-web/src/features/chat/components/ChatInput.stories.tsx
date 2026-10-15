@@ -5,11 +5,6 @@ import { useChatInputContainer } from "../containers/useChatInputContainer";
 import { longUploadErrorFile, pendingFiles } from "../story-fixtures";
 import { ChatInput } from "./ChatInput";
 import type { ChatInputProps } from "../containers/useChatInputContainer";
-import type {
-  ChatLiveRunState,
-  InputActionDefinition,
-  TodoStateSnapshot,
-} from "../types";
 import type { UploadedFile } from "@/shared/file-upload/useFileUpload";
 import type {
   AgentModelSelection,
@@ -17,6 +12,11 @@ import type {
   RequestedInferenceProfile,
   SelectableModelSettings,
 } from "@azents/public-client";
+import type {
+  ChatLiveRunState,
+  InputActionDefinition,
+  TodoStateSnapshot,
+} from "@azents/session-core/types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const reasoningModel: AgentModelSelection = {

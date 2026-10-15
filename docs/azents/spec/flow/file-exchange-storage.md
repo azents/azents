@@ -88,7 +88,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ProviderToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
-  - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
+  - typescript/packages/azents-session-core/src/toolActivityPresentation.ts
 last_verified_at: 2026-10-15
 spec_version: 61
 ---

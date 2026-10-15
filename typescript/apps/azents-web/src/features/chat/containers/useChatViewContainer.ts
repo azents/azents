@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  projectChatPresentationItems,
+  type ToolActivityGroup as ToolActivityGroupModel,
+} from "@azents/session-core/toolActivityPresentation";
 import { useSessionStorage, useWindowEvent } from "@mantine/hooks";
 import { useTranslations } from "next-intl";
 import {
@@ -23,12 +27,13 @@ import {
   type ChatScrollAnchor,
   restorePrependScrollTop,
 } from "../hooks/chatScrollAnchor";
-import {
-  projectChatPresentationItems,
-  type ToolActivityGroup as ToolActivityGroupModel,
-} from "../toolActivityPresentation";
-import type { PendingMailboxEntry } from "../hooks/pendingMailboxState";
 import type { CurrentWorkspaceProfile } from "../senderPresentation";
+import type {
+  AgentResponse,
+  ChatEventResponse,
+  RequestedInferenceProfile,
+} from "@azents/public-client";
+import type { PendingMailboxEntry } from "@azents/session-core/pendingMailboxState";
 import type {
   ActionExecutionProjection,
   AuthorizationRequest,
@@ -42,12 +47,7 @@ import type {
   PendingInputBuffer,
   TodoStateSnapshot,
   TokenUsageSummary,
-} from "../types";
-import type {
-  AgentResponse,
-  ChatEventResponse,
-  RequestedInferenceProfile,
-} from "@azents/public-client";
+} from "@azents/session-core/types";
 const LOAD_MORE_THRESHOLD = 100;
 const BOTTOM_FOLLOW_THRESHOLD = 48;
 const PROGRAMMATIC_SCROLL_GUARD_MS = 350;

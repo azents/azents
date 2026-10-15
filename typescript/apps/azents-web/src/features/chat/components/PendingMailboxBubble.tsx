@@ -5,8 +5,8 @@ import { IconTrash } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { pendingMailboxMessage } from "../pendingMessageProjection";
 import { MessageBubble } from "./MessageBubble";
-import type { PendingMailboxEntry } from "../hooks/pendingMailboxState";
 import type { CurrentWorkspaceProfile } from "../senderPresentation";
+import type { PendingMailboxEntry } from "@azents/session-core/pendingMailboxState";
 
 interface PendingMailboxBubbleProps {
   entry: PendingMailboxEntry;

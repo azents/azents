@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { knownToolPresentation } from "./knownToolPresentation.ts";
-import type { ActiveToolCall } from "./types.ts";
+import type { ActiveToolCall } from "@azents/session-core/types";
 
 function toolCall(overrides: Partial<ActiveToolCall>): ActiveToolCall {
   return {

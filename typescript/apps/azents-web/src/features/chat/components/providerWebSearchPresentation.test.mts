@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { providerWebSearchPresentation } from "./providerWebSearchPresentation.ts";
-import type { ProviderToolCall } from "../types.ts";
+import type { ProviderToolCall } from "@azents/session-core/types";
 
 function webSearchCall(
   overrides: Partial<ProviderToolCall> = {},

@@ -2,7 +2,7 @@ import { rem } from "@mantine/core";
 import { expect, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { TokenUsageDetails } from "./TokenUsageIndicator";
-import type { ChatLiveRunState } from "../types";
+import type { ChatLiveRunState } from "@azents/session-core/types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const activeRun = {

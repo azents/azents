@@ -9,8 +9,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { actionExecutionUpdatedEventFromValue } from "../actionExecutionDecoder";
-import type { ChatEvent, ConnectionStatus } from "../types";
 import type { PendingMailboxEnvelope } from "@azents/public-client";
+import type { ChatEvent, ConnectionStatus } from "@azents/session-core/types";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;

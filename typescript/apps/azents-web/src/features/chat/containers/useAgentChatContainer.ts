@@ -9,11 +9,11 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { trpc } from "@/trpc/client";
-import type { ConnectionStatus } from "@/features/chat/types";
 import type {
   AgentResponse,
   AgentSessionResponse,
 } from "@azents/public-client";
+import type { ConnectionStatus } from "@azents/session-core/types";
 
 export interface AgentChatContainerProps {
   handle: string;

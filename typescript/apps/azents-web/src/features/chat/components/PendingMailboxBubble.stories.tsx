@@ -2,7 +2,7 @@ import { rem } from "@mantine/core";
 import { expect, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { PendingMailboxBubble } from "./PendingMailboxBubble";
-import type { PendingMailboxEntry } from "../hooks/pendingMailboxState";
+import type { PendingMailboxEntry } from "@azents/session-core/pendingMailboxState";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const base = {

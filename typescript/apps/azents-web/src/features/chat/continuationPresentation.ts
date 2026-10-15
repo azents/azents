@@ -1,4 +1,4 @@
-import type { ChatMessage } from "./types";
+import type { ChatMessage } from "@azents/session-core/types";
 
 export type ContinuationSource = "goal" | "external_channel";
 export type ContinuationIcon = "target" | "channel";

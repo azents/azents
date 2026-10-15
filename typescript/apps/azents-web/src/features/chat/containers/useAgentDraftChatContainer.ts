@@ -17,7 +17,6 @@ import type {
   ProjectDirectoryPickerEntry,
   ProjectDirectoryPickerState,
 } from "@/shared/agent-workspace/types";
-import type { ChatAction } from "@/shared/chat/types";
 import type {
   PendingFile,
   UploadedFile,
@@ -29,6 +28,7 @@ import type {
   GitRefEntryResponse,
   RequestedInferenceProfile,
 } from "@azents/public-client";
+import type { ChatAction } from "@azents/session-core/action";
 
 export type AgentDraftSessionScope = "team" | "user";
 

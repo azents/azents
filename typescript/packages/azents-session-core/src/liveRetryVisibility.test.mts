@@ -6,7 +6,7 @@ import {
   liveRunForDisplay,
   resolveDismissedLiveRetryKey,
 } from "./liveRetryVisibility.ts";
-import type { ChatLiveRunState } from "../types.ts";
+import type { ChatLiveRunState } from "./types.ts";
 
 function createLiveRun(
   runId: string,

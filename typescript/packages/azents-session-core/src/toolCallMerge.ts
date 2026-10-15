@@ -4,7 +4,7 @@ import type {
   FileAttachment,
   ToolkitSourceSnapshot,
   ToolResultStatus,
-} from "../types";
+} from "./types.ts";
 
 /** FCO when arrives matched complete FC  to injectto result */
 export interface FunctionCallOutputUpdate {

@@ -10,7 +10,7 @@ import { Badge, Group, Loader, Text } from "@mantine/core";
 import { IconCheck, IconX } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
-import type { RuntimeStatus } from "../types";
+import type { RuntimeStatus } from "@azents/session-core/types";
 
 interface RuntimeStatusIndicatorProps {
   status: RuntimeStatus;

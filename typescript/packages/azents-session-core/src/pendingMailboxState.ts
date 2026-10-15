@@ -3,7 +3,7 @@ import type {
   ChatEventResponse,
   PendingMailboxEnvelope,
   PendingMailboxItem,
-} from "@azents/public-client";
+} from "@azents/public-client/types";
 
 export type PendingMailboxCorrelation = `${string}:${string}`;
 

@@ -5,7 +5,7 @@
 import { Box, Group, Paper, rem, Stack, Text } from "@mantine/core";
 import { extractFilename, FileAttachmentList } from "./FileAttachmentList";
 import { MarkdownContent } from "./MarkdownContent";
-import type { ChatAction, FileAttachment } from "../types";
+import type { ChatAction, FileAttachment } from "@azents/session-core/types";
 
 interface InputBufferBubbleFrameProps {
   content: string;

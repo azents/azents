@@ -3,8 +3,8 @@ import type {
   ChatMessage,
   FileAttachment,
   ProviderToolCall,
-} from "./types";
-import type { ChatEventResponse } from "@azents/public-client";
+} from "./types.ts";
+import type { ChatEventResponse } from "@azents/public-client/types";
 
 export interface ClientToolActivityCall {
   type: "client";

@@ -1,5 +1,5 @@
 import type { KnownToolAction } from "./knownToolPresentation.ts";
-import type { ActiveToolCall } from "./types";
+import type { ActiveToolCall } from "@azents/session-core/types";
 
 export type ToolCallActionMessageKey =
   `action.${KnownToolAction}` | `actionRunning.${KnownToolAction}`;

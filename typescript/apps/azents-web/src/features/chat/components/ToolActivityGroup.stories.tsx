@@ -4,7 +4,7 @@ import { expect, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { createChatMessage } from "../story-fixtures";
 import { ToolActivityGroup } from "./ToolActivityGroup";
-import type { ToolActivityGroup as ToolActivityGroupModel } from "../toolActivityPresentation";
+import type { ToolActivityGroup as ToolActivityGroupModel } from "@azents/session-core/toolActivityPresentation";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const longReasoning = [

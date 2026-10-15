@@ -190,7 +190,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/continuationPresentation.ts
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
-  - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
+  - typescript/packages/azents-session-core/src/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-10-09
 spec_version: 220

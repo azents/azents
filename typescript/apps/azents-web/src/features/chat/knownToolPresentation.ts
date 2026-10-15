@@ -1,8 +1,8 @@
+import { parseV4APatch } from "@azents/session-core/v4aPatchPresentation";
 import { z } from "zod";
 import { fileCodeLanguage } from "./fileCodeLanguage.ts";
-import { parseV4APatch } from "./v4aPatchPresentation.ts";
-import type { ActiveToolCall, TodoStatus } from "./types";
-import type { V4APatchFile } from "./v4aPatchPresentation.ts";
+import type { ActiveToolCall, TodoStatus } from "@azents/session-core/types";
+import type { V4APatchFile } from "@azents/session-core/v4aPatchPresentation";
 
 export type KnownToolPresentationReason =
   | "unregistered"

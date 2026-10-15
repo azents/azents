@@ -1,6 +1,10 @@
 import { externalChannelReferenceMappingsMetadata } from "./externalChannelMessage.ts";
-import type { PendingMailboxEntry } from "./hooks/pendingMailboxState";
-import type { ChatMessage, FileAttachment, PendingInputBuffer } from "./types";
+import type { PendingMailboxEntry } from "@azents/session-core/pendingMailboxState";
+import type {
+  ChatMessage,
+  FileAttachment,
+  PendingInputBuffer,
+} from "@azents/session-core/types";
 
 function pendingAttachments(uris: string[]): FileAttachment[] {
   return uris.map((uri) => ({

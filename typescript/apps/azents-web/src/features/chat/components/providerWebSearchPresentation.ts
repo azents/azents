@@ -1,4 +1,4 @@
-import type { ProviderToolCall } from "../types";
+import type { ProviderToolCall } from "@azents/session-core/types";
 
 export interface ProviderWebSearchResult {
   excerpt: string | null;

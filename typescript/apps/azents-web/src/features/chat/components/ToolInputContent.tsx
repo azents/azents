@@ -1,5 +1,5 @@
+import { toolInputPresentation } from "@azents/session-core/toolInputPresentation";
 import { Box, Code, rem, ScrollArea, Stack, Text } from "@mantine/core";
-import { toolInputPresentation } from "../toolInputPresentation";
 import {
   activityDetailScrollAreaProps,
   activityDetailScrollbarSize,

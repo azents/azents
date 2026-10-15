@@ -6,8 +6,11 @@ import { ActionIcon, Box, Group, rem, Stack, Text } from "@mantine/core";
 import { useTranslations } from "next-intl";
 import { memo, useMemo } from "react";
 import { processingSpeedIntent } from "../executionOptions";
-import type { ChatLiveRunState, TokenUsageSummary } from "../types";
 import type { AppliedInferenceProfile } from "@azents/public-client";
+import type {
+  ChatLiveRunState,
+  TokenUsageSummary,
+} from "@azents/session-core/types";
 
 interface TokenUsageIndicatorProps {
   usage: TokenUsageSummary | null;
