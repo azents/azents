@@ -22,10 +22,10 @@ the phase branch.
 
 | Workstream | Owner | Owned paths | Depends on | Output | Validation |
 | --- | --- | --- | --- | --- | --- |
-| ... | ... | ... | ... | ... | ... |
+| ... | Primary agent (default) | ... | ... | ... | ... |
 
 - Integration order: `<sequence>`
-- Independent review: `<single exact reviewer; root requests review after every implementation workstream is complete and the integrated diff is stable>`
+- Independent review: `<single exact reviewer providing read-only, one-way opinions; root requests review after implementation is complete and the integrated diff is stable, then makes corrections directly>`
 - Final validation: `<root-owned commands and evidence>`
 - Scope-drift check: `<approved coverage, unauthorized additions, non-goals>`
 - Context checkpoint: `<completed behavior, changed interfaces, evidence, remaining scope, paths, risks>`

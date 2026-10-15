@@ -103,12 +103,20 @@ remains `None`.
 
 ## Execution ownership and context
 
-- The primary agent owns orchestration, shared decisions, assigned implementation,
-  reviewer requests, review finding resolution, integrated validation, phase
-  progression, and final integration.
-- Implementation subagents are optional. When used, they stay within assigned paths
-  and interfaces, run focused checks, and hand their completed work and evidence to
-  the primary agent.
+- The primary agent directly performs implementation, integration, and validation
+  by default, and owns decisions, reviewer requests, review finding resolution,
+  and phase progression.
+- Subagent use is discouraged. Only consider the following exceptions. Even when
+  an exception applies, reconsider whether the primary agent can solve the task
+  directly.
+  - **Independent opinions:** A separate persona, such as the independent reviewer,
+    provides read-only, one-way opinions rather than collaborating on the work.
+    The primary agent evaluates the opinions and makes any changes directly.
+  - **Fully self-contained tasks:** The task can be completed from design through
+    final output without parent conversation or feedback-driven follow-up changes,
+    and is clearly faster than direct primary execution, including coordination
+    and handoff costs. Tasks that leave the parent waiting for the result do not
+    qualify.
 - The single reviewer is read-only and reviews the complete root-integrated stable
   phase diff from confirmed Requirements, accepted ADR, approved Design and Design
   Authority, and the phase contract.
@@ -138,8 +146,7 @@ For each phase:
    - the diff adds a material mechanism absent from Design Authority;
 5. remove unrelated, unauthorized, or later-phase changes and update current Specs
    when a behavior change cannot wait for spec promotion;
-6. have each implementation owner run focused checks and hand completed work and
-   evidence to the primary agent;
+6. have the primary agent run focused checks on the completed implementation;
 7. after all implementation work is complete, have the primary agent integrate the
    work and run final validation; reuse evidence only while the diff is unchanged,
    prerequisites are fresh, and the environment is equivalent;
