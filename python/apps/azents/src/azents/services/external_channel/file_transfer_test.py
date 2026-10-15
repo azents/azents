@@ -80,6 +80,7 @@ from azents.services.external_channel.discord_files import (
     DiscordFileCredentialsInvalid,
     DiscordFileNotFound,
     DiscordFilePermissionDenied,
+    DiscordFileRequestRejected,
     DiscordFileTemporaryError,
     DiscordFileTooLarge,
 )
@@ -1500,6 +1501,12 @@ async def test_discord_final_length_limit_and_body_mismatch_never_write() -> Non
         (DiscordFilePermissionDenied("denied"), "denied access"),
         (DiscordFileCredentialsInvalid("invalid"), "rejected the active"),
         (DiscordFileTemporaryError("temporary"), "temporarily unavailable"),
+        (
+            DiscordFileRequestRejected(
+                "Discord attachment response has an invalid content length."
+            ),
+            "rejected the requested attachment",
+        ),
     ],
 )
 async def test_discord_provider_failures_are_controlled_without_runtime_write(
@@ -1516,7 +1523,9 @@ async def test_discord_provider_failures_are_controlled_without_runtime_write(
         discord_client=_DiscordClient(info_error=provider_error),
     )
 
-    with pytest.raises(ExternalChannelFileTransferError, match=message):
+    with pytest.raises(
+        ExternalChannelFileTransferExecutionError, match=message
+    ) as raised:
         await _download(
             service,
             session_id="session-1",
@@ -1527,6 +1536,10 @@ async def test_discord_provider_failures_are_controlled_without_runtime_write(
             file_storage=storage,
         )
 
+    assert raised.value.failure.stage == "provider_download"
+    assert raised.value.failure.cause == type(provider_error).__name__
+    assert raised.value.failure.detail == str(provider_error)
+    assert raised.value.failure.coordinator_failure is None
     assert storage.put_calls == []
 
 

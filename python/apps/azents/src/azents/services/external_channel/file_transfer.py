@@ -661,7 +661,15 @@ class ExternalChannelFileTransferService:
         except ExternalChannelFileTransferError:
             raise
         except DiscordFileProviderError as error:
-            raise _map_discord_download_error(error, limit=limit) from None
+            raise ExternalChannelFileTransferExecutionError(
+                str(_map_discord_download_error(error, limit=limit)),
+                failure=ExternalChannelFileTransferFailure(
+                    stage="provider_download",
+                    cause=type(error).__name__,
+                    detail=str(error),
+                    coordinator_failure=None,
+                ),
+            ) from None
         except ServerToRuntimeTransferError as error:
             raise ExternalChannelFileTransferExecutionError(
                 _discord_transfer_error_message(error, path=path),

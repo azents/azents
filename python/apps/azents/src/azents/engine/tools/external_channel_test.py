@@ -521,6 +521,12 @@ async def test_download_external_file_uses_current_runtime_storage() -> None:
             None,
             None,
         ),
+        (
+            "provider_download",
+            "DiscordFileRequestRejected",
+            "Discord attachment response has an invalid content length.",
+            None,
+        ),
     ],
 )
 async def test_download_external_file_logs_secret_free_failure_context(
