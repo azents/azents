@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator, Mapping
 from dataclasses import asdict, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from aiohttp import web
@@ -30,6 +31,7 @@ from azents_runtime_runner.browser import BrowserFailure, RunnerBrowserManager
 from azents_runtime_runner.browser_viewer import (
     RunnerBrowserViewer,
     _capture_error_code,
+    _LatestPage,
 )
 
 
@@ -201,6 +203,60 @@ async def scope(
         page.resource_incarnation,
         True,
     )
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Execution context was destroyed",
+        "Cannot find context with specified id",
+        "Frame was detached",
+    ],
+)
+async def test_invalidated_capture_discards_frame_before_navigation_event(
+    manager: RunnerBrowserManager,
+    tmp_path: Path,
+    site: str,
+    monkeypatch: pytest.MonkeyPatch,
+    message: str,
+) -> None:
+    authority = await scope(manager, tmp_path, site)
+    page = manager.tasks[authority.task_id].pages[authority.page_id]
+    budget = Budget()
+    source = _LatestPage(page, budget)
+    await source.capture_once()
+    previous = source.latest
+    navigation = page.navigation_id
+    screenshot = AsyncMock(side_effect=Error(message))
+    with monkeypatch.context() as patch:
+        patch.setattr(page.page, "screenshot", screenshot)
+        await source.capture_once()
+    screenshot.assert_awaited_once()
+    assert page.navigation_id == navigation
+    assert source.latest is previous and source.sequence == 1
+    assert not source.failed
+    await source.capture_once()
+    assert source.sequence == 2
+    source.clear()
+    assert budget.bytes == 0
+
+
+async def test_unexpected_capture_failure_propagates(
+    manager: RunnerBrowserManager,
+    tmp_path: Path,
+    site: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authority = await scope(manager, tmp_path, site)
+    page = manager.tasks[authority.task_id].pages[authority.page_id]
+    budget = Budget()
+    source = _LatestPage(page, budget)
+    monkeypatch.setattr(
+        page.page, "screenshot", AsyncMock(side_effect=Error("Protocol error"))
+    )
+    with pytest.raises(Error, match="Protocol error"):
+        await source.capture_once()
+    assert source.latest is None and budget.bytes == 0
 
 
 async def stop(task: asyncio.Task[None], transport: Transport) -> None:

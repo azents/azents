@@ -177,11 +177,20 @@ class _LatestPage:
                 ],
                 mask_color="#000000",
             )
-        except Error:
+        except Error as error:
+            # Mask locators can lose their native document before Playwright
+            # delivers framenavigated, including inside a child frame. Discard
+            # this capture; the normal next frame observes the current document.
             if (
                 self.page.dialog is not None
                 or navigation != self.page.navigation_id
                 or self.page.page.is_closed()
+                or _capture_error_code(error)
+                in {
+                    "browser_capture_context_destroyed",
+                    "browser_capture_context_missing",
+                    "browser_capture_frame_detached",
+                }
             ):
                 return None
             raise

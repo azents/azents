@@ -114,10 +114,19 @@ from the attachment lifetime. Owner authority supervision is attachment-local:
 two-second validation deadlines and two-second recheck intervals fail closed
 within five seconds. The shared Runner response demultiplexer uses bounded
 freshness and never waits for Browser database/status-RPC validation. Requests
-still require fresh authority before dispatch.
+still require fresh authority before dispatch. Initial admission verifies the exact
+native task/page/incarnation through a selected-page status operation. Live
+revalidation refreshes identity, Session access, Browser opt-in, Runtime and
+working-folder authority without issuing another Browser operation for every
+input message. Runner independently fences the existing native Session binding,
+exact target, generation and acknowledged source immediately before effects.
 
 An in-flight image from an obsolete navigation or viewport is retired so it
-cannot block the new scope's first image. Each attachment retains at most 128
+cannot block the new scope's first image. A capture whose credential-mask locators
+lose their native execution context or frame is discarded even before the
+navigation event arrives; the regular next frame observes the current document,
+without replaying input. Other capture errors still fail the source.
+Each attachment retains at most 128
 retired sent-frame sequence numbers solely to ignore delayed ACKs; these ACKs
 never establish displayed authority. Unknown ACKs remain invalid.
 
