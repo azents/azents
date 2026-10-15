@@ -144,9 +144,9 @@ const cases: Array<{ tool: ActiveToolCall; action: KnownToolAction }> = [
   },
 ];
 for (const [mode, action] of Object.entries({
-  continue: "channelContinue",
-  finish: "channelFinish",
-  request_input: "channelRequestInput",
+  continue: "channelSend",
+  finish: "channelSend",
+  request_input: "channelSend",
   ignore: "channelIgnore",
 } as const)) {
   cases.push({
@@ -162,6 +162,54 @@ for (const [mode, action] of Object.entries({
     action,
   });
 }
+
+void test("channel display prioritizes ignore, then message presence, without changing tool identity", () => {
+  for (const mode of ["continue", "finish", "request_input", "ignore"]) {
+    for (const message of [null, "private message"]) {
+      for (const status of [
+        "preparing",
+        "running",
+        "completed",
+        "failed",
+        "cancelled",
+      ] as const) {
+        const tool = {
+          ...call(
+            "channel_action",
+            { binding: "binding-1", mode, message },
+            {},
+          ),
+          status,
+        };
+        const result = knownToolPresentation(tool);
+        if (status === "preparing") {
+          assert.equal(result.type, "generic");
+          continue;
+        }
+        assert.equal(result.type, "specialized");
+        assert.equal(
+          result.presentation.action,
+          mode === "ignore"
+            ? "channelIgnore"
+            : message
+              ? "channelSend"
+              : "channelProgressUpdate",
+        );
+        assert.equal(result.presentation.subject, null);
+        assert.equal(tool.name, "channel_action");
+      }
+    }
+  }
+  const noMessage = knownToolPresentation(
+    call(
+      "channel_action",
+      { binding: "binding-1", mode: "continue", title: "Working…" },
+      {},
+    ),
+  );
+  assert.equal(noMessage.type, "specialized");
+  assert.equal(noMessage.presentation.action, "channelProgressUpdate");
+});
 
 void test("specializes every added builtin and browser row across execution states", () => {
   for (const { tool, action } of cases) {

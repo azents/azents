@@ -51,9 +51,8 @@ export type KnownToolAction =
   | "searchSessions"
   | "readSessionHistory"
   | "readSessionToolResult"
-  | "channelContinue"
-  | "channelFinish"
-  | "channelRequestInput"
+  | "channelSend"
+  | "channelProgressUpdate"
   | "channelIgnore"
   | "downloadExternalFile"
   | "browserOpen"
@@ -1229,14 +1228,14 @@ export function knownToolPresentation(
         if (!input.success) {
           return generic("invalid-arguments");
         }
-        const actions = {
-          continue: "channelContinue",
-          finish: "channelFinish",
-          request_input: "channelRequestInput",
-          ignore: "channelIgnore",
-        } as const;
+        const action =
+          input.data.mode === "ignore"
+            ? "channelIgnore"
+            : input.data.message
+              ? "channelSend"
+              : "channelProgressUpdate";
         return presentation(
-          actions[input.data.mode],
+          action,
           null,
           null,
           semanticDetail({

@@ -23,11 +23,11 @@ import {
   IconFileExport,
   IconFileText,
   IconGitBranch,
-  IconMessages,
   IconPencil,
   IconPhoto,
   IconRobot,
   IconSearch,
+  IconSend,
   IconSquare,
   IconSquareCheck,
   IconTargetArrow,
@@ -110,11 +110,10 @@ function presentationIcon(presentation: KnownToolPresentation): ReactElement {
     case "readSessionHistory":
     case "readSessionToolResult":
       return <IconBrain size={activityRowIconSize} />;
-    case "channelContinue":
-    case "channelFinish":
-    case "channelRequestInput":
+    case "channelSend":
+    case "channelProgressUpdate":
     case "channelIgnore":
-      return <IconMessages size={activityRowIconSize} />;
+      return <IconSend size={activityRowIconSize} />;
     case "getGoal":
     case "createGoal":
     case "updateGoal":
@@ -212,9 +211,8 @@ function presentationQualifier(
     case "searchSessions":
     case "readSessionHistory":
     case "readSessionToolResult":
-    case "channelContinue":
-    case "channelFinish":
-    case "channelRequestInput":
+    case "channelSend":
+    case "channelProgressUpdate":
     case "channelIgnore":
     case "downloadExternalFile":
     case "browserOpen":
