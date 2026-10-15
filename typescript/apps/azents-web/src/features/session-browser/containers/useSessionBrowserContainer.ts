@@ -373,6 +373,7 @@ export function useSessionBrowserContainer(
     onZoomChange: (value) => {
       if (Number.isFinite(value) && value >= 1 && value <= 3) {
         interaction.cancel();
+        touchView.cancel();
         setZoom(value);
       }
     },

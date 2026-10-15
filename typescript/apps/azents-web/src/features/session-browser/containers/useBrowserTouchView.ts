@@ -47,6 +47,7 @@ interface Options {
 }
 
 export interface BrowserTouchView {
+  cancel: () => void;
   viewWindowRef: RefObject<HTMLDivElement | null>;
   touch: BrowserTouchHandlers;
   touchFeedback: BrowserTouchFeedback | null;
@@ -303,6 +304,7 @@ export function useBrowserTouchView(options: Options): BrowserTouchView {
     },
   };
   return {
+    cancel: clear,
     viewWindowRef,
     touch,
     touchFeedback,

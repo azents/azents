@@ -253,6 +253,7 @@ function BrowserFixture(
         }}
         onZoomChange={(value) => {
           interaction.cancel();
+          touchView.cancel();
           setZoom(value);
           props.onZoomChange(value);
         }}
