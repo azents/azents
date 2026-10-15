@@ -1,0 +1,13 @@
+included:
+  - apps
+excluded:
+  - .build
+  - .tools
+only_rules:
+  - force_cast
+  - force_try
+  - force_unwrapping
+  - identifier_name
+  - type_name
+  - unused_optional_binding
+  - unused_setter_value

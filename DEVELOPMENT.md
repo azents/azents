@@ -107,6 +107,24 @@ $ cd testenv/azents/e2e
 $ uv run pytest ./src
 ```
 
+## Swift iOS Application
+
+The Swift workspace is under `swift/`; the application is
+`swift/apps/azents-ios/`. See [Swift development and artifacts](swift/README.md)
+for the pinned macOS/Xcode requirements and complete commands.
+
+```console
+$ bash swift/scripts/ios.sh bootstrap
+$ bash swift/scripts/ios.sh format-check
+$ bash swift/scripts/ios.sh lint
+$ bash swift/scripts/ios.sh test
+$ bash swift/scripts/ios.sh build
+```
+
+The iOS workflow uses a standard GitHub-hosted macOS runner and publishes
+simulator and unsigned-device build artifacts. Personal-device installation
+and signing are not configured.
+
 ## OpenAPI Clients
 
 Backend OpenAPI specs are emitted from `python/apps/azents/specs/` and consumed

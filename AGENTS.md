@@ -24,6 +24,7 @@ Azents is an AI agent platform. This repository contains the backend, runtime pr
 | `typescript/apps/azents-admin-web/` | Admin web app |
 | `typescript/packages/azents-public-client/` | Generated TypeScript public API client |
 | `typescript/packages/azents-admin-client/` | Generated TypeScript admin API client |
+| `swift/apps/azents-ios/` | Native iOS application and UI tests |
 | `testenv/azents/` | Fixture/prerequisite support and E2E tests |
 | `docs/azents/` | ADR, design, issues, notes, plans, and living specs |
 | `infra/charts/azents/` | Helm chart |
@@ -36,6 +37,7 @@ Detailed coding rules live under `.claude/conventions/` and are indexed by `.cla
 - Always start with `.claude/rules/conventions.md`.
 - For Python work, also read `.claude/rules/python-conventions.md` when relevant.
 - For TypeScript work, also read `.claude/rules/typescript-conventions.md` when relevant.
+- For Swift work, also read `.claude/rules/swift-conventions.md` when relevant.
 - For test substrate work, read `.claude/rules/testenv-conventions.md`.
 - For infrastructure/Helm work, read `.claude/rules/infra-conventions.md`.
 - Do not bulk-read every convention body. Read only bodies whose title applies to the change.
