@@ -596,7 +596,9 @@
     "categoryWait": "대기",
     "categoryOther": "기타",
     "categoryGit": "Git",
-    "categorySchedule": "스케줄"
+    "categorySchedule": "스케줄",
+    "categoryWebService": "웹 서비스",
+    "categoryChannel": "채널"
   },
   "authorization": {
     "authorizationRequired": "인증 필요",

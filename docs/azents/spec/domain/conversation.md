@@ -197,7 +197,7 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
 last_verified_at: 2026-10-15
-spec_version: 189
+spec_version: 190
 ---
 
 # Conversation & Events
@@ -1166,6 +1166,13 @@ Run lifetime, and a completed Activity shows a check icon after the Run closes. 
 including Reasoning, remain dimmed summary text; failed events are counted in the same tone as the final
 summary item. Category overflow is summarized without hiding detail from assistive technology. Expanding
 the row reveals contextual event renderers in event order.
+
+Source-less Session history tools (`search_sessions`, `read_session_history`, and
+`read_session_tool_result`) use the Memory summary category. Runtime web-service
+tools (`request_web_service`, `list_web_services`, and `close_web_service`) use
+Web service. Both `channel_action` and `download_external_file` use Channel,
+and `tool_search` uses Explore. Explicit persisted Toolkit source identity retains
+precedence over these source-less name mappings.
 
 Reasoning, Skill, client-tool, provider-tool, and non-interactive control events use one canonical
 Activity-row grid for vertical padding, disclosure-chevron space, icon size, text baseline, status, and

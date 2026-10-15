@@ -291,6 +291,65 @@ void test("groups all Scheduled Task tools with Schedule activity", () => {
   }
 });
 
+void test("categorizes source-less history, web service, channel, and discovery tools", () => {
+  const categories = {
+    memory: [
+      "search_sessions",
+      "read_session_history",
+      "read_session_tool_result",
+    ],
+    "web-service": [
+      "request_web_service",
+      "list_web_services",
+      "close_web_service",
+    ],
+    channel: ["channel_action", "download_external_file"],
+    explore: ["tool_search"],
+  };
+  for (const [key, names] of Object.entries(categories)) {
+    for (const name of names) {
+      const items = projectChatPresentationItems(
+        [
+          event("call-1", "client_tool_call", {
+            call_id: "call-1",
+            name,
+            arguments: "{}",
+          }),
+        ],
+        [clientToolMessage("tool-message", "call-1", name)],
+      );
+      assert.deepEqual(
+        activityAt(items, 0).events[0]?.category,
+        { key, label: key },
+        name,
+      );
+    }
+  }
+});
+
+void test("preserves explicit Toolkit identity for newly categorized names", () => {
+  const source = {
+    toolkit_config_id: "custom-toolkit",
+    toolkit_type: "mcp",
+    toolkit_name: "Connected toolkit",
+    toolkit_slug: "custom",
+  };
+  const items = projectChatPresentationItems(
+    [
+      event("call-1", "client_tool_call", {
+        call_id: "call-1",
+        name: "tool_search",
+        arguments: "{}",
+      }),
+    ],
+    [clientToolMessage("tool-message", "call-1", "tool_search", source)],
+  );
+  assert.deepEqual(activityAt(items, 0).events[0]?.category, {
+    key: "toolkit:custom-toolkit",
+    label: "Connected toolkit",
+  });
+});
+
 void test("closes Activity at an action-execution message boundary", () => {
   const firstTool = clientToolMessage("tool-message-1", "call-1");
   const secondTool = clientToolMessage("tool-message-2", "call-2");

@@ -209,6 +209,42 @@ export const CollapsedWithAttention = {
   },
 } satisfies Story;
 
+export const BuiltinToolCategories = {
+  args: {
+    activity: {
+      ...activity,
+      events: [
+        { name: "search_sessions", key: "memory" },
+        { name: "request_web_service", key: "web-service" },
+        { name: "channel_action", key: "channel" },
+        { name: "tool_search", key: "explore" },
+      ].map(({ name, key }) => ({
+        id: `category:${name}`,
+        kind: "tool",
+        message: null,
+        toolCall: {
+          type: "client",
+          messageId: `message:${name}`,
+          toolCall: {
+            id: `call:${name}`,
+            name,
+            arguments: "{}",
+            status: "completed",
+          },
+        },
+        category: { key, label: key },
+        status: "complete",
+      })),
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    for (const label of ["Memory", "Web service", "Channel", "Explore"]) {
+      await expect(canvas.getByText(label, { exact: true })).toBeVisible();
+    }
+  },
+} satisfies Story;
+
 export const RestoredReasoningAndActivityDetails = {
   args: { activity },
   play: async ({ canvasElement }) => {

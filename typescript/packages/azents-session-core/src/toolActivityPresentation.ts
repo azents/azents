@@ -248,6 +248,7 @@ function activityCategoryForTool(call: ToolActivityCall): ActivityCategory {
     case "web_search":
     case "search_memories":
     case "get_memory":
+    case "tool_search":
       return { key: "explore", label: "explore" };
     case "exec_command":
     case "write_stdin":
@@ -266,7 +267,17 @@ function activityCategoryForTool(call: ToolActivityCall): ActivityCategory {
     case "save_memory":
     case "delete_memory":
     case "list_memories":
+    case "search_sessions":
+    case "read_session_history":
+    case "read_session_tool_result":
       return { key: "memory", label: "memory" };
+    case "request_web_service":
+    case "list_web_services":
+    case "close_web_service":
+      return { key: "web-service", label: "web-service" };
+    case "channel_action":
+    case "download_external_file":
+      return { key: "channel", label: "channel" };
     case "create_goal":
     case "get_goal":
     case "update_goal":
