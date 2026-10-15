@@ -187,10 +187,7 @@ void test("keeps private content out of collapsed summaries and strips browser U
       summary,
       /private|Private|password|secret|token|opaque/,
     );
-    if (
-      tool.name.startsWith("browser_") &&
-      tool.result?.includes("example.com")
-    ) {
+    if (tool.name === "browser_open" || tool.name === "browser_act") {
       assert.equal(result.presentation.subject, "example.com");
     }
   }
