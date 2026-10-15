@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, assert_never
+from typing import Literal, NamedTuple, assert_never
 from urllib.parse import urlsplit, urlunsplit
 
 from azents_runtime_control.browser_contract import (
@@ -165,6 +165,12 @@ class _Task:
     working_directory: Path
     pages: dict[str, _Page] = field(default_factory=dict)
     guard: BrowserInteractionGuard = field(default_factory=BrowserInteractionGuard)
+
+
+class _ResolvedTarget(NamedTuple):
+    task: _Task
+    page: _Page
+    frame: Frame
 
 
 class RunnerBrowserManager:
@@ -339,7 +345,7 @@ class RunnerBrowserManager:
 
     def target(
         self, authority: BrowserAuthority, target: BrowserTarget
-    ) -> tuple[_Task, _Page, Frame]:
+    ) -> _ResolvedTarget:
         """Resolve final live identity for commands and later admitted viewer input."""
         self._authority(authority)
         task = self._task(authority, target.task_id)
@@ -361,7 +367,7 @@ class RunnerBrowserManager:
             raise BrowserFailure(
                 "browser_stale_target", "Browser frame is no longer current"
             )
-        return task, page, frame
+        return _ResolvedTarget(task=task, page=page, frame=frame)
 
     def _register(self, task: _Task, page: Page) -> _Page:
         if self.tasks.get(task.id) is not task or page.is_closed():

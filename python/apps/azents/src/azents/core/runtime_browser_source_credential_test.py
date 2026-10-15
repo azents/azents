@@ -2,10 +2,15 @@
 
 import base64
 import dataclasses
+import hashlib
+import hmac
+import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from azents_runtime_control.browser_source_contract import (
+    BROWSER_SOURCE_AUDIENCE,
+    BROWSER_SOURCE_OPERATION,
     BrowserSourceCredentialRequest,
 )
 from azents_runtime_control.proto import runtime_stream_session_pb2 as pb
@@ -171,3 +176,55 @@ def test_browser_wrong_purpose_or_malformed_proof_is_rejected(credential: str) -
         RuntimeBrowserSourceCredentialVerifier(KEY, clock=lambda: NOW).verify(
             credential, request=source_request()
         )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["extra", "missing", "null", "number", "bool", "list", "object"],
+)
+def test_signed_browser_proof_rejects_nonclosed_or_nonstring_payload(
+    mutation: str,
+) -> None:
+    request = source_request()
+    verifier = RuntimeBrowserSourceCredentialVerifier(KEY, clock=lambda: NOW)
+    payload: dict[str, object] = {
+        "audience": BROWSER_SOURCE_AUDIENCE,
+        "operation": BROWSER_SOURCE_OPERATION,
+        "service_identity": "azents-api",
+        "issued_at": NOW.isoformat(),
+        "expires_at": (NOW + timedelta(seconds=5)).isoformat(),
+        "request_sha256": request.digest(),
+    }
+    match mutation:
+        case "extra":
+            payload["unexpected"] = "private-input"
+        case "missing":
+            del payload["issued_at"]
+        case "null":
+            payload["issued_at"] = None
+        case "number":
+            payload["issued_at"] = 123
+        case "bool":
+            payload["issued_at"] = True
+        case "list":
+            payload["issued_at"] = ["private-input"]
+        case "object":
+            payload["issued_at"] = {"value": "private-input"}
+    encoded = (
+        base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+    )
+    key = hmac.new(
+        base64.urlsafe_b64decode(KEY),
+        b"azents/runtime-browser-source-proof/v1",
+        hashlib.sha256,
+    ).digest()
+    signature = (
+        base64.urlsafe_b64encode(
+            hmac.new(key, encoded.encode(), hashlib.sha256).digest()
+        )
+        .decode()
+        .rstrip("=")
+    )
+    with pytest.raises(RuntimeBrowserSourceCredentialInvalid) as error:
+        verifier.verify(f"brs1.{encoded}.{signature}", request=request)
+    assert str(error.value) == "Browser source credential is invalid"

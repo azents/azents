@@ -459,9 +459,9 @@ class RuntimeRunnerOperationClient:
         """Initialize the Runner operation client."""
         if body_chunk_size_bytes <= 0:
             raise ValueError("body_chunk_size_bytes must be positive")
-        self._control_protocol = control_protocol
-        self._coordination_store = coordination_store
-        self._metrics = metrics
+        self.control_protocol = control_protocol
+        self.coordination_store = coordination_store
+        self.metrics = metrics
         self._body_chunk_size_bytes = body_chunk_size_bytes
 
     async def run_browser_command(
@@ -718,7 +718,7 @@ class RuntimeRunnerOperationClient:
                 if cancel_requested:
                     continue
                 cancel_requested = True
-                await self._control_protocol.request_runner_operation_cancel(
+                await self.control_protocol.request_runner_operation_cancel(
                     runtime_id=runtime_id,
                     runner_generation=runner_generation,
                     operation_id=dispatch.operation_id,
@@ -2171,7 +2171,7 @@ class RuntimeRunnerOperationClient:
         self,
         operation: RuntimeRunnerOperation,
     ) -> RuntimeDispatchResult:
-        result = await self._control_protocol.dispatch_runner_operation(
+        result = await self.control_protocol.dispatch_runner_operation(
             operation,
             created_at=datetime.now(timezone.utc),
         )
@@ -2193,7 +2193,7 @@ class RuntimeRunnerOperationClient:
         data: bytes,
     ) -> None:
         if not data:
-            await self._coordination_store.append_body_chunk(
+            await self.coordination_store.append_body_chunk(
                 body_stream_id,
                 RuntimeBodyChunk(
                     request_id=request_id,
@@ -2207,7 +2207,7 @@ class RuntimeRunnerOperationClient:
         chunk_id = 1
         for offset in range(0, len(data), self._body_chunk_size_bytes):
             end = offset + self._body_chunk_size_bytes
-            await self._coordination_store.append_body_chunk(
+            await self.coordination_store.append_body_chunk(
                 body_stream_id,
                 RuntimeBodyChunk(
                     request_id=request_id,
@@ -2292,28 +2292,28 @@ class RuntimeRunnerOperationClient:
                     math.ceil(min(remaining_seconds, _MAX_REPLY_WAIT_SECONDS) * 1000),
                 )
                 wait_started_at = time.monotonic()
-                self._metrics.begin_wait()
+                self.metrics.begin_wait()
                 try:
-                    records = await self._control_protocol.wait_replies(
+                    records = await self.control_protocol.wait_replies(
                         reply_stream_id=reply_stream_id,
                         after_cursor=cursor,
                         limit=100,
                         block_ms=block_ms,
                     )
                 except asyncio.CancelledError:
-                    self._metrics.finish_wait(
+                    self.metrics.finish_wait(
                         outcome="cancel",
                         duration_seconds=time.monotonic() - wait_started_at,
                     )
                     raise
                 except Exception:
-                    self._metrics.finish_wait(
+                    self.metrics.finish_wait(
                         outcome="error",
                         duration_seconds=time.monotonic() - wait_started_at,
                     )
                     raise
                 else:
-                    self._metrics.finish_wait(
+                    self.metrics.finish_wait(
                         outcome="event" if records else "timeout",
                         duration_seconds=time.monotonic() - wait_started_at,
                     )
@@ -2325,7 +2325,7 @@ class RuntimeRunnerOperationClient:
                     for record in records
                     if request_id is not None and record.event.request_id != request_id
                 )
-                self._metrics.record_replies(
+                self.metrics.record_replies(
                     examined=len(records),
                     filtered=filtered,
                 )
@@ -2333,7 +2333,7 @@ class RuntimeRunnerOperationClient:
                     cursor = record.cursor
                     if request_id is not None and record.event.request_id != request_id:
                         continue
-                    self._metrics.record_observation_latency(
+                    self.metrics.record_observation_latency(
                         (observed_at - record.event.created_at).total_seconds()
                     )
                     await folder.apply(record)
@@ -2386,7 +2386,7 @@ class RuntimeRunnerOperationClient:
         """Request cancellation when a foreground operation has a routable identity."""
         if runtime_id is None or generation is None or operation_id is None:
             return
-        await self._control_protocol.request_runner_operation_cancel(
+        await self.control_protocol.request_runner_operation_cancel(
             runtime_id=runtime_id,
             runner_generation=generation,
             operation_id=operation_id,
@@ -2412,7 +2412,7 @@ class RuntimeRunnerOperationClient:
             or generation is None
         ):
             return
-        await self._coordination_store.append_reply_for_operation(
+        await self.coordination_store.append_reply_for_operation(
             reply_stream_id,
             RuntimeReplyEvent(
                 request_id=request_id,

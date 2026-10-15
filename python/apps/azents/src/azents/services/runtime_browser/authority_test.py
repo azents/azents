@@ -6,6 +6,7 @@ from typing import Literal, NamedTuple
 from unittest.mock import AsyncMock
 
 import pytest
+from azcommon.types import JSONValue
 
 from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
@@ -295,6 +296,32 @@ async def test_browser_capability_is_required_without_allocating_context(
         metadata={"workspace_path": "/runner-reported", "capabilities": capabilities},
     )
     assert await _resolve(resolver) == RuntimeBrowserUnavailable("browser_unavailable")
+    resolver.working_folder_service.resolve_bound_authority_for_target.assert_not_awaited()
+
+
+async def test_runner_projection_preserves_uninterpreted_metadata_extensions() -> None:
+    resolver = _resolver()
+    resolver.runtime_coordination.get_connection.return_value = dataclasses.replace(
+        _runner(),
+        metadata={
+            "workspace_path": "/runner-reported",
+            "capabilities": ["browser.v1"],
+            "extension": {"opaque": [None, True, 42]},
+        },
+    )
+    assert isinstance(await _resolve(resolver), RuntimeBrowserAuthority)
+
+
+@pytest.mark.parametrize("workspace", [None, True, 123, [], {}])
+async def test_runner_workspace_projection_never_coerces_registration_evidence(
+    workspace: JSONValue,
+) -> None:
+    resolver = _resolver()
+    resolver.runtime_coordination.get_connection.return_value = dataclasses.replace(
+        _runner(),
+        metadata={"workspace_path": workspace, "capabilities": ["browser.v1"]},
+    )
+    assert await _resolve(resolver) == RuntimeBrowserUnavailable("runtime_unavailable")
     resolver.working_folder_service.resolve_bound_authority_for_target.assert_not_awaited()
 
 

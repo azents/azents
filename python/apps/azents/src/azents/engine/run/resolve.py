@@ -13,6 +13,7 @@ import time
 from collections.abc import Awaitable
 from typing import Any, Literal, assert_never
 
+from azcommon.logging import bind_extra
 from azcommon.result import Failure, Result, Success
 from azcommon.uuid import uuid7
 from pydantic import BaseModel, ValidationError
@@ -1012,6 +1013,14 @@ async def _materialize_admitted_input_exchange_file_attachment(
     model_file_service: ModelFileService | None,
 ) -> _MaterializedUserInputAttachment | None:
     """Materialize one attachment through its admission-time root claim."""
+    L = bind_extra(
+        logger,
+        {
+            "uri": uri,
+            "session_id": authority.session_id,
+            "agent_id": authority.agent_id,
+        },
+    )
     metadata_result = (
         await exchange_file_service.resolve_admitted_input_attachment_metadata(
             uri=uri,
@@ -1020,12 +1029,9 @@ async def _materialize_admitted_input_exchange_file_attachment(
         )
     )
     if isinstance(metadata_result, Failure):
-        logger.warning(
+        L.warning(
             "Failed to resolve admitted attachment metadata",
             extra={
-                "uri": uri,
-                "session_id": authority.session_id,
-                "agent_id": authority.agent_id,
                 "error": metadata_result.error.__class__.__name__,
             },
         )
@@ -1072,12 +1078,9 @@ async def _materialize_admitted_input_exchange_file_attachment(
         session_id=authority.session_id,
     )
     if isinstance(download_result, Failure):
-        logger.warning(
+        L.warning(
             "Failed to download admitted attachment for input FilePart",
             extra={
-                "uri": uri,
-                "session_id": authority.session_id,
-                "agent_id": authority.agent_id,
                 "error": download_result.error.__class__.__name__,
             },
         )
@@ -1107,12 +1110,9 @@ async def _materialize_admitted_input_exchange_file_attachment(
         },
     )
     if isinstance(model_file_result, Failure):
-        logger.warning(
+        L.warning(
             "Failed to create ModelFile for admitted input attachment",
             extra={
-                "uri": uri,
-                "session_id": authority.session_id,
-                "agent_id": authority.agent_id,
                 "reason": _model_file_creation_failure_reason(model_file_result.error),
             },
         )
@@ -1144,6 +1144,7 @@ async def _materialize_user_input_exchange_file_attachment(
     user_id: str,
 ) -> _MaterializedUserInputAttachment | None:
     """Materialize one claimed Exchange attachment for user input."""
+    L = bind_extra(logger, {"uri": uri, "session_id": session_id, "agent_id": agent_id})
     metadata_result = await exchange_file_service.resolve_attachment_metadata_for_agent(
         uri=uri,
         agent_id=agent_id,
@@ -1151,9 +1152,8 @@ async def _materialize_user_input_exchange_file_attachment(
         user_id=user_id,
     )
     if isinstance(metadata_result, Failure):
-        logger.warning(
+        L.warning(
             "Failed to resolve exchange attachment in agent namespace",
-            extra={"uri": uri, "session_id": session_id, "agent_id": agent_id},
         )
         return None
 
@@ -1196,12 +1196,9 @@ async def _materialize_user_input_exchange_file_attachment(
         user_id=user_id,
     )
     if isinstance(download_result, Failure):
-        logger.warning(
+        L.warning(
             "Failed to download exchange attachment for user input FilePart",
             extra={
-                "uri": uri,
-                "session_id": session_id,
-                "agent_id": agent_id,
                 "error": download_result.error.__class__.__name__,
             },
         )
@@ -1448,14 +1445,13 @@ async def resolve_agent_tools(
     # DB-registered toolkit (registry-based, prefix applied)
     for effective in registered_toolkits:
         toolkit = effective.toolkit
+        L = bind_extra(
+            logger, {"toolkit_type": toolkit.toolkit_type, "agent_id": agent_id}
+        )
         provider = toolkit_registry.get(toolkit.toolkit_type)
         if provider is None:
-            logger.warning(
+            L.warning(
                 "Unknown toolkit_type, skipping",
-                extra={
-                    "toolkit_type": toolkit.toolkit_type,
-                    "agent_id": agent_id,
-                },
             )
             continue
 
@@ -1493,13 +1489,11 @@ async def resolve_agent_tools(
                 toolkit.always_expose_tools
             )
         except ValidationError, ValueError:
-            logger.warning(
+            L.warning(
                 "Skipping Toolkit with invalid persisted configuration",
                 exc_info=True,
                 extra={
-                    "agent_id": agent_id,
                     "toolkit_id": toolkit.id,
-                    "toolkit_type": toolkit.toolkit_type,
                     "toolkit_slug": toolkit.slug,
                 },
             )

@@ -80,7 +80,7 @@ class RuntimeStreamSessionBroker:
         key: BrokerStreamKey,
         authority: StreamAuthority,
         protocol: StreamProtocol,
-        browser_admitted: bool = False,
+        browser_admitted: bool,
     ) -> BrokerAdmission | None:
         """Admit one exact authority and allocate Owner-scoped capacity identity."""
         if not isinstance(authority, WebStreamAuthority) and not (

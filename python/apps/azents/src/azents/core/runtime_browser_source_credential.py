@@ -14,9 +14,25 @@ from azents_runtime_control.browser_source_contract import (
     BROWSER_SOURCE_OPERATION,
     BrowserSourceCredentialRequest,
 )
+from pydantic import BaseModel, ConfigDict, StrictStr
 
 _DOMAIN = b"azents/runtime-browser-source-proof/v1"
 _PREFIX = "brs1"
+
+
+class _BrowserSourceProof(BaseModel):
+    """Closed string-only signed proof, before temporal and scope validation."""
+
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, strict=True, hide_input_in_errors=True
+    )
+
+    audience: StrictStr
+    operation: StrictStr
+    service_identity: StrictStr
+    issued_at: StrictStr
+    expires_at: StrictStr
+    request_sha256: StrictStr
 
 
 class RuntimeBrowserSourceCredentialInvalid(ValueError):
@@ -89,28 +105,14 @@ class RuntimeBrowserSourceCredentialVerifier:
             decoded = base64.b64decode(
                 encoded + "=" * (-len(encoded) % 4), altchars=b"-_", validate=True
             )
-            payload = json.loads(decoded)
+            payload = _BrowserSourceProof.model_validate(json.loads(decoded))
+            issued = datetime.fromisoformat(payload.issued_at)
+            expires = datetime.fromisoformat(payload.expires_at)
             if (
-                not isinstance(payload, dict)
-                or set(payload)
-                != {
-                    "audience",
-                    "operation",
-                    "service_identity",
-                    "issued_at",
-                    "expires_at",
-                    "request_sha256",
-                }
-                or any(not isinstance(value, str) for value in payload.values())
-            ):
-                _fail()
-            issued = datetime.fromisoformat(payload["issued_at"])
-            expires = datetime.fromisoformat(payload["expires_at"])
-            if (
-                payload["audience"] != BROWSER_SOURCE_AUDIENCE
-                or payload["operation"] != BROWSER_SOURCE_OPERATION
-                or payload["service_identity"] != "azents-api"
-                or not hmac.compare_digest(payload["request_sha256"], request.digest())
+                payload.audience != BROWSER_SOURCE_AUDIENCE
+                or payload.operation != BROWSER_SOURCE_OPERATION
+                or payload.service_identity != "azents-api"
+                or not hmac.compare_digest(payload.request_sha256, request.digest())
                 or issued.tzinfo is None
                 or expires.tzinfo is None
                 or issued > now + timedelta(seconds=5)

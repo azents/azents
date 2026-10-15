@@ -114,11 +114,13 @@ async def test_broker_scopes_capacity_by_source_session_and_releases_exactly() -
         key=first_key,
         authority=_authority(),
         protocol=StreamProtocol.HTTP,
+        browser_admitted=False,
     )
     second = await broker.admit(
         key=second_key,
         authority=_authority(),
         protocol=StreamProtocol.WEBSOCKET,
+        browser_admitted=False,
     )
     assert first is not None
     assert second is not None
@@ -133,6 +135,7 @@ async def test_broker_scopes_capacity_by_source_session_and_releases_exactly() -
             key=first_key,
             authority=_authority(),
             protocol=StreamProtocol.HTTP,
+            browser_admitted=False,
         )
 
 
@@ -145,6 +148,7 @@ async def test_broker_rejects_missing_stale_and_exhausted_targets() -> None:
             key=BrokerStreamKey("gateway", 1),
             authority=_authority(),
             protocol=StreamProtocol.HTTP,
+            browser_admitted=False,
         )
         is None
     )
@@ -163,6 +167,7 @@ async def test_broker_rejects_missing_stale_and_exhausted_targets() -> None:
             key=BrokerStreamKey("gateway", 2),
             authority=_authority(),
             protocol=StreamProtocol.HTTP,
+            browser_admitted=False,
         )
     admitted = RuntimeStreamSessionBroker(
         router=_Router(BrokerTarget(owner=_owner(), local=True, relay_count=0)),
@@ -172,6 +177,7 @@ async def test_broker_rejects_missing_stale_and_exhausted_targets() -> None:
         key=BrokerStreamKey("gateway", 3),
         authority=_authority(),
         protocol=StreamProtocol.HTTP,
+        browser_admitted=False,
     )
     exhausted_key = BrokerStreamKey("gateway", 4)
     assert (
@@ -179,6 +185,7 @@ async def test_broker_rejects_missing_stale_and_exhausted_targets() -> None:
             key=exhausted_key,
             authority=_authority(),
             protocol=StreamProtocol.HTTP,
+            browser_admitted=False,
         )
         is None
     )
@@ -217,6 +224,7 @@ async def test_broker_rolls_back_pending_capacity_on_failure(
             key=key,
             authority=_authority(),
             protocol=StreamProtocol.HTTP,
+            browser_admitted=False,
         )
     snapshot = await capacity.snapshot()
     assert snapshot.pending_opens == 0
@@ -253,6 +261,7 @@ async def test_web_capacity_rejects_browser_before_routing_or_reservation() -> N
             # Adversarial domain input intentionally violates the Web-only API.
             authority=_browser_authority(),
             protocol=StreamProtocol.HTTP,
+            browser_admitted=False,
         )
     snapshot = await capacity.snapshot()
     assert snapshot.pending_opens == 0

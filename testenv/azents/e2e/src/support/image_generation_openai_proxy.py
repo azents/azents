@@ -525,15 +525,21 @@ class _ToolOutputObservation:
     output_text: str | None
 
 
-def _browser_file_result(request: _ModelRequest, stage: str) -> dict[str, object]:
-    """Decode only the named Browser command's structured result."""
-    [output] = [
-        item
-        for item in request.input_items or ()
-        if item.effective_call_id == _BROWSER_FILES_CALL_PREFIX + stage
-        and item.kind == "function_call_output"
-    ]
-    value = _object(json.loads(output.wire_json)).get("output")
+@dataclass(frozen=True)
+class _BrowserFilePage:
+    task_id: str
+    page_id: str
+    resource_incarnation: str
+
+
+@dataclass(frozen=True)
+class _BrowserFileResult:
+    page: _BrowserFilePage | None
+    capture_path: str | None
+
+
+def _browser_payload(value: object) -> dict[str, object]:
+    """Locate one Browser payload at the tool-output ingress boundary."""
     if isinstance(value, str):
         value = json.loads(value)
     if isinstance(value, dict) and "tasks" in value:
@@ -549,11 +555,50 @@ def _browser_file_result(request: _ModelRequest, stage: str) -> dict[str, object
     raise ValueError("Browser fixture result has no Browser payload.")
 
 
+def _decode_browser_file_result(value: object) -> _BrowserFileResult | None:
+    """Project consumed identities while leaving unrelated Browser fields opaque."""
+    try:
+        payload = _browser_payload(value)
+    except ValueError, TypeError:
+        # Unrecognized provider input is not rejected before fixture selection.
+        return None
+    page = payload.get("page")
+    identity = None
+    if isinstance(page, dict):
+        task_id = page.get("task_id")
+        page_id = page.get("id")
+        incarnation = page.get("resource_incarnation")
+        if (
+            isinstance(task_id, str)
+            and isinstance(page_id, str)
+            and isinstance(incarnation, str)
+        ):
+            identity = _BrowserFilePage(task_id, page_id, incarnation)
+    capture = payload.get("capture")
+    path = capture.get("path") if isinstance(capture, dict) else None
+    return _BrowserFileResult(
+        page=identity,
+        capture_path=path if isinstance(path, str) and path.startswith("/") else None,
+    )
+
+
+def _browser_file_result(request: _ModelRequest, stage: str) -> _BrowserFileResult:
+    """Use the named command's already-decoded observation, not its wire snapshot."""
+    [output] = [
+        item
+        for item in request.input_items or ()
+        if item.effective_call_id == _BROWSER_FILES_CALL_PREFIX + stage
+        and item.kind == "function_call_output"
+    ]
+    if output.browser_file_result is None:
+        raise ValueError("Browser fixture result has no Browser payload.")
+    return output.browser_file_result
+
+
 def _browser_capture_path(request: _ModelRequest) -> str:
     """Use the captured original path, never a guessed Runtime workspace."""
-    capture = _object(_browser_file_result(request, "capture")["capture"])
-    path = capture.get("path")
-    if not isinstance(path, str) or not path.startswith("/"):
+    path = _browser_file_result(request, "capture").capture_path
+    if path is None:
         raise ValueError("Browser fixture capture path is invalid.")
     return path
 
@@ -570,6 +615,8 @@ class _ModelInputItem:
     tool_call_id: str | None
     text: str | None
     tool_outputs: tuple[_ToolOutputObservation, ...]
+    image_data_flags: tuple[bool, ...]
+    browser_file_result: _BrowserFileResult | None
     wire_json: str
 
     @property
@@ -670,6 +717,20 @@ def _decode_tool_outputs(value: object) -> tuple[_ToolOutputObservation, ...]:
     return tuple(outputs)
 
 
+def _decode_image_data_flags(value: object) -> tuple[bool, ...]:
+    if not isinstance(value, list):
+        return ()
+    flags: list[bool] = []
+    for raw in _list(value):
+        if not isinstance(raw, dict):
+            continue
+        part = _object(raw)
+        if part.get("type") == "input_image":
+            url = part.get("image_url")
+            flags.append(isinstance(url, str) and url.startswith("data:image/"))
+    return tuple(flags)
+
+
 def _decode_model_input_item(value: object) -> _ModelInputItem:
     payload = _object(value) if isinstance(value, dict) else {}
     content = payload.get("content")
@@ -688,6 +749,9 @@ def _decode_model_input_item(value: object) -> _ModelInputItem:
             ):
                 parts.append(part_text)
         text = "".join(parts)
+    effective_call_id = _optional_string(
+        payload.get("call_id") if "call_id" in payload else payload.get("tool_call_id")
+    )
     return _ModelInputItem(
         object_item=isinstance(value, dict),
         role=_optional_string(payload.get("role")),
@@ -697,6 +761,19 @@ def _decode_model_input_item(value: object) -> _ModelInputItem:
         tool_call_id=_optional_string(payload.get("tool_call_id")),
         text=text,
         tool_outputs=_decode_tool_outputs(value),
+        image_data_flags=_decode_image_data_flags(
+            payload.get("content", payload.get("output"))
+        ),
+        browser_file_result=(
+            _decode_browser_file_result(payload.get("output"))
+            if payload.get("type") == "function_call_output"
+            and effective_call_id
+            in {
+                _BROWSER_FILES_CALL_PREFIX + "open",
+                _BROWSER_FILES_CALL_PREFIX + "capture",
+            }
+            else None
+        ),
         wire_json=json.dumps(value),
     )
 
@@ -2521,19 +2598,11 @@ class _Handler(BaseHTTPRequestHandler):
                     response_id="resp_browser_files_title",
                 )
                 return
-            observed_images = []
-            for item in request.input_items or ():
-                payload = _object(json.loads(item.wire_json))
-                content = payload.get("content", payload.get("output"))
-                if not isinstance(content, list):
-                    continue
-                for part in _list(content):
-                    if isinstance(part, dict) and part.get("type") == "input_image":
-                        image = _object(part)
-                        url = image.get("image_url")
-                        observed_images.append(
-                            isinstance(url, str) and url.startswith("data:image/")
-                        )
+            observed_images = [
+                flag
+                for item in request.input_items or ()
+                for flag in item.image_data_flags
+            ]
             with _State.lock:
                 _State.browser_files_requests.append(
                     {
@@ -2570,12 +2639,14 @@ class _Handler(BaseHTTPRequestHandler):
                 name, stage = "exec_command", "inspect"
                 arguments = {"command": "python -c " + shlex.quote(code)}
             elif request_has_tool_output(request, prefix + "open"):
-                page = _object(_browser_file_result(request, "open")["page"])
+                page = _browser_file_result(request, "open").page
+                if page is None:
+                    raise ValueError("Browser fixture page identity is invalid.")
                 name, stage = "browser_observe", "capture"
                 arguments = {
-                    "task_id": page["task_id"],
-                    "page_id": page["id"],
-                    "resource_incarnation": page["resource_incarnation"],
+                    "task_id": page.task_id,
+                    "page_id": page.page_id,
+                    "resource_incarnation": page.resource_incarnation,
                     "view": "image",
                 }
             elif request_has_tool_output(request, prefix + "skill"):

@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 import grpc
+from azcommon.logging import bind_extra
 from azents_runtime_control.browser_runner_wire import browser_command_to_wire
 from azents_runtime_control.grpc_runner_client import (
     runner_event_from_message,
@@ -168,16 +169,16 @@ class RuntimeRunnerControlGrpcServicer(
         operation_block_ms: int = _DEFAULT_OPERATION_BLOCK_MS,
     ) -> None:
         """Initialize the Runner Control gRPC servicer."""
-        self._control_protocol = control_protocol
-        self._coordination_store = coordination_store
-        self._state_sink = state_sink
+        self.control_protocol = control_protocol
+        self.coordination_store = coordination_store
+        self.state_sink = state_sink
         self._owner_replica_id = owner_replica_id
         self._consumer_id = consumer_id
-        self._runner_authenticator = runner_authenticator
-        self._connection_registrar = connection_registrar
+        self.runner_authenticator = runner_authenticator
+        self.connection_registrar = connection_registrar
         self._auth = RuntimeRunnerCredentialGrpcAuth(runner_authenticator)
-        self._transfer_result_sink = transfer_result_sink
-        self._stream_session_offer_provider = stream_session_offer_provider
+        self.transfer_result_sink = transfer_result_sink
+        self.stream_session_offer_provider = stream_session_offer_provider
         self._operation_block_ms = operation_block_ms
 
     async def ConnectRunner(
@@ -200,7 +201,7 @@ class RuntimeRunnerControlGrpcServicer(
                 "Runner registration identity does not match its credential",
             )
             raise AssertionError("unreachable")
-        if not await self._runner_authenticator.authorize_runner(authentication):
+        if not await self.runner_authenticator.authorize_runner(authentication):
             await context.abort(
                 grpc.StatusCode.UNAUTHENTICATED,
                 "Runner credential is no longer authorized",
@@ -212,14 +213,14 @@ class RuntimeRunnerControlGrpcServicer(
             runtime_id=authentication.runtime_id,
             credential_id=authentication.credential_id,
         )
-        if not await self._state_sink.validate_runner_registration(registration):
+        if not await self.state_sink.validate_runner_registration(registration):
             await context.abort(
                 grpc.StatusCode.FAILED_PRECONDITION,
                 "Runner configuration evidence does not match the current target",
             )
             raise AssertionError("unreachable")
         try:
-            accepted = await self._connection_registrar.register_runner(
+            accepted = await self.connection_registrar.register_runner(
                 registration,
                 authentication=authentication,
                 registered_at=datetime.now(UTC),
@@ -233,15 +234,18 @@ class RuntimeRunnerControlGrpcServicer(
                 f"Runner registration was not accepted: {error.code}",
             )
             raise AssertionError("unreachable") from None
-        _LOGGER.info(
-            "Runtime Runner stream registered",
-            extra={
+        L = bind_extra(
+            _LOGGER,
+            {
                 "runtime_id": accepted.runtime_id,
                 "runner_id": accepted.runner_id,
                 "connection_id": accepted.connection_id,
                 "runner_generation": accepted.generation,
-                "owner_replica_id": self._owner_replica_id,
             },
+        )
+        L.info(
+            "Runtime Runner stream registered",
+            extra={"owner_replica_id": self._owner_replica_id},
         )
         outbound: asyncio.Queue[_RunnerOutbound] = asyncio.Queue(maxsize=1)
         active_transfer_dispatches: dict[
@@ -290,41 +294,29 @@ class RuntimeRunnerControlGrpcServicer(
                 inbound_task,
                 operation_task,
                 offer_task,
-                control_protocol=self._control_protocol,
-                authorize=lambda: self._runner_authenticator.authorize_runner(
+                control_protocol=self.control_protocol,
+                authorize=lambda: self.runner_authenticator.authorize_runner(
                     authentication
                 ),
             ):
                 yield message
         finally:
-            _LOGGER.info(
+            L.info(
                 "Runtime Runner stream closing",
-                extra={
-                    "runtime_id": accepted.runtime_id,
-                    "runner_id": accepted.runner_id,
-                    "connection_id": accepted.connection_id,
-                    "runner_generation": accepted.generation,
-                },
             )
             for task in (inbound_task, operation_task, offer_task):
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
-            revoked = await self._control_protocol.revoke_runner(
+            revoked = await self.control_protocol.revoke_runner(
                 runtime_id=accepted.runtime_id,
                 generation=accepted.generation,
             )
             if revoked:
                 await self._record_runner_stream_closed(accepted, registration)
             else:
-                _LOGGER.info(
+                L.info(
                     "Runtime Runner stream close ignored for stale generation",
-                    extra={
-                        "runtime_id": accepted.runtime_id,
-                        "runner_id": accepted.runner_id,
-                        "connection_id": accepted.connection_id,
-                        "runner_generation": accepted.generation,
-                    },
                 )
 
     async def _relay_stream_session_offers(
@@ -336,7 +328,7 @@ class RuntimeRunnerControlGrpcServicer(
     ) -> None:
         """Reissue exact Web session offers while Runner control remains current."""
         while True:
-            offer = await self._stream_session_offer_provider.offer_for_runner(
+            offer = await self.stream_session_offer_provider.offer_for_runner(
                 runtime_id=runtime_id,
                 runner_generation=generation,
             )
@@ -354,7 +346,7 @@ class RuntimeRunnerControlGrpcServicer(
         registration: RuntimeRunnerRegistration,
     ) -> None:
         try:
-            await self._state_sink.record_runner_state(
+            await self.state_sink.record_runner_state(
                 SharedRunnerStateReport(
                     runtime_id=accepted.runtime_id,
                     runner_id=accepted.runner_id,
@@ -396,19 +388,20 @@ class RuntimeRunnerControlGrpcServicer(
             tuple[str, str, str, bytes],
         ],
     ) -> None:
+        stream_logger = bind_extra(
+            _LOGGER, {"runtime_id": runtime_id, "runner_generation": generation}
+        )
         async for message in request_iterator:
-            if not await self._runner_authenticator.authorize_runner(authentication):
+            L = bind_extra(stream_logger, {"request_id": message.request_id})
+            if not await self.runner_authenticator.authorize_runner(authentication):
                 await outbound.put(_error(message.request_id, "STALE_RUNNER_AUTHORITY"))
                 return
             payload = message.WhichOneof("payload")
             if message.generation != generation:
-                _LOGGER.warning(
+                L.warning(
                     "Runtime Runner message rejected",
                     extra={
-                        "runtime_id": runtime_id,
-                        "runner_generation": generation,
                         "message_generation": message.generation,
-                        "request_id": message.request_id,
                     },
                 )
                 if payload == "system_metrics":
@@ -418,19 +411,14 @@ class RuntimeRunnerControlGrpcServicer(
                 )
                 return
             if payload == "heartbeat":
-                ok = await self._control_protocol.heartbeat_runner(
+                ok = await self.control_protocol.heartbeat_runner(
                     runtime_id=runtime_id,
                     generation=generation,
                     heartbeat_at=datetime.now(UTC),
                 )
                 if not ok:
-                    _LOGGER.warning(
+                    L.warning(
                         "Runtime Runner heartbeat rejected",
-                        extra={
-                            "runtime_id": runtime_id,
-                            "runner_generation": generation,
-                            "request_id": message.request_id,
-                        },
                     )
                     await outbound.put(
                         _error(message.request_id, "STALE_RUNNER_GENERATION")
@@ -440,7 +428,7 @@ class RuntimeRunnerControlGrpcServicer(
                     monotonic_sequence=message.heartbeat.monotonic_sequence,
                 )
                 runtime_configuration = (
-                    await self._state_sink.configuration_evidence_for_runner_heartbeat(
+                    await self.state_sink.configuration_evidence_for_runner_heartbeat(
                         runtime_id=runtime_id,
                     )
                 )
@@ -476,8 +464,8 @@ class RuntimeRunnerControlGrpcServicer(
                 ):
                     return
                 report = runner_state_report_from_message(message.state_report)
-                await self._state_sink.record_runner_state(report)
-                _LOGGER.info(
+                await self.state_sink.record_runner_state(report)
+                stream_logger.info(
                     "Runtime Runner state report persisted",
                     extra={
                         "runtime_id": report.runtime_id,
@@ -493,23 +481,17 @@ class RuntimeRunnerControlGrpcServicer(
                     message.system_metrics.ByteSize()
                     > RUNNER_SYSTEM_METRICS_MAX_MESSAGE_BYTES
                 ):
-                    _LOGGER.warning(
+                    L.warning(
                         "Runtime Runner system metrics rejected",
                         extra={
-                            "runtime_id": runtime_id,
-                            "runner_generation": generation,
-                            "request_id": message.request_id,
                             "reason": "message_too_large",
                         },
                     )
                     continue
                 if message.system_metrics.runtime_id != runtime_id:
-                    _LOGGER.warning(
+                    L.warning(
                         "Runtime Runner system metrics rejected",
                         extra={
-                            "runtime_id": runtime_id,
-                            "runner_generation": generation,
-                            "request_id": message.request_id,
                             "reason": "runtime_identity_mismatch",
                         },
                     )
@@ -517,19 +499,16 @@ class RuntimeRunnerControlGrpcServicer(
                 try:
                     report = runner_system_metrics_from_message(message.system_metrics)
                 except ValueError:
-                    _LOGGER.warning(
+                    L.warning(
                         "Runtime Runner system metrics rejected",
                         exc_info=True,
                         extra={
-                            "runtime_id": runtime_id,
-                            "runner_generation": generation,
-                            "request_id": message.request_id,
                             "reason": "invalid_report",
                         },
                     )
                     continue
                 try:
-                    result = await self._control_protocol.append_runner_system_metrics(
+                    result = await self.control_protocol.append_runner_system_metrics(
                         report,
                         generation=generation,
                         accepted_at=datetime.now(UTC),
@@ -537,22 +516,14 @@ class RuntimeRunnerControlGrpcServicer(
                 except asyncio.CancelledError:
                     raise
                 except Exception:
-                    _LOGGER.exception(
+                    L.exception(
                         "Runtime Runner system metrics store append failed",
-                        extra={
-                            "runtime_id": runtime_id,
-                            "runner_generation": generation,
-                            "request_id": message.request_id,
-                        },
                     )
                     continue
                 if result is not RuntimeSystemMetricsAppendResult.ACCEPTED:
-                    _LOGGER.warning(
+                    L.warning(
                         "Runtime Runner system metrics rejected",
                         extra={
-                            "runtime_id": runtime_id,
-                            "runner_generation": generation,
-                            "request_id": message.request_id,
                             "reason": result.value,
                         },
                     )
@@ -604,7 +575,7 @@ class RuntimeRunnerControlGrpcServicer(
                     )
                     return
                 start_operation = (
-                    self._coordination_store.try_start_operation_if_connection_current
+                    self.coordination_store.try_start_operation_if_connection_current
                 )
                 started = await start_operation(
                     connection_kind=RuntimeConnectionKind.RUNNER,
@@ -638,7 +609,7 @@ class RuntimeRunnerControlGrpcServicer(
         request_id: str,
         outbound: asyncio.Queue[_RunnerOutbound],
     ) -> bool:
-        ok = await self._control_protocol.heartbeat_runner(
+        ok = await self.control_protocol.heartbeat_runner(
             runtime_id=runtime_id,
             generation=generation,
             heartbeat_at=datetime.now(UTC),
@@ -660,10 +631,13 @@ class RuntimeRunnerControlGrpcServicer(
             tuple[str, str, str, bytes],
         ],
     ) -> None:
+        stream_logger = bind_extra(
+            _LOGGER, {"runtime_id": runtime_id, "runner_generation": generation}
+        )
         while True:
-            if not await self._runner_authenticator.authorize_runner(authentication):
+            if not await self.runner_authenticator.authorize_runner(authentication):
                 return
-            envelope = await self._control_protocol.claim_next_runner_request(
+            envelope = await self.control_protocol.claim_next_runner_request(
                 runtime_id=runtime_id,
                 generation=generation,
                 consumer_id=self._consumer_id,
@@ -672,7 +646,8 @@ class RuntimeRunnerControlGrpcServicer(
             if envelope is None:
                 await asyncio.sleep(max(self._operation_block_ms, 1) / 1000)
                 continue
-            if not await self._runner_authenticator.authorize_runner(authentication):
+            L = bind_extra(stream_logger, {"request_id": envelope.request_id})
+            if not await self.runner_authenticator.authorize_runner(authentication):
                 return
             if envelope.operation_type == "operation.cancel":
                 operation_id = envelope.payload.get("operation_id")
@@ -725,7 +700,7 @@ class RuntimeRunnerControlGrpcServicer(
                         raise RuntimeError(
                             "Conflicting duplicate transfer intent detected"
                         )
-                    await self._control_protocol.ack_claimed_request(envelope)
+                    await self.control_protocol.ack_claimed_request(envelope)
                     continue
                 if len(active_transfer_dispatches) >= _MAX_TRANSFER_DISPATCH_TOMBSTONES:
                     raise RuntimeError(
@@ -747,16 +722,13 @@ class RuntimeRunnerControlGrpcServicer(
                     runtime_id=runtime_id,
                     generation=generation,
                 ):
-                    _LOGGER.warning(
+                    L.warning(
                         "Runtime Runner Terminal intent rejected",
                         extra={
-                            "runtime_id": runtime_id,
-                            "runner_generation": generation,
-                            "request_id": envelope.request_id,
                             "reason": "terminal_capability_missing",
                         },
                     )
-                    await self._control_protocol.ack_claimed_request(envelope)
+                    await self.control_protocol.ack_claimed_request(envelope)
                     continue
                 await outbound.put(
                     _RunnerOutboundItem(
@@ -777,7 +749,7 @@ class RuntimeRunnerControlGrpcServicer(
                     runtime_id=runtime_id,
                     generation=generation,
                 ):
-                    await self._control_protocol.ack_claimed_request(envelope)
+                    await self.control_protocol.ack_claimed_request(envelope)
                     continue
                 await outbound.put(
                     _RunnerOutboundItem(
@@ -798,14 +770,11 @@ class RuntimeRunnerControlGrpcServicer(
                     envelope,
                     runtime_id=runtime_id,
                 )
-                await self._control_protocol.ack_claimed_request(envelope)
+                await self.control_protocol.ack_claimed_request(envelope)
                 continue
-            _LOGGER.info(
+            L.info(
                 "Runtime Runner operation routed",
                 extra={
-                    "runtime_id": runtime_id,
-                    "runner_generation": generation,
-                    "request_id": envelope.request_id,
                     "operation_type": envelope.operation_type,
                 },
             )
@@ -825,7 +794,7 @@ class RuntimeRunnerControlGrpcServicer(
         runtime_id: str,
         generation: int,
     ) -> bool:
-        connection = await self._coordination_store.get_connection(
+        connection = await self.coordination_store.get_connection(
             kind=RuntimeConnectionKind.RUNNER,
             subject_id=runtime_id,
         )
@@ -852,7 +821,7 @@ class RuntimeRunnerControlGrpcServicer(
                 "operation_type": envelope.operation_type,
             },
         )
-        await self._control_protocol.append_reply_event(
+        await self.control_protocol.append_reply_event(
             RuntimeReplyEvent(
                 request_id=envelope.request_id,
                 runtime_id=envelope.runtime_id,
@@ -913,7 +882,7 @@ class RuntimeRunnerControlGrpcServicer(
         records: list[RuntimeBodyChunkRecord] = []
         after_cursor: str | None = None
         while True:
-            batch = await self._coordination_store.read_body_chunks(
+            batch = await self.coordination_store.read_body_chunks(
                 body_stream_id,
                 after_cursor=after_cursor,
                 limit=_BODY_CHUNK_READ_LIMIT,
@@ -934,7 +903,7 @@ class RuntimeRunnerControlGrpcServicer(
             _validate_transfer_result_lookup(result)
         except ValueError:
             return
-        operation = await self._coordination_store.get_operation(result.operation_id)
+        operation = await self.coordination_store.get_operation(result.operation_id)
         if (
             operation is None
             or operation.status is RuntimeOperationStatus.FINAL
@@ -958,7 +927,7 @@ class RuntimeRunnerControlGrpcServicer(
                 error_code="RUNNER_TRANSFER_PROTOCOL_VIOLATION",
             )
             return
-        await self._transfer_result_sink.handle(
+        await self.transfer_result_sink.handle(
             mapped,
             request_id=message.request_id,
         )
@@ -971,7 +940,7 @@ class RuntimeRunnerControlGrpcServicer(
         error_code: str,
     ) -> None:
         """Settle Transfer State before finalizing an unusable transfer result."""
-        await self._transfer_result_sink.handle_failure(
+        await self.transfer_result_sink.handle_failure(
             operation,
             request_id=message.request_id,
             error_code=error_code,
@@ -991,10 +960,10 @@ class RuntimeRunnerControlGrpcServicer(
             request_id=message.request_id,
         )
         operation_id = f"operation:{event.request_id}"
-        operation = await self._coordination_store.get_operation(operation_id)
+        operation = await self.coordination_store.get_operation(operation_id)
         if operation is None or operation.status is RuntimeOperationStatus.FINAL:
             return
-        await self._control_protocol.append_reply_event(
+        await self.control_protocol.append_reply_event(
             RuntimeReplyEvent(
                 request_id=event.request_id,
                 runtime_id=event.runtime_id,
