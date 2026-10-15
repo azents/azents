@@ -34,7 +34,11 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useId } from "react";
-import { browserFrameMatchesStatus, sameBrowserTarget } from "../input";
+import {
+  browserAddress,
+  browserFrameMatchesStatus,
+  sameBrowserTarget,
+} from "../input";
 import classes from "./SessionBrowserPanel.module.css";
 import type { BrowserTouchView } from "../containers/useBrowserTouchView";
 import type {
@@ -505,7 +509,9 @@ export function SessionBrowserPanel({
               if (event.key === "Enter" && navigationEnabled && inputEnabled) {
                 event.preventDefault();
                 onAddressSubmit();
-                event.currentTarget.blur();
+                if (browserAddress(event.currentTarget.value) !== null) {
+                  event.currentTarget.blur();
+                }
               }
             }}
           />

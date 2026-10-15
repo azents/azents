@@ -497,7 +497,7 @@ export const FocusedLandscapePageMobile = {
     state: {
       ...ready,
       image: {
-        url: `data:image/svg+xml,${encodeURIComponent(svg.replaceAll('width="800"', 'width="1280"').replaceAll('height="900"', 'height="800"'))}`,
+        url: `data:image/svg+xml,${encodeURIComponent(svg.replaceAll('width="800"', 'width="1280"').replaceAll('height="900"', 'height="800"').replace('viewBox="0 0 800 900"', 'viewBox="0 0 1280 800"'))}`,
         frame: { ...frame, width: 1280, height: 800 },
       },
       status:
@@ -610,6 +610,26 @@ export const AddressExpandsOnFocus = {
     await expect(
       canvas.queryByRole("dialog", { name: "Focus browser" }),
     ).toBeNull();
+  },
+} satisfies Story;
+
+export const InvalidAddressKeepsFocus = {
+  args: {
+    addressValue: "https://user:password@example.test",
+    addressError: true,
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    await userEvent.click(
+      canvas.getByRole("textbox", { name: "Browser address" }),
+    );
+    await userEvent.keyboard("{Enter}");
+    await expect(args.onAddressSubmit).toHaveBeenCalledTimes(1);
+    await expect(args.onAddressBlur).not.toHaveBeenCalled();
+    await expect(
+      canvas.getByRole("textbox", { name: "Browser address" }),
+    ).toHaveFocus();
+    await expect(canvas.getByRole("alert")).toBeVisible();
   },
 } satisfies Story;
 
