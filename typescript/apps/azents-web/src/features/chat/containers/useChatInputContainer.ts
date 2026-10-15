@@ -30,14 +30,6 @@ import type {
   ChatExecutionOptionGroup,
 } from "../executionOptions";
 import type {
-  ChatAction,
-  ChatLiveRunState,
-  GoalStateSnapshot,
-  InputActionDefinition,
-  TodoStateSnapshot,
-  TokenUsageSummary,
-} from "../types";
-import type {
   PendingFile,
   UploadedFile,
 } from "@/shared/file-upload/useFileUpload";
@@ -47,6 +39,14 @@ import type {
   ModelReasoningEffort,
   RequestedInferenceProfile,
 } from "@azents/public-client";
+import type {
+  ChatAction,
+  ChatLiveRunState,
+  GoalStateSnapshot,
+  InputActionDefinition,
+  TodoStateSnapshot,
+  TokenUsageSummary,
+} from "@azents/session-core/types";
 
 const DRAFT_STORAGE_KEY_PREFIX = "azents.chat.inputDraft";
 

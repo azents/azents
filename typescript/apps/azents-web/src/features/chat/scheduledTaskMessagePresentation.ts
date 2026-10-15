@@ -1,4 +1,4 @@
-import type { ChatMessage } from "./types";
+import type { ChatMessage } from "@azents/session-core/types";
 
 export interface ScheduledTaskMessagePresentation {
   title: string | null;

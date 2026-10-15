@@ -52,12 +52,12 @@ import type {
   KnownToolPresentation,
   TodoDetail,
 } from "../knownToolPresentation";
-import type { ActiveToolCall } from "../types";
+import type { ActiveToolCall } from "@azents/session-core/types";
 import type {
   V4APatchFile,
   V4APatchHunk,
   V4APatchLine,
-} from "../v4aPatchPresentation";
+} from "@azents/session-core/v4aPatchPresentation";
 import type { ReactElement } from "react";
 
 type ToolCallTranslations = ReturnType<typeof useTranslations<"chat.toolCall">>;

@@ -28,6 +28,7 @@ code_paths:
   - .claude/skills/ship-feature/SKILL.md
   - .github/actions/expose-github-runtime/**
   - .github/workflows/ci.yaml
+  - typescript/packages/azents-session-core/**
   - .github/workflows/e2e-duration-recheck.yaml
   - .github/workflows/snapshot.yaml
   - azents.Dockerfile
@@ -46,8 +47,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-10-09
-spec_version: 86
+last_verified_at: 2026-10-15
+spec_version: 87
 ---
 
 # E2E Primary Test Strategy
@@ -284,6 +285,12 @@ and responsive component interactions are owned by frontend component and Storyb
 interaction tests. Browser E2E retains only behavior that requires a real browser or
 crosses independently deployed product boundaries; it does not repeat an exhaustive
 component-presentation matrix.
+The required TypeScript lane also executes `@azents/session-core` behavioral
+contracts. These cover pure tool/history/mailbox projection and a consumer
+composing the package's exported modules without a browser host. A source
+dependency-boundary check and DOM-free typecheck protect the shared-core
+boundary. This does not replace cross-boundary browser E2E or certify a native
+application or device lifecycle.
 Required repository, service, and Worker integration tests own exact interleavings whose authority is
 PostgreSQL CAS, generation fencing, ownership recovery, transaction rollback, or stale-completion
 ordering. Those tests must exercise production repositories and execution owners with explicit
@@ -745,6 +752,9 @@ External substrate features such as Agent Runtime Provider are recorded in two l
 Local/PR environment without live substrate does not fake live PASS. Instead, separate prerequisite snapshot state and deterministic evidence in PR body and design QA record. If primary E2E substrate such as Browser runner or Docker/testcontainers is unavailable and product path cannot be executed, do not replace it with PASS. Track scenario, blocker category, observed error, expected verification target, and next action in GitHub Issue, and leave blocked evidence plus issue link in design QA record.
 
 ## Changelog
+
+- **2026-10-15** (spec_version 87) — Added required TypeScript execution of
+  the shared Session core's behavior and package-consumer contracts.
 
 - **2026-10-09** (spec_version 86) — Remove stale-document login readiness
   races with an atomic current-document visibility/enabled observation.

@@ -8,6 +8,29 @@
  * so state from the previous Session cannot leak into the next one.
  */
 
+import { isLivePartialHistoryEvent } from "@azents/session-core/chatLiveHistoryProjection";
+import {
+  liveRunForDisplay,
+  resolveDismissedLiveRetryKey,
+} from "@azents/session-core/liveRetryVisibility";
+import {
+  durableMailboxCorrelation,
+  emptyPendingMailboxState,
+  pendingMailboxReducer,
+  type PendingMailboxState,
+  pendingMailboxWaitsForModel,
+  selectPendingMailboxEntries,
+} from "@azents/session-core/pendingMailboxState";
+import {
+  applyProviderToolCallItem,
+  providerToolCallFromPayload,
+} from "@azents/session-core/providerToolCallProjection";
+import {
+  applyFunctionCallItem,
+  applyFunctionCallOutput,
+  toolkitSourceFromValue,
+} from "@azents/session-core/toolCallMerge";
+import { shouldRenderIncompleteDurableToolCalls } from "@azents/session-core/toolCallVisibility";
 import { useDocumentVisibility } from "@mantine/hooks";
 import * as Sentry from "@sentry/nextjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -20,30 +43,18 @@ import {
   externalChannelPromptRole,
   externalChannelReferenceMappingsMetadata,
 } from "../externalChannelMessage";
-import { isLivePartialHistoryEvent } from "../hooks/chatLiveHistoryProjection";
-import {
-  liveRunForDisplay,
-  resolveDismissedLiveRetryKey,
-} from "../hooks/liveRetryVisibility";
-import {
-  durableMailboxCorrelation,
-  emptyPendingMailboxState,
-  pendingMailboxReducer,
-  type PendingMailboxState,
-  pendingMailboxWaitsForModel,
-  selectPendingMailboxEntries,
-} from "../hooks/pendingMailboxState";
-import {
-  applyProviderToolCallItem,
-  providerToolCallFromPayload,
-} from "../hooks/providerToolCallProjection";
-import {
-  applyFunctionCallItem,
-  applyFunctionCallOutput,
-  toolkitSourceFromValue,
-} from "../hooks/toolCallMerge";
-import { shouldRenderIncompleteDurableToolCalls } from "../hooks/toolCallVisibility";
 import { useChatWebSocket } from "../hooks/useChatWebSocket";
+import type { UploadedFile } from "@/shared/file-upload/useFileUpload";
+import type {
+  ActionExecutionProjectionResponse,
+  AgentResponse,
+  AppliedInferenceProfile,
+  ChatEventResponse,
+  ChatWriteResponse,
+  LiveEventListResponse,
+  PendingMailboxEnvelope,
+  RequestedInferenceProfile,
+} from "@azents/public-client";
 import type {
   ActionExecutionProjection,
   AgentRunPhase,
@@ -69,18 +80,7 @@ import type {
   TodoStateSnapshot,
   TokenUsageSummary,
   ToolResultStatus,
-} from "../types";
-import type { UploadedFile } from "@/shared/file-upload/useFileUpload";
-import type {
-  ActionExecutionProjectionResponse,
-  AgentResponse,
-  AppliedInferenceProfile,
-  ChatEventResponse,
-  ChatWriteResponse,
-  LiveEventListResponse,
-  PendingMailboxEnvelope,
-  RequestedInferenceProfile,
-} from "@azents/public-client";
+} from "@azents/session-core/types";
 
 export type SessionRunState = "idle" | "running";
 

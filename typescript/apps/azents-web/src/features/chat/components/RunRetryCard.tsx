@@ -29,7 +29,7 @@ import type {
   ChatLiveRunRetryState,
   FailedRunAttemptSummary,
   FailedRunFailureMetadata,
-} from "../types";
+} from "@azents/session-core/types";
 
 type RunRetryCardProps =
   | {

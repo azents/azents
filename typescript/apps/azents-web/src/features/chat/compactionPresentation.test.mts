@@ -4,7 +4,7 @@ import {
   completedCompactionIds,
   isCompactionInProgressMarker,
 } from "./compactionPresentation.ts";
-import type { ChatMessage } from "./types.ts";
+import type { ChatMessage } from "@azents/session-core/types";
 
 function compactionMessage(
   id: string,

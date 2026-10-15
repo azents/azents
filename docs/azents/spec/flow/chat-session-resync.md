@@ -39,11 +39,12 @@ code_paths:
   - python/apps/azents/src/azents/worker/live/**
   - typescript/apps/azents-web/src/features/agents/**
   - typescript/apps/azents-web/src/features/chat/**
+  - typescript/packages/azents-session-core/**
   - typescript/apps/azents-web/src/shared/agent-session/**
   - typescript/apps/azents-web/src/shared/subagent-tree/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-10-05
-spec_version: 57
+last_verified_at: 2026-10-15
+spec_version: 58
 ---
 
 # Chat Session Resync
@@ -56,6 +57,12 @@ Chat screen has two timeline states.
 
 - `LATEST_FOLLOWING`: renders latest durable history tail and live state together.
 - `DETACHED_HISTORY_BROWSING`: browses middle history window and does not render live state.
+
+Pure history/tool selection, provider-call identity merge, pending mailbox
+reduction, and retry visibility live in `@azents/session-core`. Main Web consumes
+that implementation while retaining socket authentication, health barriers,
+REST request ownership, browser lifecycle, and resync orchestration. The shared
+package does not establish a second live state store or a new transport.
 
 ## 2. Preconditions
 
@@ -604,6 +611,9 @@ presentation-only and does not change canonical content or model lowering.
 Session Channels management state is queried separately from timeline resync.
 
 ## 12. Changelog
+
+- **2026-10-15** (spec_version 58) — Recorded shared Session projection and
+  mailbox reducer ownership while retaining the existing web resync lifecycle.
 
 - **2026-10-05** — v56. Reconciled code-path discovery with current defining
   modules; system behavior is unchanged.

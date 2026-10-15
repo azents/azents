@@ -11,7 +11,7 @@ import {
   unsupportedUriAttachment,
 } from "../story-fixtures";
 import { FileAttachmentList } from "./FileAttachmentList";
-import type { FileAttachment } from "../types";
+import type { FileAttachment } from "@azents/session-core/types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const galleryImages: FileAttachment[] = Array.from(

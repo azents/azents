@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
 import { pendingInputBufferMessage } from "../pendingMessageProjection";
 import { MessageBubble } from "./MessageBubble";
 import type { CurrentWorkspaceProfile } from "../senderPresentation";
-import type { PendingInputBuffer } from "../types";
+import type { PendingInputBuffer } from "@azents/session-core/types";
 
 interface PendingInputBufferBubbleProps {
   buffer: PendingInputBuffer;

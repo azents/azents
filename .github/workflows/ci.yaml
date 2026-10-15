@@ -930,6 +930,8 @@ jobs:
         run: cd typescript && pnpm run lint
       - name: Typecheck
         run: cd typescript && pnpm run typecheck
+      - name: Session core contracts
+        run: cd typescript && pnpm --filter @azents/session-core test
 
   ci-typescript:
     name: ci-typescript

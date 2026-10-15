@@ -24,7 +24,7 @@ import {
   chatCollapseTransitionProps,
   chatCollapsibleChevronSize,
 } from "./collapsiblePresentation";
-import type { ActionExecutionProjection } from "../types";
+import type { ActionExecutionProjection } from "@azents/session-core/types";
 import type { ReactNode } from "react";
 
 interface ActionExecutionTimelineCardProps {

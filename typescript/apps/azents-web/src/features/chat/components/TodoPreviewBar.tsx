@@ -36,7 +36,7 @@ import type {
   TodoItem,
   TodoStateSnapshot,
   TodoStatus,
-} from "../types";
+} from "@azents/session-core/types";
 
 interface TodoPreviewBarProps {
   goal: GoalStateSnapshot | null;

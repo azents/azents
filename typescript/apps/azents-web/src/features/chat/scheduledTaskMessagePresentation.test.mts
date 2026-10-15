@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { scheduledTaskMessagePresentation } from "./scheduledTaskMessagePresentation.ts";
-import type { ChatMessage } from "./types.ts";
+import type { ChatMessage } from "@azents/session-core/types";
 
 function message(
   content: string,

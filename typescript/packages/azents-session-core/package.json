@@ -1,0 +1,29 @@
+{
+  "name": "@azents/session-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": {
+      "types": "./src/*.ts",
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test 'src/**/*.test.mts' 'test/**/*.test.mts'",
+    "lint": "eslint src test --max-warnings 0",
+    "lint:fix": "eslint src test --max-warnings 0 --fix",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write 'src/**/*.{ts,mts}' 'test/**/*.mts' '*.mjs'",
+    "format:check": "prettier --check 'src/**/*.{ts,mts}' 'test/**/*.mts' '*.mjs'"
+  },
+  "dependencies": {
+    "@azents/public-client": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "eslint": "^10.8.1",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.67.0"
+  }
+}

@@ -1,7 +1,10 @@
 import { rem } from "@mantine/core";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { RunRetryCard } from "./RunRetryCard";
-import type { ChatLiveRunRetryState, FailedRunFailureMetadata } from "../types";
+import type {
+  ChatLiveRunRetryState,
+  FailedRunFailureMetadata,
+} from "@azents/session-core/types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const attempts = [

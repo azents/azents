@@ -1,12 +1,12 @@
 import { z } from "zod";
 import type {
-  ActionExecutionProjection,
-  ActionExecutionUpdatedEvent,
-} from "./types";
-import type {
   ActionExecutionProjectionResponse,
   ChatEventResponse,
 } from "@azents/public-client";
+import type {
+  ActionExecutionProjection,
+  ActionExecutionUpdatedEvent,
+} from "@azents/session-core/types";
 
 const nonEmptyString = z.string().min(1);
 // The generated wire contract exposes timestamps as strings; do not impose

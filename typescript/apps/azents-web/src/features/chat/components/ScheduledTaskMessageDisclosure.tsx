@@ -4,7 +4,7 @@ import { IconCalendarClock } from "@tabler/icons-react";
 import { useLocale, useTranslations } from "next-intl";
 import { scheduledTaskMessagePresentation } from "../scheduledTaskMessagePresentation";
 import { AgentMessageDisclosure } from "./AgentMessageDisclosure";
-import type { ChatMessage } from "../types";
+import type { ChatMessage } from "@azents/session-core/types";
 
 interface ScheduledTaskMessageDisclosureProps {
   message: ChatMessage;

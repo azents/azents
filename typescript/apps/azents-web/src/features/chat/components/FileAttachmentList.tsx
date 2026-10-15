@@ -18,7 +18,7 @@ import {
   type AttachmentPreviewContent,
   AttachmentPreviewViewer,
 } from "./AttachmentPreviewViewer";
-import type { FileAttachment } from "../types";
+import type { FileAttachment } from "@azents/session-core/types";
 
 interface FileAttachmentListProps {
   files: FileAttachment[];

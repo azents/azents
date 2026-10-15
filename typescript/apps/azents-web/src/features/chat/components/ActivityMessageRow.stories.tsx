@@ -1,7 +1,7 @@
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { createChatMessage } from "../story-fixtures";
 import { ActivityMessageRow } from "./ActivityMessageRow";
-import type { ActivityEvent } from "../toolActivityPresentation";
+import type { ActivityEvent } from "@azents/session-core/toolActivityPresentation";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const goalUpdatedEvent: ActivityEvent = {

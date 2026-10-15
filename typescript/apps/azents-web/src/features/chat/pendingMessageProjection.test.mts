@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { externalChannelMessagePresentation } from "./externalChannelMessage.ts";
 import { pendingMailboxMessage } from "./pendingMessageProjection.ts";
-import type { PendingMailboxEntry } from "./hooks/pendingMailboxState";
+import type { PendingMailboxEntry } from "@azents/session-core/pendingMailboxState";
 
 function scheduledEntry(
   type: "scheduled_task_trigger" | "scheduled_task_continuation",

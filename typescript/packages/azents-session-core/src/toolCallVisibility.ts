@@ -1,4 +1,4 @@
-import type { ChatTimelineState } from "../types";
+import type { ChatTimelineState } from "./types.ts";
 
 /** Keep unmatched durable tool calls visible only while following an active Run. */
 export function shouldRenderIncompleteDurableToolCalls(

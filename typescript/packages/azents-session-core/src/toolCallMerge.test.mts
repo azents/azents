@@ -4,7 +4,7 @@ import {
   applyFunctionCallOutput,
   toolkitSourceFromValue,
 } from "./toolCallMerge.ts";
-import type { ChatMessage } from "../types.ts";
+import type { ChatMessage } from "./types.ts";
 
 const message: ChatMessage = {
   id: "message-1",

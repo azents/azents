@@ -145,6 +145,7 @@ code_paths:
   - typescript/apps/azents-web/src/app/(app)/w/[handle]/**
   - typescript/apps/azents-web/src/features/agents/**
   - typescript/apps/azents-web/src/features/chat/**
+  - typescript/packages/azents-session-core/**
   - typescript/apps/azents-web/src/shared/agent-session/**
   - typescript/apps/azents-web/src/shared/subagent-tree/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
@@ -195,8 +196,8 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
-last_verified_at: 2026-10-13
-spec_version: 188
+last_verified_at: 2026-10-15
+spec_version: 189
 ---
 
 # Conversation & Events
@@ -1291,6 +1292,21 @@ Legacy chat UI deltas and superseded input-buffer notifications such as `content
 `reasoning_delta`, `function_call_delta`, `run_started`, `run_phase_changed`, `input_buffered`, and
 `input_buffer_deleted` are not frontend state contracts.
 
+### Shared Session projection ownership
+
+`@azents/session-core` owns the host-independent Session types, client/provider
+tool projection, ordered Activity selection, pending mailbox reduction, live
+history/retry display selection, diagnostic input parsing, and V4A display
+structure. Main Web imports these defining modules directly from the workspace
+package; it does not retain application-local copies or forwarding modules.
+The package consumes schema-only Public API types, without the generated fetch
+SDK or DOM libraries. Its extraction does not change wire decoding, unknown
+result handling, timeline selection, or authorization.
+
+React UI, syntax-highlighter-dependent specialized tool presentation, transport,
+authentication, browser lifecycle, and resync orchestration remain Main Web
+responsibilities.
+
 ### Frontend Markdown rendering
 
 azents-web renders user-visible chat Markdown with GitHub Flavored Markdown, soft line breaks, and
@@ -1629,6 +1645,10 @@ identify trigger and continuation work with dedicated Scheduled Task
 presentations.
 
 ## 13. Changelog
+
+- **2026-10-15** (spec_version 189) — Moved pure Session/tool/mailbox
+  projection ownership to the shared Session core package without changing
+  conversation behavior.
 
 - **2026-10-07** — v186. Extracted public Conversation profiles from common
   execution Sessions, preserved primary uniqueness and conditional profile

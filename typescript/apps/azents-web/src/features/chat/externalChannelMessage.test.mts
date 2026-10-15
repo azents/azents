@@ -4,7 +4,7 @@ import {
   externalChannelMessagePresentation,
   externalChannelReferenceMappingsMetadata,
 } from "./externalChannelMessage.ts";
-import type { ChatMessage } from "./types";
+import type { ChatMessage } from "@azents/session-core/types";
 
 function message(
   overrides: Partial<ChatMessage> = {},

@@ -4,13 +4,13 @@ import test from "node:test";
 import {
   providerToolActivityLabel,
   providerToolDisplayName,
-} from "../components/providerToolCallPresentation.ts";
+} from "./providerToolCallPresentation.ts";
 import {
   applyProviderToolCallItem,
   providerToolCallFromPayload,
   providerToolCallStatusFromPayload,
 } from "./providerToolCallProjection.ts";
-import type { ProviderToolCall } from "../types.ts";
+import type { ProviderToolCall } from "./types.ts";
 
 void test("canonical status wins over live provenance", () => {
   assert.equal(

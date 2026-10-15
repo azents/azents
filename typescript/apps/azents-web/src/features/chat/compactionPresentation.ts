@@ -1,4 +1,4 @@
-import type { ChatMessage } from "./types";
+import type { ChatMessage } from "@azents/session-core/types";
 
 function compactionId(message: ChatMessage): string | null {
   const value = message.metadata?.compaction_id;

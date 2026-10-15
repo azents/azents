@@ -38,7 +38,7 @@ import type {
   ActivityCategory,
   ActivityEvent,
   ToolActivityGroup as ToolActivityGroupModel,
-} from "../toolActivityPresentation";
+} from "@azents/session-core/toolActivityPresentation";
 import type { ReactNode } from "react";
 
 interface ToolActivityGroupProps {

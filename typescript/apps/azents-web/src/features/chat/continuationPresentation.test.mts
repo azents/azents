@@ -4,7 +4,7 @@ import {
   continuationMetadata,
   continuationPresentation,
 } from "./continuationPresentation.ts";
-import type { ChatMessage } from "./types";
+import type { ChatMessage } from "@azents/session-core/types";
 
 function continuationMessage(
   metadata: Record<string, string> = {},

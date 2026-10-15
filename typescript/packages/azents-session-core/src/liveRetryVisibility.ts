@@ -1,4 +1,4 @@
-import type { ChatLiveRunState } from "../types";
+import type { ChatLiveRunState } from "./types.ts";
 
 export function liveRetryDisplayKey(
   liveRun: ChatLiveRunState | null,

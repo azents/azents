@@ -1,4 +1,9 @@
 import {
+  providerToolActivityLabel,
+  providerToolDisplayName,
+  providerToolStatusLabel,
+} from "@azents/session-core/providerToolCallPresentation";
+import {
   ActionIcon,
   Anchor,
   Box,
@@ -19,16 +24,11 @@ import {
   activityRowIconSize,
 } from "./activityRowPresentation";
 import { FileAttachmentList } from "./FileAttachmentList";
-import {
-  providerToolActivityLabel,
-  providerToolDisplayName,
-  providerToolStatusLabel,
-} from "./providerToolCallPresentation";
 import { providerWebSearchPresentation } from "./providerWebSearchPresentation";
 import { ToolCallStatusIcon } from "./ToolCallStatusIcon";
 import { ToolFailureOutput } from "./ToolFailureOutput";
 import { ToolInputContent } from "./ToolInputContent";
-import type { ProviderToolCall } from "../types";
+import type { ProviderToolCall } from "@azents/session-core/types";
 import type { ReactElement } from "react";
 
 function RawProviderToolDetails({

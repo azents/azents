@@ -1,5 +1,9 @@
-import type { ActiveToolCall, ChatMessage, FileAttachment } from "./types";
 import type { PendingFile } from "@/shared/file-upload/useFileUpload";
+import type {
+  ActiveToolCall,
+  ChatMessage,
+  FileAttachment,
+} from "@azents/session-core/types";
 
 const now = new Date("2026-05-01T10:00:00.000Z").toISOString();
 

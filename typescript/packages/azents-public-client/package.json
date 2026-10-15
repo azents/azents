@@ -8,6 +8,10 @@
     ".": {
       "types": "./src/api-client.ts",
       "default": "./src/api-client.ts"
+    },
+    "./types": {
+      "types": "./src/api-types.ts",
+      "default": "./src/api-types.ts"
     }
   },
   "scripts": {
