@@ -62,7 +62,7 @@ function fixture(): {
       create: () => {
         const url = `blob:synthetic-${++sequence}`;
         urls.add(url);
-        assert.equal(urls.size, 1);
+        assert.ok(urls.size <= 2);
         return url;
       },
       revoke: (url) => {
@@ -270,7 +270,7 @@ void test("new navigation dialog accepts null source before image and rejects ol
   assert.equal(connection.dialog(false, null), true);
 });
 
-void test("one URL is replaced; a newer capture does not invalidate current acknowledged same-navigation coordinates", () => {
+void test("displayed URL survives decoding its replacement without changing input authority", () => {
   const { connection, urls, revoked } = fixture();
   connection.receiveText(JSON.stringify(status));
   connection.receiveFrame(binary(frame));
@@ -278,8 +278,8 @@ void test("one URL is replaced; a newer capture does not invalidate current ackn
   assert.ok(first);
   connection.displayed(first);
   connection.receiveFrame(binary({ ...frame, frame_sequence: 2 }));
-  assert.equal(urls.size, 1);
-  assert.deepEqual(revoked, [first.url]);
+  assert.equal(urls.size, 2);
+  assert.deepEqual(revoked, []);
   assert.equal(
     connection.coordinate(frame, { kind: "key", phase: "down", key: "Enter" }),
     true,
@@ -288,6 +288,8 @@ void test("one URL is replaced; a newer capture does not invalidate current ackn
   const second = connection.snapshot().image;
   assert.ok(second);
   connection.displayed(second);
+  assert.equal(urls.size, 1);
+  assert.deepEqual(revoked, [first.url]);
   assert.equal(
     connection.coordinate(frame, {
       kind: "pointer",
@@ -304,6 +306,26 @@ void test("one URL is replaced; a newer capture does not invalidate current ackn
   );
   connection.dispose();
   assert.equal(urls.size, 0);
+});
+
+void test("only displayed and newest decoding URLs survive replacement and both clear on denial", () => {
+  const { connection, urls, revoked } = fixture();
+  connection.receiveText(JSON.stringify(status));
+  connection.receiveFrame(binary(frame));
+  const displayed = connection.snapshot().image;
+  assert.ok(displayed);
+  connection.displayed(displayed);
+  connection.receiveFrame(binary({ ...frame, frame_sequence: 2 }));
+  const superseded = connection.snapshot().image;
+  assert.ok(superseded);
+  connection.receiveFrame(binary({ ...frame, frame_sequence: 3 }));
+  assert.equal(urls.size, 2);
+  assert.deepEqual(revoked, [superseded.url]);
+  assert.equal(connection.displayed(superseded), false);
+  assert.ok(urls.has(displayed.url));
+  connection.disconnect(true, "revoked");
+  assert.equal(urls.size, 0);
+  assert.equal(connection.snapshot().image, null);
 });
 
 void test("unknown outstanding input is never replayed across loss or a fresh attachment", () => {

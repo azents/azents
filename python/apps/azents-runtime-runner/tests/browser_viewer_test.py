@@ -247,6 +247,47 @@ async def test_latest_frame_shared_and_ack_metadata_not_latest_capture(
     assert authority.task_id in manager.tasks
 
 
+async def test_unfocused_iframe_navigation_preserves_main_view_and_text_input(
+    manager: RunnerBrowserManager, tmp_path: Path, site: str
+) -> None:
+    authority = await scope(manager, tmp_path, site)
+    resource = manager.tasks[authority.task_id].pages[authority.page_id]
+    native = resource.page
+    await native.evaluate(
+        """url => {
+            const frame = document.createElement('iframe');
+            frame.src = url;
+            document.body.append(frame);
+        }""",
+        site + "/child",
+    )
+    child = native.frames[-1]
+    await child.wait_for_url(site + "/child")
+    await native.locator("#text").focus()
+    viewer = RunnerBrowserViewer(manager, Budget())
+    transport = Transport()
+    running = asyncio.create_task(
+        viewer.run(authority, transport.receive, transport.send)
+    )
+    try:
+        displayed = await transport.frame()
+        await child.goto(site + "/child-updated")
+        assert resource.navigation_id == displayed.source.navigation_id
+        assert (
+            await transport.input(
+                1, {"kind": "composition", "phase": "start", "text": None}
+            )
+        )["accepted"] is True
+        assert (
+            await transport.input(
+                2, {"kind": "composition", "phase": "commit", "text": "Synthetic 한글"}
+            )
+        )["accepted"] is True
+        assert await native.locator("#text").input_value() == "Synthetic 한글"
+    finally:
+        await stop(running, transport)
+
+
 async def test_keys_composition_conflict_sequence_and_disconnect_cleanup(
     manager: RunnerBrowserManager, tmp_path: Path, site: str
 ) -> None:

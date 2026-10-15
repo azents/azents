@@ -157,6 +157,18 @@ const initialDialogStatus: BrowserStatus = {
   dialog: promptDialog,
   conflict: false,
 };
+async function clickBrowserViewport(surface: HTMLElement): Promise<void> {
+  const bounds = surface.getBoundingClientRect();
+  await userEvent.pointer({
+    target: surface,
+    keys: "[MouseLeft]",
+    coords: {
+      clientX: bounds.left + bounds.width / 2,
+      clientY: bounds.top + bounds.height / 2,
+    },
+  });
+}
+
 function BrowserFixture(props: SessionBrowserPanelProps): ReactElement {
   const active =
     props.state.type === "READY" &&
@@ -199,11 +211,34 @@ function BrowserFixture(props: SessionBrowserPanelProps): ReactElement {
   );
 }
 
+function StreamingImageFixture(props: SessionBrowserPanelProps): ReactElement {
+  const [sequence, setSequence] = useState(1);
+  const current = {
+    ...ready,
+    image: {
+      url: `data:image/svg+xml,${encodeURIComponent(svg.replace("</svg>", `<metadata>${sequence}</metadata></svg>`))}`,
+      frame: { ...frame, frame_sequence: sequence },
+    },
+  };
+  return (
+    <>
+      <Button onClick={() => setSequence((value) => value + 1)}>
+        Receive next frame
+      </Button>
+      <BrowserFixture {...props} state={current} />
+    </>
+  );
+}
+
 const meta = {
   component: SessionBrowserPanel,
   parameters: { layout: "fullscreen" },
   render: (props) => <BrowserFixture {...props} />,
   args: {
+    focused: false,
+    zoom: 1,
+    onToggleFocus: fn(),
+    onZoomChange: fn(),
     state: ready,
     addressValue: page.url,
     addressError: false,
@@ -271,7 +306,7 @@ export const FreshAckCompositionCleanup = {
   render: (props) => <FreshAckCleanupFixture {...props} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await userEvent.click(
+    await clickBrowserViewport(
       canvas.getByRole("region", { name: "Remote browser page" }),
     );
     const keyboard = canvas.getByRole("textbox", {
@@ -297,6 +332,74 @@ export const FreshAckCompositionCleanup = {
       },
     ]);
   },
+} satisfies Story;
+
+export const StreamingImagePreservesFocus = {
+  render: (props) => <StreamingImageFixture {...props} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const image = canvas.getByRole("img");
+    const initialUrl = image.getAttribute("src");
+    const keyboard = canvas.getByRole("textbox", {
+      name: "Remote browser keyboard",
+    });
+    keyboard.focus();
+    await expect(keyboard).toHaveFocus();
+    await fireEvent.click(
+      canvas.getByRole("button", { name: "Receive next frame" }),
+    );
+    await waitFor(() =>
+      expect(canvas.getByRole("img").getAttribute("src")).not.toBe(initialUrl),
+    );
+    await expect(canvas.getByRole("img")).toBe(image);
+    await expect(keyboard).toHaveFocus();
+    actions.mockClear();
+    await userEvent.keyboard("Stable text");
+    await expect(actions).toHaveBeenLastCalledWith(
+      { ...frame, frame_sequence: 2 },
+      { kind: "composition", phase: "commit", text: "t" },
+    );
+  },
+} satisfies Story;
+
+export const Focused = {
+  args: { focused: true },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const focused = canvas.getByRole("dialog", { name: "Focus browser" });
+    await expect(focused).toBeVisible();
+    const bounds = focused.getBoundingClientRect();
+    await expect(bounds.width).toBe(window.innerWidth);
+    await expect(bounds.height).toBe(window.innerHeight);
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Exit focused view" }),
+    );
+    await expect(args.onToggleFocus).toHaveBeenCalled();
+  },
+} satisfies Story;
+
+export const Zoomed = {
+  args: { focused: true, zoom: 2 },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const viewport = canvas.getByRole("region", {
+      name: "Remote browser page",
+    });
+    const window = viewport.parentElement;
+    await expect(window).not.toBeNull();
+    if (window === null) {
+      throw new Error("Browser window missing");
+    }
+    await expect(viewport.getBoundingClientRect().width).toBe(
+      window.clientWidth * 2,
+    );
+    await expect(window.scrollWidth).toBeGreaterThan(window.clientWidth);
+  },
+} satisfies Story;
+
+export const FocusedMobile = {
+  args: { focused: true },
+  parameters: { viewport: { defaultViewport: "mobile1" } },
 } satisfies Story;
 
 export const Connected = {
@@ -553,7 +656,7 @@ export const KeyboardAndComposition = {
     const keyboard = canvas.getByRole("textbox", {
       name: "Remote browser keyboard",
     });
-    await userEvent.click(
+    await clickBrowserViewport(
       canvas.getByRole("region", { name: "Remote browser page" }),
     );
     await expect(keyboard).toHaveFocus();
@@ -588,7 +691,7 @@ export const CancelledCompositionDoesNotCommit = {
     const keyboard = canvas.getByRole("textbox", {
       name: "Remote browser keyboard",
     });
-    await userEvent.click(
+    await clickBrowserViewport(
       canvas.getByRole("region", { name: "Remote browser page" }),
     );
     await expect(keyboard).toHaveFocus();
@@ -615,7 +718,7 @@ export const HeldKeyCleanupOnBlur = {
     const keyboard = canvas.getByRole("textbox", {
       name: "Remote browser keyboard",
     });
-    await userEvent.click(
+    await clickBrowserViewport(
       canvas.getByRole("region", { name: "Remote browser page" }),
     );
     await expect(keyboard).toHaveFocus();
@@ -714,7 +817,7 @@ export const NativeMobileEditingIntent = {
     const keyboard = canvas.getByRole("textbox", {
       name: "Remote browser keyboard",
     });
-    await userEvent.click(
+    await clickBrowserViewport(
       canvas.getByRole("region", { name: "Remote browser page" }),
     );
     await expect(keyboard).toHaveFocus();
@@ -789,7 +892,7 @@ export const UppercaseTextareaText = {
 export const TextareaShortcutModifiers = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await userEvent.click(
+    await clickBrowserViewport(
       canvas.getByRole("region", { name: "Remote browser page" }),
     );
     actions.mockClear();
@@ -843,7 +946,7 @@ export const OutsideClickCancelsComposition = {
     const keyboard = canvas.getByRole("textbox", {
       name: "Remote browser keyboard",
     });
-    await userEvent.click(
+    await clickBrowserViewport(
       canvas.getByRole("region", { name: "Remote browser page" }),
     );
     await expect(keyboard).toHaveFocus();

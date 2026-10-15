@@ -314,7 +314,7 @@ async def test_disconnect_after_dispatch_cleans_pressed_state_without_replay(
             await asyncio.gather(running, return_exceptions=True)
 
 
-async def test_child_frame_navigation_invalidates_main_page_coordinate_source(
+async def test_only_main_navigation_invalidates_main_page_coordinate_source(
     manager: RunnerBrowserManager, tmp_path: Path, site: str
 ) -> None:
     authority = await scope(manager, tmp_path, site)
@@ -335,13 +335,21 @@ async def test_child_frame_navigation_invalidates_main_page_coordinate_source(
                 "iframe.src = url; document.body.appendChild(iframe); }",
                 site + "/child",
             )
-        assert resource.navigation_id != old.source.navigation_id
+        assert resource.navigation_id == old.source.navigation_id
         ack = await transport.input(
             1,
             {"kind": "pointer", "phase": "move", "x": 10, "y": 10, "button": None},
             old,
         )
-        assert ack["reason_code"] == "browser_stale_frame"
+        assert ack["accepted"] is True
+        await resource.page.goto(site + "/destination")
+        assert resource.navigation_id != old.source.navigation_id
+        stale = await transport.input(
+            2,
+            {"kind": "pointer", "phase": "move", "x": 10, "y": 10, "button": None},
+            old,
+        )
+        assert stale["reason_code"] == "browser_stale_frame"
         assert manager.tasks[authority.task_id].guard.actor is None
     finally:
         await stop(running, transport)

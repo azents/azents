@@ -1,5 +1,10 @@
 {
   "browser": {
+    "focusBrowser": "Agrandir le navigateur",
+    "exitFocus": "Quitter la vue agrandie",
+    "zoomIn": "Zoom avant",
+    "zoomOut": "Zoom arrière",
+    "resetZoom": "Adapter à la fenêtre ({percent} %)",
     "title": "Navigateur",
     "open": "Ouvrir dans le navigateur",
     "loading": "Chargement des tâches du navigateur…",

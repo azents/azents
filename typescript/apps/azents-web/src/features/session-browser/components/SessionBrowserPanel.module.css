@@ -20,6 +20,13 @@
   min-width: 0;
 }
 
+.panel[data-focused="true"] {
+  position: fixed;
+  inset: 0;
+  height: 100dvh;
+  z-index: var(--mantine-z-index-modal);
+}
+
 .taskLabel {
   flex: 1;
 }
@@ -92,7 +99,6 @@
 .viewport {
   position: relative;
   display: flex;
-  flex: 1;
   min-height: 0;
   overflow: hidden;
   align-items: center;
@@ -100,6 +106,12 @@
   background: var(--mantine-color-default-hover);
   touch-action: none;
   outline-offset: rem(-3px);
+}
+
+.viewWindow {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 
 .viewport[data-input="false"] {
