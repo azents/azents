@@ -523,6 +523,16 @@ class DelegatedToolSnapshot(BaseModel):
     wire_dialect: ClientToolWireDialect
     toolkit_source: ToolkitSourceSnapshot | None
 
+    @model_serializer(mode="wrap")
+    def serialize_required_nullable_fields(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict[str, object]:
+        """Preserve the required nullable builtin source in canonical events."""
+        serialized: dict[str, object] = handler(self)
+        if self.toolkit_source is None:
+            serialized["toolkit_source"] = None
+        return serialized
+
 
 class ClientToolCallPayload(BaseModel):
     """Client tool call payload executed by Azents."""

@@ -392,6 +392,13 @@ async def test_catalog_enriches_registered_tool_call_with_source_snapshot() -> N
         wrapped.model_copy(update={"arguments": "{"})
     )
     assert invalid.delegated_tool is None
+    builtin_snapshot = wrapped.delegated_tool.model_copy(
+        update={"toolkit_source": None}
+    )
+    builtin_call = wrapped.model_copy(update={"delegated_tool": builtin_snapshot})
+    serialized = builtin_call.model_dump(mode="json", exclude_none=True)
+    recovered = ClientToolCallPayload.model_validate(serialized)
+    assert recovered.delegated_tool == builtin_snapshot
 
 
 async def test_catalog_uses_effective_namespace_and_source_qualifier() -> None:
