@@ -27,26 +27,24 @@ import {
   IconTargetArrow,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { type ReactElement, useMemo, useState } from "react";
+import { type ReactElement, useMemo } from "react";
+import { createReactContainer } from "@/shared/lib/createReactContainer";
 import { normalizeMarkdownToPlainText } from "@/shared/lib/markdown";
+import {
+  useGoalSection,
+  useTodoPreviewBar,
+} from "../containers/useTodoPreviewBar";
 import { MarkdownContent } from "./MarkdownContent";
 import type {
-  GoalStateSnapshot,
+  GoalSectionViewProps,
+  TodoPreviewBarViewProps,
+} from "../containers/useTodoPreviewBar";
+import type {
   GoalStatus,
   TodoItem,
   TodoStateSnapshot,
   TodoStatus,
 } from "@azents/session-core/types";
-
-interface TodoPreviewBarProps {
-  goal: GoalStateSnapshot | null;
-  isMobile: boolean;
-  todo: TodoStateSnapshot;
-  onClearGoal?: () => Promise<boolean>;
-  onUpdateGoal?: (objective: string) => Promise<boolean>;
-  onPauseGoal?: () => Promise<boolean>;
-  onResumeGoal?: (hint?: string) => Promise<boolean>;
-}
 
 interface TodoListContentProps {
   completedPercent: number;
@@ -185,94 +183,27 @@ function TodoRowText({
   );
 }
 
-function GoalSection({
+export function GoalSectionView({
   goal,
   onClearGoal,
   onUpdateGoal,
   onPauseGoal,
   onResumeGoal,
-}: {
-  goal: GoalStateSnapshot;
-  onClearGoal?: () => Promise<boolean>;
-  onUpdateGoal?: (objective: string) => Promise<boolean>;
-  onPauseGoal?: () => Promise<boolean>;
-  onResumeGoal?: (hint?: string) => Promise<boolean>;
-}): ReactElement {
+  editing,
+  draft,
+  submitting,
+  confirmAction,
+  resumeHint,
+  setEditing,
+  setDraft,
+  setConfirmAction,
+  setResumeHint,
+  saveGoal,
+  closeConfirm,
+  confirmGoalAction,
+}: GoalSectionViewProps): ReactElement {
   const t = useTranslations("chat.todo");
   const status = goal.status ?? "active";
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(goal.objective ?? "");
-  const [submitting, setSubmitting] = useState(false);
-  const [confirmAction, setConfirmAction] = useState<
-    "delete" | "pause" | "resume" | null
-  >(null);
-  const [resumeHint, setResumeHint] = useState("");
-
-  const saveGoal = (): void => {
-    const nextObjective = draft.trim();
-    if (!onUpdateGoal || nextObjective === "") {
-      return;
-    }
-    setSubmitting(true);
-    void onUpdateGoal(nextObjective).then((ok) => {
-      setSubmitting(false);
-      if (ok) {
-        setEditing(false);
-      }
-    });
-  };
-
-  const clearGoal = (): void => {
-    if (!onClearGoal) {
-      return;
-    }
-    setSubmitting(true);
-    void onClearGoal()
-      .then((ok) => {
-        if (ok) {
-          closeConfirm();
-        }
-      })
-      .finally(() => setSubmitting(false));
-  };
-
-  const closeConfirm = (): void => {
-    setConfirmAction(null);
-    setResumeHint("");
-  };
-
-  const confirmGoalAction = (): void => {
-    const action = confirmAction;
-    if (action === "delete") {
-      clearGoal();
-      return;
-    }
-    if (action === "pause") {
-      if (!onPauseGoal) {
-        return;
-      }
-      setSubmitting(true);
-      void onPauseGoal().then((ok) => {
-        setSubmitting(false);
-        if (ok) {
-          closeConfirm();
-        }
-      });
-      return;
-    }
-    if (action === "resume") {
-      if (!onResumeGoal) {
-        return;
-      }
-      setSubmitting(true);
-      void onResumeGoal(resumeHint).then((ok) => {
-        setSubmitting(false);
-        if (ok) {
-          closeConfirm();
-        }
-      });
-    }
-  };
 
   const canPause = status === "active";
   const canResume = status === "paused" || status === "blocked";
@@ -584,7 +515,13 @@ function TodoListContent({
   );
 }
 
-export function TodoPreviewBar({
+const GoalSection = createReactContainer(
+  "GoalSection",
+  useGoalSection,
+  GoalSectionView,
+);
+
+export function TodoPreviewBarView({
   goal,
   isMobile,
   todo,
@@ -592,10 +529,12 @@ export function TodoPreviewBar({
   onUpdateGoal,
   onPauseGoal,
   onResumeGoal,
-}: TodoPreviewBarProps): ReactElement | null {
+  opened,
+  setOpened,
+  expandedItems,
+  toggleExpanded,
+}: TodoPreviewBarViewProps): ReactElement | null {
   const t = useTranslations("chat.todo");
-  const [opened, setOpened] = useState(false);
-  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const item = previewItem(todo.items);
   const activeGoal =
     goal?.objective && goal.status !== "complete" ? goal : null;
@@ -618,18 +557,6 @@ export function TodoPreviewBar({
       ? (item?.content ?? null)
       : normalizeMarkdownToPlainText(activeGoal.objective ?? "") || null;
   const previewStatus = activeGoal?.status ?? null;
-
-  const toggleExpanded = (key: string): void => {
-    setExpandedItems((current) => {
-      const next = new Set(current);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
-      return next;
-    });
-  };
 
   const content = useMemo(
     () => (
@@ -659,6 +586,7 @@ export function TodoPreviewBar({
       completedPercent,
       completedText,
       expandedItems,
+      toggleExpanded,
       hasTodo,
       onClearGoal,
       onUpdateGoal,
@@ -801,3 +729,9 @@ export function TodoPreviewBar({
     </>
   );
 }
+
+export const TodoPreviewBar = createReactContainer(
+  "TodoPreviewBar",
+  useTodoPreviewBar,
+  TodoPreviewBarView,
+);

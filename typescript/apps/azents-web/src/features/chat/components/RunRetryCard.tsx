@@ -10,7 +10,6 @@ import {
   Stack,
   Text,
 } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
 import {
   IconAlertTriangle,
   IconChevronRight,
@@ -18,66 +17,19 @@ import {
   IconRefresh,
 } from "@tabler/icons-react";
 import { useLocale, useTranslations } from "next-intl";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
+import { createReactContainer } from "@/shared/lib/createReactContainer";
+import {
+  useAttemptHistory,
+  useRunRetryCard,
+} from "../containers/useRunRetryCard";
 import inlineControlClasses from "./ChatInlineControl.module.css";
 import {
   chatChevronTransition,
   chatCollapseTransitionProps,
 } from "./collapsiblePresentation";
-import type {
-  AgentRunPhase,
-  ChatLiveRunRetryState,
-  FailedRunAttemptSummary,
-  FailedRunFailureMetadata,
-} from "@azents/session-core/types";
-
-type RunRetryCardProps =
-  | {
-      variant: "live";
-      retry: ChatLiveRunRetryState;
-      phase: AgentRunPhase;
-    }
-  | {
-      variant: "terminal";
-      message: string;
-      failure: FailedRunFailureMetadata;
-      canRetry: boolean;
-      isRetryPending: boolean;
-      onRetry: () => void;
-    };
-
-function timestampMs(iso: string): number | null {
-  const value = new Date(iso).getTime();
-  return Number.isFinite(value) ? value : null;
-}
-
-function useRetryCountdown(nextRetryAt: string | null): number | null {
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    if (nextRetryAt === null) {
-      return;
-    }
-    const target = timestampMs(nextRetryAt);
-    if (target === null || target <= Date.now()) {
-      setNow(Date.now());
-      return;
-    }
-    const timer = window.setInterval(() => {
-      setNow(Date.now());
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [nextRetryAt]);
-
-  if (nextRetryAt === null) {
-    return null;
-  }
-  const target = timestampMs(nextRetryAt);
-  if (target === null) {
-    return null;
-  }
-  return Math.max(0, Math.ceil((target - now) / 1000));
-}
+import type { RunRetryCardProps } from "../containers/useRunRetryCard";
+import type { FailedRunAttemptSummary } from "@azents/session-core/types";
 
 const MODEL_PROVIDER_ERROR_PREFIX = "Model provider error:";
 
@@ -98,14 +50,17 @@ function formatFullDateTime(iso: string, locale: string): string {
   }).format(date);
 }
 
-function AttemptHistory({
+export function AttemptHistoryView({
   attempts,
+  opened,
+  toggle,
 }: {
   attempts: FailedRunAttemptSummary[];
+  opened: boolean;
+  toggle: () => void;
 }): React.ReactElement | null {
   const t = useTranslations("chat");
   const locale = useLocale();
-  const [opened, { toggle }] = useDisclosure(false);
   const sortedAttempts = useMemo(
     () => [...attempts].sort((a, b) => b.attemptNumber - a.attemptNumber),
     [attempts],
@@ -195,7 +150,19 @@ function AttemptHistory({
   );
 }
 
-export function RunRetryCard(props: RunRetryCardProps): React.ReactElement {
+const AttemptHistory = createReactContainer(
+  "AttemptHistory",
+  useAttemptHistory,
+  AttemptHistoryView,
+);
+
+export function RunRetryCardView({
+  props,
+  countdown,
+}: {
+  props: RunRetryCardProps;
+  countdown: number | null;
+}): React.ReactElement {
   const t = useTranslations("chat");
   const isLive = props.variant === "live";
   const providerFailure = isLive
@@ -206,7 +173,6 @@ export function RunRetryCard(props: RunRetryCardProps): React.ReactElement {
     : isLive
       ? props.retry.attempts
       : (props.failure.attempts ?? []);
-  const countdown = useRetryCountdown(isLive ? props.retry.nextRetryAt : null);
   const rawMessage = isLive ? props.retry.lastErrorMessage : props.message;
   const message = providerFailure
     ? providerMessageBody(rawMessage)
@@ -295,3 +261,9 @@ export function RunRetryCard(props: RunRetryCardProps): React.ReactElement {
     </Box>
   );
 }
+
+export const RunRetryCard = createReactContainer(
+  "RunRetryCard",
+  useRunRetryCard,
+  RunRetryCardView,
+);

@@ -16,6 +16,7 @@ import type {
 import type { ConnectionStatus } from "@azents/session-core/types";
 
 export interface AgentChatContainerProps {
+  renderSupportingContent: import("../session-panel/supportingPanel").SupportingPanelRenderer;
   handle: string;
   agent: AgentResponse;
   sessionId: string;
@@ -28,6 +29,7 @@ export type AgentChatSessionState =
   | { type: "LOADED"; session: AgentSessionResponse };
 
 export interface AgentChatContainerOutput {
+  renderSupportingContent: import("../session-panel/supportingPanel").SupportingPanelRenderer;
   handle: string;
   agent: AgentResponse;
   sessionId: string;
@@ -69,6 +71,7 @@ export function useAgentChatContainer(
   const mountKey: string = useMemo(() => sessionId, [sessionId]);
 
   return {
+    renderSupportingContent: props.renderSupportingContent,
     handle,
     agent,
     sessionId,

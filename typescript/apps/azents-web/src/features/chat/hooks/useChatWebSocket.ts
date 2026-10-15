@@ -7,6 +7,7 @@
  * received chat event  parent container  of managed live/history state reducer  with passes it..
  */
 
+import { useWindowEvent } from "@mantine/hooks";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { actionExecutionUpdatedEventFromValue } from "../actionExecutionDecoder";
 import type { PendingMailboxEnvelope } from "@azents/public-client";
@@ -491,20 +492,14 @@ export function useChatWebSocket({
     }
   }, [wsUrl]);
 
+  useWindowEvent("pageshow", requestResumeResync);
+  useWindowEvent("focus", requestResumeResync);
+  useWindowEvent("online", requestResumeResync);
   useEffect(() => {
     const handleVisibilityChange = (): void => {
       if (document.visibilityState === "visible") {
         requestResumeResync();
       }
-    };
-    const handlePageShow = (): void => {
-      requestResumeResync();
-    };
-    const handleFocus = (): void => {
-      requestResumeResync();
-    };
-    const handleOnline = (): void => {
-      requestResumeResync();
     };
     const handleResumeProbe = (): void => {
       const now = Date.now();
@@ -516,18 +511,12 @@ export function useChatWebSocket({
     };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("pageshow", handlePageShow);
-    window.addEventListener("focus", handleFocus);
-    window.addEventListener("online", handleOnline);
     const resumeProbeTimer = window.setInterval(
       handleResumeProbe,
       RESUME_PROBE_INTERVAL_MS,
     );
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("pageshow", handlePageShow);
-      window.removeEventListener("focus", handleFocus);
-      window.removeEventListener("online", handleOnline);
       window.clearInterval(resumeProbeTimer);
     };
   }, [requestResumeResync]);

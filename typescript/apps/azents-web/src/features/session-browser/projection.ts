@@ -1,6 +1,6 @@
 import { sameBrowserTarget } from "./input.ts";
-import type { BrowserLinkedTarget } from "./route";
 import type { BrowserPageChoice, BrowserViewState } from "./types";
+import type { BrowserLinkedTarget } from "@/shared/session-browser/route";
 
 /** Explicit live links win; stale/missing links select recent Agent work, then the first live tab. */
 export function browserProjectionState(

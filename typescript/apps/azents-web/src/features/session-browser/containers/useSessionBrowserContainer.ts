@@ -1,8 +1,12 @@
 "use client";
-
+import { useWindowEvent } from "@mantine/hooks";
 import { useTranslations } from "next-intl";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  browserPanelHref,
+  parseBrowserTarget,
+} from "@/shared/session-browser/route";
 import { trpc } from "@/trpc/client";
 import {
   browserAddress,
@@ -12,7 +16,6 @@ import {
 import { browserPopupHintCurrent } from "../popup";
 import { browserProjectionState } from "../projection";
 import { recentBrowserTargets } from "../recentTargets";
-import { browserPanelHref, parseBrowserTarget } from "../route";
 import {
   browserAccessError,
   useBrowserConnection,
@@ -371,6 +374,18 @@ export function useSessionBrowserContainer(
     };
   }
   const currentState = state;
+  useWindowEvent(
+    "keydown",
+    (event: KeyboardEvent): void => {
+      if (focused && event.key === "Escape" && !event.isComposing) {
+        event.preventDefault();
+        event.stopPropagation();
+        cancel.current();
+        setFocused(false);
+      }
+    },
+    true,
+  );
   useEffect(() => {
     if (!focused) {
       return;
@@ -387,17 +402,7 @@ export function useSessionBrowserContainer(
     updateViewport();
     viewport?.addEventListener("resize", updateViewport);
     viewport?.addEventListener("scroll", updateViewport);
-    const escape = (event: KeyboardEvent): void => {
-      if (event.key === "Escape" && !event.isComposing) {
-        event.preventDefault();
-        event.stopPropagation();
-        cancel.current();
-        setFocused(false);
-      }
-    };
-    window.addEventListener("keydown", escape, true);
     return () => {
-      window.removeEventListener("keydown", escape, true);
       viewport?.removeEventListener("resize", updateViewport);
       viewport?.removeEventListener("scroll", updateViewport);
       document.body.style.overflow = previousOverflow;

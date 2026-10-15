@@ -9,32 +9,17 @@
 import { Badge, Group, Loader, Text } from "@mantine/core";
 import { IconCheck, IconX } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
-import type { RuntimeStatus } from "@azents/session-core/types";
+import { createReactContainer } from "@/shared/lib/createReactContainer";
+import { useRuntimeStatusIndicator } from "../containers/useRuntimeStatusIndicator";
+import type { RuntimeStatusIndicatorProps } from "../containers/useRuntimeStatusIndicator";
 
-interface RuntimeStatusIndicatorProps {
-  status: RuntimeStatus;
-}
-
-export function RuntimeStatusIndicator({
+export function RuntimeStatusIndicatorView({
   status,
-}: RuntimeStatusIndicatorProps): React.ReactElement | null {
+  visible,
+}: RuntimeStatusIndicatorProps & {
+  visible: boolean;
+}): React.ReactElement | null {
   const t = useTranslations("chat.runtime");
-  const [visible, setVisible] = useState(false);
-
-  // ready status in 3sec after automatic hide
-  useEffect(() => {
-    if (status === "ready") {
-      setVisible(true);
-      const timer = setTimeout(() => setVisible(false), 3000);
-      return () => clearTimeout(timer);
-    }
-    if (status === "initializing" || status === "error") {
-      setVisible(true);
-    } else {
-      setVisible(false);
-    }
-  }, [status]);
 
   if (!visible) {
     return null;
@@ -83,3 +68,9 @@ export function RuntimeStatusIndicator({
 
   return null;
 }
+
+export const RuntimeStatusIndicator = createReactContainer(
+  "RuntimeStatusIndicator",
+  useRuntimeStatusIndicator,
+  RuntimeStatusIndicatorView,
+);

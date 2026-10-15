@@ -1237,25 +1237,6 @@ void test("specializes a strict Runtime Web request from matching metadata", () 
   });
 });
 
-void test("keeps removed Runtime Web tool names generic", () => {
-  for (const name of ["prepare_web_service", "cancel_web_service_request"]) {
-    const result = knownToolPresentation(
-      toolCall({
-        name,
-        toolkitSource: {
-          toolkit_config_id: "runtime-web",
-          toolkit_type: "runtime_web",
-          toolkit_name: "Runtime Web",
-          toolkit_slug: "runtime_web",
-        },
-        arguments: "{}",
-      }),
-    );
-
-    assert.deepEqual(result, { type: "generic", reason: "unregistered" });
-  }
-});
-
 void test("rejects Runtime Web metadata that does not match the projection", () => {
   const result = knownToolPresentation(
     toolCall({

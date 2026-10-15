@@ -19,7 +19,7 @@ import {
 import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import classes from "./AgentRuntimeEnvironmentVariables.module.css";
-import type { RuntimeEnvironmentVariablesProps } from "../runtime-environment-types";
+import type { RuntimeEnvironmentVariablesProps } from "@/shared/runtime-environment/types";
 
 /** Agent-scoped secret editor; values and mutations are supplied by its container. */
 export function AgentRuntimeEnvironmentVariables({

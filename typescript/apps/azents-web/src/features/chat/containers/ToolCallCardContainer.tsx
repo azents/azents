@@ -4,8 +4,8 @@ import {
   toolCallForDisplay,
 } from "@azents/session-core/delegatedToolPresentation";
 import { Component } from "react";
-import { BrowserToolResultLink } from "@/features/session-browser/BrowserToolResultLink";
 import { createReactContainer } from "@/shared/lib/createReactContainer";
+import { BrowserToolResultLink } from "@/shared/session-browser/BrowserToolResultLink";
 import {
   GenericToolCallCard,
   StandardSpecializedToolCallCard,

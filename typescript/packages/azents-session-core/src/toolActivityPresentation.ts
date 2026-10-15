@@ -70,9 +70,15 @@ export interface MessagePresentationItem {
 export type ChatPresentationItem =
   ToolActivityPresentationItem | MessagePresentationItem;
 
+interface ActivityEventProjection extends Omit<ChatEventResponse, "payload"> {
+  callId: string | null;
+  nativeItemId: string | null;
+  usage: Record<string, unknown> | null;
+}
+
 interface TimelineEvent {
   id: string;
-  event: ChatEventResponse;
+  event: ActivityEventProjection;
   message: ChatMessage | null;
   activityEvent: ActivityEvent | null;
   boundary: boolean;
@@ -94,7 +100,7 @@ function stringField(
   return typeof value === "string" ? value : null;
 }
 
-function eventProjectionRoot(event: ChatEventResponse): string {
+function eventProjectionRoot(event: ActivityEventProjection): string {
   return event.external_id?.split(":", 1)[0] ?? event.id;
 }
 
@@ -109,18 +115,30 @@ function nativeArtifactItem(
   return isRecord(item) ? item : null;
 }
 
-function semanticKey(event: ChatEventResponse): string {
-  const payload = event.payload;
+function decodeActivityEvent(
+  event: ChatEventResponse,
+): ActivityEventProjection {
+  const { payload, ...identity } = event;
+  const nativeItem = nativeArtifactItem(payload);
+  return {
+    ...identity,
+    callId: stringField(payload, "call_id"),
+    nativeItemId: nativeItem === null ? null : stringField(nativeItem, "id"),
+    // Usage is a transparent presentation relay, not a closed domain payload.
+    usage: isRecord(payload.usage) ? payload.usage : null,
+  };
+}
+
+function semanticKey(event: ActivityEventProjection): string {
   switch (event.kind) {
     case "client_tool_call":
-      return `tool:${stringField(payload, "call_id") ?? event.id}`;
+      return `tool:${event.callId ?? event.id}`;
     case "client_tool_result":
-      return `tool-result:${stringField(payload, "call_id") ?? event.id}`;
+      return `tool-result:${event.callId ?? event.id}`;
     case "provider_tool_call":
-      return `provider-tool:${stringField(payload, "call_id") ?? event.id}`;
+      return `provider-tool:${event.callId ?? event.id}`;
     case "reasoning": {
-      const nativeId = nativeArtifactItem(payload);
-      const itemId = nativeId === null ? null : stringField(nativeId, "id");
+      const itemId = event.nativeItemId;
       return itemId === null
         ? `reasoning:event:${eventProjectionRoot(event)}`
         : `reasoning:native:${itemId}`;
@@ -136,7 +154,7 @@ function messageIndex(messages: ChatMessage[], message: ChatMessage): number {
 }
 
 function messageForEvent(
-  event: ChatEventResponse,
+  event: ActivityEventProjection,
   messages: ChatMessage[],
 ): ChatMessage | null {
   const key = semanticKey(event);
@@ -148,7 +166,7 @@ function messageForEvent(
     return direct;
   }
 
-  const callId = stringField(event.payload, "call_id");
+  const callId = event.callId;
   if (callId === null) {
     return null;
   }
@@ -166,10 +184,10 @@ function messageForEvent(
 }
 
 function toolCallForEvent(
-  event: ChatEventResponse,
+  event: ActivityEventProjection,
   messages: ChatMessage[],
 ): ToolActivityCall | null {
-  const callId = stringField(event.payload, "call_id");
+  const callId = event.callId;
   if (callId === null) {
     return null;
   }
@@ -322,10 +340,11 @@ function timelineEvents(
   events: ChatEventResponse[],
   messages: ChatMessage[],
 ): TimelineEvent[] {
-  const clientResults = new Map<string, ChatEventResponse>();
-  for (const event of events) {
+  const observations = events.map(decodeActivityEvent);
+  const clientResults = new Map<string, ActivityEventProjection>();
+  for (const event of observations) {
     if (event.kind === "client_tool_result") {
-      const callId = stringField(event.payload, "call_id");
+      const callId = event.callId;
       if (callId) {
         clientResults.set(callId, event);
       }
@@ -333,10 +352,10 @@ function timelineEvents(
   }
 
   const providerKeys = new Set<string>();
-  return events.flatMap((event): TimelineEvent[] => {
+  return observations.flatMap((event): TimelineEvent[] => {
     const message = messageForEvent(event, messages);
     if (event.kind === "turn_marker") {
-      const usage = isRecord(event.payload.usage) ? event.payload.usage : null;
+      const usage = event.usage;
       return [
         {
           id: event.id,
@@ -378,7 +397,7 @@ function timelineEvents(
       event.kind === "provider_tool_call"
     ) {
       const call = toolCallForEvent(event, messages);
-      const callId = stringField(event.payload, "call_id");
+      const callId = event.callId;
       const result = callId ? clientResults.get(callId) : null;
       const toolMessage = result
         ? (messageForEvent(result, messages) ?? message)

@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { notFound, redirect } from "next/navigation";
-import { AgentChatTabPage } from "@/features/chat/AgentChatTabPage";
 import { trpc } from "@/trpc/server";
+import { AgentSessionPage } from "./AgentSessionPage";
 
 export default async function Page({
   params,
@@ -28,7 +28,7 @@ export default async function Page({
       trpc.chat.getAgentSession({ agentId, sessionId }),
     ]);
     return (
-      <AgentChatTabPage
+      <AgentSessionPage
         handle={handle}
         agent={agent}
         sessionId={sessionId}

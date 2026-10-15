@@ -7,7 +7,7 @@ import type {
   RuntimeEnvironmentVariableDraft,
   RuntimeEnvironmentVariablesProps,
   RuntimeEnvironmentVariablesState,
-} from "../runtime-environment-types";
+} from "@/shared/runtime-environment/types";
 import type { RuntimeEnvironmentEntryEditWritable } from "@azents/public-client";
 
 export interface AgentRuntimeEnvironmentVariablesContainerProps {

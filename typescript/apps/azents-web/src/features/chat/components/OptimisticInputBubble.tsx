@@ -1,5 +1,3 @@
-"use client";
-
 import { pendingInputBufferMessage } from "../pendingMessageProjection";
 import { MessageBubble } from "./MessageBubble";
 import type { CurrentWorkspaceProfile } from "../senderPresentation";

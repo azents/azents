@@ -6,7 +6,7 @@ import { trpc } from "@/trpc/client";
 import type {
   RuntimeEnvironmentVariableDraft,
   RuntimeEnvironmentVariablesProps,
-} from "@/features/agents/runtime-environment-types";
+} from "@/shared/runtime-environment/types";
 import type { WorkspaceEnvironmentEntryEditWritable } from "@azents/public-client";
 
 export function useWorkspaceEnvironmentContainer({

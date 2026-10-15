@@ -75,15 +75,15 @@ code_paths:
   - typescript/apps/azents-web/src/features/workspace-settings/WorkspaceEnvironmentPage.tsx
   - typescript/apps/azents-web/src/features/workspace-settings/containers/useWorkspaceEnvironmentContainer.ts
   - typescript/apps/azents-web/src/trpc/routers/workspace.ts
-  - typescript/apps/azents-web/src/features/agents/components/AgentRuntimeEnvironmentVariables*
+  - typescript/apps/azents-web/src/shared/runtime-environment/**
   - typescript/apps/azents-web/src/features/agents/containers/useAgentRuntimeEnvironmentVariablesContainer.ts
   - typescript/apps/azents-web/src/trpc/routers/agent.ts
   - typescript/apps/azents-web/src/features/agents/containers/useAgentRuntimeSettingsContainer.ts
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
-last_verified_at: 2026-10-15
-spec_version: 43
+last_verified_at: 2026-10-16
+spec_version: 44
 ---
 
 # Agent Runtime Persistence

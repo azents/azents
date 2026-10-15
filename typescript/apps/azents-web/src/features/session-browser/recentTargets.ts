@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import { browserToolTarget } from "./route.ts";
+import { browserToolTarget } from "../../shared/session-browser/route.ts";
 import type { BrowserTarget } from "./types";
 import type { ChatEventResponse } from "@azents/public-client";
 

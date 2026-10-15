@@ -11,7 +11,6 @@ import {
   Text,
   UnstyledButton,
 } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
 import {
   IconAlertCircle,
   IconCheck,
@@ -19,6 +18,8 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import { createReactContainer } from "@/shared/lib/createReactContainer";
+import { useCleanupActionDetails } from "../containers/useCleanupActionDetails";
 import {
   chatChevronTransition,
   chatCollapseTransitionProps,
@@ -30,6 +31,12 @@ import type { ReactNode } from "react";
 interface ActionExecutionTimelineCardProps {
   actionExecution: ActionExecutionProjection;
 }
+
+const CleanupActionExecutionTimelineCard = createReactContainer(
+  "CleanupActionExecutionTimelineCard",
+  useCleanupActionDetails,
+  CleanupActionExecutionTimelineCardView,
+);
 
 type ActionExecutionEvent = ActionExecutionProjection["events"][number];
 
@@ -325,18 +332,17 @@ function cleanupOutcomeColor(outcome: CleanupOutcome): string {
   }
 }
 
-function CleanupActionExecutionTimelineCard({
+export function CleanupActionExecutionTimelineCardView({
   actionExecution,
   t,
-}: {
-  actionExecution: ActionExecutionProjection;
-  t: ReturnType<typeof useTranslations<"chat.actionExecution">>;
-}): React.ReactElement {
+  detailsOpened,
+  close,
+  toggle,
+}: ReturnType<typeof useCleanupActionDetails>): React.ReactElement {
   const { execution, events } = actionExecution;
   const result = cleanupResult(execution.result);
   const color = statusColor(execution.status);
   const latestEvent = events.at(-1);
-  const [detailsOpened, { close, toggle }] = useDisclosure(false);
   const detailsId = `action-execution-details-${execution.id}`;
 
   return (
