@@ -137,7 +137,7 @@ This domain covers four feature groups.
 
 1. **Toolkit bundle** — external service integration tools such as MCP / GitHub / GCP / AWS / Notion / Sentry / GoogleAnalytics / Kubernetes. Implemented by Workspace-resident `ToolkitConfig` ownership and shared attachment `AgentToolkit`.
 2. **MCP OAuth2 connection** — toolkit-level OAuth2 client/token state for remote MCP servers. Implemented by `MCPOAuthConnection`.
-3. **Auto-bound platform capabilities** — Runtime, Runtime Web, Memory, Goal, Todo, Skill, Subagent, Scheduled Task, and other platform-owned Toolkits resolved from the current Agent, Session, Run, and Runtime capability snapshot without a persisted ToolkitConfig.
+3. **Auto-bound platform capabilities** — Runtime, Session Browser, Runtime Web, Memory, Goal, Todo, Skill, Subagent, Scheduled Task, and other platform-owned Toolkits resolved from the current Agent, Session, Run, and Runtime capability snapshot without a persisted ToolkitConfig.
 4. **Registered read-only VFS** — immutable run-scoped Skills and live authorized
    Memory resources behind generic read tools. Skills remain outside Runtime until
    `import_file` materializes one selected entry; Memory has no transfer capability.
@@ -471,6 +471,14 @@ transfer-read is a backend capability: Skills retains its immutable import path,
 while Memory explicitly does not support transfer or import.
 
 ### Managed Skill VFS
+
+The global `azents` source includes the `browser` Skill and its focused
+open/observe, actions/human-help and captures/files references. The three fixed
+`browser_open`, `browser_observe` and `browser_act` tools bind trusted current
+Session/Runtime authority; neither model arguments nor Skill instructions select
+another Session or profile. The Skill is guidance inside the existing immutable
+Run projection, not a new permission, ToolkitConfig or Runtime installer.
+See the [Session Browser flow](../flow/session-browser.md).
 
 Azents-managed Skill packages use a read-only virtual filesystem distinct from the Agent Runtime filesystem. The first registered mount is `skills`, and every managed Skill entrypoint has the canonical form:
 

@@ -21,6 +21,7 @@ code_paths:
   - python/apps/azents-runtime-runner/Dockerfile
   - python/apps/azents/src/azents/engine/tools/browser.py
   - python/apps/azents/src/azents/engine/tools/builtin.py
+  - python/apps/azents/src/azents/resources/vfs/global/skills/browser/SKILL.md
   - python/apps/azents/src/azents/engine/tools/runtime_io.py
   - python/apps/azents/src/azents/runtime/control_protocol/runner_operations.py
   - python/apps/azents/src/azents/runtime/control_protocol/grpc/runner_server.py
@@ -47,7 +48,7 @@ spec_version: 1
 
 ## Reachable Scope
 
-The Agent has three Runtime-backed browser tool roles: `browser_open`, `browser_observe`, and `browser_act`. They execute through the existing authenticated Runner operation path, not an MCP server or Agent-installed CLI. Public Session Browser projection and scoped page closure use that same command boundary. An independent authenticated live attachment connects the Session Browser panel through the API-owned Browser source to the current Runner. The default browser Skill and complete file/publication acceptance remain separate delivery work.
+The Agent has three Runtime-backed browser tool roles: `browser_open`, `browser_observe`, and `browser_act`. They execute through the existing authenticated Runner operation path, not an MCP server or Agent-installed CLI. Public Session Browser projection and scoped page closure use that same command boundary. An independent authenticated live attachment connects the Session Browser panel through the API-owned Browser source to the current Runner. The release-bundled browser Skill guides observation, interaction and original capture publication through existing image and file services.
 
 Browser tools require a current managed Runtime and concrete Session/Run resource authority. Runtime capability guards enforce process/workspace availability, and image observation additionally requires current transfer authority. Projection without current execution authority omits these tools. Each call revalidates access and resolves its actual Session working folder independently of any scheduling/root alias.
 
@@ -105,6 +106,26 @@ ACK only within the same attachment, target, navigation and dimensions, includin
 the interval before React rerenders after a displayed ACK changes.
 If safe cleanup cannot be sent, the attachment closes and Runner releases its
 native held state. Spatial effects retain exact displayed-frame fencing.
+
+## Managed Browser Skill
+
+The release-bundled `browser` Skill is projected from the global `release:azents`
+source into each immutable Run VFS projection at
+`azents://skills/azents/browser/SKILL.md`. Its focused references explain
+open/observe, actions/human help and captures/files. Discovery and `load_skill`
+use the existing Run authorization and content hash; adding the package does
+not install Runtime files or update an older Run's projected content.
+
+The Skill teaches current returned identities, fresh observation after human
+interaction, bounded view selection, untrusted page content and separating
+dispatched actions from verified outcomes. Native state remains Session-owned;
+there is no persistent acquire/return mode or end-of-turn profile cleanup.
+
+Image observation supplies model-visible imagery and an intentional original
+PNG. User delivery calls the existing `present_file` path with the actual
+returned Runtime path; capture, model materialization and publication have
+separate completion/failure semantics. Schema examples are checked against
+the strict Browser codecs and all supported provider lowerers.
 
 ## Typed Command and Result Boundary
 
@@ -170,4 +191,4 @@ The assessment is local to the current manager environment and is re-established
 
 Shared strict DTO/codec, current generations/targets, native Session state, dialog/event/file combinations, observations/capture bounds and transient conflict behavior have focused unit/real-SDK coverage. Engine tests cover full catalog/provider schema lowering, access revocation, current working-folder binding, mandatory action-state/result scope and image failure propagation.
 
-Focused tests and static component stories do not establish assembled-product acceptance. The representative Browser E2E uses normal user creation/login, an Engine-created task, real Runner images and API/Control source admission, a read-only child and unrelated-user denial, native pointer/dialog/composition input, fresh reconnect and the real Web panel. The phase execution plan records actual execution results and unresolved integration failures. Complete mobile/OS IME and original file/model/user publication acceptance remain distinct; the implementation Design remains unimplemented until the full feature verification is finished.
+Focused tests and static component stories do not establish assembled-product acceptance. The representative Browser E2E uses normal user creation/login, an Engine-created task, real Runner images and API/Control source admission, a read-only child and unrelated-user denial, native pointer/dialog/composition input, fresh reconnect and the real Web panel. A separate normal-authentication Engine journey verifies actual model imagery, original Runtime PNG identity and authorized Exchange publication/download. The [delivery verification report](../../design/session-browser-verification-report-2026-10-15.md) records completed checks, historical failures and evidence limits. Real iPhone Safari, OS-mobile IME, production deployment and real-site acceptance are not established by these synthetic journeys.

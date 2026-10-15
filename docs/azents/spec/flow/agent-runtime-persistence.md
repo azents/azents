@@ -99,6 +99,24 @@ The Runner image includes Pixi and points its global environments, exposed
 commands, manifest, and package cache under the existing persistent Runner
 `HOME`.
 
+## Session Browser native state
+
+The product Browser uses a native persistent context/profile for each concrete
+Session under the current Runner-reported Workspace. Tasks within that Session
+reuse site state; distinct Sessions do not share a browser context. Existing
+Runtime storage persistence owns the bytes, not a server checkpoint or profile
+export/restore service.
+
+Task/page/frame handles and resource incarnations belong to the live Runner
+manager. Runner replacement invalidates those identities without promising
+restoration of old tabs. Manager shutdown closes contexts without deleting native
+profile bytes. Run completion, panel dismissal and attachment revocation do not
+delete profiles or close unrelated tasks. Captures are intentional Session files;
+volatile viewer frames are not durable recordings.
+
+The [Session Browser flow](session-browser.md) defines current authority,
+SDK/tool behavior, lifecycle and capture delivery.
+
 ## Per-Agent Runtime environment variables
 
 Agent settings → Runtime exposes one environment-variable editor for managed Agents.

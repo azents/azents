@@ -74,6 +74,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/tools/import_resolver.py
   - python/apps/azents/src/azents/engine/tools/present_file.py
   - python/apps/azents/src/azents/engine/tools/read_image.py
+  - python/apps/azents/src/azents/engine/tools/browser.py
   - python/apps/azents/src/azents/engine/tools/run_tool_to_file.py
   - typescript/apps/azents-web/src/shared/file-upload/useFileUpload.ts
   - typescript/apps/azents-web/src/shared/file-upload/browserDownloadRedirect.ts
@@ -404,6 +405,19 @@ without Runtime access. Purge never relies on an Exchange URI to infer the owner
 database cascade erase the last cleanup reference before external deletion succeeds.
 
 ### Agent presents sandbox file
+
+Session Browser image observation saves an intentional original PNG in the
+authorized Session working context and materializes actual model imagery through
+RuntimeImageReadService/ModelFile/FilePart. Model normalization may produce a
+separate JPEG without overwriting the original. Source scope, dimensions, size
+and capture limits remain explicit.
+
+A capture becoming model-visible does not publish a user attachment. When
+delivery is requested, `present_file` receives the returned original Runtime
+path and uses the same verified publication boundary below. Browser downloads
+likewise remain site files until explicitly published; a screenshot is not a
+downloaded document. No continuous live-frame history or Browser-specific
+attachment store is created.
 
 Exchange publication recovery uses a completed
 `ExchangeFileOperationRepository.load_publication_for_recovery` operation with

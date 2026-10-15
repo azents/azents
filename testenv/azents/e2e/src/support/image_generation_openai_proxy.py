@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import threading
 import time
 import urllib.error
@@ -31,6 +32,9 @@ _EXPLICIT_IMAGE_PROMPT = "Provider image generation explicit pin handoff"
 _FOLLOW_UP_PROMPT = "Provider image generation follow-up"
 _OPENAI_IMAGE_PROMPT = "A deterministic OpenAI image"
 _OPENAI_IMAGE_CALL_ID = "call_openai_image_generation"
+_BROWSER_FILES_PROMPT = "Session Browser capture and publication handoff"
+_BROWSER_FILES_CALL_PREFIX = "call_browser_files_"
+_BROWSER_FILES_JOURNAL_PATH = "/v1/_browser_files_requests"
 _BRAVE_PROMPT_PREFIX = "Brave Search E2E "
 _BRAVE_KINDS = ("web", "context", "news", "images", "videos")
 RUNTIME_ENVIRONMENT_PROMPT_PREFIX = "Agent Runtime environment E2E: "
@@ -519,6 +523,39 @@ class _ToolOutputObservation:
     call_id: str
     kind: str | None
     output_text: str | None
+
+
+def _browser_file_result(request: _ModelRequest, stage: str) -> dict[str, object]:
+    """Decode only the named Browser command's structured result."""
+    [output] = [
+        item
+        for item in request.input_items or ()
+        if item.effective_call_id == _BROWSER_FILES_CALL_PREFIX + stage
+        and item.kind == "function_call_output"
+    ]
+    value = _object(json.loads(output.wire_json)).get("output")
+    if isinstance(value, str):
+        value = json.loads(value)
+    if isinstance(value, dict) and "tasks" in value:
+        return _object(value)
+    if isinstance(value, list):
+        for raw in _list(value):
+            part = _object(raw)
+            text = part.get("text")
+            if isinstance(text, str):
+                parsed = json.loads(text)
+                if isinstance(parsed, dict) and "tasks" in parsed:
+                    return _object(parsed)
+    raise ValueError("Browser fixture result has no Browser payload.")
+
+
+def _browser_capture_path(request: _ModelRequest) -> str:
+    """Use the captured original path, never a guessed Runtime workspace."""
+    capture = _object(_browser_file_result(request, "capture")["capture"])
+    path = capture.get("path")
+    if not isinstance(path, str) or not path.startswith("/"):
+        raise ValueError("Browser fixture capture path is invalid.")
+    return path
 
 
 @dataclass(frozen=True)
@@ -2291,6 +2328,7 @@ def _image_request_egress(request: _ImageGenerationRequest) -> dict[str, object]
 class _State:
     catalog_source_variant: ClassVar[_InferenceProfileSourceVariant] = "baseline"
     requests: ClassVar[list[dict[str, object]]] = []
+    browser_files_requests: ClassVar[list[dict[str, object]]] = []
     consolidation_continuations: ClassVar[
         OrderedDict[str, ConsolidationFixtureContinuation]
     ] = OrderedDict()
@@ -2470,6 +2508,92 @@ class _Handler(BaseHTTPRequestHandler):
         """Route one generation-fenced local model request."""
         request = _decode_model_request(request)
         user_text = _last_user_text(request)
+        if user_text == _BROWSER_FILES_PROMPT:
+            if self.path != "/v1/responses":
+                self._write_json(
+                    400, {"error": {"message": "Browser fixture requires Responses."}}
+                )
+                return
+            if _SESSION_TITLE_SYSTEM_MARKER in request.matching_text:
+                self._write_text_response(
+                    request,
+                    '{"title":"Browser capture delivery"}',
+                    response_id="resp_browser_files_title",
+                )
+                return
+            observed_images = []
+            for item in request.input_items or ():
+                payload = _object(json.loads(item.wire_json))
+                content = payload.get("content", payload.get("output"))
+                if not isinstance(content, list):
+                    continue
+                for part in _list(content):
+                    if isinstance(part, dict) and part.get("type") == "input_image":
+                        image = _object(part)
+                        url = image.get("image_url")
+                        observed_images.append(
+                            isinstance(url, str) and url.startswith("data:image/")
+                        )
+            with _State.lock:
+                _State.browser_files_requests.append(
+                    {
+                        "model": request.model,
+                        "completed_calls": [
+                            item.call_id
+                            for item in request.tool_outputs
+                            if item.call_id.startswith(_BROWSER_FILES_CALL_PREFIX)
+                        ],
+                        "model_image_count": len(observed_images),
+                        "model_images_are_data": all(observed_images),
+                    }
+                )
+            prefix = _BROWSER_FILES_CALL_PREFIX
+            arguments: dict[str, object]
+            if request_has_tool_output(request, prefix + "publish"):
+                self._write_text_response(
+                    request,
+                    "BROWSER_CAPTURE_PUBLICATION_COMPLETED",
+                    response_id="resp_browser_files_complete",
+                )
+                return
+            if request_has_tool_output(request, prefix + "inspect"):
+                name, stage = "present_file", "publish"
+                arguments = {"paths": [_browser_capture_path(request)]}
+            elif request_has_tool_output(request, prefix + "capture"):
+                path = _browser_capture_path(request)
+                code = (
+                    "from pathlib import Path;import hashlib,json;"
+                    f"p=Path({path!r});b=p.read_bytes();"
+                    "print(json.dumps({'size':len(b),'sha256':hashlib.sha256(b).hexdigest(),"
+                    "'png':b.startswith(bytes([137,80,78,71,13,10,26,10]))}))"
+                )
+                name, stage = "exec_command", "inspect"
+                arguments = {"command": "python -c " + shlex.quote(code)}
+            elif request_has_tool_output(request, prefix + "open"):
+                page = _object(_browser_file_result(request, "open")["page"])
+                name, stage = "browser_observe", "capture"
+                arguments = {
+                    "task_id": page["task_id"],
+                    "page_id": page["id"],
+                    "resource_incarnation": page["resource_incarnation"],
+                    "view": "image",
+                }
+            elif request_has_tool_output(request, prefix + "skill"):
+                name, stage = "browser_open", "open"
+                arguments = {
+                    "url": "http://127.0.0.1:8766/",
+                    "label": "Capture delivery",
+                }
+            else:
+                name, stage = "load_skill", "skill"
+                arguments = {"skill_path": "azents://skills/azents/browser/SKILL.md"}
+            self._write_function_call_response(
+                request,
+                call_id=prefix + stage,
+                name=name,
+                arguments=arguments,
+            )
+            return
         if self.path == "/v1/responses":
             fixture_request = request.consolidation
             if is_consolidation_fixture_request(fixture_request):
@@ -4085,6 +4209,8 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _journal_for_path(self) -> list[dict[str, object]] | None:
         """Return the journal selected by the current request path."""
+        if self.path == _BROWSER_FILES_JOURNAL_PATH:
+            return _State.browser_files_requests
         if self.path == _JOURNAL_PATH:
             return _State.requests
         if self.path == _OPENAI_IMAGE_JOURNAL_PATH:
