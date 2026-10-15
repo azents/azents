@@ -7,9 +7,10 @@ import pytest
 from azcommon import di
 from fastapi import Depends, FastAPI, Request, WebSocket
 from fastapi.responses import StreamingResponse
+from fastapi.routing import APIRoute, APIWebSocketRoute
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
-from starlette.routing import Mount
+from starlette.routing import BaseRoute, Mount
 
 from azents.app import (
     create_admin_api_app,
@@ -43,6 +44,35 @@ from azents.services.terminal_policy.invalidation import (
     get_terminal_policy_invalidation_publisher,
 )
 from azents.utils.appctx import AppContext
+
+
+def _prioritize_binding_probes(app: FastAPI) -> None:
+    """Keep real bindings while avoiding unrelated lazy router compilation.
+
+    These requests verify dependency identity and lifetime, not product endpoint
+    matching. Retain every original route and production-route relative order.
+    """
+    paths = {
+        "/binding-evidence",
+        "/binding-evidence-ws",
+        "/context-evidence",
+        "/publisher-evidence",
+        "/request-publisher-evidence",
+        "/generator-publisher-evidence",
+        "/canonical-publisher-evidence",
+    }
+    probes: list[BaseRoute] = []
+    production: list[BaseRoute] = []
+    for route in app.router.routes:
+        if isinstance(route, Mount) and route.path == "/internal":
+            assert isinstance(route.app, FastAPI)
+            _prioritize_binding_probes(route.app)
+            probes.append(route)
+        elif isinstance(route, APIRoute | APIWebSocketRoute) and route.path in paths:
+            probes.append(route)
+        else:
+            production.append(route)
+    app.router.routes[:] = [*probes, *production]
 
 
 @pytest.fixture
@@ -115,6 +145,7 @@ def test_application_bindings_serve_http_and_websocket_without_overrides(
         expected_context=binding.appctx,
         expected_container=container,
     )
+    _prioritize_binding_probes(app)
     client = TestClient(app)
     try:
         assert client.get("/binding-evidence").json() == {
@@ -146,6 +177,24 @@ def test_internal_mount_shares_exact_borrowed_bindings(binding_config: Config) -
         expected_context=context,
         expected_container=container,
     )
+    original_routes = tuple(app.router.routes)
+    original_internal_routes = tuple(internal.router.routes)
+    _prioritize_binding_probes(app)
+    assert set(map(id, app.router.routes)) == set(map(id, original_routes))
+    assert set(map(id, internal.router.routes)) == set(
+        map(id, original_internal_routes)
+    )
+    first = app.router.routes[0]
+    assert isinstance(first, Mount)
+    assert first.app is internal
+    assert tuple(app.router.routes[1:]) == tuple(
+        route for route in original_routes if route is not first
+    )
+    assert isinstance(internal.router.routes[0], APIRoute)
+    assert internal.router.routes[0].path == "/binding-evidence"
+    assert isinstance(internal.router.routes[1], APIWebSocketRoute)
+    assert internal.router.routes[1].path == "/binding-evidence-ws"
+    assert tuple(internal.router.routes[2:]) == original_internal_routes[:-2]
     client = TestClient(app)
     try:
         assert client.get("/internal/binding-evidence").json() == {
@@ -186,6 +235,7 @@ def test_context_binding_for_another_owner_remains_an_explicit_override(
         expected_context=custom_context,
         expected_container=container,
     )
+    _prioritize_binding_probes(app)
     client = TestClient(app)
     try:
         assert client.get("/binding-evidence").json() == {
@@ -254,6 +304,7 @@ def test_custom_context_override_retains_request_injection_and_lifetime(
     path = "/context-evidence"
     if internal_mount:
         path = f"/internal{path}"
+    _prioritize_binding_probes(app)
     client = TestClient(app)
     try:
         for value in ["first", "second"]:
@@ -309,6 +360,7 @@ def test_custom_publishers_and_explicit_overrides_keep_their_identity(
             "marker": value,
         }
 
+    _prioritize_binding_probes(app)
     client = TestClient(app)
     try:
         for _ in range(2):
@@ -384,6 +436,7 @@ def test_custom_publishers_receive_each_request(
     path = "/request-publisher-evidence"
     if internal_mount:
         path = f"/internal{path}"
+    _prioritize_binding_probes(app)
     client = TestClient(app)
     try:
         for value in ["first", "second"]:
@@ -469,6 +522,7 @@ def test_custom_publisher_generators_close_after_each_streaming_response(
     path = "/generator-publisher-evidence"
     if internal_mount:
         path = f"/internal{path}"
+    _prioritize_binding_probes(app)
     client = TestClient(app)
     try:
         for value in ["first", "second"]:
@@ -626,6 +680,7 @@ async def test_canonical_publishers_use_custom_request_context(
     path = "/canonical-publisher-evidence"
     if internal_mount:
         path = f"/internal{path}"
+    _prioritize_binding_probes(app)
     async with custom_context, container:
         await custom_context.get_variable(
             f"{runtime_deps.__name__}.get_runtime_terminal_coordination_store",
@@ -723,6 +778,7 @@ def test_canonical_publishers_use_explicit_request_store_and_dispatcher_override
     path = "/canonical-publisher-evidence"
     if internal_mount:
         path = f"/internal{path}"
+    _prioritize_binding_probes(app)
     client = TestClient(app)
     try:
         for value in ["first", "second"]:
