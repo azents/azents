@@ -21,6 +21,7 @@ from azents_runtime_control.browser_viewer_contract import (
     ViewerComposition,
     ViewerDialog,
     ViewerDialogResponse,
+    ViewerEditable,
     ViewerFrame,
     ViewerFrameAck,
     ViewerInput,
@@ -28,6 +29,7 @@ from azents_runtime_control.browser_viewer_contract import (
     ViewerInputReason,
     ViewerKey,
     ViewerNavigation,
+    ViewerPaste,
     ViewerPointer,
     ViewerSource,
     ViewerStatus,
@@ -44,7 +46,6 @@ from azents_runtime_control.runtime_stream_session import (
 from playwright.async_api import Error, Page
 
 from azents_runtime_runner.browser import (
-    _CREDENTIAL_FIELDS,
     BrowserFailure,
     RunnerBrowserManager,
     _ActionOutcome,
@@ -52,6 +53,8 @@ from azents_runtime_runner.browser import (
     _safe_page_text,
     _Task,
 )
+from azents_runtime_runner.browser_editables import BrowserEditableRegions
+from azents_runtime_runner.browser_popups import BrowserPopupTracker
 
 
 class BrowserFrameBudget(Protocol):
@@ -88,6 +91,7 @@ def _capture_error_code(error: Error) -> str:
 class _Image:
     source: ViewerSource
     data: bytes
+    editables: tuple[ViewerEditable, ...]
 
 
 class _LatestPage:
@@ -100,9 +104,13 @@ class _LatestPage:
         self.failed = False
         self.changed = asyncio.Condition()
         self.task: asyncio.Task[None] | None = None
+        self.editables = BrowserEditableRegions(page.page)
+        self.popups = BrowserPopupTracker(page.page, lambda: page.popup_owner)
 
     async def capture(self) -> None:
         try:
+            await self.popups.start()
+            self.page.popup_tracker = self.popups
             while not self.page.page.is_closed():
                 if self.page.dialog is None:
                     await self.capture_once()
@@ -135,6 +143,7 @@ class _LatestPage:
                 "browser_resource_exhausted", "Browser capture budget is exhausted"
             )
         try:
+            editables = await self.editables.read()
             data = await self.screenshot(navigation)
             if data is None:
                 return
@@ -142,6 +151,10 @@ class _LatestPage:
                 self.page.page
             ):
                 return
+            current_editables = await self.editables.read()
+            editables = tuple(
+                region for region in editables if region in current_editables
+            )
             if len(data) + MAX_VIEWER_HEADER_BYTES + 4 > MAX_VIEWER_MESSAGE_BYTES:
                 raise BrowserFailure(
                     "browser_frame_oversized", "Browser live frame exceeds its bound"
@@ -157,6 +170,7 @@ class _LatestPage:
                 self.latest = _Image(
                     ViewerSource(self.sequence, navigation, viewport[0], viewport[1]),
                     data,
+                    editables,
                 )
                 self.changed.notify_all()
         finally:
@@ -170,17 +184,10 @@ class _LatestPage:
                 quality=60,
                 full_page=False,
                 timeout=2000,
-                mask=[
-                    frame.locator(_CREDENTIAL_FIELDS)
-                    for frame in self.page.page.frames
-                    if not frame.is_detached()
-                ],
-                mask_color="#000000",
             )
         except Error as error:
-            # Mask locators can lose their native document before Playwright
-            # delivers framenavigated, including inside a child frame. Discard
-            # this capture; the normal next frame observes the current document.
+            # Native documents can change before framenavigated is delivered.
+            # Discard that capture; the next frame observes the current document.
             if (
                 self.page.dialog is not None
                 or navigation != self.page.navigation_id
@@ -205,6 +212,10 @@ class _LatestPage:
             self.task.cancel()
             await asyncio.gather(self.task, return_exceptions=True)
         self.clear()
+        await self.editables.close()
+        if self.page.popup_tracker is self.popups:
+            self.page.popup_tracker = None
+        await self.popups.close()
 
 
 def _viewport(page: Page) -> tuple[int, int]:
@@ -314,8 +325,10 @@ class _Attachment:
         )
         self.sequence = 0
         self.sent: ViewerSource | None = None
+        self.sent_editables: tuple[ViewerEditable, ...] = ()
         self.retired_frames: deque[int] = deque(maxlen=128)
         self.acknowledged: ViewerSource | None = None
+        self.acknowledged_editables: tuple[ViewerEditable, ...] = ()
         self.buttons: set[Literal["left", "middle", "right"]] = set()
         self.keys: set[str] = set()
         self.composing = False
@@ -356,6 +369,13 @@ class _Attachment:
                 self.page.navigation_id,
                 dialog,
                 self.task.guard.actor is not None and self.task.guard.actor != self.id,
+                (
+                    self.page.popup_selection.target
+                    if self.page.popup_selection is not None
+                    and self.page.popup_selection.owner == self.id
+                    and self.page.popup_selection.target.page_id in self.task.pages
+                    else None
+                ),
             )
         )
         if value != self.last_status:
@@ -381,6 +401,8 @@ class _Attachment:
                 self.retired_frames.append(self.sent.frame_sequence)
                 self.sent = None
                 self.acknowledged = None
+                self.sent_editables = ()
+                self.acknowledged_editables = ()
             image = self.source.latest
             if (
                 self.sent is None
@@ -399,9 +421,16 @@ class _Attachment:
                         "Browser frame send budget is exhausted",
                     )
                 self.sent = image.source
+                self.sent_editables = image.editables
                 try:
                     data = encode_viewer_frame(
-                        ViewerFrame(self.id, self.target, image.source, image.data)
+                        ViewerFrame(
+                            self.id,
+                            self.target,
+                            image.source,
+                            image.data,
+                            image.editables,
+                        )
                     )
                     del image
                     await self.emit(WebSocketOpcode.BINARY, data)
@@ -436,6 +465,10 @@ class _Attachment:
                             "Browser frame acknowledgement is stale"
                         )
                     self.acknowledged, self.sent = self.sent, None
+                    self.acknowledged_editables, self.sent_editables = (
+                        self.sent_editables,
+                        (),
+                    )
                     async with self.source.changed:
                         self.source.changed.notify_all()
                 case ViewerInput():
@@ -612,6 +645,11 @@ class _Attachment:
         self.begin()
         try:
             self.current()
+            if not isinstance(action, ViewerPointer) and not (
+                isinstance(action, ViewerKey) and action.phase == "up"
+            ):
+                self.page.popup_owner = None
+                self.source.popups.clear()
             match action:
                 case ViewerPointer():
                     if action.phase != "cancel":
@@ -627,6 +665,16 @@ class _Attachment:
                                 "Browser pointer is already pressed",
                             )
                         self.buttons.add(action.button)
+                        self.page.popup_selection = None
+                        self.source.popups.clear()
+                        self.page.popup_owner = (
+                            self.id
+                            if action.button == "left"
+                            and not self.keys.intersection(
+                                {"Control", "Meta", "Shift", "Alt"}
+                            )
+                            else None
+                        )
                         await self.effect(
                             lambda: self.page.page.mouse.move(action.x, action.y)
                         )
@@ -642,9 +690,12 @@ class _Attachment:
                             lambda: self.page.page.mouse.move(action.x, action.y)
                         )
                         self.buttons.discard(action.button)
-                        await self.effect(
-                            lambda: self.page.page.mouse.up(button=action.button)
-                        )
+                        try:
+                            await self.effect(
+                                lambda: self.page.page.mouse.up(button=action.button)
+                            )
+                        finally:
+                            self.page.popup_owner = None
                     else:
                         await self.cleanup()
                 case ViewerWheel():
@@ -702,12 +753,50 @@ class _Attachment:
                         )
                     else:
                         self.composing = False
+                case ViewerPaste():
+                    if self.composing or self.buttons or self.keys:
+                        raise BrowserFailure(
+                            "browser_input_conflict",
+                            "Another Browser interaction is active",
+                        )
+                    if not any(
+                        region.id == action.editable_id
+                        for region in self.acknowledged_editables
+                    ):
+                        raise BrowserFailure(
+                            "browser_stale_input",
+                            "Browser editable is no longer current",
+                        )
+
+                    async def paste() -> None:
+                        if not await self.source.editables.focused(action.editable_id):
+                            raise BrowserFailure(
+                                "browser_stale_input",
+                                "Browser editable is no longer focused",
+                            )
+                        self.current()
+                        if (
+                            request.source is None
+                            or request.source.navigation_id != self.page.navigation_id
+                            or (request.source.width, request.source.height)
+                            != _viewport(self.page.page)
+                        ):
+                            raise BrowserFailure(
+                                "browser_stale_frame",
+                                "Browser source changed before paste dispatch",
+                            )
+                        await self.page.page.keyboard.insert_text(action.text)
+
+                    await self.effect(paste)
                 case _:
                     assert_never(action)
         finally:
             self.finish()
 
     async def cleanup(self) -> None:
+        if self.page.popup_owner == self.id:
+            self.page.popup_owner = None
+        self.source.popups.discard(self.id)
         # Never release another attachment's pressed state or guard.
         owns = self.task.guard.actor == self.id or self.task.guard.actor is None
         try:

@@ -25,6 +25,17 @@ export interface BrowserStatus {
   navigation_id: string;
   dialog: BrowserDialog | null;
   conflict: boolean;
+  opened_target: BrowserTarget | null;
+}
+
+export interface BrowserEditable {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  input_mode:
+    "text" | "email" | "url" | "tel" | "numeric" | "decimal" | "search";
 }
 
 export interface BrowserFrame extends BrowserViewport {
@@ -34,6 +45,7 @@ export interface BrowserFrame extends BrowserViewport {
   frame_sequence: number;
   navigation_id: string;
   media_type: "image/jpeg";
+  editables: readonly BrowserEditable[];
 }
 
 export type BrowserInputReason =
@@ -77,6 +89,7 @@ export type BrowserInputAction =
       delta_y: number;
     }
   | { kind: "key"; phase: "down" | "up"; key: string }
+  | { kind: "paste"; editable_id: string; text: string }
   | {
       kind: "composition";
       phase: "start" | "commit" | "cancel";

@@ -6,6 +6,7 @@ import {
   browserFrameMatchesStatus,
   browserInput,
   browserKey,
+  browserPasteAction,
   browserPoint,
   browserReleaseFrame,
   browserRemoteModifiers,
@@ -28,6 +29,7 @@ const frame = {
   width: 1280,
   height: 800,
   media_type: "image/jpeg" as const,
+  editables: [],
 };
 const status = {
   type: "status" as const,
@@ -39,6 +41,7 @@ const status = {
   navigation_id: "nav",
   dialog: null,
   conflict: false,
+  opened_target: null,
 };
 
 void test("address entry supports web destinations without embedded credentials", () => {
@@ -59,6 +62,37 @@ void test("address entry supports web destinations without embedded credentials"
   ]) {
     assert.equal(browserAddress(value), null);
   }
+});
+
+void test("paste preserves plaintext and rejects oversized or unknown destinations", () => {
+  const source = {
+    ...frame,
+    editables: [
+      {
+        id: "doc-1",
+        x: 1,
+        y: 1,
+        width: 100,
+        height: 40,
+        input_mode: "text" as const,
+      },
+    ],
+  };
+  const text = ' Synthetic 한글 🔑\n"\\ ';
+  assert.deepEqual(browserPasteAction(source, "doc-1", text), {
+    kind: "paste",
+    editable_id: "doc-1",
+    text,
+  });
+  for (const value of [
+    "",
+    "x".repeat(32769),
+    "界".repeat(24000),
+    "\u0000".repeat(20000),
+  ]) {
+    assert.equal(browserPasteAction(source, "doc-1", value), null);
+  }
+  assert.equal(browserPasteAction(source, "old", text), null);
 });
 
 void test("textarea uppercase text uses local Shift while actual chords retain typed modifiers", () => {

@@ -66,6 +66,12 @@ class ViewerComposition:
 
 
 @dataclass(frozen=True)
+class ViewerPaste:
+    editable_id: str
+    text: str
+
+
+@dataclass(frozen=True)
 class ViewerDialogResponse:
     dialog_id: str
     accept: bool
@@ -83,6 +89,7 @@ type ViewerAction = (
     | ViewerWheel
     | ViewerKey
     | ViewerComposition
+    | ViewerPaste
     | ViewerDialogResponse
     | ViewerNavigation
 )
@@ -117,6 +124,17 @@ class ViewerStatus:
     navigation_id: str
     dialog: ViewerDialog | None
     conflict: bool
+    opened_target: ViewerTarget | None
+
+
+@dataclass(frozen=True)
+class ViewerEditable:
+    id: str
+    x: float
+    y: float
+    width: float
+    height: float
+    input_mode: Literal["text", "email", "url", "tel", "numeric", "decimal", "search"]
 
 
 class ViewerInputReason(enum.StrEnum):
@@ -153,6 +171,7 @@ class ViewerFrame:
     target: ViewerTarget
     source: ViewerSource
     image: bytes
+    editables: tuple[ViewerEditable, ...]
 
 
 class _Fields:
@@ -314,6 +333,11 @@ def _action(value: object) -> ViewerAction:
                     "Invalid Browser composition combination"
                 )
             return ViewerComposition(phase, text)
+        case "paste":
+            fields = _Fields(value, {"kind", "editable_id", "text"})
+            return ViewerPaste(
+                fields.text("editable_id", 48), fields.text("text", 32768)
+            )
         case "dialog":
             fields = _Fields(value, {"kind", "dialog_id", "accept", "text"})
             return ViewerDialogResponse(
@@ -415,6 +439,9 @@ def encode_viewer_event(event: ViewerStatus | ViewerInputAck) -> bytes:
                 "navigation_id": event.navigation_id,
                 "dialog": None if event.dialog is None else asdict(event.dialog),
                 "conflict": event.conflict,
+                "opened_target": (
+                    None if event.opened_target is None else asdict(event.opened_target)
+                ),
             }
         case ViewerInputAck():
             value = {"type": "input_ack", **asdict(event)}
@@ -432,6 +459,7 @@ def encode_viewer_frame(frame: ViewerFrame) -> bytes:
             "target": asdict(frame.target),
             **asdict(frame.source),
             "media_type": "image/jpeg",
+            "editables": [asdict(region) for region in frame.editables],
         },
         MAX_VIEWER_HEADER_BYTES,
     )
@@ -459,6 +487,7 @@ def decode_viewer_frame(data: bytes) -> ViewerFrame:
             "width",
             "height",
             "media_type",
+            "editables",
         },
     )
     if fields.text("type") != "frame" or fields.text("media_type") != "image/jpeg":
@@ -474,4 +503,37 @@ def decode_viewer_frame(data: bytes) -> ViewerFrame:
         _target(fields.value["target"]),
         source,
         data[4 + size :],
+        decode_viewer_editables(fields.value["editables"], source.width, source.height),
     )
+
+
+def decode_viewer_editables(
+    value: object, viewport_width: int, viewport_height: int
+) -> tuple[ViewerEditable, ...]:
+    if not isinstance(value, list) or len(value) > 16:
+        raise BrowserViewerContractError("Invalid Browser editable regions")
+    regions = []
+    ids = set()
+    for item in value:
+        fields = _Fields(item, {"id", "x", "y", "width", "height", "input_mode"})
+        identifier = fields.text("id", 48)
+        x, y = fields.number("x"), fields.number("y")
+        width, height = fields.number("width"), fields.number("height")
+        mode = fields.text("input_mode")
+        if (
+            identifier in ids
+            or min(x, y) < 0
+            or min(width, height) <= 0
+            or x + width > viewport_width
+            or y + height > viewport_height
+            or mode
+            not in {"text", "email", "url", "tel", "numeric", "decimal", "search"}
+        ):
+            raise BrowserViewerContractError("Invalid Browser editable geometry")
+        ids.add(identifier)
+        match mode:
+            case "text" | "email" | "url" | "tel" | "numeric" | "decimal" | "search":
+                regions.append(ViewerEditable(identifier, x, y, width, height, mode))
+            case _:
+                raise BrowserViewerContractError("Invalid Browser input mode")
+    return tuple(regions)

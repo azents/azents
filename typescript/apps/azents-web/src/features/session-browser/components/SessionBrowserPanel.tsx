@@ -21,6 +21,7 @@ import {
 import {
   IconArrowLeft,
   IconArrowRight,
+  IconClipboard,
   IconDots,
   IconMaximize,
   IconMinimize,
@@ -40,6 +41,7 @@ import {
   sameBrowserTarget,
 } from "../input";
 import classes from "./SessionBrowserPanel.module.css";
+import type { BrowserPasteControls } from "../containers/useBrowserPaste";
 import type { BrowserTouchView } from "../containers/useBrowserTouchView";
 import type {
   BrowserImage,
@@ -48,6 +50,7 @@ import type {
   BrowserViewState,
 } from "../types";
 import type {
+  ClipboardEventHandler,
   CompositionEventHandler,
   FocusEventHandler,
   FormEventHandler,
@@ -61,6 +64,9 @@ import type {
 } from "react";
 
 export interface BrowserInteractionHandlers {
+  onKeyboardFocus: FocusEventHandler<HTMLTextAreaElement>;
+  onKeyboardPointerDown: PointerEventHandler<HTMLTextAreaElement>;
+  onPaste: ClipboardEventHandler<HTMLTextAreaElement>;
   onContextMenu: MouseEventHandler<HTMLDivElement>;
   onPointerDown: PointerEventHandler<HTMLDivElement>;
   onPointerMove: PointerEventHandler<HTMLDivElement>;
@@ -100,6 +106,7 @@ export interface SessionBrowserPanelProps {
   keyboardRef: RefObject<HTMLTextAreaElement | null> | null;
   interaction: BrowserInteractionHandlers | null;
   touchView: BrowserTouchView | null;
+  paste: BrowserPasteControls | null;
   addressValue: string;
   addressError: boolean;
   navigationEnabled: boolean;
@@ -169,6 +176,7 @@ export function SessionBrowserPanel({
   keyboardRef,
   interaction,
   touchView,
+  paste,
   addressValue,
   addressError,
   navigationEnabled,
@@ -286,6 +294,7 @@ export function SessionBrowserPanel({
   const handlers = inputEnabled && focused ? interaction : null;
   const touch = focused ? touchView?.touch : null;
   const image = state.image;
+  const editableFrame = touchView?.frame ?? null;
   const imageCurrent =
     image !== null &&
     status !== null &&
@@ -520,6 +529,21 @@ export function SessionBrowserPanel({
               }
             }}
           />
+          <Tooltip label={paste?.enabled ? t("paste") : t("pasteSelectInput")}>
+            <span data-browser-paste>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                aria-label={t("paste")}
+                disabled={!focused || handlers === null || !paste?.enabled}
+                loading={paste?.pending}
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={paste?.onPaste}
+              >
+                <IconClipboard size={16} aria-hidden />
+              </ActionIcon>
+            </span>
+          </Tooltip>
           <Menu
             withinPortal
             position="bottom-end"
@@ -753,6 +777,41 @@ export function SessionBrowserPanel({
               />
             )}
             {focused &&
+              state.canClose &&
+              editableFrame !== null &&
+              status !== null &&
+              browserFrameMatchesStatus(editableFrame, status) &&
+              editableFrame.editables.map((editable) => (
+                <textarea
+                  key={`${editableFrame.attachment_id}:${editableFrame.navigation_id}:${editable.id}`}
+                  data-browser-native-input={editable.id}
+                  className={classes.nativeInput}
+                  style={{
+                    left: `${(editable.x / editableFrame.width) * 100}%`,
+                    top: `${(editable.y / editableFrame.height) * 100}%`,
+                    width: `${(editable.width / editableFrame.width) * 100}%`,
+                    height: `${(editable.height / editableFrame.height) * 100}%`,
+                  }}
+                  inputMode={editable.input_mode}
+                  aria-label={t("keyboard")}
+                  tabIndex={-1}
+                  maxLength={32768}
+                  readOnly={handlers === null}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  onFocus={handlers?.onKeyboardFocus}
+                  onPointerDown={handlers?.onKeyboardPointerDown}
+                  onPaste={handlers?.onPaste}
+                  onCompositionStart={handlers?.onCompositionStart}
+                  onCompositionEnd={handlers?.onCompositionEnd}
+                  onInput={handlers?.onKeyboardInput}
+                  onKeyDown={handlers?.onKeyDown}
+                  onKeyUp={handlers?.onKeyUp}
+                />
+              ))}
+            {focused &&
               touchView != null &&
               touchView.touchFeedback !== null && (
                 <span
@@ -771,7 +830,7 @@ export function SessionBrowserPanel({
                   }}
                 />
               )}
-            {handlers !== null && (
+            {focused && state.canClose && (
               <textarea
                 maxLength={32768}
                 ref={keyboardRef}
@@ -784,16 +843,31 @@ export function SessionBrowserPanel({
                 autoCorrect="off"
                 autoCapitalize="off"
                 spellCheck={false}
-                onCompositionStart={handlers.onCompositionStart}
-                onCompositionEnd={handlers.onCompositionEnd}
-                onInput={handlers.onKeyboardInput}
-                onKeyDown={handlers.onKeyDown}
-                onKeyUp={handlers.onKeyUp}
+                inputMode="none"
+                readOnly={handlers === null}
+                onFocus={handlers?.onKeyboardFocus}
+                onPaste={handlers?.onPaste}
+                onCompositionStart={handlers?.onCompositionStart}
+                onCompositionEnd={handlers?.onCompositionEnd}
+                onInput={handlers?.onKeyboardInput}
+                onKeyDown={handlers?.onKeyDown}
+                onKeyUp={handlers?.onKeyUp}
               />
             )}
           </div>
         </div>
       </div>
+      {focused && paste?.notice != null && (
+        <Alert
+          role="status"
+          className={classes.pasteNotice}
+          withCloseButton
+          closeButtonLabel={t("pasteDismiss")}
+          onClose={paste.onDismiss}
+        >
+          {t(`pasteNotice.${paste.notice}`)}
+        </Alert>
+      )}
       {showDescription ? (
         <Text
           id={descriptionId}

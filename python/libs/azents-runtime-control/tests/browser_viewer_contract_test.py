@@ -12,9 +12,11 @@ from azents_runtime_control.browser_viewer_contract import (
     ViewerFrameAck,
     ViewerInput,
     ViewerNavigation,
+    ViewerPaste,
     ViewerPointer,
     ViewerSource,
     ViewerTarget,
+    decode_viewer_editables,
     decode_viewer_frame,
     decode_viewer_request,
     encode_viewer_frame,
@@ -68,6 +70,27 @@ def test_request_roundtrip_and_read_only_frame_ack() -> None:
 def test_malformed_request_is_rejected(payload: bytes) -> None:
     with pytest.raises(BrowserViewerContractError):
         decode_viewer_request(payload)
+
+
+def test_paste_is_plaintext_bound_to_an_explicit_editable() -> None:
+    payload = _input()
+    text = ' Synthetic 한글 🔑\n"\\ '
+    payload["action"] = {"kind": "paste", "editable_id": "doc-1", "text": text}
+    decoded = decode_viewer_request(json.dumps(payload).encode())
+    assert isinstance(decoded, ViewerInput)
+    assert decoded.action == ViewerPaste("doc-1", text)
+    for action in [
+        {"kind": "paste", "text": text},
+        {"kind": "paste", "editable_id": "", "text": text},
+        {"kind": "paste", "editable_id": "x" * 49, "text": text},
+        {"kind": "paste", "editable_id": "doc-1", "text": ""},
+        {"kind": "paste", "editable_id": "doc-1", "text": "x" * 32769},
+        {"kind": "paste", "editable_id": "doc-1", "text": "界" * 24000},
+        {"kind": "paste", "editable_id": "doc-1", "text": text, "html": text},
+    ]:
+        payload["action"] = action
+        with pytest.raises(BrowserViewerContractError):
+            decode_viewer_request(json.dumps(payload, ensure_ascii=False).encode())
 
 
 @pytest.mark.parametrize(
@@ -169,6 +192,7 @@ def test_binary_header_and_image_are_exact_and_bounded() -> None:
         ViewerTarget("task", "page", "incarnation"),
         ViewerSource(1, "nav", 1280, 720),
         b"\xff\xd8JPEG\xff\xd9",
+        (),
     )
     encoded = encode_viewer_frame(frame)
     assert decode_viewer_frame(encoded) == frame
@@ -183,6 +207,7 @@ def test_binary_header_and_image_are_exact_and_bounded() -> None:
                 frame.target,
                 frame.source,
                 b"x" * MAX_VIEWER_MESSAGE_BYTES,
+                (),
             )
         )
     for invalid in [
@@ -193,3 +218,28 @@ def test_binary_header_and_image_are_exact_and_bounded() -> None:
     ]:
         with pytest.raises(BrowserViewerContractError):
             decode_viewer_frame(invalid)
+
+
+def test_editable_regions_are_bounded_content_free_and_viewport_scoped() -> None:
+    region = {
+        "id": "native-1",
+        "x": 10,
+        "y": 20,
+        "width": 100,
+        "height": 40,
+        "input_mode": "text",
+    }
+    decoded = decode_viewer_editables([region], 1280, 800)
+    assert len(decoded) == 1 and decoded[0].id == "native-1"
+    for invalid in [
+        [region, region],
+        [region] * 17,
+        [{**region, "value": "never part of geometry"}],
+        [{**region, "x": -1}],
+        [{**region, "width": 0}],
+        [{**region, "y": 790}],
+        [{**region, "input_mode": "unknown"}],
+        [{**region, "x": float("nan")}],
+    ]:
+        with pytest.raises(BrowserViewerContractError):
+            decode_viewer_editables(invalid, 1280, 800)

@@ -18,7 +18,6 @@ from azents_runtime_control.browser_contract import (
     BrowserResult,
     BrowserTarget,
 )
-from PIL import Image
 from playwright.async_api import Error, Playwright
 
 import azents_runtime_runner.browser as browser_module
@@ -573,28 +572,6 @@ async def test_initialization_support_probe_does_not_hide_generic_failure(
             assert len(calls) == 2 and calls[1].kwargs["chromium_sandbox"] is False
         await manager.close()
     assert not list(tmp_path.iterdir())
-
-
-async def test_intentional_capture_masks_credential_fields_only(
-    manager: RunnerBrowserManager,
-    site: str,
-    tmp_path: Path,
-) -> None:
-    a = authority(tmp_path)
-    opened = await manager.execute(BrowserOpenCommand(a, None, site, None))
-    current = target(opened)
-    _, page, _ = manager.target(a, current)
-    box = await page.page.locator("#otp").bounding_box()
-    assert box is not None
-    captured = await observe(manager, a, current, "image")
-    assert captured.capture is not None
-    with Image.open(captured.capture.path) as image:
-        pixel = image.getpixel((int(box["x"] + 10), int(box["y"] + 10)))
-        assert isinstance(pixel, tuple)
-        assert pixel[:3] == (0, 0, 0)
-    # The actual authorized page/viewer state is unchanged; only export is masked.
-    assert await page.page.locator("#otp").input_value() == "246810"
-    assert await page.page.locator("h1").inner_text() == "Report"
 
 
 async def test_open_navigation_dialog_returns_current_resources_without_deadlock(

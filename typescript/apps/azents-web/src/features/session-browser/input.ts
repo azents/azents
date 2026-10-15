@@ -189,6 +189,35 @@ export function browserInput(
   };
 }
 
+/** Reject oversized plaintext before transport without truncating or retaining it. */
+export function browserPasteAction(
+  frame: BrowserFrame,
+  editableId: string,
+  text: string,
+): Extract<BrowserCoordinateAction, { kind: "paste" }> | null {
+  if (
+    !text ||
+    text.length > 32768 ||
+    !frame.editables.some((editable) => editable.id === editableId)
+  ) {
+    return null;
+  }
+  const action = { kind: "paste", editable_id: editableId, text } as const;
+  const encoded = JSON.stringify({
+    type: "input",
+    attachment_id: frame.attachment_id,
+    sequence: Number.MAX_SAFE_INTEGER,
+    source: {
+      frame_sequence: frame.frame_sequence,
+      navigation_id: frame.navigation_id,
+      width: frame.width,
+      height: frame.height,
+    },
+    action,
+  });
+  return new TextEncoder().encode(encoded).length <= 64 * 1024 ? action : null;
+}
+
 /** Current page dialog authority does not depend on an image existing. */
 export function browserDialogInput(
   status: BrowserStatus,

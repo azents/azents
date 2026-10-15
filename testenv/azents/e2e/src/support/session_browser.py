@@ -50,6 +50,7 @@ class BrowserStatus(_WireModel):
     navigation_id: str
     dialog: BrowserDialog | None
     conflict: bool
+    opened_target: ViewerTarget | None
 
 
 class BrowserInputAck(_WireModel):

@@ -111,6 +111,7 @@ class _Status(BaseModel):
     navigation_id: str = Field(min_length=1, max_length=128)
     dialog: _Dialog | None
     conflict: bool
+    opened_target: _Target | None
 
 
 class _InputAck(BaseModel):
@@ -412,6 +413,12 @@ class RuntimeBrowserSocketService:
                         4500, "Invalid Browser metadata"
                     ) from None
                 if isinstance(metadata, _Status):
+                    opened = metadata.opened_target
+                    if opened is not None and (
+                        opened.task_id != target.task_id
+                        or opened.resource_incarnation != target.resource_incarnation
+                    ):
+                        raise BrowserSocketFailure(4409, "Browser popup scope changed")
                     if (
                         metadata.target.task_id,
                         metadata.target.page_id,

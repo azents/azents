@@ -45,6 +45,7 @@ const frame: BrowserFrame = {
   width: 800,
   height: 900,
   media_type: "image/jpeg",
+  editables: [],
 };
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="900" viewBox="0 0 800 900"><rect width="800" height="900" fill="white"/><text x="56" y="82" font-family="sans-serif" font-size="20" fill="#64748b">PARTNER PORTAL · SYNTHETIC FIXTURE</text><text x="56" y="170" font-family="sans-serif" font-size="42" fill="#1e293b">Review your delivery</text><text x="56" y="224" font-family="sans-serif" font-size="22" fill="#64748b">Sign in to view the details of your order.</text><text x="56" y="258" font-family="sans-serif" font-size="22" fill="#64748b">Static fixture. Do not enter real credentials.</text><text x="56" y="342" font-family="sans-serif" font-size="22" fill="#334155">Email address</text><rect x="56" y="366" width="688" height="76" rx="8" fill="white" stroke="#cbd5e1"/><text x="78" y="413" font-family="sans-serif" font-size="22" fill="#64748b">name@example.test</text><text x="56" y="505" font-family="sans-serif" font-size="22" fill="#334155">Password</text><rect x="56" y="530" width="688" height="76" rx="8" fill="white" stroke="#cbd5e1"/><text x="78" y="577" font-family="sans-serif" font-size="22" fill="#94a3b8">Enter your password</text><rect x="56" y="654" width="688" height="78" rx="8" fill="#345e85"/><text x="400" y="703" text-anchor="middle" font-family="sans-serif" font-size="25" fill="white">Sign in</text><text x="56" y="820" font-family="sans-serif" font-size="20" fill="#64748b">Session browser · Example page</text></svg>`;
 const ready: Extract<BrowserViewState, { type: "READY" }> = {
@@ -63,6 +64,7 @@ const ready: Extract<BrowserViewState, { type: "READY" }> = {
     navigation_id: frame.navigation_id,
     dialog: null,
     conflict: false,
+    opened_target: null,
   },
   canInput: true,
   canClose: true,
@@ -123,6 +125,7 @@ function FreshAckCleanupFixture(props: SessionBrowserPanelProps): ReactElement {
     return () => connection.dispose();
   }, [connection, displayFrame]);
   const interaction = useBrowserInteraction({
+    readClipboard: null,
     enabled: live.connection === "connected",
     frame: live.displayed,
     onAction: (source, action) => connection.coordinate(source, action),
@@ -157,6 +160,7 @@ const initialDialogStatus: BrowserStatus = {
   navigation_id: "new-navigation",
   dialog: promptDialog,
   conflict: false,
+  opened_target: null,
 };
 async function clickBrowserViewport(surface: HTMLElement): Promise<void> {
   const modal = surface.closest('[role="dialog"]');
@@ -177,7 +181,11 @@ async function clickBrowserViewport(surface: HTMLElement): Promise<void> {
 }
 
 function BrowserFixture(
-  props: SessionBrowserPanelProps & { reportActions?: boolean },
+  props: SessionBrowserPanelProps & {
+    reportActions?: boolean;
+    readClipboard?: (() => Promise<string>) | null;
+    onInputAction?: (action: BrowserInputAction) => void;
+  },
 ): ReactElement {
   const [focused, setFocused] = useState(props.focused);
   const [zoom, setZoom] = useState(props.zoom);
@@ -192,6 +200,7 @@ function BrowserFixture(
     source: BrowserFrame,
     action: BrowserInputAction,
   ): boolean => {
+    props.onInputAction?.(action);
     if (props.reportActions) {
       if (action.kind === "pointer" && action.phase !== "move") {
         const phase = action.phase;
@@ -214,6 +223,7 @@ function BrowserFixture(
     browserFrameMatchesStatus(props.state.image.frame, props.state.status) &&
     props.state.dialog === null;
   const interaction = useBrowserInteraction({
+    readClipboard: props.readClipboard ?? null,
     enabled: active && focused,
     frame:
       props.state.type === "READY" ? (props.state.image?.frame ?? null) : null,
@@ -244,6 +254,7 @@ function BrowserFixture(
         interaction={interaction.interaction}
         keyboardRef={interaction.keyboardRef}
         touchView={touchView}
+        paste={interaction.paste}
         focused={focused}
         zoom={zoom}
         onToggleFocus={() => {
@@ -309,6 +320,115 @@ function StreamingImageFixture(props: SessionBrowserPanelProps): ReactElement {
   );
 }
 
+function NativeReceiverFixture(props: SessionBrowserPanelProps): ReactElement {
+  const [sequence, setSequence] = useState(1);
+  const nativeFrame: BrowserFrame = {
+    ...frame,
+    frame_sequence: sequence,
+    editables: [
+      {
+        id: "native-main",
+        x: 56,
+        y: 366,
+        width: 688,
+        height: 76,
+        input_mode: "email",
+      },
+    ],
+  };
+  return (
+    <>
+      <Button onClick={() => setSequence((value) => value + 1)}>
+        Receive native frame
+      </Button>
+      <BrowserFixture
+        {...props}
+        state={{
+          ...ready,
+          image: {
+            frame: nativeFrame,
+            url: `data:image/svg+xml,${encodeURIComponent(svg.replace("</svg>", `<metadata>${sequence}</metadata></svg>`))}`,
+          },
+        }}
+      />
+    </>
+  );
+}
+
+/** Preview-only composition: synthetic paste, no clipboard or product API access. */
+function PastePreviewFixture(
+  props: SessionBrowserPanelProps & {
+    readClipboard?: (() => Promise<string>) | null;
+  },
+): ReactElement {
+  const [pasted, setPasted] = useState<"email" | "password" | null>(null);
+  const editableFrame: BrowserFrame = {
+    ...frame,
+    editables: [
+      {
+        id: "preview-email",
+        x: 56,
+        y: 366,
+        width: 688,
+        height: 76,
+        input_mode: "email",
+      },
+      {
+        id: "preview-password",
+        x: 56,
+        y: 530,
+        width: 688,
+        height: 76,
+        input_mode: "text",
+      },
+    ],
+  };
+  const content = svg
+    .replace("Review your delivery", "Paste interaction preview")
+    .replace(
+      "Static fixture. Do not enter real credentials.",
+      "Synthetic clipboard only. No device clipboard access.",
+    )
+    .replace(
+      "name@example.test",
+      pasted === "email" ? "demo@example.test" : "name@example.test",
+    )
+    .replace(
+      "Enter your password",
+      pasted === "password" ? "••••••••••••" : "Enter your password",
+    );
+  return (
+    <>
+      <BrowserFixture
+        {...props}
+        readClipboard={
+          "readClipboard" in props
+            ? (props.readClipboard ?? null)
+            : () => Promise.resolve("Synthetic paste only")
+        }
+        onInputAction={(action) => {
+          if (action.kind === "paste") {
+            setPasted(
+              action.editable_id === "preview-email" ? "email" : "password",
+            );
+          }
+        }}
+        state={{
+          ...ready,
+          selected: {
+            ...page,
+            taskLabel: "붙여넣기 시안 · 기기 클립보드 접근 없음",
+          },
+          image: {
+            url: `data:image/svg+xml,${encodeURIComponent(content)}`,
+            frame: editableFrame,
+          },
+        }}
+      />
+    </>
+  );
+}
+
 const meta = {
   component: SessionBrowserPanel,
   parameters: { layout: "fullscreen" },
@@ -344,6 +464,7 @@ const meta = {
     keyboardRef: null,
     interaction: null,
     touchView: null,
+    paste: null,
   },
   beforeEach: (): void => {
     actions.mockClear();
@@ -352,6 +473,245 @@ const meta = {
 } satisfies Meta<typeof SessionBrowserPanel>;
 export default meta;
 type Story = StoryObj<typeof meta>;
+
+export const PasteButtonPreview = {
+  render: (props) => <PastePreviewFixture {...props} />,
+  parameters: { viewport: { defaultViewport: "mobile1" } },
+} satisfies Story;
+
+export const PasteButtonPreviewInteraction = {
+  ...PasteButtonPreview,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    await expect(
+      await canvas.findByRole("button", { name: "Paste" }),
+    ).toBeDisabled();
+    const field =
+      canvasElement.ownerDocument.querySelector<HTMLTextAreaElement>(
+        '[data-browser-native-input="preview-password"]',
+      );
+    if (field === null) {
+      throw new Error("The synthetic password target is required");
+    }
+    await userEvent.click(field);
+    await userEvent.click(canvas.getByRole("button", { name: "Paste" }));
+    await expect(
+      canvas.getByText("Text sent to the selected input."),
+    ).toBeVisible();
+    await expect(actions).toHaveBeenLastCalledWith(expect.anything(), {
+      kind: "paste",
+      editable_id: "preview-password",
+      text: "Synthetic paste only",
+    });
+  },
+} satisfies Story;
+
+export const NativePaste = {
+  ...PasteButtonPreview,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const field =
+      canvasElement.ownerDocument.querySelector<HTMLTextAreaElement>(
+        '[data-browser-native-input="preview-password"]',
+      );
+    if (field === null) {
+      throw new Error("The synthetic password receiver is required");
+    }
+    await userEvent.click(field);
+    actions.mockClear();
+    await fireEvent.keyDown(field, { key: "v", ctrlKey: true });
+    const clipboard = new DataTransfer();
+    clipboard.setData("text/plain", "  Synthetic 한글 🔑  ");
+    await fireEvent.paste(field, { clipboardData: clipboard });
+    await expect(
+      canvas.getByText("Text sent to the selected input."),
+    ).toBeVisible();
+    await expect(actions).toHaveBeenCalledTimes(1);
+    await expect(actions).toHaveBeenLastCalledWith(expect.anything(), {
+      kind: "paste",
+      editable_id: "preview-password",
+      text: "  Synthetic 한글 🔑  ",
+    });
+    await expect(field).toHaveValue("");
+  },
+} satisfies Story;
+
+export const ClipboardDenied = {
+  ...PasteButtonPreview,
+  render: (props) => (
+    <PastePreviewFixture
+      {...props}
+      readClipboard={() =>
+        Promise.reject(new DOMException("Denied", "NotAllowedError"))
+      }
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const field =
+      canvasElement.ownerDocument.querySelector<HTMLTextAreaElement>(
+        '[data-browser-native-input="preview-password"]',
+      );
+    if (field === null) {
+      throw new Error("The synthetic input is required");
+    }
+    await userEvent.click(field);
+    actions.mockClear();
+    await userEvent.click(canvas.getByRole("button", { name: "Paste" }));
+    await expect(
+      await canvas.findByText(/Clipboard access was cancelled or denied/),
+    ).toBeVisible();
+    await expect(actions).not.toHaveBeenCalled();
+  },
+} satisfies Story;
+
+export const ClipboardUnavailable = {
+  ...PasteButtonPreview,
+  render: (props) => <PastePreviewFixture {...props} readClipboard={null} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const field =
+      canvasElement.ownerDocument.querySelector<HTMLTextAreaElement>(
+        '[data-browser-native-input="preview-password"]',
+      );
+    if (field === null) {
+      throw new Error("The synthetic input is required");
+    }
+    await userEvent.click(field);
+    actions.mockClear();
+    await userEvent.click(canvas.getByRole("button", { name: "Paste" }));
+    await expect(
+      await canvas.findByText(/clipboard access is unavailable here/),
+    ).toBeVisible();
+    await expect(actions).not.toHaveBeenCalled();
+  },
+} satisfies Story;
+
+export const OversizedPaste = {
+  ...PasteButtonPreview,
+  render: (props) => (
+    <PastePreviewFixture
+      {...props}
+      readClipboard={() => Promise.resolve("界".repeat(24000))}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const field =
+      canvasElement.ownerDocument.querySelector<HTMLTextAreaElement>(
+        '[data-browser-native-input="preview-password"]',
+      );
+    if (field === null) {
+      throw new Error("The synthetic input is required");
+    }
+    await userEvent.click(field);
+    actions.mockClear();
+    await userEvent.click(canvas.getByRole("button", { name: "Paste" }));
+    await expect(
+      await canvas.findByText(/exceeds the paste size limit/),
+    ).toBeVisible();
+    await expect(actions).not.toHaveBeenCalled();
+  },
+} satisfies Story;
+
+const pendingClipboard: { resolve: ((text: string) => void) | null } = {
+  resolve: null,
+};
+const delayedRead = fn(
+  (): Promise<string> =>
+    new Promise((resolve) => {
+      pendingClipboard.resolve = resolve;
+    }),
+);
+export const DelayedPasteDoesNotFollowFocus = {
+  ...PasteButtonPreview,
+  render: (props) => (
+    <PastePreviewFixture {...props} readClipboard={delayedRead} />
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    delayedRead.mockClear();
+    await expect(delayedRead).not.toHaveBeenCalled();
+    const field =
+      canvasElement.ownerDocument.querySelector<HTMLTextAreaElement>(
+        '[data-browser-native-input="preview-password"]',
+      );
+    if (field === null) {
+      throw new Error("The synthetic input is required");
+    }
+    await userEvent.click(field);
+    actions.mockClear();
+    const button = canvas.getByRole("button", { name: "Paste" });
+    await userEvent.click(button);
+    await userEvent.click(button);
+    await expect(delayedRead).toHaveBeenCalledTimes(1);
+    const address = canvas.getByRole("textbox", { name: "Browser address" });
+    await userEvent.click(address);
+    if (pendingClipboard.resolve === null) {
+      throw new Error("The clipboard read must be pending");
+    }
+    pendingClipboard.resolve("Synthetic delayed value");
+    await waitFor(() => expect(button).toBeDisabled());
+    await expect(actions).not.toHaveBeenCalled();
+    await expect(field).toHaveValue("");
+  },
+} satisfies Story;
+
+export const NativeReceiverPreservesFocus = {
+  render: (props) => <NativeReceiverFixture {...props} />,
+  play: async ({ canvasElement }) => {
+    const document = canvasElement.ownerDocument;
+    const canvas = within(document.body);
+    const receiver = document.querySelector<HTMLTextAreaElement>(
+      '[data-browser-native-input="native-main"]',
+    );
+    if (receiver === null) {
+      throw new Error("Native receiver is required");
+    }
+    await userEvent.click(receiver);
+    await expect(receiver).toHaveFocus();
+    const blurred = fn();
+    receiver.addEventListener("blur", blurred);
+    await fireEvent.click(
+      canvas.getByRole("button", { name: "Receive native frame" }),
+    );
+    await expect(
+      document.querySelector('[data-browser-native-input="native-main"]'),
+    ).toBe(receiver);
+    await expect(receiver).toHaveFocus();
+    await expect(blurred).not.toHaveBeenCalled();
+    // Clear transfer intent without changing the receiver's retained DOM focus.
+    await fireEvent(window, new Event("pagehide"));
+    const paste = canvas.getByRole("button", { name: "Paste" });
+    await expect(paste).toBeDisabled();
+    const rect = receiver.getBoundingClientRect();
+    const touch = {
+      pointerType: "touch",
+      pointerId: 17,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+    };
+    await fireEvent.pointerDown(receiver, touch);
+    await fireEvent.pointerUp(receiver, touch);
+    await expect(paste).toBeEnabled();
+    await expect(receiver).toHaveFocus();
+    await expect(blurred).not.toHaveBeenCalled();
+    await expect(await fireEvent.contextMenu(receiver)).toBe(true);
+    const region = canvas.getByRole("region", { name: "Remote browser page" });
+    await expect(await fireEvent.contextMenu(region)).toBe(false);
+    const bounds = region.getBoundingClientRect();
+    const outside = {
+      ...touch,
+      pointerId: 18,
+      clientX: bounds.left + 10,
+      clientY: bounds.top + 10,
+    };
+    await fireEvent.pointerDown(region, outside);
+    await fireEvent.pointerUp(region, outside);
+    await expect(receiver).not.toHaveFocus();
+    await expect(paste).toBeDisabled();
+  },
+} satisfies Story;
 
 export const FreshAckPointerCleanup = {
   render: (props) => <FreshAckCleanupFixture {...props} />,
@@ -676,6 +1036,7 @@ export const PreciseTouchMarker = {
   render: (props) => <SessionBrowserPanel {...props} />,
   args: {
     touchView: {
+      frame,
       cancel: fn(),
       viewWindowRef: { current: null },
       touch: {

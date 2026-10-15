@@ -168,6 +168,7 @@ def _status(
                 "nav-1",
                 None,
                 False,
+                None,
             )
         ),
     )
@@ -182,6 +183,7 @@ def _frame() -> BrowserSourceWebSocketMessage:
                 _TARGET,
                 ViewerSource(1, "nav-1", 800, 600),
                 b"jpeg-fixture",
+                (),
             )
         ),
     )

@@ -23,6 +23,7 @@ const status: BrowserStatus = {
   navigation_id: "navigation",
   dialog: null,
   conflict: false,
+  opened_target: null,
 };
 const frame: BrowserFrame = {
   type: "frame",
@@ -33,6 +34,7 @@ const frame: BrowserFrame = {
   width: 1280,
   height: 800,
   media_type: "image/jpeg",
+  editables: [],
 };
 function binary(metadata: BrowserFrame): ArrayBuffer {
   const json = new TextEncoder().encode(JSON.stringify(metadata));

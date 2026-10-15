@@ -14,6 +14,18 @@
     "refresh": "Actualiser",
     "refreshConnection": "Actualiser la connexion du navigateur",
     "keyboardActions": "Actions du navigateur",
+    "paste": "Coller",
+    "pasteSelectInput": "Sélectionnez d’abord un champ de saisie",
+    "pasteDismiss": "Fermer le message de collage",
+    "pasteNotice": {
+      "sent": "Texte envoyé au champ sélectionné.",
+      "unavailable": "Le presse-papiers est indisponible ici. Utilisez le clavier ou le menu Coller natif du champ.",
+      "denied": "L’accès au presse-papiers a été annulé ou refusé. Vous pouvez utiliser le menu Coller natif du champ.",
+      "empty": "Le presse-papiers ne contient aucun texte brut à coller.",
+      "tooLarge": "Le texte dépasse la taille maximale de collage. Rien n’a été envoyé.",
+      "targetChanged": "Le champ a changé. Sélectionnez-le à nouveau avant de coller.",
+      "notSent": "Le collage n’a pas été envoyé. Vérifiez la page et la connexion avant de réessayer."
+    },
     "address": "Adresse du navigateur",
     "addressPlaceholder": "Saisir une adresse web",
     "invalidAddress": "Saisissez une adresse HTTP ou HTTPS sans identifiants intégrés.",

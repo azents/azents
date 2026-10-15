@@ -10,20 +10,24 @@ import {
   browserTextareaModifier,
   browserTextareaTextKey,
 } from "../input";
+import { useBrowserPaste } from "./useBrowserPaste";
 import type { BrowserInteractionHandlers } from "../components/SessionBrowserPanel";
 import type { BrowserCoordinateAction, BrowserFrame } from "../types";
+import type { BrowserPasteControls } from "./useBrowserPaste";
 import type { RefObject } from "react";
 
 export interface BrowserInteractionOptions {
   enabled: boolean;
   frame: BrowserFrame | null;
   onAction: (frame: BrowserFrame, action: BrowserCoordinateAction) => boolean;
+  readClipboard: (() => Promise<string>) | null;
 }
 
 export interface BrowserInteractionOutput {
   keyboardRef: RefObject<HTMLTextAreaElement | null>;
   interaction: BrowserInteractionHandlers | null;
   cancel: () => void;
+  paste: BrowserPasteControls;
 }
 
 /** Track actual DOM interactions only; this hook does not open a connection or replay input. */
@@ -31,6 +35,7 @@ export function useBrowserInteraction({
   enabled,
   frame,
   onAction,
+  readClipboard,
 }: BrowserInteractionOptions): BrowserInteractionOutput {
   const keyboardRef = useRef<HTMLTextAreaElement>(null);
   const latest = useRef({ enabled, frame, onAction });
@@ -40,6 +45,7 @@ export function useBrowserInteraction({
     x: number;
     y: number;
     frame: BrowserFrame;
+    receiver: HTMLTextAreaElement | null;
   } | null>(null);
   const composing = useRef<BrowserFrame | null>(null);
   const suppressInput = useRef<string | null>(null);
@@ -97,6 +103,14 @@ export function useBrowserInteraction({
       keyboardRef.current.value = "";
     }
   }, [releaseKeys]);
+
+  const paste = useBrowserPaste({
+    enabled,
+    frame,
+    onAction,
+    readClipboard,
+    cancelInput: cancel,
+  });
 
   const attachment = frame?.attachment_id;
   const navigation = frame?.navigation_id;
@@ -175,6 +189,12 @@ export function useBrowserInteraction({
   }, [enabled, softwareKey]);
 
   const interaction: BrowserInteractionHandlers = {
+    onKeyboardFocus: (event) => {
+      keyboardRef.current = event.currentTarget;
+      paste.onFocus(event);
+    },
+    onPaste: paste.onPaste,
+    onKeyboardPointerDown: paste.onPointerDown,
     onSendTab: (reverse) => {
       const source = latest.current.frame;
       if (source === null) {
@@ -191,7 +211,15 @@ export function useBrowserInteraction({
         pressed.current.delete("Shift");
       }
     },
-    onContextMenu: (event) => event.preventDefault(),
+    onContextMenu: (event) => {
+      if (!(
+        event.target instanceof HTMLTextAreaElement &&
+        event.target.hasAttribute("data-browser-native-input") &&
+        !event.target.readOnly
+      )) {
+        event.preventDefault();
+      }
+    },
     onPointerDown: (event) => {
       const source = latest.current.frame;
       if (source === null || pointer.current !== null) {
@@ -207,12 +235,37 @@ export function useBrowserInteraction({
       if (point === null || button === null) {
         return;
       }
+      for (const modifier of browserRemoteModifiers({
+        control: event.ctrlKey,
+        meta: event.metaKey,
+        alt: event.altKey,
+        shift: event.shiftKey,
+        altGraph: false,
+      })) {
+        if (!pressed.current.has(modifier)) {
+          if (!send({ kind: "key", phase: "down", key: modifier })) {
+            releaseKeys();
+            return;
+          }
+          pressed.current.set(modifier, source);
+        }
+      }
       if (!send({ kind: "pointer", phase: "down", ...point, button })) {
+        releaseKeys();
         return;
       }
       event.preventDefault();
       event.currentTarget.setPointerCapture(event.pointerId);
-      pointer.current = { id: event.pointerId, ...point, frame: source };
+      pointer.current = {
+        id: event.pointerId,
+        ...point,
+        frame: source,
+        receiver:
+          event.target instanceof HTMLTextAreaElement &&
+          event.target.hasAttribute("data-browser-native-input")
+            ? event.target
+            : null,
+      };
     },
     onPointerMove: (event) => {
       const source = latest.current.frame;
@@ -263,7 +316,21 @@ export function useBrowserInteraction({
         });
       } else {
         if (send({ kind: "pointer", phase: "up", ...point, button })) {
-          keyboardRef.current?.focus({ preventScroll: true });
+          if (held.receiver !== null) {
+            keyboardRef.current = held.receiver;
+          }
+          if (
+            held.receiver !== null &&
+            document.activeElement !== held.receiver
+          ) {
+            held.receiver.focus({ preventScroll: true });
+          } else if (held.receiver === null) {
+            event.currentTarget
+              .querySelector<HTMLTextAreaElement>(
+                "textarea:not([data-browser-native-input])",
+              )
+              ?.focus({ preventScroll: true });
+          }
         } else {
           latest.current.onAction(held.frame, {
             kind: "pointer",
@@ -277,6 +344,7 @@ export function useBrowserInteraction({
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
+      releaseKeys();
     },
     onPointerCancel: cancel,
     onLostPointerCapture: () => {
@@ -337,6 +405,17 @@ export function useBrowserInteraction({
       }
       suppressInput.current = null;
       const textarea = event.currentTarget instanceof HTMLTextAreaElement;
+      if (
+        textarea &&
+        (((event.ctrlKey || event.metaKey) &&
+          !event.altKey &&
+          event.key.toLowerCase() === "v") ||
+          (event.shiftKey && event.key === "Insert"))
+      ) {
+        // Let the local OS deliver its authorized paste event, not a remote chord.
+        releaseKeys();
+        return;
+      }
       const modifiers = {
         control: event.ctrlKey,
         meta: event.metaKey,
@@ -477,5 +556,10 @@ export function useBrowserInteraction({
       }
     },
   };
-  return { keyboardRef, interaction: enabled ? interaction : null, cancel };
+  return {
+    keyboardRef,
+    interaction: enabled ? interaction : null,
+    cancel,
+    paste: paste.controls,
+  };
 }

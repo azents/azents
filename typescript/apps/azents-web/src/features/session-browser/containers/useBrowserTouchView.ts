@@ -47,6 +47,7 @@ interface Options {
 }
 
 export interface BrowserTouchView {
+  frame: BrowserFrame | null;
   cancel: () => void;
   viewWindowRef: RefObject<HTMLDivElement | null>;
   touch: BrowserTouchHandlers;
@@ -113,7 +114,15 @@ export function useBrowserTouchView(options: Options): BrowserTouchView {
       }
       const point = { x: event.clientX, y: event.clientY };
       fingers.current.set(event.pointerId, point);
-      event.currentTarget.setPointerCapture(event.pointerId);
+      const nativeInput =
+        event.target instanceof HTMLTextAreaElement &&
+        event.target.hasAttribute("data-browser-native-input") &&
+        current.canInput &&
+        !event.target.readOnly;
+      if (!nativeInput) {
+        event.currentTarget.setPointerCapture(event.pointerId);
+        current.keyboardRef.current?.blur();
+      }
       if (fingers.current.size === 1) {
         current.cancelInput();
         gesture.current = {
@@ -142,9 +151,11 @@ export function useBrowserTouchView(options: Options): BrowserTouchView {
       } else {
         gesture.current = { type: "blocked" };
       }
-      // Suppress compatibility mousedown focus, which would steal the receiver focus after pointerup.
-      // Keyboard focus is deferred to the trusted touch-end activation, not this pointerdown.
-      event.preventDefault();
+      // Native editable hits use their own trusted touch activation.
+      // Other image interactions must not request a software keyboard.
+      if (!nativeInput || fingers.current.size !== 1) {
+        event.preventDefault();
+      }
     },
     onPointerMove: (event) => {
       const current = latest.current;
@@ -256,14 +267,6 @@ export function useBrowserTouchView(options: Options): BrowserTouchView {
               y: ((event.clientY - bounds.top) / bounds.height) * 100,
             });
             if (current.canInput) {
-              // Run synchronously in the trusted touch-end activation, before any transport response.
-              const field = current.keyboardRef.current;
-              if (field !== null) {
-                if (document.activeElement === field) {
-                  field.blur();
-                }
-                field.focus({ preventScroll: true });
-              }
               if (
                 current.onAction(source, {
                   kind: "pointer",
@@ -304,6 +307,7 @@ export function useBrowserTouchView(options: Options): BrowserTouchView {
     },
   };
   return {
+    frame: options.frame,
     cancel: clear,
     viewWindowRef,
     touch,

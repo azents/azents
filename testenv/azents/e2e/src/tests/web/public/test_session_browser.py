@@ -66,7 +66,9 @@ width:200px;height:40px;box-sizing:border-box}button{top:20px}
 Continue</button><input id="entry" oninput="document.title=
 this.value.includes('Synthetic GUI input')?String.fromCodePoint(0x2705):
 String.fromCodePoint(0x270f,0xfe0f)">
-<input id="secret" type="password" value="synthetic-password-canary">
+<input id="secret" type="password" value="synthetic-password-canary"
+oninput="document.title=this.value==='Synthetic GUI paste value'?
+'Browser GUI paste verified':'Browser GUI paste mismatch'">
 <button style="top:260px" onclick="document.title='Browser GUI pointer verified'">
 Verify GUI</button>
 """
@@ -308,6 +310,30 @@ def _verify_live_panel(
         )
         error.add_note(json.dumps(diagnostics, sort_keys=True))
         raise
+    click_native(100, 200)
+    wait.until(
+        lambda _: driver.execute_script(
+            "return document.activeElement?.hasAttribute('data-browser-native-input');"
+        )
+    )
+    ActionChains(driver).key_down(Keys.CONTROL).send_keys("a").key_up(
+        Keys.CONTROL
+    ).perform()
+    # Synthetic event data exercises UI -> authenticated stream -> native password
+    # insertion, not host clipboard permissions or OS consent UI.
+    driver.execute_script("""
+const data = new DataTransfer();
+data.setData('text/plain', 'Synthetic GUI paste value');
+document.activeElement.dispatchEvent(new ClipboardEvent('paste', {
+  bubbles: true, cancelable: true, clipboardData: data
+}));
+""")
+    wait_until(
+        lambda: title_is("Browser GUI paste verified"),
+        timeout=15,
+        interval=0.1,
+        message="The Web panel paste did not reach the native password input",
+    )
     ActionChains(driver).send_keys(Keys.ESCAPE).perform()
     wait.until(
         ec.invisibility_of_element_located(
