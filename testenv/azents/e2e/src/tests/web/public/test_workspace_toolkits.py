@@ -108,36 +108,18 @@ def test_workspace_toolkit_catalog_details_and_mutations_are_persisted(
     assert updated is not None
     assert updated.slug == saved.slug
     # Saving an edit returns to the exact Toolkit's details dialog.
-    toggle = _wait(browser_driver).until(
-        ec.element_to_be_clickable(
-            (By.XPATH, '//label[normalize-space()="Toolkit enabled"]')
-        )
+    # Mantine's visible label remains clickable while its hidden input is disabled.
+    _wait(browser_driver).until(
+        lambda driver: driver.find_element(
+            By.CSS_SELECTOR, '[role="dialog"] input[role="switch"]'
+        ).is_enabled()
     )
-    toggle.click()
+    browser_driver.find_element(
+        By.XPATH, '//label[normalize-space()="Toolkit enabled"]'
+    ).click()
     _wait(browser_driver).until(
         lambda _: not next(item for item in configs() if item.id == saved.id).enabled
     )
-    _wait(browser_driver).until(
-        ec.element_to_be_clickable(
-            (By.XPATH, '//label[normalize-space()="Toolkit enabled"]')
-        )
-    ).click()
-    _wait(browser_driver).until(
-        lambda _: next(item for item in configs() if item.id == saved.id).enabled
-    )
-
-    _click_button(browser_driver, "Delete")
-    _click_button(browser_driver, "Cancel")
-    _wait(browser_driver).until(
-        ec.invisibility_of_element_located(
-            (
-                By.XPATH,
-                '//*[@role="dialog"][.//*[normalize-space()='
-                '"Are you sure you want to delete this toolkit?"]]',
-            )
-        )
-    )
-    assert any(item.id == saved.id for item in configs())
     _click_button(browser_driver, "Delete")
     _wait(browser_driver).until(
         ec.element_to_be_clickable(

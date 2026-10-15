@@ -410,6 +410,15 @@ export const ManagementQa: Story = {
       modal.getByRole("switch", { name: "Toolkit enabled" }),
     );
     await expect(modal.getByText("Disabled", { exact: true })).toBeVisible();
+    await expect(
+      modal.getByRole("switch", { name: "Toolkit enabled" }),
+    ).not.toBeChecked();
+    await userEvent.click(
+      modal.getByRole("switch", { name: "Toolkit enabled" }),
+    );
+    await expect(
+      modal.getByRole("switch", { name: "Toolkit enabled" }),
+    ).toBeChecked();
     await userEvent.click(modal.getByRole("button", { name: "Delete" }));
     modal = within(await page.findByRole("dialog", { name: "Delete" }));
     await userEvent.click(
