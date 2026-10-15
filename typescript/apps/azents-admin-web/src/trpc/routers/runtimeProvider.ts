@@ -43,7 +43,7 @@ const profileLifecycleSchema = z.enum(["active", "disabled"]);
 
 export const runtimeProviderRouter = router({
   getRecreation: protectedProcedure
-    .input(z.object({ operationId: z.string().min(1) }))
+    .input(z.strictObject({ operationId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
       try {
         const { data } = await runtimeProviderV1GetPlatformRecreation({
@@ -60,7 +60,7 @@ export const runtimeProviderRouter = router({
 
   listInfrastructureProfiles: protectedProcedure
     .input(
-      z.object({
+      z.strictObject({
         providerId: z.string().min(1),
         profileKind: profileKindSchema,
       }),
@@ -85,7 +85,7 @@ export const runtimeProviderRouter = router({
 
   getInfrastructureProfileDeletionImpact: protectedProcedure
     .input(
-      z.object({
+      z.strictObject({
         providerId: z.string().min(1),
         profileId: z.string().min(1),
         profileKind: profileKindSchema,
@@ -119,7 +119,7 @@ export const runtimeProviderRouter = router({
 
   deleteInfrastructureProfile: protectedProcedure
     .input(
-      z.object({
+      z.strictObject({
         providerId: z.string().min(1),
         profileId: z.string().min(1),
         profileKind: profileKindSchema,
@@ -153,7 +153,7 @@ export const runtimeProviderRouter = router({
 
   getWorkspaceProfileAdminDetail: protectedProcedure
     .input(
-      z.object({
+      z.strictObject({
         workspaceHandle: z.string().min(1),
         profileId: z.string().min(1),
       }),
@@ -176,7 +176,7 @@ export const runtimeProviderRouter = router({
 
   createInfrastructureProfile: protectedProcedure
     .input(
-      z.object({
+      z.strictObject({
         providerId: z.string().min(1),
         displayName: z.string().min(1).max(120),
         description: z.string().max(1000),
@@ -215,7 +215,7 @@ export const runtimeProviderRouter = router({
 
   replaceInfrastructureProfile: protectedProcedure
     .input(
-      z.object({
+      z.strictObject({
         providerId: z.string().min(1),
         profileId: z.string().min(1),
         expectedVersion: z.number().int().positive(),
@@ -260,7 +260,7 @@ export const runtimeProviderRouter = router({
 
   createInfrastructureProfileRecreation: protectedProcedure
     .input(
-      z.object({
+      z.strictObject({
         providerId: z.string().min(1),
         profileId: z.string().min(1),
         profileKind: profileKindSchema,
@@ -294,7 +294,7 @@ export const runtimeProviderRouter = router({
 
   createProviderRecreation: protectedProcedure
     .input(
-      z.object({
+      z.strictObject({
         providerId: z.string().min(1),
         expectedVersion: z.number().int().positive(),
       }),
@@ -318,7 +318,7 @@ export const runtimeProviderRouter = router({
     }),
 
   listContracts: protectedProcedure
-    .input(z.object({ providerId: z.string().min(1) }))
+    .input(z.strictObject({ providerId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
       try {
         const { data } = await runtimeProviderV1ListContracts({
@@ -333,7 +333,7 @@ export const runtimeProviderRouter = router({
     }),
 
   listAuthBindings: protectedProcedure
-    .input(z.object({ providerId: z.string().min(1) }))
+    .input(z.strictObject({ providerId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
       try {
         const { data } = await runtimeProviderV1ListAuthBindings({
@@ -349,7 +349,7 @@ export const runtimeProviderRouter = router({
 
   listAuthBindingAuditEvents: protectedProcedure
     .input(
-      z.object({
+      z.strictObject({
         bindingId: z.string().min(1),
         offset: z.number().int().nonnegative(),
         limit: z.number().int().positive().max(100),
@@ -371,7 +371,7 @@ export const runtimeProviderRouter = router({
 
   createAuthBinding: protectedProcedure
     .input(
-      z.object({
+      z.strictObject({
         providerId: z.string().min(1),
         subject: z.string().min(1).max(255),
       }),
@@ -400,7 +400,7 @@ export const runtimeProviderRouter = router({
 
   rotateAuthBinding: protectedProcedure
     .input(
-      z.object({
+      z.strictObject({
         bindingId: z.string().min(1),
         expectedAdminVersion: z.number().int().positive(),
         expiresAt: z.string().min(1),
@@ -429,7 +429,7 @@ export const runtimeProviderRouter = router({
 
   revokeAuthBinding: protectedProcedure
     .input(
-      z.object({
+      z.strictObject({
         bindingId: z.string().min(1),
         expectedAdminVersion: z.number().int().positive(),
         reason: z.string().max(255).nullable(),
@@ -465,7 +465,7 @@ export const runtimeProviderRouter = router({
   }),
 
   get: protectedProcedure
-    .input(z.object({ providerId: z.string().min(1) }))
+    .input(z.strictObject({ providerId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
       try {
         const { data } = await runtimeProviderV1GetRuntimeProvider({
@@ -480,7 +480,7 @@ export const runtimeProviderRouter = router({
     }),
 
   getDiagnostics: protectedProcedure
-    .input(z.object({ providerId: z.string().min(1) }))
+    .input(z.strictObject({ providerId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
       try {
         const { data } = await runtimeProviderV1GetProviderDiagnostics({
@@ -496,7 +496,7 @@ export const runtimeProviderRouter = router({
 
   updatePolicy: protectedProcedure
     .input(
-      z.object({
+      z.strictObject({
         providerId: z.string().min(1),
         enabled: z.boolean(),
         lifecycleState: lifecycleStateSchema,
@@ -523,7 +523,7 @@ export const runtimeProviderRouter = router({
 
   replaceAvailability: protectedProcedure
     .input(
-      z.object({
+      z.strictObject({
         providerId: z.string().min(1),
         workspaceIds: z.array(z.string().min(1)),
       }),

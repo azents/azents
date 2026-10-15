@@ -1,5 +1,6 @@
 "use client";
 
+import { useColorScheme } from "@mantine/hooks";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -30,15 +31,6 @@ interface ColorModeProviderProps {
   initialResolvedMode?: ColorMode;
 }
 
-function getSystemColorMode(): ColorMode {
-  if (typeof window === "undefined") {
-    return "light";
-  }
-  return window.matchMedia("(prefers-color-scheme: dark)").matches
-    ? "dark"
-    : "light";
-}
-
 function setCookie(name: string, value: string, days: number = 365): void {
   if (typeof document === "undefined") {
     return;
@@ -57,30 +49,15 @@ export function ColorModeProvider({
   const [preference, setPreference] =
     useState<ColorModePreference>(initialPreference);
   const [mode, setMode] = useState<ColorMode>(initialResolvedMode);
+  const systemMode = useColorScheme(initialResolvedMode);
 
   // Sync with system preference and save resolved mode to cookie
   useEffect(() => {
-    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-
-    const syncMode = (): void => {
-      if (preference === "system") {
-        const systemMode = getSystemColorMode();
-        setMode(systemMode);
-        setCookie(RESOLVED_MODE_COOKIE, systemMode);
-      }
-    };
-
-    // Initial sync
-    syncMode();
-
-    // Listen for system preference changes
-    const handleChange = (): void => {
-      syncMode();
-    };
-
-    mediaQuery.addEventListener("change", handleChange);
-    return () => mediaQuery.removeEventListener("change", handleChange);
-  }, [preference]);
+    if (preference === "system") {
+      setMode(systemMode);
+      setCookie(RESOLVED_MODE_COOKIE, systemMode);
+    }
+  }, [preference, systemMode]);
 
   const colorMode = useMemo(
     () => ({
@@ -89,7 +66,6 @@ export function ColorModeProvider({
         setCookie(PREFERENCE_COOKIE, newPreference);
 
         if (newPreference === "system") {
-          const systemMode = getSystemColorMode();
           setMode(systemMode);
           setCookie(RESOLVED_MODE_COOKIE, systemMode);
         } else {
@@ -100,7 +76,7 @@ export function ColorModeProvider({
       mode,
       preference,
     }),
-    [mode, preference],
+    [mode, preference, systemMode],
   );
 
   return (

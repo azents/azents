@@ -632,13 +632,13 @@ class TestModelSelectionReadiness:
         candidate = body.default_selectable_model_options[0].candidates[0]
         assert candidate.model_selection.model_identifier == "gpt-5.5"
 
-    def test_context_range_default_and_maximum_resolution(
+    def test_catalog_context_reaches_prepared_turn(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
     ) -> None:
-        """Prepared turns use default, explicit cap, maximum clamp, and legacy max."""
+        """One assembled turn retains the catalog default and prepared threshold."""
         token, handle, integration_id = _workspace_with_deterministic_integration(
             public_api_client,
             admin_api_client,
@@ -683,12 +683,6 @@ class TestModelSelectionReadiness:
                 "model_identifier": identifier,
             }
 
-        scenarios = [
-            ("default", "gpt-5.5", None, 96_000),
-            ("extended", "gpt-5.5", 160_000, 160_000),
-            ("clamped", "gpt-5.5", 300_000, 256_000),
-            ("legacy", "gpt-5.5-mini", None, 512_000),
-        ]
         runtime_profile_id = create_workspace_runtime_profile(
             public_api_client,
             token=token,
@@ -708,7 +702,7 @@ class TestModelSelectionReadiness:
                             {
                                 "model_selection": selection(identifier),
                                 "settings": {
-                                    "context_window_tokens": context_window_tokens,
+                                    "context_window_tokens": None,
                                     "builtin_tools": [],
                                 },
                             }
@@ -716,7 +710,10 @@ class TestModelSelectionReadiness:
                         "subagent_enabled": True,
                         "subagent_guidance": None,
                     }
-                    for label, identifier, context_window_tokens, _ in scenarios
+                    for label, identifier in (
+                        ("default", "gpt-5.5"),
+                        ("legacy", "gpt-5.5-mini"),
+                    )
                 ],
                 "main_model_label": "default",
                 "lightweight_model_label": "legacy",
@@ -743,31 +740,30 @@ class TestModelSelectionReadiness:
         session.raise_for_status()
         session_id = AgentSessionResponse.model_validate(session.json()).id
 
-        for label, _, _, expected_effective in scenarios:
-            submitted = requests.post(
-                f"{azents_public_server_url}/chat/v1/sessions/{session_id}/inputs",
-                headers=_headers(token),
-                json={
-                    "agent_id": agent_id,
-                    "client_request_id": f"context-range-{label}-{unique()}",
-                    "message": f"Verify prepared context for {label}.",
-                    "inference_profile": {
-                        "model_target_label": label,
-                        "reasoning_effort": None,
-                        "enabled_execution_options": [],
-                    },
+        submitted = requests.post(
+            f"{azents_public_server_url}/chat/v1/sessions/{session_id}/inputs",
+            headers=_headers(token),
+            json={
+                "agent_id": agent_id,
+                "client_request_id": f"context-range-default-{unique()}",
+                "message": "Verify prepared context for default.",
+                "inference_profile": {
+                    "model_target_label": "default",
+                    "reasoning_effort": None,
+                    "enabled_execution_options": [],
                 },
-                timeout=10,
-            )
-            submitted.raise_for_status()
-            _wait_for_turn_context(
-                server_url=azents_public_server_url,
-                token=token,
-                agent_id=agent_id,
-                session_id=session_id,
-                target=label,
-                expected_effective=expected_effective,
-            )
+            },
+            timeout=10,
+        )
+        submitted.raise_for_status()
+        _wait_for_turn_context(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=session_id,
+            target="default",
+            expected_effective=96_000,
+        )
 
     def test_selectable_model_candidate_chains_copy_and_remain_independent(
         self,

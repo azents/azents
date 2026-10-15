@@ -19,8 +19,8 @@ import { IconArrowLeft, IconLock, IconPlus } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { ToolkitTypeIcon } from "@/shared/toolkits/components/ToolkitTypeIcon";
-import { isGitHubUserMode } from "@/shared/toolkits/github-user-oauth-state";
 import { GitHubUserAuthorizationContainer } from "@/shared/toolkits/GitHubUserAuthorizationContainer";
+import { projectGitHubUserMode } from "@/shared/toolkits/provider-config-views";
 import { projectToolkitDetails } from "@/shared/toolkits/toolkit-detail-projection";
 import { usesToolkitCreationWizard } from "@/shared/toolkits/toolkit-form-lifecycle";
 import { ToolkitFormContainer } from "@/shared/toolkits/ToolkitFormContainer";
@@ -357,7 +357,7 @@ export function ManagedAgentToolkitSectionView(
       onDelete: () => props.onRequestDelete(item),
       userConnectionView:
         item.toolkit.toolkit_type === "github" &&
-        isGitHubUserMode(item.toolkit.config.github_auth_type) &&
+        projectGitHubUserMode(item.toolkit.config) &&
         (item.ownership_scope === "agent_only" || props.canAuthorizeShared) &&
         editor.type === "DETAIL" &&
         editor.toolkitConfigId === item.toolkit.id

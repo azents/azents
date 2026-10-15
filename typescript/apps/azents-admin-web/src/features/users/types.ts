@@ -5,7 +5,7 @@
 // --- API response types (re-exported from the generated client) ---
 export type { UserEmailResponse, UserResponse } from "@azents/admin-client";
 
-import type { UserResponse } from "@azents/admin-client";
+import type { UserEmailResponse, UserResponse } from "@azents/admin-client";
 
 // --- ADT state types ---
 
@@ -17,6 +17,11 @@ export type UserListState =
       type: "LOADED";
       users: UserResponse[];
     };
+
+export type UserEmailListState =
+  | { type: "LOADING" }
+  | { type: "ERROR"; message: string }
+  | { type: "LOADED"; emails: UserEmailResponse[] };
 
 /** System administrator role state */
 export type SystemAdminRoleState =

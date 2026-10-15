@@ -265,16 +265,9 @@ function ExternalChannelFilesCard({
   );
 }
 
-function impactNumber(
-  candidate: PlatformGitHubAppCandidateResponse,
-  name: string,
-): number | null {
-  const value = candidate.impact?.[name];
-  return typeof value === "number" ? value : null;
-}
-
 function CandidatePanel({
   candidate,
+  candidateImpact,
   confirmationAction,
   confirmationActions,
   validating,
@@ -288,6 +281,7 @@ function CandidatePanel({
   SystemSettingsPageContentProps,
   | "confirmationAction"
   | "confirmationActions"
+  | "candidateImpact"
   | "validating"
   | "confirming"
   | "cancelling"
@@ -299,10 +293,10 @@ function CandidatePanel({
   candidate: PlatformGitHubAppCandidateResponse;
 }): React.ReactElement {
   const impactRows = [
-    ["Users", impactNumber(candidate, "affected_user_count")],
-    ["Installations", impactNumber(candidate, "affected_installation_count")],
-    ["Toolkits", impactNumber(candidate, "affected_toolkit_count")],
-    ["Agents", impactNumber(candidate, "affected_agent_count")],
+    ["Users", candidateImpact.affected_user_count],
+    ["Installations", candidateImpact.affected_installation_count],
+    ["Toolkits", candidateImpact.affected_toolkit_count],
+    ["Agents", candidateImpact.affected_agent_count],
   ].filter((row): row is [string, number] => row[1] !== null);
 
   return (
@@ -471,6 +465,7 @@ export function SystemSettingsPageContent({
   draft,
   confirmationAction,
   confirmationActions,
+  candidateImpact,
   saving,
   validating,
   confirming,
@@ -672,6 +667,7 @@ export function SystemSettingsPageContent({
       {detail.candidate && (
         <CandidatePanel
           candidate={detail.candidate}
+          candidateImpact={candidateImpact}
           confirmationAction={confirmationAction}
           confirmationActions={confirmationActions}
           validating={validating}

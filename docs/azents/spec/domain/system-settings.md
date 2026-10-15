@@ -1,7 +1,7 @@
 ---
 title: "System Settings"
 created: 2026-07-19
-updated: 2026-10-14
+updated: 2026-10-15
 tags: [backend, frontend, admin, scheduler, security, infra]
 spec_type: domain
 domain: system-settings
@@ -63,7 +63,7 @@ api_routes:
   - /system/v1/settings/file-lifecycle/compacted-event-retention
   - /system/v1/settings/file-lifecycle/archive-retention/preview
   - /system/v1/settings/file-lifecycle/retention-applications/{application_id}
-last_verified_at: 2026-10-14
+last_verified_at: 2026-10-15
 spec_version: 10
 ---
 
@@ -106,9 +106,13 @@ Section lock/generation fence so stale success or failure cannot win through
 configuration replacement. Existing data is preserved; there is no retired-secret
 fallback or remote revocation on local configuration change.
 
-See [Google Connection Backend](google-connection.md) for the exact manager/
-execution and candidate/publication contracts. The Google Admin browser editor
-is not yet part of this backend implementation.
+Admin System Settings exposes a Google application card with redacted preparation
+state, environment-owned read-only fields, explicit secret replacement/clear
+actions and the deployment callback. A conflict or uncertain save requires
+reloading current settings before retry; reload discards the draft. Local
+configuration is not presented as verified Preview eligibility or service access.
+See [Google Connection](google-connection.md) for the exact management, execution
+and candidate/publication contracts.
 
 ## Provider-neutral Section lifecycle
 

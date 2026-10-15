@@ -25,7 +25,7 @@ export const bootstrapRouter = router({
 
   firstAdmin: bootstrapProcedure
     .input(
-      z.object({
+      z.strictObject({
         setupToken: z.string().min(1),
         email: z.string().email(),
         password: z.string().min(1),

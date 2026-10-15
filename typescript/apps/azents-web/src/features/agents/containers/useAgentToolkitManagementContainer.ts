@@ -15,13 +15,13 @@ import {
   consumeGitHubUserPopupHandoff,
   deserializeGitHubUserContext,
   GITHUB_USER_CONTEXT_KEY,
-  isGitHubUserMode,
 } from "@/shared/toolkits/github-user-oauth-state";
 import {
   deserializeGoogleResume,
   GOOGLE_RESUME_KEY,
   googleReturnPath,
 } from "@/shared/toolkits/google-resume";
+import { projectGitHubUserMode } from "@/shared/toolkits/provider-config-views";
 import { usesToolkitCreationWizard } from "@/shared/toolkits/toolkit-form-lifecycle";
 import { trpc } from "@/trpc/client";
 import {
@@ -269,7 +269,7 @@ export function useAgentToolkitManagementContainer({
       setMutationState({ type: "IDLE" });
       if (
         item.toolkit.toolkit_type === "github" &&
-        isGitHubUserMode(item.toolkit.config.github_auth_type)
+        projectGitHubUserMode(item.toolkit.config)
       ) {
         setEditor({ type: "DETAIL", toolkitConfigId: item.toolkit.id });
         saveGithubContext({

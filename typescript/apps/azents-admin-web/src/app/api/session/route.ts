@@ -13,7 +13,7 @@ import {
 import { hasExpectedOrigin } from "@/shared/lib/same-origin";
 import { createContext } from "@/trpc/context";
 
-const LoginInputSchema = z.object({
+const LoginInputSchema = z.strictObject({
   email: z.string().email(),
   password: z.string().min(1),
 });

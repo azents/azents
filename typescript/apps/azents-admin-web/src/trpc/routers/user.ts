@@ -62,7 +62,7 @@ export const userRouter = router({
    * Get user details
    */
   get: protectedProcedure
-    .input(z.object({ id: z.string() }))
+    .input(z.strictObject({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const { data } = await userV1GetUser({
         client: ctx.adminApiClient,
@@ -76,7 +76,7 @@ export const userRouter = router({
    * Delete a user
    */
   delete: protectedProcedure
-    .input(z.object({ id: z.string() }))
+    .input(z.strictObject({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       try {
         await userV1DeleteUser({

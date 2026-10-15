@@ -414,9 +414,10 @@ already-executed notice remain model-visible after partial Runtime storage failu
 
 Dynamic prompt preparation may return visible text plus server-only native replay
 compatibility metadata in one result. Ordinary toolkit strings are unchanged.
-Memory supplies only already admitted exact Historical unit/revision identity;
-catalog projections preserve that binding without injecting it into visible
-prompt fragments or treating it as access authority.
+Memory binds native replay compatibility to the actual authorized context text.
+Catalog projections preserve that binding without treating it as access authority;
+changed or denied context resets incompatible native replay while retaining
+durable visible Events.
 
 ### Registered VFS and Generic Storage Ownership
 
@@ -441,8 +442,11 @@ use separately registered optional mutation and atomic-patch capabilities;
 read-only backends need no mutation members or throwing placeholder methods.
 Patch admission rejects mixed backends and commits all-or-none within a backend.
 Unsupported VFS operations fail without Runtime fallback. Foreground Skills and
-Memory remain read-only; only the internal consolidation principal registers the
-private writable `memory-draft` mount with draft/epoch/receipt fences.
+Memory remain read-only. Internal consolidation uses the common Session execution
+file backend under `azents://execution/`, with read-only provided inputs and
+writable authored files. File operations and accepted submission retain the exact
+execution owner-generation fence; the foreground Memory mount exposes none of
+these internal files.
 
 Skills reads use the immutable current AgentRun projection. Memory reads use live
 PostgreSQL queries and independently recheck Memory enablement and current root/
@@ -1029,10 +1033,13 @@ root/subagent `memory_context` contributes the root's persisted initial or
 post-compaction boundary snapshot and live VFS lookup guidance, with no domain
 read tools. Ordinary turns filter unavailable entries without reselection.
 Root-only `memory_write` exposes Saved `save_memory` and `delete_memory`; subagents
-do not receive those mutation tools. The six dedicated Memory/history read
-factories are removed without aliases. Disabled Memory contributes no automatic
-context/mutation tools and denies the live Memory mount while generic tools can
-still read other authorized backends.
+do not receive those mutation tools. Saved Memory and Session-summary lookup use
+generic VFS reads. Memory-enabled root and subagent execution also retain
+`search_sessions`, `read_session_history` and `read_session_tool_result` through
+the directly visible readable-storage Toolkit, with current root authorization
+and server-bound execution identity. Disabled Memory omits these history tools,
+contributes no automatic context/mutation tools and denies the live Memory mount
+while generic tools can still read other authorized backends.
 
 - `ShellToolkitConfig` is the internal shared configuration model for auto-bound Builtin, Memory,
   and Runtime Toolkit instances. It carries `allowed_domains`, `denied_domains`, `agent_data_root`,

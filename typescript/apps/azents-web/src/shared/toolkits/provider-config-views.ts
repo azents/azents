@@ -1,8 +1,11 @@
 import { z } from "zod/v4";
 import { isString } from "../lib/unknown-value.ts";
 import { normalizeGitHubUserCredentialEdits } from "./github-user-credentials.ts";
+import { isGitHubUserMode } from "./github-user-oauth-state.ts";
+import { isWizardMode } from "./github-wizard-state.ts";
 import { getClusterCredentials, getClusters } from "./kubernetes-fields.ts";
 import { getServiceAccountKey } from "./service-account-fields.ts";
+import type { GitHubWizardMode } from "./github-wizard-state";
 
 const text = z.string().catch("");
 const timeout = z
@@ -186,6 +189,30 @@ export function projectGitHubAuthEvidence(config: unknown): GitHubAuthEvidence {
 export type GitHubAuthEvidence = z.infer<
   typeof githubAuthEvidenceSchema
 >["github_auth_type"];
+
+const githubWizardModeSchema = z.object({
+  github_auth_type: z
+    .unknown()
+    .optional()
+    .transform((value) => (isWizardMode(value) ? value : null)),
+});
+const githubUserModeSchema = z.object({
+  github_auth_type: z
+    .unknown()
+    .optional()
+    .transform((value) => isGitHubUserMode(value)),
+});
+/** Management consumes only mode authority, without coercing opaque display values. */
+export function projectGitHubUserMode(config: unknown): boolean {
+  return githubUserModeSchema.parse(config).github_auth_type;
+}
+
+/** Resume only the five current Wizard modes; all other values require restart. */
+export function projectGitHubWizardMode(
+  config: unknown,
+): GitHubWizardMode | null {
+  return githubWizardModeSchema.parse(config).github_auth_type;
+}
 
 /** Boundary equality retains unknown provider discriminators without interpreting them downstream. */
 export function gitHubAuthChanged(saved: unknown, current: unknown): boolean {

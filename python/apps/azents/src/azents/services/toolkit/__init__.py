@@ -97,6 +97,78 @@ _envvar_secrets_adapter: TypeAdapter[EnvVarToolkitSecrets] = TypeAdapter(
 
 
 @dataclasses.dataclass(frozen=True)
+class _ToolkitAuthEvidence:
+    """Interpreted authentication selectors, separate from opaque provider data."""
+
+    github_auth_type: str | None
+    credential_type: str | None
+
+    @property
+    def github_user(self) -> bool:
+        """Return whether the configured mode requires a user connection."""
+        return self.github_auth_type in ("github_app_user", "github_app_platform_user")
+
+    @property
+    def user_creation(self) -> bool:
+        """Preserve creation admission from either configuration or credentials."""
+        return self.github_user or self.credential_type in (
+            "github_app_user",
+            "github_app_platform_user",
+        )
+
+
+def _decode_toolkit_auth(
+    config: dict[str, object] | None,
+    credentials: dict[str, object] | None,
+) -> _ToolkitAuthEvidence:
+    """Project exact string selectors without validating unrelated provider fields.
+
+    Missing, null and non-string selectors retain their historical nonmatching
+    behavior. Partial credentials and provider extensions remain opaque.
+    """
+    auth_type = config.get("github_auth_type") if config is not None else None
+    credential_type = credentials.get("type") if credentials is not None else None
+    return _ToolkitAuthEvidence(
+        github_auth_type=auth_type if isinstance(auth_type, str) else None,
+        credential_type=credential_type if isinstance(credential_type, str) else None,
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class _ToolkitAuthTransition:
+    """Validated evidence relevant to implicit credential invalidation."""
+
+    mcp_auth_changed: bool
+    mcp_auth_supplied: bool
+    same_github_user_registration: bool
+
+
+def _decode_toolkit_auth_transition(
+    toolkit_type: str,
+    existing_config: dict[str, object],
+    submitted_config: dict[str, object],
+) -> _ToolkitAuthTransition:
+    """Project the existing pairwise compatibility contract at update ingress.
+
+    Generic providers own their auth-type values, so preserve their exact equality
+    and explicit-null behavior rather than narrowing or coercing those values.
+    """
+    old_auth = existing_config.get("auth_type")
+    new_auth = submitted_config.get("auth_type")
+    old_github = _decode_toolkit_auth(existing_config, None)
+    new_github = _decode_toolkit_auth(submitted_config, None)
+    return _ToolkitAuthTransition(
+        mcp_auth_changed=old_auth != new_auth,
+        mcp_auth_supplied=new_auth is not None,
+        same_github_user_registration=(
+            toolkit_type == "github"
+            and old_github.github_user
+            and new_github.github_auth_type == old_github.github_auth_type
+        ),
+    )
+
+
+@dataclasses.dataclass(frozen=True)
 class _PreparedCredentials:
     """Credentials normalized against one external Platform settings snapshot."""
 
@@ -197,12 +269,8 @@ class ToolkitService:
 
     @staticmethod
     def _requires_user_creation(create: ToolkitCreateInput) -> bool:
-        return create.toolkit_type == "github" and (
-            create.config.get("github_auth_type")
-            in ("github_app_user", "github_app_platform_user")
-            or (create.credentials or {}).get("type")
-            in ("github_app_user", "github_app_platform_user")
-        )
+        auth = _decode_toolkit_auth(create.config, create.credentials)
+        return create.toolkit_type == "github" and auth.user_creation
 
     async def prepare_user_creation(
         self, create: ToolkitCreateInput, *, owner_agent_id: str | None
@@ -229,9 +297,11 @@ class ToolkitService:
             raise GitHubUserOAuthError(
                 GitHubUserErrorCode.INVALID, "GitHub App registration is incomplete."
             )
-        if prepared.credentials is None or prepared.credentials.get(
-            "type"
-        ) != create.config.get("github_auth_type"):
+        auth = _decode_toolkit_auth(create.config, prepared.credentials)
+        if (
+            prepared.credentials is None
+            or auth.credential_type != auth.github_auth_type
+        ):
             raise GitHubUserOAuthError(
                 GitHubUserErrorCode.INVALID,
                 "GitHub App source does not match configuration.",
@@ -638,9 +708,8 @@ class ToolkitService:
         self, toolkit: ToolkitOutput
     ) -> ToolkitOutput:
         """Attach only redacted saved user identity."""
-        if toolkit.toolkit_type != "github" or toolkit.config.get(
-            "github_auth_type"
-        ) not in ("github_app_user", "github_app_platform_user"):
+        auth = _decode_toolkit_auth(toolkit.config, None)
+        if toolkit.toolkit_type != "github" or not auth.github_user:
             return toolkit
         summary = await self.operations_repository.get_github_user_summary(toolkit.id)
         return toolkit.model_copy(update={"github_user_connection": summary})
@@ -664,9 +733,10 @@ class ToolkitService:
         self, existing: ToolkitConfig, submitted: dict[str, object]
     ) -> _PreparedCredentials | InvalidCredentials:
         """Keep omitted write-only BYOA values only for the same App registration."""
+        auth = _decode_toolkit_auth(None, submitted)
         if (
             existing.toolkit_type == "github"
-            and submitted.get("type") == "github_app_user"
+            and auth.credential_type == "github_app_user"
         ):
             try:
                 submitted = merge_github_user_registration(
@@ -684,7 +754,8 @@ class ToolkitService:
         credentials: dict[str, object] | None,
     ) -> _PreparedCredentials | InvalidCredentials:
         """Bind Platform credentials to one external settings snapshot."""
-        if credentials is None or credentials.get("type") not in (
+        auth = _decode_toolkit_auth(None, credentials)
+        if credentials is None or auth.credential_type not in (
             "github_app_platform",
             "github_app_platform_user",
         ):
@@ -808,19 +879,15 @@ class ToolkitService:
             repo_update["always_expose_tools"] = update["always_expose_tools"]
 
         if "config" in update and "credentials" not in update:
-            old_auth = existing.config.get("auth_type") if existing.config else None
-            new_auth = update["config"].get("auth_type") if update["config"] else None
-            same_user_registration = (
-                existing.toolkit_type == "github"
-                and existing.config.get("github_auth_type")
-                in ("github_app_user", "github_app_platform_user")
-                and update["config"].get("github_auth_type")
-                == existing.config.get("github_auth_type")
+            transition = _decode_toolkit_auth_transition(
+                existing.toolkit_type,
+                existing.config,
+                update["config"],
             )
             if (
-                old_auth != new_auth
-                and new_auth is not None
-                and not same_user_registration
+                transition.mcp_auth_changed
+                and transition.mcp_auth_supplied
+                and not transition.same_github_user_registration
             ):
                 repo_update["credentials"] = None
         return repo_update
@@ -1452,9 +1519,8 @@ class ToolkitService:
             return "disabled"
         if toolkit.authorization_state is not None:
             return "authorization_required"
-        if toolkit.toolkit_type == "github" and toolkit.config.get(
-            "github_auth_type"
-        ) in ("github_app_user", "github_app_platform_user"):
+        auth = _decode_toolkit_auth(toolkit.config, None)
+        if toolkit.toolkit_type == "github" and auth.github_user:
             if (
                 toolkit.github_user_connection is None
                 or toolkit.github_user_connection.status

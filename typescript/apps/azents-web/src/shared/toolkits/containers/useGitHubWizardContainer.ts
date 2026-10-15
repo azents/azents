@@ -26,12 +26,14 @@ import {
   DEFAULT_GITHUB_WIZARD_SETTINGS,
   finalWizardSettings,
   gitHubWizardConnectionReady,
-  isWizardMode,
   wizardCandidateRequiresRestart,
   wizardIdentity,
 } from "../github-wizard-state";
 import { decodeGitHubPopupMessage } from "../popup-messages";
-import { projectGitHubReviewSettings } from "../provider-config-views";
+import {
+  projectGitHubReviewSettings,
+  projectGitHubWizardMode,
+} from "../provider-config-views";
 import { useGitHubWizardProgression } from "./useGitHubWizardProgression";
 import type { GitHubWizardProps } from "../components/GitHubWizard";
 import type { GitHubUserCreationContext } from "../github-user-creation-state";
@@ -344,8 +346,8 @@ export function useGitHubWizardContainer({
         if (!epoch.current.isCurrent(operation) || closed.current) {
           return;
         }
-        const restoredMode = review.config.github_auth_type;
-        if (!isWizardMode(restoredMode)) {
+        const restoredMode = projectGitHubWizardMode(review.config);
+        if (restoredMode == null) {
           setConnection({ type: "ERROR", message: t("restart") });
           return;
         }

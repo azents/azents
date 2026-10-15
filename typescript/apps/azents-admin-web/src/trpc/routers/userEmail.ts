@@ -18,7 +18,7 @@ export const userEmailRouter = router({
    * List emails by user
    */
   listByUser: protectedProcedure
-    .input(z.object({ user_id: z.string() }))
+    .input(z.strictObject({ user_id: z.string() }))
     .query(async ({ ctx, input }) => {
       const { data } = await useremailV1ListEmailsByUser({
         client: ctx.adminApiClient,
@@ -37,7 +37,7 @@ export const userEmailRouter = router({
    */
   create: protectedProcedure
     .input(
-      z.object({
+      z.strictObject({
         user_id: z.string(),
         email: z.string().email(),
       }),
@@ -56,7 +56,7 @@ export const userEmailRouter = router({
    * Delete a UserEmail
    */
   delete: protectedProcedure
-    .input(z.object({ email_id: z.string() }))
+    .input(z.strictObject({ email_id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await useremailV1DeleteEmail({
         client: ctx.adminApiClient,

@@ -1,22 +1,21 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import {
+  BrowserStorageFixture,
+  deferred,
+  HookHarness,
+  invoke,
+  noMutation,
+  object,
+} from "../../shared/testing/hook-test-harness.ts";
 import * as googleResume from "../../shared/toolkits/google-resume.ts";
 import * as googleTypes from "../../shared/toolkits/google-types.ts";
 import * as popupMessages from "../../shared/toolkits/popup-messages.ts";
 import * as providerConfigViews from "../../shared/toolkits/provider-config-views.ts";
 import * as projection from "../../shared/toolkits/toolkit-config-projection.ts";
 import * as formLifecycle from "../../shared/toolkits/toolkit-form-lifecycle.ts";
-import * as managementState from "../agents/agentToolkitManagementState.ts";
-import {
-  deferred,
-  HookHarness,
-  invoke,
-  noMutation,
-  object,
-  ResumeStore,
-} from "./google-container-test-harness.ts";
+import type { NativeDeferred } from "../../shared/testing/hook-test-harness.ts";
 import type { GoogleResume } from "../../shared/toolkits/google-resume.ts";
-import type { NativeDeferred } from "./google-container-test-harness.ts";
 
 function receipt(value: NativeDeferred | null): PromiseLike<unknown> {
   if (value == null) {
@@ -68,7 +67,7 @@ const review = {
 };
 
 function callbackHarness(
-  store: ResumeStore,
+  store: BrowserStorageFixture,
   exchange: (input: unknown) => PromiseLike<unknown>,
   cancel: (input: unknown) => PromiseLike<unknown>,
 ): { harness: HookHarness; routes: unknown[] } {
@@ -104,7 +103,7 @@ function callbackHarness(
 for (const operation of ["exchange", "denial"]) {
   for (const leave of ["unmount", "replacement"]) {
     void test(`actual Google callback fences late ${operation} after ${leave}`, async () => {
-      const store = new ResumeStore();
+      const store = new BrowserStorageFixture(googleResume.GOOGLE_RESUME_KEY);
       const old = {
         ...context(),
         phase: "AUTHORIZING",
@@ -145,7 +144,7 @@ for (const operation of ["exchange", "denial"]) {
   }
 }
 void test("actual callback survives Strict Mode probe and dispatches one exact exchange", async () => {
-  const store = new ResumeStore();
+  const store = new BrowserStorageFixture(googleResume.GOOGLE_RESUME_KEY);
   store.value = {
     ...context(),
     phase: "AUTHORIZING",
@@ -179,7 +178,7 @@ void test("actual callback survives Strict Mode probe and dispatches one exact e
   assert.deepEqual(routes, [context().returnPath]);
 });
 void test("denial cancellation observes publication rather than labelling it discarded", async () => {
-  const store = new ResumeStore();
+  const store = new BrowserStorageFixture(googleResume.GOOGLE_RESUME_KEY);
   store.value = {
     ...context(),
     phase: "AUTHORIZING",
@@ -224,144 +223,9 @@ function query(data: unknown): Record<string, unknown> {
 function translations(): (key: string) => string {
   return (key) => key;
 }
-function managerHarness(store: ResumeStore, items: unknown[]): HookHarness {
-  const harness = new HookHarness();
-  const toolkit: Record<string, unknown> = {
-    listAgentManagement: {
-      useQuery: () => query({ items, available_shared: [] }),
-    },
-    listToolkits: {
-      useQuery: () => query({ items: [{ slug: "google", name: "Google" }] }),
-    },
-  };
-  for (const name of [
-    "attachToAgent",
-    "detachFromAgent",
-    "updateAgentConfig",
-    "removeAgentConfig",
-    "connectOauth",
-    "connectAgentOauth",
-  ]) {
-    toolkit[name] = { useMutation: noMutation };
-  }
-  const utils = {
-    toolkit: {
-      listAgentManagement: { invalidate: async () => {} },
-      githubUser: {
-        status: { invalidate: async () => {} },
-        access: { invalidate: async () => {} },
-        review: { invalidate: async () => {} },
-      },
-      getAgentConfig: { invalidate: async () => {} },
-    },
-  };
-  harness.load(
-    new URL(
-      "../agents/containers/useAgentToolkitManagementContainer.ts",
-      import.meta.url,
-    ),
-    "useAgentToolkitManagementContainer",
-    {
-      react: harness.react,
-      "@mantine/hooks": store.mantine,
-      "next-intl": { useTranslations: translations },
-      "@/shared/toolkits/google-resume": googleResume,
-      "@/shared/toolkits/toolkit-form-lifecycle": formLifecycle,
-      "@/shared/toolkits/github-user-creation-state": {
-        creationReturnPath: googleResume.googleReturnPath,
-        deserializeGitHubUserCreation: () => null,
-        GITHUB_USER_CREATION_KEY: "github.creation",
-      },
-      "@/shared/toolkits/github-user-oauth-state": {
-        deserializeGitHubUserContext: () => null,
-        GITHUB_USER_CONTEXT_KEY: "github.context",
-      },
-      "../agentToolkitManagementState": managementState,
-      "@/trpc/client": {
-        trpc: {
-          toolkit,
-          useUtils: () => utils,
-          workspaceMember: { me: { useQuery: () => query({ role: "owner" }) } },
-        },
-      },
-    },
-    { location: { origin: "https://app.example.invalid" } },
-  );
-  return harness;
-}
-void test("actual Agent management restores Google create and uncertain publication", () => {
-  for (const phase of ["REVIEW", "VERIFYING", "UNKNOWN", "PUBLISHING"]) {
-    const store = new ResumeStore();
-    store.value = { ...context(), phase };
-    const harness = managerHarness(store, []);
-    harness.render({ handle: "team", agentId: "agent" });
-    harness.flushEffects();
-    const editor = object(harness.render().editor);
-    assert.equal(editor.type, "CREATE");
-    assert.equal(editor.toolkitType, "google");
-  }
-});
-void test("actual Agent management restores only the exact owned Google reconnect editor", () => {
-  const store = new ResumeStore();
-  store.value = context("old", "saved");
-  const item = {
-    ownership_scope: "agent_only",
-    toolkit: { id: "saved", toolkit_type: "google" },
-  };
-  const harness = managerHarness(store, [item]);
-  harness.render({ handle: "team", agentId: "agent" });
-  harness.flushEffects();
-  assert.equal(object(harness.render().editor).toolkitConfigId, "saved");
-  for (const invalid of [{ handle: "other" }, { agentId: "other" }]) {
-    const wrong = managerHarness(store, [item]);
-    wrong.render({ handle: "team", agentId: "agent", ...invalid });
-    wrong.flushEffects();
-    assert.equal(object(wrong.render().editor).type, "CLOSED");
-  }
-  const shared = managerHarness(store, [
-    { ...item, ownership_scope: "workspace_shared" },
-  ]);
-  shared.render({ handle: "team", agentId: "agent" });
-  shared.flushEffects();
-  assert.equal(object(shared.render().editor).type, "CLOSED");
-});
-for (const action of ["close", "back"]) {
-  void test(`actual Agent Google ${action} invokes exact abandonment and guards unknown publication`, () => {
-    const store = new ResumeStore();
-    store.value = context();
-    const harness = managerHarness(store, []);
-    harness.render({ handle: "team", agentId: "agent" });
-    harness.flushEffects();
-    let output = harness.render();
-    let abandoned = 0;
-    invoke(output.onCreateAbandonReady, () => {
-      abandoned += 1;
-    });
-    invoke(output.onCreatePublicationPendingChange, true);
-    output = harness.render();
-    invoke(
-      action === "close" ? output.onCloseEditor : output.onCatalogTabChange,
-      "new",
-    );
-    assert.equal(abandoned, 0);
-    assert.equal(object(harness.render().editor).type, "CREATE");
-    invoke(output.onCreatePublicationPendingChange, false);
-    output = harness.render();
-    invoke(
-      action === "close" ? output.onCloseEditor : output.onCatalogTabChange,
-      "new",
-    );
-    assert.equal(abandoned, 1);
-    assert.equal(
-      object(harness.render().editor).type,
-      action === "close" ? "CLOSED" : "CATALOG",
-    );
-  });
-}
-
 for (const agentOwned of [false, true]) {
   void test(`actual ${agentOwned ? "Agent" : "shared"} metadata save preserves independently confirmed Google configuration`, () => {
-    const store = new ResumeStore();
+    const store = new BrowserStorageFixture(googleResume.GOOGLE_RESUME_KEY);
     const harness = new HookHarness();
     const captured: Array<{ route: string; input: unknown }> = [];
     const oldConfig = {
@@ -519,7 +383,7 @@ for (const agentOwned of [false, true]) {
 }
 
 function setupHarness(
-  store: ResumeStore,
+  store: BrowserStorageFixture,
   cancelRequest: () => PromiseLike<unknown>,
   reviewRead: () => Promise<unknown>,
   register: (value: unknown) => void,
@@ -598,7 +462,7 @@ function setupHarness(
 }
 for (const outcome of ["cancelled", "published", "replaced"]) {
   void test(`exact candidate abandonment ${outcome} preserves browser ownership after unmount`, async () => {
-    const store = new ResumeStore();
+    const store = new BrowserStorageFixture(googleResume.GOOGLE_RESUME_KEY);
     store.value = context();
     let abandon: unknown = null;
     const cancelStarted = deferred<void>();

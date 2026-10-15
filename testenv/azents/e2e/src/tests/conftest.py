@@ -48,6 +48,10 @@ from support.container_logs import (
     emit_container_logs,
     read_container_logs,
 )
+from support.docker_fixture_observations import (
+    DockerWaitObservation,
+    decode_docker_network_address,
+)
 from support.e2e_image_preparation import E2EImagePreparation as _E2EImagePreparation
 from support.google_provider_fake import HOSTS as GOOGLE_FIXTURE_HOSTS
 from support.google_provider_fixture import (
@@ -1691,8 +1695,10 @@ def azents_database_schema(
     )
 
     with container:
-        result = container.get_wrapped_container().wait(timeout=120)
-        if result["StatusCode"] != 0:
+        result = DockerWaitObservation.model_validate(
+            container.get_wrapped_container().wait(timeout=120)
+        )
+        if result.status_code != 0:
             stdout, stderr = container.get_logs()
             pytest.fail(
                 "azents database migration failed\n\n"
@@ -2314,9 +2320,11 @@ def _remove_runtime_provider_data_root(data_root: str, *, image: str) -> None:
         .with_kwargs(user="root")
     )
     with cleanup:
-        result = cleanup.get_wrapped_container().wait(timeout=30)
+        result = DockerWaitObservation.model_validate(
+            cleanup.get_wrapped_container().wait(timeout=30)
+        )
         logs = b"\n".join(cleanup.get_logs()).decode(errors="replace")
-    if result["StatusCode"] != 0:
+    if result.status_code != 0:
         pytest.fail(f"E2E Runtime Provider data cleanup failed: {logs}")
 
 
@@ -2449,10 +2457,12 @@ def strict_network_control_plane(
 
     runtime_control = azents_runtime_control_container.get_wrapped_container()
     runtime_control.reload()
-    host = runtime_control.attrs["NetworkSettings"]["Networks"][container_network.name][
-        "IPAddress"
-    ]
-    if not isinstance(host, str) or not host:
+    address = decode_docker_network_address(
+        runtime_control.attrs,
+        network_name=container_network.name,
+    )
+    host = address.ip_address
+    if not host:
         pytest.fail("Runtime Control has no address on the E2E container network")
     state_dir = tmp_path_factory.mktemp("strict-network-control-plane")
     evidence_path = state_dir / "evidence.jsonl"

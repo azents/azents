@@ -13,7 +13,7 @@ export const debugRouter = router({
    */
   fireLog: protectedProcedure
     .input(
-      z.object({
+      z.strictObject({
         level: z.enum(["warning", "error", "critical"]),
         message: z.string(),
       }),
@@ -31,7 +31,7 @@ export const debugRouter = router({
    * Raise an unhandled exception (500 error)
    */
   fireException: protectedProcedure
-    .input(z.object({ message: z.string() }))
+    .input(z.strictObject({ message: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const { data } = await debugV1FireException({
         client: ctx.adminApiClient,
