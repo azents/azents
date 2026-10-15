@@ -489,7 +489,18 @@
       "listScheduledTasks": "예약 작업 목록 조회",
       "deleteScheduledTask": "예약 작업 삭제",
       "submitScheduledTaskResult": "예약 작업 결과 제출",
-      "runtimeWeb": "웹 서비스 관리"
+      "runtimeWeb": "웹 서비스 관리",
+      "searchSessions": "세션 이력 검색",
+      "readSessionHistory": "세션 이력 조회",
+      "readSessionToolResult": "이전 도구 결과 조회",
+      "channelContinue": "채널 진행 상황 업데이트",
+      "channelFinish": "채널 답변 전송",
+      "channelRequestInput": "채널에 입력 요청",
+      "channelIgnore": "채널 작업을 응답 없이 종료",
+      "downloadExternalFile": "채널 파일 다운로드",
+      "browserOpen": "브라우저 열기",
+      "browserObserve": "브라우저 확인",
+      "browserAct": "브라우저 조작"
     },
     "actionRunning": {
       "read": "파일 읽는 중",
@@ -530,7 +541,18 @@
       "listScheduledTasks": "예약 작업 목록 조회 중",
       "deleteScheduledTask": "예약 작업 삭제 중",
       "submitScheduledTaskResult": "예약 작업 결과 제출 중",
-      "runtimeWeb": "웹 서비스 관리 중"
+      "runtimeWeb": "웹 서비스 관리 중",
+      "searchSessions": "세션 이력 검색 중",
+      "readSessionHistory": "세션 이력 조회 중",
+      "readSessionToolResult": "이전 도구 결과 조회 중",
+      "channelContinue": "채널 진행 상황 업데이트 중",
+      "channelFinish": "채널 답변 전송 중",
+      "channelRequestInput": "채널에 입력 요청 중",
+      "channelIgnore": "채널 작업을 응답 없이 종료 중",
+      "downloadExternalFile": "채널 파일 다운로드 중",
+      "browserOpen": "브라우저 여는 중",
+      "browserObserve": "브라우저 확인 중",
+      "browserAct": "브라우저 조작 중"
     },
     "field": {
       "source": "출처",

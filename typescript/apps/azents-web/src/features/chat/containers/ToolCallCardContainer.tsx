@@ -118,15 +118,26 @@ export function ToolCallCardContainer({
     );
   }
   return (
-    <SpecializedToolCallBoundary
-      resetKey={`${toolCall.id}:${toolCall.status}:${toolCall.result ?? ""}`}
-      fallback={generic}
-    >
-      <StandardCard
-        toolCall={toolCall}
-        presentation={result.presentation}
-        hiddenAttachmentUris={hiddenAttachmentUris}
-      />
-    </SpecializedToolCallBoundary>
+    <>
+      <SpecializedToolCallBoundary
+        resetKey={`${toolCall.id}:${toolCall.status}:${toolCall.result ?? ""}`}
+        fallback={generic}
+      >
+        <StandardCard
+          toolCall={toolCall}
+          presentation={result.presentation}
+          hiddenAttachmentUris={hiddenAttachmentUris}
+        />
+      </SpecializedToolCallBoundary>
+      {toolCall.status === "completed" &&
+        ["browser_open", "browser_observe", "browser_act"].includes(
+          toolCall.name,
+        ) && (
+          <BrowserToolResultLink
+            name={toolCall.name}
+            result={toolCall.result ?? null}
+          />
+        )}
+    </>
   );
 }

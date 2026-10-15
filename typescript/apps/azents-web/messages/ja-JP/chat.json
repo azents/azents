@@ -489,7 +489,18 @@
       "listScheduledTasks": "Scheduled Taskを一覧表示",
       "deleteScheduledTask": "Scheduled Taskを削除",
       "submitScheduledTaskResult": "Scheduled Taskの結果を送信",
-      "runtimeWeb": "Web サービスを管理"
+      "runtimeWeb": "Web サービスを管理",
+      "searchSessions": "セッション履歴を検索",
+      "readSessionHistory": "セッション履歴を取得",
+      "readSessionToolResult": "以前のツール結果を取得",
+      "channelContinue": "チャンネルの進行状況を更新",
+      "channelFinish": "チャンネルに返信",
+      "channelRequestInput": "チャンネルで入力を要求",
+      "channelIgnore": "チャンネル作業を応答せずに終了",
+      "downloadExternalFile": "チャンネルのファイルをダウンロード",
+      "browserOpen": "ブラウザーを開きました",
+      "browserObserve": "ブラウザーを確認",
+      "browserAct": "ブラウザーを操作"
     },
     "actionRunning": {
       "read": "ファイルを読み取り中",
@@ -530,7 +541,18 @@
       "listScheduledTasks": "Scheduled Taskを一覧表示中",
       "deleteScheduledTask": "Scheduled Taskを削除中",
       "submitScheduledTaskResult": "Scheduled Taskの結果を送信中",
-      "runtimeWeb": "Web サービスを管理中"
+      "runtimeWeb": "Web サービスを管理中",
+      "searchSessions": "セッション履歴を検索中",
+      "readSessionHistory": "セッション履歴を取得中",
+      "readSessionToolResult": "以前のツール結果を取得中",
+      "channelContinue": "チャンネルの進行状況を更新中",
+      "channelFinish": "チャンネルに返信中",
+      "channelRequestInput": "チャンネルで入力を要求中",
+      "channelIgnore": "チャンネル作業を応答せずに終了中",
+      "downloadExternalFile": "チャンネルのファイルをダウンロード中",
+      "browserOpen": "ブラウザーを開いています",
+      "browserObserve": "ブラウザーを確認中",
+      "browserAct": "ブラウザーを操作中"
     },
     "field": {
       "source": "ソース",

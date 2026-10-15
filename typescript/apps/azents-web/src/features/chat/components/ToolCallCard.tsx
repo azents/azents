@@ -15,6 +15,7 @@ import {
 import {
   IconBook,
   IconBrain,
+  IconBrowser,
   IconCalendarClock,
   IconClock,
   IconDots,
@@ -22,6 +23,7 @@ import {
   IconFileExport,
   IconFileText,
   IconGitBranch,
+  IconMessages,
   IconPencil,
   IconPhoto,
   IconRobot,
@@ -74,6 +76,10 @@ function formatJson(value: string): string {
 
 function presentationIcon(presentation: KnownToolPresentation): ReactElement {
   switch (presentation.action) {
+    case "browserOpen":
+    case "browserObserve":
+    case "browserAct":
+      return <IconBrowser size={activityRowIconSize} />;
     case "grep":
     case "glob":
     case "toolSearch":
@@ -93,13 +99,22 @@ function presentationIcon(presentation: KnownToolPresentation): ReactElement {
     case "readImage":
       return <IconPhoto size={activityRowIconSize} />;
     case "importFile":
+    case "downloadExternalFile":
       return <IconDownload size={activityRowIconSize} />;
     case "saveMemory":
     case "listMemories":
     case "getMemory":
     case "searchMemories":
     case "deleteMemory":
+    case "searchSessions":
+    case "readSessionHistory":
+    case "readSessionToolResult":
       return <IconBrain size={activityRowIconSize} />;
+    case "channelContinue":
+    case "channelFinish":
+    case "channelRequestInput":
+    case "channelIgnore":
+      return <IconMessages size={activityRowIconSize} />;
     case "getGoal":
     case "createGoal":
     case "updateGoal":
@@ -194,6 +209,17 @@ function presentationQualifier(
     case "deleteScheduledTask":
     case "submitScheduledTaskResult":
     case "runtimeWeb":
+    case "searchSessions":
+    case "readSessionHistory":
+    case "readSessionToolResult":
+    case "channelContinue":
+    case "channelFinish":
+    case "channelRequestInput":
+    case "channelIgnore":
+    case "downloadExternalFile":
+    case "browserOpen":
+    case "browserObserve":
+    case "browserAct":
       return presentation.qualifier;
   }
 }

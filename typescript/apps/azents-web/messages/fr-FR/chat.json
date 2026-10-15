@@ -489,7 +489,18 @@
       "listScheduledTasks": "Tâches planifiées listées",
       "deleteScheduledTask": "Tâche planifiée supprimée",
       "submitScheduledTaskResult": "Résultat de la tâche planifiée envoyé",
-      "runtimeWeb": "Service web géré"
+      "runtimeWeb": "Service web géré",
+      "searchSessions": "Historique des Sessions recherché",
+      "readSessionHistory": "Historique de la Session consulté",
+      "readSessionToolResult": "Résultat précédent de l’outil consulté",
+      "channelContinue": "Progression du canal mise à jour",
+      "channelFinish": "Réponse envoyée au canal",
+      "channelRequestInput": "Saisie demandée dans le canal",
+      "channelIgnore": "Travail du canal terminé sans réponse",
+      "downloadExternalFile": "Fichier du canal téléchargé",
+      "browserOpen": "Navigateur ouvert",
+      "browserObserve": "Navigateur consulté",
+      "browserAct": "Interaction avec le navigateur effectuée"
     },
     "actionRunning": {
       "read": "Lecture du fichier en cours",
@@ -530,7 +541,18 @@
       "listScheduledTasks": "Liste des tâches planifiées en cours",
       "deleteScheduledTask": "Suppression de la tâche planifiée en cours",
       "submitScheduledTaskResult": "Envoi du résultat de la tâche planifiée en cours",
-      "runtimeWeb": "Gestion du service web"
+      "runtimeWeb": "Gestion du service web",
+      "searchSessions": "Recherche dans l’historique des Sessions",
+      "readSessionHistory": "Consultation de l’historique de la Session",
+      "readSessionToolResult": "Consultation du résultat précédent de l’outil",
+      "channelContinue": "Mise à jour de la progression du canal",
+      "channelFinish": "Envoi d’une réponse au canal",
+      "channelRequestInput": "Demande de saisie dans le canal",
+      "channelIgnore": "Clôture du travail du canal sans réponse",
+      "downloadExternalFile": "Téléchargement du fichier du canal",
+      "browserOpen": "Ouverture du navigateur",
+      "browserObserve": "Consultation du navigateur",
+      "browserAct": "Interaction avec le navigateur"
     },
     "field": {
       "source": "Source",

@@ -197,7 +197,7 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
 last_verified_at: 2026-10-15
-spec_version: 191
+spec_version: 192
 ---
 
 # Conversation & Events
@@ -1181,6 +1181,16 @@ active, and durable events. A compact output-file icon indicates pending, stored
 partial, or unsuccessful output storage; the Raw dialog retains the outer wrapper
 name, arguments, and storage result. Only bounded target output is retained in
 UI result metadata; the model-visible result remains the Runtime storage summary.
+
+Individual source-less Session-history, External Channel, and Browser tool rows
+use validated specialized presentations with localized lifecycle actions and
+Memory, channel, download, or browser icons. History queries, message content,
+opaque file locators, browser input text, and full URLs remain out of collapsed
+summaries. Browser summaries show only a URL host or compact page identity and
+retain the existing explicit-page Browser-panel link. Expanded history rows show
+Session matches, visible events, or the selected previous tool result. Existing
+web-service and Tool Search semantic renderers remain in use. Invalid payloads
+and unrelated Toolkit-owned names retain Generic presentation and Raw diagnostics.
 
 Reasoning, Skill, client-tool, provider-tool, and non-interactive control events use one canonical
 Activity-row grid for vertical padding, disclosure-chevron space, icon size, text baseline, status, and
