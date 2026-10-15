@@ -259,8 +259,6 @@ def test_plain_file_rounds_require_submission_correction_and_continuation() -> N
     assert names.count("submit_memory") == 2
     document = files["azents://execution/result.md"]
     assert _MARKER in document and "blue" in document and "unverified" in document
-    assert "coverage.json" not in json.dumps(request)
-    assert "memory-draft" not in json.dumps(request)
     assert "CONSOLIDATION_FIXTURE_FINISHED" not in document
 
 

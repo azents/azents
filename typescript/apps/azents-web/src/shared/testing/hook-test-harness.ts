@@ -211,13 +211,17 @@ export class HookHarness {
     }
   }
 }
-export class ResumeStore {
+export class BrowserStorageFixture {
+  readonly key: string;
+  constructor(key: string) {
+    this.key = key;
+  }
   value: unknown = null;
   readonly writes: unknown[] = [];
   readonly mantine = {
     readSessionStorageValue: (options: unknown): unknown => {
       const settings = object(options);
-      if (settings.key !== "azents.google.connection" || this.value == null) {
+      if (settings.key !== this.key || this.value == null) {
         return null;
       }
       return invoke(settings.deserialize, JSON.stringify(this.value));

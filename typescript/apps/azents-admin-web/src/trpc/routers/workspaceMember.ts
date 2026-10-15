@@ -18,19 +18,19 @@ import { mapExpectedError } from "../api-error";
 import { protectedProcedure, router } from "../init";
 
 // --- Input Schemas ---
-const WorkspaceMemberCreateInput = z.object({
+const WorkspaceMemberCreateInput = z.strictObject({
   workspace_handle: z.string(),
   user_id: z.string(),
   name: z.string().min(1).max(255),
   role: z.enum(["owner", "manager", "member"]),
 });
 
-const WorkspaceMemberUpdateInput = z.object({
+const WorkspaceMemberUpdateInput = z.strictObject({
   workspace_user_id: z.string(),
   name: z.string().min(1).max(255).optional(),
 });
 
-const WorkspaceMemberRoleUpdateInput = z.object({
+const WorkspaceMemberRoleUpdateInput = z.strictObject({
   workspace_user_id: z.string(),
   role: z.enum(["manager", "member"]),
 });
@@ -41,7 +41,7 @@ export const workspaceMemberRouter = router({
    * List members for a workspace
    */
   listByWorkspace: protectedProcedure
-    .input(z.object({ workspace_handle: z.string() }))
+    .input(z.strictObject({ workspace_handle: z.string() }))
     .query(async ({ ctx, input }) => {
       const { data } = await workspaceuserV1ListWorkspaceUsers({
         client: ctx.adminApiClient,
@@ -59,7 +59,7 @@ export const workspaceMemberRouter = router({
    * Get WorkspaceUser details
    */
   get: protectedProcedure
-    .input(z.object({ id: z.string() }))
+    .input(z.strictObject({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const { data } = await workspaceuserV1GetWorkspaceUser({
         client: ctx.adminApiClient,
@@ -148,7 +148,7 @@ export const workspaceMemberRouter = router({
    */
   transferOwnership: protectedProcedure
     .input(
-      z.object({
+      z.strictObject({
         workspace_handle: z.string(),
         new_owner_workspace_user_id: z.string(),
       }),
@@ -179,7 +179,7 @@ export const workspaceMemberRouter = router({
    * Delete a WorkspaceUser
    */
   delete: protectedProcedure
-    .input(z.object({ id: z.string() }))
+    .input(z.strictObject({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       try {
         await workspaceuserV1DeleteWorkspaceUser({

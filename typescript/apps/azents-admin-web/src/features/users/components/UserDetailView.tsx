@@ -23,42 +23,37 @@ import {
   IconTrash,
 } from "@tabler/icons-react";
 import dayjs from "dayjs";
-import { useState } from "react";
 import type { UserDetailComponentProps } from "../containers/useUserDetailContainer";
-import type { SystemAdminRoleState, UserEmailResponse } from "../types";
+import type { SystemAdminRoleState, UserEmailListState } from "../types";
 
 /**
  * Email list subsection
  */
 function EmailSection({
-  emails,
-  isLoading,
-  onAddEmail,
+  state,
+  draft,
+  onDraftChange,
+  onSubmit,
   onDeleteEmail,
 }: {
-  emails: UserEmailResponse[];
-  isLoading: boolean;
-  onAddEmail: (email: string) => void;
+  state: UserEmailListState;
+  draft: string;
+  onDraftChange: (email: string) => void;
+  onSubmit: () => void;
   onDeleteEmail: (emailId: string) => void;
 }): React.ReactElement {
-  const [newEmail, setNewEmail] = useState("");
-
-  const handleSubmit = (): void => {
-    if (!newEmail.trim()) {
-      return;
-    }
-    onAddEmail(newEmail.trim());
-    setNewEmail("");
-  };
-
   return (
     <Stack gap="sm">
       <Title order={6}>Emails</Title>
-      {isLoading ? (
+      {state.type === "LOADING" ? (
         <Center p="sm">
           <Loader size="sm" />
         </Center>
-      ) : emails.length === 0 ? (
+      ) : state.type === "ERROR" ? (
+        <Text size="sm" c="red">
+          Error: {state.message}
+        </Text>
+      ) : state.emails.length === 0 ? (
         <Text size="sm" c="dimmed">
           No email addresses found.
         </Text>
@@ -72,7 +67,7 @@ function EmailSection({
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {emails.map((email) => (
+            {state.emails.map((email) => (
               <Table.Tr key={email.id}>
                 <Table.Td>
                   <Text size="sm">{email.email}</Text>
@@ -108,12 +103,12 @@ function EmailSection({
         <TextInput
           placeholder="New email address"
           size="xs"
-          value={newEmail}
-          onChange={(e) => setNewEmail(e.currentTarget.value)}
+          value={draft}
+          onChange={(e) => onDraftChange(e.currentTarget.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
-              handleSubmit();
+              onSubmit();
             }
           }}
           style={{ flex: 1 }}
@@ -122,8 +117,8 @@ function EmailSection({
           size="xs"
           variant="light"
           leftSection={<IconPlus size={14} />}
-          onClick={handleSubmit}
-          disabled={!newEmail.trim()}
+          onClick={onSubmit}
+          disabled={!draft.trim()}
         >
           Add
         </Button>
@@ -231,12 +226,13 @@ function SystemAdminSection({
 export function UserDetailView({
   state,
   roleState,
-  emails,
-  isLoadingEmails,
+  emailState,
+  emailDraft,
   onDelete,
   onGrantAdmin,
   onRevokeAdmin,
-  onAddEmail,
+  onEmailDraftChange,
+  onSubmitEmail,
   onDeleteEmail,
 }: UserDetailComponentProps): React.ReactElement {
   switch (state.type) {
@@ -317,9 +313,10 @@ export function UserDetailView({
               />
 
               <EmailSection
-                emails={emails}
-                isLoading={isLoadingEmails}
-                onAddEmail={onAddEmail}
+                state={emailState}
+                draft={emailDraft}
+                onDraftChange={onEmailDraftChange}
+                onSubmit={onSubmitEmail}
                 onDeleteEmail={onDeleteEmail}
               />
 

@@ -6,6 +6,8 @@ import {
   projectGitHubAuthEvidence,
   projectGitHubFormRegistration,
   projectGitHubReviewSettings,
+  projectGitHubUserMode,
+  projectGitHubWizardMode,
   projectGoogleAnalyticsFields,
   projectKubernetesFields,
   projectNotionFields,
@@ -523,4 +525,63 @@ void test("saved/current auth evidence keeps exact known authority and opaque mi
     ).registrationDirty,
     false,
   );
+});
+
+void test("Agent management and resumed creation consume exact GitHub modes without changing opaque persisted config", () => {
+  const base: ToolkitConfigResponse = {
+    id: "fixture-toolkit",
+    workspace_id: "fixture-workspace",
+    toolkit_type: "github",
+    slug: "fixture",
+    name: "Fixture",
+    description: null,
+    prompt: null,
+    enabled: true,
+    always_expose_tools: false,
+    config: {},
+    created_at: "2026-10-15T00:00:00Z",
+    updated_at: "2026-10-15T00:00:00Z",
+  };
+  for (const value of [
+    "pat",
+    "github_app",
+    "github_app_platform",
+    "github_app_user",
+    "github_app_platform_user",
+    "future",
+    "",
+    null,
+    void 0,
+    false,
+    1,
+    [],
+    { future: true },
+    { toString: null },
+    { toString: 1 },
+    { toString: {} },
+    { toString: [], valueOf: null },
+  ]) {
+    const response: ToolkitConfigResponse = {
+      ...base,
+      config: { github_auth_type: value, extension: { opaque: true } },
+    };
+    const original = JSON.stringify(response);
+    assert.equal(
+      projectGitHubUserMode(response.config),
+      value === "github_app_user" || value === "github_app_platform_user",
+    );
+    assert.equal(
+      projectGitHubWizardMode(response.config),
+      value === "pat" ||
+        value === "github_app" ||
+        value === "github_app_platform" ||
+        value === "github_app_user" ||
+        value === "github_app_platform_user"
+        ? value
+        : null,
+    );
+    assert.equal(JSON.stringify(response), original);
+  }
+  assert.equal(projectGitHubUserMode(base.config), false);
+  assert.equal(projectGitHubWizardMode(base.config), null);
 });

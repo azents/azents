@@ -77,7 +77,7 @@ export const toolkitRouter = router({
    * Fetch Toolkit Configs for a workspace.
    */
   listConfigs: publicProcedure
-    .input(z.object({ handle: z.string().min(1) }))
+    .input(z.object({ handle: z.string().min(1) }).strict())
     .query(async ({ ctx, input }) => {
       try {
         const { data } = await toolkitV1ListToolkitConfigs({
@@ -98,7 +98,7 @@ export const toolkitRouter = router({
    * Fetch Toolkit Configs available to the current user.
    */
   listAvailableConfigs: publicProcedure
-    .input(z.object({ handle: z.string().min(1) }))
+    .input(z.object({ handle: z.string().min(1) }).strict())
     .query(async ({ ctx, input }) => {
       try {
         const { data } = await toolkitV1ListAvailableToolkitConfigs({
@@ -120,10 +120,12 @@ export const toolkitRouter = router({
    */
   getConfig: publicProcedure
     .input(
-      z.object({
-        handle: z.string().min(1),
-        toolkitId: z.string().min(1),
-      }),
+      z
+        .object({
+          handle: z.string().min(1),
+          toolkitId: z.string().min(1),
+        })
+        .strict(),
     )
     .query(async ({ ctx, input }) => {
       try {
@@ -150,18 +152,20 @@ export const toolkitRouter = router({
    */
   createConfig: publicProcedure
     .input(
-      z.object({
-        handle: z.string().min(1),
-        toolkitType: z.string().min(1).max(100),
-        slug: toolkitSlugInput.optional(),
-        name: z.string().max(255).optional(),
-        description: z.string().optional(),
-        prompt: z.string().optional(),
-        config: z.record(z.string(), z.unknown()),
-        credentials: z.record(z.string(), z.unknown()).optional(),
-        enabled: z.boolean().optional(),
-        alwaysExposeTools: z.boolean().optional(),
-      }),
+      z
+        .object({
+          handle: z.string().min(1),
+          toolkitType: z.string().min(1).max(100),
+          slug: toolkitSlugInput.optional(),
+          name: z.string().max(255).optional(),
+          description: z.string().optional(),
+          prompt: z.string().optional(),
+          config: z.record(z.string(), z.unknown()),
+          credentials: z.record(z.string(), z.unknown()).optional(),
+          enabled: z.boolean().optional(),
+          alwaysExposeTools: z.boolean().optional(),
+        })
+        .strict(),
     )
     .mutation(async ({ ctx, input }) => {
       try {
@@ -197,18 +201,20 @@ export const toolkitRouter = router({
    */
   updateConfig: publicProcedure
     .input(
-      z.object({
-        handle: z.string().min(1),
-        toolkitId: z.string().min(1),
-        slug: toolkitSlugInput.optional(),
-        name: z.string().max(255).optional(),
-        description: z.string().nullable().optional(),
-        prompt: z.string().nullable().optional(),
-        config: z.record(z.string(), z.unknown()).optional(),
-        credentials: z.record(z.string(), z.unknown()).optional(),
-        enabled: z.boolean().optional(),
-        alwaysExposeTools: z.boolean().optional(),
-      }),
+      z
+        .object({
+          handle: z.string().min(1),
+          toolkitId: z.string().min(1),
+          slug: toolkitSlugInput.optional(),
+          name: z.string().max(255).optional(),
+          description: z.string().nullable().optional(),
+          prompt: z.string().nullable().optional(),
+          config: z.record(z.string(), z.unknown()).optional(),
+          credentials: z.record(z.string(), z.unknown()).optional(),
+          enabled: z.boolean().optional(),
+          alwaysExposeTools: z.boolean().optional(),
+        })
+        .strict(),
     )
     .mutation(async ({ ctx, input }) => {
       try {
@@ -246,10 +252,12 @@ export const toolkitRouter = router({
    */
   removeConfig: publicProcedure
     .input(
-      z.object({
-        handle: z.string().min(1),
-        toolkitId: z.string().min(1),
-      }),
+      z
+        .object({
+          handle: z.string().min(1),
+          toolkitId: z.string().min(1),
+        })
+        .strict(),
     )
     .mutation(async ({ ctx, input }) => {
       try {
@@ -276,10 +284,12 @@ export const toolkitRouter = router({
    */
   listAgentToolkits: publicProcedure
     .input(
-      z.object({
-        handle: z.string().min(1),
-        agentId: z.string().min(1),
-      }),
+      z
+        .object({
+          handle: z.string().min(1),
+          agentId: z.string().min(1),
+        })
+        .strict(),
     )
     .query(async ({ ctx, input }) => {
       try {
@@ -303,11 +313,13 @@ export const toolkitRouter = router({
    */
   attachToAgent: publicProcedure
     .input(
-      z.object({
-        handle: z.string().min(1),
-        agentId: z.string().min(1),
-        toolkitId: z.string().min(1),
-      }),
+      z
+        .object({
+          handle: z.string().min(1),
+          agentId: z.string().min(1),
+          toolkitId: z.string().min(1),
+        })
+        .strict(),
     )
     .mutation(async ({ ctx, input }) => {
       try {
@@ -333,11 +345,13 @@ export const toolkitRouter = router({
    */
   detachFromAgent: publicProcedure
     .input(
-      z.object({
-        handle: z.string().min(1),
-        agentId: z.string().min(1),
-        agentToolkitId: z.string().min(1),
-      }),
+      z
+        .object({
+          handle: z.string().min(1),
+          agentId: z.string().min(1),
+          agentToolkitId: z.string().min(1),
+        })
+        .strict(),
     )
     .mutation(async ({ ctx, input }) => {
       try {
@@ -368,10 +382,12 @@ export const toolkitRouter = router({
    */
   getGithubInstallUrl: publicProcedure
     .input(
-      z.object({
-        handle: z.string().min(1),
-        agentId: z.string().min(1).optional(),
-      }),
+      z
+        .object({
+          handle: z.string().min(1),
+          agentId: z.string().min(1).optional(),
+        })
+        .strict(),
     )
     .query(async ({ ctx, input }) => {
       try {
@@ -405,10 +421,12 @@ export const toolkitRouter = router({
    */
   getGithubOauthUrl: publicProcedure
     .input(
-      z.object({
-        handle: z.string().min(1),
-        agentId: z.string().min(1).optional(),
-      }),
+      z
+        .object({
+          handle: z.string().min(1),
+          agentId: z.string().min(1).optional(),
+        })
+        .strict(),
     )
     .query(async ({ ctx, input }) => {
       try {
@@ -441,12 +459,14 @@ export const toolkitRouter = router({
    */
   getGithubInstallations: publicProcedure
     .input(
-      z.object({
-        handle: z.string().min(1),
-        agentId: z.string().min(1).optional(),
-        code: z.string().min(1),
-        state: z.string().min(1),
-      }),
+      z
+        .object({
+          handle: z.string().min(1),
+          agentId: z.string().min(1).optional(),
+          code: z.string().min(1),
+          state: z.string().min(1),
+        })
+        .strict(),
     )
     .mutation(async ({ ctx, input }) => {
       try {
@@ -481,10 +501,12 @@ export const toolkitRouter = router({
    */
   connectOauth: publicProcedure
     .input(
-      z.object({
-        handle: z.string().min(1),
-        toolkitConfigId: z.string().min(1),
-      }),
+      z
+        .object({
+          handle: z.string().min(1),
+          toolkitConfigId: z.string().min(1),
+        })
+        .strict(),
     )
     .mutation(async ({ ctx, input }) => {
       try {
@@ -513,12 +535,14 @@ export const toolkitRouter = router({
    */
   oauthExchange: publicProcedure
     .input(
-      z.object({
-        handle: z.string().min(1),
-        toolkitConfigId: z.string().min(1),
-        code: z.string().min(1),
-        state: z.string().min(1),
-      }),
+      z
+        .object({
+          handle: z.string().min(1),
+          toolkitConfigId: z.string().min(1),
+          code: z.string().min(1),
+          state: z.string().min(1),
+        })
+        .strict(),
     )
     .mutation(async ({ ctx, input }) => {
       try {
@@ -548,10 +572,12 @@ export const toolkitRouter = router({
    */
   disconnectOauth: publicProcedure
     .input(
-      z.object({
-        handle: z.string().min(1),
-        toolkitConfigId: z.string().min(1),
-      }),
+      z
+        .object({
+          handle: z.string().min(1),
+          toolkitConfigId: z.string().min(1),
+        })
+        .strict(),
     )
     .mutation(async ({ ctx, input }) => {
       try {
@@ -581,14 +607,16 @@ export const toolkitRouter = router({
    */
   testConnection: publicProcedure
     .input(
-      z.object({
-        handle: z.string().min(1),
-        agentId: z.string().min(1).optional(),
-        toolkitType: z.string().default("mcp"),
-        toolkitConfigId: z.string().nullable(),
-        config: z.record(z.string(), z.unknown()),
-        credentials: z.record(z.string(), z.unknown()).nullable(),
-      }),
+      z
+        .object({
+          handle: z.string().min(1),
+          agentId: z.string().min(1).optional(),
+          toolkitType: z.string().default("mcp"),
+          toolkitConfigId: z.string().nullable(),
+          config: z.record(z.string(), z.unknown()),
+          credentials: z.record(z.string(), z.unknown()).nullable(),
+        })
+        .strict(),
     )
     .mutation(async ({ ctx, input }) => {
       try {
@@ -623,10 +651,12 @@ export const toolkitRouter = router({
 
   listAgentManagement: publicProcedure
     .input(
-      z.object({
-        handle: z.string().min(1),
-        agentId: z.string().min(1),
-      }),
+      z
+        .object({
+          handle: z.string().min(1),
+          agentId: z.string().min(1),
+        })
+        .strict(),
     )
     .query(async ({ ctx, input }) => {
       try {
@@ -647,19 +677,21 @@ export const toolkitRouter = router({
 
   createAgentConfig: publicProcedure
     .input(
-      z.object({
-        handle: z.string().min(1),
-        agentId: z.string().min(1),
-        toolkitType: z.string().min(1).max(100),
-        slug: toolkitSlugInput.optional(),
-        name: z.string().max(255).optional(),
-        description: z.string().optional(),
-        prompt: z.string().optional(),
-        config: z.record(z.string(), z.unknown()),
-        credentials: z.record(z.string(), z.unknown()).optional(),
-        enabled: z.boolean(),
-        alwaysExposeTools: z.boolean(),
-      }),
+      z
+        .object({
+          handle: z.string().min(1),
+          agentId: z.string().min(1),
+          toolkitType: z.string().min(1).max(100),
+          slug: toolkitSlugInput.optional(),
+          name: z.string().max(255).optional(),
+          description: z.string().optional(),
+          prompt: z.string().optional(),
+          config: z.record(z.string(), z.unknown()),
+          credentials: z.record(z.string(), z.unknown()).optional(),
+          enabled: z.boolean(),
+          alwaysExposeTools: z.boolean(),
+        })
+        .strict(),
     )
     .mutation(async ({ ctx, input }) => {
       try {
@@ -692,11 +724,13 @@ export const toolkitRouter = router({
 
   getAgentConfig: publicProcedure
     .input(
-      z.object({
-        handle: z.string().min(1),
-        agentId: z.string().min(1),
-        toolkitConfigId: z.string().min(1),
-      }),
+      z
+        .object({
+          handle: z.string().min(1),
+          agentId: z.string().min(1),
+          toolkitConfigId: z.string().min(1),
+        })
+        .strict(),
     )
     .query(async ({ ctx, input }) => {
       try {
@@ -720,19 +754,21 @@ export const toolkitRouter = router({
 
   updateAgentConfig: publicProcedure
     .input(
-      z.object({
-        handle: z.string().min(1),
-        agentId: z.string().min(1),
-        toolkitConfigId: z.string().min(1),
-        slug: toolkitSlugInput.optional(),
-        name: z.string().max(255).optional(),
-        description: z.string().nullable().optional(),
-        prompt: z.string().nullable().optional(),
-        config: z.record(z.string(), z.unknown()).optional(),
-        credentials: z.record(z.string(), z.unknown()).nullable().optional(),
-        enabled: z.boolean().optional(),
-        alwaysExposeTools: z.boolean().optional(),
-      }),
+      z
+        .object({
+          handle: z.string().min(1),
+          agentId: z.string().min(1),
+          toolkitConfigId: z.string().min(1),
+          slug: toolkitSlugInput.optional(),
+          name: z.string().max(255).optional(),
+          description: z.string().nullable().optional(),
+          prompt: z.string().nullable().optional(),
+          config: z.record(z.string(), z.unknown()).optional(),
+          credentials: z.record(z.string(), z.unknown()).nullable().optional(),
+          enabled: z.boolean().optional(),
+          alwaysExposeTools: z.boolean().optional(),
+        })
+        .strict(),
     )
     .mutation(async ({ ctx, input }) => {
       try {
@@ -767,11 +803,13 @@ export const toolkitRouter = router({
 
   removeAgentConfig: publicProcedure
     .input(
-      z.object({
-        handle: z.string().min(1),
-        agentId: z.string().min(1),
-        toolkitConfigId: z.string().min(1),
-      }),
+      z
+        .object({
+          handle: z.string().min(1),
+          agentId: z.string().min(1),
+          toolkitConfigId: z.string().min(1),
+        })
+        .strict(),
     )
     .mutation(async ({ ctx, input }) => {
       try {
@@ -795,10 +833,12 @@ export const toolkitRouter = router({
 
   getAgentGithubInstallUrl: publicProcedure
     .input(
-      z.object({
-        handle: z.string().min(1),
-        agentId: z.string().min(1),
-      }),
+      z
+        .object({
+          handle: z.string().min(1),
+          agentId: z.string().min(1),
+        })
+        .strict(),
     )
     .query(async ({ ctx, input }) => {
       try {
@@ -819,10 +859,12 @@ export const toolkitRouter = router({
 
   getAgentGithubOauthUrl: publicProcedure
     .input(
-      z.object({
-        handle: z.string().min(1),
-        agentId: z.string().min(1),
-      }),
+      z
+        .object({
+          handle: z.string().min(1),
+          agentId: z.string().min(1),
+        })
+        .strict(),
     )
     .query(async ({ ctx, input }) => {
       try {
@@ -843,12 +885,14 @@ export const toolkitRouter = router({
 
   getAgentGithubInstallations: publicProcedure
     .input(
-      z.object({
-        handle: z.string().min(1),
-        agentId: z.string().min(1),
-        code: z.string().min(1),
-        state: z.string().min(1),
-      }),
+      z
+        .object({
+          handle: z.string().min(1),
+          agentId: z.string().min(1),
+          code: z.string().min(1),
+          state: z.string().min(1),
+        })
+        .strict(),
     )
     .mutation(async ({ ctx, input }) => {
       try {
@@ -873,11 +917,13 @@ export const toolkitRouter = router({
 
   connectAgentOauth: publicProcedure
     .input(
-      z.object({
-        handle: z.string().min(1),
-        agentId: z.string().min(1),
-        toolkitConfigId: z.string().min(1),
-      }),
+      z
+        .object({
+          handle: z.string().min(1),
+          agentId: z.string().min(1),
+          toolkitConfigId: z.string().min(1),
+        })
+        .strict(),
     )
     .mutation(async ({ ctx, input }) => {
       try {
@@ -902,13 +948,15 @@ export const toolkitRouter = router({
 
   agentOauthExchange: publicProcedure
     .input(
-      z.object({
-        handle: z.string().min(1),
-        agentId: z.string().min(1),
-        toolkitConfigId: z.string().min(1),
-        code: z.string().min(1),
-        state: z.string().min(1),
-      }),
+      z
+        .object({
+          handle: z.string().min(1),
+          agentId: z.string().min(1),
+          toolkitConfigId: z.string().min(1),
+          code: z.string().min(1),
+          state: z.string().min(1),
+        })
+        .strict(),
     )
     .mutation(async ({ ctx, input }) => {
       try {
@@ -935,11 +983,13 @@ export const toolkitRouter = router({
 
   disconnectAgentOauth: publicProcedure
     .input(
-      z.object({
-        handle: z.string().min(1),
-        agentId: z.string().min(1),
-        toolkitConfigId: z.string().min(1),
-      }),
+      z
+        .object({
+          handle: z.string().min(1),
+          agentId: z.string().min(1),
+          toolkitConfigId: z.string().min(1),
+        })
+        .strict(),
     )
     .mutation(async ({ ctx, input }) => {
       try {
@@ -963,14 +1013,16 @@ export const toolkitRouter = router({
 
   testAgentConnection: publicProcedure
     .input(
-      z.object({
-        handle: z.string().min(1),
-        agentId: z.string().min(1),
-        toolkitType: z.string().default("mcp"),
-        toolkitConfigId: z.string().nullable(),
-        config: z.record(z.string(), z.unknown()),
-        credentials: z.record(z.string(), z.unknown()).nullable(),
-      }),
+      z
+        .object({
+          handle: z.string().min(1),
+          agentId: z.string().min(1),
+          toolkitType: z.string().default("mcp"),
+          toolkitConfigId: z.string().nullable(),
+          config: z.record(z.string(), z.unknown()),
+          credentials: z.record(z.string(), z.unknown()).nullable(),
+        })
+        .strict(),
     )
     .mutation(async ({ ctx, input }) => {
       try {

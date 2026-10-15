@@ -28,7 +28,7 @@ export const signupTokenRouter = router({
 
   create: protectedProcedure
     .input(
-      z.object({
+      z.strictObject({
         email: z.string().email(),
       }),
     )
@@ -60,7 +60,7 @@ export const signupTokenRouter = router({
     }),
 
   revoke: protectedProcedure
-    .input(z.object({ tokenId: z.string().min(1) }))
+    .input(z.strictObject({ tokenId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       try {
         await authV1RevokeSignupToken({

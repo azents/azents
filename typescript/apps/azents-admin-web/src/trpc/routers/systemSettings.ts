@@ -119,7 +119,7 @@ export const systemSettingsRouter = router({
 
   patchExternalChannelFiles: protectedProcedure
     .input(
-      z.object({
+      z.strictObject({
         expectedVersion: z.number().int().nonnegative(),
         outboundMaxFileBytes: z.number().int().positive(),
         outboundMaxActionBytes: z.number().int().positive(),
@@ -149,7 +149,7 @@ export const systemSettingsRouter = router({
     }),
 
   getExternalAccountOAuth: protectedProcedure
-    .input(z.object({ provider: z.enum(["slack", "discord"]) }))
+    .input(z.strictObject({ provider: z.enum(["slack", "discord"]) }))
     .query(async ({ ctx, input }) => {
       const { data } = await systemSettingsV1GetExternalAccountOauthSetting({
         client: ctx.adminApiClient,
@@ -161,7 +161,7 @@ export const systemSettingsRouter = router({
 
   patchExternalAccountOAuth: protectedProcedure
     .input(
-      z.object({
+      z.strictObject({
         provider: z.enum(["slack", "discord"]),
         expectedVersion: z.number().int().nonnegative(),
         clientId: z.string().nullable().optional(),
@@ -201,7 +201,7 @@ export const systemSettingsRouter = router({
     }),
 
   checkExternalAccountOAuthHealth: protectedProcedure
-    .input(z.object({ provider: z.enum(["slack", "discord"]) }))
+    .input(z.strictObject({ provider: z.enum(["slack", "discord"]) }))
     .mutation(async ({ ctx, input }) => {
       try {
         const { data } = await systemSettingsV1CheckExternalAccountOauthHealth({
@@ -228,7 +228,7 @@ export const systemSettingsRouter = router({
 
   patchPlatformGitHubApp: protectedProcedure
     .input(
-      z.object({
+      z.strictObject({
         expectedVersion: z.number().int().nonnegative(),
         appId: z.string().nullable().optional(),
         clientId: z.string().nullable().optional(),
@@ -287,7 +287,7 @@ export const systemSettingsRouter = router({
 
   confirmPlatformGitHubAppCandidate: protectedProcedure
     .input(
-      z.object({
+      z.strictObject({
         candidateId: z.string().min(1),
         expectedVersion: z.number().int().nonnegative(),
         confirmationAction: z.string().min(1),
@@ -316,7 +316,7 @@ export const systemSettingsRouter = router({
     }),
 
   cancelPlatformGitHubAppCandidate: protectedProcedure
-    .input(z.object({ candidateId: z.string().min(1) }))
+    .input(z.strictObject({ candidateId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       try {
         await systemSettingsV1CancelPlatformGithubAppCandidate({
@@ -350,7 +350,7 @@ export const systemSettingsRouter = router({
   listAuditEvents: protectedProcedure
     .input(
       z
-        .object({
+        .strictObject({
           offset: z.number().int().nonnegative().default(0),
           limit: z.number().int().positive().max(100).default(20),
         })

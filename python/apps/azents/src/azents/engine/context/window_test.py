@@ -3,9 +3,39 @@
 import pytest
 
 from azents.engine.context.window import (
+    compute_auto_compaction_threshold_tokens,
     compute_effective_context_window_tokens,
     resolve_model_input_tokens,
 )
+
+
+@pytest.mark.parametrize(
+    ("provider_default", "provider_maximum", "user_cap", "effective", "threshold"),
+    [
+        (96_000, 256_000, None, 96_000, 86_400),
+        (96_000, 256_000, 160_000, 160_000, 144_000),
+        (96_000, 256_000, 300_000, 256_000, 230_400),
+        (None, 512_000, None, 512_000, 460_800),
+    ],
+    ids=["default", "extended", "clamped", "legacy"],
+)
+def test_catalog_context_matrix_and_compaction_threshold(
+    provider_default: int | None,
+    provider_maximum: int,
+    user_cap: int | None,
+    effective: int,
+    threshold: int,
+) -> None:
+    """Keep exact catalog limit branches and threshold math at their native owner."""
+    resolved = resolve_model_input_tokens(
+        provider_default, provider_maximum, None, user_cap
+    )
+    assert resolved.default_input_tokens == (
+        provider_maximum if provider_default is None else provider_default
+    )
+    assert resolved.max_input_tokens == provider_maximum
+    assert resolved.effective_input_tokens == effective
+    assert compute_auto_compaction_threshold_tokens(effective) == threshold
 
 
 class TestComputeEffectiveContextWindowTokens:

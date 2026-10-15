@@ -14,12 +14,12 @@ import { z } from "zod/v4";
 import { protectedProcedure, router } from "../init";
 
 // --- Input Schemas ---
-const WorkspaceCreateInput = z.object({
+const WorkspaceCreateInput = z.strictObject({
   name: z.string().min(1).max(100),
   handle: z.string().min(1).max(100),
 });
 
-const WorkspaceUpdateInput = z.object({
+const WorkspaceUpdateInput = z.strictObject({
   handle: z.string(),
   name: z.string().min(1).max(100),
   new_handle: z.string().min(1).max(100),
@@ -45,7 +45,7 @@ export const workspaceRouter = router({
    * Get workspace details
    */
   get: protectedProcedure
-    .input(z.object({ handle: z.string() }))
+    .input(z.strictObject({ handle: z.string() }))
     .query(async ({ ctx, input }) => {
       const { data } = await workspaceV1GetWorkspace({
         client: ctx.adminApiClient,

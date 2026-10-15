@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
+import { projectPlatformGitHubCandidateImpact } from "../platform-github-impact";
+import type { PlatformGitHubCandidateImpact } from "../platform-github-impact";
 import type {
   ExternalChannelFilesDraft,
   ExternalChannelFilesPageState,
@@ -34,6 +36,7 @@ export interface SystemSettingsPageContentProps {
   draft: PlatformGitHubAppDraft;
   confirmationAction: string | null;
   confirmationActions: string[];
+  candidateImpact: PlatformGitHubCandidateImpact;
   saving: boolean;
   validating: boolean;
   confirming: boolean;
@@ -105,16 +108,6 @@ function fieldValue(
   return detail.fields.find((field) => field.name === name)?.value ?? "";
 }
 
-function confirmationActions(
-  detail?: PlatformGitHubAppDetailResponse,
-): string[] {
-  const raw = detail?.candidate?.impact?.confirmation_actions;
-  if (!Array.isArray(raw)) {
-    return [];
-  }
-  return raw.filter((item): item is string => typeof item === "string");
-}
-
 function secretAction(clear: boolean, value: string): SecretAction | null {
   if (clear) {
     return { action: "clear" };
@@ -171,10 +164,12 @@ export function useSystemSettingsPageContainer(): SystemSettingsPageContentProps
     });
   }, [detailQuery.data]);
 
-  const actions = useMemo(
-    () => confirmationActions(detailQuery.data),
-    [detailQuery.data],
+  const candidateImpact = useMemo(
+    () =>
+      projectPlatformGitHubCandidateImpact(detailQuery.data?.candidate?.impact),
+    [detailQuery.data?.candidate?.impact],
   );
+  const actions = candidateImpact.confirmation_actions;
 
   useEffect(() => {
     const candidateId = detailQuery.data?.candidate?.id;
@@ -424,6 +419,7 @@ export function useSystemSettingsPageContainer(): SystemSettingsPageContentProps
     draft,
     confirmationAction,
     confirmationActions: actions,
+    candidateImpact,
     saving: patchMutation.isPending,
     validating: validateMutation.isPending,
     confirming: confirmMutation.isPending,

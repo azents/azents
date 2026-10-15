@@ -10,10 +10,12 @@ export const googleTaskSchema = z.enum([
   "gmail_drafts",
   "gmail_modify",
 ]);
-export const googleScopeSchema = z.object({
-  handle: z.string().min(1),
-  agentId: z.string().min(1).optional(),
-});
+export const googleScopeSchema = z
+  .object({
+    handle: z.string().min(1),
+    agentId: z.string().min(1).optional(),
+  })
+  .strict();
 export const googleDesiredSchema = z
   .object({
     tasks: z.array(googleTaskSchema).min(1),

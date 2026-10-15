@@ -3,13 +3,13 @@
 import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import { useLogout } from "@refinedev/core";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { trpc } from "@/trpc/client";
 import { getSystemAdminRoleSummary } from "../system-admin-state";
 import type {
   SystemAdminRoleState,
   UserDetailState,
-  UserEmailResponse,
+  UserEmailListState,
 } from "../types";
 
 export interface UserDetailContainerProps {
@@ -20,12 +20,13 @@ export interface UserDetailContainerProps {
 export interface UserDetailComponentProps {
   state: UserDetailState;
   roleState: SystemAdminRoleState;
-  emails: UserEmailResponse[];
-  isLoadingEmails: boolean;
+  emailState: UserEmailListState;
+  emailDraft: string;
   onDelete: () => void;
   onGrantAdmin: () => void;
   onRevokeAdmin: () => void;
-  onAddEmail: (email: string) => void;
+  onEmailDraftChange: (email: string) => void;
+  onSubmitEmail: () => void;
   onDeleteEmail: (emailId: string) => void;
 }
 
@@ -41,6 +42,7 @@ export function useUserDetailContainer(
   const { userId, onDeleted } = props;
   const utils = trpc.useUtils();
   const { mutate: logout } = useLogout();
+  const [emailDraft, setEmailDraft] = useState("");
 
   // --- Data loading ---
   const {
@@ -72,13 +74,15 @@ export function useUserDetailContainer(
   );
 
   // --- Email list loading ---
-  const { data: emailData, isLoading: isLoadingEmails } =
-    trpc.userEmail.listByUser.useQuery(
-      { user_id: userId ?? "" },
-      { enabled: !!userId },
-    );
-
-  const emails = emailData?.items ?? [];
+  const emailQuery = trpc.userEmail.listByUser.useQuery(
+    { user_id: userId ?? "" },
+    { enabled: !!userId },
+  );
+  const emailState: UserEmailListState = emailQuery.isLoading
+    ? { type: "LOADING" }
+    : emailQuery.isError
+      ? { type: "ERROR", message: emailQuery.error.message }
+      : { type: "LOADED", emails: emailQuery.data?.items ?? [] };
 
   // --- Mutations ---
   const deleteMutation = trpc.user.delete.useMutation();
@@ -112,6 +116,12 @@ export function useUserDetailContainer(
     }
     return { type: "LOADING", userId };
   }, [userId, currentUser, isLoadingUser, isLoadError, loadError, isDeleting]);
+
+  useEffect(() => {
+    if (state.type !== "VIEWING" && state.type !== "DELETING") {
+      setEmailDraft("");
+    }
+  }, [state.type]);
 
   const roleState: SystemAdminRoleState = useMemo(() => {
     if (isLoadingRoles || isLoadingCurrentAdmin) {
@@ -290,6 +300,15 @@ export function useUserDetailContainer(
     [userId, createEmailMutation, utils],
   );
 
+  const handleSubmitEmail = useCallback((): void => {
+    const email = emailDraft.trim();
+    if (!email) {
+      return;
+    }
+    handleAddEmail(email);
+    setEmailDraft("");
+  }, [emailDraft, handleAddEmail]);
+
   const handleDeleteEmail = useCallback(
     (emailId: string) => {
       if (!userId) {
@@ -320,12 +339,13 @@ export function useUserDetailContainer(
   return {
     state,
     roleState,
-    emails,
-    isLoadingEmails,
+    emailState,
+    emailDraft,
     onDelete: handleDelete,
     onGrantAdmin: handleGrantAdmin,
     onRevokeAdmin: handleRevokeAdmin,
-    onAddEmail: handleAddEmail,
+    onEmailDraftChange: setEmailDraft,
+    onSubmitEmail: handleSubmitEmail,
     onDeleteEmail: handleDeleteEmail,
   };
 }

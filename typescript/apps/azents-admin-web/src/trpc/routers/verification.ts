@@ -31,7 +31,7 @@ export const verificationRouter = router({
    * Get email verification details
    */
   get: protectedProcedure
-    .input(z.object({ id: z.string() }))
+    .input(z.strictObject({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const { data } = await authV1GetEmailVerification({
         client: ctx.adminApiClient,
