@@ -1490,6 +1490,7 @@ class _AgentRepository(AgentRepository):
         now = datetime.datetime.now(datetime.UTC)
         selection = _model_selection(self.structured_response)
         return Agent(
+            browser_enabled=True,
             id="agent-001",
             workspace_id="workspace-001",
             name="Test agent",

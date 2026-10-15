@@ -48,6 +48,7 @@
     "sendTab": "Envoyer Tab",
     "sendShiftTab": "Envoyer Maj+Tab",
     "runtimeUnavailable": "Démarrez le Runtime de la session pour utiliser son navigateur.",
+    "browserDisabled": "Activez le navigateur de session dans les paramètres Runtime de l'Agent.",
     "workingFolderUnavailable": "Le dossier de travail de la session n’est pas prêt. Actualisez une fois sa préparation terminée.",
     "capabilityUnavailable": "Le Runtime actuel ne dispose pas d’un navigateur disponible.",
     "transportUnavailable": "Le flux du navigateur est indisponible. Actualisez pour vérifier la connexion. La sélection et la fermeture des pages autorisées restent disponibles."
@@ -587,6 +588,7 @@
     "categorySkill": "Skill",
     "categoryExplore": "Explorer",
     "categoryShell": "Shell",
+    "categoryBrowser": "Navigateur",
     "categoryEdit": "Modifier",
     "categoryFile": "Fichier",
     "categoryImage": "Image",

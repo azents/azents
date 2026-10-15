@@ -111,11 +111,13 @@ export function useSessionBrowserContainer(
     state = {
       type: "UNAVAILABLE",
       reason:
-        query.data.reason_code === "runtime_unavailable"
-          ? t("runtimeUnavailable")
-          : query.data.reason_code === "working_folder_unavailable"
-            ? t("workingFolderUnavailable")
-            : t("capabilityUnavailable"),
+        query.data.reason_code === "browser_disabled"
+          ? t("browserDisabled")
+          : query.data.reason_code === "runtime_unavailable"
+            ? t("runtimeUnavailable")
+            : query.data.reason_code === "working_folder_unavailable"
+              ? t("workingFolderUnavailable")
+              : t("capabilityUnavailable"),
     };
   } else {
     state = browserProjectionState(

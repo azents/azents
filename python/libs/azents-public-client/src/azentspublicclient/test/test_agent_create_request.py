@@ -71,6 +71,7 @@ class TestAgentCreateRequest(unittest.TestCase):
                 enabled = True,
                 type = 'public',
                 runtime_profile_id = '',
+                browser_enabled = True,
                 terminal_enabled = True,
                 memory_enabled = True,
                 tool_search_enabled = True,

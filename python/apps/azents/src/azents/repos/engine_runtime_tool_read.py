@@ -2,7 +2,10 @@
 
 import dataclasses
 
+import sqlalchemy as sa
+
 from azents.core.session_workspace_project import SessionWorkspaceProject
+from azents.rdb.models.agent import RDBAgent
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession
 from azents.repos.agent_runtime import AgentRuntimeRepository
@@ -30,6 +33,15 @@ class EngineRuntimeToolReadRepository:
     agent_runtime_repository: AgentRuntimeRepository
     runtime_profile_repository: RuntimeProfileRepository
     project_repository: SessionWorkspaceProjectRepository
+
+    async def browser_enabled(self, *, agent_id: str) -> bool:
+        """Read the current Agent Browser setting without provisioning a Runtime."""
+        async with self.session_manager() as session:
+            return (
+                await session.read_session.scalar(
+                    sa.select(RDBAgent.browser_enabled).where(RDBAgent.id == agent_id)
+                )
+            ) is True
 
     async def load_behavior(
         self,

@@ -1299,6 +1299,8 @@
       "unknown": "현재 Runtime 구성을 사용할 수 없습니다."
     },
     "runtimeSettings": {
+      "browserLabel": "세션 브라우저",
+      "browserDescription": "Agent의 브라우저 도구와 실시간 브라우저 패널을 사용합니다. 꺼도 저장된 사이트 상태는 유지되며 다른 Runtime 기능에는 영향을 주지 않습니다.",
       "environmentVariables": {
         "workspaceTitle": "Workspace 환경변수",
         "workspaceDescription": "Agent가 선택해서 사용할 공통 값을 관리합니다.",

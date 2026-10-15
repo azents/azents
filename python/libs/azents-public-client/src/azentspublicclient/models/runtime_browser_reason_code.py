@@ -28,6 +28,7 @@ class RuntimeBrowserReasonCode(str, Enum):
     """
     RUNTIME_UNAVAILABLE = 'runtime_unavailable'
     BROWSER_UNAVAILABLE = 'browser_unavailable'
+    BROWSER_DISABLED = 'browser_disabled'
     WORKING_FOLDER_UNAVAILABLE = 'working_folder_unavailable'
 
     @classmethod

@@ -54,6 +54,7 @@ class AgentOutput(BaseModel):
     runtime_remove_available: bool
     toolkit_management_available: bool
     terminal_enabled: bool
+    browser_enabled: bool
     infrastructure_terminal_enabled: bool | None
     workspace_terminal_enabled: bool | None
     effective_terminal_enabled: bool
@@ -139,6 +140,7 @@ class AgentOutput(BaseModel):
             ),
             toolkit_management_available=can_manage,
             terminal_enabled=data.terminal_enabled,
+            browser_enabled=data.browser_enabled,
             infrastructure_terminal_enabled=infrastructure_terminal_enabled,
             workspace_terminal_enabled=workspace_terminal_enabled,
             effective_terminal_enabled=effective_terminal_enabled,
@@ -214,6 +216,9 @@ class AgentCreateInput(BaseModel):
     runtime_profile_id: str | None = Field(
         default=None, description="Selected Workspace Runtime Profile ID"
     )
+    browser_enabled: bool = Field(
+        default=False, description="Session Browser enabled flag"
+    )
     terminal_enabled: bool = Field(
         default=True,
         description="Interactive Terminal enabled flag",
@@ -264,6 +269,7 @@ class AgentUpdateInput(TypedDict, total=False):
             description="Required optimistic version when replacing the selection",
         ),
     ]
+    browser_enabled: Annotated[bool, Field(description="Session Browser enabled flag")]
     terminal_enabled: Annotated[
         bool,
         Field(description="Interactive Terminal enabled flag"),

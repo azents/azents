@@ -153,7 +153,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-10-09
+last_verified_at: 2026-10-15
 spec_version: 97
 ---
 
@@ -194,6 +194,7 @@ Session or Agent settings operates on the same Agent-owned service.
 | `runtime_profile_selection_version` | positive optimistic version for replacing or clearing the Agent selection |
 | `toolkit_management_available` | requester-relative true only for a Workspace Owner or explicit AgentAdmin of this active Agent; grants the enhanced saved-Agent Toolkit management flow but does not disclose any Toolkit state itself |
 | `terminal_enabled` | Agent-owned default-true browser Terminal policy. It is independently editable from Runtime capability and never gates Worker Runtime Toolkit access |
+| `browser_enabled` | Agent-owned opt-in Session Browser setting, default false for existing and new Agents. Runtime settings can enable tools and live-panel access independently of Terminal and other Runtime features. Disabling preserves native profile bytes. |
 | `memory_enabled` | gates Saved/Historical automatic context, preparation, mutation tools, and model-facing live Memory VFS access; retained human settings inspection remains available |
 | `max_turns` | run turn limit. null means unlimited |
 | `auto_archive_ttl_days` | positive whole-day inactivity TTL for automatic archive of this Agent's non-primary root Sessions. Defaults to `30` and applies dynamically to existing active Sessions |

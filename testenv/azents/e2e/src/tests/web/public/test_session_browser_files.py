@@ -22,7 +22,7 @@ from tests.required.public.test_runtime_terminal import (
     _TerminalWorkspace,
 )
 from tests.web.public.test_runtime_web_gateway import _RuntimeApplicationCommands
-from tests.web.public.test_session_browser import _start_application
+from tests.web.public.test_session_browser import _enable_browser, _start_application
 
 _PROMPT = "Session Browser capture and publication handoff"
 _PREFIX = "call_browser_files_"
@@ -112,6 +112,7 @@ def test_session_browser_capture_model_image_and_original_publication(
         agent_id=agent_id,
         session_id=session_id,
     )
+    _enable_browser(azents_public_server_url, handle, agent_id, token)
     _prepare_terminal_session(
         public_api_client=public_api_client,
         workspace=workspace,

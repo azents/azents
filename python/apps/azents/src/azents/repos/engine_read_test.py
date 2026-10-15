@@ -51,6 +51,7 @@ async def test_engine_reads_complete_their_sessions_before_returning() -> None:
     selection = make_test_model_selection(integration_id="integration-1")
     now = datetime.datetime.now(datetime.UTC)
     agent = Agent(
+        browser_enabled=True,
         id="agent-1",
         workspace_id="workspace-1",
         name="Agent",

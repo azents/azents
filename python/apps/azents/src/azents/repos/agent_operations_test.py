@@ -47,6 +47,7 @@ def _agent() -> Agent:
     now = datetime.datetime.now(datetime.UTC)
     selection = make_test_model_selection()
     return Agent(
+        browser_enabled=True,
         id="agent-1",
         workspace_id="workspace-1",
         name="Agent",

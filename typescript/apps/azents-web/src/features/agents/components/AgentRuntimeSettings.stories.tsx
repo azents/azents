@@ -1,5 +1,6 @@
 import { rem } from "@mantine/core";
 import { NextIntlClientProvider } from "next-intl";
+import { expect, fn, userEvent, within } from "storybook/test";
 import koreanMessages from "@/i18n/ko-KR-messages";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { RuntimeEnvironmentPreview } from "./AgentRuntimeEnvironmentVariables.story-fixtures";
@@ -36,6 +37,7 @@ const agent: AgentResponse = {
   runtime_remove_available: false,
   toolkit_management_available: true,
   terminal_enabled: true,
+  browser_enabled: false,
   infrastructure_terminal_enabled: true,
   workspace_terminal_enabled: true,
   effective_terminal_enabled: true,
@@ -200,6 +202,8 @@ const meta = {
     removalAcknowledged: false,
     isAdding: false,
     isUpdatingProfile: false,
+    isUpdatingBrowser: false,
+    onBrowserEnabledChange: noop,
     isRemoving: false,
     lifecycleAction: null,
     onSelectProfile: noop,
@@ -241,6 +245,42 @@ export const Managed = {
       terminal_enabled: true,
     },
     state: { type: "READY", runtime: managed, profiles: [profile] },
+  },
+} satisfies Story;
+
+export const BrowserOptIn = {
+  args: {
+    ...Managed.args,
+    onBrowserEnabledChange: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const toggle = within(canvasElement).getByRole("switch", {
+      name: "Session browser",
+    });
+    await expect(toggle).not.toBeChecked();
+    await userEvent.click(toggle);
+    await expect(args.onBrowserEnabledChange).toHaveBeenCalledWith(true);
+  },
+} satisfies Story;
+
+export const BrowserEnabled = {
+  args: {
+    ...Managed.args,
+    agent: { ...Managed.args.agent, browser_enabled: true },
+  },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByRole("switch", { name: "Session browser" }),
+    ).toBeChecked();
+  },
+} satisfies Story;
+
+export const BrowserUpdating = {
+  args: { ...Managed.args, isUpdatingBrowser: true },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByRole("switch", { name: "Session browser" }),
+    ).toBeDisabled();
   },
 } satisfies Story;
 

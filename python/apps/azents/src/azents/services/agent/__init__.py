@@ -411,6 +411,7 @@ class AgentService:
             runtime_profile_id=runtime_profile_id,
             runtime_capability=runtime_capability,
             terminal_enabled=create.terminal_enabled,
+            browser_enabled=create.browser_enabled,
             memory_enabled=create.memory_enabled,
             tool_search_enabled=create.tool_search_enabled,
             max_turns=create.max_turns,
@@ -629,6 +630,8 @@ class AgentService:
             repo_update["memory_enabled"] = update["memory_enabled"]
         if "terminal_enabled" in update:
             repo_update["terminal_enabled"] = update["terminal_enabled"]
+        if "browser_enabled" in update:
+            repo_update["browser_enabled"] = update["browser_enabled"]
         if "tool_search_enabled" in update:
             repo_update["tool_search_enabled"] = update["tool_search_enabled"]
         if "max_turns" in update:

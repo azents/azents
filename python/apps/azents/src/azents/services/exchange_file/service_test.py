@@ -570,6 +570,7 @@ def _make_agent() -> Agent:
     """Create Agent for tests."""
     selection = make_test_model_selection()
     return Agent(
+        browser_enabled=True,
         id="agent-1",
         workspace_id="workspace-1",
         name="Test Agent",

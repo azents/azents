@@ -1299,6 +1299,8 @@
       "unknown": "The current Runtime configuration is unavailable."
     },
     "runtimeSettings": {
+      "browserLabel": "Session browser",
+      "browserDescription": "Allow Agent browser tools and the live browser panel. Turning this off preserves saved site state and leaves other Runtime features available.",
       "environmentVariables": {
         "workspaceTitle": "Workspace environment variables",
         "workspaceDescription": "Shared values that Agents can explicitly choose to use.",

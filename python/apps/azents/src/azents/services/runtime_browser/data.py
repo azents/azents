@@ -9,7 +9,10 @@ from azents_runtime_control.browser_contract import BrowserTask
 from azents.services.agent_runtime.lifecycle_data import RuntimeOperationTarget
 
 type RuntimeBrowserReasonCode = Literal[
-    "runtime_unavailable", "browser_unavailable", "working_folder_unavailable"
+    "runtime_unavailable",
+    "browser_unavailable",
+    "browser_disabled",
+    "working_folder_unavailable",
 ]
 
 

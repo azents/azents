@@ -52,6 +52,7 @@ _RESOURCE = RuntimeBrowserResource("workspace", "agent-1", "child-session")
 def _snapshot() -> RuntimeBrowserDurableSnapshot:
     return RuntimeBrowserDurableSnapshot(
         agent=Agent.model_construct(
+            browser_enabled=True,
             id="agent-1",
             workspace_id="workspace-1",
             runtime_capability=AgentRuntimeCapability.MANAGED,
@@ -98,6 +99,19 @@ def _snapshot() -> RuntimeBrowserDurableSnapshot:
         ),
         authentication_session_expires_at=_NOW + timedelta(hours=1),
     )
+
+
+@pytest.mark.asyncio
+async def test_disabled_browser_denies_before_runtime_or_folder_access() -> None:
+    harness = _resolver()
+    snapshot = _snapshot()
+    harness.authority_repository.read_snapshot.return_value = dataclasses.replace(
+        snapshot, agent=snapshot.agent.model_copy(update={"browser_enabled": False})
+    )
+    result = await _resolve(harness)
+    assert result == RuntimeBrowserUnavailable("browser_disabled")
+    harness.runtime_coordination.get_connection.assert_not_awaited()
+    harness.working_folder_service.resolve_bound_authority_for_target.assert_not_awaited()
 
 
 def _runner() -> RuntimeConnectionRecord:

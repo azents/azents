@@ -253,6 +253,10 @@ function activityCategoryForTool(call: ToolActivityCall): ActivityCategory {
     case "exec_command":
     case "write_stdin":
       return { key: "shell", label: "shell" };
+    case "browser_open":
+    case "browser_observe":
+    case "browser_act":
+      return { key: "browser", label: "browser" };
     case "write":
     case "edit":
     case "apply_patch":
