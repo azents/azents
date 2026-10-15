@@ -8,7 +8,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from azents.core.tools import ToolkitStatus, TurnContext
 from azents.engine.client_tools import ClientToolWireDialect
@@ -23,6 +23,7 @@ from azents.engine.events.tool_invocation import (
 from azents.engine.events.types import (
     ClientToolCallPayload,
     ClientToolResultPayload,
+    DelegatedToolSnapshot,
     OutputTextPart,
     ToolkitSourceSnapshot,
     ToolOutput,
@@ -47,6 +48,7 @@ from azents.engine.tooling.tool_search import (
     ToolExposure,
     classify_tool_exposure,
 )
+from azents.engine.tools.run_tool_to_file import RunToolToFileInput
 from azents.utils.logging import sanitized_exception_info
 
 logger = logging.getLogger(__name__)
@@ -116,22 +118,41 @@ class ToolCatalog:
         call: ClientToolCallPayload,
     ) -> ClientToolCallPayload:
         """Copy the exact catalog entry's immutable Toolkit source onto a call."""
-        entry = self.entries.get(call.name)
-        if entry is None or entry.source.toolkit_config_id is None:
-            return call.model_copy(update={"toolkit_source": None})
-        if entry.source.toolkit_type is None:
-            raise ValueError("DB-attached Toolkit source requires toolkit_type")
+        delegated_tool = None
+        if call.name == "run_tool_to_file":
+            try:
+                target = RunToolToFileInput.model_validate_json(call.arguments)
+            except ValidationError:
+                pass
+            else:
+                dialect = self.wire_dialects.get(target.tool_name)
+                if target.tool_name != call.name and dialect is not None:
+                    delegated_tool = DelegatedToolSnapshot(
+                        name=target.tool_name,
+                        wire_dialect=dialect,
+                        toolkit_source=self._toolkit_source(target.tool_name),
+                    )
         return call.model_copy(
             update={
-                "toolkit_source": ToolkitSourceSnapshot(
-                    toolkit_config_id=entry.source.toolkit_config_id,
-                    toolkit_type=entry.source.toolkit_type,
-                    toolkit_name=entry.source.label,
-                    toolkit_slug=entry.source.slug,
-                    toolkit_namespace=entry.source.namespace,
-                    source_identity=dict(entry.source.source_identity),
-                )
+                "toolkit_source": self._toolkit_source(call.name),
+                "delegated_tool": delegated_tool,
             }
+        )
+
+    def _toolkit_source(self, name: str) -> ToolkitSourceSnapshot | None:
+        """Read one exact catalog source without tool-name prefix inference."""
+        entry = self.entries.get(name)
+        if entry is None or entry.source.toolkit_config_id is None:
+            return None
+        if entry.source.toolkit_type is None:
+            raise ValueError("DB-attached Toolkit source requires toolkit_type")
+        return ToolkitSourceSnapshot(
+            toolkit_config_id=entry.source.toolkit_config_id,
+            toolkit_type=entry.source.toolkit_type,
+            toolkit_name=entry.source.label,
+            toolkit_slug=entry.source.slug,
+            toolkit_namespace=entry.source.namespace,
+            source_identity=dict(entry.source.source_identity),
         )
 
     def native_tools_for(

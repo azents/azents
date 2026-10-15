@@ -10,6 +10,7 @@ import {
   ScrollArea,
   Stack,
   Text,
+  Tooltip,
 } from "@mantine/core";
 import {
   IconBook,
@@ -784,6 +785,8 @@ function RawPayloadContent({
 
 export function GenericToolCallCard({
   toolCall,
+  rawToolCall = toolCall,
+  outputFileState = null,
   hiddenAttachmentUris,
   rawOpened,
   onOpenRaw,
@@ -823,7 +826,14 @@ export function GenericToolCallCard({
         detail={detail}
         icon={<IconTool size={activityRowIconSize} />}
         primary={toolCall.name}
-        status={<ToolCallStatusIcon label={status} status={toolCall.status} />}
+        status={
+          <Group gap={rem(4)} wrap="nowrap">
+            {outputFileState !== null ? (
+              <OutputFileIndicator state={outputFileState} />
+            ) : null}
+            <ToolCallStatusIcon label={status} status={toolCall.status} />
+          </Group>
+        }
       />
       {visibleAttachments.length > 0 ? (
         <FileAttachmentList files={visibleAttachments} />
@@ -836,10 +846,10 @@ export function GenericToolCallCard({
         size="lg"
       >
         <RawPayloadContent
-          argumentsText={toolCall.arguments}
+          argumentsText={rawToolCall.arguments}
           formatJsonValues={false}
-          outputText={toolCall.result ?? ""}
-          toolName={toolCall.name}
+          outputText={rawToolCall.result ?? ""}
+          toolName={rawToolCall.name}
           failed={toolCall.status === "failed"}
         />
       </Modal>
@@ -849,6 +859,8 @@ export function GenericToolCallCard({
 
 export function StandardSpecializedToolCallCard({
   toolCall,
+  rawToolCall = toolCall,
+  outputFileState = null,
   presentation,
   hiddenAttachmentUris,
   rawOpened,
@@ -914,7 +926,14 @@ export function StandardSpecializedToolCallCard({
         icon={presentationIcon(presentation)}
         primary={action}
         qualifier={qualifier}
-        status={<ToolCallStatusIcon label={status} status={toolCall.status} />}
+        status={
+          <Group gap={rem(4)} wrap="nowrap">
+            {outputFileState !== null ? (
+              <OutputFileIndicator state={outputFileState} />
+            ) : null}
+            <ToolCallStatusIcon label={status} status={toolCall.status} />
+          </Group>
+        }
         subject={presentation.subject}
       />
       {visibleAttachments.length > 0 ? (
@@ -928,10 +947,10 @@ export function StandardSpecializedToolCallCard({
         size="lg"
       >
         <RawPayloadContent
-          argumentsText={toolCall.arguments}
+          argumentsText={rawToolCall.arguments}
           formatJsonValues={false}
-          outputText={toolCall.result ?? ""}
-          toolName={toolCall.name}
+          outputText={rawToolCall.result ?? ""}
+          toolName={rawToolCall.name}
           failed={toolCall.status === "failed"}
         />
       </Modal>
@@ -939,7 +958,35 @@ export function StandardSpecializedToolCallCard({
   );
 }
 
+function OutputFileIndicator({
+  state,
+}: {
+  state: OutputFileState;
+}): ReactElement {
+  const t = useTranslations("chat.toolCall");
+  const keys = {
+    pending: "outputToFile",
+    stored: "outputStored",
+    partial: "outputPartiallyStored",
+    failed: "outputStorageFailed",
+  } as const;
+  const label = t(keys[state]);
+  return (
+    <Tooltip label={label}>
+      <Box
+        component="span"
+        c="dimmed"
+        aria-label={label}
+        style={{ display: "inline-flex" }}
+      >
+        <IconFileExport size={activityRowIconSize} />
+      </Box>
+    </Tooltip>
+  );
+}
+
 import type {
   GenericToolCallCardViewProps,
   StandardToolCallCardViewProps,
 } from "../types";
+import type { OutputFileState } from "@azents/session-core/delegatedToolPresentation";

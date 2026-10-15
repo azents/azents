@@ -156,6 +156,7 @@ class EngineOutputOperationRepository:
                             arguments=call.arguments,
                             wire_dialect=call.wire_dialect,
                             toolkit_source=call.toolkit_source,
+                            delegated_tool=call.delegated_tool,
                             started_at=datetime.datetime.now(datetime.UTC),
                             owner_generation=admission.owner_generation,
                         )

@@ -514,6 +514,16 @@ class ToolkitSourceSnapshot(BaseModel):
     source_identity: dict[str, str] = Field(default_factory=dict)
 
 
+class DelegatedToolSnapshot(BaseModel):
+    """Authoritative target identity for a higher-order client Tool."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str = Field(min_length=1)
+    wire_dialect: ClientToolWireDialect
+    toolkit_source: ToolkitSourceSnapshot | None
+
+
 class ClientToolCallPayload(BaseModel):
     """Client tool call payload executed by Azents."""
 
@@ -526,6 +536,7 @@ class ClientToolCallPayload(BaseModel):
         description="Provider wire dialect selected for this call"
     )
     toolkit_source: ToolkitSourceSnapshot | None = Field(default=None)
+    delegated_tool: DelegatedToolSnapshot | None = Field(default=None)
     native_artifact: NativeArtifact = Field(description="Native artifact")
 
 
@@ -950,6 +961,7 @@ class ActiveToolCall(BaseModel):
         description="Provider wire dialect selected for this active call"
     )
     toolkit_source: ToolkitSourceSnapshot | None = Field(default=None)
+    delegated_tool: DelegatedToolSnapshot | None = Field(default=None)
     started_at: datetime.datetime
     owner_generation: int = Field(ge=1)
 

@@ -424,6 +424,14 @@ async def test_saves_full_text_without_engine_cap() -> None:
     assert result.storage.files["/tmp/result/output.txt"] == html.encode()
     assert "/tmp/result/manifest.json" in result.storage.files
     assert html not in str(result.returned)
+    assert isinstance(result.returned.output, str)
+    assert "x" * 100 not in result.returned.output
+    preview = result.returned.metadata["delegated_result"]
+    assert isinstance(preview, dict)
+    preview_output = preview["output"]
+    assert isinstance(preview_output, str)
+    assert len(preview_output) < len(html)
+    assert preview_output.endswith("</html>")
     assert len(result.transfer.requests) == 2
     assert result.invoker.calls == [
         PreparedClientToolInvocation(

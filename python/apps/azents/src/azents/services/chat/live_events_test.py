@@ -36,6 +36,7 @@ from azents.engine.events.types import (
     AgentMessagePayload,
     AssistantMessagePayload,
     ClientToolCallPayload,
+    DelegatedToolSnapshot,
     ExternalChannelMessagePayload,
     ProviderToolCallPayload,
     ReasoningPayload,
@@ -810,6 +811,9 @@ def test_active_tool_call_projection_has_stable_live_shape() -> None:
             call_id="call-1",
             name="bash",
             arguments='{"cmd":"sleep"}',
+            delegated_tool=DelegatedToolSnapshot(
+                name="read", wire_dialect="json_function", toolkit_source=None
+            ),
             toolkit_source=ToolkitSourceSnapshot(
                 toolkit_config_id="toolkit-config-1",
                 toolkit_type="github",
@@ -826,6 +830,8 @@ def test_active_tool_call_projection_has_stable_live_shape() -> None:
     assert isinstance(event.payload, ClientToolCallPayload)
     assert event.payload.call_id == "call-1"
     assert event.payload.arguments == '{"cmd":"sleep"}'
+    assert event.payload.delegated_tool is not None
+    assert event.payload.delegated_tool.name == "read"
     assert event.payload.toolkit_source is not None
     assert event.payload.toolkit_source.toolkit_config_id == "toolkit-config-1"
     assert event.created_at == now

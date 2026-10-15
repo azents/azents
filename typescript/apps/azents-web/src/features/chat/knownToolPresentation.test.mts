@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { toolCallForDisplay } from "@azents/session-core/delegatedToolPresentation";
 import { knownToolPresentation } from "./knownToolPresentation.ts";
 import type { ActiveToolCall } from "@azents/session-core/types";
 
@@ -13,6 +14,34 @@ function toolCall(overrides: Partial<ActiveToolCall>): ActiveToolCall {
     ...overrides,
   };
 }
+
+void test("wrapped tools reuse exactly the direct tool presentation", () => {
+  for (const status of ["running", "completed", "failed"] as const) {
+    const direct = toolCall({ status });
+    const wrapped: ActiveToolCall = {
+      ...direct,
+      name: "run_tool_to_file",
+      arguments: JSON.stringify({
+        tool_name: direct.name,
+        arguments: direct.arguments,
+        directory: "/tmp/output",
+      }),
+      result: "Storage summary",
+      resultMetadata: {
+        delegated_result: { output: direct.result, metadata: {} },
+      },
+      delegatedTool: {
+        name: direct.name,
+        wireDialect: "json_function",
+        toolkitSource: null,
+      },
+    };
+    assert.deepEqual(
+      knownToolPresentation(toolCallForDisplay(wrapped)),
+      knownToolPresentation(direct),
+    );
+  }
+});
 
 void test("specializes a validated first-party read call", () => {
   assert.deepEqual(knownToolPresentation(toolCall({})), {

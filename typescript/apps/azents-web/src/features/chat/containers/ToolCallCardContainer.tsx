@@ -1,4 +1,8 @@
 "use client";
+import {
+  outputFileState,
+  toolCallForDisplay,
+} from "@azents/session-core/delegatedToolPresentation";
 import { Component } from "react";
 import { BrowserToolResultLink } from "@/features/session-browser/BrowserToolResultLink";
 import { createReactContainer } from "@/shared/lib/createReactContainer";
@@ -53,13 +57,27 @@ function useGenericToolCallCard({
   hiddenAttachmentUris = [],
   ...props
 }: ToolCallCardInput): GenericToolCallCardViewProps {
-  return { ...props, hiddenAttachmentUris, ...useRawToolDialog() };
+  return {
+    ...props,
+    rawToolCall: props.toolCall,
+    toolCall: toolCallForDisplay(props.toolCall),
+    outputFileState: outputFileState(props.toolCall),
+    hiddenAttachmentUris,
+    ...useRawToolDialog(),
+  };
 }
 function useStandardToolCallCard({
   hiddenAttachmentUris = [],
   ...props
 }: StandardToolCallCardInput): StandardToolCallCardViewProps {
-  return { ...props, hiddenAttachmentUris, ...useRawToolDialog() };
+  return {
+    ...props,
+    rawToolCall: props.toolCall,
+    toolCall: toolCallForDisplay(props.toolCall),
+    outputFileState: outputFileState(props.toolCall),
+    hiddenAttachmentUris,
+    ...useRawToolDialog(),
+  };
 }
 const GenericCard = createReactContainer(
   "GenericToolCallCard",
@@ -76,7 +94,7 @@ export function ToolCallCardContainer({
   toolCall,
   hiddenAttachmentUris = [],
 }: ToolCallCardInput): ReactElement {
-  const result = knownToolPresentation(toolCall);
+  const result = knownToolPresentation(toolCallForDisplay(toolCall));
   const generic = (
     <GenericCard
       toolCall={toolCall}
