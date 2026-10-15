@@ -27,6 +27,7 @@ import {
   IconSettings,
   IconUpload,
 } from "@tabler/icons-react";
+import { useTranslations } from "next-intl";
 import { useCallback } from "react";
 import { parseJsonRecord } from "@/shared/lib/unknown-value";
 import { getServiceAccountKey } from "../service-account-fields";
@@ -46,6 +47,7 @@ export function GoogleAnalyticsConfigFields({
   onShowKeyInput,
   onKeyFileUpload,
 }: GoogleAnalyticsConfigFieldsProps): React.ReactElement {
+  const setup = useTranslations("toolkitSetup");
   const {
     default_property_id: propertyId,
     timeout: timeoutValue,
@@ -91,7 +93,7 @@ export function GoogleAnalyticsConfigFields({
           </Text>
         </Text>
 
-        {clientEmail && !showKeyInput ? (
+        {(hasCredentials || clientEmail) && !showKeyInput ? (
           <Alert
             variant="light"
             color="blue"
@@ -99,14 +101,20 @@ export function GoogleAnalyticsConfigFields({
           >
             <Group justify="space-between" align="center">
               <Text size="sm">
-                Authenticated as <Code>{clientEmail}</Code>
+                {clientEmail ? (
+                  <>
+                    {setup("keyIdentity")}: <Code>{clientEmail}</Code>
+                  </>
+                ) : (
+                  setup("storedCredentials")
+                )}
               </Text>
               <Button
                 size="xs"
                 variant="subtle"
                 onClick={() => onShowKeyInput()}
               >
-                Replace Key
+                {setup("replaceKey")}
               </Button>
             </Group>
           </Alert>
@@ -154,11 +162,7 @@ export function GoogleAnalyticsConfigFields({
 
       {/* Runtime wait notice */}
       <Alert variant="light" color="yellow" icon={<IconInfoCircle size={16} />}>
-        <Text size="xs">
-          This tool requires an agent runtime to run. The first session may take
-          up to 30 seconds to start. Subsequent sessions will be instant while
-          the runtime is active.
-        </Text>
+        <Text size="xs">{setup("analyticsRuntime")}</Text>
       </Alert>
 
       {/* Connection Test */}

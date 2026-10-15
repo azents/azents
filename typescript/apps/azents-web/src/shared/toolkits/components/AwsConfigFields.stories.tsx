@@ -151,7 +151,7 @@ export const ExistingCredentials: Story = {
 };
 
 export const ContainerCredentialReplacement: Story = {
-  args: { credentials: { access_key_id: "saved-key" }, hasCredentials: true },
+  args: { credentials: null, hasCredentials: true },
   render: (args) => (
     <ProviderFieldStoryTransport
       response={{ success: true, message: "Fixture test passed." }}
@@ -160,13 +160,19 @@ export const ContainerCredentialReplacement: Story = {
       <AwsConfigFieldsContainer {...args} />
     </ProviderFieldStoryTransport>
   ),
-  play: async ({ canvasElement }) => {
+  play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
+    await expect(canvas.getByText(/Credentials are saved/)).toBeVisible();
+    await expect(
+      canvas.queryByRole("textbox", { name: "Access Key ID" }),
+    ).not.toBeInTheDocument();
+    await expect(args.onCredentialsChange).not.toHaveBeenCalled();
     await userEvent.click(
       canvas.getByRole("button", { name: "Replace Credentials" }),
     );
     await expect(
       canvas.getByRole("textbox", { name: "Access Key ID" }),
     ).toBeVisible();
+    await expect(args.onCredentialsChange).not.toHaveBeenCalled();
   },
 };

@@ -25,6 +25,7 @@ import {
   IconPlugConnected,
   IconSettings,
 } from "@tabler/icons-react";
+import { useTranslations } from "next-intl";
 import { ProviderConnectionTestFeedback } from "./ProviderConnectionTestFeedback";
 
 const AWS_REGIONS = [
@@ -61,6 +62,7 @@ export function AwsConfigFields({
   showKeyInput,
   onShowKeyInput,
 }: AwsConfigFieldsProps): React.ReactElement {
+  const setup = useTranslations("toolkitSetup");
   const {
     region,
     role_arn: roleArn,
@@ -83,14 +85,20 @@ export function AwsConfigFields({
         required
       />
 
-      {accessKeyId && !showKeyInput ? (
+      {(hasCredentials || accessKeyId) && !showKeyInput ? (
         <Alert variant="light" color="blue" icon={<IconInfoCircle size={16} />}>
           <Stack gap={4}>
             <Text size="sm">
-              Access Key ID: <Code>{accessKeyId}</Code>
+              {accessKeyId ? (
+                <>
+                  Access Key ID: <Code>{accessKeyId}</Code>
+                </>
+              ) : (
+                setup("storedCredentials")
+              )}
             </Text>
             <Button size="xs" variant="subtle" onClick={() => onShowKeyInput()}>
-              Replace Credentials
+              {setup("replaceCredentials")}
             </Button>
           </Stack>
         </Alert>

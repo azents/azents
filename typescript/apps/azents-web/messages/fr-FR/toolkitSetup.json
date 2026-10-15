@@ -1,0 +1,130 @@
+{
+  "prepareTitle": "Préparer la connexion",
+  "prepareDescription": "Choisissez le service et vérifiez les informations nécessaires.",
+  "configureTitle": "Configurer les accès",
+  "configureDescription": "Limitez les ressources et permissions aux besoins de l’Agent. Utilisez les contrôles du fournisseur ci-dessous pour la connexion et l’autorisation.",
+  "reviewTitle": "Vérifier et enregistrer",
+  "reviewDescription": "Nommez la connexion et choisissez son utilisation par les Agents avant d’enregistrer.",
+  "beforeYouStart": "À préparer",
+  "setupOrder": "Ordre de configuration",
+  "ifItFails": "En cas d’échec",
+  "officialGuide": "Ouvrir la documentation officielle",
+  "advanced": "Nom technique et instructions avancées",
+  "advancedHint": "L’alias et les instructions supplémentaires sont facultatifs. Les valeurs par défaut conviennent à la plupart des connexions.",
+  "summary": "Paramètres à enregistrer",
+  "provider": "Service",
+  "name": "Nom de la connexion",
+  "scope": "Périmètre d’utilisation",
+  "workspaceScope": "Partagé dans le Workspace — à associer aux Agents concernés",
+  "agentScope": "Cet Agent uniquement",
+  "availability": "Disponibilité",
+  "enabled": "Utilisation activée",
+  "disabled": "Désactivé",
+  "discovery": "Visibilité des outils",
+  "search": "Découverte avec Tool Search",
+  "always": "Toujours exposer les outils",
+  "secretsOmitted": "Les identifiants ne figurent pas dans ce récapitulatif. Les identifiants existants sont conservés sauf remplacement explicite.",
+  "saveHint": "Ajouter ou Enregistrer conserve ces paramètres. Un test de connexion est une action explicite distincte : il n’accorde aucun accès et n’enregistre pas les modifications.",
+  "localSaveHint": "Ajouter ou Enregistrer conserve ces paramètres. Les accès au Runtime et l’acceptation des risques restent régis par les contrôles ci-dessus.",
+  "testHint": "Le résultat décrit cette requête, pas un état permanent ni toutes les permissions. Après une modification, relancez le test si vous souhaitez vérifier la configuration.",
+  "oauthNext": "Pour OAuth, ajoutez d’abord le Toolkit, puis rouvrez ses paramètres et choisissez Connecter. L’enregistrement seul n’autorise aucun compte.",
+  "savedHint": "Vous modifiez un Toolkit enregistré. Ne remplacez les identifiants que si nécessaire. Les actions de connexion du compte peuvent s’appliquer indépendamment de l’enregistrement.",
+  "keyIdentity": "Compte de service indiqué dans la clé",
+  "storedCredentials": "Les identifiants sont enregistrés et leurs valeurs masquées. Laissez-les inchangés pour conserver cette connexion.",
+  "replaceKey": "Remplacer la clé",
+  "replaceCredentials": "Remplacer les identifiants",
+  "analyticsRuntime": "Ce Toolkit s’exécute dans le Runtime de l’Agent. Démarrer un Runtime inactif peut prendre du temps ; tester la connexion et exécuter les outils sont deux actions distinctes.",
+  "guides": {
+    "mcp": {
+      "purpose": "Connecter les outils d’un serveur MCP distant.",
+      "prepare": "Obtenez l’URL MCP et la méthode d’authentification auprès du propriétaire du serveur. Choisissez un serveur fiable : il recevra les requêtes envoyées à ses outils.",
+      "configure": "Saisissez l’URL et choisissez la méthode correspondante. Placez les secrets uniquement dans les champs prévus. Les points de terminaison avancés et le délai sont facultatifs.",
+      "verify": "Lancez explicitement le test pour vérifier la réponse ou découvrir les métadonnées OAuth. Cette découverte ne connecte pas votre compte.",
+      "recovery": "Vérifiez l’URL, le réseau et l’authentification. Pour OAuth, autorisez la connexion enregistrée ; modifier les métadonnées ne confère aucun accès."
+    },
+    "github": {
+      "purpose": "Gérer une connexion GitHub avec son identité de compte ou d’App existante.",
+      "prepare": "Déterminez si les outils doivent agir comme une personne ou une installation d’App. Utilisez les contrôles correspondant au mode choisi.",
+      "configure": "Conservez l’identité sauf si vous souhaitez remplacer son enregistrement ou ses identifiants. Sélectionnez uniquement les fonctionnalités et dépôts nécessaires.",
+      "verify": "Examinez les informations retournées par GitHub. L’injection de jeton dans le Runtime est un choix distinct nécessitant une confirmation du risque.",
+      "recovery": "Vérifiez l’expiration du jeton, l’App, l’installation et l’approbation de l’organisation. Réautorisez via les contrôles dédiés, sans coller de secret dans le nom ou la description."
+    },
+    "google": {
+      "purpose": "Connecter les tâches Google au compte et aux accès que vous approuvez.",
+      "prepare": "Utilisez un compte ayant accès aux fichiers, calendriers ou messages nécessaires. Les tâches disponibles sont proposées par la configuration Google existante.",
+      "configure": "Choisissez les tâches, autorisez le compte, puis vérifiez les accès réellement accordés. La reconnexion est distincte du changement de nom.",
+      "verify": "Consultez le compte et les accès retournés. Sélectionner une tâche ne prouve pas que sa permission a été accordée.",
+      "recovery": "Si les accès sont partiels ou expirés, vérifiez les tâches manquantes et reconnectez le compte. Une approbation administrative peut être requise."
+    },
+    "notion": {
+      "purpose": "Permettre aux Agents d’utiliser le contenu Notion autorisé.",
+      "prepare": "Préparez un compte ayant accès au workspace et au contenu souhaités. Cette connexion utilise OAuth Notion, sans jeton d’intégration à saisir ici.",
+      "configure": "Ajoutez le Toolkit, rouvrez les paramètres, puis choisissez Connecter. Gardez le délai par défaut sauf besoin particulier.",
+      "verify": "Après l’autorisation, testez la connexion enregistrée. L’ajout du Toolkit seul ne donne pas accès au contenu Notion.",
+      "recovery": "Reconnectez le compte si l’autorisation expire. Si des pages manquent, vérifiez le workspace choisi et les droits sur le contenu."
+    },
+    "sentry": {
+      "purpose": "Examiner les problèmes Sentry et activer uniquement les actions nécessaires.",
+      "prepare": "Utilisez un compte ayant accès aux organisations et projets concernés. Les fonctions de triage et de gestion peuvent modifier leur état.",
+      "configure": "Choisissez les groupes de fonctions, ajoutez le Toolkit, puis rouvrez les paramètres pour connecter Sentry. Les fonctions choisies n’accordent pas de permissions.",
+      "verify": "Testez la connexion après autorisation. Vérifiez l’accès aux projets avant de demander à l’Agent d’effectuer des modifications.",
+      "recovery": "Vérifiez les droits du compte et des projets, puis reconnectez si nécessaire. Limitez les fonctions pour un usage en lecture seule."
+    },
+    "aws": {
+      "purpose": "Utiliser AWS Managed MCP avec les permissions AWS que vous fournissez.",
+      "prepare": "Préparez un Access Key ID et son secret pour une identité IAM limitée aux opérations nécessaires. Choisissez la région de travail.",
+      "configure": "Saisissez la paire de clés. Pour assumer un rôle, indiquez son ARN et l’External ID requis ; l’appelant et la relation de confiance doivent autoriser cette opération.",
+      "verify": "Testez les identifiants saisis ou enregistrés. Un succès ne certifie pas les permissions pour toutes les opérations AWS.",
+      "recovery": "Vérifiez les clés, la région, la politique IAM, la confiance du rôle et l’External ID. N’accordez pas de droits administrateur pour faire réussir le test."
+    },
+    "gcp": {
+      "purpose": "Choisir les services Google Cloud et les accès demandés par l’Agent.",
+      "prepare": "Préparez l’ID du projet et une clé JSON de compte de service. Activez les services nécessaires et attribuez les rôles adaptés.",
+      "configure": "Sélectionnez les services et l’écriture uniquement si nécessaire, puis collez ou importez la clé. La liste de rôles indique les besoins, pas les droits déjà accordés.",
+      "verify": "Testez après avoir renseigné le projet et la clé. L’adresse extraite de la clé est une donnée fournie, pas une identité authentifiée par ce seul affichage.",
+      "recovery": "Vérifiez le projet, la clé JSON, les API activées et les rôles IAM. Pour une écriture refusée, examinez la permission précise plutôt que d’élargir tous les droits."
+    },
+    "google_analytics": {
+      "purpose": "Lire les rapports Google Analytics avec un compte de service.",
+      "prepare": "Activez les API Google Analytics Data et Admin, créez une clé de compte de service et autorisez ce compte sur la propriété Analytics.",
+      "configure": "Collez ou importez la clé JSON. L’ID numérique de propriété par défaut est facultatif ; laissez-le vide pour choisir une propriété accessible plus tard.",
+      "verify": "Testez après avoir accordé l’accès à la propriété. Une clé Google Cloud valide ne donne pas automatiquement accès à une propriété Analytics.",
+      "recovery": "Vérifiez les API, l’adresse du compte dans la gestion des accès à la propriété et l’ID de propriété. L’authentification et l’accès Analytics sont distincts."
+    },
+    "brave_search": {
+      "purpose": "Rechercher sur le Web avec votre abonnement Brave Search API.",
+      "prepare": "Créez une clé dans le tableau de bord Brave Search API et vérifiez le quota de l’abonnement.",
+      "configure": "Saisissez la clé et choisissez les valeurs par défaut du pays, de la langue et de Safe Search. Elles influencent les résultats, pas l’identité autorisée.",
+      "verify": "Le test envoie une requête explicite pouvant consommer du quota. Il n’enregistre pas la clé et ne garantit pas le quota futur.",
+      "recovery": "Vérifiez la clé, le quota et la limite de requêtes. Après rotation d’une clé, choisissez son remplacement et enregistrez la nouvelle valeur."
+    },
+    "kubernetes": {
+      "purpose": "Donner un accès limité aux clusters Kubernetes sélectionnés.",
+      "prepare": "Préparez un kubeconfig, un jeton de compte de service ou les identifiants cloud pris en charge pour chaque cluster. Son API doit être accessible depuis le service.",
+      "configure": "Choisissez l’authentification de chaque cluster, puis limitez namespaces et ressources. Gardez la lecture seule sauf besoin de modification ; les Secrets sont refusés par défaut.",
+      "verify": "Testez explicitement les accès. Les restrictions de l’interface complètent Kubernetes RBAC et IAM, sans les remplacer.",
+      "recovery": "Vérifiez l’URL de l’API, le certificat, le jeton ou l’identité cloud et RBAC. Ne désactivez pas TLS et n’accordez pas cluster-admin pour contourner une erreur."
+    },
+    "envvar": {
+      "purpose": "Fournir des variables d’environnement aux processus du Runtime.",
+      "prepare": "Déterminez les variables réellement nécessaires. Les processus et commandes ayant accès à cet environnement peuvent lire leurs valeurs.",
+      "configure": "Saisissez des noms et valeurs valides, puis lisez et acceptez l’avertissement existant. Les valeurs enregistrées restent masquées ; remplacez uniquement celles à modifier.",
+      "verify": "Aucun test de connexion externe ne s’applique. Vérifiez les noms, l’exposition et l’acceptation du risque avant d’enregistrer.",
+      "recovery": "Corrigez les erreurs de nom, taille ou confirmation affichées. Placez les secrets uniquement dans les valeurs, jamais dans le nom ou la description de la connexion."
+    },
+    "shell": {
+      "purpose": "Examiner les restrictions réseau Shell existantes.",
+      "prepare": "Identifiez les domaines nécessaires au Runtime. Cet écran ne crée et n’autorise aucun Runtime.",
+      "configure": "Utilisez les contrôles d’autorisation et de refus existants. Conservez les valeurs actuelles sauf besoin d’accès précis.",
+      "verify": "Ce sont des règles de configuration, pas un test de connexion ni une preuve de réussite des commandes.",
+      "recovery": "Examinez le domaine exact et la politique du Runtime. N’assouplissez pas de restrictions sans rapport pour contourner un refus."
+    },
+    "other": {
+      "purpose": "Configurer le service choisi dans le catalogue du Workspace.",
+      "prepare": "Suivez sa documentation et limitez les accès aux besoins du travail.",
+      "configure": "Utilisez les paramètres disponibles ci-dessous. Le catalogue du serveur détermine les fournisseurs disponibles.",
+      "verify": "Utilisez un test uniquement si le fournisseur le propose. Enregistrer ne prouve pas la connectivité.",
+      "recovery": "Vérifiez l’erreur et les exigences du fournisseur. Placez les secrets dans les champs prévus."
+    }
+  }
+}

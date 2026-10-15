@@ -354,6 +354,11 @@ def test_agent_owned_toolkit_owner_management_and_member_legacy_view(
     _click_button(browser_driver, "Add Toolkit")
     _click_button(browser_driver, "MCP")
 
+    _wait(browser_driver).until(
+        ec.element_to_be_clickable(
+            (By.XPATH, '//summary[.="Advanced naming and instructions"]')
+        )
+    ).click()
     _fill_text_input(browser_driver, "Slug", toolkit_slug)
     _fill_text_input(browser_driver, "Name", toolkit_name)
     _fill_text_input(browser_driver, "Server URL", "https://example.com/mcp")

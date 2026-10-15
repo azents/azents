@@ -18,6 +18,7 @@ import runtimeMetrics from "../../messages/fr-FR/runtimeMetrics.json";
 import runtimeWeb from "../../messages/fr-FR/runtimeWeb.json";
 import security from "../../messages/fr-FR/security.json";
 import skills from "../../messages/fr-FR/skills.json";
+import toolkitSetup from "../../messages/fr-FR/toolkitSetup.json";
 import workspace from "../../messages/fr-FR/workspace.json";
 import workspaces from "../../messages/fr-FR/workspaces.json";
 import { composeMessages } from "./message-composition";
@@ -44,6 +45,7 @@ const messages = composeMessages([
   ["runtimeWeb", runtimeWeb],
   ["security", security],
   ["skills", skills],
+  ["toolkitSetup", toolkitSetup],
   ["workspace", workspace],
   ["workspaces", workspaces],
 ]);

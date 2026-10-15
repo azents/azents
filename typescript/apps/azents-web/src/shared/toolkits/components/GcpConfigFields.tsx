@@ -31,6 +31,7 @@ import {
   IconSettings,
   IconUpload,
 } from "@tabler/icons-react";
+import { useTranslations } from "next-intl";
 import { useCallback, useMemo } from "react";
 import { parseJsonRecord } from "@/shared/lib/unknown-value";
 import { ProviderConnectionTestFeedback } from "./ProviderConnectionTestFeedback";
@@ -157,6 +158,7 @@ export function GcpConfigFields({
   onShowKeyInput,
   onKeyFileUpload,
 }: GcpConfigFieldsProps): React.ReactElement {
+  const setup = useTranslations("toolkitSetup");
   const {
     project_id: projectId,
     services: selectedServices,
@@ -341,7 +343,7 @@ export function GcpConfigFields({
           </Text>
         </Text>
 
-        {clientEmail && !showKeyInput && (
+        {(hasCredentials || clientEmail) && !showKeyInput && (
           <Alert
             variant="light"
             color="blue"
@@ -349,14 +351,20 @@ export function GcpConfigFields({
           >
             <Group justify="space-between" align="center">
               <Text size="sm">
-                Authenticated as <Code>{clientEmail}</Code>
+                {clientEmail ? (
+                  <>
+                    {setup("keyIdentity")}: <Code>{clientEmail}</Code>
+                  </>
+                ) : (
+                  setup("storedCredentials")
+                )}
               </Text>
               <Button
                 size="xs"
                 variant="subtle"
                 onClick={() => onShowKeyInput()}
               >
-                Replace Key
+                {setup("replaceKey")}
               </Button>
             </Group>
           </Alert>
