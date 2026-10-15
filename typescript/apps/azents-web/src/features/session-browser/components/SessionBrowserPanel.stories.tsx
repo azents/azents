@@ -672,6 +672,86 @@ export const MouseClickHasNoTouchEffect = {
   },
 } satisfies Story;
 
+export const PreciseTouchMarker = {
+  render: (props) => <SessionBrowserPanel {...props} />,
+  args: {
+    touchView: {
+      cancel: fn(),
+      viewWindowRef: { current: null },
+      touch: {
+        onPointerDown: fn(),
+        onPointerMove: fn(),
+        onPointerUp: fn(),
+        onPointerCancel: fn(),
+        onLostPointerCapture: fn(),
+      },
+      touchFeedback: { id: 1, x: 37, y: 43 },
+      onTouchFeedbackEnd: fn(),
+    },
+  },
+  play: async ({ canvasElement, args }) => {
+    const body = canvasElement.ownerDocument.body;
+    const marker = body.querySelector<HTMLElement>(
+      "[data-browser-touch-feedback]",
+    );
+    if (marker === null) {
+      throw new Error("The exact touch marker must be visible");
+    }
+    const view = body.ownerDocument.defaultView;
+    if (view === null) {
+      throw new Error("The touch marker requires a rendered window");
+    }
+    const animations = marker.getAnimations({ subtree: true });
+    for (const animation of animations) {
+      animation.pause();
+      animation.currentTime = 50;
+    }
+    const position = marker.getBoundingClientRect();
+    const dot = view.getComputedStyle(marker, "::after");
+    const dotGeometry = [dot.width, dot.height, dot.transform];
+    await expect(marker.style.left).toBe("37%");
+    await expect(marker.style.top).toBe("43%");
+    await expect(view.getComputedStyle(marker).pointerEvents).toBe("none");
+    await expect(Number.parseFloat(dot.width)).toBeGreaterThan(0);
+    for (const time of [200, 350]) {
+      for (const animation of animations) {
+        animation.currentTime = time;
+      }
+      const current = marker.getBoundingClientRect();
+      const currentDot = view.getComputedStyle(marker, "::after");
+      await expect([
+        current.x,
+        current.y,
+        current.width,
+        current.height,
+      ]).toEqual([position.x, position.y, position.width, position.height]);
+      await expect([
+        currentDot.width,
+        currentDot.height,
+        currentDot.transform,
+      ]).toEqual(dotGeometry);
+    }
+    await fireEvent.animationEnd(marker, { pseudoElement: "::before" });
+    await expect(args.touchView?.onTouchFeedbackEnd).not.toHaveBeenCalled();
+    await fireEvent.animationEnd(marker, { pseudoElement: "" });
+    await expect(args.touchView?.onTouchFeedbackEnd).toHaveBeenCalledTimes(1);
+  },
+} satisfies Story;
+
+export const AddressUsesUrlKeyboard = {
+  play: async ({ canvasElement }) => {
+    const address = within(canvasElement.ownerDocument.body).getByRole(
+      "textbox",
+      { name: "Browser address" },
+    );
+    await expect(address).toHaveAttribute("type", "url");
+    await expect(address).toHaveAttribute("inputmode", "url");
+    await expect(address).toHaveAttribute("autocapitalize", "off");
+    await expect(address).toHaveAttribute("autocorrect", "off");
+    await expect(address).toHaveAttribute("spellcheck", "false");
+  },
+} satisfies Story;
+
 export const ReadOnly = {
   args: {
     state: { ...ready, canInput: false, canClose: false },

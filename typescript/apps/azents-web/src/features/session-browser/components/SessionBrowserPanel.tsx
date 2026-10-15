@@ -493,6 +493,11 @@ export function SessionBrowserPanel({
             </Tooltip>
           </Group>
           <TextInput
+            type="url"
+            inputMode="url"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
             size="xs"
             variant="unstyled"
             className={classes.address}
@@ -759,7 +764,11 @@ export function SessionBrowserPanel({
                     left: `${touchView.touchFeedback.x}%`,
                     top: `${touchView.touchFeedback.y}%`,
                   }}
-                  onAnimationEnd={touchView.onTouchFeedbackEnd}
+                  onAnimationEnd={(event) => {
+                    if (event.pseudoElement === "") {
+                      touchView.onTouchFeedbackEnd();
+                    }
+                  }}
                 />
               )}
             {handlers !== null && (
