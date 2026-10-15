@@ -139,8 +139,8 @@ RUN pip install --no-cache-dir --break-system-packages \
         sympy
 
 RUN docker --version | grep -F "Docker version 29.8.2" \
-    && docker buildx version | grep -F "github.com/docker/buildx v0.37.1" \
-    && docker compose version | grep -F "Docker Compose version v5.5.1" \
+    && docker buildx version | grep -F "github.com/docker/buildx v0.37.2" \
+    && docker compose version | grep -F "Docker Compose version v5.6.0" \
     && unshare --version \
     && test ! -e /var/run/azents-engine/docker.sock
 
