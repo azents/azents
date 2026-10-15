@@ -30,6 +30,85 @@ if _version_not_supported:
     )
 
 
+class RuntimeBrowserSourceSessionStub:
+    """Missing associated documentation comment in .proto file."""
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.Connect = channel.stream_stream(
+            "/azents.runtime_control.v1.RuntimeBrowserSourceSession/Connect",
+            request_serializer=runtime__stream__session__pb2.RuntimeStreamSessionEnvelope.SerializeToString,
+            response_deserializer=runtime__stream__session__pb2.RuntimeStreamSessionEnvelope.FromString,
+            _registered_method=True,
+        )
+
+
+class RuntimeBrowserSourceSessionServicer:
+    """Missing associated documentation comment in .proto file."""
+
+    def Connect(self, request_iterator, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details("Method not implemented!")
+        raise NotImplementedError("Method not implemented!")
+
+
+def add_RuntimeBrowserSourceSessionServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+        "Connect": grpc.stream_stream_rpc_method_handler(
+            servicer.Connect,
+            request_deserializer=runtime__stream__session__pb2.RuntimeStreamSessionEnvelope.FromString,
+            response_serializer=runtime__stream__session__pb2.RuntimeStreamSessionEnvelope.SerializeToString,
+        ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+        "azents.runtime_control.v1.RuntimeBrowserSourceSession", rpc_method_handlers
+    )
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers(
+        "azents.runtime_control.v1.RuntimeBrowserSourceSession", rpc_method_handlers
+    )
+
+
+# This class is part of an EXPERIMENTAL API.
+class RuntimeBrowserSourceSession:
+    """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def Connect(
+        request_iterator,
+        target,
+        options=(),
+        channel_credentials=None,
+        call_credentials=None,
+        insecure=False,
+        compression=None,
+        wait_for_ready=None,
+        timeout=None,
+        metadata=None,
+    ):
+        return grpc.experimental.stream_stream(
+            request_iterator,
+            target,
+            "/azents.runtime_control.v1.RuntimeBrowserSourceSession/Connect",
+            runtime__stream__session__pb2.RuntimeStreamSessionEnvelope.SerializeToString,
+            runtime__stream__session__pb2.RuntimeStreamSessionEnvelope.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True,
+        )
+
+
 class RuntimeStreamGatewaySessionStub:
     """Missing associated documentation comment in .proto file."""
 

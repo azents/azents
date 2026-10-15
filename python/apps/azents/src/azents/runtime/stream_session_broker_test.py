@@ -251,7 +251,7 @@ async def test_web_capacity_rejects_browser_before_routing_or_reservation() -> N
         await broker.admit(
             key=BrokerStreamKey("gateway", 1),
             # Adversarial domain input intentionally violates the Web-only API.
-            authority=_browser_authority(),  # ty: ignore[invalid-argument-type]
+            authority=_browser_authority(),
             protocol=StreamProtocol.HTTP,
         )
     snapshot = await capacity.snapshot()

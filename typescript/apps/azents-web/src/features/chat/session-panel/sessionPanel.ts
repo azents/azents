@@ -1,6 +1,7 @@
 export const sessionPanelViews = [
   "files",
   "services",
+  "browser",
   "context",
   "subagents",
   "channels",
@@ -41,6 +42,9 @@ export function sessionPanelHref(
   params.delete("page");
   params.delete("taskId");
   params.delete("edit");
+  params.delete("browserTaskId");
+  params.delete("browserPageId");
+  params.delete("browserIncarnation");
   if (view !== null) {
     params.set("page", view);
   }

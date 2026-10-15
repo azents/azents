@@ -2663,6 +2663,159 @@
         }
       }
     },
+    "/browser/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}": {
+      "get": {
+        "tags": [
+          "Browser v1"
+        ],
+        "summary": "Get Browser Projection",
+        "description": "List authorized current Browser tasks without starting any Runtime.",
+        "operationId": "browser_v1_get_browser_projection",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserProjectionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/browser/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/pages/{page_id}/close": {
+      "post": {
+        "tags": [
+          "Browser v1"
+        ],
+        "summary": "Close Browser Page",
+        "description": "Close only the exact current page under directing Session authority.",
+        "operationId": "browser_v1_close_browser_page",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "page_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "title": "Page Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserClosePageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserProjectionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/start": {
       "post": {
         "tags": [
@@ -25486,6 +25639,165 @@
         "title": "AwsSecrets",
         "description": "AWS IAM based secrets for AWS Bedrock."
       },
+      "BrowserClosePageRequest": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Task Id"
+          },
+          "resource_incarnation": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Resource Incarnation"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "task_id",
+          "resource_incarnation"
+        ],
+        "title": "BrowserClosePageRequest"
+      },
+      "BrowserFrameResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "name"
+        ],
+        "title": "BrowserFrameResponse"
+      },
+      "BrowserPageResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "resource_incarnation": {
+            "type": "string",
+            "title": "Resource Incarnation"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "frames": {
+            "items": {
+              "$ref": "#/components/schemas/BrowserFrameResponse"
+            },
+            "type": "array",
+            "title": "Frames"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "task_id",
+          "resource_incarnation",
+          "url",
+          "title",
+          "frames"
+        ],
+        "title": "BrowserPageResponse"
+      },
+      "BrowserProjectionResponse": {
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeBrowserReasonCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "allow_input": {
+            "type": "boolean",
+            "title": "Allow Input"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/BrowserTaskResponse"
+            },
+            "type": "array",
+            "title": "Tasks"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "available",
+          "reason_code",
+          "allow_input",
+          "tasks"
+        ],
+        "title": "BrowserProjectionResponse"
+      },
+      "BrowserTaskResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "resource_incarnation": {
+            "type": "string",
+            "title": "Resource Incarnation"
+          },
+          "pages": {
+            "items": {
+              "$ref": "#/components/schemas/BrowserPageResponse"
+            },
+            "type": "array",
+            "title": "Pages"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "resource_incarnation",
+          "pages"
+        ],
+        "title": "BrowserTaskResponse"
+      },
       "BuiltinToolConfig": {
         "properties": {
           "name": {
@@ -36845,6 +37157,14 @@
         "title": "RunnerSystemMetricsScope",
         "description": "Physical execution environment visible to the Runner."
       },
+      "RuntimeBrowserReasonCode": {
+        "type": "string",
+        "enum": [
+          "runtime_unavailable",
+          "browser_unavailable",
+          "working_folder_unavailable"
+        ]
+      },
       "RuntimeConfigurationNetworkResponse": {
         "properties": {
           "mode": {
@@ -43205,6 +43525,10 @@
     {
       "name": "Auth v1",
       "description": "\nAuth API (Public)\n\nAuthentication endpoints based on email verification codes.\n"
+    },
+    {
+      "name": "Browser v1",
+      "description": "Authorized current Session Browser projection and exact page closure."
     },
     {
       "name": "ChatGPT OAuth v1",

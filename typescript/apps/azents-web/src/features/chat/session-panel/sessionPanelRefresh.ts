@@ -16,6 +16,7 @@ export function sessionPanelInvalidationPlan(
     case "channels":
       return ["channels"];
     case "scheduled-tasks":
+    case "browser":
       return [];
     case "terminal":
       return ["terminal"];

@@ -22,6 +22,24 @@ from azcommon.infra.s3.service import (
     S3TransferObjectMetadata,
     S3VerifiedObject,
 )
+from azents_runtime_control.browser_contract import (
+    BrowserAuthority,
+    BrowserCapture,
+    BrowserDialog,
+    BrowserElementRef,
+    BrowserFrame,
+    BrowserObserveCommand,
+    BrowserOpenCommand,
+    BrowserPage,
+    BrowserResult,
+    BrowserTarget,
+    BrowserTask,
+    decode_browser_command,
+    decode_browser_result,
+    encode_browser_command,
+    encode_browser_result,
+)
+from azents_runtime_control.grpc_runner_client import GrpcRunnerControlClient
 from azents_runtime_control.grpc_runner_transfer_client import (
     GrpcRunnerTransferClient,
     RunnerDownloadChunk,
@@ -37,7 +55,14 @@ from azents_runtime_control.proto import runtime_runner_transfer_pb2 as transfer
 from azents_runtime_control.proto import (
     runtime_runner_transfer_pb2_grpc as transfer_grpc,
 )
-from azents_runtime_control.runner import RunnerStateReport
+from azents_runtime_control.runner import (
+    JsonValue,
+    RunnerOperationEnvelope,
+    RunnerOperationEvent,
+    RunnerRegistration,
+    RunnerStateReport,
+    RuntimeRunnerEventType,
+)
 from azents_runtime_control.runner_transfer import (
     RunnerTransferIdentity,
     RunnerTransferResult,
@@ -1206,3 +1231,181 @@ def _config(*, maximum_attempts: int = 4) -> RuntimeTransferConfig:
         terminal_ttl=timedelta(minutes=5),
         list_page_size=10,
     )
+
+
+@pytest.mark.parametrize(
+    "operation_type", ["browser.list", "browser.open", "browser.observe", "browser.act"]
+)
+async def test_browser_command_and_result_cross_real_runner_grpc(
+    operation_type: str,
+) -> None:
+    """Exercise all four Browser mappings over the actual server/client socket."""
+    coordination = InMemoryRuntimeCoordinationStore()
+    control = RuntimeControlProtocolService(coordination)
+    runner = _RecordingRunnerServicer(
+        control_protocol=control,
+        coordination_store=coordination,
+        state_sink=_StateSink(),
+        owner_replica_id="replica-1",
+        consumer_id="browser-consumer",
+        runner_authenticator=_Authenticator(),
+        operation_block_ms=1,
+    )
+    server = grpc.aio.server()
+    control_grpc.add_RuntimeRunnerControlServicer_to_server(runner, server)
+    port = server.add_insecure_port("127.0.0.1:0")
+    await server.start()
+    client = GrpcRunnerControlClient.from_endpoint(
+        f"127.0.0.1:{port}", runner_auth_token="token", tls=None, allow_insecure=True
+    )
+    operations: asyncio.Queue[RunnerOperationEnvelope] = asyncio.Queue()
+
+    async def receive(operation: RunnerOperationEnvelope) -> None:
+        await operations.put(operation)
+
+    client.set_operation_handler(receive)
+    authority = BrowserAuthority("session-1", "/workspace/session-1")
+    target = BrowserTarget("task-1", "page-1", "page-incarnation", None)
+    payload: dict[str, JsonValue]
+    if operation_type == "browser.open":
+        payload = encode_browser_command(
+            BrowserOpenCommand(authority, None, "https://fixture.example", None)
+        )
+    elif operation_type in {"browser.list", "browser.observe"}:
+        payload = encode_browser_command(
+            BrowserObserveCommand(
+                authority,
+                None if operation_type == "browser.list" else target,
+                "status",
+                False,
+                100000,
+            )
+        )
+    else:
+        action: dict[str, JsonValue] = {
+            "kind": "reload",
+            "ref": None,
+            "observation_id": None,
+            "text": None,
+            "url": None,
+            "values": None,
+            "checked": None,
+            "key": None,
+            "x": None,
+            "y": None,
+            "end_ref": None,
+            "paths": None,
+            "dialog_id": None,
+            "accept": None,
+            "condition": None,
+            "expect": None,
+            "timeout_ms": 60000,
+        }
+        payload = {
+            "authority": {
+                "session_id": authority.session_id,
+                "working_directory": authority.working_directory,
+            },
+            "target": {
+                "task_id": target.task_id,
+                "page_id": target.page_id,
+                "resource_incarnation": target.resource_incarnation,
+                "frame_id": None,
+            },
+            "action": action,
+        }
+    command = decode_browser_command(operation_type, payload)
+    page = BrowserPage(
+        "page-1",
+        "task-1",
+        "page-incarnation",
+        "https://fixture.example",
+        "",
+        (BrowserFrame("frame-1", "https://fixture.example", ""),),
+    )
+    result = (
+        BrowserResult((), None, None, False, (), None, None, None, None, "none")
+        if operation_type == "browser.list"
+        else BrowserResult(
+            (BrowserTask("task-1", "", "task-incarnation", (page,)),),
+            page,
+            "",
+            True,
+            (BrowserElementRef("r", "observation-1", "frame-1", "button", "Submit"),),
+            BrowserCapture("/workspace/image.png", "image/png", 1 << 40, 100000, 1),
+            page,
+            BrowserCapture(
+                "/workspace/download.bin", "application/octet-stream", 0, None, None
+            ),
+            BrowserDialog("dialog-1", "prompt", ""),
+            "dialog_pending",
+        )
+    )
+    try:
+        accepted = await asyncio.wait_for(
+            client.register_runner(
+                RunnerRegistration(
+                    runtime_id="runtime-1",
+                    runner_id="runner-1",
+                    protocol_version="2026-07-25",
+                    capabilities=("file.transfer.v1", "browser"),
+                    health="ok",
+                    workspace_path="/workspace",
+                    metadata={},
+                    auth_credential_id="credential-1",
+                    runtime_configuration=RuntimeConfigurationEvidence(
+                        configuration_sequence=1,
+                        digest="d" * 64,
+                        desired_generation=1,
+                    ),
+                ),
+                connection_id="connection-1",
+                registered_at=datetime.now(UTC),
+            ),
+            timeout=3,
+        )
+        dispatched = await control.dispatch_runner_operation(
+            RuntimeRunnerOperation(
+                runtime_id="runtime-1",
+                runner_generation=accepted.generation,
+                operation_type=operation_type,
+                owner_session_id=authority.session_id,
+                payload=payload,
+                deadline_at=datetime.now(UTC) + timedelta(minutes=1),
+                body_stream_id=None,
+            ),
+            created_at=datetime.now(UTC),
+        )
+        assert isinstance(dispatched, RuntimeDispatchResult)
+        delivered = await asyncio.wait_for(operations.get(), timeout=3)
+        assert delivered.operation_type == operation_type
+        assert delivered.owner_session_id == authority.session_id
+        assert delivered.payload == payload
+        assert decode_browser_command(operation_type, delivered.payload) == command
+        assert await asyncio.wait_for(
+            client.start_runner_operation(delivered), timeout=3
+        )
+        await client.append_runner_event(
+            RunnerOperationEvent(
+                request_id=delivered.request_id,
+                runtime_id=delivered.runtime_id,
+                generation=delivered.runner_generation,
+                event_type=RuntimeRunnerEventType.FINAL_SUCCESS,
+                payload=encode_browser_result(result),
+                created_at=datetime.now(UTC),
+                final=True,
+            )
+        )
+        replies = await _wait_for_replies(control, dispatched.reply_stream_id)
+        assert replies[-1].event.final
+        assert replies[-1].event.payload == encode_browser_result(result)
+        assert decode_browser_result(replies[-1].event.payload) == result
+        capture = replies[-1].event.payload["capture"]
+        if capture is not None:
+            assert isinstance(capture, dict)
+            assert type(capture["size"]) is int
+            assert type(capture["width"]) is int
+        assert runner.peers
+    finally:
+        await client.close()
+        await server.stop(None)

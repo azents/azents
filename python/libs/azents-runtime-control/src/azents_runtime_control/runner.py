@@ -832,11 +832,13 @@ class RunnerRunLoop:
                 self._active_by_owner[active.owner] -= 1
                 if self._active_by_owner[active.owner] == 0:
                     del self._active_by_owner[active.owner]
-            task.result()
+            if not task.cancelled():
+                task.result()
             _LOGGER.info(
                 "Runtime Runner operation finished",
                 extra={
                     **self._operation_log_extra(active.operation),
+                    "canceled": task.cancelled(),
                     "execution_ms": round(
                         (self.monotonic() - active.started_at) * 1000,
                         3,

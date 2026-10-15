@@ -206,3 +206,56 @@ The requester chose compatibility with otherwise supported Runtimes while retain
 - Retain bounded non-secret support reason/selected launch protection in diagnostics without copying raw launch/environment/page content.
 
 The preceding D4 candidate brief remains historical comparison context; this accepted decision records the requester's selected support-dependent policy.
+
+## D5 Candidate Brief: Authenticated API Source for Browser Streaming
+
+- State: pending requester decision; no new source authentication or endpoint topology is authorized.
+- Affected requirements: existing REQ-1/2/4/8/9; product outcomes remain unchanged.
+- Affected Design mechanisms: M2/M3/M13. Design revision 2/M1-M17 remains the accepted baseline; this brief does not alter its approval.
+
+### Implementation Evidence and Gap
+
+The production Public API and Runtime Control run as separate processes. The existing common stream's ingress RPC requires Gateway-specific mTLS identity and a GATEWAY Hello on the trusted listener. The API has no admitted common-stream source and no resident data-plane shortcut. Its existing ordinary-Control credential permits exact transfer-coordinator methods/audience, not arbitrary application streams. Reusing that credential for Browser or borrowing Gateway credentials would expand authority.
+
+The existing Chat HMAC ticket solves user identity at a Public API WebSocket, not the API-to-Control service-source edge. Gateway cannot verify it today: Gateway settings/deployment do not receive the main authentication signing key. Its opaque database-cookie identity is a separate Web configuration-bound mechanism, and separate-domain enrollment requires a Web service. A Gateway Browser route is therefore not a no-provisioning/no-authority-change alternative.
+
+Source boundaries: `core/auth/jwt.py`, `core/runtime_transfer_coordinator_credential.py`, `runtime/deps.py`, `runtime/control_server.py`, `runtime/control_protocol/grpc/runtime_stream_session_server.py`, `runtime_web_gateway/settings.py`, `runtime_web_gateway/server.py`, and the separate API/Gateway deployment templates.
+
+### Consequence-Level Question
+
+Which authenticated process/source should carry the already-authorized Session Browser attachment into the common Runtime data plane?
+
+- **A — Recommended: API-owned Browser source on the existing ordinary Control channel.** Preserve normal Public API Session access and identity-ticket verification. Explicitly authorize a Browser-purpose service credential/RPC for existing `azents-api`, separate from transfer credentials and Web Gateway authority, binding current admitted resource/generations and connection lifetime. Reuse existing TLS server trust, source/Owner/relay/flow-control machinery and Runner consumer. No new port, durable grant/ticket table, Web exposure or main-auth-key distribution. Local and deployed processes use the same authentication/admission contract.
+- **B — Gateway-owned Browser public endpoint with explicit user verification authority.** Reuse the actual Gateway's mTLS source, but choose new normal-user verification/provisioning and endpoint ownership. Provisioning the main symmetric authentication key broadens signing privilege; a narrow verification RPC adds another trust/lifecycle edge; existing Web-cookie authority couples availability to Gateway/Web configuration and separate-domain enrollment. Preserve Web service policies and never treat service authority as Browser input authority.
+- **C — API/Control production co-location.** Share the resident broker by changing process/deployment/lifecycle/scaling topology. The current local devserver is not evidence for this production arrangement. This is the largest operational change and is not recommended.
+
+Option A requires a complete authority/lifecycle addition: purpose-separated credential audience and admitted stream-open binding, allowed service principal, listener/RPC registration, source expiry/drain/reconnect, current resource/account revocation, and non-replay/cancellation. These are material decisions, not codec/helper naming details. Do not broaden the existing transfer audience or Gateway allowlist implicitly.
+
+Decision-independent Runner consumer/shared DTO, UI component/input/wire preparation, and authorized REST projection/page closure can continue within approved mechanisms. Backend streaming activation waits for the requester choice, updated ADR/Design authority and matching Design approval.
+
+## D5. Admit an API-Owned Browser Source on the Existing Control Channel
+
+- Decision reference: `browsercmd-261014/ADR-D5`
+- Accepted by the requester on: 2026-10-15 at 10:22 KST.
+- Affected requirements: existing REQ-1/2/4/8/9, with all product outcomes unchanged.
+- Selected option: A from the preceding candidate brief. This choice authorizes the bounded API-source trust direction; the complete revised Design still requires authority/feasibility validation and revision-bound approval before source activation.
+
+### Decision
+
+Keep the Browser public attachment in the normal Public API, where existing user identity tickets and concrete Session observation/input access can be validated. Explicitly admit the existing `azents-api` service identity to a Browser-purpose authenticated stream RPC on the already-provisioned ordinary Runtime Control endpoint/TLS trust.
+
+Use a separate Browser credential purpose/audience and exact admitted scope. Bind the concrete user/authentication Session, Agent/Runtime, Session/task/page/resource incarnation, input permission, current generations and connection lifetime. Revalidate current account/resource access and generations during the live attachment. Preserve the existing common Owner/relay, exact fingerprint, flow control, resource ceilings and Runner-owned consumer. New attachment admission must not replay old input or reconstruct old live resources.
+
+Do not widen the transfer-coordinator audience/method permissions or use a transfer credential as a Browser proof. Do not impersonate GATEWAY, borrow its certificates or alter its Web service/exposure/cookie authority. Source identity is an internal transport authority, not an independent user permission or durable browser grant.
+
+Use the same authentication/admission boundary in local, single-process and separately deployed execution. No in-process authority bypass, additional port, durable grant/ticket table, main-auth signing key distribution to Gateway, profile subsystem, public CDP or MCP service is authorized.
+
+### Rationale and Alternatives
+
+The API already owns normal user authentication and concrete Session access, and it already has TLS server trust/service identity infrastructure for the ordinary Control endpoint. A Browser-purpose authenticated source fills the missing service edge without exporting the main authentication key to another ingress process or coupling Browser to Gateway Web-cookie enrollment.
+
+Gateway placement was not selected because it requires additional user-verification/provisioning authority and Gateway/Web configuration coupling. Production API/Control co-location was not selected because it changes process/deployment/scaling ownership rather than preserving the current architecture.
+
+### Design and Validation Obligations
+
+Specify exact source principal, credential binding, permitted RPC/domain, initial proof validity versus live transport lifetime, expiry/drain/reconnect/cancellation, current access revocation and replay rejection in revised Design. Keep Gateway mTLS/Web admission and transfer credentials unchanged. Verify separately deployed and local parity, wrong-domain/altered-scope/expired-proof rejection before capacity or effects, stale-generation and current-resource rejection, bounded source/stream cleanup, and real authenticated API/Control/Owner/Runner/UI behavior. No implementation, merge or deployment is implied by the decision record alone.

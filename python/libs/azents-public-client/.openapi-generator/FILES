@@ -3,6 +3,7 @@ azentspublicclient/api/__init__.py
 azentspublicclient/api/agent_runtime_v1_api.py
 azentspublicclient/api/agent_v1_api.py
 azentspublicclient/api/auth_v1_api.py
+azentspublicclient/api/browser_v1_api.py
 azentspublicclient/api/chat_gpto_auth_v1_api.py
 azentspublicclient/api/chat_v1_api.py
 azentspublicclient/api/external_channel_v1_api.py
@@ -152,6 +153,12 @@ azentspublicclient/docs/AvatarUploadTicketResponse.md
 azentspublicclient/docs/AwsConfig.md
 azentspublicclient/docs/AwsSecrets.md
 azentspublicclient/docs/Body.md
+azentspublicclient/docs/BrowserClosePageRequest.md
+azentspublicclient/docs/BrowserFrameResponse.md
+azentspublicclient/docs/BrowserPageResponse.md
+azentspublicclient/docs/BrowserProjectionResponse.md
+azentspublicclient/docs/BrowserTaskResponse.md
+azentspublicclient/docs/BrowserV1Api.md
 azentspublicclient/docs/BuiltinToolConfig.md
 azentspublicclient/docs/CatalogOffPeakRule.md
 azentspublicclient/docs/CatalogPriceIssue.md
@@ -474,6 +481,7 @@ azentspublicclient/docs/ResponseLlmProviderIntegrationV1GetSubscriptionUsage.md
 azentspublicclient/docs/ResponseModeRequest.md
 azentspublicclient/docs/RunnerSystemMetricAvailability.md
 azentspublicclient/docs/RunnerSystemMetricsScope.md
+azentspublicclient/docs/RuntimeBrowserReasonCode.md
 azentspublicclient/docs/RuntimeConfigurationNetworkResponse.md
 azentspublicclient/docs/RuntimeConfigurationStateResponse.md
 azentspublicclient/docs/RuntimeConfigurationStatus.md
@@ -781,6 +789,11 @@ azentspublicclient/models/avatar_upload_ticket_response.py
 azentspublicclient/models/aws_config.py
 azentspublicclient/models/aws_secrets.py
 azentspublicclient/models/body.py
+azentspublicclient/models/browser_close_page_request.py
+azentspublicclient/models/browser_frame_response.py
+azentspublicclient/models/browser_page_response.py
+azentspublicclient/models/browser_projection_response.py
+azentspublicclient/models/browser_task_response.py
 azentspublicclient/models/builtin_tool_config.py
 azentspublicclient/models/catalog_off_peak_rule.py
 azentspublicclient/models/catalog_price_issue.py
@@ -1091,6 +1104,7 @@ azentspublicclient/models/response_llm_provider_integration_v1_get_subscription_
 azentspublicclient/models/response_mode_request.py
 azentspublicclient/models/runner_system_metric_availability.py
 azentspublicclient/models/runner_system_metrics_scope.py
+azentspublicclient/models/runtime_browser_reason_code.py
 azentspublicclient/models/runtime_configuration_network_response.py
 azentspublicclient/models/runtime_configuration_state_response.py
 azentspublicclient/models/runtime_configuration_status.py
@@ -1387,6 +1401,12 @@ azentspublicclient/test/test_avatar_upload_ticket_response.py
 azentspublicclient/test/test_aws_config.py
 azentspublicclient/test/test_aws_secrets.py
 azentspublicclient/test/test_body.py
+azentspublicclient/test/test_browser_close_page_request.py
+azentspublicclient/test/test_browser_frame_response.py
+azentspublicclient/test/test_browser_page_response.py
+azentspublicclient/test/test_browser_projection_response.py
+azentspublicclient/test/test_browser_task_response.py
+azentspublicclient/test/test_browser_v1_api.py
 azentspublicclient/test/test_builtin_tool_config.py
 azentspublicclient/test/test_catalog_off_peak_rule.py
 azentspublicclient/test/test_catalog_price_issue.py
@@ -1709,6 +1729,7 @@ azentspublicclient/test/test_response_llm_provider_integration_v1_get_subscripti
 azentspublicclient/test/test_response_mode_request.py
 azentspublicclient/test/test_runner_system_metric_availability.py
 azentspublicclient/test/test_runner_system_metrics_scope.py
+azentspublicclient/test/test_runtime_browser_reason_code.py
 azentspublicclient/test/test_runtime_configuration_network_response.py
 azentspublicclient/test/test_runtime_configuration_state_response.py
 azentspublicclient/test/test_runtime_configuration_status.py

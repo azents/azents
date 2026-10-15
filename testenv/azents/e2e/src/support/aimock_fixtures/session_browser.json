@@ -1,0 +1,92 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Open the synthetic Session Browser handoff",
+        "systemMessage": "Create a brief title from the request"
+      },
+      "response": {
+        "content": "{\"title\":\"Session Browser handoff\"}"
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Open the synthetic Session Browser handoff",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_session_browser_handoff",
+            "name": "browser_open",
+            "arguments": {
+              "task_id": null,
+              "url": "http://127.0.0.1:8766/",
+              "label": "Synthetic Session Browser"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_session_browser_handoff"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_session_browser_child",
+            "name": "spawn_agent",
+            "arguments": {
+              "name": "browser_observer",
+              "task": "Open the synthetic read-only child Browser",
+              "agent_type": "default",
+              "fork_turns": "none"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_session_browser_child"
+      },
+      "response": {
+        "content": "The synthetic browser is ready for your input."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Open the synthetic read-only child Browser",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_session_browser_child_open",
+            "name": "browser_open",
+            "arguments": {
+              "task_id": null,
+              "url": "http://127.0.0.1:8766/",
+              "label": "Synthetic child Browser"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_session_browser_child_open"
+      },
+      "response": {
+        "content": "The child browser is ready for observation."
+      }
+    }
+  ]
+}

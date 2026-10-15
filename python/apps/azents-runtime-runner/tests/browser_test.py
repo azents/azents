@@ -296,7 +296,7 @@ async def test_popup_download_upload_frame_and_scoped_close(
     "label,response,accept,title",
     [
         ("Alert", None, True, "Synthetic fixture"),
-        ("Prompt", "Answered", True, "[input omitted]"),
+        ("Prompt", "Answered", True, "Answered"),
         ("Confirm", None, False, "Dismissed"),
     ],
 )

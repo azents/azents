@@ -26,6 +26,7 @@ from azents_runtime_control.runtime_stream_session import (
     MAX_ENVELOPE_BYTES,
     MAX_STREAM_TOMBSTONES,
     RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
+    BrowserStreamAuthority,
     CloseReason,
     Header,
     OwnerSessionEpoch,
@@ -882,6 +883,7 @@ class _SourceSession:
     peer_boot_id: str
     owner: OwnerSessionEpoch | None
     queue: _BoundedEnvelopeQueue
+    browser_authority: BrowserStreamAuthority | None = None
     credit: _SourceCredit = dataclasses.field(default_factory=_SourceCredit, init=False)
 
 
@@ -902,6 +904,7 @@ class _StreamBinding:
     capacity_stream_id: int | None
     runner_stream_id: int | None
     protocol: CapacityProtocol
+    browser_authority: BrowserStreamAuthority | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1143,7 +1146,7 @@ class _RunnerConnection:
         envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
         *,
         on_dequeued: Callable[[], Awaitable[None]] | None = None,
-    ) -> BrokerStreamKey:
+    ) -> BrokerStreamKey | None:
         """Return one Runner response to the exact source session."""
         if not _matches_owner(envelope, self.accepted.owner):
             raise ValueError("Runtime Web Runner response Owner epoch is stale")
@@ -1152,6 +1155,8 @@ class _RunnerConnection:
         async with self.lock:
             binding = self.sources.get(envelope.stream_id)
             if binding is None:
+                if envelope.stream_id in self.tombstone_set:
+                    return None
                 raise ValueError("Runtime Web Runner response stream is unknown")
             source = binding.source
             translated = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope()
@@ -1287,6 +1292,8 @@ class RuntimeStreamControlDataPlane:
         finite_grace_seconds: float,
         hard_limits: RuntimeStreamControlHardLimits,
         resident_memory_bytes: Callable[[], int],
+        browser_scope_validator: Callable[[BrowserStreamAuthority], Awaitable[bool]]
+        | None = None,
     ) -> None:
         if (
             not metrics_recoverable_errors
@@ -1294,6 +1301,9 @@ class RuntimeStreamControlDataPlane:
             or finite_grace_seconds <= long_lived_grace_seconds
         ):
             raise ValueError("Runtime Web Control lifecycle settings are invalid")
+        self.browser_scope_validator = browser_scope_validator
+        self.browser_guards: dict[BrokerStreamKey, asyncio.Task[None]] = {}
+        self.browser_fresh_until: dict[BrokerStreamKey, float] = {}
         self.route_repository = route_repository
         self.owner_replica_id = owner_replica_id
         self.control_boot_id = control_boot_id
@@ -1351,6 +1361,7 @@ class RuntimeStreamControlDataPlane:
         session_id: str,
         peer_boot_id: str,
         owner: OwnerSessionEpoch | None,
+        browser_authority: BrowserStreamAuthority | None = None,
     ) -> _SourceSession:
         source = _SourceSession(
             source_key=(
@@ -1359,6 +1370,7 @@ class RuntimeStreamControlDataPlane:
             session_id=session_id,
             peer_boot_id=peer_boot_id,
             owner=owner,
+            browser_authority=browser_authority,
             queue=_BoundedEnvelopeQueue(self.resources),
         )
         async with self.lock:
@@ -1384,7 +1396,21 @@ class RuntimeStreamControlDataPlane:
                 if binding.source is source
             )
         for key in keys:
-            await self._release(key)
+            async with self.lock:
+                current = self.bindings.get(key)
+            if current is not None and current.browser_authority is not None:
+                async with contextlib.AsyncExitStack() as cleanup:
+                    cleanup.push_async_callback(self._release, key)
+                    await self._send_runner_reset(current, CloseReason.CALLER)
+                    if not current.target.local:
+                        cancel = _base_response(source, source.peer_boot_id)
+                        cancel.stream_id = key.stream_id
+                        cancel.cancel.reason = _close_reason(CloseReason.CALLER)
+                        await self.relay_pool.forward(
+                            target=current.target, envelope=cancel
+                        )
+            else:
+                await self._release(key)
         if source.owner is None:
             await self.relay_pool.release_source(
                 source_session_id=source.session_id,
@@ -1504,6 +1530,20 @@ class RuntimeStreamControlDataPlane:
         ):
             raise ValueError("Runtime Web source envelope identity is stale")
         payload = envelope.WhichOneof("payload")
+        if source.browser_authority is not None:
+            if envelope.stream_id not in {0, 1}:
+                raise ValueError("Browser source stream scope changed")
+            if payload not in {
+                "open",
+                "websocket",
+                "window_update",
+                "cancel",
+                "reset",
+                "heartbeat",
+                "heartbeat_ack",
+                "go_away",
+            }:
+                raise ValueError("Browser source message is invalid")
         if payload == "go_away":
             async with self.lock:
                 self.draining_sources.add(source.source_key)
@@ -1598,10 +1638,20 @@ class RuntimeStreamControlDataPlane:
             runner_source.source.source_key,
             runner_source.source_stream_id,
         )
-        async with self.lock:
-            binding = self.bindings.get(source_key)
+        binding = await self._runner_response_binding(source_key)
         if binding is None:
-            raise ValueError("Runtime Web Runner response binding is unknown")
+            return
+        if binding.browser_authority is not None and (
+            self.clock() >= binding.browser_authority.transport_deadline_at
+            or asyncio.get_running_loop().time()
+            >= self.browser_fresh_until.get(binding.key, 0)
+        ):
+            # Per-binding guards revoke expired authority without blocking the
+            # shared Runner reader on database or status-RPC I/O.
+            return
+        binding = await self._runner_response_binding(source_key)
+        if binding is None:
+            return
         if envelope.WhichOneof("payload") == "response_head" and _is_sse(
             envelope.response_head
         ):
@@ -1652,7 +1702,7 @@ class RuntimeStreamControlDataPlane:
             await self._release(source_key)
             return
         try:
-            await connection.receive(envelope, on_dequeued=on_dequeued)
+            delivered = await connection.receive(envelope, on_dequeued=on_dequeued)
         except RuntimeError:
             if on_dequeued is not None:
                 await on_dequeued()
@@ -1664,12 +1714,25 @@ class RuntimeStreamControlDataPlane:
             if on_dequeued is not None:
                 await on_dequeued()
             raise
+        if delivered is None:
+            if on_dequeued is not None:
+                await on_dequeued()
+            return
         if envelope.WhichOneof("payload") in {
             "open_rejected",
             "reset",
             "stream_end",
         }:
             await self._release(source_key)
+
+    async def _runner_response_binding(
+        self, key: BrokerStreamKey
+    ) -> _StreamBinding | None:
+        async with self.lock:
+            binding = self.bindings.get(key)
+            if binding is None and key not in self.source_tombstone_set:
+                raise ValueError("Runtime Web Runner response binding is unknown")
+            return binding
 
     async def relay_response(
         self,
@@ -2063,9 +2126,31 @@ class RuntimeStreamControlDataPlane:
         envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
         authority = decode_stream_authority(envelope.open.authority)
-        # Browser admission and its Runner consumer are introduced separately.
-        # The current Web path cannot admit Browser authority to Web capacity.
-        if not isinstance(authority, WebStreamAuthority):
+        browser = isinstance(authority, BrowserStreamAuthority)
+        if browser:
+            if source.owner is None and source.browser_authority != authority:
+                await source.queue.put(
+                    _rejection(
+                        source,
+                        self.control_boot_id,
+                        envelope.stream_id,
+                        CloseReason.PROTOCOL_VIOLATION,
+                    )
+                )
+                return
+            if not await self._browser_scope_current(authority):
+                await source.queue.put(
+                    _rejection(
+                        source,
+                        self.control_boot_id,
+                        envelope.stream_id,
+                        CloseReason.AUTHORITY_REVOKED,
+                    )
+                )
+                return
+        elif source.browser_authority is not None:
+            raise ValueError("Browser source cannot admit Web authority")
+        if not isinstance(authority, WebStreamAuthority) and not browser:
             await source.queue.put(
                 _rejection(
                     source,
@@ -2120,6 +2205,7 @@ class RuntimeStreamControlDataPlane:
                 key=key,
                 authority=authority,
                 protocol=head.protocol,
+                browser_admitted=browser,
             )
             if admission is None:
                 await source.queue.put(
@@ -2140,6 +2226,9 @@ class RuntimeStreamControlDataPlane:
             capacity_stream_id=capacity_stream_id,
             runner_stream_id=None,
             protocol=protocol,
+            browser_authority=authority
+            if isinstance(authority, BrowserStreamAuthority)
+            else None,
         )
         async with self.lock:
             draining = self.draining or source.source_key in self.draining_sources
@@ -2166,6 +2255,12 @@ class RuntimeStreamControlDataPlane:
             self.binding_changed.notify_all()
         try:
             await self._forward(binding, envelope)
+            if binding.browser_authority is not None and key in self.bindings:
+                self.browser_guards[key] = _create_control_task(
+                    self.resources,
+                    lambda: self._guard_browser(binding),
+                    name="browser-current-scope",
+                )
         except BaseException:
             await self._release(key)
             raise
@@ -2176,6 +2271,14 @@ class RuntimeStreamControlDataPlane:
         envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope,
     ) -> None:
         target = binding.target
+        if binding.browser_authority is not None:
+            checked_at = asyncio.get_running_loop().time()
+            if not await self._browser_scope_current(binding.browser_authority):
+                await self._revoke_browser(binding)
+                return
+            if binding.key not in self.bindings:
+                return
+            self.browser_fresh_until[binding.key] = checked_at + 5
         if target.local:
             async with self.lock:
                 runner = self.runners.get(target.owner)
@@ -2231,6 +2334,60 @@ class RuntimeStreamControlDataPlane:
                         )
             return
         await self.relay_pool.forward(target=target, envelope=envelope)
+
+    async def _browser_scope_current(self, authority: BrowserStreamAuthority) -> bool:
+        if (
+            self.browser_scope_validator is None
+            or self.clock() >= authority.transport_deadline_at
+        ):
+            return False
+        try:
+            async with asyncio.timeout(2):
+                return await self.browser_scope_validator(authority)
+        except asyncio.CancelledError:
+            raise
+        except TimeoutError:
+            return False
+        except Exception:
+            _LOGGER.exception("Browser current authority validation failed")
+            return False
+
+    async def _revoke_browser(self, binding: _StreamBinding) -> None:
+        async with self.lock:
+            current = self.bindings.get(binding.key)
+        if current is None:
+            return
+        async with contextlib.AsyncExitStack() as cleanup:
+            cleanup.push_async_callback(self._release, current.key)
+            await self._send_runner_reset(current, CloseReason.AUTHORITY_REVOKED)
+            if not current.target.local:
+                cancel = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+                    protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
+                    session_id=current.source.session_id,
+                    peer_boot_id=current.source.peer_boot_id,
+                    stream_id=current.key.stream_id,
+                )
+                cancel.cancel.reason = _close_reason(CloseReason.AUTHORITY_REVOKED)
+                await self.relay_pool.forward(target=current.target, envelope=cancel)
+            await current.source.queue.put(
+                _reset(
+                    current.source,
+                    self.control_boot_id,
+                    current.key.stream_id,
+                    CloseReason.AUTHORITY_REVOKED,
+                )
+            )
+
+    async def _guard_browser(self, binding: _StreamBinding) -> None:
+        assert binding.browser_authority is not None
+        while binding.key in self.bindings:
+            await asyncio.sleep(2)
+            checked_at = asyncio.get_running_loop().time()
+            if not await self._browser_scope_current(binding.browser_authority):
+                await self._revoke_browser(binding)
+                return
+            if binding.key in self.bindings:
+                self.browser_fresh_until[binding.key] = checked_at + 5
 
     async def _send_runner_reset(
         self,
@@ -2293,21 +2450,26 @@ class RuntimeStreamControlDataPlane:
             binding = self.bindings.pop(key, None)
             broker = None if binding is None else binding.broker
             runner = None if binding is None else self.runners.get(binding.target.owner)
-        if binding is None:
-            return
-        self.resources.close_stream()
-        async with self.lock:
-            if key not in self.source_tombstone_set:
+            if binding is not None and key not in self.source_tombstone_set:
                 if len(self.source_tombstones) == MAX_STREAM_TOMBSTONES:
                     expired = self.source_tombstones.popleft()
                     self.source_tombstone_set.remove(expired)
                 self.source_tombstones.append(key)
                 self.source_tombstone_set.add(key)
+        guard = self.browser_guards.pop(key, None)
+        self.browser_fresh_until.pop(key, None)
+        if guard is not None and guard is not asyncio.current_task():
+            guard.cancel()
+        if binding is None:
+            return
+        self.resources.close_stream()
         if runner is not None:
             await runner.release(
                 source_session_id=key.source_session_id,
                 source_stream_id=key.stream_id,
             )
+        if guard is not None and guard is not asyncio.current_task():
+            await asyncio.gather(guard, return_exceptions=True)
         if broker is not None:
             await broker.release(key)
         async with self.binding_changed:

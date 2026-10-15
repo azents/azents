@@ -6,6 +6,7 @@ import { router } from "../init";
 import { accountLinksRouter } from "./account-links";
 import { agentRouter } from "./agent";
 import { authRouter } from "./auth";
+import { browserRouter } from "./browser";
 import { chatRouter } from "./chat";
 import { externalChannelRouter } from "./externalChannel";
 import { invitationRouter } from "./invitation";
@@ -27,6 +28,7 @@ export const appRouter = router({
   accountLinks: accountLinksRouter,
   agent: agentRouter,
   auth: authRouter,
+  browser: browserRouter,
   chat: chatRouter,
   externalChannel: externalChannelRouter,
   invitation: invitationRouter,

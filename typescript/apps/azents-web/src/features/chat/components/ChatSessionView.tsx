@@ -20,6 +20,7 @@ import {
 import {
   IconArrowLeft,
   IconArrowUp,
+  IconBrowser,
   IconCalendarClock,
   IconChartBar,
   IconCode,
@@ -88,6 +89,11 @@ export function ChatSessionView({
       id: "services",
       label: t("workspacePanel.servicesTab"),
       icon: <IconWorld size={rem(16)} />,
+    },
+    {
+      id: "browser",
+      label: t("browser.title"),
+      icon: <IconBrowser size={rem(16)} />,
     },
     {
       id: "subagents",

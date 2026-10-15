@@ -7,6 +7,13 @@ owner: "@Hardtack"
 touches_domains: [agent, session, toolkit, runtime]
 code_paths:
   - python/libs/azents-runtime-control/src/azents_runtime_control/browser_contract.py
+  - python/libs/azents-runtime-control/src/azents_runtime_control/browser_runner_wire.py
+  - python/libs/azents-runtime-control/src/azents_runtime_control/grpc_runner_client.py
+  - proto/azents/runtime_control/v1/runtime_runner_control.proto
+  - python/libs/azents-runtime-control/src/azents_runtime_control/browser_viewer_contract.py
+  - python/libs/azents-runtime-control/src/azents_runtime_control/browser_source_contract.py
+  - python/libs/azents-runtime-control/src/azents_runtime_control/grpc_browser_source_client.py
+  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_viewer.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/operations.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/main.py
@@ -16,7 +23,22 @@ code_paths:
   - python/apps/azents/src/azents/engine/tools/builtin.py
   - python/apps/azents/src/azents/engine/tools/runtime_io.py
   - python/apps/azents/src/azents/runtime/control_protocol/runner_operations.py
+  - python/apps/azents/src/azents/runtime/control_protocol/grpc/runner_server.py
   - python/apps/azents/src/azents/runtime/runner_operation_adapter.py
+  - python/apps/azents/src/azents/api/public/browser/v1/__init__.py
+  - python/apps/azents/src/azents/api/public/browser/v1/data.py
+  - python/apps/azents/src/azents/api/public/browser/v1/websocket.py
+  - python/apps/azents/src/azents/core/runtime_browser_source_credential.py
+  - python/apps/azents/src/azents/runtime/control_protocol/grpc/browser_source_server.py
+  - python/apps/azents/src/azents/services/runtime_browser/authority.py
+  - python/apps/azents/src/azents/services/runtime_browser/service.py
+  - python/apps/azents/src/azents/repos/runtime_browser_authority_read.py
+  - typescript/apps/azents-web/src/features/session-browser/SessionBrowserPage.tsx
+  - typescript/apps/azents-web/src/features/session-browser/containers/useSessionBrowserContainer.ts
+  - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserConnection.ts
+  - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserInteraction.ts
+  - typescript/apps/azents-web/src/features/session-browser/components/SessionBrowserPanel.tsx
+  - typescript/apps/azents-web/src/trpc/routers/browser.ts
 last_verified_at: 2026-10-15
 spec_version: 1
 ---
@@ -25,13 +47,69 @@ spec_version: 1
 
 ## Reachable Scope
 
-The Agent has three Runtime-backed browser tool roles: `browser_open`, `browser_observe`, and `browser_act`. They execute through the existing authenticated Runner operation path, not an MCP server or Agent-installed CLI. This implementation provides Agent automation and observation; Browser public attachment routes, a human viewer and default browser Skill are not activated by these command handlers alone.
+The Agent has three Runtime-backed browser tool roles: `browser_open`, `browser_observe`, and `browser_act`. They execute through the existing authenticated Runner operation path, not an MCP server or Agent-installed CLI. Public Session Browser projection and scoped page closure use that same command boundary. An independent authenticated live attachment connects the Session Browser panel through the API-owned Browser source to the current Runner. The default browser Skill and complete file/publication acceptance remain separate delivery work.
 
 Browser tools require a current managed Runtime and concrete Session/Run resource authority. Runtime capability guards enforce process/workspace availability, and image observation additionally requires current transfer authority. Projection without current execution authority omits these tools. Each call revalidates access and resolves its actual Session working folder independently of any scheduling/root alias.
+
+## Public Session Projection and Page Closure
+
+The public Browser v1 domain exposes a GET projection and a POST close request beneath `/browser/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}`. Closing `/pages/{page_id}/close` requires the exact `task_id` and `resource_incarnation`; there is no public profile/open/reset API.
+
+Normal HTTP authentication establishes the current user/authentication Session. A completed repository read authorizes the concrete active Agent Session using existing Workspace, Agent, TEAM/USER and root/subagent rules before any task title or content is returned. Public subagent targets are observable but not closable. The root identity used for permission checking never replaces the concrete browser Session identity.
+
+Availability reports `runtime_unavailable`, `browser_unavailable`, or `working_folder_unavailable`. Account/resource denial remains a normal denied/not-found response, not an unavailable projection containing cached titles. Projection does not auto-start a Runtime, allocate a browser context or bind a pending Session folder. It requires the current live Runner generation, reported Workspace, `browser.v1` and an already-bound concrete Session folder.
+
+The service sends typed status/close commands and revalidates current account, Session and Runtime authority before returning the result. Close requires SDK dispatch and the selected target's absence from the returned current list; unknown/failed operations raise rather than masquerading as successful closure or an unavailable read, and are never replayed.
+
+The existing Session supporting panel has a Browser destination using source-generated REST clients through tRPC. Task/page/incarnation links are separate from scheduled-task identifiers. Missing, incomplete or closed requested targets are explicit and do not fall back to another page. Panel dismissal or another destination unmounts the Browser Page without closing browser resources. REST closure permissions are independent of live-preview availability, and errors suppress cached unauthorized content.
+
+## Authenticated Live Attachment
+
+The Browser WebSocket is `/ws` beneath the same concrete Session resource and uses `azents.browser.v1`. Its first text message carries the existing short-lived Chat identity ticket and an exact task/page/incarnation target. Credentials in URL query parameters are rejected. Ticket authentication establishes identity, not resource authority: current account, authentication Session, concrete Session, Runtime generations, working-folder binding and selected live page are checked before source attachment.
+
+Only `azents-api` can open a Browser-purpose source on the existing ordinary Runtime Control listener. Browser-specific credential derivation separates its purpose and audience from transfer credentials and Gateway identity. A fresh Control challenge binds the proof to the connection Hello/profile and one exact Browser OPEN authority. Wrong purpose, peer role, proof, scope, expired setup or a second OPEN is rejected before native effects or admission capacity. There is no new port, durable grant/nonce table, Gateway certificate reuse or main authentication-key distribution.
+
+Connection proof/setup expiry and active attachment lifetime are distinct. The live attachment lasts no longer than one hour or the authenticated Session's expiry, whichever comes first. API and Owner revalidate current joined authority at least every five seconds, with API checks before forwarding input and Owner checks before effect-bearing application frames. Current target/generation checks remain in the Runner. Read-only subagent viewers may acknowledge frames but cannot send input, answer dialogs or close pages.
+
+The source uses existing Owner/relay routing, flow control, capacity, lease/fingerprint and drain boundaries. Local insecure transport is allowed only by the existing local environment policy and still requires Browser proof. Auth/resource/expiry/stale-target termination is distinguished from ordinary source loss. Disconnect or revocation resets only the attachment, releases transient input and volatile frame state, and preserves native tabs, Session profiles and unrelated attachments.
+
+## Live Panel and Input
+
+The panel validates the first status against its exact selected target and attachment before treating the stream as connected. Binary frames carry typed dimensions, navigation and source identity. Image decoding must match those dimensions, and only a displayed current image is acknowledged. One volatile Blob URL and bounded serial inbox are retained; frame bytes are not saved as intentional captures, files, transcripts or image history.
+
+The existing supporting panel presents pages as compact tabs above address/navigation chrome and the framed live viewport. Authorized input participants can enter an HTTP(S) address, go back or forward in the selected page's native history, and reload the actual page. Address drafts are volatile, cleared on blur/target change/submission, and never form an input history. Unsupported schemes and embedded user credentials are rejected. Read-only viewers cannot edit or navigate. Connection refresh is separately labelled and does not claim to reload the site. No standalone page-text entry form is shown.
+
+Navigation is one closed admitted viewer input carrying the same current acknowledged source and sequence. The Runner checks input permission, current source/target/generation and actual held-input conflict before invoking its existing structured navigation/dialog handler. In-flight input blocks another UI navigation without queuing it. New navigation invalidates prior displayed-frame input until the current image is acknowledged; lost actions are not replayed.
+
+Pointer coordinates are transformed against the displayed image and its acknowledged source, excluding letterbox/outside/stale positions. A valid viewport pointer interaction focuses a visually hidden native textarea inside the same focus boundary for text, IME and mobile keyboard events. This receiver is the viewport's single keyboard stop; forward/reverse physical Tab leaves it naturally. Local printable-text modifiers are separated from remote effect-bearing key chords so mixed-case text does not conflict with a held SDK Shift key. Shift+Arrow and Ctrl/Meta/Alt shortcuts still send typed key events.
+
+Keyboard, pointer and composition events carry the current acknowledged source; exact dialog responses carry explicit null source and remain available before a first image. Accessible Send Tab and Send Shift+Tab commands in the compact keyboard menu address the remote page without trapping local focus. Native beforeinput covers mobile Backspace/Delete/Enter. Blur, pointer cancellation and disconnect clean up the attachment's held input and composition without committing cancelled text. Internal viewport/receiver focus transitions do not cancel the interaction.
+
+Input sequences are monotonic and attachment-local. No input payload queue or replay is retained. Ordinary transport loss permits at most three observation-only retries with a fresh ticket, source and sequence; uncertain-action status remains visible. Auth/resource/expiry/stale-target/protocol failures purge unauthorized images/status/cache and do not automatically retry. Read-only UI exposes no effect-bearing callbacks.
+
+Browser source setup has one total deadline of at most ten seconds, including
+scope validation, source registration and initial OPEN handling; it is separate
+from the attachment lifetime. Owner authority supervision is attachment-local:
+two-second validation deadlines and two-second recheck intervals fail closed
+within five seconds. The shared Runner response demultiplexer uses bounded
+freshness and never waits for Browser database/status-RPC validation. Requests
+still require fresh authority before dispatch.
+
+An in-flight image from an obsolete navigation or viewport is retired so it
+cannot block the new scope's first image. Each attachment retains at most 128
+retired sent-frame sequence numbers solely to ignore delayed ACKs; these ACKs
+never establish displayed authority. Unknown ACKs remain invalid.
+
+Cleanup-only pointer/composition cancellation and key release can use the newest
+displayed ACK only within the same attachment, target, navigation and dimensions.
+If safe cleanup cannot be sent, the attachment closes and Runner releases its
+native held state. Spatial effects retain exact displayed-frame fencing.
 
 ## Typed Command and Result Boundary
 
 The shared runtime-control library declares frozen operation-specific Browser DTOs and strict codecs. Model-facing schemas have one top-level object. The Engine sends normalized typed commands through `browser.open`, `browser.observe`, `browser.act`, or an internal `browser.list` projection; the latter is not a fourth model tool. Decoding rejects malformed primitive types, missing mandatory fields, unknown fields, unsupported operations and invalid action combinations before effects.
+
+Runner gRPC requests and final successes have dedicated Browser protobuf oneof arms. They carry at most one MiB of canonical UTF-8 Browser-domain bytes, validated through the strict command/result codec on both sides. Integer fields, explicit nulls and empty lists survive the real protobuf roundtrip. Wrong operation/oneof, malformed or duplicate fields, nonfinite values, excessive nesting and oversized payloads fail closed; there is no general JSON or Struct fallback.
 
 Current task/page/resource incarnation and optional frame identity select the target; there is no Runtime-global selected tab or model-controlled Session/profile/debugging endpoint. Element actions carry the current observation identity and stable live element reference. Replaced frames, navigation, detached nodes, closed pages and old manager incarnations invalidate relevant targets/references.
 
@@ -63,7 +141,7 @@ Act performs structured navigation, observed-element input/select/check/key/scro
 
 Navigation and URL waits honor the selected frame. Back/forward/reload, page closure and page dialog responses require the main-page target and reject subframe scope before effects.
 
-Page dialogs have exact current identities. A pending dialog suspends the outstanding SDK operation's input-dispatch phase, permitting a scoped response without an operation-wide deadlock. Predetermined/observed responses and expected popup/download completion are reconciled; orphaned pending tasks/references are collected on scoped closure, cancellation and shutdown. Other Sessions can continue while one page dialog waits.
+Page dialogs have exact current identities. The Runner viewer application contract requires `input.source` explicitly: exact dialog responses require null, while pointer/key/composition input requires current acknowledged image metadata. A dialog before the first image or after navigation therefore remains answerable without fabricating frame identity. A pending dialog suspends the outstanding SDK operation's input-dispatch phase, permitting a scoped response without an operation-wide deadlock. Predetermined/observed responses and expected popup/download completion are reconciled; orphaned pending tasks/references are collected on scoped closure, cancellation and shutdown. Other Sessions can continue while one page dialog waits.
 
 Each response races completion of the original operation against the next dialog. Consecutive dialogs retain that operation and release transient input arbitration at every handoff; cancelling a response drains its tracked original operation without replay.
 
@@ -91,4 +169,4 @@ The assessment is local to the current manager environment and is re-established
 
 Shared strict DTO/codec, current generations/targets, native Session state, dialog/event/file combinations, observations/capture bounds and transient conflict behavior have focused unit/real-SDK coverage. Engine tests cover full catalog/provider schema lowering, access revocation, current working-folder binding, mandatory action-state/result scope and image failure propagation.
 
-Actual public Session viewer, authenticated transport, mobile/IME and original user publication E2E are not established by these focused command tests. Combined product acceptance uses the real built Runner and normal Engine/access/file/stream surfaces; the implementation Design remains unimplemented until that complete verification is finished.
+Focused tests and static component stories do not establish assembled-product acceptance. The representative Browser E2E uses normal user creation/login, an Engine-created task, real Runner images and API/Control source admission, a read-only child and unrelated-user denial, native pointer/dialog/composition input, fresh reconnect and the real Web panel. The phase execution plan records actual execution results and unresolved integration failures. Complete mobile/OS IME and original file/model/user publication acceptance remain distinct; the implementation Design remains unimplemented until the full feature verification is finished.

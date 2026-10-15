@@ -18,6 +18,7 @@ void test("container-owned views delegate refresh to their owning container", ()
   assert.deepEqual(sessionPanelInvalidationPlan("files"), []);
   assert.deepEqual(sessionPanelInvalidationPlan("services"), []);
   assert.deepEqual(sessionPanelInvalidationPlan("scheduled-tasks"), []);
+  assert.deepEqual(sessionPanelInvalidationPlan("browser"), []);
   assert.deepEqual(sessionPanelInvalidationPlan("runtime"), []);
   assert.deepEqual(sessionPanelInvalidationPlan("metrics"), []);
 });

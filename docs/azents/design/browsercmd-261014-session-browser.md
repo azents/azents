@@ -1,6 +1,7 @@
 ---
 title: "Session Browser Runtime Commands and Observation Design"
 created: 2026-10-14
+updated: 2026-10-15
 tags: [browser, session, runtime, engine, frontend, architecture, security]
 document_role: primary
 document_type: design
@@ -12,9 +13,9 @@ snapshot_id: browsercmd-261014
 - Snapshot: `browsercmd-261014`
 - Document reference: `browsercmd-261014/DESIGN`
 - Requirements: [browsercmd-261014/REQ](../requirements/browsercmd-261014-session-browser.md).
-- Decisions: [browsercmd-261014/ADR](../adr/browsercmd-261014-session-browser.md), D1 through D4, with unchanged transport/resource/admission boundaries carried from [browser-261014/ADR](../adr/browser-261014-session-browser.md), D1, D2 and D4.
+- Decisions: [browsercmd-261014/ADR](../adr/browsercmd-261014-session-browser.md), D1 through D5, with unchanged transport/resource/admission boundaries carried from [browser-261014/ADR](../adr/browser-261014-session-browser.md), D1, D2 and D4.
 - Mode: Collaborative; decision owner: requester.
-- The requester approved Design revision 2 and its exact M1-M17 authority set on 2026-10-14 at 22:06 KST. Source-grounded mechanisms and synthetic SDK evidence remain distinguished from unverified product integration. Approval finalizes the Design; product implementation and operational changes still require the requester's separate execution instruction.
+- The requester approved baseline revision 2/M1-M17 on 2026-10-14 at 22:06 KST and requested implementation on 2026-10-15 at 08:03 KST. During phase 3, deployed API-to-Control source authentication was found to be missing. The requester selected ADR-D5 option A on 2026-10-15 at 10:22 KST. Revision 3 adds M18 for that bounded source edge and passed its authority/feasibility audit. After receiving the complete revision 3 brief, the requester instructed immediate implementation at 10:53 KST on 2026-10-15; this authorizes the disclosed revision 3/M1-M18 scope without another confirmation round.
 
 ## Current Behavior and Gap
 
@@ -28,9 +29,11 @@ The Runner image installs a system Playwright package and native dependencies, b
 
 Image input and file delivery already have completed service boundaries: RuntimeImageReadService materializes ModelFile/FilePart, and present_file publishes verified Runtime files as Exchange attachments. Managed release Skills already use immutable per-Run VFS projections and load_skill.
 
+The paragraphs above preserve the original research baseline. Delivery has since implemented phases 1/2 and the independent phase 3 Runner consumer, REST projection/closure and supporting-panel groundwork. The remaining deployed gap is concrete: API and Control are separate processes, the common stream admits Gateway mTLS sources, and the API's ordinary-Control credential is transfer-specific. Gateway lacks the main user-ticket verification key and cannot be used without new provisioning/authority. ADR-D5 resolves the process/source choice in favor of an explicitly authenticated API-owned Browser source; authenticated live integration remains delivery work, not completed evidence.
+
 ## Design Authority
 
-- Design revision: `2`
+- Design revision: `3`
 
 | ID | Material mechanism | Authority | Classification |
 | --- | --- | --- | --- |
@@ -49,8 +52,9 @@ Image input and file delivery already have completed service boundaries: Runtime
 | M13 | Browser-domain live viewer and input bound through common transport to Runner consumer | REQ-1, REQ-4, REQ-8; prior ADR-D1/D2; M2/M3/M4/M9 | derived |
 | M14 | One managed release browser Skill and focused supported-tool references | REQ-13; ADR-D3; existing Managed Skill VFS | decided |
 | M15 | Product-owned SDK/Chromium provisioning retaining Runtime network authority | prior ADR-D2; ADR-D1; existing Runtime provisioning/network policy | derived |
-| M16 | Accessible desktop/mobile input, composition and status without exposing authentication data to generic logs | REQ-9; M1/M2/M9 | required |
+| M16 | Accessible desktop/mobile input, composition, browser controls and status without exposing authentication data to generic logs | REQ-9/15; M1/M2/M5/M9 | required |
 | M17 | Use native Chromium sandbox where supported; keep browser available without it on specifically unsupported Runtimes | REQ-14; ADR-D4; existing Runtime containment/network authority | decided |
+| M18 | API-owned, Browser-purpose authenticated source on the existing ordinary Control channel, bound to one admitted resource/lifetime with current access revocation and no cross-domain credential reuse | ADR-D5; REQ-1/2/4/8/9; M2/M3/M12/M13 | decided |
 
 Local identifiers, equivalent helper/module boundaries, parameter names, fixed safety bounds, converter package choice, and fixture arrangement are implementation details, not independent authority. A new runtime mode, dependency service, persistence authority or execution capability requires returning to the ADR workflow.
 
@@ -60,15 +64,16 @@ REQ-1 through REQ-11 preserve the complete preceding acceptance criteria by refe
 
 | Requirement | Mechanisms | Primary verification |
 | --- | --- | --- |
-| REQ-1 | M1, M13 | Existing panel context, desktop/mobile navigation and exact task opening |
-| REQ-2 | M2, M4, M6, M13 | A/B visibility, cross-task target rejection, unavailable/closed state |
+| REQ-1 | M1, M13, M18 | Existing panel context, desktop/mobile navigation and exact task opening |
+| REQ-2 | M2, M4, M6, M13, M18 | A/B visibility, cross-task target rejection, unavailable/closed state |
 | REQ-3 | M4, M5, M15 | Cross-Session login/logout separation, same-Session reuse, normal restart |
-| REQ-4 | M2, M9, M13 | Existing USER/member/subagent permissions and live revocation |
+| REQ-4 | M2, M9, M13, M18 | Existing USER/member/subagent permissions and live revocation |
 | REQ-5 | M9, M16 | Real overlapping Agent/person/person input and composition boundaries |
 | REQ-6 | M10, M14 | Ordinary help and user continuation with fresh state, no ownership workflow |
 | REQ-7 | M6, M9, M10 | Independent tasks and truthful partial-result delivery |
-| REQ-8 | M4, M9, M12, M13 | Panel close versus task close, cancellation, disconnect and non-replay |
-| REQ-9 | M1, M2, M7, M13, M16 | Keyboard/mobile/IME, safe content and no raw ingress |
+| REQ-8 | M4, M9, M12, M13, M18 | Panel close versus task close, cancellation, disconnect and non-replay |
+| REQ-9 | M1, M2, M7, M13, M16, M18 | Keyboard/mobile/IME, safe content and no raw ingress |
+| REQ-15 | M1, M2, M5, M9, M16, M18 | Editable supported address, native back/forward/reload, direct page input and browser-like panel controls under unchanged authority |
 | REQ-10 | M6, M7, M8 | Actual DOM/text/image observation and explicit partial extraction |
 | REQ-11 | M8 | Original capture integrity, model preparation and user publication success/failure |
 | REQ-12 | M4, M6, M11, M12 | Frames/popups/dialogs/upload/download/events and uncertain results |
@@ -85,12 +90,13 @@ flowchart LR
     P[Playwright SDK and native browser]
     U[Session supporting panel]
     A[Browser admission: existing Session access]
+    I[API Browser source: purpose-bound proof]
     T[Common Runtime stream transport]
     B[Runner Browser consumer]
     F[Existing image and file transfer services]
     S[Managed Skill VFS]
     E --> C --> R --> P
-    U --> A --> T --> B --> R
+    U --> A --> I --> T --> B --> R
     R --> F --> E
     F --> U
     S --> E
@@ -101,6 +107,8 @@ The Engine owns model-facing tool schema/projection and current execution author
 Do not use scheduling owner_session_id, root Session alias, URL query, Origin, arbitrary request header, or model-provided Session ID as browser ownership. Tool handlers take the concrete SessionResourceAuthority from their execution context and attach trusted internal browser identity when constructing a Runner command. The receiving generation-bound path verifies the resource registry belongs to that exact Session/task before any content/result or effect.
 
 The Browser consumer is owned by the Runner, not a separately supervised service or generic Agent Web application. Bind each admitted logical Browser connection to one current task/page and observation/input authority. The common transport can dispatch to this owned HTTP/WebSocket consumer; it must not derive identity from the consumer's URL. No MCP connection, public debugging listener, or additional user-enabled Runtime service is introduced.
+
+The Public API owns user attachment authentication/current access and the API-side source client. Ordinary Control owns Browser-purpose service-source verification and common routing. Gateway remains the existing Web ingress with its existing mTLS authority; it is not an API identity alias or Browser user-ticket verifier. M18 fills this explicit service edge without changing Runner resource ownership.
 
 ## Resource and Storage Model
 
@@ -180,6 +188,42 @@ Viewer input includes current resource/frame identity, dimensions and a monotoni
 
 UI exposes connected/stale/unavailable/actual-conflict states accessibly, task/page selection and task-local close. It does not add takeover/return controls. Dismissing the panel closes its attachment, not tabs or Agent work. Connection loss marks the image stale and requires current attachment state before input. ACK means accepted browser input, not site transaction success.
 
+The ordinary browser controls clarified in REQ-15 surface the existing M5 navigation primitives through M16's admitted human input path. A closed navigation action selects address navigation, back, forward or reload; only address navigation carries a bounded URL. The same acknowledged source, current concrete target, allow-input check and task-local guard apply before reusing the Runner's existing structured navigation handler and dialog handoff. This is UI/input adaptation of existing SDK effects, not a new public endpoint, permission, Runtime mode or execution backend. Address entry accepts the same supported HTTP(S) destinations without credential user-info; URL drafts are volatile and are not logged, retained as input history or replayed. Connection refresh remains a separate observational action.
+
+### API-Owned Browser Source Authentication (M18)
+
+#### Public identity and resource admission
+
+Use the normal Public API Session Browser WebSocket route and the existing identity-only Chat HMAC ticket primitive. The user authenticates in the bounded first attach message, together with requested task/page/incarnation selectors. Keep credentials out of the connection URL and normal access-log URI; use a fixed Browser subprotocol and an explicit attach deadline/message/rate bound. Accepting a protocol socket is not resource admission: return no title/frame/status, allocate no Runner resource/source, and enable no input until current ticket, account/authentication Session and concrete Session access are validated.
+
+The API builds all service/user/resource metadata from completed current reads. Validate the current Runner/Runtime target and exact existing task/page/incarnation through the typed command path; selectors never assign a Session or working directory. Public subagent targets remain observation-only. Reuse existing ticket issuance through the generated API client/BFF; no Browser ticket store, enrollment service or additional user permission exists.
+
+#### Purpose-bound service proof and ordinary Control RPC
+
+Add an explicit API source role and Browser source RPC in the existing Runtime stream protocol, served on the ordinary Control listener already used by the API. Reuse its existing endpoint/TLS server trust configuration. The API source is not GATEWAY and never uses Gateway certificates, cookie/service identity or Web exposure. Missing/disabled/incompatible common-stream infrastructure reports unavailable rather than enabling Web policy or bypassing authentication.
+
+Derive a Browser-only signing purpose from the already-provisioned deployment-root service credential material, following the current exact-method/request-bound trusted-service infrastructure. Use a distinct credential domain/audience and verifier admitting only `azents-api`. Do not call the transfer issuer for Browser, broaden `ctr1` permissions, accept the transfer audience or distribute the main user-authentication signing key to Gateway. Tokens/proofs remain secret transport data, absent from URLs, logs, metrics, durable rows and Runner authority.
+
+For every source RPC, Control issues a fresh cryptographic challenge bound to that RPC/accepting-Control boot and a finite handshake deadline. The API signs the challenge together with exact source Hello/session/boot/nonce/profile/fingerprint identity and one normalized Browser stream-open request: user/authentication Session, Agent/Runtime, concrete Session/task/page/incarnation, input permission, desired/Runner generations, correlation identity, open/transport deadlines and fixed WebSocket request head. Control accepts that proof and bound OPEN once. The challenge lives only in the bounded connection authentication state and is cleared when consumed/closed. A new connection or replica issues a new challenge, so an old proof cannot authenticate it; active-source IDs and stream tombstones alone are not assumed to provide global proof consumption.
+
+One API attachment source admits one matching logical Browser stream; another target/open requires fresh admission and proof. Altered fields, Web authority, HTTP forwarding, a different source identity, reused challenge or additional logical opens are rejected before application capacity or Runner effects. There is no durable nonce/grant registry, short-lived replayable bearer fallback or Browser-specific credential versioning framework.
+
+Separate proof validity from live transport lifetime. Issue the proof after receiving the challenge, immediately before opening; its initial validity is at most 30 seconds and the handshake/open deadline is at most 10 seconds. The admitted transport deadline is at most one hour and no later than current authentication-Session expiry. These are fixed safety ceilings, not new user settings or profile-retention TTLs. Schedule transport expiry and continue live current-access checks; accepting a short proof does not establish indefinite authority and proof expiry alone does not impose a 30-second UI session.
+
+Use current common profile, exact fingerprint, source/stream identity, Owner epoch/route, one-hop relay, flow control, hard memory/task/session ceilings, close/reset/drain and cancellation. A shared API gRPC channel carries bounded attachment RPCs; do not enlarge hard caps to compensate for one source per attachment. Generate protocol outputs from source. Gateway Web sources remain Web-only; API sources remain Browser-only; authenticated Control relay preserves the admitted Browser metadata unchanged. Local/single-process execution takes the same RPC/proof/domain path, including when existing local-only plaintext transport is enabled; it has no object-access or insecure-authentication shortcut.
+
+#### Live current access and cleanup
+
+Control/Owner revalidates current account/authentication Session and concrete resource/input access before admitting/forwarding the scoped Browser source. API and Owner each revalidate on the existing bounded live-access cadence (at most five seconds); API checks before forwarding an input message and Owner checks before forwarding Browser request/application frames that can carry effects. This preserves opaque shared transport rather than adding an arbitrary application dispatcher. Both sides retain current route/generation/resource fencing. Loss or change of access, input scope, active resource, current generations, source/transport deadline or peer route ends the attachment rather than widening/rescoping it in place. Reattaching with a changed permission is a new admission.
+
+After an observed authorization denial, stop forwarding bytes/input, clear unauthorized UI content and terminate the exact source/stream. Normal disconnect can mark a still-authorized image stale, but has no mutating replay. Reconnection requires a new identity ticket/source challenge/proof and new attachment/frame/input state; discard pending input and release only that attachment's actual held gestures/keys/composition. Source drain/expiry/panel dismissal never closes all browser tasks, deletes profiles or resumes an Agent automatically.
+
+#### Configuration, rollout and verification boundary
+
+No new port, main-auth-key deployment, persistent grant table, source mode, credential compatibility format or Browser-specific versioning framework is added. Existing Control TLS/endpoint/common-stream availability and configured trust are prerequisites, not evidence of Browser authority; Web Gateway cookies/On/Off do not grant Browser access. The currently named Web-transport setting controls availability of the existing common plane; do not force it on or create a second owner if disabled. Native command/REST capability and live transport availability remain distinct. Existing wire fingerprint replacement requires matching rebuilt peers, with explicit unavailable/closed behavior and no old-role or credential fallback.
+
+Release all source/protocol/Runner/client changes coherently through the existing phased PR/CI flow; no merge/deploy action is authorized here. Validate real separate API/Control/Owner/Runner paths and local parity. Signed-scope tampering, wrong audience/principal/domain, expired/reused challenge/proof, extra opens, stale scope, account/Session revocation, current-generation replacement, backpressure/drain and cancellation must fail safely without image/input recording or action replay.
+
 ## Lifecycle, Failure, Recovery and Operations
 
 - Runner startup initializes the manager and product browser availability before advertising support. Missing/incompatible browser provisioning gives an unavailable reason; no Agent-installed tool fallback.
@@ -217,6 +261,7 @@ Teach availability checks, view selection, current task/page refs, observation/a
 | Prototype takeover/return controls and shared-cookie tests | Not product code; excluded by ADR-D2 and REQ-3 | New product E2E fixtures and ordinary-conversation help | Evidence/verification only | Required tests exercise current behavior; old prototype/profile remains untouched and is not shipped |
 | MCP integration proposal | Prior D3 approval withdrawn; current ADR-D1 | Runtime browser commands and SDK | Design authority only; no installed production MCP to delete | No MCP server/client/relay dependency or tool discovery path added |
 | Existing Web/Terminal/file/publication semantics, permissions and durable native profile bytes | No removal authorized | Existing Specs and REQ constraints | Retained | Regression evidence, no destructive migration or profile-copy task |
+| Web-only source/routing assumptions in common admission | ADR-D5; M3/M13 | Explicit API Browser source proof/domain beneath common routing, with existing Web Gateway and Control trust unchanged | Source role/RPC/codec, ordinary Control registration, broker domain adapters | API cannot admit Web/HTTP or use Gateway/transfer credentials; Web service/cookie/exposure regressions; exact-scope/current access tests |
 
 Source surface: proto/azents/runtime_control/v1/runtime_stream_session.proto and runtime_runner_control.proto; runtime-control stream/Runner contracts; Runtime Control/Owner/runtime-web paths; Runner stream dispatch and operations; Engine RuntimeToolkit/runtime I/O; Session public routes and panel; managed Skill bundle; OpenAPI/generated clients; corresponding tests and Living Specs. Follow approved transport extraction through all generated/imported consumers rather than merely renaming classes. New public routes/types require normal OpenAPI/client regeneration.
 
@@ -240,6 +285,7 @@ E2E-first primary acceptance runs against built product Runtime images with synt
 | Original capture versus model normalization and user attachment | Original hash/dimensions, model part, verified Exchange publication; induced transfer failures |
 | Disconnect/reconnect/Runner replacement/cancellation | Old refs rejected, stale UI, no uncertain mutation replay or success assumption |
 | Common transport extraction and cross-replica Owner | Browser/Web variant rejection, existing Web On/Off/identity/flow-control regressions |
+| API Browser source proof and lifecycle | Valid one-OPEN challenge proof through separate API/Control/Owner/Runner; altered scope, wrong principal/audience/domain, replay on same/new connection/replica, proof/open/transport expiry, disabled plane, extra opens and bounded teardown |
 | Runner provisioning, sandbox and network policy | Locked SDK/engine on target image/architecture; proxy and blocked-origin traffic evidence |
 | Support-dependent native sandboxing | Supported launch uses sandbox; known incompatibility keeps Browser usable; generic missing binary/timeout/startup errors do not disable sandbox; probe leaves Session profiles untouched |
 | Managed browser Skill | Release scan, projection/load/resume, unsupported browser and current examples |
@@ -263,12 +309,17 @@ Store bounded content-safe reports with commit/image identity, dependency/engine
 | M14 | source-grounded feasible | Current managed release/VFS facilities inspected; new Skill content and projection tests remain delivery work |
 | M15 | source-grounded feasible; delivery integration conditional | Current uv/image gap identified; product SDK/engine pinning and proxy checks are delivery obligations, not reliance on system installation |
 | M17 | policy resolved; current unsupported-path SDK evidence | ADR-D4 authorizes support-dependent native sandboxing. Local known-incompatibility start and sandbox-disabled SDK functionality verified; supported-image and classification/error cases remain delivery tests |
+| M18 | source-grounded feasible; implementation and revised approval conditional | Ordinary Control TLS endpoint/root material/API identity already exist; dedicated role/RPC, Browser-only derivation, connection challenge and one exact OPEN add the missing source edge. Existing source IDs/tombstones do not consume proof across replicas, so the challenge is explicit. Auth Session expiry is available from its canonical DB record. No new port/table/Gateway key is needed; real authenticated source/Owner/relay/access/expiry/cleanup E2E remains delivery work |
 
 The SDK experiment checked 21 assertions on fresh synthetic profiles: A/B cookie separation, same-Session reuse, popup attribution, unaffected pages after close, frame action, pre-armed completed download, upload, three predetermined dialogs, outstanding dialog observation and independent-page progress, dialog response, visible text/sanitized DOM, original screenshot preservation, native profile reopen, old handle closure and a local short-lived guard. The last guard checks are primitive evidence only, not a production contention test. Native cookies in that fixture were explicitly persistent; no universal site-login restoration is claimed.
 
 The local sandbox probe failed with TargetClosedError and Chromium's `No usable sandbox!` diagnostic under UID 1000; functional assertions used sandbox-disabled Chromium for this isolated experiment. This identifies native sandbox availability as the failure stage, not a failed SDK action. The requester subsequently accepted the support-dependent production policy in ADR-D4; the experiment does not itself implement that assessment/launch policy. Initial fixture execution failed because system Python lacked aiohttp; the fixture was replaced with a standard-library HTTP server without installation or product changes. No live credentials, previous profiles or production infrastructure were used. This evidence does not prove product isolation, network enforcement, external Gateway or model/user delivery.
 
-Authority coverage is recorded above. Product E2E execution is post-implementation delivery evidence, not something this unimplemented Design claims to have completed or requires to exist before all design work. ADR-D4 resolves the former sandbox-availability decision: current native incompatibility no longer prevents the approved primary browser outcome. Source inspection and synthetic SDK evidence establish a credible implementation/verification path with explicit conditional delivery obligations; no additional blocking material choice is identified in this review. Revision-bound Design approval is recorded below. If actual integration exposes a material blocker, return that exact conflict rather than adding an unrelated fallback, privileged flags, another service or an unapproved mode.
+Authority coverage is recorded above. Product E2E execution is post-implementation delivery evidence, not something this unimplemented Design claims to have completed or requires to exist before all design work. ADR-D4 resolved the former sandbox-availability choice; ADR-D5 resolves the newly discovered API source direction. Revision 3 makes connection-bound challenge proof, one-OPEN scope and bounded source lifetime explicit. Source inspection establishes a credible implementation/verification path. The requester authorized this disclosed revision for immediate implementation; authenticated delivery evidence remains pending. If integration exposes another material blocker, return that exact conflict rather than adding an unrelated fallback, privileged flags, another service or an unapproved mode.
+
+Current delivery evidence does not replace the M18 gate: phases 1/2 PR CI passed; independent phase 3 root checks passed 396 shared, 469 Runner, 215 affected backend and 501 Web tests, with 24 static real-component stories and 11 viewer/15 prior-regression assertions in the built UID-1000/Playwright1.64.0 image. Those image probes use synthetic pre-admitted authority, not the missing API proof path. Native browser state and original PNGs were preserved; no authenticated live source success or full feature completion is inferred.
+
+Revision 3 audit scope: unchanged M1-M17 retains its confirmed requirement/ADR/current-Spec authority; M18 is decided by ADR-D5, with privacy/no-secret-log, current Session access, no replay and existing capacity constraints determining the narrow challenge-bound one-OPEN mechanism. Fixed safety bounds, helper/field naming and equivalent canonical serialization remain local implementation details. No new product question, profile persistence, permission table, configuration mode, source fallback or user-visible versioning authority is proposed.
 
 ## Delivery Outline and Living Specs
 
@@ -278,6 +329,8 @@ Update relevant Agent Runtime Control/Persistence, Toolkit, File Exchange Storag
 
 ## Design Approval
 
+### Historical Baseline Revision 2
+
 - Mode: Collaborative
 - Decision owner: requester
 - Approved on: 2026-10-14
@@ -286,4 +339,19 @@ Update relevant Agent Runtime Control/Persistence, Toolkit, File Exchange Storag
 - Approved authority IDs: M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17
 - Approved scope: the complete revision 2 Design, including the three Runtime-command/SDK tools; existing Session permissions and native state; shared Web/Browser transport with distinct authorities; ordinary-conversation help and actual input arbitration; DOM/text/image/capture/file paths; managed browser Skill; support-dependent sandboxing; removal/replacement boundaries; lifecycle/failure/non-replay behavior; and explicit conditional delivery verification obligations.
 
-This is complete Design approval, not an implementation-completion record. A material change to revision 2 or its exact authority set invalidates this approval and must return to the authority/feasibility/approval workflow. The requester has not yet given the separate implementation instruction; no implemented date is set.
+This historical approval authorizes the unchanged baseline mechanisms and is not an implementation-completion record. The requester separately requested implementation on 2026-10-15 at 08:03 KST. It does not authorize the new M18 source mechanism or count as approval of revision 3; no implemented date is set.
+
+### Approved Revision 3
+
+- Mode: Collaborative.
+- Decision owner: requester.
+- Approved Design revision: 3.
+- Approved authority IDs: M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17, M18.
+- ADR-D5 direction accepted on: 2026-10-15 at 10:22 KST.
+- Authority/feasibility audit: passed on 2026-10-15, read-only `/root/browser-feature-reviewer`; complete Requirements/ADR/Design/current-source review found no blocking authority/security/lifecycle contradiction. Source-grounded feasible, with implementation and delivery evidence conditional. Documentation/diff checks passed; no code/source activation or phase 3 implementation approval was claimed.
+- Approved on: 2026-10-15 at 10:53 KST, by the requester's explicit instruction to implement the already-presented revision instead of repeating approval questions.
+- Material delta: M18 only. API-owned Browser source on existing Control TLS, separate purpose/only `azents-api`, connection challenge and one exact OPEN, bounded initial/live lifetime/current access, strict domain/fingerprint/Owner/capacity/non-replay/cleanup, no new port/table/Gateway credentials/main key distribution.
+
+Proceed with M18 implementation under this exact revision/authority set and the existing implementation request. Preserve prior delivery evidence and normal material-scope boundaries. Merge and deployment remain separately unauthorized.
+
+On 2026-10-15 at 12:23 and 12:44 KST the requester directed the browser-like UI correction and identified missing address editing/navigation. REQ-15 records that product clarification. Its implementation reuses existing M5 structured navigation through M16's current admitted input/guard boundary; the closed application action and UI controls do not introduce another material mechanism, authority, persistence or operational mode. The authority ID set is unchanged. This clarification is not included in the earlier read-only audit claim; the complete updated phase diff and REQ-15 must be checked in the final independent phase review and actual navigation E2E before delivery.

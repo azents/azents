@@ -831,9 +831,18 @@ async def test_cancel_command_removes_pending_operation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cancel_command_interrupts_active_operation() -> None:
+@pytest.mark.parametrize("propagate", [False, True])
+async def test_cancel_command_interrupts_active_operation(propagate: bool) -> None:
+    class PropagatingCancellationOperations(BlockingOperations):
+        async def handle(self, operation: RunnerOperationEnvelope) -> None:
+            await super().handle(operation)
+            if operation.request_id in self.canceled_while_active:
+                raise asyncio.CancelledError
+
     client = FakeRunnerControlClient()
-    operations = BlockingOperations()
+    operations = (
+        PropagatingCancellationOperations() if propagate else BlockingOperations()
+    )
     client.operations.append(_operation("active", owner="session-a"))
     loop = _loop(client, operations, max_concurrent_operations=1)
     await loop.start()
@@ -850,6 +859,14 @@ async def test_cancel_command_interrupts_active_operation() -> None:
     await _wait_for(lambda: operations.canceled_while_active == ["active"])
     await loop.run_once(block_ms=0)
 
+    assert client.reports[-1].diagnostic["runtime_active_operations"] == "0"
+    assert client.operation_handler is not None
+    await client.operation_handler(_operation("following", owner="session-a"))
+    await loop.run_once(block_ms=0)
+    await _wait_for(lambda: operations.started == ["active", "following"])
+    operations.release("following")
+    await _wait_for(lambda: operations.finished == ["following"])
+    await loop.run_once(block_ms=0)
     assert client.reports[-1].diagnostic["runtime_active_operations"] == "0"
 
 

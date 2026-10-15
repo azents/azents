@@ -119,6 +119,8 @@ Class | Method | HTTP request | Description
 *AuthV1Api* | [**auth_v1_request_signup_email**](azentspublicclient/docs/AuthV1Api.md#auth_v1_request_signup_email) | **POST** /auth/v1/signup/email | Request Signup Email
 *AuthV1Api* | [**auth_v1_send_code**](azentspublicclient/docs/AuthV1Api.md#auth_v1_send_code) | **POST** /auth/v1/email/send-code | Send Code
 *AuthV1Api* | [**auth_v1_verify_code**](azentspublicclient/docs/AuthV1Api.md#auth_v1_verify_code) | **POST** /auth/v1/email/verify | Verify Code
+*BrowserV1Api* | [**browser_v1_close_browser_page**](azentspublicclient/docs/BrowserV1Api.md#browser_v1_close_browser_page) | **POST** /browser/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/pages/{page_id}/close | Close Browser Page
+*BrowserV1Api* | [**browser_v1_get_browser_projection**](azentspublicclient/docs/BrowserV1Api.md#browser_v1_get_browser_projection) | **GET** /browser/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id} | Get Browser Projection
 *ChatGPTOAuthV1Api* | [**chatgpt_oauth_v1_cancel_device**](azentspublicclient/docs/ChatGPTOAuthV1Api.md#chatgpt_oauth_v1_cancel_device) | **DELETE** /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id} | Cancel Device
 *ChatGPTOAuthV1Api* | [**chatgpt_oauth_v1_poll_device**](azentspublicclient/docs/ChatGPTOAuthV1Api.md#chatgpt_oauth_v1_poll_device) | **GET** /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id} | Poll Device
 *ChatGPTOAuthV1Api* | [**chatgpt_oauth_v1_start_device**](azentspublicclient/docs/ChatGPTOAuthV1Api.md#chatgpt_oauth_v1_start_device) | **POST** /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/start | Start Device
@@ -538,6 +540,11 @@ Class | Method | HTTP request | Description
  - [AwsConfig](azentspublicclient/docs/AwsConfig.md)
  - [AwsSecrets](azentspublicclient/docs/AwsSecrets.md)
  - [Body](azentspublicclient/docs/Body.md)
+ - [BrowserClosePageRequest](azentspublicclient/docs/BrowserClosePageRequest.md)
+ - [BrowserFrameResponse](azentspublicclient/docs/BrowserFrameResponse.md)
+ - [BrowserPageResponse](azentspublicclient/docs/BrowserPageResponse.md)
+ - [BrowserProjectionResponse](azentspublicclient/docs/BrowserProjectionResponse.md)
+ - [BrowserTaskResponse](azentspublicclient/docs/BrowserTaskResponse.md)
  - [BuiltinToolConfig](azentspublicclient/docs/BuiltinToolConfig.md)
  - [CatalogOffPeakRule](azentspublicclient/docs/CatalogOffPeakRule.md)
  - [CatalogPriceIssue](azentspublicclient/docs/CatalogPriceIssue.md)
@@ -848,6 +855,7 @@ Class | Method | HTTP request | Description
  - [ResponseModeRequest](azentspublicclient/docs/ResponseModeRequest.md)
  - [RunnerSystemMetricAvailability](azentspublicclient/docs/RunnerSystemMetricAvailability.md)
  - [RunnerSystemMetricsScope](azentspublicclient/docs/RunnerSystemMetricsScope.md)
+ - [RuntimeBrowserReasonCode](azentspublicclient/docs/RuntimeBrowserReasonCode.md)
  - [RuntimeConfigurationNetworkResponse](azentspublicclient/docs/RuntimeConfigurationNetworkResponse.md)
  - [RuntimeConfigurationStateResponse](azentspublicclient/docs/RuntimeConfigurationStateResponse.md)
  - [RuntimeConfigurationStatus](azentspublicclient/docs/RuntimeConfigurationStatus.md)

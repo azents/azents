@@ -12,6 +12,7 @@ void test("only existing supporting session views are recognized", () => {
     assert.equal(parseSessionPanelView(view), view);
   }
   assert.equal(parseSessionPanelView("services"), "services");
+  assert.equal(parseSessionPanelView("browser"), "browser");
   for (const view of [null, "chat", "projects", "unknown", "canvas"]) {
     assert.equal(parseSessionPanelView(view), null);
   }
@@ -56,5 +57,13 @@ void test("feature transitions keep session identity and unrelated query while c
   assert.equal(
     sessionPanelHref(path, "page=files&other=value", "services"),
     `${path}?other=value&page=services`,
+  );
+  assert.equal(
+    sessionPanelHref(
+      path,
+      "page=browser&browserTaskId=t&browserPageId=p&browserIncarnation=i&other=value",
+      "context",
+    ),
+    `${path}?other=value&page=context`,
   );
 });

@@ -15,6 +15,7 @@ import { AgentSubagentsPage } from "@/features/agents/AgentSubagentsPage";
 import { useRuntimeTerminalContainer } from "@/features/chat/containers/useRuntimeTerminalContainer";
 import { useSubagentTreePanelContainer } from "@/features/chat/containers/useSubagentTreePanelContainer";
 import { ScheduledTasksPage } from "@/features/scheduled-tasks/ScheduledTasksPage";
+import { SessionBrowserPage } from "@/features/session-browser/SessionBrowserPage";
 import { SessionChannelsPage } from "@/features/session-channels/SessionChannelsPage";
 import { isTerminalProjectionConnectable } from "@/shared/runtime-terminal/protocol";
 import { resolveComposerSubscriptionSelection } from "@/shared/subscription-usage/composerSubscriptionUsage";
@@ -273,6 +274,15 @@ export function useChatSessionViewContainer(
   let supportingContent: ReactNode = null;
   const supportingProps = { handle, agent, sessionId, session: headerSession };
   switch (panel.activeView) {
+    case "browser":
+      supportingContent = panel.opened ? (
+        <SessionBrowserPage
+          handle={handle}
+          agentId={agent.id}
+          sessionId={sessionId}
+        />
+      ) : null;
+      break;
     case "context":
     case "system-prompt":
     case "raw-events":
