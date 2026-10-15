@@ -1,0 +1,33 @@
+name: Publish CI test observability
+description: Publish bounded pytest results even when an earlier CI step failed.
+inputs:
+  name:
+    description: Stable artifact-safe test job identity
+    required: true
+  directory:
+    description: Absolute directory containing test evidence
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Summarize test evidence
+      shell: bash
+      env:
+        REPORT_DIR: ${{ inputs.directory }}
+        REPORT_NAME: ${{ inputs.name }}
+        JOB_RESULT: ${{ job.status }}
+      run: |
+        python scripts/ci/observability.py summarize \
+          --lane "$REPORT_NAME" --job-result "$JOB_RESULT" \
+          --junit "$REPORT_DIR/junit.xml" \
+          --timings "$REPORT_DIR/pytest-timings.jsonl" \
+          --lane-duration "$REPORT_DIR/lane-duration-seconds.txt" \
+          --output "$REPORT_DIR/summary.md"
+        cat "$REPORT_DIR/summary.md" >> "$GITHUB_STEP_SUMMARY"
+    - name: Upload test evidence
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: ci-observability-${{ inputs.name }}-${{ github.run_attempt }}
+        path: ${{ inputs.directory }}
+        retention-days: 14
+        if-no-files-found: error

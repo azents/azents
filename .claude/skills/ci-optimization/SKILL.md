@@ -1,296 +1,143 @@
 ---
-name: e2e-ci-optimization
-description: Analyze and ship Azents E2E reliability and required-CI performance improvements using observability artifacts, critical-path modeling, focused reproduction, PR creation, and repeated same-SHA measurement. Use when asked to reduce E2E CI time, investigate flaky required E2E, rank optimization candidates, implement the next E2E improvement, or verify that an E2E optimization produced a real net gain.
+name: ci-optimization
+description: Improve Azents general CI reliability, unit/integration/pytest and E2E test runtime, lint/typecheck/build performance, and runner cost using verified artifacts and repeated same-SHA measurements. Use for manual or scheduled CI optimization, slow pytest diagnosis, flaky CI, or general CI observability analysis; includes E2E as a subset.
 ---
 
-# E2E CI Optimization
+# CI Optimization
 
-Own the complete improvement loop. For every recurring or scheduled improvement run,
-ship the smallest coverage-preserving candidate set that can meet acceptance whenever
-actionable candidates exist. Start with the highest-confidence change, but do not stop
-after one implementation when modeled or measured impact remains below acceptance.
-Continue adding compatible, separately explainable safe changes in the same cycle until
-the combined result is accepted or every remaining candidate is infeasible.
-Analysis-only completion is valid only when the requester explicitly asks for analysis
-or the investigation establishes that no feasible candidate exists.
+Own the complete loop across general CI, not only numbered E2E lanes. Inspect
+`.github/workflows/ci.yaml`, other quality/test workflows (including iOS), configured
+required checks and their dependency graphs before selecting a candidate. Release,
+publication and deployment effects are not optimization experiments unless authorized.
 
-Reuse these skills instead of duplicating their procedures:
+## Start safely
 
-- `e2e-debugging` for focused reproduction and fixture diagnosis.
-- `code-review` for the review gate.
-- `spec-review` for Living Spec impact.
-- `ship-pr` for PR creation and CI monitoring.
+1. Audit registered worktrees, dirty state, branches and PRs. Remove only clean,
+   completed worktrees belonging to this Session with definite merged/closed or
+   completed-work evidence. Preserve foreign, dirty, unfinished, unknown and reused
+   development environments. Record the audit before doing candidate work.
+2. Fetch latest main with explicit refspec. Continue existing open optimization PRs
+   and prior candidate evidence; do not create a duplicate or mix unrelated work.
+   An approval-blocked candidate does not block independent authorized general-CI
+   work: record that prerequisite and continue the other ranked candidates.
+3. Record Requirements before code work. Use a focused temporary repository file for
+   bounded tooling fixes and remove it before commit. Follow technical feature design
+   for material new authority, persistence, operational or product decisions.
+4. Rank current demonstrated reliability failures first, then expected whole-CI gate
+   completion gain, confidence, runner cost and risk. Evaluate new candidates each
+   recurring cycle even while continuing an existing PR.
 
-Run commands from the repository root unless a command says otherwise.
+## Collect trustworthy evidence
 
-## Delivery contract
-
-Determine the requested stopping point before execution:
-
-- **Analysis only**: collect evidence, rank candidates, and recommend the next action.
-- **Implementation**: continue through focused validation and review.
-- **Ship or improve**: continue through PR creation, at least two successful same-SHA
-  CI measurements, measured acceptance, or a final exhausted-candidate rejection, and
-  PR body update.
-- **Recurring or scheduled improvement**: exhaust the ranked candidate list until one
-  or more compatible changes form the smallest feasible candidate set likely to meet
-  acceptance, then complete the ship flow for that set. If measurement misses
-  acceptance, add the next compatible, separately explainable coverage-preserving
-  candidate and repeat on the new SHA. Finish without an accepted implementation only
-  when every discovered candidate is infeasible or the measured combined result
-  remains below acceptance after all feasible candidates are exhausted. Report the
-  concrete blocker or measured shortfall for each remaining candidate.
-
-Treat requests such as "improve E2E", "optimize E2E CI", or "find and fix the next
-candidate" as ship requests unless the requester limits the scope.
-
-Never merge a PR without explicit approval.
-
-## 1. Establish a current baseline
-
-1. Create a separate worktree or branch from the latest `origin/main`.
-2. Refresh main with an explicit refspec before rebasing:
-
-   ```bash
-   git fetch origin +refs/heads/main:refs/remotes/origin/main
-   git rebase origin/main
-   ```
-
-3. Record temporary task Requirements before code work. Delete the temporary file
-   before commit.
-4. Record requester exclusions, such as an approach or closed PR that must not be
-   reused.
-5. Collect recent main runs and download every `e2e-observability-*` artifact before
-   making performance claims.
-6. Derive the measured lane set from the suites gated by `ci-python-e2e`. Include
-   every enabled `ci-e2e-*` suite lane, especially `web-*`; never treat only the
-   `required-*` shards as the required-CI critical path.
-
-Keep research findings in a disposable working note outside the repository. Consolidate
-the result and delete or retain the note according to the current Session workflow.
-
-See [references/metrics.md](references/metrics.md) for sample layout, collection
-commands, and metric definitions.
-
-Analyze baseline and experiment samples separately:
+Use repository-root commands; shared tooling lives under `scripts/ci/`:
 
 ```bash
-python .agents/skills/e2e-ci-optimization/scripts/analyze_e2e_ci.py \
-  --cohort baseline \
-  --samples-root /tmp/e2e-ci-baseline \
-  --json-output /tmp/e2e-ci-baseline.json
-python .agents/skills/e2e-ci-optimization/scripts/analyze_e2e_ci.py \
-  --cohort experiment \
-  --samples-root /tmp/e2e-ci-experiment \
-  --json-output /tmp/e2e-ci-experiment.json
+python -m scripts.ci.collect --repository azents/azents --run-id RUN \
+  --attempt ATTEMPT --output /absolute/session/ci/main-RUN-ATTEMPT
+python -m scripts.ci.analyze --samples-root /absolute/session/ci/baseline \
+  --cohort baseline --json-output /absolute/session/ci/baseline.json
+python -m scripts.ci.analyze --samples-root /absolute/session/ci/experiment \
+  --cohort experiment --json-output /absolute/session/ci/experiment.json
 ```
 
-The experiment analyzer rejects mixed commit SHAs and reports whether at least two
-successful same-SHA attempts are available for acceptance.
+Preserve complete metadata/artifacts before rerunning a workflow. Artifacts must match
+head SHA, run and attempt; later-attempt artifacts must not be attached to earlier
+attempts. Reject duplicate attempts and mixed-SHA experiment samples. Compare identical
+enabled jobs, test selections, assertions and lifecycle boundaries, not historical case
+counts when main legitimately moved exhaustive cases into unit tests.
 
-## 2. Rank by impact
+Include Python matrix unit/integration pytest, migrations, Docker-free support tests,
+Helm tests, E2E/Web, and TypeScript/Swift tests and all lint/typecheck/build steps. The
+shared pytest plugin records safe setup/call/teardown and fixture metadata. Other
+runners retain native diagnostics plus workflow job/step time; do not label job duration
+as test-call duration or claim unavailable per-case metrics exist.
 
-Inspect test-level waste before selecting infrastructure-only candidates:
+Read [references/metrics.md](references/metrics.md) for metric and artifact contracts.
 
-1. Separate per-test `setup`, `call`, and `teardown` from session/module fixture,
-   image, and CI step timings. Use actual `call` records to identify slow test bodies;
-   do not attribute shared startup charged to the first test to its assertions.
-2. Inspect slow bodies and expensive setup/teardown on the current critical lanes and
-   likely takeover lanes. Read their scenarios and support code, then profile repeated
-   initialization, provider/Gateway lifecycle work, API round trips, serialized
-   independent operations, and polling against authoritative completion evidence.
-3. Identify removable work while preserving every assertion, isolated state, required
-   restart/recovery transition, and real failure boundary. Slow duration alone is not
-   proof of waste; do not shorten behavior whose contract is elapsed time.
-4. Maintain a candidate ledger with the affected tests/fixtures and lanes, mechanism,
-   preserved coverage, evidence, estimated net saving, compatibility with other
-   candidates, and next validation or concrete rejection reason. Include test-level
-   candidates even when each saves only a few seconds.
+## Model and rank
 
-Rank candidates in this order:
+- Primary whole-CI metric: workflow creation to last configured required gate
+  completion. It includes dependency scheduling and queues; identify those costs rather
+  than describing it as a causal DAG estimate or the longest individual lane.
+- Also report maximum job wall, every job/step wall, sum of job runner-seconds, and
+  observability overhead. Different runner classes have different cost rates; don't
+  add runners, jobs or image producers without approval and full cost evidence.
+- E2E max-lane wall remains a named subset metric. Preserve its duration gate/planner
+  policy; this extension does not authorize a new failing gate or changed threshold.
+- Separate test call/setup/teardown from nested fixture and image timings. Inspect
+  slow bodies and duplicate initialization, not startup attributed to the first test.
+- Maintain a candidate ledger: tests/jobs, mechanism, retained coverage, observed
+  phases, saving, dependency/lane takeover, overhead, compatible combinations and
+  concrete rejection/blocker for every ranked candidate.
+- Model the smallest compatible coverage-preserving candidate set likely to achieve
+  at least 30 seconds or 5 percent net whole-CI completion gain. Small proven savings
+  are useful building blocks; recompute dependency completion and takeover, never add
+  aggregate body durations. Reliability value may justify below-threshold work.
 
-1. A current reproducible reliability failure.
-2. Expected required-CI critical-path reduction.
-3. Breadth and confidence.
-4. Regression and operational risk.
+## Implement and validate
 
-Do not rank by aggregate test duration. For each run, change the affected lane times
-and recompute the maximum wall time across every enabled E2E lane gated by
-`ci-python-e2e`.
+Use `e2e-debugging` for E2E, `python-quality-check` for Python and
+`typescript-quality-check` for TypeScript as appropriate. Read applicable conventions.
+Keep fixes at the narrowest layer that removes proven waste while retaining behavior.
 
-Default performance acceptance threshold:
+1. Deterministic unit/support tests for the changed mechanism.
+2. Format, lint and strict type checks for affected projects and shared tooling.
+3. Smallest real integration/E2E selection when product boundaries change.
+4. Independent read-only `code-review`, then `spec-review` and matching Living Spec.
+5. `ship-pr` for PR creation/monitoring; request `hardtack` when verification is ready.
 
-- at least 30 seconds net critical-path reduction; or
-- at least 5 percent net critical-path reduction.
+Never delete tests, weaken assertions, skip recovery, alter the covered state matrix,
+replace abrupt failure with graceful cleanup, write product state directly through SQL,
+add fixed sleeps/retries, increase timeouts, or count changed tests as a speed gain.
+Local timing proves a mechanism, not whole-CI causal improvement.
 
-Apply this threshold to the complete compatible candidate set, not to each change.
-Retain evidence-backed 5–10 second improvements as building blocks. Use a single-lane
-saving ceiling to identify takeover lanes that also need work, not to declare all
-test-level or cross-lane combinations exhausted.
+## Repeat and accept
 
-Reliability value may justify work below the performance threshold.
+After first complete CI success, preserve metadata/artifacts and repeat complete CI
+on the unchanged SHA. Require at least two complete successful same-SHA attempts and
+the same enabled test/job scope, with no hidden failures or missing evidence. A green
+status linking another SHA is not successful verification of this PR.
 
-Include every new producer, dependency, artifact transfer, pull, load, setup, and
-teardown cost. Reject optimizations that only move existing work to a new prerequisite.
+Compare baseline and experiment separately. Report each attempt's SHA, run/attempt,
+gate completion, jobs/steps, test-phase mechanism and all overhead. Report mean and
+median, absolute/percentage change and resource costs. Classify accepted,
+reliability-accepted, inconclusive or rejected. Do not claim success from one run.
 
-Build an acceptance budget before editing:
+For recurring work, continue compatible proven candidates when measurement misses
+acceptance. Finish without an accepted change only with documented exhausted candidates,
+concrete missing evidence or a prerequisite/authority blocker. Do not call an unprofiled
+slow test infeasible. Record and close measured rejected ineffective experiments;
+inconclusive or active feasible work may remain open. Never merge without approval.
 
-1. Model the smallest high-confidence change.
-2. If it is unlikely to clear acceptance after lane takeover, combine it with the next
-   compatible, separately explainable coverage-preserving candidate.
-3. Continue until the modeled candidate set can clear acceptance or no feasible
-   combination remains.
-4. Keep each change separately explainable and validate its mechanism even when CI
-   acceptance is measured for the combined set.
+## Durable reporting and recurring prompts
 
-Before finishing a recurring run without an accepted implementation, account for the
-ranked test-level candidates and their feasible combinations in the ledger. One
-subthreshold infrastructure candidate or isolated lane ceiling is not exhaustion.
-Profile remaining actionable test candidates and evaluate compatible bundles first;
-when necessary evidence or prerequisites are unavailable, report the specific blocker
-and an inconclusive result rather than claiming that no feasible improvement exists.
+- Accumulate KST date, SHA/workflow/run/attempt, conclusions, enabled scope, job and
+  gate times, mean/median and costs in durable Session files. Preserve original E2E
+  history as its own scope; never fill general-CI values with E2E subset values.
+- Append deduplicated real main records with
+  `python -m scripts.ci.history --analysis /absolute/session/ci/baseline.json
+  --history /absolute/session/ci-main-history.jsonl --cohort main`.
+  The tool rejects non-main sources, conflicting attempts and experiment relabeling.
+  Keep baseline/experiment and independent workflows/runner classes separate.
+- Render only the latest 30 KST calendar dates including report date:
 
-## 3. Validate the candidate
+  ```bash
+  python -m scripts.ci.chart --history /absolute/session/ci-main-history.jsonl \
+    --workflow CI --date YYYY-MM-DD --output /absolute/session/ci-30d.png
+  ```
 
-For a reliability candidate:
+  Plot mean/median/min–max/n and lower-is-faster; expose missing, failed and unverified
+  dates without interpolation. Keep raw history beyond 30 days. Never mix synthetic
+  fixtures or experiments with main trends. Visually inspect exported PNGs.
+  Install plotting only when needed with the E2E project's optional `ci-report`
+  dependency group (`uv sync --group ci-report`); test producers do not install it.
+- Keep Scheduled Task title/objective, linked documentation and reporting tools aligned
+  with general-CI scope. Preserve schedule/channel/cleanup/merge constraints; replace
+  tasks through the Scheduled Task Skill, not database edits.
+- Report selected/new candidates, blocked combinations, verification/review, PR link,
+  exact measurements, classification, next work and no-merge statement. Update PR
+  bodies with measured evidence, not only expected savings.
 
-1. Load `e2e-debugging`.
-2. Reproduce the smallest test selection repeatedly on current main.
-3. Capture authoritative product, provider-fake, and fixture readiness evidence.
-4. Check whether a later fix already removed the failure mechanism.
-5. Replace races with generation, correlation, barriers, persisted status, or other
-   observable boundaries. Never extend a timeout or add a sleep as the fix.
-
-For a performance candidate:
-
-1. Identify the actual required-gate critical path.
-2. Profile the affected test or fixture phases and verify the proposed removed work.
-   Preserve the same observable behavior; local total runtime alone does not prove
-   which phase improved.
-3. Model lane takeover after each candidate and the complete bundle are applied.
-   Count shared savings once and include each change's added overhead.
-4. Validate dependency and resource contention assumptions.
-5. Prefer changes that overlap independent work without adding a new prerequisite.
-6. Define the exact artifact evidence that will prove the mechanism worked.
-
-## 4. Implement and validate
-
-Read applicable repository, testenv, Python, and GitHub Actions conventions before
-editing.
-
-Preserve product behavior and required coverage. Do not write directly to the product
-database from E2E tests or substrate.
-
-Treat test-level optimization as first-class implementation work. A safe candidate may
-change:
-
-- E2E test code and scenario structure;
-- fixtures, provider fakes, barriers, and readiness evidence;
-- test-support code and deterministic configuration;
-- CI setup or artifact handling;
-- production code when the bottleneck is a real product mechanism.
-
-Prefer the narrowest layer that removes measured waste while retaining the same
-observable behavior and failure boundary. Several compatible changes may be shipped in
-one candidate set when one change cannot meet acceptance alone.
-
-Never manufacture acceptance by deleting tests, weakening assertions, reducing the
-covered state matrix, replacing abrupt failure with graceful cleanup, bypassing real
-lease/recovery/lifecycle behavior, extending timeouts, or adding sleeps. Adding runners
-or other CI resources requires explicit requester approval, and the acceptance model
-must include their complete cost.
-
-Validation order:
-
-1. Unit or Docker-free support tests for the changed mechanism.
-2. Formatting, lint, and type checks for the affected project.
-3. The smallest real Docker E2E selection.
-4. Broader affected checks only when needed.
-
-Record local timing as mechanism evidence, not as a substitute for CI measurement.
-
-## 5. Review and create the PR
-
-1. Load and run `code-review`.
-2. Address required findings and rerun affected validation.
-3. Load and run `spec-review`.
-4. Update the matching Living Spec when the CI or test strategy changed.
-5. Load and run `ship-pr`.
-6. Request `hardtack` as reviewer.
-
-Write the PR in English. Include:
-
-- the changed behavior;
-- modeled baseline and expected impact;
-- validation performed;
-- measurement risks;
-- `## Spec Impact` when applicable.
-
-## 6. Measure the same SHA
-
-After the first complete PR CI succeeds:
-
-1. Preserve its metadata and artifacts before rerunning.
-2. Rerun the complete workflow on the same commit at least once.
-3. Require at least two successful attempts for acceptance.
-4. For each attempt, record:
-   - every gated E2E lane wall time, including Web when enabled;
-   - the full gated E2E critical path;
-   - failures;
-   - the changed fixture or image timings;
-   - within-run overlap or removed work;
-   - all new overhead.
-5. Compare the experiment mean with the recent-main baseline mean and median.
-6. Classify the result:
-   - **accepted**: reliable and above the threshold;
-   - **reliability accepted**: removes a demonstrated failure mechanism;
-   - **inconclusive**: insufficient or noisy evidence;
-   - **rejected**: below threshold or slower.
-
-Do not claim a result from one favorable run.
-
-When the result is not accepted:
-
-1. Preserve the completed attempt artifacts and record the measured shortfall.
-2. Return to candidate ranking when another compatible, separately explainable
-   coverage-preserving change is feasible.
-3. Add that change to the same candidate set, rerun focused validation and review, and
-   produce a new commit SHA.
-4. Restart the complete two-successful-attempt measurement for that unchanged new SHA.
-5. Stop with `inconclusive` or `rejected` only after feasible candidates are exhausted,
-   evidence cannot distinguish the result, or the remaining changes require an
-   unapproved coverage, reliability, or runner tradeoff.
-
-## 7. Update the PR with measured evidence
-
-Replace expected impact in the PR body with:
-
-- baseline sample count, mean, and median;
-- exact commit SHA;
-- every same-SHA attempt and gated E2E lane time;
-- experiment mean;
-- absolute and percentage change;
-- mechanism evidence from artifacts;
-- pass/fail and final classification.
-
-If the final result is rejected after all feasible compatible candidates are exhausted,
-say so directly, update the PR with the measured rejection, and close it. Do not leave
-the rejected experiment open merely to recommend closure. Keep the PR open when another
-feasible candidate remains, the evidence is inconclusive, or the requester explicitly
-asks to retain it. Do not preserve an ineffective optimization merely because
-implementation is complete.
-
-## Final report
-
-Report:
-
-- selected candidate set and why each change was included;
-- slow test/fixture phases investigated, each candidate's evidence and saving budget,
-  and concrete blockers or shortfalls for unshipped candidates and combinations;
-- implementation summary;
-- review result;
-- PR URL;
-- baseline and same-SHA measurements;
-- acceptance classification;
-- remaining risk or next candidate;
-- explicit statement that the PR was not merged.
+Historical E2E-only datasets use `scripts/analyze_e2e_ci.py` within this Skill as a
+subset diagnostic. They cannot fill missing whole-CI metrics or establish general-CI
+acceptance.

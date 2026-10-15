@@ -24,6 +24,7 @@ concurrency:
 
 env:
   UV_FROZEN: "1"
+  CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
   changes:
@@ -62,6 +63,8 @@ jobs:
           base: ${{ steps.change_base.outputs.base }}
           filters: |
             python:
+              - '.github/actions/**'
+              - 'scripts/ci/**'
               - '.github/workflows/**'
               - '.pre-commit-config.yaml'
               - 'proto/**'
@@ -73,6 +76,8 @@ jobs:
               - 'python/libs/az-common/**'
               - 'python/libs/azents-runtime-control/**'
             python-e2e:
+              - '.github/actions/**'
+              - 'scripts/ci/**'
               - '.github/workflows/**'
               - 'azents.Dockerfile'
               - 'azents-e2e-server-overlay.Dockerfile'
@@ -89,6 +94,8 @@ jobs:
               - 'python/libs/azents-runtime-control/**'
               - 'testenv/azents/**'
             web-e2e:
+              - '.github/actions/**'
+              - 'scripts/ci/**'
               - '.dockerignore'
               - '.github/workflows/**'
               - 'azents.Dockerfile'
@@ -138,15 +145,19 @@ jobs:
               - 'python/apps/azents/specs/**'
               - 'typescript/**'
             typescript:
+              - '.github/actions/**'
               - '.github/workflows/**'
               - 'azents-admin-web.Dockerfile'
               - 'azents-web.Dockerfile'
               - 'python/apps/azents/specs/**'
               - 'typescript/**'
             helm:
+              - '.github/actions/**'
+              - 'scripts/ci/**'
               - '.github/workflows/**'
               - 'infra/charts/azents/**'
             docker:
+              - '.github/actions/**'
               - '.dockerignore'
               - '.github/workflows/**'
               - '*.Dockerfile'
@@ -195,13 +206,21 @@ jobs:
       matrix:
         include:
           - project: python/libs/az-common
+            observation: python-az-common
           - project: python/libs/azents-runtime-control
+            observation: python-runtime-control
           - project: python/apps/azents
+            observation: python-azents
           - project: python/apps/azents-runtime-runner
+            observation: python-runtime-runner
           - project: python/apps/azents-runtime-proxy
+            observation: python-runtime-proxy
           - project: python/apps/azents-runtime-provider-kubernetes
+            observation: python-provider-kubernetes
           - project: python/apps/azents-runtime-provider-docker
+            observation: python-provider-docker
           - project: testenv/azents
+            observation: python-testenv
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -233,14 +252,22 @@ jobs:
           uv run ty check --error-on-warning
       - name: Pytest
         run: |
-          cd "${{ matrix.project }}"
-          uv run pytest -vv
+          python scripts/ci/run_pytest.py \
+            --project "${{ matrix.project }}" \
+            --name "${{ matrix.observation }}" \
+            --artifact-dir "${RUNNER_TEMP}/ci-tests" -- -vv
       - name: Verify OpenAPI spec drift
         if: matrix.project == 'python/apps/azents'
         run: |
           cd python/apps/azents
           uv run python src/cli/dump_openapi.py
           git diff --exit-code -- specs
+      - name: Publish Python test observability
+        if: always()
+        uses: ./.github/actions/ci-test-observability
+        with:
+          name: ${{ matrix.observation }}
+          directory: ${{ runner.temp }}/ci-tests
 
   ci_python_migrations_run:
     name: ci-python-migrations-run
@@ -278,8 +305,9 @@ jobs:
           uv sync
       - name: Run pytest-alembic migration suite
         run: |
-          cd python/apps/azents
-          uv run pytest -vv migration_tests
+          python scripts/ci/run_pytest.py \
+            --project python/apps/azents --name python-migrations \
+            --artifact-dir "${RUNNER_TEMP}/ci-tests" -- -vv migration_tests
       - name: Verify Alembic model drift
         env:
           AZ_AUTH_JWT_SECRET_KEY: migration-ci
@@ -292,6 +320,12 @@ jobs:
           cd python/apps/azents
           uv run alembic -c db-schemas/rdb/alembic.ini upgrade head
           uv run alembic -c db-schemas/rdb/alembic.ini check
+      - name: Publish migration test observability
+        if: always()
+        uses: ./.github/actions/ci-test-observability
+        with:
+          name: python-migrations
+          directory: ${{ runner.temp }}/ci-tests
 
   ci-python:
     name: ci-python
@@ -358,8 +392,17 @@ jobs:
         run: python testenv/azents/scripts/verify-runtime-docker.py
       - name: Run E2E support tests
         run: |
-          cd testenv/azents/e2e
-          uv run pytest -vv ./src/support_tests
+          python scripts/ci/run_pytest.py \
+            --project testenv/azents/e2e --name testenv-support \
+            --artifact-dir "${RUNNER_TEMP}/ci-tests" -- -vv ./src/support_tests
+      - name: CI tooling contracts
+        run: python -m unittest discover -s scripts/ci/tests -v
+      - name: Publish support test observability
+        if: always()
+        uses: ./.github/actions/ci-test-observability
+        with:
+          name: testenv-support
+          directory: ${{ runner.temp }}/ci-tests
 
   ci_e2e_plan:
     name: ci-e2e-plan
@@ -608,9 +651,11 @@ jobs:
           SECONDS=0
           set +e
           AZENTS_E2E_ARTIFACT_DIR="$report_dir" \
+            AZENTS_CI_ARTIFACT_DIR="$report_dir" \
+            PYTHONPATH="$GITHUB_WORKSPACE" \
             AZENTS_E2E_DOCKER_BUILDER="${{ steps.buildx.outputs.name }}" \
             AZENTS_E2E_DOCKER_GHA_CACHE_SCOPE_PREFIX="azents-e2e-v1" \
-            uv run pytest -vv \
+            uv run pytest -p scripts.ci.pytest_timing -vv \
             --junitxml="$report_dir/junit.xml" \
             --durations=30 \
             --durations-min=0.25 \
@@ -629,7 +674,7 @@ jobs:
           timeout 30s docker system df > "$report_dir/docker-system-df.txt" 2>&1 || true
           timeout 30s docker buildx du --builder "${{ steps.buildx.outputs.name }}" > "$report_dir/docker-buildx-du.txt" 2>&1 || true
           timeout 30s docker buildx du --builder default > "$report_dir/docker-buildx-du-default.txt" 2>&1 || true
-          python testenv/azents/e2e/src/support/ci_observability.py summarize \
+          python scripts/ci/observability.py summarize \
             --lane "${{ matrix.lane }}" \
             --job-result "${{ job.status }}" \
             --junit "$report_dir/junit.xml" \
@@ -840,72 +885,83 @@ jobs:
           done
           echo 'All enabled E2E suites passed.'
 
-  ci_e2e_observability_comment:
-    name: ci-e2e-observability-comment
+  ci_observability:
+    name: ci-observability
     needs:
       - changes
-      - ci_e2e_plan
+      - ci-pre-commit
+      - ci-python
+      - ci-python-e2e
+      - ci-typescript
+      - ci-helm
+      - ci-docker-build
       - ci_e2e_run
       - ci_e2e_aggregate
-    if: >-
-      always()
-      && github.event_name == 'pull_request'
-      && github.event.pull_request.head.repo.full_name == github.repository
-      && (
-        needs.changes.outputs.python_e2e == 'true'
-        || needs.changes.outputs.web_e2e == 'true'
-      )
+    if: always()
     runs-on: ubuntu-latest
     permissions:
       actions: read
       pull-requests: write
     steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Capture workflow job and step evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p ci-workflow
+          gh run view "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json databaseId,attempt,status,conclusion,headSha,headBranch,event,workflowName,createdAt,jobs \
+            > ci-workflow/run.json
+          python scripts/ci/workflow_report.py \
+            --run ci-workflow/run.json --repository "$GITHUB_REPOSITORY" \
+            --output ci-workflow/summary.md
       - name: Download E2E observability artifacts
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: e2e-observability-*
           path: e2e-observability-artifacts
+      - name: Download general CI test artifacts
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: ci-observability-*-${{ github.run_attempt }}
+          path: ci-test-artifacts
       - name: Download E2E duration verdict
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: e2e-duration-gate
           path: e2e-duration-gate
-      - name: Build sticky E2E observability comment
-        env:
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          RUN_RESULT: ${{ needs.ci_e2e_run.result }}
+      - name: Build general CI observability report
         run: |
-          {
-            echo '## E2E CI observability'
-            echo
-            printf "Commit: \`%s\`\n\n" "$HEAD_SHA"
-            printf '[Workflow run and full artifacts](%s)\n\n' "$RUN_URL"
-            if [ -f e2e-duration-gate/summary.md ]; then
-              cat e2e-duration-gate/summary.md
-              echo
-            fi
-            summaries=()
-            while IFS= read -r summary; do
-              summaries+=("$summary")
-            done < <(find e2e-observability-artifacts -name summary.md -type f | sort)
-            if [ "${#summaries[@]}" -eq 0 ]; then
-              printf 'No lane summary artifact was available. Runner result: `%s`.\n\n' "$RUN_RESULT"
-            else
-              for summary in "${summaries[@]}"; do
-                cat "$summary"
-              done
-            fi
-            echo 'This comment is updated in place for each CI run.'
-          } > e2e-observability-comment.md
-      - name: Update sticky E2E observability comment
+          python -m scripts.ci.build_comment \
+            --run ci-workflow/run.json \
+            --workflow ci-workflow/summary.md \
+            --duration e2e-duration-gate/summary.md \
+            --test-roots e2e-observability-artifacts ci-test-artifacts \
+            --output ci-workflow/comment.md
+          cat ci-workflow/comment.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload general CI workflow evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-workflow-${{ github.run_attempt }}
+          path: ci-workflow
+          retention-days: 14
+          if-no-files-found: error
+      - name: Update sticky CI observability comment
+        if: >-
+          github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.full_name == github.repository
         continue-on-error: true
         uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
         with:
+          # Keep the hidden identity to update existing PR comments in place.
           header: e2e-observability
-          path: e2e-observability-comment.md
+          path: ci-workflow/comment.md
           skip_unchanged: true
 
   ci_typescript_run:
@@ -991,7 +1047,16 @@ jobs:
             --set adminWeb.image.tag=sha \
             --set secrets.existingSecrets.redis=azents-redis
       - name: Helm render tests
-        run: python -m pytest -vv infra/charts/azents/tests
+        run: |
+          python scripts/ci/run_pytest.py --system-python \
+            --project . --name helm \
+            --artifact-dir "${RUNNER_TEMP}/ci-tests" -- -vv infra/charts/azents/tests
+      - name: Publish Helm test observability
+        if: always()
+        uses: ./.github/actions/ci-test-observability
+        with:
+          name: helm
+          directory: ${{ runner.temp }}/ci-tests
 
   ci-helm:
     name: ci-helm

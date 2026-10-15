@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Protocol
 
-from support.timing_observability import (
+from scripts.ci.pytest_timing import (
     record_fixture_phase,
     record_test_phase,
     timing_path,
@@ -20,7 +20,7 @@ def test_timing_records_contain_only_safe_metadata(
     monkeypatch: _EnvironmentSetter,
 ) -> None:
     """Write test and fixture phase records without runtime values or logs."""
-    monkeypatch.setenv("AZENTS_E2E_ARTIFACT_DIR", str(tmp_path))
+    monkeypatch.setenv("AZENTS_CI_ARTIFACT_DIR", str(tmp_path))
 
     record_test_phase(
         node_id="src/tests/test_example.py::test_example",

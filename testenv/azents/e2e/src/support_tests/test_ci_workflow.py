@@ -109,16 +109,16 @@ def test_duration_gate_compares_base_once_without_retry() -> None:
 
 def test_comment_and_status_are_rechecked_when_base_ci_completes() -> None:
     workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
-    comment = workflow.split("  ci_e2e_observability_comment:\n", 1)[1].split(
+    comment = workflow.split("  ci_observability:\n", 1)[1].split(
         "\n  ci_typescript_run:\n", 1
     )[0]
     recheck = (
         REPOSITORY_ROOT / ".github/workflows/e2e-duration-recheck.yaml"
     ).read_text(encoding="utf-8")
 
-    assert "## E2E CI observability" in comment
-    assert "Commit:" in comment
-    assert "Workflow run and full artifacts" in comment
+    assert "scripts/ci/workflow_report.py" in comment
+    assert "ci-workflow/summary.md" in comment
+    assert "ci-observability" in comment
     assert "e2e-duration-gate/summary.md" in comment
     assert "pull_request_target:" in recheck
     assert "workflow_run:" in recheck

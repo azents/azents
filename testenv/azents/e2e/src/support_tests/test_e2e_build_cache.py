@@ -9,8 +9,8 @@ import threading
 from pathlib import Path
 
 import pytest
+from scripts.ci.observability import parse_image_build_timings
 
-from support.ci_observability import parse_image_build_timings
 from support.consts import REPOSITORY_ROOT
 from tests import conftest as e2e_conftest
 

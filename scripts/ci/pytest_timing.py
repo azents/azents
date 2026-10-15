@@ -1,4 +1,4 @@
-"""Write safe, structured pytest timing evidence for E2E CI runs."""
+"""Write safe, structured pytest timing evidence for every CI pytest project."""
 
 import json
 import os
@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-_ARTIFACT_DIR_ENV = "AZENTS_E2E_ARTIFACT_DIR"
+_ARTIFACT_DIR_ENV = "AZENTS_CI_ARTIFACT_DIR"
 _PYTEST_TIMINGS_FILENAME = "pytest-timings.jsonl"
 
 
@@ -42,6 +42,10 @@ class FixtureTeardownState:
     """Mutable timestamps retained between fixture finalizer hooks."""
 
     started_at: float | None = None
+
+    def start(self) -> None:
+        """Capture the finalizer boundary without inspecting fixture values."""
+        self.started_at = monotonic_time()
 
 
 class TimingObservabilityPlugin:
@@ -92,9 +96,7 @@ class TimingObservabilityPlugin:
         )
         teardown_state = FixtureTeardownState()
         self.fixture_teardown_states[id(fixturedef)] = teardown_state
-        fixturedef.addfinalizer(
-            lambda: setattr(teardown_state, "started_at", monotonic_time())
-        )
+        fixturedef.addfinalizer(teardown_state.start)
         return result
 
     def pytest_fixture_post_finalizer(
@@ -115,6 +117,14 @@ class TimingObservabilityPlugin:
             outcome="completed",
         )
         del self.fixture_teardown_states[id(fixturedef)]
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Enable the same observer for unit, migration, support, and E2E tests."""
+    if timing_path() is not None:
+        config.pluginmanager.register(
+            TimingObservabilityPlugin(), "azents-ci-timing-observability"
+        )
 
 
 def record_test_phase(

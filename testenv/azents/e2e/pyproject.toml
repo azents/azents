@@ -27,6 +27,9 @@ dependencies = [
 ]
 
 [dependency-groups]
+ci-report = [
+    "matplotlib>=3.11.2",
+]
 dev = [
     "ruff>=0.16.4",
     "ty>=0.0.74",
@@ -54,8 +57,10 @@ select = ["E", "W", "F", "B", "I", "G", "PLC", "PLE", "PLW", "T", "PGH003"]
 
 [tool.ty.environment]
 python-version = "3.14"
+extra-paths = ["../../.."]
 
 [tool.pytest.ini_options]
+pythonpath = ["src", "../../.."]
 testpaths = ["src/support_tests", "src/tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]

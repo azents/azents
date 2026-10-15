@@ -31,6 +31,9 @@ from docker.errors import APIError, DockerException, NotFound
 from docker.models.containers import Container
 from pydantic import TypeAdapter
 from python_on_whales import docker as pow_docker
+from scripts.ci.pytest_timing import (
+    record_fixture_phase,
+)
 from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.options import Options as ChromeOptions
@@ -79,11 +82,6 @@ from support.strict_network_control_plane import (
     load_control_plane_evidence,
 )
 from support.system_bootstrap import SystemBootstrapEvidence
-from support.timing_observability import (
-    TimingObservabilityPlugin,
-    record_fixture_phase,
-    timing_path,
-)
 
 _AIMOCK_FIXTURE_DIR = REPOSITORY_ROOT / "testenv/azents/e2e/src/support/aimock_fixtures"
 _IMAGE_GENERATION_PROXY = (
@@ -289,15 +287,6 @@ def pytest_runtest_makereport(
         if report.failed:
             _emit_active_server_logs(item.config)
     return report
-
-
-def pytest_configure(config: pytest.Config) -> None:
-    """Register timing hooks globally so session fixtures are observable."""
-    if timing_path() is not None:
-        config.pluginmanager.register(
-            TimingObservabilityPlugin(),
-            "azents-e2e-timing-observability",
-        )
 
 
 def random_secret(length: int = 32) -> str:

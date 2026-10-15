@@ -940,7 +940,7 @@ def _update_sticky_comment(
         return
     body = "\n".join(
         [
-            "## E2E CI observability",
+            "## CI observability",
             "",
             f"Commit: `{head_sha}`",
             "",
