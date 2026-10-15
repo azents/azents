@@ -786,6 +786,7 @@ async def test_runner_serializes_patch_operations_per_runtime(tmp_path: Path) ->
 
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -832,6 +833,7 @@ async def test_runner_operation_emits_typed_success_and_failure(tmp_path: Path) 
 *** End Patch"""
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -891,6 +893,7 @@ async def test_runner_cancellation_before_commit_settles_to_no_change_failure(
 
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -934,6 +937,7 @@ async def test_runner_cancellation_after_commit_starts_waits_for_terminal_result
 
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),

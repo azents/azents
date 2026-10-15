@@ -60,6 +60,7 @@ async def test_malformed_edit_replacement_is_rejected_without_writing(
     target.write_text("before\n")
     sink = _Sink()
     operations = RunnerOperations(
+        browser_manager=None,
         client=sink,
         workspace=Workspace(str(tmp_path)),
         execution_backend=DirectExecutionBackend(),
@@ -92,6 +93,7 @@ async def test_omitted_edit_replacement_is_rejected_but_explicit_empty_is_deleti
     target.write_text("before\n")
     sink = _Sink()
     operations = RunnerOperations(
+        browser_manager=None,
         client=sink,
         workspace=Workspace(str(tmp_path)),
         execution_backend=DirectExecutionBackend(),
@@ -151,6 +153,7 @@ async def test_malformed_file_fields_produce_terminal_errors_without_effects(
     target.write_text("unchanged")
     sink = _Sink()
     operations = RunnerOperations(
+        browser_manager=None,
         client=sink,
         workspace=Workspace(str(tmp_path)),
         execution_backend=DirectExecutionBackend(),
@@ -187,6 +190,7 @@ async def test_invalid_environment_members_are_rejected_before_launch(
     sink = _Sink()
     backend = _NoLaunchBackend()
     operations = RunnerOperations(
+        browser_manager=None,
         client=sink,
         workspace=Workspace(str(tmp_path)),
         execution_backend=backend,
@@ -229,6 +233,7 @@ async def test_payload_is_decoded_once_and_handler_never_reads_raw_fields(
     monkeypatch.setattr(payloads, "decode_operation_payload", decode_once)
     sink = _Sink()
     operations = RunnerOperations(
+        browser_manager=None,
         client=sink,
         workspace=Workspace(str(tmp_path)),
         execution_backend=DirectExecutionBackend(),
@@ -260,6 +265,7 @@ async def test_terminal_error_logs_safe_origin_once_and_preserves_final_error(
 ) -> None:
     sink = _Sink()
     operations = RunnerOperations(
+        browser_manager=None,
         client=sink,
         workspace=Workspace(str(tmp_path)),
         execution_backend=_OriginFailureBackend(),
@@ -304,6 +310,7 @@ async def test_cancellation_remains_propagated_without_error_conversion(
 ) -> None:
     sink = _Sink()
     operations = RunnerOperations(
+        browser_manager=None,
         client=sink,
         workspace=Workspace(str(tmp_path)),
         execution_backend=_CancellationBackend(),
@@ -331,6 +338,7 @@ async def test_invalid_payload_final_delivery_failure_is_not_disguised_as_succes
 ) -> None:
     sink = _FinalClosedSink()
     operations = RunnerOperations(
+        browser_manager=None,
         client=sink,
         workspace=Workspace(str(tmp_path)),
         execution_backend=DirectExecutionBackend(),
@@ -367,6 +375,7 @@ async def test_malformed_patch_metadata_retains_structured_terminal_failure(
     raw[field] = False
     sink = _Sink()
     operations = RunnerOperations(
+        browser_manager=None,
         client=sink,
         workspace=Workspace(str(tmp_path)),
         execution_backend=DirectExecutionBackend(),

@@ -60,6 +60,7 @@ async def test_stream_closed_event_is_not_retried_as_final_error(
 ) -> None:
     client = _ClosedClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -80,6 +81,7 @@ async def test_stream_closed_event_is_not_retried_as_final_error(
 async def test_bash_operation_emits_stdout_and_final_success(tmp_path: Path) -> None:
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -111,6 +113,7 @@ async def test_direct_bash_environment_inherits_runner_values(
     monkeypatch.setenv("HOME", str(tmp_path))
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -149,6 +152,7 @@ async def test_direct_bash_environment_allows_operation_override(
     monkeypatch.setenv("DOCKER_HOST", "unix:///runner/docker.sock")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -175,6 +179,7 @@ async def test_bash_cancellation_terminates_process_group(
 ) -> None:
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -219,7 +224,10 @@ async def test_file_write_read_and_list_stay_in_workspace(tmp_path: Path) -> Non
     client = _FakeClient()
     workspace = Workspace(str(tmp_path))
     operations = RunnerOperations(
-        execution_backend=DirectExecutionBackend(), client=client, workspace=workspace
+        browser_manager=None,
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=workspace,
     )
 
     await operations.handle(
@@ -275,6 +283,7 @@ async def test_file_read_uses_bounded_range_without_full_file_load(
     path.write_bytes(b"prefix-target-suffix")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -310,6 +319,7 @@ async def test_file_read_rejects_non_positive_byte_limit(tmp_path: Path) -> None
     path.write_bytes(b"content")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -348,6 +358,7 @@ async def test_file_read_text_rejects_invalid_character_range(
     path.write_bytes(b"content")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -395,6 +406,7 @@ async def test_file_read_caps_requested_byte_limit(
     )
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -423,6 +435,7 @@ async def test_file_read_text_uses_requested_encoding_without_base64(
     path.write_bytes("café".encode("latin-1"))
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -468,6 +481,7 @@ async def test_file_read_text_rejects_unsupported_or_non_text_encoding(
     path.write_bytes(b"QQ==")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -515,6 +529,7 @@ async def test_file_read_text_uses_decoded_character_ranges(
     path.write_text(content, encoding="utf-8")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -550,6 +565,7 @@ async def test_file_read_text_decodes_character_split_across_chunks(
     path.write_text(content, encoding="utf-8")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -582,6 +598,7 @@ async def test_file_read_text_caps_requested_character_limit(tmp_path: Path) -> 
     path.write_text("A" * (64 * 1024 + 2), encoding="utf-8")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -616,6 +633,7 @@ async def test_file_read_text_reports_binary_decode_error(tmp_path: Path) -> Non
     path.write_bytes(b"\xff\xfe\x00")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -648,6 +666,7 @@ async def test_file_read_text_reports_invalid_source_before_range(
     path.write_bytes(b"A\xffB")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -674,6 +693,7 @@ async def test_file_read_text_ignores_invalid_unread_suffix(tmp_path: Path) -> N
     path.write_bytes(b"AB\xff")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -705,6 +725,7 @@ async def test_file_edit_replaces_text_in_one_native_operation(tmp_path: Path) -
     path.write_text("before\nbefore\n")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -737,6 +758,7 @@ async def test_file_edit_rejects_ambiguous_match_without_changing_file(
     path.write_text("before\nbefore\n")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -772,6 +794,7 @@ async def test_file_edit_rejects_symlink_paths(tmp_path: Path) -> None:
     link.symlink_to(target)
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -802,6 +825,7 @@ async def test_file_list_supports_file_path(tmp_path: Path) -> None:
     file_path.write_text("hello")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -841,6 +865,7 @@ async def test_file_list_recursive_with_excludes(tmp_path: Path) -> None:
     (tmp_path / "node_modules" / "pkg" / "index.js").write_text("hello")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -885,6 +910,7 @@ async def test_file_glob_matches_runtime_entries_with_braces_and_excludes(
     (tmp_path / "node_modules" / "pkg" / "ignored.py").write_text("ignored")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -920,6 +946,7 @@ async def test_file_glob_supports_question_mark_and_character_classes(
     (tmp_path / "src" / "app-long.py").write_text("long")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -945,6 +972,7 @@ async def test_file_glob_rejects_excessive_brace_expansion(tmp_path: Path) -> No
     """Runner-native glob rejects brace expansions above the bounded limit."""
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -971,6 +999,7 @@ async def test_file_glob_returns_matching_directories(tmp_path: Path) -> None:
     (tmp_path / "skills" / "search" / "SKILL.md").write_text("search")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -1000,6 +1029,7 @@ async def test_file_glob_rejects_tilde_expansion(
     """Runner-native glob rejects process-dependent home expansion."""
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -1056,6 +1086,7 @@ async def test_blocked_file_list_does_not_block_unrelated_read(
     )
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -1135,6 +1166,7 @@ async def test_file_operation_executor_never_exceeds_worker_bound(
     )
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -1194,6 +1226,7 @@ async def test_cancelled_file_list_signals_blocking_traversal(
     )
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -1224,6 +1257,7 @@ async def test_file_stat_reports_regular_file(tmp_path: Path) -> None:
     file_path.write_text("hello")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -1257,6 +1291,7 @@ async def test_file_stat_reports_symlink_without_following_it(tmp_path: Path) ->
     link_path.symlink_to(target_path)
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -1288,6 +1323,7 @@ async def test_file_stat_reports_symlink_without_following_it(tmp_path: Path) ->
 async def test_file_stat_missing_path_returns_final_error(tmp_path: Path) -> None:
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -1314,6 +1350,7 @@ async def test_file_grep_searches_workspace_files(tmp_path: Path) -> None:
     (tmp_path / "bin.dat").write_bytes(b"\xff\xfe\x00\x01")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -1353,6 +1390,7 @@ async def test_file_grep_searches_workspace_files(tmp_path: Path) -> None:
 async def test_file_grep_invalid_regex_returns_final_error(tmp_path: Path) -> None:
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -1374,6 +1412,7 @@ async def test_relative_paths_stay_under_workspace(tmp_path: Path) -> None:
     (tmp_path / "inside.txt").write_text("hello")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -1395,6 +1434,7 @@ async def test_absolute_paths_outside_workspace_are_allowed(tmp_path: Path) -> N
     outside.write_text("hello")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -1418,6 +1458,7 @@ async def test_file_grep_skips_symlink_escape(tmp_path: Path) -> None:
     (tmp_path / ".venv" / "bin" / "python").symlink_to("/usr/local/bin/python3.14")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -1453,6 +1494,7 @@ async def test_file_grep_stops_at_searched_file_limit(tmp_path: Path) -> None:
         (tmp_path / f"file-{index}.txt").write_text("nothing")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -1483,6 +1525,7 @@ async def test_file_grep_stops_at_scanned_byte_limit(tmp_path: Path) -> None:
     (tmp_path / "large.txt").write_text("a" * 20)
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -1513,6 +1556,7 @@ async def test_process_start_quick_command_returns_exit_snapshot(
 ) -> None:
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -1549,6 +1593,7 @@ async def test_process_write_and_empty_poll_observe_process_lifecycle(
 ) -> None:
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -1618,6 +1663,7 @@ async def test_process_write_and_empty_poll_observe_process_lifecycle(
 async def test_process_output_is_bounded_and_reports_truncation(tmp_path: Path) -> None:
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -1647,6 +1693,7 @@ async def test_process_output_is_bounded_and_reports_truncation(tmp_path: Path) 
 async def test_process_quota_prunes_oldest_process(tmp_path: Path) -> None:
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -1701,6 +1748,7 @@ async def test_close_does_not_signal_exited_process_group(
 ) -> None:
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -1732,6 +1780,7 @@ async def test_close_terminates_process_group_without_blocking_on_child_pipes(
 ) -> None:
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -1774,6 +1823,7 @@ async def test_process_terminate_session_terminates_only_owned_processes(
 ) -> None:
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -1850,6 +1900,7 @@ async def test_file_bulk_delete_removes_multiple_files(tmp_path: Path) -> None:
     (tmp_path / "b.txt").write_text("b")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -1883,6 +1934,7 @@ async def test_file_delete_unlinks_root_symlink_without_following_target(
     root_link.symlink_to(external, target_is_directory=True)
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -1918,6 +1970,7 @@ async def test_file_delete_does_not_follow_descendant_symlink(
     )
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -1944,6 +1997,7 @@ async def test_file_bulk_move_moves_multiple_files_into_directory(
     (tmp_path / "archive").mkdir()
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -1986,6 +2040,7 @@ async def test_git_cancellation_terminates_process_group(
     repo = _init_git_repo(tmp_path / "repo")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -2040,6 +2095,7 @@ async def test_git_list_refs_returns_branches_tags_and_head(tmp_path: Path) -> N
     _git(repo, "tag", "v1")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -2074,6 +2130,7 @@ async def test_git_list_refs_resolves_linked_worktree_repository_anchor(
     _git(repo, "worktree", "add", "-b", "linked", str(linked), "main")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -2098,6 +2155,7 @@ async def test_git_create_remove_worktree_and_delete_branch(tmp_path: Path) -> N
     worktree_path = tmp_path / ".azents" / "worktrees" / "session" / "repo"
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -2232,6 +2290,7 @@ async def test_git_discover_managed_worktrees_ignores_worktree_children(
 
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -2274,6 +2333,7 @@ async def test_git_remove_worktree_treats_missing_target_as_terminal(
     shutil.rmtree(worktree_path)
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -2332,6 +2392,7 @@ async def test_git_remove_worktree_rejects_existing_unregistered_target(
     marker.write_text("keep\n")
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -2362,6 +2423,7 @@ async def test_git_remove_worktree_accepts_unregistered_missing_target(
     worktree_path = tmp_path / "missing"
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -2402,6 +2464,7 @@ async def test_git_remove_worktree_rejects_registered_branch_mismatch(
     )
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -2443,6 +2506,7 @@ async def test_git_remove_worktree_rejects_missing_registered_branch_mismatch(
     shutil.rmtree(worktree_path)
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -2523,6 +2587,7 @@ async def test_git_create_worktree_semantic_failures(
             normalized_payload[key] = value
     client = _FakeClient()
     operations = RunnerOperations(
+        browser_manager=None,
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
@@ -2558,6 +2623,7 @@ async def test_cleanup_timeout_logs_safe_origin_with_bound_process_count(
             )
 
     operations = TimeoutOperations(
+        browser_manager=None,
         client=_FakeClient(),
         workspace=Workspace(str(tmp_path)),
         execution_backend=DirectExecutionBackend(),
@@ -2622,6 +2688,7 @@ async def test_kill_timeout_warning_preserves_bound_operation_identity(
     monkeypatch.setattr(operations_module, "_PROCESS_TERMINATE_TIMEOUT_SECONDS", 0)
     monkeypatch.setattr(operations_module, "_PROCESS_KILL_TIMEOUT_SECONDS", 0)
     operations = RunnerOperations(
+        browser_manager=None,
         client=_FakeClient(),
         workspace=Workspace(str(tmp_path)),
         execution_backend=DirectExecutionBackend(),

@@ -24,6 +24,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Protocol, TypeVar, assert_never
 
+from azents_runtime_control.browser_contract import (
+    BrowserContractError,
+    decode_browser_command,
+    encode_browser_result,
+)
 from azents_runtime_control.grpc_runner_client import (
     RuntimeRunnerControlStreamClosed,
 )
@@ -42,6 +47,7 @@ from azents_runtime_runner.apply_patch import (
     ApplyPatchResult,
     execute_apply_patch,
 )
+from azents_runtime_runner.browser import BrowserFailure, RunnerBrowserManager
 from azents_runtime_runner.diagnostics import (
     RunnerDiagnosticReason,
     bind_extra,
@@ -258,6 +264,7 @@ class RunnerOperations:
         self,
         *,
         client: RunnerEventSink,
+        browser_manager: RunnerBrowserManager | None,
         workspace: Workspace,
         execution_backend: ExecutionBackend,
         process_max_unread_bytes: int = _DEFAULT_PROCESS_MAX_UNREAD_BYTES,
@@ -274,6 +281,7 @@ class RunnerOperations:
     ) -> None:
         """Initialize operation handlers."""
         self.client = client
+        self.browser_manager = browser_manager
         self.workspace = workspace
         self._processes: dict[str, _ManagedProcess] = {}
         self._missing_processes: dict[str, _MissingProcessRecord] = {}
@@ -303,6 +311,25 @@ class RunnerOperations:
                 RuntimeRunnerEventType.ACCEPTED,
                 {"operation_type": operation.operation_type},
             )
+            if operation.operation_type in {
+                "browser.open",
+                "browser.observe",
+                "browser.act",
+                "browser.list",
+            }:
+                if self.browser_manager is None:
+                    raise BrowserFailure(
+                        "browser_unavailable", "Product browser manager is unavailable"
+                    )
+                self.browser_manager.validate_operation(
+                    operation.runtime_id, operation.runner_generation
+                )
+                command = decode_browser_command(
+                    operation.operation_type, operation.payload
+                )
+                result = await self.browser_manager.execute(command)
+                await self._final_success(operation, encode_browser_result(result))
+                return
             request = payloads.decode_operation_payload(
                 operation.operation_type, operation.payload
             )
@@ -369,6 +396,14 @@ class RunnerOperations:
             raise
         except RuntimeRunnerControlStreamClosed:
             raise
+        except BrowserContractError:
+            await self._final_error(
+                operation,
+                "browser_invalid_payload",
+                "Browser command payload is invalid",
+            )
+        except BrowserFailure as exc:
+            await self._final_error(operation, exc.code, str(exc))
         except payloads.OperationPayloadError as exc:
             if exc.patch_reason is not None:
                 await self._file_apply_patch_error(
@@ -421,6 +456,14 @@ class RunnerOperations:
         )
 
     async def close(self) -> None:
+        """Clean independent resources even if browser cleanup fails."""
+        try:
+            await self._close_managed_processes()
+        finally:
+            if self.browser_manager is not None:
+                await self.browser_manager.close()
+
+    async def _close_managed_processes(self) -> None:
         """Stop filesystem work and terminate processes before reconnecting."""
         self._file_operation_executor.shutdown(wait=False, cancel_futures=True)
         records = tuple(self._processes.values())

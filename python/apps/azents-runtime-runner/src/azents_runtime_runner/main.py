@@ -41,6 +41,7 @@ from azents_runtime_control.transfer import (
     RUNNER_TRANSFER_PROTOCOL_VERSION,
 )
 
+from azents_runtime_runner.browser import BrowserFailure, RunnerBrowserManager
 from azents_runtime_runner.diagnostics import (
     RunnerDiagnosticReason,
     bind_extra,
@@ -383,7 +384,20 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                 allow_insecure=allow_insecure_control,
             )
             connection_id = _control_connection_id(base_connection_id)
+            browser_manager = RunnerBrowserManager(
+                workspace_root=workspace.root,
+                proxy=runner_network_environment.get("HTTP_PROXY"),
+            )
+            try:
+                await browser_manager.initialize()
+                browser_capabilities = (*registration.capabilities, "browser.v1")
+            except BrowserFailure as exc:
+                L.warning(
+                    "Product browser is unavailable", extra={"reason_code": exc.code}
+                )
+                browser_capabilities = tuple(registration.capabilities)
             operations = RunnerOperations(
+                browser_manager=browser_manager,
                 client=client,
                 workspace=workspace,
                 execution_backend=execution_backend,
@@ -391,7 +405,9 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
             run_loop = RunnerRunLoop(
                 client=client,
                 operations=operations,
-                registration=registration,
+                registration=dataclasses.replace(
+                    registration, capabilities=browser_capabilities
+                ),
                 connection_id=connection_id,
                 consumer_id=runner_id,
                 system_metrics_collector=create_system_metrics_collector(
@@ -417,6 +433,7 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                 accepted = run_loop.accepted
                 return None if accepted is None else accepted.generation
 
+            browser_manager.bind_runtime(runtime_id, accepted_generation)
             terminal_registry = RunnerTerminalRegistry(
                 backend=LinuxPtyTerminalBackend(),
                 limits=TerminalLimits(

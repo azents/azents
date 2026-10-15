@@ -215,6 +215,10 @@ jobs:
         run: |
           cd "${{ matrix.project }}"
           uv sync
+      - name: Install Runner browser engine
+        if: matrix.project == 'python/apps/azents-runtime-runner'
+        working-directory: python/apps/azents-runtime-runner
+        run: uv run playwright install --with-deps chromium
       - name: Ruff check
         run: |
           cd "${{ matrix.project }}"
