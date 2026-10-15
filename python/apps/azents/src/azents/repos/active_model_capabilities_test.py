@@ -461,6 +461,7 @@ def test_real_agent_workspace_orphan_refinements_adopt_current_facts() -> None:
         "runtime_profile_selection_version": 1,
         "runtime_capability": "none",
         "runtime_capability_version": 1,
+        "browser_enabled": False,
         "terminal_enabled": True,
         "tool_search_enabled": True,
         "auto_archive_ttl_days": 30,
