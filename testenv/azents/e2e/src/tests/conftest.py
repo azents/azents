@@ -56,6 +56,7 @@ from support.docker_fixture_observations import (
     decode_docker_network_address,
 )
 from support.e2e_image_preparation import E2EImagePreparation as _E2EImagePreparation
+from support.gateway_image import prepare_gateway_image, run_gateway_image_command
 from support.google_provider_fake import HOSTS as GOOGLE_FIXTURE_HOSTS
 from support.google_provider_fixture import (
     GoogleProviderFixture,
@@ -2982,6 +2983,12 @@ def azents_workspace_upload_gateway_container(
 ) -> Generator[DockerContainer, None, None]:
     """Expose the workspace upload object store through its TLS boundary."""
     del rustfs_container
+    artifact_dir = os.environ.get(_E2E_ARTIFACT_DIR_ENV)
+    image_id = prepare_gateway_image(
+        artifact_dir=Path(artifact_dir) if artifact_dir is not None else None,
+        budget_seconds=_DOCKER_CLIENT_TIMEOUT_SECONDS,
+        command_runner=run_gateway_image_command,
+    )
     config = """
 server {
     listen 8446 ssl;
@@ -3009,7 +3016,7 @@ server {
         config_path.write_text(config, encoding="utf-8")
         container = (
             DockerContainer(
-                image="nginx:1.29-alpine",
+                image=image_id,
                 docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
             )
             .with_name(f"azents-workspace-upload-gateway-{random_secret(4)}")

@@ -49,7 +49,7 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-10-15
+last_verified_at: 2026-10-16
 spec_version: 87
 ---
 
@@ -693,6 +693,13 @@ Always-on required CI does not depend on external credentials.
   pytest fails. The artifact contains JUnit XML, the complete pytest output, the
   slow-test report, and Docker process/storage diagnostics. Failed browser calls also
   capture a screenshot and page HTML when the WebDriver remains available.
+- The upload TLS gateway resolves its existing nginx image explicitly before
+  Testcontainers construction. Cached local image IDs avoid registry access; an
+  absent image is pulled once within the shared existing 300-second Docker budget,
+  then its immutable local ID is used for container creation. Acquisition errors,
+  invalid IDs and deadline exhaustion fail visibly instead of entering an implicit
+  streamed pull. Safe gateway-image stage/outcome/timing evidence excludes raw
+  registry output. TLS configuration, readiness and S3/browser assertions remain.
 - General CI observability includes every Python matrix pytest project, migration
   tests, Docker-free support tests and Helm pytest, using the shared
   `scripts/ci/pytest_timing.py` plugin. It records only test identifiers, phases,
