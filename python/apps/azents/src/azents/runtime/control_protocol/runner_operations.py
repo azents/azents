@@ -9,6 +9,15 @@ from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime, timezone
 from typing import Literal
 
+from azents_runtime_control.browser_contract import (
+    BrowserCommand,
+    BrowserContractError,
+    BrowserResult,
+    browser_operation_type,
+    decode_browser_result,
+    encode_browser_command,
+)
+
 from azents.runtime.control_protocol.data import (
     RuntimeDispatchResult,
     RuntimeProtocolRouteUnavailable,
@@ -454,6 +463,46 @@ class RuntimeRunnerOperationClient:
         self._coordination_store = coordination_store
         self._metrics = metrics
         self._body_chunk_size_bytes = body_chunk_size_bytes
+
+    async def run_browser_command(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str,
+        command: BrowserCommand,
+        deadline_at: datetime,
+    ) -> BrowserResult:
+        """Dispatch one typed browser command without retrying site effects."""
+        payload = encode_browser_command(command)
+        dispatch = await self._dispatch_runner_operation(
+            RuntimeRunnerOperation(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                operation_type=browser_operation_type(command),
+                owner_session_id=owner_session_id,
+                payload=payload,
+                deadline_at=deadline_at,
+                body_stream_id=None,
+            )
+        )
+        record = await self._read_until_final(
+            dispatch.reply_stream_id,
+            _ReplyFolder(after_cursor=None),
+            request_id=dispatch.request_id,
+            operation_id=dispatch.operation_id,
+            runtime_id=runtime_id,
+            generation=runner_generation,
+            deadline_at=deadline_at,
+        )
+        try:
+            return decode_browser_result(record.event.payload)
+        except BrowserContractError as exc:
+            raise RuntimeRunnerOperationFailedError(
+                "Runner browser response is malformed; "
+                "do not repeat an uncertain action.",
+                code="browser_invalid_response",
+            ) from exc
 
     async def run_bash(
         self,

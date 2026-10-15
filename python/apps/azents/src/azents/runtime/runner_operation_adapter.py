@@ -4,6 +4,8 @@ from collections.abc import Awaitable
 from datetime import datetime
 from typing import TypeVar
 
+from azents_runtime_control.browser_contract import BrowserCommand, BrowserResult
+
 from azents.engine.tools import runtime_io as engine_runtime_io
 from azents.engine.tools.runtime_io import (
     RuntimeBashResult,
@@ -43,6 +45,26 @@ class RuntimeRunnerOperationAdapter:
     def __init__(self, client: ControlRuntimeRunnerOperationClient) -> None:
         """Initialize Adapter."""
         self._client = client
+
+    async def run_browser_command(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str,
+        command: BrowserCommand,
+        deadline_at: datetime,
+    ) -> BrowserResult:
+        """Preserve typed browser results and translate operation failures."""
+        return await _translate_runtime_errors(
+            self._client.run_browser_command(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                owner_session_id=owner_session_id,
+                command=command,
+                deadline_at=deadline_at,
+            )
+        )
 
     async def run_bash(
         self,

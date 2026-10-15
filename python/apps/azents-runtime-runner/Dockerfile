@@ -136,10 +136,7 @@ RUN pip install --no-cache-dir --break-system-packages \
         python-dateutil \
         pydantic \
         jinja2 \
-        sympy \
-        playwright
-
-RUN playwright install-deps chromium
+        sympy
 
 RUN docker --version | grep -F "Docker version 29.8.1" \
     && docker buildx version | grep -F "github.com/docker/buildx v0.37.1" \
@@ -154,7 +151,10 @@ COPY python/apps/azents-runtime-runner/uv.lock ./
 COPY python/libs/azents-runtime-control /workspace/python/libs/azents-runtime-control
 COPY python/apps/azents-runtime-runner/src ./src
 
-RUN uv sync --frozen --no-dev
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/azents-browsers
+RUN uv sync --frozen --no-dev \
+    && uv run --no-dev playwright install --with-deps chromium \
+    && chmod -R a+rX /opt/azents-browsers
 
 COPY python/apps/azents-runtime-runner/docker/azents-git-credential.sh /usr/local/bin/azents-git-credential
 RUN chmod +x /usr/local/bin/azents-git-credential \

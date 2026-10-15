@@ -5,6 +5,8 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Literal, Protocol
 
+from azents_runtime_control.browser_contract import BrowserCommand, BrowserResult
+
 type RuntimeOperationCancelCheck = Callable[[], Awaitable[bool]]
 type RuntimeProcessOutputCallback = Callable[
     ["RuntimeProcessOutputDelta"], Awaitable[None]
@@ -228,6 +230,18 @@ class RuntimeFileApplyPatchFailedError(RuntimeRunnerOperationFailedError):
 
 class RuntimeRunnerOperationClient(Protocol):
     """Runtime Runner operation client used by Builtin tools."""
+
+    async def run_browser_command(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str,
+        command: BrowserCommand,
+        deadline_at: datetime,
+    ) -> BrowserResult:
+        """Run a typed browser command with exact Session/resource binding."""
+        ...
 
     async def run_bash(
         self,

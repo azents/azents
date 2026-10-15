@@ -11,6 +11,7 @@ from typing import Any, Protocol, runtime_checkable
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from azents_runtime_control.browser_contract import BrowserCommand, BrowserResult
 from cryptography.fernet import Fernet
 
 from azents.core.crypto import CredentialCipher
@@ -18,6 +19,7 @@ from azents.core.engine_tool_state import AgentsAppendixDedupeState
 from azents.core.enums import (
     AgentRuntimeCapability,
     EventKind,
+    LLMProvider,
     RuntimeDesiredState,
     RuntimeProviderConnectionState,
     RuntimeProviderObservedState,
@@ -48,8 +50,17 @@ from azents.engine.events.engine_events import (
     RuntimeProcessOutputDeltaEvent,
     RuntimeReadyEvent,
 )
+from azents.engine.events.tools import (
+    build_tool_catalog,
+    project_tool_catalog_for_client_compatibility,
+)
 from azents.engine.events.types import ClientToolResultPayload, Event
 from azents.engine.hooks.types import RunStartHookContext, SessionCompactHookContext
+from azents.engine.run.client_tool_compatibility import (
+    ClientToolRoute,
+    resolve_client_tool_adapter_profile,
+)
+from azents.engine.run.contracts import ToolkitBinding
 from azents.engine.run.emit import PublishedEvent, durable, handle_engine_event
 from azents.engine.run.types import (
     FunctionTool,
@@ -570,7 +581,24 @@ def _runtime_configuration_state(
 
 
 class _FakeRunnerOperations:
+    async def run_browser_command(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str,
+        command: BrowserCommand,
+        deadline_at: datetime,
+    ) -> BrowserResult:
+        """Require browser tests to provide an explicit command implementation."""
+        self.browser_calls.append(command)
+        if self.next_browser_result is None:
+            raise AssertionError("Unexpected browser command in file/process test")
+        return self.next_browser_result
+
     def __init__(self, files: dict[str, bytes] | None = None) -> None:
+        self.browser_calls: list[BrowserCommand] = []
+        self.next_browser_result: BrowserResult | None = None
         self.files = dict(files or {})
         self.bash_calls: list[dict[str, object]] = []
         self.process_start_calls: list[dict[str, object]] = []
@@ -1550,6 +1578,10 @@ class TestRuntimeToolkitUpdateContext:
     async def test_includes_resource_file_tools_only_with_authority(self) -> None:
         """Expose resource tools only under canonical Session/Run authority."""
         toolkit = _make_toolkit()
+        unauthenticated = await toolkit.update_context(_make_context())
+        assert not {"browser_open", "browser_observe", "browser_act"} & {
+            tool.spec.name for tool in unauthenticated.tools
+        }
         authority = SessionResourceAuthority(
             workspace_id="ws-1",
             agent_id="agent-1",
@@ -1565,7 +1597,129 @@ class TestRuntimeToolkitUpdateContext:
         )
 
         names = {tool.spec.name for tool in state.tools}
-        assert {"import_file", "present_file", "read_image"} <= names
+        assert {
+            "import_file",
+            "present_file",
+            "read_image",
+            "browser_open",
+            "browser_observe",
+            "browser_act",
+        } <= names
+
+    @pytest.mark.asyncio
+    async def test_browser_binding_uses_concrete_session_not_runtime_owner(
+        self,
+    ) -> None:
+        """Root scheduling ownership cannot redirect a child's native browser state."""
+        toolkit = _make_toolkit(session_id="child-session")
+        toolkit.set_runtime_session_id("root-session")
+        authority = SessionResourceAuthority(
+            workspace_id="ws-1",
+            agent_id="agent-1",
+            session_id="child-session",
+            root_session_id="root-session",
+            run_id="run-child",
+            run_index=1,
+            owner_generation=1,
+        )
+        state = await toolkit.update_context(
+            _make_context(resource_authority=authority)
+        )
+        runner = _runner_operations(toolkit)
+        runner.next_browser_result = BrowserResult(
+            (), None, "Created", False, (), None, None, None, None, "none"
+        )
+        await _find_tool(state.tools, "browser_open").handler("{}")
+        command = runner.browser_calls[0]
+        assert command.authority.session_id == "child-session"
+        assert command.authority.working_directory.endswith(
+            "/.azents/sessions/child-session"
+        )
+
+    @pytest.mark.asyncio
+    async def test_browser_tools_survive_runtime_catalog_and_native_projection(
+        self,
+    ) -> None:
+        """Keep executable browser handlers in the actual model-facing catalog."""
+        toolkit = _make_toolkit()
+        authority = SessionResourceAuthority(
+            workspace_id="ws-1",
+            agent_id="agent-1",
+            session_id="session-1",
+            root_session_id="session-1",
+            run_id="run-1",
+            run_index=1,
+            owner_generation=1,
+        )
+        candidate = await build_tool_catalog(
+            toolkit_bindings=[
+                ToolkitBinding(
+                    toolkit=toolkit,
+                    slug="runtime",
+                    base_slug="runtime",
+                    use_prefix=False,
+                )
+            ],
+            context=_make_context(resource_authority=authority),
+        )
+        adapter_profile = resolve_client_tool_adapter_profile(
+            route=ClientToolRoute(
+                provider=LLMProvider.OPENAI,
+                adapter="openai",
+                native_format="responses",
+            )
+        )
+        assert adapter_profile is not None
+        projected = project_tool_catalog_for_client_compatibility(
+            candidate, frozenset(), adapter_profile
+        )
+        browser_names = {"browser_open", "browser_observe", "browser_act"}
+        assert browser_names <= set(projected.tools)
+        assert browser_names <= set(projected.entries)
+        native = {
+            declaration["name"]: declaration for declaration in projected.native_tools
+        }
+        for name in browser_names:
+            assert native[name]["type"] == "function"
+            parameters = native[name]["parameters"]
+            assert isinstance(parameters, dict) and parameters["type"] == "object"
+            assert not {"oneOf", "anyOf", "allOf"} & set(parameters)
+            assert projected.tools[name].handler is candidate.tools[name].handler
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("name", ["browser_open", "browser_observe", "browser_act"])
+    async def test_browser_tools_recheck_revoked_runtime_capability(
+        self, name: str
+    ) -> None:
+        """Reject prebuilt browser tools after managed Runtime access is revoked."""
+
+        async def current_snapshot_provider() -> RuntimeCapabilitySnapshot:
+            return RuntimeCapabilitySnapshot(
+                state=AgentRuntimeCapability.NONE, version=2
+            )
+
+        resolver = RuntimeCapabilityResolver.from_agent(
+            state=AgentRuntimeCapability.MANAGED,
+            version=1,
+            current_snapshot_provider=current_snapshot_provider,
+        )
+        toolkit = _make_toolkit(runtime_capability_resolver=resolver)
+        authority = SessionResourceAuthority(
+            workspace_id="ws-1",
+            agent_id="agent-1",
+            session_id="session-1",
+            root_session_id="session-1",
+            run_id="run-1",
+            run_index=1,
+            owner_generation=1,
+        )
+        state = await toolkit.update_context(
+            _make_context(resource_authority=authority)
+        )
+        with pytest.raises(FunctionToolError) as captured:
+            await _find_tool(state.tools, name).handler("{}")
+        assert captured.value.metadata["kind"] == "runtime_capability_denied"
+        assert not _runner_operations(toolkit).browser_calls
 
     @pytest.mark.asyncio
     async def test_builds_run_tool_to_file_only_with_resource_authority(self) -> None:

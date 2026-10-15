@@ -72,6 +72,7 @@ from azents.engine.run.types import (
 from azents.engine.tooling.execution_context import get_client_tool_execution_context
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.apply_patch import RuntimePatchTarget, make_apply_patch_tool
+from azents.engine.tools.browser import BrowserExecutionTarget, make_browser_tools
 from azents.engine.tools.builtin_agents import (
     AgentsAppendixDedupeStateStore,
     AgentsAppendixMixin,
@@ -1196,8 +1197,53 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             return await self.model_file_service.validate_resource_authority(authority)
 
         file_tools: list[FunctionTool] = []
+        browser_tools: list[FunctionTool] = []
         if context.resource_authority is not None:
             authority = context.resource_authority
+
+            async def resolve_browser_target() -> BrowserExecutionTarget:
+                runtime = await resolve_exact_runtime_target()
+                try:
+                    await capability_resolver.require(RuntimeCapability.WORKSPACE)
+                    binding_service = self.session_working_folder_binding_service
+                    binding = await binding_service.resolve_authority(
+                        agent_id=authority.agent_id,
+                        session_id=authority.session_id,
+                        capability_snapshot=capability_resolver.snapshot,
+                        runtime_target=runtime,
+                    )
+                except (
+                    RuntimeCapabilityDeniedError,
+                    SessionWorkingFolderBindingError,
+                ) as exc:
+                    raise FunctionToolError(
+                        "Browser Session working-folder authority is unavailable."
+                    ) from exc
+                return BrowserExecutionTarget(
+                    runtime_id=runtime.id,
+                    desired_generation=runtime.desired_generation,
+                    runner_generation=runtime.runner_generation,
+                    working_directory=binding.working_folder_path,
+                )
+
+            async def require_browser_image_transfer() -> None:
+                try:
+                    await capability_resolver.require(
+                        RuntimeCapability.RUNTIME_TRANSFER
+                    )
+                except RuntimeCapabilityDeniedError as exc:
+                    raise FunctionToolError(
+                        "Browser image transfer capability is unavailable."
+                    ) from exc
+
+            browser_tools = make_browser_tools(
+                runner_operations=self.runner_operations,
+                authority=authority,
+                resolve_execution_target=resolve_browser_target,
+                revalidate_authority=revalidate_resource_authority,
+                require_image_transfer=require_browser_image_transfer,
+                runtime_image_read_service=self.runtime_image_read_service,
+            )
             self._run_tool_to_file_context = RunToolToFileRuntimeContext(
                 session_storage=file_ss,
                 exchange_file_service=self.exchange_file_service,
@@ -1269,6 +1315,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 )
                 for tool in file_tools
             ],
+            *browser_tools,
         ]
         # Filter tools requested by the runtime context.
         if self._excluded_tools:
@@ -1279,7 +1326,14 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 tool,
                 (
                     RuntimeCapability.PROCESS_EXECUTION
-                    if tool.spec.name in {"exec_command", "write_stdin"}
+                    if tool.spec.name
+                    in {
+                        "exec_command",
+                        "write_stdin",
+                        "browser_open",
+                        "browser_observe",
+                        "browser_act",
+                    }
                     else (
                         RuntimeCapability.RUNTIME_TRANSFER
                         if tool.spec.name

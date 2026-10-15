@@ -3,8 +3,20 @@
 import asyncio
 import dataclasses
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 import pytest
+from azents_runtime_control.browser_contract import (
+    BrowserActCommand,
+    BrowserAction,
+    BrowserAuthority,
+    BrowserDialog,
+    BrowserOpenCommand,
+    BrowserResult,
+    BrowserTarget,
+    encode_browser_command,
+    encode_browser_result,
+)
 from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
 from azents_runtime_control.transfer import (
     RUNNER_TRANSFER_CAPABILITY,
@@ -57,6 +69,167 @@ from azents.runtime.observability import RuntimeReplyDeliveryMetrics
 from azents.testing.runtime_coordination import (
     FakeRuntimeControlProtocolService,
 )
+
+
+async def test_browser_command_preserves_concrete_session_and_typed_result() -> None:
+    """Scheduling scope cannot replace the command's concrete browser Session."""
+    harness = await _make_harness()
+    command = BrowserOpenCommand(
+        BrowserAuthority("child-session", "/workspace/reported/session-child"),
+        None,
+        "https://example.test/",
+        "Fixture",
+    )
+    task = asyncio.create_task(
+        harness.client.run_browser_command(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            owner_session_id="scheduling-root",
+            command=command,
+            deadline_at=_now() + timedelta(seconds=30),
+        )
+    )
+    request = await harness.claim()
+    assert request.operation_type == "browser.open"
+    assert request.payload["owner_session_id"] == "scheduling-root"
+    assert request.payload["payload"] == encode_browser_command(command)
+    expected = BrowserResult(
+        (), None, "Created", False, (), None, None, None, None, "none"
+    )
+    await harness.reply(
+        request.request_id,
+        RuntimeReplyEventType.FINAL_SUCCESS,
+        encode_browser_result(expected),
+        final=True,
+    )
+    assert await asyncio.wait_for(task, 1) == expected
+
+
+@pytest.mark.parametrize("action_state", ["dispatched", "dialog_pending"])
+async def test_browser_action_reply_preserves_execution_state_without_replay(
+    action_state: Literal["dispatched", "dialog_pending"],
+) -> None:
+    harness = await _make_harness()
+    command = BrowserActCommand(
+        BrowserAuthority("session-1", "/workspace/reported/session-1"),
+        BrowserTarget("task-1", "page-1", "incarnation-1", None),
+        BrowserAction(
+            kind="reload",
+            ref=None,
+            observation_id=None,
+            text=None,
+            url=None,
+            values=None,
+            checked=None,
+            key=None,
+            x=None,
+            y=None,
+            end_ref=None,
+            paths=None,
+            dialog_id=None,
+            accept=None,
+            condition=None,
+            expect=None,
+            timeout_ms=10000,
+        ),
+    )
+    task = asyncio.create_task(
+        harness.client.run_browser_command(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
+            command=command,
+            deadline_at=_now() + timedelta(seconds=30),
+        )
+    )
+    request = await harness.claim()
+    assert request.operation_type == "browser.act"
+    dialog = (
+        BrowserDialog("dialog-1", "confirm", "Proceed?")
+        if action_state == "dialog_pending"
+        else None
+    )
+    expected = BrowserResult(
+        (), None, None, False, (), None, None, None, dialog, action_state
+    )
+    await harness.reply(
+        request.request_id,
+        RuntimeReplyEventType.FINAL_SUCCESS,
+        encode_browser_result(expected),
+        final=True,
+    )
+    result = await asyncio.wait_for(task, 1)
+    assert result == expected and result.action_state == action_state
+    assert harness.store.request_appended.empty()
+
+
+@pytest.mark.parametrize("missing_action_state", [False, True])
+async def test_browser_malformed_final_response_is_error_without_redispatch(
+    missing_action_state: bool,
+) -> None:
+    harness = await _make_harness()
+    task = asyncio.create_task(
+        harness.client.run_browser_command(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
+            command=BrowserOpenCommand(
+                BrowserAuthority("session-1", "/workspace/reported/session-1"),
+                None,
+                None,
+                None,
+            ),
+            deadline_at=_now() + timedelta(seconds=30),
+        )
+    )
+    request = await harness.claim()
+    payload: dict[str, JsonValue]
+    if missing_action_state:
+        payload = encode_browser_result(
+            BrowserResult((), None, None, False, (), None, None, None, None, "none")
+        )
+        del payload["action_state"]
+    else:
+        payload = {"unexpected": "value"}
+    await harness.reply(
+        request.request_id,
+        RuntimeReplyEventType.FINAL_SUCCESS,
+        payload,
+        final=True,
+    )
+    with pytest.raises(RuntimeRunnerOperationFailedError) as captured:
+        await asyncio.wait_for(task, 1)
+    assert captured.value.code == "browser_invalid_response"
+    assert harness.store.request_appended.empty()
+
+
+async def test_browser_final_failure_keeps_reason_without_automatic_retry() -> None:
+    harness = await _make_harness()
+    task = asyncio.create_task(
+        harness.client.run_browser_command(
+            runtime_id="runtime-1",
+            runner_generation=harness.runner_generation,
+            owner_session_id="session-1",
+            command=BrowserOpenCommand(
+                BrowserAuthority("session-1", "/workspace/reported/session-1"),
+                None,
+                None,
+                None,
+            ),
+            deadline_at=_now() + timedelta(seconds=30),
+        )
+    )
+    request = await harness.claim()
+    await harness.reply(
+        request.request_id,
+        RuntimeReplyEventType.FINAL_ERROR,
+        {"error_code": "browser_uncertain", "message": "Outcome is uncertain."},
+        final=True,
+    )
+    with pytest.raises(RuntimeRunnerOperationFailedError) as captured:
+        await asyncio.wait_for(task, 1)
+    assert captured.value.code == "browser_uncertain"
+    assert harness.store.request_appended.empty()
 
 
 @pytest.mark.asyncio
