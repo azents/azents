@@ -3,46 +3,100 @@
     var(--mantine-color-gray-7),
     var(--mantine-color-dark-1)
   );
-
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
-  padding: var(--mantine-spacing-md);
-  gap: var(--mantine-spacing-sm);
   background: var(--mantine-color-body);
 }
 
 .header {
   flex-shrink: 0;
   min-width: 0;
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-xs) 0;
+  background: var(--mantine-color-default-hover);
 }
 
 .panel[data-focused="true"] {
   position: fixed;
   inset: 0;
   height: 100dvh;
-  z-index: var(--mantine-z-index-modal);
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  box-sizing: border-box;
+  z-index: calc(var(--mantine-z-index-modal) + 1);
 }
 
 .taskLabel {
   flex: 1;
 }
 
+.tabsChrome {
+  --browser-tab-width: clamp(rem(160px), 45vw, rem(224px));
+  display: flex;
+  gap: rem(4px);
+  min-width: 0;
+}
+
+.tabScroll {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.tabsContent {
+  position: relative;
+  width: max-content;
+}
+
 .tabs {
   display: flex;
-  overflow-x: auto;
-  border-bottom: rem(1px) solid var(--mantine-color-default-border);
+  gap: rem(4px);
+}
+
+.tabCloseControls {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  gap: rem(4px);
+  pointer-events: none;
+}
+
+.tabCloseSlot {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  width: var(--browser-tab-width);
+  flex-shrink: 0;
+}
+
+.closeTab {
+  pointer-events: auto;
+  flex-shrink: 0;
+  margin-inline-end: rem(4px);
+  min-width: rem(32px);
+  min-height: rem(32px);
+}
+
+.newTab {
+  flex-shrink: 0;
+  align-self: center;
+  min-width: rem(36px);
+  min-height: rem(36px);
 }
 
 .tab {
   flex-shrink: 0;
-  max-width: rem(220px);
-  padding: var(--mantine-spacing-xs);
+  width: var(--browser-tab-width);
+  min-height: rem(40px);
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
+  padding-inline-end: rem(40px);
   border: 0;
-  border-bottom: rem(2px) solid transparent;
+  border-radius: var(--mantine-radius-md) var(--mantine-radius-md) 0 0;
+  transition: background-color 160ms ease;
   background: transparent;
   color: var(--mantine-color-dimmed);
   font: inherit;
@@ -54,8 +108,9 @@
 }
 
 .tab[aria-selected="true"] {
-  color: var(--mantine-primary-color-filled);
-  border-bottom-color: var(--mantine-primary-color-filled);
+  background: var(--mantine-color-default);
+  color: var(--mantine-color-text);
+  font-weight: 600;
 }
 
 .browser {
@@ -64,8 +119,6 @@
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  border: rem(1px) solid var(--mantine-color-default-border);
-  border-radius: var(--mantine-radius-md);
 }
 
 .addressBar {
@@ -79,21 +132,41 @@
 .address {
   flex: 1;
   min-width: 0;
+  background: var(--mantine-color-body);
+  border-radius: var(--mantine-radius-sm);
+}
+
+.address input {
+  font-size: rem(16px);
+}
+
+.navigationControls {
+  flex-shrink: 0;
+  max-width: rem(104px);
+  overflow: hidden;
+  opacity: 1;
+  transition:
+    max-width 220ms cubic-bezier(0.2, 0.7, 0.2, 1),
+    opacity 160ms ease;
+}
+
+.addressBar:has(.address input:focus) .navigationControls {
+  max-width: 0;
+  opacity: 0;
 }
 
 .notices:empty {
   display: none;
 }
-
 .notices:not(:empty) {
   padding: var(--mantine-spacing-sm);
   flex-shrink: 0;
   max-height: 50%;
   overflow-y: auto;
 }
-
 .footer {
   flex-shrink: 0;
+  padding: var(--mantine-spacing-xs);
 }
 
 .viewport {
@@ -101,10 +174,7 @@
   display: flex;
   min-height: 0;
   overflow: hidden;
-  align-items: center;
-  justify-content: center;
-  background: var(--mantine-color-default-hover);
-  touch-action: none;
+  background: var(--mantine-color-dark-7);
   outline-offset: rem(-3px);
 }
 
@@ -112,26 +182,32 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
+  background: var(--mantine-color-dark-7);
+  overscroll-behavior: contain;
 }
 
-.viewport[data-input="false"] {
-  touch-action: auto;
+.viewport[data-focused="true"] {
+  touch-action: none;
 }
-
-.viewport:focus-visible,
-.viewport:focus-within {
+.panel[data-focused="false"] .viewWindow {
+  overflow: hidden;
+}
+.viewport[data-focused="false"] {
+  height: 100%;
+}
+.viewport[data-focused="false"] .image {
+  object-fit: contain;
+}
+.viewport:focus-visible {
   outline: rem(3px) solid var(--mantine-primary-color-filled);
 }
-
 .image {
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: contain;
   user-select: none;
   pointer-events: none;
 }
-
 .viewport[data-stale="true"] .image {
   opacity: 0.5;
 }
@@ -146,13 +222,17 @@
 }
 
 .keyboard {
-  position: absolute;
+  position: fixed;
   inset-inline-start: 0;
-  bottom: 0;
-  width: rem(1px);
-  height: rem(1px);
+  top: 0;
+  width: rem(16px);
+  height: rem(20px);
   min-height: 0;
-  opacity: 0;
+  opacity: 0.01;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
+  outline: none;
   resize: none;
   border: 0;
   padding: 0;
@@ -163,4 +243,58 @@
 .dialog {
   border: rem(1px) solid var(--mantine-color-default-border);
   border-radius: var(--mantine-radius-sm);
+}
+.preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+.preview:focus-visible {
+  outline: rem(3px) solid var(--mantine-primary-color-filled);
+  outline-offset: rem(-3px);
+}
+
+.touchFeedback {
+  position: absolute;
+  width: rem(36px);
+  height: rem(36px);
+  border: rem(2px) solid var(--mantine-color-blue-5);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--mantine-color-blue-5) 20%, transparent);
+  pointer-events: none;
+  animation: touch-ripple 400ms ease-out forwards;
+}
+
+@keyframes touch-ripple {
+  from {
+    transform: translate(-50%, -50%) scale(0.5);
+    opacity: 1;
+  }
+  to {
+    transform: translate(-50%, -50%) scale(1.5);
+    opacity: 0;
+  }
+}
+@keyframes touch-fade {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -50%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tab,
+  .navigationControls {
+    transition: none;
+  }
+  .touchFeedback {
+    animation-name: touch-fade;
+  }
 }

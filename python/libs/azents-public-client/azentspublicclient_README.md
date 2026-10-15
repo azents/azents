@@ -120,6 +120,7 @@ Class | Method | HTTP request | Description
 *AuthV1Api* | [**auth_v1_send_code**](azentspublicclient/docs/AuthV1Api.md#auth_v1_send_code) | **POST** /auth/v1/email/send-code | Send Code
 *AuthV1Api* | [**auth_v1_verify_code**](azentspublicclient/docs/AuthV1Api.md#auth_v1_verify_code) | **POST** /auth/v1/email/verify | Verify Code
 *BrowserV1Api* | [**browser_v1_close_browser_page**](azentspublicclient/docs/BrowserV1Api.md#browser_v1_close_browser_page) | **POST** /browser/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/pages/{page_id}/close | Close Browser Page
+*BrowserV1Api* | [**browser_v1_create_browser_page**](azentspublicclient/docs/BrowserV1Api.md#browser_v1_create_browser_page) | **POST** /browser/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/pages | Create Browser Page
 *BrowserV1Api* | [**browser_v1_get_browser_projection**](azentspublicclient/docs/BrowserV1Api.md#browser_v1_get_browser_projection) | **GET** /browser/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id} | Get Browser Projection
 *ChatGPTOAuthV1Api* | [**chatgpt_oauth_v1_cancel_device**](azentspublicclient/docs/ChatGPTOAuthV1Api.md#chatgpt_oauth_v1_cancel_device) | **DELETE** /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id} | Cancel Device
 *ChatGPTOAuthV1Api* | [**chatgpt_oauth_v1_poll_device**](azentspublicclient/docs/ChatGPTOAuthV1Api.md#chatgpt_oauth_v1_poll_device) | **GET** /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id} | Poll Device
@@ -547,6 +548,7 @@ Class | Method | HTTP request | Description
  - [AwsSecrets](azentspublicclient/docs/AwsSecrets.md)
  - [Body](azentspublicclient/docs/Body.md)
  - [BrowserClosePageRequest](azentspublicclient/docs/BrowserClosePageRequest.md)
+ - [BrowserCreatePageResponse](azentspublicclient/docs/BrowserCreatePageResponse.md)
  - [BrowserFrameResponse](azentspublicclient/docs/BrowserFrameResponse.md)
  - [BrowserPageResponse](azentspublicclient/docs/BrowserPageResponse.md)
  - [BrowserProjectionResponse](azentspublicclient/docs/BrowserProjectionResponse.md)

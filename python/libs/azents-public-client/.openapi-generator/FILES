@@ -156,6 +156,7 @@ azentspublicclient/docs/AwsConfig.md
 azentspublicclient/docs/AwsSecrets.md
 azentspublicclient/docs/Body.md
 azentspublicclient/docs/BrowserClosePageRequest.md
+azentspublicclient/docs/BrowserCreatePageResponse.md
 azentspublicclient/docs/BrowserFrameResponse.md
 azentspublicclient/docs/BrowserPageResponse.md
 azentspublicclient/docs/BrowserProjectionResponse.md
@@ -798,6 +799,7 @@ azentspublicclient/models/aws_config.py
 azentspublicclient/models/aws_secrets.py
 azentspublicclient/models/body.py
 azentspublicclient/models/browser_close_page_request.py
+azentspublicclient/models/browser_create_page_response.py
 azentspublicclient/models/browser_frame_response.py
 azentspublicclient/models/browser_page_response.py
 azentspublicclient/models/browser_projection_response.py
@@ -1416,6 +1418,7 @@ azentspublicclient/test/test_aws_config.py
 azentspublicclient/test/test_aws_secrets.py
 azentspublicclient/test/test_body.py
 azentspublicclient/test/test_browser_close_page_request.py
+azentspublicclient/test/test_browser_create_page_response.py
 azentspublicclient/test/test_browser_frame_response.py
 azentspublicclient/test/test_browser_page_response.py
 azentspublicclient/test/test_browser_projection_response.py

@@ -10,6 +10,7 @@ from azents_runtime_control.browser_contract import (
 from pydantic import BaseModel, ConfigDict, Field
 
 from azents.services.runtime_browser.data import (
+    RuntimeBrowserCreatedPage,
     RuntimeBrowserProjection,
     RuntimeBrowserReasonCode,
 )
@@ -84,6 +85,26 @@ class BrowserProjectionResponse(BaseModel):
             reason_code=projection.reason_code,
             allow_input=projection.allow_input,
             tasks=[BrowserTaskResponse.convert_from(task) for task in projection.tasks],
+        )
+
+
+class BrowserCreatePageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
+
+
+class BrowserCreatePageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    projection: BrowserProjectionResponse
+    page: BrowserPageResponse
+
+    @classmethod
+    def convert_from(
+        cls, created: RuntimeBrowserCreatedPage
+    ) -> "BrowserCreatePageResponse":
+        return cls(
+            projection=BrowserProjectionResponse.convert_from(created.projection),
+            page=BrowserPageResponse.convert_from(created.page),
         )
 
 

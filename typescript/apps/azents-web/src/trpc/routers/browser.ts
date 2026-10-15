@@ -1,5 +1,6 @@
 import {
   browserV1CloseBrowserPage,
+  browserV1CreateBrowserPage,
   browserV1GetBrowserProjection,
   chatV1IssueWsTicket,
 } from "@azents/public-client";
@@ -54,6 +55,25 @@ export const browserRouter = router({
       throw mapExpectedError(error, expectedErrors);
     }
   }),
+  createPage: publicProcedure
+    .input(resource)
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await browserV1CreateBrowserPage({
+          client: ctx.apiClient,
+          path: {
+            handle: input.handle,
+            agent_id: input.agentId,
+            session_id: input.sessionId,
+          },
+          body: {},
+          throwOnError: true,
+        });
+        return data;
+      } catch (error) {
+        throw mapExpectedError(error, expectedErrors);
+      }
+    }),
   closePage: publicProcedure
     .input(
       resource.extend({

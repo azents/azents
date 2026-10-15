@@ -10,6 +10,7 @@ import {
 } from "storybook/test";
 import { BrowserConnection, emptyBrowserLiveState } from "../connection";
 import { useBrowserInteraction } from "../containers/useBrowserInteraction";
+import { useBrowserTouchView } from "../containers/useBrowserTouchView";
 import { browserDialogInput, browserFrameMatchesStatus } from "../input";
 import { SessionBrowserPanel } from "./SessionBrowserPanel";
 import type {
@@ -158,6 +159,12 @@ const initialDialogStatus: BrowserStatus = {
   conflict: false,
 };
 async function clickBrowserViewport(surface: HTMLElement): Promise<void> {
+  const modal = surface.closest('[role="dialog"]');
+  if (modal !== null) {
+    await waitFor(() =>
+      expect(modal.contains(surface.ownerDocument.activeElement)).toBe(true),
+    );
+  }
   const bounds = surface.getBoundingClientRect();
   await userEvent.pointer({
     target: surface,
@@ -169,7 +176,34 @@ async function clickBrowserViewport(surface: HTMLElement): Promise<void> {
   });
 }
 
-function BrowserFixture(props: SessionBrowserPanelProps): ReactElement {
+function BrowserFixture(
+  props: SessionBrowserPanelProps & { reportActions?: boolean },
+): ReactElement {
+  const [focused, setFocused] = useState(props.focused);
+  const [zoom, setZoom] = useState(props.zoom);
+  const [counts, setCounts] = useState({
+    down: 0,
+    up: 0,
+    cancel: 0,
+    wheel: 0,
+    text: 0,
+  });
+  const onAction = (
+    source: BrowserFrame,
+    action: BrowserInputAction,
+  ): boolean => {
+    if (props.reportActions) {
+      if (action.kind === "pointer" && action.phase !== "move") {
+        const phase = action.phase;
+        setCounts((value) => ({ ...value, [phase]: value[phase] + 1 }));
+      } else if (action.kind === "wheel") {
+        setCounts((value) => ({ ...value, wheel: value.wheel + 1 }));
+      } else if (action.kind === "composition" && action.phase === "commit") {
+        setCounts((value) => ({ ...value, text: value.text + 1 }));
+      }
+    }
+    return actions(source, action);
+  };
   const active =
     props.state.type === "READY" &&
     props.state.connection === "connected" &&
@@ -180,10 +214,28 @@ function BrowserFixture(props: SessionBrowserPanelProps): ReactElement {
     browserFrameMatchesStatus(props.state.image.frame, props.state.status) &&
     props.state.dialog === null;
   const interaction = useBrowserInteraction({
-    enabled: active,
+    enabled: active && focused,
     frame:
       props.state.type === "READY" ? (props.state.image?.frame ?? null) : null,
-    onAction: actions,
+    onAction,
+  });
+  const touchView = useBrowserTouchView({
+    enabled:
+      focused &&
+      props.state.type === "READY" &&
+      props.state.connection === "connected" &&
+      props.state.image !== null &&
+      props.state.status !== null &&
+      browserFrameMatchesStatus(props.state.image.frame, props.state.status) &&
+      props.state.dialog === null,
+    canInput: active,
+    frame:
+      props.state.type === "READY" ? (props.state.image?.frame ?? null) : null,
+    zoom,
+    onZoomChange: setZoom,
+    onAction,
+    keyboardRef: interaction.keyboardRef,
+    cancelInput: interaction.cancel,
   });
   return (
     <Box h={rem(800)} w="100%" maw={rem(640)}>
@@ -191,6 +243,19 @@ function BrowserFixture(props: SessionBrowserPanelProps): ReactElement {
         {...props}
         interaction={interaction.interaction}
         keyboardRef={interaction.keyboardRef}
+        touchView={touchView}
+        focused={focused}
+        zoom={zoom}
+        onToggleFocus={() => {
+          interaction.cancel();
+          setFocused((value) => !value);
+          props.onToggleFocus();
+        }}
+        onZoomChange={(value) => {
+          interaction.cancel();
+          setZoom(value);
+          props.onZoomChange(value);
+        }}
         onDialogResponse={(accept) => {
           if (props.state.type !== "READY" || props.state.status === null) {
             return;
@@ -207,6 +272,19 @@ function BrowserFixture(props: SessionBrowserPanelProps): ReactElement {
           }
         }}
       />
+      {props.reportActions && (
+        <output
+          data-browser-gesture-probe
+          data-zoom={zoom}
+          data-focused={focused}
+          data-down={counts.down}
+          data-up={counts.up}
+          data-cancel={counts.cancel}
+          data-wheel={counts.wheel}
+          data-text={counts.text}
+          hidden
+        />
+      )}
     </Box>
   );
 }
@@ -235,7 +313,8 @@ const meta = {
   parameters: { layout: "fullscreen" },
   render: (props) => <BrowserFixture {...props} />,
   args: {
-    focused: false,
+    focused: true,
+    focusViewport: null,
     zoom: 1,
     onToggleFocus: fn(),
     onZoomChange: fn(),
@@ -249,6 +328,10 @@ const meta = {
     onAddressSubmit: fn(),
     onNavigate: fn(),
     closeError: false,
+    createError: false,
+    canCreate: true,
+    creating: false,
+    onCreatePage: fn(),
     onSelect: fn(),
     onClosePage: fn(),
     onRetry: fn(),
@@ -259,6 +342,7 @@ const meta = {
     onDialogTextChange: fn(),
     keyboardRef: null,
     interaction: null,
+    touchView: null,
   },
   beforeEach: (): void => {
     actions.mockClear();
@@ -271,7 +355,7 @@ type Story = StoryObj<typeof meta>;
 export const FreshAckPointerCleanup = {
   render: (props) => <FreshAckCleanupFixture {...props} />,
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     const region = canvas.getByRole("region", { name: "Remote browser page" });
     await waitFor(() => expect(canvas.getByRole("img")).toBeVisible());
     cleanupMessages.mockClear();
@@ -305,7 +389,7 @@ export const FreshAckPointerCleanup = {
 export const FreshAckCompositionCleanup = {
   render: (props) => <FreshAckCleanupFixture {...props} />,
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     await clickBrowserViewport(
       canvas.getByRole("region", { name: "Remote browser page" }),
     );
@@ -337,7 +421,12 @@ export const FreshAckCompositionCleanup = {
 export const StreamingImagePreservesFocus = {
   render: (props) => <StreamingImageFixture {...props} />,
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
+    await waitFor(() =>
+      expect(
+        canvas.getByRole("button", { name: "Exit focused view" }),
+      ).toHaveFocus(),
+    );
     const image = canvas.getByRole("img");
     const initialUrl = image.getAttribute("src");
     const keyboard = canvas.getByRole("textbox", {
@@ -365,7 +454,7 @@ export const StreamingImagePreservesFocus = {
 export const Focused = {
   args: { focused: true },
   play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     const focused = canvas.getByRole("dialog", { name: "Focus browser" });
     await expect(focused).toBeVisible();
     const bounds = focused.getBoundingClientRect();
@@ -381,7 +470,7 @@ export const Focused = {
 export const Zoomed = {
   args: { focused: true, zoom: 2 },
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     const viewport = canvas.getByRole("region", {
       name: "Remote browser page",
     });
@@ -402,9 +491,27 @@ export const FocusedMobile = {
   parameters: { viewport: { defaultViewport: "mobile1" } },
 } satisfies Story;
 
+export const FocusedLandscapePageMobile = {
+  args: {
+    focused: true,
+    state: {
+      ...ready,
+      image: {
+        url: `data:image/svg+xml,${encodeURIComponent(svg.replaceAll('width="800"', 'width="1280"').replaceAll('height="900"', 'height="800"'))}`,
+        frame: { ...frame, width: 1280, height: 800 },
+      },
+      status:
+        ready.status === null
+          ? null
+          : { ...ready.status, viewport: { width: 1280, height: 800 } },
+    },
+  },
+  parameters: { viewport: { defaultViewport: "mobile1" } },
+} satisfies Story;
+
 export const Connected = {
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     await expect(
       canvas.getByRole("img", { name: "Browser page: Synthetic order" }),
     ).toBeVisible();
@@ -412,8 +519,135 @@ export const Connected = {
       canvas.getByRole("region", { name: "Remote browser page" }),
     ).toHaveAttribute("data-input", "true");
     await expect(
-      canvas.getByRole("button", { name: "Close page" }),
+      canvas.getByRole("button", { name: "Close tab: Synthetic order" }),
     ).toBeEnabled();
+  },
+} satisfies Story;
+
+export const PreviewOpensFocusOnly = {
+  args: { focused: false },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    await expect(
+      canvas.queryByRole("textbox", { name: "Remote browser keyboard" }),
+    ).toBeNull();
+    const region = canvas.getByRole("region", { name: "Remote browser page" });
+    await expect(region).toHaveAttribute("data-input", "false");
+    await userEvent.click(
+      within(region).getByRole("button", { name: "Focus browser" }),
+    );
+    await expect(args.onToggleFocus).toHaveBeenCalledTimes(1);
+    await expect(actions).not.toHaveBeenCalled();
+    await expect(
+      canvas.getByRole("dialog", { name: "Focus browser" }),
+    ).toBeVisible();
+    await expect(
+      canvas.getByRole("textbox", { name: "Remote browser keyboard" }),
+    ).toBeVisible();
+  },
+} satisfies Story;
+
+export const MobileTouchGestures = {
+  args: { focused: false },
+  render: (props) => <BrowserFixture {...props} reportActions />,
+  parameters: { viewport: { defaultViewport: "mobile1" } },
+} satisfies Story;
+
+export const MobileReadOnlyTouchGestures = {
+  args: {
+    state: { ...ready, canInput: false, canClose: false },
+    canCreate: false,
+    navigationEnabled: false,
+  },
+  render: (props) => <BrowserFixture {...props} reportActions />,
+  parameters: { viewport: { defaultViewport: "mobile1" } },
+} satisfies Story;
+
+export const BrowserTabs = {
+  args: {
+    state: {
+      ...ready,
+      pages: [
+        page,
+        {
+          ...page,
+          target: { ...target, page_id: "second" },
+          title: "Another tab",
+        },
+      ],
+    },
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Close tab: Another tab" }),
+    );
+    await expect(args.onClosePage).toHaveBeenCalledWith({
+      ...target,
+      page_id: "second",
+    });
+    await expect(args.onSelect).not.toHaveBeenCalled();
+    await userEvent.click(canvas.getByRole("button", { name: "New tab" }));
+    await expect(args.onCreatePage).toHaveBeenCalledTimes(1);
+    await expect(
+      canvas.getByRole("button", { name: "Exit focused view" }),
+    ).toBeVisible();
+  },
+} satisfies Story;
+
+export const AddressExpandsOnFocus = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const address = canvas.getByRole("textbox", { name: "Browser address" });
+    const width = address.getBoundingClientRect().width;
+    await userEvent.click(address);
+    await waitFor(() =>
+      expect(address.getBoundingClientRect().width).toBeGreaterThan(width + 50),
+    );
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Exit focused view" }),
+    );
+    await expect(
+      canvas.queryByRole("dialog", { name: "Focus browser" }),
+    ).toBeNull();
+  },
+} satisfies Story;
+
+export const EmptyOffersNewTab = {
+  args: { state: { type: "EMPTY" } },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    await userEvent.click(canvas.getByRole("button", { name: "New tab" }));
+    await expect(args.onCreatePage).toHaveBeenCalledTimes(1);
+  },
+} satisfies Story;
+
+export const EmptyReadOnly = {
+  args: { state: { type: "EMPTY" }, canCreate: false },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    await expect(
+      canvas.getByRole("button", { name: "New tab" }),
+    ).toBeDisabled();
+    await expect(args.onCreatePage).not.toHaveBeenCalled();
+  },
+} satisfies Story;
+
+export const MouseClickHasNoTouchEffect = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    await clickBrowserViewport(
+      canvas.getByRole("region", { name: "Remote browser page" }),
+    );
+    await expect(actions).toHaveBeenCalledWith(
+      frame,
+      expect.objectContaining({ kind: "pointer", phase: "up" }),
+    );
+    await expect(
+      canvasElement.ownerDocument.querySelector(
+        "[data-browser-touch-feedback]",
+      ),
+    ).toBeNull();
   },
 } satisfies Story;
 
@@ -423,12 +657,12 @@ export const ReadOnly = {
     navigationEnabled: false,
   },
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     await expect(
       canvas.queryByRole("textbox", { name: "Remote browser keyboard" }),
     ).toBeNull();
     await expect(
-      canvas.getByRole("button", { name: "Close page" }),
+      canvas.getByRole("button", { name: "Close tab: Synthetic order" }),
     ).toBeDisabled();
     const surface = canvas.getByRole("region", { name: "Remote browser page" });
     await expect(surface).toHaveAttribute("tabindex", "-1");
@@ -440,10 +674,10 @@ export const ReadOnly = {
 export const Disconnected = {
   args: { state: { ...ready, connection: "stale", canClose: false } },
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     await expect(canvas.getByText(/last received image/)).toBeVisible();
     await expect(
-      canvas.getByRole("button", { name: "Close page" }),
+      canvas.getByRole("button", { name: "Close tab: Synthetic order" }),
     ).toBeDisabled();
     await expect(
       canvas.queryByRole("textbox", { name: "Remote browser keyboard" }),
@@ -460,7 +694,7 @@ export const Dialog = {
     },
   },
   play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     await expect(
       canvas.getByRole("textbox", { name: "Dialog response" }),
     ).toBeVisible();
@@ -493,7 +727,7 @@ export const InitialDialogBeforeImage = {
     },
   },
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     await expect(canvas.queryByRole("img")).toBeNull();
     await expect(canvas.getByRole("button", { name: "Accept" })).toBeEnabled();
     await expect(
@@ -522,7 +756,7 @@ export const NavigationDialogAfterStaleImage = {
     state: { ...ready, status: initialDialogStatus, dialog: promptDialog },
   },
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     await expect(
       canvas.getByRole("region", { name: "Remote browser page" }),
     ).toHaveAttribute("tabindex", "-1");
@@ -543,7 +777,7 @@ export const ReadOnlyDialogBeforeImage = {
     },
   },
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     await expect(canvas.getByRole("button", { name: "Accept" })).toBeDisabled();
     await expect(
       canvas.getByRole("button", { name: "Dismiss" }),
@@ -556,7 +790,7 @@ export const StaleCoordinates = {
     state: { ...ready, status: { ...initialDialogStatus, dialog: null } },
   },
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     const surface = canvas.getByRole("region", { name: "Remote browser page" });
     await expect(surface).toHaveAttribute("tabindex", "-1");
     await fireEvent.keyDown(surface, { key: "Enter" });
@@ -580,19 +814,6 @@ export const Unavailable = {
     },
   },
 } satisfies Story;
-export const ClosedTarget = {
-  args: { state: { type: "CLOSED_TARGET", pages: [page] } },
-  play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement);
-    await expect(
-      canvas.getAllByText(/no longer available/).length,
-    ).toBeGreaterThan(0);
-    await expect(args.onSelect).not.toHaveBeenCalled();
-  },
-} satisfies Story;
-export const SelectPage = {
-  args: { state: { type: "SELECT_PAGE", pages: [page] } },
-} satisfies Story;
 export const Connecting = {
   args: { state: { ...ready, connection: "connecting", image: null } },
 } satisfies Story;
@@ -607,9 +828,9 @@ export const LiveTransportUnavailable = {
     },
   },
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     await expect(
-      canvas.getByRole("button", { name: "Close page" }),
+      canvas.getByRole("button", { name: "Close tab: Synthetic order" }),
     ).toBeEnabled();
     await expect(
       canvas.queryByRole("textbox", { name: "Remote browser keyboard" }),
@@ -652,7 +873,7 @@ export const LongLabels = {
 } satisfies Story;
 export const KeyboardAndComposition = {
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     const keyboard = canvas.getByRole("textbox", {
       name: "Remote browser keyboard",
     });
@@ -687,7 +908,7 @@ export const KeyboardAndComposition = {
 } satisfies Story;
 export const CancelledCompositionDoesNotCommit = {
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     const keyboard = canvas.getByRole("textbox", {
       name: "Remote browser keyboard",
     });
@@ -714,7 +935,7 @@ export const CancelledCompositionDoesNotCommit = {
 } satisfies Story;
 export const HeldKeyCleanupOnBlur = {
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     const keyboard = canvas.getByRole("textbox", {
       name: "Remote browser keyboard",
     });
@@ -741,7 +962,7 @@ export const HeldKeyCleanupOnBlur = {
 export const AccessChanged = {
   args: { state: { type: "ACCESS_CHANGED" } },
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     await expect(canvas.queryByRole("img")).toBeNull();
     await expect(canvas.queryByRole("combobox")).toBeNull();
     await expect(canvas.getByText("Browser access changed")).toBeVisible();
@@ -758,18 +979,25 @@ export const DecodedImageDimensionsMustMatch = {
     },
   },
   play: async ({ args }) => {
-    await expect(args.onFrameError).toHaveBeenCalled();
+    await waitFor(() => expect(args.onFrameError).toHaveBeenCalled());
     await expect(args.onFrameDisplayed).not.toHaveBeenCalled();
   },
 } satisfies Story;
 export const ExplicitRemoteTabKeys = {
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
+    await waitFor(() =>
+      expect(
+        canvas.getByRole("button", { name: "Exit focused view" }),
+      ).toHaveFocus(),
+    );
     const body = within(canvasElement.ownerDocument.body);
     await userEvent.click(
       canvas.getByRole("button", { name: "Browser actions" }),
     );
-    await userEvent.click(body.getByRole("menuitem", { name: "Send Tab" }));
+    await userEvent.click(
+      await body.findByRole("menuitem", { name: "Send Tab" }),
+    );
     await waitFor(() =>
       expect(
         canvasElement.ownerDocument.querySelector("[data-menu-dropdown]"),
@@ -791,7 +1019,7 @@ export const ExplicitRemoteTabKeys = {
       canvas.getByRole("button", { name: "Browser actions" }),
     );
     await userEvent.click(
-      body.getByRole("menuitem", { name: "Send Shift+Tab" }),
+      await body.findByRole("menuitem", { name: "Send Shift+Tab" }),
     );
     await waitFor(() =>
       expect(
@@ -813,7 +1041,7 @@ export const ExplicitRemoteTabKeys = {
 } satisfies Story;
 export const NativeMobileEditingIntent = {
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     const keyboard = canvas.getByRole("textbox", {
       name: "Remote browser keyboard",
     });
@@ -855,12 +1083,12 @@ export const NativeMobileEditingIntent = {
 } satisfies Story;
 export const UppercaseTextareaText = {
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     const surface = canvas.getByRole("region", { name: "Remote browser page" });
     const keyboard = canvas.getByRole("textbox", {
       name: "Remote browser keyboard",
     });
-    await userEvent.click(surface);
+    await clickBrowserViewport(surface);
     await expect(keyboard).toHaveFocus();
     await expect(actions).toHaveBeenCalledTimes(2);
     await expect(actions).toHaveBeenNthCalledWith(
@@ -891,7 +1119,7 @@ export const UppercaseTextareaText = {
 } satisfies Story;
 export const TextareaShortcutModifiers = {
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     await clickBrowserViewport(
       canvas.getByRole("region", { name: "Remote browser page" }),
     );
@@ -942,7 +1170,7 @@ export const TextareaShortcutModifiers = {
 
 export const OutsideClickCancelsComposition = {
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     const keyboard = canvas.getByRole("textbox", {
       name: "Remote browser keyboard",
     });
@@ -985,7 +1213,7 @@ export const MultiplePages = {
     },
   },
   play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     await expect(
       canvas.getByRole("tab", { name: "Synthetic order" }),
     ).toHaveAttribute("aria-selected", "true");
@@ -1001,7 +1229,7 @@ export const MultiplePages = {
 
 export const NativeNavigationControls = {
   play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     const address = canvas.getByRole("textbox", { name: "Browser address" });
     await expect(address).not.toHaveAttribute("readonly");
     await userEvent.click(address);
@@ -1035,7 +1263,7 @@ export const ReadOnlyNavigation = {
     navigationEnabled: false,
   },
   play: async ({ canvasElement, args }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     await expect(
       canvas.getByRole("textbox", { name: "Browser address" }),
     ).toHaveAttribute("readonly");
@@ -1054,12 +1282,17 @@ export const KeyboardEntryAndEscape = {
     </>
   ),
   play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
+    const canvas = within(canvasElement.ownerDocument.body);
     const keyboard = canvas.getByRole("textbox", {
       name: "Remote browser keyboard",
     });
-    const close = canvas.getByRole("button", { name: "Close page" });
-    close.focus();
+    await waitFor(() =>
+      expect(
+        canvas.getByRole("button", { name: "Exit focused view" }),
+      ).toHaveFocus(),
+    );
+    const menu = canvas.getByRole("button", { name: "Browser actions" });
+    menu.focus();
     actions.mockClear();
     await userEvent.tab();
     await expect(keyboard).toHaveFocus();
@@ -1071,11 +1304,11 @@ export const KeyboardEntryAndEscape = {
     });
     await userEvent.tab();
     await expect(
-      canvas.getByRole("button", { name: "Outside browser panel" }),
+      canvas.getByRole("button", { name: "Exit focused view" }),
     ).toHaveFocus();
     await userEvent.tab({ shift: true });
     await expect(keyboard).toHaveFocus();
     await userEvent.tab({ shift: true });
-    await expect(close).toHaveFocus();
+    await expect(menu).toHaveFocus();
   },
 } satisfies Story;

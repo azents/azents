@@ -4,18 +4,25 @@ import { useTranslations } from "next-intl";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
-import { browserAddress, browserFrameMatchesStatus } from "../input";
+import {
+  browserAddress,
+  browserFrameMatchesStatus,
+  sameBrowserTarget,
+} from "../input";
 import { browserProjectionState } from "../projection";
+import { recentBrowserTargets } from "../recentTargets";
 import { browserPanelHref, parseBrowserTarget } from "../route";
 import {
   browserAccessError,
   useBrowserConnection,
 } from "./useBrowserConnection";
 import { useBrowserInteraction } from "./useBrowserInteraction";
+import { useBrowserTouchView } from "./useBrowserTouchView";
 import type { SessionBrowserPanelProps } from "../components/SessionBrowserPanel";
 import type {
   BrowserNavigationAction,
   BrowserPageChoice,
+  BrowserTarget,
   BrowserViewState,
 } from "../types";
 import type { BrowserProjectionResponse } from "@azents/public-client";
@@ -41,7 +48,7 @@ function pages(projection: BrowserProjectionResponse): BrowserPageChoice[] {
   );
 }
 
-/** Bind one fresh admitted attachment to the exact concrete Session and selected resource. */
+/** Select current tabs by preference, then independently admit every exact live attachment. */
 export function useSessionBrowserContainer(
   resource: SessionBrowserContainerProps,
 ): SessionBrowserPanelProps {
@@ -50,38 +57,80 @@ export function useSessionBrowserContainer(
   const pathname = usePathname();
   const search = useSearchParams();
   const utils = trpc.useUtils();
-  const resourceKey = JSON.stringify([
-    resource.handle,
-    resource.agentId,
-    resource.sessionId,
-  ]);
-  const [denial, setDenial] = useState<{
+  const { handle, agentId, sessionId } = resource;
+  const resourceKey = JSON.stringify([handle, agentId, sessionId]);
+  const [deniedResource, setDeniedResource] = useState<string | null>(null);
+  const denied = deniedResource === resourceKey;
+  const selectedRef = useRef<BrowserTarget | null>(null);
+  const [unavailable, setUnavailable] = useState<{
     key: string;
-    kind: "access" | "target";
+    targets: BrowserTarget[];
   } | null>(null);
-  const denied = denial?.key === resourceKey ? denial.kind : null;
   const query = trpc.browser.projection.useQuery(resource, {
     retry: false,
     refetchInterval: 5000,
-    enabled: denied === null,
+    enabled: !denied,
   });
+  const history = trpc.chat.listSessionEvents.useQuery(
+    { sessionId, limit: 100 },
+    {
+      enabled: !denied && query.data?.available === true,
+      retry: false,
+      staleTime: 5000,
+    },
+  );
   const { mutateAsync: connectionInfo } =
     trpc.browser.connectionInfo.useMutation({ retry: false });
-  const { handle, agentId, sessionId } = resource;
   const connect = useCallback(
     () => connectionInfo({ handle, agentId, sessionId }),
     [connectionInfo, handle, agentId, sessionId],
   );
   const rejected = useCallback(
     (kind: "access" | "target"): void => {
-      setDenial({ key: resourceKey, kind });
+      if (kind === "access") {
+        setDeniedResource(resourceKey);
+      } else {
+        const target = selectedRef.current;
+        if (target !== null) {
+          setUnavailable((current) => ({
+            key: resourceKey,
+            targets: [
+              ...(current?.key === resourceKey ? current.targets : []),
+              target,
+            ].slice(-512),
+          }));
+        }
+      }
       void utils.browser.projection.reset({ handle, agentId, sessionId });
     },
     [resourceKey, handle, agentId, sessionId, utils.browser.projection],
   );
   const close = trpc.browser.closePage.useMutation({
     retry: false,
-    onSuccess: async () => {
+    onSuccess: async (projection) => {
+      utils.browser.projection.setData(resource, projection);
+      await utils.browser.projection.invalidate(resource);
+    },
+    onError: (error) => {
+      if (browserAccessError(error)) {
+        rejected("access");
+      } else {
+        void utils.browser.projection.invalidate(resource);
+      }
+    },
+  });
+  const create = trpc.browser.createPage.useMutation({
+    retry: false,
+    onSuccess: async (created) => {
+      utils.browser.projection.setData(resource, created.projection);
+      router.replace(
+        browserPanelHref(pathname, search.toString(), {
+          task_id: created.page.task_id,
+          page_id: created.page.id,
+          resource_incarnation: created.page.resource_incarnation,
+        }),
+        { scroll: false },
+      );
       await utils.browser.projection.invalidate(resource);
     },
     onError: (error) => {
@@ -93,16 +142,14 @@ export function useSessionBrowserContainer(
     },
   });
   useEffect(() => {
-    if (denied === null && query.isError && browserAccessError(query.error)) {
+    if (!denied && query.isError && browserAccessError(query.error)) {
       rejected("access");
     }
   }, [denied, query.isError, query.error, rejected]);
 
   let state: BrowserViewState;
-  if (denied === "access") {
+  if (denied) {
     state = { type: "ACCESS_CHANGED" };
-  } else if (denied === "target") {
-    state = { type: "CLOSED_TARGET", pages: [] };
   } else if (query.isLoading) {
     state = { type: "LOADING" };
   } else if (query.isError || !query.data) {
@@ -110,27 +157,63 @@ export function useSessionBrowserContainer(
   } else if (!query.data.available) {
     state = {
       type: "UNAVAILABLE",
-      reason:
+      reason: t(
         query.data.reason_code === "browser_disabled"
-          ? t("browserDisabled")
+          ? "browserDisabled"
           : query.data.reason_code === "runtime_unavailable"
-            ? t("runtimeUnavailable")
+            ? "runtimeUnavailable"
             : query.data.reason_code === "working_folder_unavailable"
-              ? t("workingFolderUnavailable")
-              : t("capabilityUnavailable"),
+              ? "workingFolderUnavailable"
+              : "capabilityUnavailable",
+      ),
     };
   } else {
-    state = browserProjectionState(
-      pages(query.data),
-      parseBrowserTarget(search.toString()),
-      query.data.allow_input,
+    const candidates = pages(query.data).filter(
+      (page) =>
+        unavailable?.key !== resourceKey ||
+        !unavailable.targets.some((target) =>
+          sameBrowserTarget(page.target, target),
+        ),
     );
+    const linked = parseBrowserTarget(search.toString());
+    const explicit =
+      linked.type === "TARGET" &&
+      candidates.some((page) => sameBrowserTarget(page.target, linked.target));
+    state =
+      !explicit && candidates.length > 0 && history.isLoading
+        ? { type: "LOADING" }
+        : browserProjectionState(
+            candidates,
+            linked,
+            query.data.allow_input,
+            recentBrowserTargets([
+              ...(history.data?.history.items ?? []),
+              ...(history.data?.live.partial_history.items ?? []),
+            ]),
+          );
   }
+  selectedRef.current = state.type === "READY" ? state.selected.target : null;
+  const selectedTarget = selectedRef.current;
+  useEffect(() => {
+    if (selectedTarget === null) {
+      return;
+    }
+    const linked = parseBrowserTarget(search.toString());
+    if (
+      linked.type !== "TARGET" ||
+      !sameBrowserTarget(linked.target, selectedTarget)
+    ) {
+      router.replace(
+        browserPanelHref(pathname, search.toString(), selectedTarget),
+        { scroll: false },
+      );
+    }
+  }, [selectedTarget, pathname, router, search]);
 
   const cancel = useRef<() => void>(() => {});
   const live = useBrowserConnection({
     resourceKey: `${resourceKey}\u0000${query.data?.allow_input === true ? "direct" : "observe"}`,
-    target: state.type === "READY" ? state.selected.target : null,
+    target: selectedTarget,
     connect,
     rejected,
     cancelInteraction: () => cancel.current(),
@@ -138,19 +221,23 @@ export function useSessionBrowserContainer(
   const [dialogText, setDialogText] = useState("");
   const [focused, setFocused] = useState(false);
   const [zoom, setZoom] = useState(1);
+  const [focusViewport, setFocusViewport] = useState<{
+    top: number;
+    height: number;
+  } | null>(null);
   useEffect(() => {
-    if (state.type !== "READY") {
+    if (!["READY", "EMPTY", "LOADING"].includes(state.type)) {
       setFocused(false);
     }
   }, [state.type]);
   const [addressDraft, setAddressDraft] = useState<string | null>(null);
   const [addressError, setAddressError] = useState(false);
-  const dialogId = live.state.status?.dialog?.id;
+  const source = live.state.displayed;
+  const status = live.state.status;
+  const dialogId = status?.dialog?.id;
   useEffect(() => {
     setDialogText("");
   }, [resourceKey, dialogId]);
-  const source = live.state.displayed;
-  const status = live.state.status;
   const selectedAddress = state.type === "READY" ? state.selected.url : "";
   const selectedPage =
     state.type === "READY" ? state.selected.target.page_id : null;
@@ -158,10 +245,12 @@ export function useSessionBrowserContainer(
     setAddressDraft(null);
     setAddressError(false);
   }, [resourceKey, selectedPage]);
+  const mutationPending = close.isPending || create.isPending;
   const interaction = useBrowserInteraction({
     enabled:
+      focused &&
       state.type === "READY" &&
-      !close.isPending &&
+      !mutationPending &&
       query.data?.allow_input === true &&
       live.state.connection === "connected" &&
       status !== null &&
@@ -173,6 +262,24 @@ export function useSessionBrowserContainer(
     onAction: (frame, action) =>
       query.data?.allow_input === true && live.coordinate(frame, action),
   });
+  const touchView = useBrowserTouchView({
+    enabled:
+      focused &&
+      !mutationPending &&
+      source !== null &&
+      status !== null &&
+      browserFrameMatchesStatus(source, status) &&
+      live.state.connection === "connected" &&
+      status.dialog === null,
+    canInput: interaction.interaction !== null,
+    frame: source,
+    zoom,
+    onZoomChange: setZoom,
+    onAction: (frame, action) =>
+      query.data?.allow_input === true && live.coordinate(frame, action),
+    keyboardRef: interaction.keyboardRef,
+    cancelInput: interaction.cancel,
+  });
   cancel.current = interaction.cancel;
   if (state.type === "READY") {
     state = {
@@ -183,12 +290,12 @@ export function useSessionBrowserContainer(
       status,
       canInput:
         state.canClose &&
-        !close.isPending &&
+        !mutationPending &&
         status?.allow_input === true &&
         live.state.connection === "connected",
       canClose:
         state.canClose &&
-        !close.isPending &&
+        !mutationPending &&
         live.state.connection !== "closed",
       dialog: status?.dialog ?? null,
       conflict: live.state.conflict,
@@ -202,6 +309,16 @@ export function useSessionBrowserContainer(
     }
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    const viewport = window.visualViewport;
+    const updateViewport = (): void =>
+      setFocusViewport(
+        viewport === null
+          ? null
+          : { top: viewport.offsetTop, height: viewport.height },
+      );
+    updateViewport();
+    viewport?.addEventListener("resize", updateViewport);
+    viewport?.addEventListener("scroll", updateViewport);
     const escape = (event: KeyboardEvent): void => {
       if (event.key === "Escape" && !event.isComposing) {
         event.preventDefault();
@@ -213,7 +330,10 @@ export function useSessionBrowserContainer(
     window.addEventListener("keydown", escape, true);
     return () => {
       window.removeEventListener("keydown", escape, true);
+      viewport?.removeEventListener("resize", updateViewport);
+      viewport?.removeEventListener("scroll", updateViewport);
       document.body.style.overflow = previousOverflow;
+      setFocusViewport(null);
     };
   }, [focused]);
   const navigationEnabled =
@@ -235,12 +355,19 @@ export function useSessionBrowserContainer(
       void utils.browser.projection.invalidate(resource);
     }
   };
+  const canCreate =
+    !denied &&
+    query.data?.available === true &&
+    query.data.allow_input &&
+    !mutationPending;
   return {
     state,
     focused,
+    focusViewport,
     zoom,
     onToggleFocus: () => {
       interaction.cancel();
+      interaction.keyboardRef.current?.blur();
       setFocused((value) => !value);
     },
     onZoomChange: (value) => {
@@ -271,6 +398,15 @@ export function useSessionBrowserContainer(
     },
     onNavigate: navigate,
     closeError: close.isError,
+    createError: create.isError,
+    creating: create.isPending,
+    canCreate,
+    onCreatePage: () => {
+      if (canCreate) {
+        interaction.cancel();
+        create.mutate(resource);
+      }
+    },
     onSelect: (target) => {
       interaction.cancel();
       if (!close.isPending) {
@@ -280,20 +416,23 @@ export function useSessionBrowserContainer(
         scroll: false,
       });
     },
-    onClosePage: () => {
+    onClosePage: (target) => {
       if (
         currentState.type !== "READY" ||
         !currentState.canClose ||
-        close.isPending
+        mutationPending ||
+        !currentState.pages.some((page) =>
+          sameBrowserTarget(page.target, target),
+        )
       ) {
         return;
       }
       interaction.cancel();
       close.mutate({
         ...resource,
-        taskId: currentState.selected.target.task_id,
-        pageId: currentState.selected.target.page_id,
-        resourceIncarnation: currentState.selected.target.resource_incarnation,
+        taskId: target.task_id,
+        pageId: target.page_id,
+        resourceIncarnation: target.resource_incarnation,
       });
     },
     onRetry: () => {
@@ -301,7 +440,10 @@ export function useSessionBrowserContainer(
       if (!close.isPending) {
         close.reset();
       }
-      setDenial(null);
+      if (!create.isPending) {
+        create.reset();
+      }
+      setDeniedResource(null);
       live.reconnect();
       void utils.browser.projection.invalidate(resource);
     },
@@ -322,5 +464,6 @@ export function useSessionBrowserContainer(
     onDialogTextChange: setDialogText,
     keyboardRef: interaction.keyboardRef,
     interaction: interaction.interaction,
+    touchView,
   };
 }

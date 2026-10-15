@@ -13,30 +13,46 @@ const page = {
   title: "Page",
   url: "https://example.test",
 };
-void test("stale or incomplete links never switch silently to another page", () => {
-  assert.deepEqual(browserProjectionState([page], { type: "NONE" }, true), {
-    type: "SELECT_PAGE",
-    pages: [page],
-  });
-  assert.deepEqual(browserProjectionState([page], { type: "INVALID" }, true), {
-    type: "CLOSED_TARGET",
-    pages: [page],
-  });
-  assert.deepEqual(
-    browserProjectionState(
-      [page],
-      { type: "TARGET", target: { ...target, resource_incarnation: "old" } },
-      true,
-    ),
-    { type: "CLOSED_TARGET", pages: [page] },
-  );
+const other = { ...page, target: { ...target, page_id: "other" } };
+
+void test("missing, incomplete and closed links select the recent live Agent tab", () => {
+  for (const linked of [
+    { type: "NONE" },
+    { type: "INVALID" },
+    { type: "TARGET", target: { ...target, resource_incarnation: "old" } },
+  ] as const) {
+    const state = browserProjectionState([page, other], linked, true, [
+      other.target,
+    ]);
+    assert.equal(state.type, "READY");
+    assert.deepEqual(state.selected.target, other.target);
+  }
 });
-void test("REST selection awaits actual admitted viewer status before enabling input", () => {
+void test("unknown or closed recent tabs fall back to the first live tab", () => {
+  const state = browserProjectionState([page, other], { type: "NONE" }, true, [
+    { ...target, page_id: "closed" },
+  ]);
+  assert.equal(state.type, "READY");
+  assert.deepEqual(state.selected.target, target);
+});
+void test("explicit live tab selection is retained over Agent preference", () => {
   const state = browserProjectionState(
-    [page],
+    [page, other],
     { type: "TARGET", target },
     true,
+    [other.target],
   );
+  assert.equal(state.type, "READY");
+  assert.deepEqual(state.selected.target, target);
+});
+void test("empty tab lists guide creation regardless of an obsolete link", () => {
+  assert.deepEqual(
+    browserProjectionState([], { type: "TARGET", target }, true),
+    { type: "EMPTY" },
+  );
+});
+void test("automatic selection awaits actual admitted viewer status before enabling input", () => {
+  const state = browserProjectionState([page], { type: "NONE" }, true);
   assert.equal(state.type, "READY");
   assert.equal(state.connection, "connecting");
   assert.equal(state.canInput, false);

@@ -177,6 +177,7 @@ __all__ = [
     "AwsSecrets",
     "Body",
     "BrowserClosePageRequest",
+    "BrowserCreatePageResponse",
     "BrowserFrameResponse",
     "BrowserPageResponse",
     "BrowserProjectionResponse",
@@ -836,6 +837,7 @@ from azentspublicclient.models.aws_config import AwsConfig as AwsConfig
 from azentspublicclient.models.aws_secrets import AwsSecrets as AwsSecrets
 from azentspublicclient.models.body import Body as Body
 from azentspublicclient.models.browser_close_page_request import BrowserClosePageRequest as BrowserClosePageRequest
+from azentspublicclient.models.browser_create_page_response import BrowserCreatePageResponse as BrowserCreatePageResponse
 from azentspublicclient.models.browser_frame_response import BrowserFrameResponse as BrowserFrameResponse
 from azentspublicclient.models.browser_page_response import BrowserPageResponse as BrowserPageResponse
 from azentspublicclient.models.browser_projection_response import BrowserProjectionResponse as BrowserProjectionResponse

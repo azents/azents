@@ -16,6 +16,7 @@ from azents.api.public.browser.v1 import mount
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.enums import WorkspaceUserRole
 from azents.services.runtime_browser.data import (
+    RuntimeBrowserCreatedPage,
     RuntimeBrowserOperationError,
     RuntimeBrowserProjection,
     RuntimeBrowserRequestError,
@@ -63,6 +64,37 @@ def _service() -> AsyncMock:
     )
     service.close_page.return_value = RuntimeBrowserProjection(True, None, True, ())
     return service
+
+
+def test_create_returns_current_projection_and_exact_new_tab() -> None:
+    service = _service()
+    service.create_page.return_value = RuntimeBrowserCreatedPage(
+        RuntimeBrowserProjection(True, None, True, (_TASK,)), _PAGE
+    )
+    with TestClient(_app(service)) as client:
+        result = client.post(_PATH + "/pages", json={})
+    assert result.status_code == 200
+    assert result.json()["page"]["id"] == _PAGE.id
+    assert result.json()["projection"]["tasks"][0]["pages"][0]["id"] == _PAGE.id
+    service.create_page.assert_awaited_once_with(
+        user_id="user-a",
+        authentication_session_id="auth-a",
+        resource=RuntimeBrowserResource("team", "agent-1", "concrete-session"),
+    )
+
+
+@pytest.mark.parametrize(
+    "body",
+    [{"url": "https://example.test"}, {"session_id": "other"}, {"task_id": "task"}],
+)
+def test_create_body_cannot_override_blank_tab_or_authority(
+    body: dict[str, str],
+) -> None:
+    service = _service()
+    with TestClient(_app(service)) as client:
+        result = client.post(_PATH + "/pages", json=body)
+    assert result.status_code == 422
+    service.create_page.assert_not_awaited()
 
 
 def test_projection_exposes_only_frozen_fields_and_concrete_session() -> None:
@@ -186,10 +218,10 @@ def test_member_auth_dependency_rejection_runs_before_browser_service() -> None:
     service.projection.assert_not_awaited()
 
 
-def test_openapi_has_frozen_operation_ids_and_no_ws_ticket_or_open_route() -> None:
+def test_openapi_has_typed_projection_create_close_operations() -> None:
     schema = _app(_service()).openapi()
     paths = schema["paths"]
-    assert len(paths) == 2
+    assert len(paths) == 3
     projection = paths[
         _PATH.replace("team", "{handle}")
         .replace("agent-1", "{agent_id}")
@@ -198,6 +230,8 @@ def test_openapi_has_frozen_operation_ids_and_no_ws_ticket_or_open_route() -> No
     assert projection["get"]["operationId"] == "browser_v1_get_browser_projection"
     close = next(path for path in paths if path.endswith("/close"))
     assert paths[close]["post"]["operationId"] == "browser_v1_close_browser_page"
+    create = next(path for path in paths if path.endswith("/pages"))
+    assert paths[create]["post"]["operationId"] == "browser_v1_create_browser_page"
     assert not {"ws", "ticket", "open"} & {path.rsplit("/", 1)[-1] for path in paths}
     properties = schema["components"]["schemas"]["BrowserProjectionResponse"][
         "properties"

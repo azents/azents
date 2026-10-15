@@ -2,27 +2,27 @@ import { sameBrowserTarget } from "./input.ts";
 import type { BrowserLinkedTarget } from "./route";
 import type { BrowserPageChoice, BrowserViewState } from "./types";
 
-/** Pure selection never promotes a missing linked page to a different live page. */
+/** Explicit live links win; stale/missing links select recent Agent work, then the first live tab. */
 export function browserProjectionState(
   pages: readonly BrowserPageChoice[],
   linked: BrowserLinkedTarget,
   allowInput: boolean,
+  recent: readonly BrowserPageChoice["target"][] = [],
 ): BrowserViewState {
-  if (linked.type === "INVALID") {
-    return { type: "CLOSED_TARGET", pages };
-  }
-  const selected =
-    linked.type === "TARGET"
-      ? pages.find((page) => sameBrowserTarget(page.target, linked.target))
-      : null;
-  if (linked.type === "TARGET" && !selected) {
-    return { type: "CLOSED_TARGET", pages };
-  }
   if (pages.length === 0) {
     return { type: "EMPTY" };
   }
-  if (!selected) {
-    return { type: "SELECT_PAGE", pages };
+  const selected =
+    (linked.type === "TARGET"
+      ? pages.find((page) => sameBrowserTarget(page.target, linked.target))
+      : null) ??
+    recent.flatMap((target) =>
+      pages.filter((page) => sameBrowserTarget(page.target, target)),
+    )[0] ??
+    pages[0] ??
+    null;
+  if (selected === null) {
+    return { type: "EMPTY" };
   }
   return {
     type: "READY",

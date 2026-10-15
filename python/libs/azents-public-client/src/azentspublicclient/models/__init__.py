@@ -133,6 +133,7 @@ from azentspublicclient.models.aws_config import AwsConfig
 from azentspublicclient.models.aws_secrets import AwsSecrets
 from azentspublicclient.models.body import Body
 from azentspublicclient.models.browser_close_page_request import BrowserClosePageRequest
+from azentspublicclient.models.browser_create_page_response import BrowserCreatePageResponse
 from azentspublicclient.models.browser_frame_response import BrowserFrameResponse
 from azentspublicclient.models.browser_page_response import BrowserPageResponse
 from azentspublicclient.models.browser_projection_response import BrowserProjectionResponse

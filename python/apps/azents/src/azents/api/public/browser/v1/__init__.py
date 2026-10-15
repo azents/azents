@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Path
 
 from azents.api.public.browser.v1.data import (
     BrowserClosePageRequest,
+    BrowserCreatePageRequest,
+    BrowserCreatePageResponse,
     BrowserProjectionResponse,
 )
 from azents.api.public.browser.v1.websocket import router as websocket_router
@@ -85,6 +87,37 @@ async def close_browser_page(
             else None,
         ) from None
     return BrowserProjectionResponse.convert_from(result)
+
+
+@router.post(
+    "/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/pages",
+    operation_id="browser_v1_create_browser_page",
+    response_model=BrowserCreatePageResponse,
+)
+async def create_browser_page(
+    handle: str,
+    agent_id: str,
+    session_id: str,
+    body: BrowserCreatePageRequest,
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[RuntimeBrowserService, Depends(get_runtime_browser_service)],
+) -> BrowserCreatePageResponse:
+    """Create a blank tab using the current directing Session authority."""
+    try:
+        result = await service.create_page(
+            user_id=member.user_id,
+            authentication_session_id=member.session_id,
+            resource=RuntimeBrowserResource(handle, agent_id, session_id),
+        )
+    except RuntimeBrowserRequestError as error:
+        raise HTTPException(
+            status_code=error.status_code,
+            detail=error.detail,
+            headers={"WWW-Authenticate": "Bearer"}
+            if error.status_code == 401
+            else None,
+        ) from None
+    return BrowserCreatePageResponse.convert_from(result)
 
 
 def mount(mounter: RouteMounter) -> None:

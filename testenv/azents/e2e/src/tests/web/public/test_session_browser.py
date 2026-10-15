@@ -27,6 +27,8 @@ from azentspublicclient.models.subagent_tree_response import SubagentTreeRespons
 from azentspublicclient.models.ws_ticket_response import WsTicketResponse
 from pydantic import BaseModel, ConfigDict, Field
 from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.actions.action_builder import ActionBuilder
+from selenium.webdriver.common.actions.pointer_input import PointerInput
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
@@ -222,6 +224,28 @@ def _verify_live_panel(
         == target.task_id
     )
     wait = WebDriverWait(driver, 60)
+    preview = wait.until(
+        ec.element_to_be_clickable(
+            (
+                By.CSS_SELECTOR,
+                '[aria-label="Remote browser page"] button[aria-label="Focus browser"]',
+            )
+        )
+    )
+    assert not driver.find_elements(
+        By.CSS_SELECTOR, 'textarea[aria-label="Remote browser keyboard"]'
+    )
+    preview.click()
+    focused = wait.until(
+        ec.visibility_of_element_located(
+            (By.CSS_SELECTOR, '[role="dialog"][aria-label="Focus browser"]')
+        )
+    )
+    assert driver.execute_script(
+        "const r=arguments[0].getBoundingClientRect();"
+        "return r.width===innerWidth && r.height===innerHeight;",
+        focused,
+    )
     viewport = wait.until(
         ec.visibility_of_element_located(
             (By.CSS_SELECTOR, '[aria-label="Remote browser page"][data-stale="false"]')
@@ -238,15 +262,20 @@ def _verify_live_panel(
             )
         )
     )
-    width, height = dimensions.width, dimensions.height
-    scale = min(viewport.size["width"] / width, viewport.size["height"] / height)
+    width = dimensions.width
 
     def click_native(x: int, y: int) -> None:
-        ActionChains(driver).move_to_element_with_offset(
-            viewport,
-            int((x - width / 2) * scale),
-            int((y - height / 2) * scale),
-        ).click().perform()
+        rect = viewport.rect
+        scale = rect["width"] / width
+        # WebDriver's element origin clips the center of a scrollable image.
+        # Native coordinates are relative to the full image, not its visible center.
+        mouse = ActionBuilder(driver)
+        mouse.pointer_action.move_to_location(
+            int(rect["x"] + x * scale), int(rect["y"] + y * scale)
+        )
+        mouse.pointer_action.pointer_down()
+        mouse.pointer_action.pointer_up()
+        mouse.perform()
 
     def title_is(expected: str) -> bool:
         projection = _projection(public_url, resource_path, token)
@@ -290,17 +319,6 @@ def _verify_live_panel(
         )
         error.add_note(json.dumps(diagnostics, sort_keys=True))
         raise
-    driver.find_element(By.CSS_SELECTOR, 'button[aria-label="Focus browser"]').click()
-    focused = wait.until(
-        ec.visibility_of_element_located(
-            (By.CSS_SELECTOR, '[role="dialog"][aria-label="Focus browser"]')
-        )
-    )
-    assert driver.execute_script(
-        "const r=arguments[0].getBoundingClientRect();"
-        "return r.width===innerWidth && r.height===innerHeight;",
-        focused,
-    )
     assert driver.execute_script(
         "return document.querySelector('[aria-label=\"Remote browser page\"]')"
         "=== arguments[0];",
@@ -409,6 +427,81 @@ return {ready: false};
     )
     assert driver.execute_script(
         "return document.documentElement.scrollWidth <= window.innerWidth;"
+    )
+    wait.until(
+        ec.element_to_be_clickable(
+            (
+                By.CSS_SELECTOR,
+                '[aria-label="Remote browser page"] button[aria-label="Focus browser"]',
+            )
+        )
+    ).click()
+    viewport = wait.until(
+        ec.visibility_of_element_located(
+            (By.CSS_SELECTOR, '[aria-label="Remote browser page"][data-stale="false"]')
+        )
+    )
+
+    def tap_native(x: int, y: int) -> None:
+        rect = viewport.rect
+        scale = rect["width"] / width
+        touch = ActionBuilder(driver, mouse=PointerInput("touch", "browser-finger"))
+        touch.pointer_action.move_to_location(
+            int(rect["x"] + x * scale), int(rect["y"] + y * scale)
+        )
+        touch.pointer_action.pointer_down()
+        touch.pointer_action.pointer_up()
+        touch.perform()
+
+    tap_native(100, 280)
+    wait_until(
+        lambda: title_is("Browser GUI pointer verified"),
+        timeout=15,
+        interval=0.1,
+        message="Mobile touch did not activate the native page button",
+    )
+    tap_native(100, 120)
+    wait.until(
+        lambda _: driver.execute_script(
+            "return document.activeElement?.getAttribute('aria-label') "
+            "=== 'Remote browser keyboard';"
+        )
+    )
+    ActionChains(driver).send_keys("Synthetic GUI input").perform()
+    wait_until(
+        lambda: title_is("✅"),
+        timeout=15,
+        interval=0.1,
+        message="Mobile touch focus did not deliver complete native text",
+    )
+    driver.find_element(
+        By.XPATH, "//button[normalize-space(.)='Exit focused view']"
+    ).click()
+    wait.until(
+        ec.invisibility_of_element_located(
+            (By.CSS_SELECTOR, '[role="dialog"][aria-label="Focus browser"]')
+        )
+    )
+
+    driver.find_element(By.CSS_SELECTOR, 'button[aria-label="New tab"]').click()
+    wait.until(
+        lambda _: driver.execute_script(
+            "return new URLSearchParams(location.search).get('browserPageId') "
+            "!== arguments[0];",
+            target.page_id,
+        )
+    )
+    wait.until(
+        ec.element_to_be_clickable(
+            (By.CSS_SELECTOR, 'button[aria-label="Close tab: about:blank"]')
+        )
+    ).click()
+    wait.until(
+        lambda _: driver.execute_script(
+            "return new URLSearchParams(location.search).get('browserPageId') "
+            "=== arguments[0];",
+            target.page_id,
+        )
     )
     if artifact_directory is not None:
         assert driver.save_screenshot(
@@ -592,6 +685,13 @@ def test_session_browser_engine_native_input_dialog_and_reconnect(
             timeout=10,
         )
         assert child_close.status_code == 409
+        child_create = requests.post(
+            f"{azents_public_server_url}{child_resource}/pages",
+            headers=headers,
+            json={},
+            timeout=10,
+        )
+        assert child_create.status_code == 409
         unchanged = _projection(
             azents_public_server_url, child_resource, workspace.token
         )
