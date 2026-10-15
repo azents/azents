@@ -644,7 +644,11 @@ export function SessionBrowserPanel({
             </Stack>
           )}
         </Stack>
-        <div className={classes.viewWindow} ref={touchView?.viewWindowRef}>
+        <div
+          className={classes.viewWindow}
+          ref={touchView?.viewWindowRef}
+          tabIndex={focused && handlers === null ? 0 : -1}
+        >
           <div
             className={classes.viewport}
             style={{
