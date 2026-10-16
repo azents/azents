@@ -1,13 +1,15 @@
 {
   "change_checkpoint": {
-    "checked_at": "2026-10-15T03:27:58Z",
+    "checked_at": "2026-10-15T22:42:11Z",
     "checked_ruleset_revisions": [
+      "1a20f0b0040f5867251874f2f51afde1051e59c29a1aea59650e93daeb66ce9d",
       "27090dfbb643163110b41d91462c4d2455bb024416896d88067d8bdb05b520f5",
+      "7938fddbec63f2bd90521cce732ffdfa6aab738736f324b6bcdadae2dc4d3fb4",
       "b28dd359ab885a353fe9a3a84a088c980974ede0e4b31af189a66feac8a11c58",
       "ce4ed60d01f8f4493abdc5e541c07f524f0511ffeab06c8e6fca47ed03366709",
       "dee40c24e2143112ee9589d8a267ff5294a635bdc89b2dfd91e79cd31396b1b7"
     ],
-    "checked_through_commit": "fdb34e87dacef7c061497168b44b2ef560771f55"
+    "checked_through_commit": "3e2ed11f9a174f96cb5bae9ed38508a152605b3b"
   },
   "ranges": {
     ".::bucket-1-of-8": {
@@ -660,6 +662,41 @@
       "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
       "checked_through_commit": "25517e3d8c60dc0d8029f9bac5f4a7ebda1be51d"
     },
+    "swift/**::bucket-2-of-8": {
+      "checked_at": "2026-10-15T22:42:11Z",
+      "checked_ruleset_revision": "7938fddbec63f2bd90521cce732ffdfa6aab738736f324b6bcdadae2dc4d3fb4",
+      "checked_through_commit": "3e2ed11f9a174f96cb5bae9ed38508a152605b3b"
+    },
+    "swift/**::bucket-3-of-8": {
+      "checked_at": "2026-10-15T22:42:11Z",
+      "checked_ruleset_revision": "7938fddbec63f2bd90521cce732ffdfa6aab738736f324b6bcdadae2dc4d3fb4",
+      "checked_through_commit": "3e2ed11f9a174f96cb5bae9ed38508a152605b3b"
+    },
+    "swift/**::bucket-4-of-8": {
+      "checked_at": "2026-10-15T22:42:11Z",
+      "checked_ruleset_revision": "7938fddbec63f2bd90521cce732ffdfa6aab738736f324b6bcdadae2dc4d3fb4",
+      "checked_through_commit": "3e2ed11f9a174f96cb5bae9ed38508a152605b3b"
+    },
+    "swift/**::bucket-5-of-8": {
+      "checked_at": "2026-10-15T22:42:11Z",
+      "checked_ruleset_revision": "7938fddbec63f2bd90521cce732ffdfa6aab738736f324b6bcdadae2dc4d3fb4",
+      "checked_through_commit": "3e2ed11f9a174f96cb5bae9ed38508a152605b3b"
+    },
+    "swift/**::bucket-6-of-8": {
+      "checked_at": "2026-10-15T22:42:11Z",
+      "checked_ruleset_revision": "7938fddbec63f2bd90521cce732ffdfa6aab738736f324b6bcdadae2dc4d3fb4",
+      "checked_through_commit": "3e2ed11f9a174f96cb5bae9ed38508a152605b3b"
+    },
+    "swift/**::bucket-7-of-8": {
+      "checked_at": "2026-10-15T22:42:11Z",
+      "checked_ruleset_revision": "7938fddbec63f2bd90521cce732ffdfa6aab738736f324b6bcdadae2dc4d3fb4",
+      "checked_through_commit": "3e2ed11f9a174f96cb5bae9ed38508a152605b3b"
+    },
+    "swift/**::bucket-8-of-8": {
+      "checked_at": "2026-10-15T22:42:11Z",
+      "checked_ruleset_revision": "7938fddbec63f2bd90521cce732ffdfa6aab738736f324b6bcdadae2dc4d3fb4",
+      "checked_through_commit": "3e2ed11f9a174f96cb5bae9ed38508a152605b3b"
+    },
     "testdata/**::bucket-7-of-8": {
       "checked_at": "2026-10-03T03:37:48Z",
       "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
@@ -889,6 +926,46 @@
       "checked_at": "2026-09-18T22:40:42Z",
       "checked_ruleset_revision": "193cd524af5bf589eeab7744b06e813623015ce64d6d503b684ddbbbf9bbced2",
       "checked_through_commit": "dfff3ad6c92497e43e86fce93fe4efafb0693dba"
+    },
+    "typescript/packages/azents-session-core/**::bucket-1-of-8": {
+      "checked_at": null,
+      "checked_ruleset_revision": null,
+      "checked_through_commit": null
+    },
+    "typescript/packages/azents-session-core/**::bucket-2-of-8": {
+      "checked_at": null,
+      "checked_ruleset_revision": null,
+      "checked_through_commit": null
+    },
+    "typescript/packages/azents-session-core/**::bucket-3-of-8": {
+      "checked_at": null,
+      "checked_ruleset_revision": null,
+      "checked_through_commit": null
+    },
+    "typescript/packages/azents-session-core/**::bucket-4-of-8": {
+      "checked_at": null,
+      "checked_ruleset_revision": null,
+      "checked_through_commit": null
+    },
+    "typescript/packages/azents-session-core/**::bucket-5-of-8": {
+      "checked_at": null,
+      "checked_ruleset_revision": null,
+      "checked_through_commit": null
+    },
+    "typescript/packages/azents-session-core/**::bucket-6-of-8": {
+      "checked_at": null,
+      "checked_ruleset_revision": null,
+      "checked_through_commit": null
+    },
+    "typescript/packages/azents-session-core/**::bucket-7-of-8": {
+      "checked_at": null,
+      "checked_ruleset_revision": null,
+      "checked_through_commit": null
+    },
+    "typescript/packages/azents-session-core/**::bucket-8-of-8": {
+      "checked_at": null,
+      "checked_ruleset_revision": null,
+      "checked_through_commit": null
     }
   },
   "rulesets": {
@@ -1156,6 +1233,34 @@
       ".claude/conventions/testenv/no-direct-db-write-in-tests.md",
       ".claude/conventions/testenv/qa-report-includes-slack-link.md",
       ".claude/conventions/testenv/slack-password-login-uses-hidden-url.md"
+    ],
+    "7938fddbec63f2bd90521cce732ffdfa6aab738736f324b6bcdadae2dc4d3fb4": [
+      ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
+      ".claude/conventions/global/comments-and-docstrings-in-english.md",
+      ".claude/conventions/global/decode-json-into-typed-payloads.md",
+      ".claude/conventions/global/dependency-updates-without-overrides.md",
+      ".claude/conventions/global/deterministic-test-synchronization.md",
+      ".claude/conventions/global/diagrams-in-mermaid.md",
+      ".claude/conventions/global/load-tests-as-reports.md",
+      ".claude/conventions/global/patch-null-means-set-null.md",
+      ".claude/conventions/global/prefer-supported-external-service-sdks.md",
+      ".claude/conventions/global/redis-optional-no-ha.md",
+      ".claude/conventions/global/remove-obsolete-feature-tests.md",
+      ".claude/conventions/global/runner-reported-agent-workspace.md",
+      ".claude/conventions/global/stacked-pr-rebase-script.md",
+      ".claude/conventions/global/user-facing-text-in-english.md",
+      ".claude/conventions/global/worktree-rebase-origin-main.md",
+      ".claude/conventions/swift/apps-depend-on-libs-only.md",
+      ".claude/conventions/swift/declarative-views.md",
+      ".claude/conventions/swift/exhaustive-state-enums.md",
+      ".claude/conventions/swift/explicit-actor-isolation.md",
+      ".claude/conventions/swift/generated-project-inputs.md",
+      ".claude/conventions/swift/improve-types-before-suppression.md",
+      ".claude/conventions/swift/injected-collaborators.md",
+      ".claude/conventions/swift/swift-api-design.md",
+      ".claude/conventions/swift/transparent-errors-and-cancellation.md",
+      ".claude/conventions/swift/typed-domain-boundaries.md",
+      ".claude/conventions/swift/value-semantics-first.md"
     ],
     "7b246418b69059cc3b665a6c9e453007d5d1b71f3e1bac8bf63edee97336466a": [
       ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
