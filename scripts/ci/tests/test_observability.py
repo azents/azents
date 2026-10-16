@@ -12,8 +12,14 @@ from pathlib import Path
 from scripts.ci.analyze import analyze, expected_test_artifacts
 from scripts.ci.build_comment import LIMIT, combine, producer_summaries
 from scripts.ci.chart import HistoryPoint, daily, decode_history
-from scripts.ci.evidence import artifacts_for_run, file_hashes, verify_collection
-from scripts.ci.history import append
+from scripts.ci.evidence import (
+    artifacts_for_run,
+    decode_collection,
+    decode_test_run,
+    file_hashes,
+    verify_collection,
+)
+from scripts.ci.history import append, decode_analysis, decode_record
 from scripts.ci.workflow_report import decode_run, metrics, render
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -168,6 +174,75 @@ def lane_sample(root: Path, attempt: int, assignments: dict[str, list[str]]) -> 
 
 
 class WorkflowReportTest(unittest.TestCase):
+    def test_typed_history_preserves_opaque_metrics_and_conflict_detection(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            record = metrics(decode_run(sample()))
+            record["cohort"] = "baseline"
+            record["extension"] = {"opaque": [None, True, {"future": "value"}]}
+            analysis = root / "analysis.json"
+            history = root / "history.jsonl"
+            analysis.write_text(json.dumps({"cohort": "baseline", "records": [record]}))
+            self.assertEqual(append(analysis, history, "main"), 1)
+            stored = json.loads(history.read_text())
+            self.assertEqual(stored, {**record, "cohort": "main"})
+            self.assertEqual(append(analysis, history, "main"), 1)
+            without_cohort = {k: v for k, v in record.items() if k != "cohort"}
+            analysis.write_text(
+                json.dumps({"cohort": "baseline", "records": [without_cohort]})
+            )
+            self.assertEqual(append(analysis, history, "main"), 1)
+            record["extension"] = {"different": True}
+            analysis.write_text(json.dumps({"cohort": "baseline", "records": [record]}))
+            with self.assertRaisesRegex(ValueError, "Conflicting evidence"):
+                append(analysis, history, "main")
+            self.assertEqual(json.loads(history.read_text()), stored)
+
+    def test_typed_provenance_decoders_preserve_extensibility_and_identity(
+        self,
+    ) -> None:
+        producer = decode_test_run(
+            {
+                "head_sha": "a" * 40,
+                "run_id": "100",
+                "attempt": "1",
+                "name": "python-azents",
+                "exit_code": 0,
+                "extension": [None, True],
+            }
+        )
+        self.assertEqual((producer.run_id, producer.attempt), ("100", "1"))
+        manifest = decode_collection(
+            {
+                "workflow_run_id": 100,
+                "workflow_attempt": 1,
+                "head_sha": "a" * 40,
+                "artifact_identity_verified": True,
+                "artifact_names": ["a", "a"],
+                "file_hashes": {"a/file": "digest"},
+                "extension": {"future": True},
+            }
+        )
+        self.assertEqual(manifest.artifact_names, {"a"})
+        self.assertEqual(manifest.file_hashes, {"a/file": "digest"})
+        raw = metrics(decode_run(sample()))
+        raw["cohort"] = "baseline"
+        parsed = decode_analysis(
+            {"cohort": "baseline", "records": [raw], "extra": None}
+        )
+        self.assertEqual(parsed.records[0].key, ("CI", 100, 1, "baseline"))
+        for field, value in [
+            ("workflow_run_id", True),
+            ("workflow_attempt", "1"),
+            ("workflow_name", None),
+            ("created_at_utc", []),
+        ]:
+            with self.subTest(field=field):
+                with self.assertRaises(ValueError):
+                    decode_record({**raw, field: value})
+
     def test_dependency_elapsed_is_not_longest_parallel_job(self) -> None:
         run = decode_run(sample())
         data = metrics(run)

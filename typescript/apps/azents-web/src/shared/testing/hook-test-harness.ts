@@ -127,6 +127,7 @@ export class HookHarness {
     exportName: string,
     modules: Record<string, unknown>,
     window: unknown,
+    document?: unknown,
   ): void {
     const exports: Record<string, unknown> = {};
     const cjsModule = { exports };
@@ -146,6 +147,7 @@ export class HookHarness {
         return modules[name];
       },
       window,
+      document,
       Promise,
       Date: FixtureDate,
     });

@@ -3,7 +3,8 @@
 import { Box, Button, Group, Portal, rem } from "@mantine/core";
 import { IconClipboard, IconEdit } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { useBrowserToolbarTouch } from "../containers/useBrowserToolbarTouch";
+import { createReactContainer } from "@/shared/lib/createReactContainer";
+import { useBrowserKeyboardToolbar } from "../containers/useBrowserKeyboardToolbar";
 import type { BrowserEditorViewport } from "../containers/useBrowserEditorViewport";
 import type { ReactElement } from "react";
 
@@ -16,16 +17,16 @@ export interface BrowserKeyboardToolbarProps {
 }
 
 /** Action buttons only: native editing remains in the separate modal. */
-export function BrowserKeyboardToolbar({
+export function BrowserKeyboardToolbarView({
   viewport,
   appearance,
   onPaste,
   onOpen,
   editDisabled = false,
-}: BrowserKeyboardToolbarProps): ReactElement {
+  pasteRef,
+  openRef,
+}: ReturnType<typeof useBrowserKeyboardToolbar>): ReactElement {
   const t = useTranslations("chat.browser");
-  const pasteRef = useBrowserToolbarTouch(onPaste);
-  const openRef = useBrowserToolbarTouch(onOpen);
   const bottom =
     viewport === null ? "100dvh" : rem(viewport.top + viewport.height);
   const floating = appearance === "floating";
@@ -115,3 +116,9 @@ export function BrowserKeyboardToolbar({
     </>
   );
 }
+
+export const BrowserKeyboardToolbar = createReactContainer(
+  "BrowserKeyboardToolbar",
+  useBrowserKeyboardToolbar,
+  BrowserKeyboardToolbarView,
+);

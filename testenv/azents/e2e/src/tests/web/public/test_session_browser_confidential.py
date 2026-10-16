@@ -8,6 +8,7 @@ import azentspublicclient
 import pytest
 import requests
 from azentspublicclient.models.agent_runtime_response import AgentRuntimeResponse
+from pydantic import BaseModel, ConfigDict, StrictStr
 from testcontainers.core.container import DockerContainer
 
 from support.browser_confidential_fixture import (
@@ -65,6 +66,18 @@ socketserver.TCPServer.allow_reuse_address=True
 with socketserver.TCPServer(('127.0.0.1',8766),Handler) as server:
     server.serve_forever()
 '''
+
+
+class _BrowserPageTitle(BaseModel):
+    model_config = ConfigDict(extra="ignore", hide_input_in_errors=True)
+    title: StrictStr
+
+
+class _BrowserVerification(BaseModel):
+    """Typed fields consumed from an extensible Browser tool-result envelope."""
+
+    model_config = ConfigDict(extra="ignore", hide_input_in_errors=True)
+    page: _BrowserPageTitle
 
 
 def test_confidential_environment_input_through_skill_and_native_browser(
@@ -176,8 +189,8 @@ def test_confidential_environment_input_through_skill_and_native_browser(
     } <= (observed.keys())
     assert all(result.status == "completed" for result in observed.values())
     texts = [part.text for part in _parts(observed["verify"]) if part.text]
-    verified = json.loads(texts[0])
-    assert verified["page"]["title"] == "Confidential input verified"
+    verified = _BrowserVerification.model_validate_json(texts[0])
+    assert verified.page.title == "Confidential input verified"
     wait_until(
         lambda: (
             FINAL
@@ -263,7 +276,10 @@ def test_confidential_environment_input_through_skill_and_native_browser(
         if stage != "oldfill"
     )
     texts = [part.text for part in _parts(replacement_results["verify"]) if part.text]
-    assert json.loads(texts[0])["page"]["title"] == "Confidential input verified"
+    assert (
+        _BrowserVerification.model_validate_json(texts[0]).page.title
+        == "Confidential input verified"
+    )
     history = list_history(
         server_url=azents_public_server_url, token=token, session_id=session_id
     )

@@ -8,7 +8,6 @@
  */
 
 import { Box, Center, Loader, Text } from "@mantine/core";
-import { useEffect } from "react";
 import { ChatSessionViewContainer } from "@/features/chat/containers/useChatSessionViewContainer";
 import styles from "./AgentChatTab.module.css";
 import type { AgentChatContainerOutput } from "../containers/useAgentChatContainer";
@@ -23,29 +22,6 @@ export function AgentChatTab(
     mountSessionId,
     onConnectionStatusChange,
   } = props;
-
-  // Lock outer document scroll on chat page.
-  // Lock root too because locking only body can leave html scroll on iOS Safari.
-  useEffect(() => {
-    const root = document.documentElement;
-    const body = document.body;
-    const previousRootOverflow = root.style.overflow;
-    const previousRootOverscrollBehavior = root.style.overscrollBehavior;
-    const previousBodyOverflow = body.style.overflow;
-    const previousBodyOverscrollBehavior = body.style.overscrollBehavior;
-
-    root.style.overflow = "hidden";
-    root.style.overscrollBehavior = "none";
-    body.style.overflow = "hidden";
-    body.style.overscrollBehavior = "none";
-
-    return () => {
-      root.style.overflow = previousRootOverflow;
-      root.style.overscrollBehavior = previousRootOverscrollBehavior;
-      body.style.overflow = previousBodyOverflow;
-      body.style.overscrollBehavior = previousBodyOverscrollBehavior;
-    };
-  }, []);
 
   switch (sessionState.type) {
     case "LOADING": {
