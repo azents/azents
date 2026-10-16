@@ -3,7 +3,11 @@
 import { useLocalStorage } from "@mantine/hooks";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { parseSessionPanelView, sessionPanelHref } from "./sessionPanel";
+import {
+  availableSessionPanelView,
+  parseSessionPanelView,
+  sessionPanelHref,
+} from "./sessionPanel";
 import type { SessionPanelView } from "./sessionPanel";
 import type { PointerEvent, RefObject } from "react";
 
@@ -22,19 +26,45 @@ export interface SessionPanelState {
   openInitialTaskForEdit: boolean;
 }
 
-export function useSessionPanelState(mobile: boolean): SessionPanelState {
+export function useSessionPanelState({
+  mobile,
+  browserEnabled,
+}: {
+  mobile: boolean;
+  browserEnabled: boolean;
+}): SessionPanelState {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
   const page = params.get("page");
-  const selected = parseSessionPanelView(page);
+  const selected = availableSessionPanelView(
+    parseSessionPanelView(page),
+    browserEnabled,
+  );
   const [activeView, setActiveView] = useState<SessionPanelView>(
     selected ?? "files",
   );
   const [activationRevision, setActivationRevision] = useState(0);
   const [opened, setOpened] = useState(selected !== null || !mobile);
   const pendingPageRef = useRef<{ value: string | null } | null>(null);
+  const availableActiveView =
+    availableSessionPanelView(activeView, browserEnabled) ?? "files";
   useEffect(() => {
+    if (!browserEnabled && activeView === "browser") {
+      setActiveView("files");
+      pendingPageRef.current = null;
+    }
+  }, [browserEnabled, activeView]);
+  useEffect(() => {
+    if (!browserEnabled && page === "browser") {
+      setActiveView("files");
+      setOpened(true);
+      pendingPageRef.current = { value: "files" };
+      router.replace(sessionPanelHref(pathname, params.toString(), "files"), {
+        scroll: false,
+      });
+      return;
+    }
     const pendingPage = pendingPageRef.current;
     if (pendingPage !== null) {
       if (page === pendingPage.value) {
@@ -48,7 +78,7 @@ export function useSessionPanelState(mobile: boolean): SessionPanelState {
       return;
     }
     setOpened(!mobile);
-  }, [mobile, page, selected]);
+  }, [mobile, page, selected, browserEnabled, router, pathname, params]);
   const containerRef = useRef<HTMLDivElement>(null);
   const [chatRatio, setChatRatio] = useLocalStorage<number>({
     key: "azents.chat.workspaceRatio",
@@ -63,18 +93,20 @@ export function useSessionPanelState(mobile: boolean): SessionPanelState {
   });
   const onSelect = useCallback(
     (view: SessionPanelView): void => {
-      setActiveView(view);
+      const nextView =
+        availableSessionPanelView(view, browserEnabled) ?? "files";
+      setActiveView(nextView);
       setActivationRevision((revision) => revision + 1);
       setOpened(true);
-      if (page === view) {
+      if (page === nextView) {
         return;
       }
-      pendingPageRef.current = { value: view };
-      router.replace(sessionPanelHref(pathname, params.toString(), view), {
+      pendingPageRef.current = { value: nextView };
+      router.replace(sessionPanelHref(pathname, params.toString(), nextView), {
         scroll: false,
       });
     },
-    [page, router, pathname, params],
+    [page, router, pathname, params, browserEnabled],
   );
   const onClose = useCallback((): void => {
     setOpened(false);
@@ -89,14 +121,17 @@ export function useSessionPanelState(mobile: boolean): SessionPanelState {
   const onOpen = useCallback((): void => {
     setOpened(true);
     setActivationRevision((revision) => revision + 1);
-    if (page === activeView) {
+    if (page === availableActiveView) {
       return;
     }
-    pendingPageRef.current = { value: activeView };
-    router.replace(sessionPanelHref(pathname, params.toString(), activeView), {
-      scroll: false,
-    });
-  }, [activeView, page, params, pathname, router]);
+    pendingPageRef.current = { value: availableActiveView };
+    router.replace(
+      sessionPanelHref(pathname, params.toString(), availableActiveView),
+      {
+        scroll: false,
+      },
+    );
+  }, [availableActiveView, page, params, pathname, router]);
   const onResizeBy = useCallback(
     (delta: number): void => {
       setChatRatio((ratio) => Math.min(0.75, Math.max(0.35, ratio + delta)));
@@ -131,7 +166,7 @@ export function useSessionPanelState(mobile: boolean): SessionPanelState {
     [setChatRatio],
   );
   return {
-    activeView,
+    activeView: availableActiveView,
     activationRevision,
     opened,
     onSelect,

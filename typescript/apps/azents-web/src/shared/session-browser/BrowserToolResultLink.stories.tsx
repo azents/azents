@@ -1,5 +1,8 @@
-import { expect, within } from "storybook/test";
+import { useState } from "react";
+import { expect, userEvent, within } from "storybook/test";
+import { BrowserAvailabilityProvider } from "./BrowserAvailability";
 import { BrowserToolResultLink } from "./BrowserToolResultLink";
+import type { BrowserToolResultLinkProps } from "./useBrowserToolResultLink";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const meta = {
@@ -23,6 +26,13 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const ExactCurrentSession = {
+  decorators: [
+    (Story) => (
+      <BrowserAvailabilityProvider enabled>
+        <Story />
+      </BrowserAvailabilityProvider>
+    ),
+  ],
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const link = canvas.getByRole("link", { name: "Open in Browser" });
@@ -32,7 +42,39 @@ export const ExactCurrentSession = {
     );
   },
 } satisfies Story;
+export const DisabledAgent = {
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).queryByRole("link")).toBeNull();
+  },
+} satisfies Story;
+
+function AvailabilityFixture(
+  props: BrowserToolResultLinkProps,
+): React.ReactElement {
+  const [enabled, setEnabled] = useState(true);
+  return (
+    <BrowserAvailabilityProvider enabled={enabled}>
+      <button onClick={() => setEnabled(false)}>Disable Browser</button>
+      <BrowserToolResultLink {...props} />
+    </BrowserAvailabilityProvider>
+  );
+}
+export const DisableRemovesExistingLink = {
+  render: (props) => <AvailabilityFixture {...props} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("link", { name: "Open in Browser" }),
+    ).toBeVisible();
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Disable Browser" }),
+    );
+    await expect(canvas.queryByRole("link")).toBeNull();
+  },
+} satisfies Story;
+
 export const ClosedPageResult = {
+  decorators: ExactCurrentSession.decorators,
   args: { result: '{"page":null}' },
   play: async ({ canvasElement }) => {
     await expect(within(canvasElement).queryByRole("link")).toBeNull();

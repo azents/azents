@@ -857,3 +857,46 @@ def test_session_browser_engine_native_input_dialog_and_reconnect(
         )
     finally:
         reconnected.close()
+    # A disabled Agent must not expose Browser UI through a stale deep link.
+    disabled_response = requests.patch(
+        f"{azents_public_server_url}/agent/v1/workspaces/{workspace.handle}"
+        f"/agents/{workspace.agent_id}",
+        headers={"Authorization": f"Bearer {fresh.access_token}"},
+        json={"browser_enabled": False},
+        timeout=10,
+    )
+    disabled_response.raise_for_status()
+    assert disabled_response.json()["browser_enabled"] is False
+    browser_driver.get(
+        f"{azents_main_web_url}/w/{workspace.handle}/agents/{workspace.agent_id}"
+        f"/sessions/{workspace.session_id}?"
+        + urlencode(
+            {
+                "page": "browser",
+                "browserTaskId": target.task_id,
+                "browserPageId": target.page_id,
+                "browserIncarnation": target.resource_incarnation,
+                "retained": "fixture",
+            }
+        )
+    )
+    WebDriverWait(browser_driver, 60).until(
+        lambda _: browser_driver.execute_script(
+            "return new URLSearchParams(location.search).get('page') === 'files';"
+        )
+    )
+    assert browser_driver.execute_script(
+        "const p = new URLSearchParams(location.search);"
+        "return p.get('retained') === 'fixture' && "
+        "!p.has('browserTaskId') && !p.has('browserPageId') && "
+        "!p.has('browserIncarnation');"
+    )
+    assert not browser_driver.find_elements(
+        By.XPATH, '//*[@role="tab" and normalize-space(.)="Browser"]'
+    )
+    assert not browser_driver.find_elements(
+        By.CSS_SELECTOR, '[aria-label="Remote browser page"]'
+    )
+    assert not browser_driver.find_elements(
+        By.XPATH, '//a[normalize-space(.)="Open in Browser"]'
+    )

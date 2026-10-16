@@ -39,6 +39,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { AgentSessionHeader } from "@/shared/agent-session/AgentSessionHeader";
 import { RuntimeTerminalPanel } from "@/shared/runtime-terminal/components/RuntimeTerminalPanel";
+import { BrowserAvailabilityProvider } from "@/shared/session-browser/BrowserAvailability";
 import { ComposerSubscriptionUsagePopoverWithBoundary } from "@/shared/subscription-usage/ComposerSubscriptionUsage";
 import { SessionSidePanel } from "../session-panel/SessionSidePanel";
 import { WorkspacePanelContainer } from "../workspace/containers/WorkspacePanelContainer";
@@ -55,7 +56,17 @@ function sessionHref(
   return `/w/${handle}/agents/${agentId}/sessions/${sessionId}`;
 }
 
-export function ChatSessionView({
+export function ChatSessionView(
+  props: ChatSessionViewContainerOutput,
+): React.ReactElement {
+  return (
+    <BrowserAvailabilityProvider enabled={props.agent.browser_enabled}>
+      <ChatSessionContent {...props} />
+    </BrowserAvailabilityProvider>
+  );
+}
+
+function ChatSessionContent({
   handle,
   agent,
   headerSession,
@@ -90,11 +101,15 @@ export function ChatSessionView({
       label: t("workspacePanel.servicesTab"),
       icon: <IconWorld size={rem(16)} />,
     },
-    {
-      id: "browser",
-      label: t("browser.title"),
-      icon: <IconBrowser size={rem(16)} />,
-    },
+    ...(agent.browser_enabled
+      ? [
+          {
+            id: "browser" as const,
+            label: t("browser.title"),
+            icon: <IconBrowser size={rem(16)} />,
+          },
+        ]
+      : []),
     {
       id: "subagents",
       label: tAgentDetail("subagents.title"),
@@ -187,7 +202,9 @@ export function ChatSessionView({
           onStartRuntime={workspacePanel.onStartRuntime}
         />
       </Box>
-      {supportingContent}
+      {panel.activeView !== "browser" || agent.browser_enabled
+        ? supportingContent
+        : null}
     </SessionSidePanel>
   );
 

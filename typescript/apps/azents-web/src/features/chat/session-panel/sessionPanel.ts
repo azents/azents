@@ -15,6 +15,13 @@ export const sessionPanelViews = [
 
 export type SessionPanelView = (typeof sessionPanelViews)[number];
 
+export function availableSessionPanelView(
+  view: SessionPanelView | null,
+  browserEnabled: boolean,
+): SessionPanelView | null {
+  return view === "browser" && !browserEnabled ? null : view;
+}
+
 export function parseSessionPanelView(
   value: string | null,
 ): SessionPanelView | null {
