@@ -27,6 +27,8 @@ from typing import (
 )
 from urllib.parse import parse_qs, urlsplit
 
+from support import browser_confidential_fixture
+
 _PROMPT = "Provider image generation handoff"
 _EXPLICIT_IMAGE_PROMPT = "Provider image generation explicit pin handoff"
 _FOLLOW_UP_PROMPT = "Provider image generation follow-up"
@@ -617,6 +619,7 @@ class _ModelInputItem:
     tool_outputs: tuple[_ToolOutputObservation, ...]
     image_data_flags: tuple[bool, ...]
     browser_file_result: _BrowserFileResult | None
+    confidential_output: browser_confidential_fixture.Observation | None
     wire_json: str
 
     @property
@@ -774,6 +777,11 @@ def _decode_model_input_item(value: object) -> _ModelInputItem:
             }
             else None
         ),
+        confidential_output=browser_confidential_fixture.decode_output(
+            effective_call_id, payload.get("output")
+        )
+        if payload.get("type") == "function_call_output"
+        else None,
         wire_json=json.dumps(value),
     )
 
@@ -2585,6 +2593,47 @@ class _Handler(BaseHTTPRequestHandler):
         """Route one generation-fenced local model request."""
         request = _decode_model_request(request)
         user_text = _last_user_text(request)
+        replacement = (
+            user_text.removeprefix(browser_confidential_fixture.REPLACEMENT_PROMPT)
+            if user_text is not None
+            and user_text.startswith(browser_confidential_fixture.REPLACEMENT_PROMPT)
+            else None
+        )
+        if user_text == browser_confidential_fixture.PROMPT or replacement is not None:
+            if _SESSION_TITLE_SYSTEM_MARKER in request.matching_text:
+                self._write_text_response(
+                    request,
+                    '{"title":"Confidential Browser input"}',
+                    response_id="resp_browser_confidential_title",
+                )
+                return
+            call = browser_confidential_fixture.next_call(
+                [
+                    item.confidential_output
+                    for item in request.input_items or ()
+                    if item.confidential_output is not None
+                ],
+                old_ciphertext=replacement,
+            )
+            if call is None:
+                self._write_text_response(
+                    request,
+                    browser_confidential_fixture.FINAL,
+                    response_id="resp_browser_confidential_complete",
+                )
+            else:
+                self._write_function_call_response(
+                    request,
+                    call_id=(
+                        browser_confidential_fixture.REPLACEMENT_PREFIX
+                        if replacement is not None
+                        else browser_confidential_fixture.PREFIX
+                    )
+                    + call.stage,
+                    name=call.name,
+                    arguments=call.arguments,
+                )
+            return
         if user_text == _BROWSER_FILES_PROMPT:
             if self.path != "/v1/responses":
                 self._write_json(

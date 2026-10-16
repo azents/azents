@@ -18,7 +18,7 @@ import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
@@ -48,6 +48,7 @@ from azents_runtime_runner.apply_patch import (
     execute_apply_patch,
 )
 from azents_runtime_runner.browser import BrowserFailure, RunnerBrowserManager
+from azents_runtime_runner.browser_input import PUBLIC_KEY_ENV
 from azents_runtime_runner.diagnostics import (
     RunnerDiagnosticReason,
     bind_extra,
@@ -56,6 +57,7 @@ from azents_runtime_runner.diagnostics import (
 from azents_runtime_runner.execution import (
     ExecutionBackend,
     ExecutionProcess,
+    ExecutionSpec,
     ProcessTerminationResult,
     shell_execution_spec,
 )
@@ -609,11 +611,9 @@ class RunnerOperations:
         timeout_seconds = request.timeout_seconds
         try:
             process = await self.execution_backend.start(
-                shell_execution_spec(
-                    backend=self.execution_backend,
+                self._command_spec(
                     command=command,
                     cwd=self.workspace.root,
-                    workspace_path=str(self.workspace.root),
                     operation_environment=request.env,
                     managed=False,
                 )
@@ -1782,6 +1782,33 @@ class RunnerOperations:
             {"deleted_branch_name": branch_name, "outcome": "deleted"},
         )
 
+    def _command_spec(
+        self,
+        *,
+        command: str,
+        cwd: Path,
+        operation_environment: Mapping[str, str],
+        managed: bool,
+    ) -> ExecutionSpec:
+        """Compose normal command environment before setting the recipient key."""
+        spec = shell_execution_spec(
+            backend=self.execution_backend,
+            command=command,
+            cwd=cwd,
+            workspace_path=str(self.workspace.root),
+            operation_environment=operation_environment,
+            managed=managed,
+        )
+        if self.browser_manager is None:
+            return spec
+        return replace(
+            spec,
+            environment={
+                **spec.environment,
+                PUBLIC_KEY_ENV: self.browser_manager.input_key.public_key,
+            },
+        )
+
     async def _process_start(
         self, operation: RunnerOperationEnvelope, request: payloads.ProcessStartPayload
     ) -> None:
@@ -1811,11 +1838,9 @@ class RunnerOperations:
             return
         try:
             process = await self.execution_backend.start(
-                shell_execution_spec(
-                    backend=self.execution_backend,
+                self._command_spec(
                     command=command,
                     cwd=cwd,
-                    workspace_path=str(self.workspace.root),
                     operation_environment=request.env,
                     managed=True,
                 )

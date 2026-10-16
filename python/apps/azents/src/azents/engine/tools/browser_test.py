@@ -434,6 +434,30 @@ async def test_unrecognized_runner_failure_code_is_not_echoed_in_metadata() -> N
     assert "private-fixture" not in json.dumps(captured.value.metadata)
 
 
+@pytest.mark.parametrize(
+    "code", ["browser_encrypted_input_invalid", "browser_encrypted_input_failed"]
+)
+async def test_encrypted_input_failure_preserves_only_fixed_reason(code: str) -> None:
+    h = _Harness()
+    h.runner.error = RuntimeRunnerOperationFailedError("private-canary", code=code)
+    with pytest.raises(FunctionToolError) as captured:
+        await h.tools()["browser_act"].handler(
+            json.dumps(
+                {
+                    **_target_args(),
+                    "action": "fill",
+                    "ref": "r",
+                    "observation_id": "o",
+                    "encrypted_text": "A" * 64,
+                }
+            )
+        )
+    assert captured.value.metadata["reason_code"] == code
+    assert "private-canary" not in str(captured.value)
+    if code == "browser_encrypted_input_invalid":
+        assert "Browser encrypted input is invalid" in str(captured.value)
+
+
 def test_all_three_schema_roots_are_objects_without_root_combinators() -> None:
     tools = _Harness().tools()
     assert set(tools) == {"browser_open", "browser_observe", "browser_act"}

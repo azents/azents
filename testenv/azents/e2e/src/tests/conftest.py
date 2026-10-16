@@ -559,6 +559,11 @@ def core_prerequisites(
         )
         .with_volume_mapping(str(_IMAGE_GENERATION_PROXY), "/app/proxy.py", "ro")
         .with_volume_mapping(
+            str(_IMAGE_GENERATION_PROXY.with_name("browser_confidential_fixture.py")),
+            "/app/support/browser_confidential_fixture.py",
+            "ro",
+        )
+        .with_volume_mapping(
             str(_IMAGE_GENERATION_FIXTURE_DIR),
             "/fixtures",
             "ro",

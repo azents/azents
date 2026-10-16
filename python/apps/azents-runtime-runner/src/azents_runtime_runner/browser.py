@@ -46,6 +46,7 @@ from playwright.async_api import (
     TimeoutError as PlaywrightTimeoutError,
 )
 
+from azents_runtime_runner.browser_input import BrowserInputError, BrowserInputKey
 from azents_runtime_runner.browser_popups import BrowserPopupTracker
 from azents_runtime_runner.browser_stealth import (
     BROWSER_ARGS,
@@ -182,8 +183,11 @@ class _ResolvedTarget(NamedTuple):
 class RunnerBrowserManager:
     """Own product browser contexts, identities and every supported input path."""
 
-    def __init__(self, *, workspace_root: Path, proxy: str | None) -> None:
+    def __init__(
+        self, *, workspace_root: Path, proxy: str | None, input_key: BrowserInputKey
+    ) -> None:
         self.workspace_root = workspace_root.resolve()
+        self.input_key = input_key
         self.proxy = proxy
         self.driver: Playwright | None = None
         self.contexts: dict[str, BrowserContext] = {}
@@ -647,6 +651,7 @@ class RunnerBrowserManager:
                     ref=None,
                     observation_id=None,
                     text=None,
+                    encrypted_text=None,
                     url=_url(command.url),
                     values=None,
                     checked=None,
@@ -996,8 +1001,26 @@ class RunnerBrowserManager:
                 assert handle is not None
                 await handle.click(timeout=action.timeout_ms)
             case "fill":
-                assert handle is not None and action.text is not None
-                await handle.fill(action.text, timeout=action.timeout_ms)
+                assert handle is not None
+                if action.encrypted_text is not None:
+                    try:
+                        value = self.input_key.decrypt(action.encrypted_text)
+                    except BrowserInputError:
+                        raise BrowserFailure(
+                            "browser_encrypted_input_invalid",
+                            "Browser encrypted input is invalid",
+                        ) from None
+                    try:
+                        await handle.fill(value, timeout=action.timeout_ms)
+                    except Error:
+                        raise BrowserFailure(
+                            "browser_encrypted_input_failed",
+                            "Confidential Browser fill failed; reobserve before "
+                            "deciding another action",
+                        ) from None
+                else:
+                    assert action.text is not None
+                    await handle.fill(action.text, timeout=action.timeout_ms)
             case "select":
                 assert handle is not None and action.values is not None
                 await handle.select_option(

@@ -63,6 +63,8 @@ _BROWSER_FAILURE_CODES = frozenset(
         "browser_download_failed",
         "browser_deadline",
         "browser_outcome_unknown",
+        "browser_encrypted_input_invalid",
+        "browser_encrypted_input_failed",
         "browser_invalid_payload",
         "browser_invalid_response",
         "operation_timeout",
@@ -204,6 +206,15 @@ class BrowserActInput(BaseModel):
         max_length=32768,
         description="fill text or prompt response; never request secrets in chat.",
     )
+    encrypted_text: str | None = Field(
+        default=None,
+        max_length=5528,
+        description=(
+            "Fill-only ciphertext from the Browser Skill encryption script; "
+            "use exactly one of text or encrypted_text. Import the Skill script, "
+            "execute it in Runtime with an environment variable name, and copy stdout."
+        ),
+    )
     url: str | None = Field(
         default=None,
         max_length=32768,
@@ -280,6 +291,7 @@ def _act_command(
             ref=input.ref,
             observation_id=input.observation_id,
             text=input.text,
+            encrypted_text=input.encrypted_text,
             url=input.url,
             values=None if input.values is None else tuple(input.values),
             checked=input.checked,
@@ -379,8 +391,13 @@ def make_browser_tools(
             ) from exc
         except RuntimeRunnerOperationFailedError as exc:
             raise FunctionToolError(
-                "Browser operation did not complete. Observe current state; "
-                "do not repeat an uncertain submission.",
+                (
+                    "Browser encrypted input is invalid. Prepare a new ciphertext "
+                    "in a fresh Runtime command; do not replay an uncertain input."
+                    if exc.code == "browser_encrypted_input_invalid"
+                    else "Browser operation did not complete. Observe current state; "
+                    "do not repeat an uncertain submission."
+                ),
                 metadata={
                     "kind": "browser_operation_failed",
                     "reason_code": (
@@ -527,7 +544,9 @@ def make_browser_tools(
                 "for a dialog response. Observe and verify the actual outcome. "
                 "Handle exact dialog IDs and authorized Runtime uploads. Actual "
                 "conflicting input is rejected; no persistent human-control mode. "
-                "Ask for login help in conversation, stop affected manipulation, "
+                "For delegated environment credentials, use the Browser Skill's "
+                "Runtime encryption script and encrypted_text; never echo plaintext. "
+                "Ask for human login help when needed, stop affected manipulation, "
                 "then freshly observe after the user says to continue. "
                 "Never replay an uncertain submission."
             ),

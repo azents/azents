@@ -18,6 +18,7 @@ from azents_runtime_control.runner import (
 )
 
 from azents_runtime_runner.browser import RunnerBrowserManager
+from azents_runtime_runner.browser_input import BrowserInputKey
 from azents_runtime_runner.execution import DirectExecutionBackend
 from azents_runtime_runner.operations import RunnerOperations
 from azents_runtime_runner.workspace import Workspace
@@ -33,7 +34,7 @@ class Sink:
 
 class Manager(RunnerBrowserManager):
     def __init__(self, root: Path) -> None:
-        super().__init__(workspace_root=root, proxy=None)
+        super().__init__(workspace_root=root, proxy=None, input_key=BrowserInputKey())
         self.received: list[BrowserCommand] = []
         self.bind_runtime("runtime", lambda: 7)
 

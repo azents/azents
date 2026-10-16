@@ -29,6 +29,7 @@ from playwright.async_api import Error
 
 from azents_runtime_runner.browser import BrowserFailure, RunnerBrowserManager
 from azents_runtime_runner.browser_editables import BrowserEditableRegions
+from azents_runtime_runner.browser_input import BrowserInputKey
 from azents_runtime_runner.browser_viewer import (
     RunnerBrowserViewer,
     _capture_error_code,
@@ -171,7 +172,9 @@ onkeydown="if(event.key==='Enter') document.body.dataset.answer=prompt('Key ques
 
 @pytest.fixture
 async def manager(tmp_path: Path) -> AsyncIterator[RunnerBrowserManager]:
-    value = RunnerBrowserManager(workspace_root=tmp_path, proxy=None)
+    value = RunnerBrowserManager(
+        workspace_root=tmp_path, proxy=None, input_key=BrowserInputKey()
+    )
     value.bind_runtime("runtime", lambda: 7)
     yield value
     await value.close()

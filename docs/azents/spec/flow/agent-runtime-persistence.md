@@ -83,7 +83,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
 last_verified_at: 2026-10-16
-spec_version: 44
+spec_version: 45
 ---
 
 # Agent Runtime Persistence
@@ -146,6 +146,21 @@ values authoritative on duplicate names while retaining unrelated Toolkit values
 Removing an Agent entry removes only that contribution; a same-name Toolkit value
 can remain. Read/decryption failures fail command preparation rather than silently
 using stale or empty settings. Prompts include names only.
+
+The Browser confidential-input path retains that environment delegation. For
+new Agent shell commands the Runner applies its process-owned
+`AZENTS_BROWSER_INPUT_PUBLIC_KEY` after ordinary environment composition; that
+reserved public metadata slot wins over a caller-provided entry of the same name.
+No private key or plaintext credential is added to Runner-global environment,
+Provider configuration or persisted Runtime metadata. Interactive Terminal keeps
+its existing environment behavior.
+
+The Agent imports the release Browser Skill encryption script from the current
+Run's immutable VFS projection and executes it with Runtime-side dependencies.
+The imported copy and dependency cache follow ordinary Runtime file/tool
+persistence; the script is not installed as a Runner-package command. The
+[Session Browser flow](session-browser.md) defines ciphertext delivery and
+process-key loss behavior.
 
 Saved changes affect new shell processes without Runtime restart. Existing
 processes, Interactive Terminal, Runner environment, Provider configuration and
@@ -665,6 +680,10 @@ Required checks:
   database writes.
 
 ## Changelog
+
+- **2026-10-16** (spec_version 45) — Added command-time Browser public metadata
+  injection and Skill-delivered Runtime script/dependency ownership while
+  retaining delegated credential environment and existing persistence boundaries.
 
 - **2026-10-05** (spec_version 42) — Recorded nonlocking Runtime/binding/worktree
   observations and exact mutation-only owner, reclaim-attempt and resource-ack

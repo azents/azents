@@ -53,6 +53,7 @@ ACTION = BrowserAction(
     ref=None,
     observation_id=None,
     text=None,
+    encrypted_text=None,
     url=None,
     values=None,
     checked=None,

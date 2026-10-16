@@ -1,6 +1,7 @@
 """Docker-free checks for the inert inference-profile model source fixture."""
 
 import json
+import shutil
 import subprocess
 import sys
 from decimal import Decimal
@@ -64,15 +65,26 @@ def test_proxy_import_is_stdlib_only_without_starting_a_listener(
     tmp_path: Path,
 ) -> None:
     """Mirror the standalone image import with site packages and cwd isolated."""
-    script_path = Path(proxy.__file__).resolve()
+    source = Path(proxy.__file__).resolve()
+    application = tmp_path / "app"
+    (application / "support").mkdir(parents=True)
+    script_path = application / "proxy.py"
+    shutil.copyfile(source, script_path)
+    shutil.copyfile(
+        source.with_name("browser_confidential_fixture.py"),
+        application / "support" / "browser_confidential_fixture.py",
+    )
     smoke = """
 import dataclasses
 import json
+import pathlib
 import runpy
 import sys
 
 assert sys.flags.isolated == 1
 assert sys.flags.no_site == 1
+# Match the fixture's /app script root without exposing repository/site packages.
+sys.path.insert(0, str(pathlib.Path(sys.argv[1]).parent))
 namespace = runpy.run_path(sys.argv[1], run_name="fixture_stdlib_import")
 assert "pydantic" not in sys.modules
 decode = namespace["_decode_inference_profile_source_control"]

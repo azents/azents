@@ -42,6 +42,7 @@ from azents_runtime_control.transfer import (
 )
 
 from azents_runtime_runner.browser import BrowserFailure, RunnerBrowserManager
+from azents_runtime_runner.browser_input import BrowserInputKey
 from azents_runtime_runner.browser_viewer import RunnerBrowserViewer
 from azents_runtime_runner.diagnostics import (
     RunnerDiagnosticReason,
@@ -304,6 +305,7 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
             machine=platform.machine(),
         ),
     }
+    browser_input_key = BrowserInputKey()
     execution_backend = DirectExecutionBackend(
         inherited_environment=inherited_environment
     )
@@ -388,6 +390,7 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
             browser_manager = RunnerBrowserManager(
                 workspace_root=workspace.root,
                 proxy=runner_network_environment.get("HTTP_PROXY"),
+                input_key=browser_input_key,
             )
             try:
                 await browser_manager.initialize()
