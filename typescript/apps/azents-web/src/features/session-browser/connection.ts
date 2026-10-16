@@ -7,6 +7,9 @@ import {
 import { decodeBrowserFrame, decodeBrowserText } from "./wire.ts";
 import type {
   BrowserCoordinateAction,
+  BrowserFieldAction,
+  BrowserFieldResult,
+  BrowserFieldValue,
   BrowserFrame,
   BrowserImage,
   BrowserInput,
@@ -48,6 +51,13 @@ export class BrowserConnection {
   private lastAcknowledged = 0;
   private lastFrame = 0;
   private displayedImageUrl: string | null = null;
+  private field: { editableId: string; editId: string | null } | null = null;
+  private openedField: BrowserFieldValue | null = null;
+  private fieldPending: {
+    sequence: number;
+    kind: BrowserFieldAction["kind"];
+  } | null = null;
+  private readonly fieldChanged: (result: BrowserFieldResult) => void;
   private readonly target: BrowserTarget;
   private readonly send: (message: string) => boolean;
   private readonly images: BrowserImageUrls;
@@ -62,12 +72,14 @@ export class BrowserConnection {
     images: BrowserImageUrls,
     changed: (state: BrowserLiveState) => void,
     interrupted: (kind: "transport" | "target" | "access") => void,
+    fieldChanged: (result: BrowserFieldResult) => void = () => {},
   ) {
     this.target = target;
     this.send = send;
     this.images = images;
     this.changed = changed;
     this.interrupted = interrupted;
+    this.fieldChanged = fieldChanged;
   }
 
   public snapshot(): BrowserLiveState {
@@ -99,6 +111,22 @@ export class BrowserConnection {
         this.current.status?.navigation_id !== event.navigation_id ||
         this.current.status.viewport.width !== event.viewport.width ||
         this.current.status.viewport.height !== event.viewport.height;
+      if (
+        (this.field !== null || this.fieldPending !== null) &&
+        (changedNavigation ||
+          !event.allow_input ||
+          event.state !== "connected" ||
+          event.dialog !== null ||
+          event.conflict)
+      ) {
+        // Retire the attachment too, so its Runner-owned private snapshot is disposed.
+        this.disconnect(
+          !event.allow_input,
+          event.allow_input ? "stale" : "revoked",
+        );
+        this.interrupted(event.allow_input ? "transport" : "access");
+        return true;
+      }
       this.update({
         status: event,
         connection:
@@ -123,7 +151,48 @@ export class BrowserConnection {
     ) {
       return false;
     }
+    if (event.type === "field_value") {
+      if (
+        this.fieldPending?.kind !== "field_open" ||
+        this.fieldPending.sequence !== event.sequence ||
+        this.field?.editableId !== event.editable_id ||
+        this.field.editId !== null
+      ) {
+        return false;
+      }
+      this.field.editId = event.edit_id;
+      this.openedField = event;
+      return true;
+    }
     this.lastAcknowledged = event.sequence;
+    if (
+      this.fieldPending !== null &&
+      event.sequence >= this.fieldPending.sequence
+    ) {
+      const pending = this.fieldPending;
+      this.fieldPending = null;
+      if (
+        event.sequence !== pending.sequence ||
+        !event.accepted ||
+        event.outcome !== "dispatched" ||
+        (pending.kind === "field_open" && this.field?.editId == null)
+      ) {
+        this.field = null;
+        this.openedField = null;
+        this.fieldChanged({
+          type: "failed",
+          reason: event.reason_code,
+          unknown: event.outcome === "outcome_unknown",
+        });
+      } else if (pending.kind === "field_open" && this.openedField !== null) {
+        const field = this.openedField;
+        this.openedField = null;
+        this.fieldChanged({ type: "opened", field });
+      } else if (pending.kind !== "field_open") {
+        this.field = null;
+        this.fieldChanged({ type: "completed" });
+      }
+    }
     if (
       event.reason_code === "browser_read_only" ||
       event.reason_code === "browser_invalid_authority"
@@ -170,6 +239,17 @@ export class BrowserConnection {
       return false;
     }
     this.lastFrame = message.frame.frame_sequence;
+    if (
+      this.field !== null &&
+      !message.frame.editables.some(
+        (editable) => editable.id === this.field?.editableId,
+      )
+    ) {
+      // A missing document-local identity cannot retain a private draft or edit handle.
+      this.disconnect(false);
+      this.interrupted("transport");
+      return true;
+    }
     // Keep the displayed raster available until its replacement actually loads.
     if (
       this.current.image !== null &&
@@ -246,6 +326,22 @@ export class BrowserConnection {
     frame: BrowserFrame,
     action: BrowserCoordinateAction,
   ): boolean {
+    if (
+      action.kind === "field_open" ||
+      action.kind === "field_replace" ||
+      action.kind === "field_cancel" ||
+      this.field !== null ||
+      this.fieldPending !== null
+    ) {
+      return false;
+    }
+    return this.coordinateInput(frame, action);
+  }
+
+  private coordinateInput(
+    frame: BrowserFrame,
+    action: BrowserCoordinateAction,
+  ): boolean {
     const displayed = this.current.displayed;
     const cleanup =
       (action.kind === "pointer" && action.phase === "cancel") ||
@@ -283,6 +379,7 @@ export class BrowserConnection {
   }
 
   public dialog(accept: boolean, text: string | null): boolean {
+    this.invalidateField(false);
     return this.input(
       this.current.status === null
         ? null
@@ -302,6 +399,7 @@ export class BrowserConnection {
     if (!this.active) {
       return;
     }
+    this.invalidateField(this.fieldPending?.kind === "field_replace");
     this.active = false;
     const unknown =
       this.current.outcomeUnknown ||
@@ -332,6 +430,7 @@ export class BrowserConnection {
 
   public dispose(): void {
     this.active = false;
+    this.invalidateField(this.fieldPending?.kind === "field_replace");
     if (this.current.image !== null) {
       this.images.revoke(this.current.image.url);
     }
@@ -343,6 +442,78 @@ export class BrowserConnection {
     }
     this.displayedImageUrl = null;
     this.current = { ...emptyBrowserLiveState };
+  }
+
+  private invalidateField(unknown: boolean): void {
+    this.openedField = null;
+    if (this.field === null && this.fieldPending === null) {
+      return;
+    }
+    this.field = null;
+    this.fieldPending = null;
+    this.fieldChanged({ type: "failed", reason: null, unknown });
+  }
+
+  /** One explicit read owns one attachment-local, single-use replacement. */
+  public openField(frame: BrowserFrame, editableId: string): boolean {
+    if (
+      this.field !== null ||
+      this.fieldPending !== null ||
+      this.current.pendingInputs !== 0 ||
+      !frame.editables.some((editable) => editable.id === editableId)
+    ) {
+      return false;
+    }
+    this.field = { editableId, editId: null };
+    this.fieldPending = { sequence: this.nextSequence, kind: "field_open" };
+    if (
+      !this.coordinateInput(frame, {
+        kind: "field_open",
+        editable_id: editableId,
+      })
+    ) {
+      this.invalidateField(false);
+      return false;
+    }
+    return true;
+  }
+
+  public finishField(text: string | null): boolean {
+    const field = this.field;
+    const frame = this.current.displayed;
+    if (
+      field?.editId == null ||
+      frame === null ||
+      this.fieldPending !== null ||
+      (text !== null && [...text].length > 32768)
+    ) {
+      return false;
+    }
+    const action: BrowserFieldAction =
+      text === null
+        ? { kind: "field_cancel", edit_id: field.editId }
+        : {
+            kind: "field_replace",
+            editable_id: field.editableId,
+            edit_id: field.editId,
+            text,
+          };
+    const request =
+      this.current.status === null
+        ? null
+        : browserInput(frame, this.current.status, this.nextSequence, action);
+    if (
+      request === null ||
+      new TextEncoder().encode(JSON.stringify(request)).length > 64 * 1024
+    ) {
+      return false;
+    }
+    this.fieldPending = { sequence: this.nextSequence, kind: action.kind };
+    if (!this.coordinateInput(frame, action)) {
+      this.invalidateField(false);
+      return false;
+    }
+    return true;
   }
 }
 

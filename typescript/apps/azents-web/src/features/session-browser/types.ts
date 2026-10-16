@@ -50,6 +50,8 @@ export interface BrowserFrame extends BrowserViewport {
 
 export type BrowserInputReason =
   | "browser_read_only"
+  | "browser_field_changed"
+  | "browser_field_unsupported"
   | "browser_stale_input"
   | "browser_stale_frame"
   | "browser_stale_target"
@@ -73,6 +75,21 @@ export interface BrowserInputAck {
   outcome: "dispatched" | "rejected" | "outcome_unknown";
 }
 
+export interface BrowserFieldValue {
+  type: "field_value";
+  attachment_id: string;
+  sequence: number;
+  editable_id: string;
+  edit_id: string;
+  kind: "text" | "password" | "multiline";
+  value: string;
+}
+
+export type BrowserFieldResult =
+  | { type: "opened"; field: BrowserFieldValue }
+  | { type: "completed" }
+  | { type: "failed"; reason: BrowserInputReason | null; unknown: boolean };
+
 export type BrowserInputAction =
   | {
       kind: "pointer";
@@ -90,6 +107,14 @@ export type BrowserInputAction =
     }
   | { kind: "key"; phase: "down" | "up"; key: string }
   | { kind: "paste"; editable_id: string; text: string }
+  | { kind: "field_open"; editable_id: string }
+  | {
+      kind: "field_replace";
+      editable_id: string;
+      edit_id: string;
+      text: string;
+    }
+  | { kind: "field_cancel"; edit_id: string }
   | {
       kind: "composition";
       phase: "start" | "commit" | "cancel";
@@ -115,6 +140,11 @@ export type BrowserDialogAction = Extract<
 export type BrowserCoordinateAction = Exclude<
   BrowserInputAction,
   BrowserDialogAction
+>;
+
+export type BrowserFieldAction = Extract<
+  BrowserCoordinateAction,
+  { kind: "field_open" | "field_replace" | "field_cancel" }
 >;
 
 export type BrowserInput = {

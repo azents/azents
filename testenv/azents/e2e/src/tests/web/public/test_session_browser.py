@@ -67,7 +67,8 @@ Continue</button><input id="entry" oninput="document.title=
 this.value.includes('Synthetic GUI input')?String.fromCodePoint(0x2705):
 String.fromCodePoint(0x270f,0xfe0f)">
 <input id="secret" type="password" value="synthetic-password-canary"
-oninput="document.title=this.value==='Synthetic GUI paste value'?
+oninput="document.title=this.value==='Synthetic GUI edit value'?
+'Browser GUI edit verified':this.value==='Synthetic GUI paste value'?
 'Browser GUI paste verified':'Browser GUI paste mismatch'">
 <button style="top:260px" onclick="document.title='Browser GUI pointer verified'">
 Verify GUI</button>
@@ -333,6 +334,64 @@ document.activeElement.dispatchEvent(new ClipboardEvent('paste', {
         timeout=15,
         interval=0.1,
         message="The Web panel paste did not reach the native password input",
+    )
+    edit_button = (
+        By.XPATH,
+        '//*[@data-browser-input-toolbar]//button[normalize-space(.)="Edit"]',
+    )
+    wait.until(ec.element_to_be_clickable(edit_button)).click()
+    editor_input = (
+        By.CSS_SELECTOR,
+        '[data-browser-field-editor] input[type="password"]',
+    )
+    local = wait.until(ec.visibility_of_element_located(editor_input))
+    assert local.get_attribute("value") == "Synthetic GUI paste value"
+    local.clear()
+    local.send_keys("Discard this synthetic edit")
+    wait.until(
+        ec.element_to_be_clickable(
+            (
+                By.XPATH,
+                '//*[@data-browser-field-editor]//button[normalize-space(.)="Cancel"]',
+            )
+        )
+    ).click()
+    wait.until(
+        ec.invisibility_of_element_located(
+            (
+                By.CSS_SELECTOR,
+                "[data-browser-field-editor]",
+            )
+        )
+    )
+    assert title_is("Browser GUI paste verified")
+    click_native(100, 200)
+    wait.until(ec.element_to_be_clickable(edit_button)).click()
+    local = wait.until(ec.visibility_of_element_located(editor_input))
+    assert local.get_attribute("value") == "Synthetic GUI paste value"
+    local.clear()
+    local.send_keys("Synthetic GUI edit value")
+    wait.until(
+        ec.element_to_be_clickable(
+            (
+                By.XPATH,
+                '//*[@data-browser-field-editor]//button[normalize-space(.)="Apply"]',
+            )
+        )
+    ).click()
+    wait.until(
+        ec.invisibility_of_element_located(
+            (
+                By.CSS_SELECTOR,
+                "[data-browser-field-editor]",
+            )
+        )
+    )
+    wait_until(
+        lambda: title_is("Browser GUI edit verified"),
+        timeout=15,
+        interval=0.1,
+        message="The Web panel editor did not replace the original password field",
     )
     ActionChains(driver).send_keys(Keys.ESCAPE).perform()
     wait.until(

@@ -11,6 +11,7 @@ from typing import Annotated, Literal, Protocol
 from azents_runtime_control.browser_viewer_contract import (
     MAX_VIEWER_TEXT_BYTES,
     BrowserViewerContractError,
+    ViewerFieldOpen,
     ViewerFrameAck,
     ViewerInput,
     ViewerInputReason,
@@ -136,8 +137,19 @@ class _InputAck(BaseModel):
         return self
 
 
+class _FieldValue(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
+    type: Literal["field_value"]
+    attachment_id: str = Field(min_length=1, max_length=128)
+    sequence: int = Field(ge=1, le=(1 << 53) - 1)
+    editable_id: str = Field(min_length=1, max_length=48)
+    edit_id: str = Field(min_length=1, max_length=48)
+    kind: Literal["text", "password", "multiline"]
+    value: str = Field(max_length=32768, repr=False)
+
+
 _SERVER_MESSAGE = TypeAdapter(
-    Annotated[_Status | _InputAck, Field(discriminator="type")]
+    Annotated[_Status | _InputAck | _FieldValue, Field(discriminator="type")]
 )
 
 
@@ -152,11 +164,20 @@ def unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
 
 
 @dataclass
+class _FieldRead:
+    sequence: int
+    editable_id: str
+    navigation_id: str
+    delivered: bool
+
+
+@dataclass
 class _SocketProgress:
     attachment_id: str | None
     last_frame_sequence: int
     last_input_sequence: int
     last_ack_sequence: int
+    field_read: _FieldRead | None
 
 
 @dataclass
@@ -247,7 +268,7 @@ class RuntimeBrowserSocketService:
             ):
                 connection = await self.source_client.connect(authority=authority)
             await self._live(authority)
-            progress = _SocketProgress(None, 0, 0, 0)
+            progress = _SocketProgress(None, 0, 0, 0, None)
             tasks = [
                 asyncio.create_task(
                     self._receive_client(socket, connection, authority, progress)
@@ -367,6 +388,15 @@ class RuntimeBrowserSocketService:
                     )
                 await self._live(authority)
                 progress.last_input_sequence = request.sequence
+                if isinstance(request.action, ViewerFieldOpen):
+                    if request.source is None:
+                        raise BrowserSocketFailure(4400, "Invalid Browser field source")
+                    progress.field_read = _FieldRead(
+                        request.sequence,
+                        request.action.editable_id,
+                        request.source.navigation_id,
+                        False,
+                    )
             await connection.send_websocket(opcode=WebSocketOpcode.TEXT, payload=data)
 
     async def _send_client(
@@ -433,6 +463,28 @@ class RuntimeBrowserSocketService:
                         progress.attachment_id = metadata.attachment_id
                     if progress.attachment_id != metadata.attachment_id:
                         raise BrowserSocketFailure(4409, "Browser attachment changed")
+                    if progress.field_read is not None and (
+                        metadata.navigation_id != progress.field_read.navigation_id
+                        or metadata.state != "connected"
+                        or metadata.dialog is not None
+                    ):
+                        progress.field_read = None
+                elif isinstance(metadata, _FieldValue):
+                    read = progress.field_read
+                    if (
+                        not authority.allow_input
+                        or metadata.attachment_id != progress.attachment_id
+                        or read is None
+                        or read.delivered
+                        or metadata.sequence != read.sequence
+                        or metadata.editable_id != read.editable_id
+                        or metadata.sequence <= progress.last_ack_sequence
+                    ):
+                        raise BrowserSocketFailure(
+                            4500, "Invalid Browser private field response"
+                        )
+                    await self._live(authority)
+                    read.delivered = True
                 elif (
                     metadata.attachment_id != progress.attachment_id
                     or not progress.last_ack_sequence
@@ -444,6 +496,11 @@ class RuntimeBrowserSocketService:
                     )
                 else:
                     progress.last_ack_sequence = metadata.sequence
+                    if (
+                        progress.field_read is not None
+                        and metadata.sequence >= progress.field_read.sequence
+                    ):
+                        progress.field_read = None
                 async with asyncio.timeout(10):
                     await socket.send_text(message.payload.decode())
                 if isinstance(metadata, _Status) and metadata.state != "connected":

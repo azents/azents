@@ -40,7 +40,9 @@ import {
   browserFrameMatchesStatus,
   sameBrowserTarget,
 } from "../input";
+import { BrowserFieldEditor } from "./BrowserFieldEditor";
 import classes from "./SessionBrowserPanel.module.css";
+import type { BrowserAddressSelection } from "../containers/useBrowserAddressSelection";
 import type { BrowserPasteControls } from "../containers/useBrowserPaste";
 import type { BrowserTouchView } from "../containers/useBrowserTouchView";
 import type {
@@ -49,6 +51,7 @@ import type {
   BrowserTarget,
   BrowserViewState,
 } from "../types";
+import type { BrowserFieldEditorControls } from "./BrowserFieldEditor";
 import type {
   ClipboardEventHandler,
   CompositionEventHandler,
@@ -107,7 +110,9 @@ export interface SessionBrowserPanelProps {
   interaction: BrowserInteractionHandlers | null;
   touchView: BrowserTouchView | null;
   paste: BrowserPasteControls | null;
+  fieldEditor: BrowserFieldEditorControls | null;
   addressValue: string;
+  addressSelection: BrowserAddressSelection | null;
   addressError: boolean;
   navigationEnabled: boolean;
   onAddressChange: (value: string) => void;
@@ -122,18 +127,21 @@ function BrowserShell({
   focusViewport,
   label,
   children,
+  modalOpen = false,
 }: {
   focused: boolean;
   focusViewport: SessionBrowserPanelProps["focusViewport"];
   label: string;
   children: ReactNode;
+  modalOpen?: boolean;
 }): ReactElement {
   return (
     <OptionalPortal withinPortal={focused}>
-      <FocusTrap active={focused}>
+      <FocusTrap active={focused && !modalOpen}>
         <Box
           className={classes.panel}
           data-focused={focused}
+          aria-hidden={modalOpen}
           style={
             focused && focusViewport !== null
               ? {
@@ -177,7 +185,9 @@ export function SessionBrowserPanel({
   interaction,
   touchView,
   paste,
+  fieldEditor,
   addressValue,
+  addressSelection,
   addressError,
   navigationEnabled,
   onAddressChange,
@@ -312,6 +322,7 @@ export function SessionBrowserPanel({
       focused={focused}
       focusViewport={focusViewport}
       label={t("focusBrowser")}
+      modalOpen={fieldEditor?.draft != null}
     >
       <Stack gap="sm" className={classes.header}>
         <Group gap="xs" justify="space-between" wrap="nowrap">
@@ -517,8 +528,16 @@ export function SessionBrowserPanel({
             readOnly={!(navigationEnabled && inputEnabled)}
             aria-invalid={addressError}
             onChange={(event) => onAddressChange(event.currentTarget.value)}
-            onFocus={onAddressFocus}
-            onBlur={onAddressBlur}
+            onFocus={(event) => {
+              onAddressFocus();
+              addressSelection?.onFocus(event);
+            }}
+            onPointerDown={addressSelection?.onPointerDown}
+            onClick={addressSelection?.onClick}
+            onBlur={(event) => {
+              addressSelection?.onBlur(event);
+              onAddressBlur();
+            }}
             onKeyDown={(event) => {
               if (event.key === "Enter" && navigationEnabled && inputEnabled) {
                 event.preventDefault();
@@ -529,21 +548,25 @@ export function SessionBrowserPanel({
               }
             }}
           />
-          <Tooltip label={paste?.enabled ? t("paste") : t("pasteSelectInput")}>
-            <span data-browser-paste>
-              <ActionIcon
-                variant="subtle"
-                color="gray"
-                aria-label={t("paste")}
-                disabled={!focused || handlers === null || !paste?.enabled}
-                loading={paste?.pending}
-                onPointerDown={(event) => event.preventDefault()}
-                onClick={paste?.onPaste}
-              >
-                <IconClipboard size={16} aria-hidden />
-              </ActionIcon>
-            </span>
-          </Tooltip>
+          {fieldEditor === null && (
+            <Tooltip
+              label={paste?.enabled ? t("paste") : t("pasteSelectInput")}
+            >
+              <span data-browser-paste>
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  aria-label={t("paste")}
+                  disabled={!focused || handlers === null || !paste?.enabled}
+                  loading={paste?.pending}
+                  onPointerDown={(event) => event.preventDefault()}
+                  onClick={paste?.onPaste}
+                >
+                  <IconClipboard size={16} aria-hidden />
+                </ActionIcon>
+              </span>
+            </Tooltip>
+          )}
           <Menu
             withinPortal
             position="bottom-end"
@@ -627,6 +650,11 @@ export function SessionBrowserPanel({
           {state.conflict && (
             <Alert color="yellow" role="status">
               {t("conflict")}
+            </Alert>
+          )}
+          {fieldEditor?.failed && (
+            <Alert color="yellow" role="alert">
+              {t("fieldEditorFailed")}
             </Alert>
           )}
           {state.outcomeUnknown && (
@@ -868,6 +896,7 @@ export function SessionBrowserPanel({
           {t(`pasteNotice.${paste.notice}`)}
         </Alert>
       )}
+      {fieldEditor !== null && <BrowserFieldEditor controls={fieldEditor} />}
       {showDescription ? (
         <Text
           id={descriptionId}

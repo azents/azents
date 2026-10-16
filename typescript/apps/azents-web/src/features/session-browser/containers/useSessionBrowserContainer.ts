@@ -16,15 +16,19 @@ import {
 import { browserPopupHintCurrent } from "../popup";
 import { browserProjectionState } from "../projection";
 import { recentBrowserTargets } from "../recentTargets";
+import { useBrowserAddressSelection } from "./useBrowserAddressSelection";
 import {
   browserAccessError,
   useBrowserConnection,
 } from "./useBrowserConnection";
+import { useBrowserFieldEditor } from "./useBrowserFieldEditor";
+import { useBrowserFieldVisibility } from "./useBrowserFieldVisibility";
 import { useBrowserInteraction } from "./useBrowserInteraction";
 import { useBrowserTouchView } from "./useBrowserTouchView";
 import type { SessionBrowserPanelProps } from "../components/SessionBrowserPanel";
 import type { BrowserPopupHint } from "../popup";
 import type {
+  BrowserFieldResult,
   BrowserNavigationAction,
   BrowserPageChoice,
   BrowserTarget,
@@ -216,12 +220,15 @@ export function useSessionBrowserContainer(
   }, [selectedTarget, pathname, router, search]);
 
   const cancel = useRef<() => void>(() => {});
+  const fieldResult = useRef<(result: BrowserFieldResult) => void>(() => {});
+  const cancelField = useRef<(() => void) | null>(null);
   const live = useBrowserConnection({
     resourceKey: `${resourceKey}\u0000${query.data?.allow_input === true ? "direct" : "observe"}`,
     target: selectedTarget,
     connect,
     rejected,
     cancelInteraction: () => cancel.current(),
+    fieldChanged: (result) => fieldResult.current(result),
   });
   const [dialogText, setDialogText] = useState("");
   const [focused, setFocused] = useState(false);
@@ -236,6 +243,7 @@ export function useSessionBrowserContainer(
     }
   }, [state.type]);
   const [addressDraft, setAddressDraft] = useState<string | null>(null);
+  const addressSelection = useBrowserAddressSelection();
   const [addressError, setAddressError] = useState(false);
   const source = live.state.displayed;
   const status = live.state.status;
@@ -311,6 +319,36 @@ export function useSessionBrowserContainer(
     setAddressError(false);
   }, [resourceKey, selectedPage]);
   const mutationPending = close.isPending || create.isPending;
+  const fieldEditor = useBrowserFieldEditor({
+    scope: JSON.stringify([
+      resourceKey,
+      selectedTarget,
+      source?.attachment_id,
+      source?.navigation_id,
+      source?.width,
+      source?.height,
+    ]),
+    enabled:
+      focused &&
+      state.type === "READY" &&
+      !mutationPending &&
+      query.data?.allow_input === true &&
+      live.state.connection === "connected" &&
+      status !== null &&
+      status.allow_input &&
+      status.dialog === null &&
+      source !== null &&
+      browserFrameMatchesStatus(source, status),
+    frame: source,
+    label: t("fieldEditorTitle"),
+    open: live.openField,
+    finish: live.finishField,
+    cancelInput: () => cancel.current(),
+  });
+  fieldResult.current = fieldEditor.result;
+  cancelField.current = fieldEditor.active
+    ? fieldEditor.controls.onCancel
+    : null;
   const interaction = useBrowserInteraction({
     readClipboard:
       typeof navigator !== "undefined" &&
@@ -320,6 +358,7 @@ export function useSessionBrowserContainer(
         : null,
     enabled:
       focused &&
+      fieldEditor.controls.draft === null &&
       state.type === "READY" &&
       !mutationPending &&
       query.data?.allow_input === true &&
@@ -352,6 +391,11 @@ export function useSessionBrowserContainer(
     cancelInput: interaction.cancel,
   });
   cancel.current = interaction.cancel;
+  useBrowserFieldVisibility({
+    enabled: focused && interaction.paste.enabled && !fieldEditor.active,
+    viewport: fieldEditor.controls.viewport,
+    viewWindowRef: touchView.viewWindowRef,
+  });
   if (state.type === "READY") {
     state = {
       ...state,
@@ -380,6 +424,10 @@ export function useSessionBrowserContainer(
       if (focused && event.key === "Escape" && !event.isComposing) {
         event.preventDefault();
         event.stopPropagation();
+        if (cancelField.current !== null) {
+          cancelField.current();
+          return;
+        }
         cancel.current();
         setFocused(false);
       }
@@ -451,6 +499,7 @@ export function useSessionBrowserContainer(
       }
     },
     addressValue: addressDraft ?? selectedAddress,
+    addressSelection,
     addressError,
     navigationEnabled,
     onAddressChange: (value) => {
@@ -543,5 +592,10 @@ export function useSessionBrowserContainer(
     interaction: interaction.interaction,
     touchView,
     paste: interaction.paste,
+    fieldEditor: {
+      ...fieldEditor.controls,
+      toolbarVisible: interaction.paste.enabled,
+      onDirectPaste: interaction.paste.onPaste,
+    },
   };
 }

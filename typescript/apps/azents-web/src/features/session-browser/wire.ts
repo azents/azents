@@ -1,5 +1,6 @@
 import type {
   BrowserEditable,
+  BrowserFieldValue,
   BrowserFrame,
   BrowserInputAck,
   BrowserInputReason,
@@ -16,6 +17,8 @@ function reasonCode(value: unknown): value is BrowserInputReason | null {
     value === null ||
     [
       "browser_read_only",
+      "browser_field_changed",
+      "browser_field_unsupported",
       "browser_stale_input",
       "browser_stale_frame",
       "browser_stale_target",
@@ -90,13 +93,47 @@ function parse(textValue: string): unknown {
 
 export function decodeBrowserText(
   raw: string,
-): BrowserStatus | BrowserInputAck | null {
+): BrowserStatus | BrowserInputAck | BrowserFieldValue | null {
   if (new TextEncoder().encode(raw).length > MAX_TEXT) {
     return null;
   }
   const value = parse(raw);
   if (!object(value) || !text(value.attachment_id)) {
     return null;
+  }
+  if (value.type === "field_value") {
+    if (
+      !keys(value, [
+        "type",
+        "attachment_id",
+        "sequence",
+        "editable_id",
+        "edit_id",
+        "kind",
+        "value",
+      ]) ||
+      !integer(value.sequence, Number.MAX_SAFE_INTEGER) ||
+      !text(value.editable_id) ||
+      value.editable_id.length > 48 ||
+      !text(value.edit_id) ||
+      value.edit_id.length > 48 ||
+      (value.kind !== "text" &&
+        value.kind !== "password" &&
+        value.kind !== "multiline") ||
+      typeof value.value !== "string" ||
+      [...value.value].length > 32768
+    ) {
+      return null;
+    }
+    return {
+      type: "field_value",
+      attachment_id: value.attachment_id,
+      sequence: value.sequence,
+      editable_id: value.editable_id,
+      edit_id: value.edit_id,
+      kind: value.kind,
+      value: value.value,
+    };
   }
   if (value.type === "input_ack") {
     if (

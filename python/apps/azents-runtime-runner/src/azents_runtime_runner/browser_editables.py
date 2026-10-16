@@ -1,7 +1,8 @@
 """Content-free, document-local text-input geometry for native mobile receivers."""
 
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
+from typing import Literal
 
 from azents_runtime_control.browser_viewer_contract import (
     ViewerEditable,
@@ -83,7 +84,51 @@ _PROBE = """() => {
         return active?.isConnected && ids.get(active) === id &&
             probe().some(region => region.id === id);
     };
+    probe.open = id => {
+        if (!probe.focused(id)) return null;
+        let element = document.activeElement;
+        while (element?.shadowRoot?.activeElement)
+            element = element.shadowRoot.activeElement;
+        const multiline = element instanceof HTMLTextAreaElement;
+        if (!multiline && (!(element instanceof HTMLInputElement) ||
+            !['text','email','url','tel','password','search'].includes(element.type)))
+            return null;
+        if (element.value.length > 32768) return null;
+        return {element, value:element.value, id, probe, nativeType:element.type,
+            kind:multiline ? 'multiline' :
+                element.type === 'password' ? 'password' : 'text'};
+    };
     return probe;
+}"""
+
+_REPLACE_FIELD = """(snapshot, text) => {
+    const element = snapshot.element;
+    const valid = () => element.isConnected &&
+        snapshot.probe.focused(snapshot.id) &&
+        element.type === snapshot.nativeType &&
+        !element.matches(':disabled') && !element.readOnly &&
+        element.value === snapshot.value &&
+        (element instanceof HTMLTextAreaElement ||
+            (element instanceof HTMLInputElement &&
+                ['text','email','url','tel','password','search'].includes(element.type)));
+    if (snapshot.consumed || !valid()) return false;
+    snapshot.consumed = true;
+    const before = new InputEvent('beforeinput', {
+        bubbles:true, composed:true, cancelable:true,
+        inputType:'insertReplacementText', data:text
+    });
+    if (!element.dispatchEvent(before) || !valid()) return false;
+    const prototype = element instanceof HTMLTextAreaElement ?
+        HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(prototype, 'value').set.call(element, text);
+    if (typeof element.setSelectionRange === 'function' &&
+        (element instanceof HTMLTextAreaElement ||
+            ['text','tel','password','search'].includes(element.type)))
+        element.setSelectionRange(text.length,text.length);
+    element.dispatchEvent(new InputEvent('input', {
+        bubbles:true, composed:true, inputType:'insertReplacementText', data:text
+    }));
+    return true;
 }"""
 
 _FRAME_PROJECT = """(element, regions) => {
@@ -123,6 +168,40 @@ _FRAME_PROJECT = """(element, regions) => {
 class _Probe:
     prefix: str
     handle: JSHandle
+
+
+@dataclass(frozen=True)
+class EditableFieldValue:
+    kind: Literal["text", "password", "multiline"]
+    value: str = field(repr=False)
+
+
+@dataclass(frozen=True)
+class EditableFieldSnapshot:
+    identifier: str
+    handle: JSHandle = field(repr=False)
+
+    async def value(self) -> EditableFieldValue:
+        raw: object = await self.handle.evaluate(
+            "snapshot => ({kind:snapshot.kind,value:snapshot.value})"
+        )
+        if not isinstance(raw, dict):
+            raise ValueError("Invalid native Browser field snapshot")
+        kind, value = raw.get("kind"), raw.get("value")
+        if not isinstance(value, str) or len(value) > 32768:
+            raise ValueError("Invalid native Browser field value")
+        match kind:
+            case "text" | "password" | "multiline":
+                return EditableFieldValue(kind, value)
+            case _:
+                raise ValueError("Unsupported native Browser field kind")
+
+    async def replace(self, text: str) -> bool:
+        result: object = await self.handle.evaluate(_REPLACE_FIELD, text)
+        return result is True
+
+    async def close(self) -> None:
+        await self.handle.dispose()
 
 
 class BrowserEditableRegions:
@@ -206,6 +285,23 @@ class BrowserEditableRegions:
         for probe in self.probes.values():
             await probe.handle.dispose()
         self.probes.clear()
+
+    async def open_edit(self, identifier: str) -> EditableFieldSnapshot | None:
+        """Snapshot only a focused native field on explicit participant request."""
+        if not await self.focused(identifier):
+            return None
+        for probe in self.probes.values():
+            prefix = f"{probe.prefix}-"
+            if not identifier.startswith(prefix):
+                continue
+            handle = await probe.handle.evaluate_handle(
+                "(probe, id) => probe.open(id)", identifier.removeprefix(prefix)
+            )
+            if await handle.evaluate("snapshot => snapshot === null"):
+                await handle.dispose()
+                return None
+            return EditableFieldSnapshot(identifier, handle)
+        return None
 
     async def focused(self, identifier: str) -> bool:
         """Check the same current editable and every active ancestor frame."""

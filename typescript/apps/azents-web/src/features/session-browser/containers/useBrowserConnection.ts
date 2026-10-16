@@ -11,6 +11,7 @@ import {
 import type { BrowserLiveState } from "../connection";
 import type {
   BrowserCoordinateAction,
+  BrowserFieldResult,
   BrowserFrame,
   BrowserImage,
   BrowserTarget,
@@ -26,6 +27,7 @@ export interface BrowserConnectionOptions {
   connect: () => Promise<BrowserConnectionInfo>;
   rejected: (kind: "access" | "target") => void;
   cancelInteraction: () => void;
+  fieldChanged?: (result: BrowserFieldResult) => void;
 }
 
 export function browserAccessError(error: unknown): boolean {
@@ -47,6 +49,8 @@ export function browserAccessError(error: unknown): boolean {
 
 export interface BrowserConnectionOutput {
   state: BrowserLiveState;
+  openField: (frame: BrowserFrame, editableId: string) => boolean;
+  finishField: (text: string | null) => boolean;
   reconnect: () => void;
   coordinate: (frame: BrowserFrame, action: BrowserCoordinateAction) => boolean;
   dialog: (accept: boolean, text: string | null) => boolean;
@@ -174,6 +178,7 @@ export function useBrowserConnection(
           "Browser attachment requires fresh admission.",
         );
       },
+      (result) => latest.current.fieldChanged?.(result),
     );
     client.current = session;
     setSnapshot({
@@ -298,6 +303,16 @@ export function useBrowserConnection(
       client.current?.coordinate(frame, action) ?? false,
     [],
   );
+  const openField = useCallback(
+    (frame: BrowserFrame, editableId: string): boolean =>
+      client.current?.openField(frame, editableId) ?? false,
+    [],
+  );
+  const finishField = useCallback(
+    (text: string | null): boolean =>
+      client.current?.finishField(text) ?? false,
+    [],
+  );
   const dialog = useCallback(
     (accept: boolean, text: string | null): boolean =>
       client.current?.dialog(accept, text) ?? false,
@@ -339,6 +354,8 @@ export function useBrowserConnection(
           },
     reconnect,
     coordinate,
+    openField,
+    finishField,
     dialog,
     displayed,
     frameError,

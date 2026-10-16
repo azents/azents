@@ -3,7 +3,7 @@
 import enum
 import json
 import math
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Literal, assert_never
 from urllib.parse import urlsplit
 
@@ -72,6 +72,33 @@ class ViewerPaste:
 
 
 @dataclass(frozen=True)
+class ViewerFieldOpen:
+    editable_id: str
+
+
+@dataclass(frozen=True)
+class ViewerFieldReplace:
+    editable_id: str
+    edit_id: str
+    text: str = field(repr=False)
+
+
+@dataclass(frozen=True)
+class ViewerFieldCancel:
+    edit_id: str
+
+
+@dataclass(frozen=True)
+class ViewerFieldValue:
+    attachment_id: str
+    sequence: int
+    editable_id: str
+    edit_id: str
+    kind: Literal["text", "password", "multiline"]
+    value: str = field(repr=False)
+
+
+@dataclass(frozen=True)
 class ViewerDialogResponse:
     dialog_id: str
     accept: bool
@@ -90,6 +117,9 @@ type ViewerAction = (
     | ViewerKey
     | ViewerComposition
     | ViewerPaste
+    | ViewerFieldOpen
+    | ViewerFieldReplace
+    | ViewerFieldCancel
     | ViewerDialogResponse
     | ViewerNavigation
 )
@@ -141,6 +171,8 @@ class ViewerInputReason(enum.StrEnum):
     """Closed content-free failure categories, never an SDK exception body."""
 
     READ_ONLY = "browser_read_only"
+    FIELD_CHANGED = "browser_field_changed"
+    FIELD_UNSUPPORTED = "browser_field_unsupported"
     STALE_INPUT = "browser_stale_input"
     STALE_FRAME = "browser_stale_frame"
     STALE_TARGET = "browser_stale_target"
@@ -338,6 +370,19 @@ def _action(value: object) -> ViewerAction:
             return ViewerPaste(
                 fields.text("editable_id", 48), fields.text("text", 32768)
             )
+        case "field_open":
+            fields = _Fields(value, {"kind", "editable_id"})
+            return ViewerFieldOpen(fields.text("editable_id", 48))
+        case "field_replace":
+            fields = _Fields(value, {"kind", "editable_id", "edit_id", "text"})
+            return ViewerFieldReplace(
+                fields.text("editable_id", 48),
+                fields.text("edit_id", 48),
+                fields.text("text", 32768, empty=True),
+            )
+        case "field_cancel":
+            fields = _Fields(value, {"kind", "edit_id"})
+            return ViewerFieldCancel(fields.text("edit_id", 48))
         case "dialog":
             fields = _Fields(value, {"kind", "dialog_id", "accept", "text"})
             return ViewerDialogResponse(
@@ -425,7 +470,9 @@ def _dump(value: object, limit: int) -> bytes:
     return data
 
 
-def encode_viewer_event(event: ViewerStatus | ViewerInputAck) -> bytes:
+def encode_viewer_event(
+    event: ViewerStatus | ViewerInputAck | ViewerFieldValue,
+) -> bytes:
     """Encode bounded text metadata; never include image or input bodies in logs."""
     match event:
         case ViewerStatus():
@@ -445,6 +492,12 @@ def encode_viewer_event(event: ViewerStatus | ViewerInputAck) -> bytes:
             }
         case ViewerInputAck():
             value = {"type": "input_ack", **asdict(event)}
+        case ViewerFieldValue():
+            if len(event.value) > 32768:
+                raise BrowserViewerContractError(
+                    "Browser field value exceeds its bound"
+                )
+            value = {"type": "field_value", **asdict(event)}
         case _:
             assert_never(event)
     return _dump(value, MAX_VIEWER_TEXT_BYTES)
