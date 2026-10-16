@@ -3,7 +3,7 @@
 import enum
 import json
 import math
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Literal, assert_never
 from urllib.parse import urlsplit
 
@@ -72,6 +72,59 @@ class ViewerPaste:
 
 
 @dataclass(frozen=True)
+class ViewerFieldOpen:
+    editable_id: str
+
+
+@dataclass(frozen=True)
+class ViewerFieldReplace:
+    editable_id: str
+    edit_id: str
+    text: str = field(repr=False)
+
+
+@dataclass(frozen=True)
+class ViewerFieldCancel:
+    edit_id: str
+
+
+@dataclass(frozen=True)
+class ViewerFieldAttributes:
+    input_type: Literal["text", "password", "email", "url", "tel", "search", "textarea"]
+    input_mode: (
+        Literal["none", "text", "email", "url", "tel", "numeric", "decimal", "search"]
+        | None
+    )
+    autocomplete: str = field(repr=False)
+    autocapitalize: (
+        Literal["off", "none", "on", "sentences", "words", "characters"] | None
+    )
+    autocorrect: Literal["on", "off"] | None
+    spellcheck: bool
+    enter_key_hint: (
+        Literal["enter", "done", "go", "next", "previous", "search", "send"] | None
+    )
+    max_length: int | None
+    min_length: int | None
+    pattern: str = field(repr=False)
+    required: bool
+    multiple: bool
+    placeholder: str = field(repr=False)
+    name: str = field(repr=False)
+
+
+@dataclass(frozen=True)
+class ViewerFieldValue:
+    attachment_id: str
+    sequence: int
+    editable_id: str
+    edit_id: str
+    kind: Literal["text", "password", "multiline"]
+    attributes: ViewerFieldAttributes = field(repr=False)
+    value: str = field(repr=False)
+
+
+@dataclass(frozen=True)
 class ViewerDialogResponse:
     dialog_id: str
     accept: bool
@@ -90,6 +143,9 @@ type ViewerAction = (
     | ViewerKey
     | ViewerComposition
     | ViewerPaste
+    | ViewerFieldOpen
+    | ViewerFieldReplace
+    | ViewerFieldCancel
     | ViewerDialogResponse
     | ViewerNavigation
 )
@@ -141,6 +197,8 @@ class ViewerInputReason(enum.StrEnum):
     """Closed content-free failure categories, never an SDK exception body."""
 
     READ_ONLY = "browser_read_only"
+    FIELD_CHANGED = "browser_field_changed"
+    FIELD_UNSUPPORTED = "browser_field_unsupported"
     STALE_INPUT = "browser_stale_input"
     STALE_FRAME = "browser_stale_frame"
     STALE_TARGET = "browser_stale_target"
@@ -216,6 +274,118 @@ class _Fields:
         if not isinstance(value, bool):
             raise BrowserViewerContractError("Invalid Browser viewer boolean")
         return value
+
+
+def _native_length(value: object) -> int | None:
+    if value is None:
+        return None
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 0 <= value <= (1 << 31) - 1
+    ):
+        raise BrowserViewerContractError("Invalid Browser native length")
+    return value
+
+
+def decode_viewer_field_attributes(value: object) -> ViewerFieldAttributes:
+    fields = _Fields(
+        value,
+        {
+            "input_type",
+            "input_mode",
+            "autocomplete",
+            "autocapitalize",
+            "autocorrect",
+            "spellcheck",
+            "enter_key_hint",
+            "max_length",
+            "min_length",
+            "pattern",
+            "required",
+            "multiple",
+            "placeholder",
+            "name",
+        },
+    )
+    input_type = fields.text("input_type", 16)
+    input_mode = fields.nullable_text("input_mode", 16)
+    autocapitalize = fields.nullable_text("autocapitalize", 16)
+    autocorrect = fields.nullable_text("autocorrect", 3)
+    enter_key_hint = fields.nullable_text("enter_key_hint", 16)
+    if input_type not in {
+        "text",
+        "password",
+        "email",
+        "url",
+        "tel",
+        "search",
+        "textarea",
+    }:
+        raise BrowserViewerContractError("Unsupported Browser native input type")
+    if input_mode not in {
+        None,
+        "none",
+        "text",
+        "email",
+        "url",
+        "tel",
+        "numeric",
+        "decimal",
+        "search",
+    }:
+        raise BrowserViewerContractError("Unsupported Browser native input mode")
+    if autocapitalize not in {
+        None,
+        "off",
+        "none",
+        "on",
+        "sentences",
+        "words",
+        "characters",
+    }:
+        raise BrowserViewerContractError("Unsupported Browser native capitalization")
+    if autocorrect not in {None, "on", "off"}:
+        raise BrowserViewerContractError("Unsupported Browser native correction")
+    if enter_key_hint not in {
+        None,
+        "enter",
+        "done",
+        "go",
+        "next",
+        "previous",
+        "search",
+        "send",
+    }:
+        raise BrowserViewerContractError("Unsupported Browser native enter-key hint")
+    return ViewerFieldAttributes(
+        input_type,
+        input_mode,
+        fields.text("autocomplete", 256, empty=True),
+        autocapitalize,
+        autocorrect,
+        fields.boolean("spellcheck"),
+        enter_key_hint,
+        _native_length(fields.value["max_length"]),
+        _native_length(fields.value["min_length"]),
+        fields.text("pattern", 2048, empty=True),
+        fields.boolean("required"),
+        fields.boolean("multiple"),
+        fields.text("placeholder", 2048, empty=True),
+        fields.text("name", 256, empty=True),
+    )
+
+
+def viewer_field_kind(
+    attributes: ViewerFieldAttributes,
+) -> Literal["text", "password", "multiline"]:
+    return (
+        "multiline"
+        if attributes.input_type == "textarea"
+        else "password"
+        if attributes.input_type == "password"
+        else "text"
+    )
 
 
 def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -338,6 +508,19 @@ def _action(value: object) -> ViewerAction:
             return ViewerPaste(
                 fields.text("editable_id", 48), fields.text("text", 32768)
             )
+        case "field_open":
+            fields = _Fields(value, {"kind", "editable_id"})
+            return ViewerFieldOpen(fields.text("editable_id", 48))
+        case "field_replace":
+            fields = _Fields(value, {"kind", "editable_id", "edit_id", "text"})
+            return ViewerFieldReplace(
+                fields.text("editable_id", 48),
+                fields.text("edit_id", 48),
+                fields.text("text", 32768, empty=True),
+            )
+        case "field_cancel":
+            fields = _Fields(value, {"kind", "edit_id"})
+            return ViewerFieldCancel(fields.text("edit_id", 48))
         case "dialog":
             fields = _Fields(value, {"kind", "dialog_id", "accept", "text"})
             return ViewerDialogResponse(
@@ -425,7 +608,9 @@ def _dump(value: object, limit: int) -> bytes:
     return data
 
 
-def encode_viewer_event(event: ViewerStatus | ViewerInputAck) -> bytes:
+def encode_viewer_event(
+    event: ViewerStatus | ViewerInputAck | ViewerFieldValue,
+) -> bytes:
     """Encode bounded text metadata; never include image or input bodies in logs."""
     match event:
         case ViewerStatus():
@@ -445,6 +630,17 @@ def encode_viewer_event(event: ViewerStatus | ViewerInputAck) -> bytes:
             }
         case ViewerInputAck():
             value = {"type": "input_ack", **asdict(event)}
+        case ViewerFieldValue():
+            attributes = decode_viewer_field_attributes(asdict(event.attributes))
+            if viewer_field_kind(attributes) != event.kind:
+                raise BrowserViewerContractError(
+                    "Inconsistent Browser native field kind"
+                )
+            if len(event.value) > 32768:
+                raise BrowserViewerContractError(
+                    "Browser field value exceeds its bound"
+                )
+            value = {"type": "field_value", **asdict(event)}
         case _:
             assert_never(event)
     return _dump(value, MAX_VIEWER_TEXT_BYTES)

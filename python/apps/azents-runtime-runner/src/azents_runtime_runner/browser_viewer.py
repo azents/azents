@@ -22,6 +22,10 @@ from azents_runtime_control.browser_viewer_contract import (
     ViewerDialog,
     ViewerDialogResponse,
     ViewerEditable,
+    ViewerFieldCancel,
+    ViewerFieldOpen,
+    ViewerFieldReplace,
+    ViewerFieldValue,
     ViewerFrame,
     ViewerFrameAck,
     ViewerInput,
@@ -53,7 +57,10 @@ from azents_runtime_runner.browser import (
     _safe_page_text,
     _Task,
 )
-from azents_runtime_runner.browser_editables import BrowserEditableRegions
+from azents_runtime_runner.browser_editables import (
+    BrowserEditableRegions,
+    EditableFieldSnapshot,
+)
 from azents_runtime_runner.browser_popups import BrowserPopupTracker
 
 
@@ -92,6 +99,13 @@ class _Image:
     source: ViewerSource
     data: bytes
     editables: tuple[ViewerEditable, ...]
+
+
+@dataclass(frozen=True)
+class _FieldEdit:
+    id: str
+    navigation_id: str
+    snapshot: EditableFieldSnapshot
 
 
 class _LatestPage:
@@ -342,6 +356,7 @@ class _Attachment:
         self.composing = False
         self.last_status: bytes | None = None
         self.send_lock = asyncio.Lock()
+        self.field_edit: _FieldEdit | None = None
 
     def current(self) -> None:
         concrete = self.manager.viewer_authority(self.authority)
@@ -392,6 +407,11 @@ class _Attachment:
 
     async def write(self) -> None:
         while True:
+            if (
+                self.field_edit is not None
+                and self.field_edit.navigation_id != self.page.navigation_id
+            ):
+                await self.discard_field_edit()
             try:
                 self.current()
             except BrowserFailure:
@@ -477,6 +497,11 @@ class _Attachment:
                         self.sent_editables,
                         (),
                     )
+                    if self.field_edit is not None and not any(
+                        region.id == self.field_edit.snapshot.identifier
+                        for region in self.acknowledged_editables
+                    ):
+                        await self.discard_field_edit()
                     async with self.source.changed:
                         self.source.changed.notify_all()
                 case ViewerInput():
@@ -584,6 +609,8 @@ class _Attachment:
 
     async def dispatch(self, request: ViewerInput) -> None:
         action = request.action
+        if not isinstance(action, ViewerFieldReplace | ViewerFieldCancel):
+            await self.discard_field_edit()
         if isinstance(action, ViewerNavigation):
             if self.buttons or self.keys or self.composing:
                 raise BrowserFailure(
@@ -796,12 +823,132 @@ class _Attachment:
                         await self.page.page.keyboard.insert_text(action.text)
 
                     await self.effect(paste)
+                case ViewerFieldOpen():
+                    if self.composing or self.buttons or self.keys:
+                        raise BrowserFailure(
+                            "browser_input_conflict",
+                            "Another Browser interaction is active",
+                        )
+                    if not any(
+                        region.id == action.editable_id
+                        for region in self.acknowledged_editables
+                    ):
+                        raise BrowserFailure(
+                            "browser_field_changed",
+                            "Browser editable is no longer current",
+                        )
+
+                    async def open_field() -> None:
+                        snapshot = await self.source.editables.open_edit(
+                            action.editable_id
+                        )
+                        if snapshot is None:
+                            raise BrowserFailure(
+                                "browser_field_unsupported",
+                                "Browser field cannot be edited in the native editor",
+                            )
+                        edit = _FieldEdit(
+                            uuid.uuid4().hex, self.page.navigation_id, snapshot
+                        )
+                        self.field_edit = edit
+                        try:
+                            value = await snapshot.value()
+                        except ValueError:
+                            await self.discard_field_edit()
+                            raise BrowserFailure(
+                                "browser_field_unsupported",
+                                "Browser native field attributes are unsupported",
+                            ) from None
+                        self.current()
+                        if (
+                            request.source is None
+                            or request.source.navigation_id != self.page.navigation_id
+                            or edit.navigation_id != self.page.navigation_id
+                        ):
+                            await self.discard_field_edit()
+                            raise BrowserFailure(
+                                "browser_stale_frame",
+                                "Browser document changed during field read",
+                            )
+                        try:
+                            reply = encode_viewer_event(
+                                ViewerFieldValue(
+                                    self.id,
+                                    request.sequence,
+                                    action.editable_id,
+                                    edit.id,
+                                    value.kind,
+                                    value.attributes,
+                                    value.value,
+                                )
+                            )
+                        except BrowserViewerContractError:
+                            await self.discard_field_edit()
+                            raise BrowserFailure(
+                                "browser_resource_exhausted",
+                                "Browser field exceeds its text bound",
+                            ) from None
+                        await self.emit(WebSocketOpcode.TEXT, reply)
+
+                    await self.effect(open_field)
+                case ViewerFieldReplace():
+                    edit = self.field_edit
+                    self.field_edit = None
+                    if edit is None:
+                        raise BrowserFailure(
+                            "browser_field_changed",
+                            "Browser field edit is no longer current",
+                        )
+                    try:
+                        if (
+                            edit.id != action.edit_id
+                            or edit.snapshot.identifier != action.editable_id
+                            or edit.navigation_id != self.page.navigation_id
+                            or self.composing
+                            or self.buttons
+                            or self.keys
+                        ):
+                            raise BrowserFailure(
+                                "browser_field_changed",
+                                "Browser field edit context changed",
+                            )
+
+                        async def replace_field() -> None:
+                            if not await self.source.editables.focused(
+                                action.editable_id
+                            ):
+                                raise BrowserFailure(
+                                    "browser_field_changed",
+                                    "Browser field focus changed",
+                                )
+                            self.current()
+                            if edit.navigation_id != self.page.navigation_id:
+                                raise BrowserFailure(
+                                    "browser_field_changed",
+                                    "Browser field document changed",
+                                )
+                            if not await edit.snapshot.replace(action.text):
+                                raise BrowserFailure(
+                                    "browser_field_changed",
+                                    "Browser field changed before replacement",
+                                )
+
+                        await self.effect(replace_field)
+                    finally:
+                        await edit.snapshot.close()
+                case ViewerFieldCancel():
+                    if (
+                        self.field_edit is not None
+                        and self.field_edit.id == action.edit_id
+                    ):
+                        await self.discard_field_edit()
                 case _:
                     assert_never(action)
         finally:
             self.finish()
 
     async def cleanup(self) -> None:
+        await self.discard_field_edit()
         if self.page.popup_owner == self.id:
             self.page.popup_owner = None
         self.source.popups.discard(self.id)
@@ -828,3 +975,8 @@ class _Attachment:
             self.composing = False
             if self.task.guard.actor == self.id:
                 self.task.guard.end(self.id)
+
+    async def discard_field_edit(self) -> None:
+        edit, self.field_edit = self.field_edit, None
+        if edit is not None:
+            await edit.snapshot.close()

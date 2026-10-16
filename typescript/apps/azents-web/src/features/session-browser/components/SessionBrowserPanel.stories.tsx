@@ -1,5 +1,5 @@
 import { Box, Button, rem } from "@mantine/core";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   expect,
   fireEvent,
@@ -9,11 +9,15 @@ import {
   within,
 } from "storybook/test";
 import { BrowserConnection, emptyBrowserLiveState } from "../connection";
+import { useBrowserAddressSelection } from "../containers/useBrowserAddressSelection";
+import { useBrowserEditorViewport } from "../containers/useBrowserEditorViewport";
+import { useBrowserFieldVisibility } from "../containers/useBrowserFieldVisibility";
 import { useBrowserInteraction } from "../containers/useBrowserInteraction";
 import { useBrowserTouchView } from "../containers/useBrowserTouchView";
 import { browserDialogInput, browserFrameMatchesStatus } from "../input";
 import { SessionBrowserPanel } from "./SessionBrowserPanel";
 import type {
+  BrowserFieldAttributes,
   BrowserFrame,
   BrowserInput,
   BrowserInputAction,
@@ -21,9 +25,27 @@ import type {
   BrowserStatus,
   BrowserViewState,
 } from "../types";
+import type { BrowserFieldEditorDraft } from "./BrowserFieldEditor";
 import type { SessionBrowserPanelProps } from "./SessionBrowserPanel";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 import type { ReactElement } from "react";
+
+const fieldAttributes: BrowserFieldAttributes = {
+  input_type: "text",
+  input_mode: null,
+  autocomplete: "",
+  autocapitalize: null,
+  autocorrect: null,
+  spellcheck: true,
+  enter_key_hint: null,
+  max_length: null,
+  min_length: null,
+  pattern: "",
+  required: false,
+  multiple: false,
+  placeholder: "",
+  name: "",
+};
 
 const target = {
   task_id: "synthetic-task",
@@ -183,10 +205,12 @@ async function clickBrowserViewport(surface: HTMLElement): Promise<void> {
 function BrowserFixture(
   props: SessionBrowserPanelProps & {
     reportActions?: boolean;
+    recordActions?: boolean;
     readClipboard?: (() => Promise<string>) | null;
     onInputAction?: (action: BrowserInputAction) => void;
   },
 ): ReactElement {
+  const addressSelection = useBrowserAddressSelection();
   const [focused, setFocused] = useState(props.focused);
   const [zoom, setZoom] = useState(props.zoom);
   const [counts, setCounts] = useState({
@@ -211,7 +235,7 @@ function BrowserFixture(
         setCounts((value) => ({ ...value, text: value.text + 1 }));
       }
     }
-    return actions(source, action);
+    return props.recordActions === false ? true : actions(source, action);
   };
   const active =
     props.state.type === "READY" &&
@@ -247,6 +271,15 @@ function BrowserFixture(
     keyboardRef: interaction.keyboardRef,
     cancelInput: interaction.cancel,
   });
+  useBrowserFieldVisibility({
+    enabled:
+      focused &&
+      props.fieldEditor !== null &&
+      props.fieldEditor.toolbarVisible &&
+      props.fieldEditor.draft === null,
+    viewport: props.fieldEditor?.viewport ?? null,
+    viewWindowRef: touchView.viewWindowRef,
+  });
   return (
     <Box h={rem(800)} w="100%" maw={rem(640)}>
       <SessionBrowserPanel
@@ -254,6 +287,7 @@ function BrowserFixture(
         interaction={interaction.interaction}
         keyboardRef={interaction.keyboardRef}
         touchView={touchView}
+        addressSelection={addressSelection}
         paste={interaction.paste}
         focused={focused}
         zoom={zoom}
@@ -429,6 +463,271 @@ function PastePreviewFixture(
   );
 }
 
+/** Synthetic remote values; actual clipboard text stays in transient UI state. */
+function FieldEditorPreviewFixture(
+  props: SessionBrowserPanelProps & {
+    multiline?: boolean;
+    toolbarAppearance?: "bar" | "floating";
+  },
+): ReactElement {
+  const [selected, setSelected] = useState<"search" | "password" | null>(null);
+  const [directActive, setDirectActive] = useState(false);
+  const [searchValue, setSearchValue] = useState(
+    props.multiline
+      ? "오늘 날씨를 확인합니다.\n明日の予定\n明天的天气"
+      : "서울 날씨",
+  );
+  const [passwordValue, setPasswordValue] = useState("SyntheticPasswordOnly");
+  const [draft, setDraft] = useState<
+    | (BrowserFieldEditorDraft & {
+        field: "search" | "password";
+      })
+    | null
+  >(null);
+  const latestDraft = useRef(draft);
+  latestDraft.current = draft;
+  const editorViewport = useBrowserEditorViewport(
+    draft !== null || directActive,
+  );
+  useEffect(() => {
+    const select = (event: globalThis.PointerEvent): void => {
+      if (!(event.target instanceof Element)) {
+        return;
+      }
+      const id = event.target.getAttribute("data-browser-native-input");
+      if (id === "editor-search" || id === "editor-password") {
+        setSelected(id === "editor-search" ? "search" : "password");
+      }
+    };
+    const focus = (event: FocusEvent): void => {
+      const id =
+        event.target instanceof Element
+          ? event.target.getAttribute("data-browser-native-input")
+          : null;
+      setDirectActive(id === "editor-search" || id === "editor-password");
+    };
+    const blur = (): void => setDirectActive(false);
+    document.addEventListener("pointerdown", select, true);
+    document.addEventListener("focusin", focus, true);
+    document.addEventListener("focusout", blur, true);
+    return () => {
+      document.removeEventListener("pointerdown", select, true);
+      document.removeEventListener("focusin", focus, true);
+      document.removeEventListener("focusout", blur, true);
+    };
+  }, []);
+  const editableFrame: BrowserFrame = {
+    ...frame,
+    editables: [
+      {
+        id: "editor-search",
+        x: 56,
+        y: 366,
+        width: 688,
+        height: 76,
+        input_mode: "text",
+      },
+      {
+        id: "editor-password",
+        x: 56,
+        y: 530,
+        width: 688,
+        height: 76,
+        input_mode: "text",
+      },
+    ],
+  };
+  const displayText = searchValue
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\n", " ");
+  const content = svg
+    .replace("Review your delivery", "One-field edit preview")
+    .replace(
+      "Static fixture. Do not enter real credentials.",
+      "Synthetic page only. No remote field access.",
+    )
+    .replace("Email address", props.multiline ? "Notes" : "Search query")
+    .replace("name@example.test", displayText)
+    .replace("Enter your password", passwordValue ? "••••••••••••" : "")
+    .replace("Sign in", "Search");
+  return (
+    <BrowserFixture
+      {...props}
+      recordActions={false}
+      onInputAction={(action) => {
+        if (action.kind !== "wheel") {
+          return;
+        }
+        const surface = document.querySelector<HTMLElement>(
+          '[aria-label="Remote browser page"]',
+        );
+        const view = surface?.parentElement;
+        if (surface !== null && view != null) {
+          const scale = surface.getBoundingClientRect().width / frame.width;
+          view.scrollTop += action.delta_y * scale;
+          view.scrollLeft += action.delta_x * scale;
+        }
+      }}
+      focusViewport={
+        editorViewport === null
+          ? null
+          : {
+              top: editorViewport.top,
+              height: editorViewport.height,
+            }
+      }
+      state={{
+        ...ready,
+        selected: {
+          ...page,
+          title: "Synthetic search",
+          taskLabel: "입력창 편집 시안 · 실제 페이지 연결 없음",
+        },
+        image: {
+          url: `data:image/svg+xml,${encodeURIComponent(content)}`,
+          frame: editableFrame,
+        },
+      }}
+      fieldEditor={{
+        enabled: selected !== null,
+        draft,
+        viewport: editorViewport,
+        toolbarVisible: directActive,
+        toolbarAppearance: props.toolbarAppearance ?? "bar",
+        onOpen: () => {
+          if (selected === null) {
+            return;
+          }
+          setDraft({
+            field: selected,
+            attributes: {
+              ...fieldAttributes,
+              input_type:
+                selected === "password"
+                  ? "password"
+                  : props.multiline
+                    ? "textarea"
+                    : "text",
+            },
+            label:
+              selected === "password"
+                ? "비밀번호"
+                : props.multiline
+                  ? "메모"
+                  : "검색어",
+            kind:
+              selected === "password"
+                ? "password"
+                : props.multiline
+                  ? "multiline"
+                  : "text",
+            value: selected === "password" ? passwordValue : searchValue,
+          });
+        },
+        onChange: (value) =>
+          setDraft((current) =>
+            current === null ? null : { ...current, value },
+          ),
+        onConfirm: () => {
+          if (draft === null) {
+            return;
+          }
+          if (draft.field === "search") {
+            setSearchValue(draft.value);
+          } else {
+            setPasswordValue(draft.value);
+          }
+          setDraft(null);
+        },
+        onCancel: () => {
+          setDraft(null);
+        },
+        onDirectPaste: () => {
+          const receiver = document.activeElement;
+          if (
+            selected === null ||
+            !(receiver instanceof HTMLTextAreaElement) ||
+            receiver.getAttribute("data-browser-native-input") !==
+              `editor-${selected}`
+          ) {
+            return;
+          }
+          const field = selected;
+          const originalValue =
+            field === "search" ? searchValue : passwordValue;
+          if (
+            typeof navigator.clipboard === "undefined" ||
+            typeof navigator.clipboard.readText !== "function"
+          ) {
+            return;
+          }
+          void navigator.clipboard.readText().then(
+            (text) => {
+              if (
+                document.activeElement !== receiver ||
+                !receiver.isConnected
+              ) {
+                return;
+              }
+              if (text.length === 0) {
+                return;
+              }
+              if (originalValue.length + text.length > 32768) {
+                return;
+              }
+              const update = (value: string): string =>
+                value !== originalValue ? value : value + text;
+              if (field === "search") {
+                setSearchValue(update);
+              } else {
+                setPasswordValue(update);
+              }
+            },
+            () => {},
+          );
+        },
+        onPaste: (insertNative) => {
+          if (draft === null) {
+            return;
+          }
+          const original = draft;
+          if (
+            typeof navigator.clipboard === "undefined" ||
+            typeof navigator.clipboard.readText !== "function"
+          ) {
+            return;
+          }
+          void navigator.clipboard.readText().then(
+            (text) => {
+              if (
+                latestDraft.current !== original ||
+                [...text].length > 32768
+              ) {
+                return;
+              }
+              const value = insertNative(text);
+              if (value === null) {
+                return;
+              }
+              setDraft((current) =>
+                current !== original
+                  ? current
+                  : {
+                      ...current,
+                      value,
+                    },
+              );
+            },
+            () => {},
+          );
+        },
+      }}
+    />
+  );
+}
+
 const meta = {
   component: SessionBrowserPanel,
   parameters: { layout: "fullscreen" },
@@ -441,6 +740,7 @@ const meta = {
     onZoomChange: fn(),
     state: ready,
     addressValue: page.url,
+    addressSelection: null,
     addressError: false,
     navigationEnabled: true,
     onAddressChange: fn(),
@@ -465,6 +765,7 @@ const meta = {
     interaction: null,
     touchView: null,
     paste: null,
+    fieldEditor: null,
   },
   beforeEach: (): void => {
     actions.mockClear();
@@ -477,6 +778,137 @@ type Story = StoryObj<typeof meta>;
 export const PasteButtonPreview = {
   render: (props) => <PastePreviewFixture {...props} />,
   parameters: { viewport: { defaultViewport: "mobile1" } },
+} satisfies Story;
+
+export const FieldEditorPreview = {
+  render: (props) => <FieldEditorPreviewFixture {...props} />,
+  parameters: { viewport: { defaultViewport: "mobile1" } },
+} satisfies Story;
+
+export const FieldEditorMultilinePreview = {
+  ...FieldEditorPreview,
+  render: (props) => <FieldEditorPreviewFixture {...props} multiline />,
+} satisfies Story;
+
+export const FieldEditorFloatingPreview = {
+  ...FieldEditorPreview,
+  render: (props) => (
+    <FieldEditorPreviewFixture {...props} toolbarAppearance="floating" />
+  ),
+} satisfies Story;
+
+export const FieldEditorLowerInputVisibility = {
+  ...FieldEditorPreview,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const field =
+      canvasElement.ownerDocument.querySelector<HTMLTextAreaElement>(
+        '[data-browser-native-input="editor-password"]',
+      );
+    if (field === null) {
+      throw new Error("The synthetic lower input is required");
+    }
+    await userEvent.click(field);
+    const toolbar = canvas.getByRole("toolbar", { name: "Browser actions" });
+    await waitFor(async () => {
+      const bounds = field.getBoundingClientRect();
+      const view = field.parentElement?.parentElement?.getBoundingClientRect();
+      if (!view) {
+        throw new Error("The synthetic viewing area is required");
+      }
+      await expect(bounds.top).toBeGreaterThanOrEqual(view.top);
+      await expect(bounds.bottom).toBeLessThanOrEqual(
+        toolbar.getBoundingClientRect().top - 11,
+      );
+    });
+    await expect(field).toHaveFocus();
+    await expect(
+      canvas.queryByRole("dialog", { name: "Edit input" }),
+    ).toBeNull();
+  },
+} satisfies Story;
+
+export const FieldEditorFloatingLowerInputVisibility = {
+  ...FieldEditorLowerInputVisibility,
+  render: (props) => (
+    <FieldEditorPreviewFixture {...props} toolbarAppearance="floating" />
+  ),
+} satisfies Story;
+
+export const FieldEditorPreviewInteraction = {
+  ...FieldEditorPreview,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const open = (): HTMLElement =>
+      canvas.getByRole("button", { name: "Edit" });
+    await expect(
+      canvas.queryByRole("button", { name: "Edit selected input" }),
+    ).toBeNull();
+    await expect(canvas.queryByRole("button", { name: "Paste" })).toBeNull();
+    const search =
+      canvasElement.ownerDocument.querySelector<HTMLTextAreaElement>(
+        '[data-browser-native-input="editor-search"]',
+      );
+    if (search === null) {
+      throw new Error("Synthetic editable target is required");
+    }
+    await userEvent.click(search);
+    await expect(
+      canvas.queryByRole("dialog", { name: "Edit input" }),
+    ).toBeNull();
+    const toolbar = canvas.getByRole("toolbar", { name: "Browser actions" });
+    await expect(toolbar.querySelector("input,textarea")).toBeNull();
+    await expect(within(toolbar).getAllByRole("button")).toHaveLength(2);
+    await userEvent.click(
+      within(toolbar).getByRole("button", { name: "Edit" }),
+    );
+    await expect(
+      canvas.getByRole("dialog", { name: "Edit input" }),
+    ).toBeVisible();
+    const input = canvas.getByRole("textbox", { name: "검색어" });
+    await expect(input).toHaveValue("서울 날씨");
+    await waitFor(() => expect(input).toHaveFocus());
+    const panel = canvas.getByRole("dialog", { name: "Edit input" });
+    await waitFor(async () => {
+      const viewport = canvasElement.ownerDocument.defaultView?.visualViewport;
+      if (!viewport) {
+        throw new Error("A visual viewport is required for this story");
+      }
+      const bounds = panel.getBoundingClientRect();
+      await expect(
+        Math.abs(bounds.bottom - viewport.offsetTop - viewport.height),
+      ).toBeLessThan(1);
+      await expect(Math.abs(bounds.height - viewport.height)).toBeLessThan(1);
+    });
+    await userEvent.clear(input);
+    await userEvent.type(input, "오늘 날씨");
+    await userEvent.click(canvas.getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(canvas.queryByRole("dialog", { name: "Edit input" })).toBeNull(),
+    );
+    await userEvent.click(search);
+    await userEvent.click(open());
+    await expect(canvas.getByRole("textbox", { name: "검색어" })).toHaveValue(
+      "서울 날씨",
+    );
+    await userEvent.clear(canvas.getByRole("textbox", { name: "검색어" }));
+    await userEvent.type(
+      canvas.getByRole("textbox", { name: "검색어" }),
+      "오늘 날씨",
+    );
+    await userEvent.click(canvas.getByRole("button", { name: "Apply" }));
+    await waitFor(() =>
+      expect(canvas.queryByRole("dialog", { name: "Edit input" })).toBeNull(),
+    );
+    await userEvent.click(search);
+    await expect(
+      canvas.queryByRole("dialog", { name: "Edit input" }),
+    ).toBeNull();
+    await userEvent.click(open());
+    await expect(canvas.getByRole("textbox", { name: "검색어" })).toHaveValue(
+      "오늘 날씨",
+    );
+  },
 } satisfies Story;
 
 export const PasteButtonPreviewInteraction = {
@@ -707,7 +1139,22 @@ export const NativeReceiverPreservesFocus = {
       clientY: bounds.top + 10,
     };
     await fireEvent.pointerDown(region, outside);
-    await fireEvent.pointerUp(region, outside);
+    await expect(receiver).toHaveFocus();
+    await fireEvent.pointerMove(region, {
+      ...outside,
+      clientY: outside.clientY + 40,
+    });
+    await fireEvent.pointerUp(region, {
+      ...outside,
+      clientY: outside.clientY + 40,
+    });
+    await expect(receiver).toHaveFocus();
+    await expect(blurred).not.toHaveBeenCalled();
+    await expect(
+      actions.mock.calls.some(([, action]) => action.kind === "wheel"),
+    ).toBe(true);
+    await fireEvent.pointerDown(region, { ...outside, pointerId: 19 });
+    await fireEvent.pointerUp(region, { ...outside, pointerId: 19 });
     await expect(receiver).not.toHaveFocus();
     await expect(paste).toBeDisabled();
   },
@@ -953,6 +1400,51 @@ export const BrowserTabs = {
     await expect(
       canvas.getByRole("button", { name: "Exit focused view" }),
     ).toBeVisible();
+  },
+} satisfies Story;
+
+export const AddressSelectsAllOnEntry = {
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const address = canvas.getByRole("textbox", { name: "Browser address" });
+    await userEvent.click(address);
+    await expect(canvasElement.ownerDocument.getSelection()?.toString()).toBe(
+      page.url,
+    );
+    await userEvent.keyboard("{Backspace}");
+    await expect(args.onAddressChange).toHaveBeenLastCalledWith("");
+  },
+} satisfies Story;
+
+export const AddressKeepsLaterCaretEdits = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const address = canvasElement.ownerDocument.querySelector<HTMLInputElement>(
+      'input[aria-label="Browser address"]',
+    );
+    if (address === null) {
+      throw new Error("The browser address is required");
+    }
+    await userEvent.click(address);
+    await expect(canvasElement.ownerDocument.getSelection()?.toString()).toBe(
+      page.url,
+    );
+    await userEvent.keyboard("{End}{Shift>}{ArrowLeft}{ArrowLeft}{/Shift}");
+    const selected = canvasElement.ownerDocument.getSelection()?.toString();
+    await expect(selected).toBe(page.url.slice(-2));
+    await fireEvent.pointerDown(address);
+    await fireEvent.click(address);
+    await expect(canvasElement.ownerDocument.getSelection()?.toString()).toBe(
+      selected,
+    );
+    address.blur();
+    address.focus();
+    await expect(canvasElement.ownerDocument.getSelection()?.toString()).toBe(
+      page.url,
+    );
+    await expect(
+      canvas.getByRole("textbox", { name: "Browser address" }),
+    ).toHaveAttribute("inputmode", "url");
   },
 } satisfies Story;
 

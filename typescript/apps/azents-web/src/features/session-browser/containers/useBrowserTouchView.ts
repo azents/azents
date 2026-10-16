@@ -18,7 +18,15 @@ interface Point {
 
 type Gesture =
   | { type: "idle" }
-  | { type: "tap"; id: number; start: Point; last: Point; frame: BrowserFrame }
+  | {
+      type: "tap";
+      id: number;
+      start: Point;
+      last: Point;
+      frame: BrowserFrame;
+      nativeInput: boolean;
+      receiver: HTMLTextAreaElement | null;
+    }
   | { type: "pan"; id: number; last: Point }
   | { type: "pinch"; distance: number; zoom: number; anchor: Point }
   | { type: "blocked" };
@@ -119,7 +127,6 @@ export function useBrowserTouchView(options: Options): BrowserTouchView {
         !event.target.readOnly;
       if (!nativeInput) {
         event.currentTarget.setPointerCapture(event.pointerId);
-        current.keyboardRef.current?.blur();
       }
       if (fingers.current.size === 1) {
         current.cancelInput();
@@ -129,9 +136,15 @@ export function useBrowserTouchView(options: Options): BrowserTouchView {
           start: point,
           last: point,
           frame: current.frame,
+          nativeInput,
+          receiver:
+            nativeInput && event.target instanceof HTMLTextAreaElement
+              ? event.target
+              : null,
         };
       } else if (fingers.current.size === 2) {
         current.cancelInput();
+        current.keyboardRef.current?.blur();
         const [a = null, b = null] = [...fingers.current.values()];
         if (a === null || b === null) {
           return;
@@ -258,6 +271,17 @@ export function useBrowserTouchView(options: Options): BrowserTouchView {
             source,
           );
           if (point !== null) {
+            if (!held.nativeInput) {
+              current.keyboardRef.current?.blur();
+            } else if (
+              held.receiver !== null &&
+              held.receiver.isConnected &&
+              !held.receiver.readOnly &&
+              document.activeElement !== held.receiver
+            ) {
+              // Keep focus inside this completed trusted tap, including after a modal closes.
+              held.receiver.focus({ preventScroll: true });
+            }
             feedbackSequence.current += 1;
             setTouchFeedback({
               id: feedbackSequence.current,

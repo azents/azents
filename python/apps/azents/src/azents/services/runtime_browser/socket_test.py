@@ -11,6 +11,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 from azents_runtime_control.browser_viewer_contract import (
+    ViewerFieldAttributes,
+    ViewerFieldValue,
     ViewerFrame,
     ViewerSource,
     ViewerStatus,
@@ -467,3 +469,142 @@ def test_rate_budget_bounds_both_message_count_and_bytes() -> None:
     budget.consume(256 * 1024, 0)
     with pytest.raises(BrowserSocketFailure):
         budget.consume(1, 0)
+
+
+def _field_value(
+    *, sequence: int = 1, editable_id: str = "native-1"
+) -> BrowserSourceWebSocketMessage:
+    return BrowserSourceWebSocketMessage(
+        WebSocketOpcode.TEXT,
+        encode_viewer_event(
+            ViewerFieldValue(
+                "attachment-1",
+                sequence,
+                editable_id,
+                "edit-1",
+                "password",
+                ViewerFieldAttributes(
+                    "password",
+                    None,
+                    "current-password",
+                    None,
+                    None,
+                    False,
+                    None,
+                    None,
+                    None,
+                    "",
+                    False,
+                    False,
+                    "",
+                    "password",
+                ),
+                "Synthetic private value",
+            )
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "patch",
+    [
+        {"form": "not allowed"},
+        {"input_type": "email"},
+        {"autocomplete": "x" * 257},
+    ],
+)
+async def test_private_native_attributes_fail_closed(
+    patch: dict[str, object],
+) -> None:
+    h = _harness()
+    task = await _connected(h)
+    await _open_field(h)
+    value = json.loads(_field_value().payload)
+    value["attributes"].update(patch)
+    h.connection.incoming.put_nowait(
+        BrowserSourceWebSocketMessage(WebSocketOpcode.TEXT, json.dumps(value).encode())
+    )
+    with pytest.raises(BrowserSocketFailure) as captured:
+        await asyncio.wait_for(task, 2)
+    assert captured.value.code == 4500 and len(h.socket.texts) == 1
+    assert "Synthetic private value" not in str(captured.value)
+
+
+async def _open_field(h: _Harness) -> None:
+    request = dict(_input())
+    value = json.loads(str(request["text"]))
+    value["action"] = {"kind": "field_open", "editable_id": "native-1"}
+    request["text"] = json.dumps(value)
+    h.socket.incoming.put_nowait(request)
+    await asyncio.wait_for(h.connection.sent_event.wait(), 2)
+
+
+async def test_private_field_response_requires_explicit_correlated_read() -> None:
+    h = _harness()
+    task = await _connected(h)
+    await _open_field(h)
+    h.socket.text_sent.clear()
+    h.connection.incoming.put_nowait(_field_value())
+    await asyncio.wait_for(h.socket.text_sent.wait(), 2)
+    assert h.socket.texts[-1] == _field_value().payload.decode()
+    h.socket.text_sent.clear()
+    h.connection.incoming.put_nowait(
+        BrowserSourceWebSocketMessage(
+            WebSocketOpcode.TEXT,
+            json.dumps(
+                {
+                    "type": "input_ack",
+                    "attachment_id": "attachment-1",
+                    "sequence": 1,
+                    "accepted": True,
+                    "reason_code": None,
+                    "outcome": "dispatched",
+                }
+            ).encode(),
+        )
+    )
+    await asyncio.wait_for(h.socket.text_sent.wait(), 2)
+    assert json.loads(h.socket.texts[-1])["type"] == "input_ack"
+    await _disconnect(h, task)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "unsolicited",
+        "wrong-sequence",
+        "wrong-field",
+        "revoked",
+        "readonly",
+        "duplicate",
+    ],
+)
+async def test_private_field_response_fails_closed_without_forwarding(
+    case: str,
+) -> None:
+    h = _harness()
+    if case == "readonly":
+        h.validator.admit.return_value = dataclasses.replace(
+            _CURRENT, allow_input=False
+        )
+    task = await _connected(h)
+    if case not in {"unsolicited", "readonly"}:
+        await _open_field(h)
+    if case == "revoked":
+        h.validator.return_value = False
+    if case == "duplicate":
+        h.socket.text_sent.clear()
+        h.connection.incoming.put_nowait(_field_value())
+        await asyncio.wait_for(h.socket.text_sent.wait(), 2)
+    count = len(h.socket.texts)
+    h.connection.incoming.put_nowait(
+        _field_value(
+            sequence=2 if case == "wrong-sequence" else 1,
+            editable_id="other" if case == "wrong-field" else "native-1",
+        )
+    )
+    with pytest.raises(BrowserSocketFailure) as captured:
+        await asyncio.wait_for(task, 2)
+    assert captured.value.code == (4403 if case == "revoked" else 4500)
+    assert len(h.socket.texts) == count
+    assert "Synthetic private value" not in str(captured.value)

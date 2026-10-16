@@ -1,11 +1,14 @@
-"""Content-free, document-local text-input geometry for native mobile receivers."""
+"""Content-free native geometry and explicit private, one-field editing."""
 
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
+from typing import Literal
 
 from azents_runtime_control.browser_viewer_contract import (
     ViewerEditable,
+    ViewerFieldAttributes,
     decode_viewer_editables,
+    decode_viewer_field_attributes,
 )
 from playwright.async_api import Error, Frame, JSHandle, Page
 
@@ -13,6 +16,25 @@ _PROBE = """() => {
     const ids = new WeakMap(); let sequence = 0;
     const modes = new Set(['text','email','url','tel','numeric','decimal','search']);
     const types = new Set(['text','email','url','tel','password','search','number']);
+    const names = ['value','type','readOnly','inputMode','autocomplete',
+        'autocapitalize','autocorrect','spellcheck','enterKeyHint','maxLength',
+        'minLength','pattern','required','multiple','placeholder','name','form'];
+    const descriptors = prototype => new Map(names.map(name => [name,
+        Object.getOwnPropertyDescriptor(prototype, name) ||
+        Object.getOwnPropertyDescriptor(HTMLElement.prototype, name)]));
+    const inputProperties = descriptors(HTMLInputElement.prototype);
+    const textareaProperties = descriptors(HTMLTextAreaElement.prototype);
+    const properties = element => element instanceof HTMLInputElement ?
+        inputProperties : textareaProperties;
+    const readNative = (element, name) =>
+        properties(element).get(name)?.get?.call(element);
+    const writeNative = (element, name, value) =>
+        properties(element).get(name).set.call(element, value);
+    const nativeType = element => readNative(element, 'type');
+    const nativeValue = element => readNative(element, 'value');
+    const nativeReadOnly = element => readNative(element, 'readOnly');
+    const formAutocomplete = Object.getOwnPropertyDescriptor(
+        HTMLFormElement.prototype, 'autocomplete').get;
     const hit = (root, x, y) => {
         let element = root.elementFromPoint(x, y);
         while (element?.shadowRoot) {
@@ -39,10 +61,12 @@ _PROBE = """() => {
             if (regions.length >= 16) break;
             const input = element instanceof HTMLInputElement;
             const native = input || element instanceof HTMLTextAreaElement;
-            if (element.inputMode === 'none') continue;
+            const type = input ? nativeType(element) : null;
+            const mode = native ? readNative(element, 'inputMode') : element.inputMode;
+            if (mode === 'none') continue;
             if (native) {
-                if (element.matches(':disabled') || element.readOnly ||
-                    (input && !types.has(element.type))) continue;
+                if (element.matches(':disabled') || nativeReadOnly(element) ||
+                    (input && !types.has(type))) continue;
             } else if (!element.isContentEditable ||
                 element.parentElement?.isContentEditable) continue;
             const rect = element.getBoundingClientRect();
@@ -68,13 +92,28 @@ _PROBE = """() => {
                 return target && (target===element || element.contains(target));
             })) continue;
             if (!ids.has(element)) ids.set(element, String(++sequence));
-            const input_mode = modes.has(element.inputMode) ? element.inputMode :
-                ['email','url','tel','search'].includes(element.type) ?
-                element.type : element.type === 'number' ? 'decimal' : 'text';
+            const input_mode = modes.has(mode) ? mode :
+                ['email','url','tel','search'].includes(type) ?
+                type : type === 'number' ? 'decimal' : 'text';
             regions.push({id:ids.get(element),x,y,
                 width:right-x,height:bottom-y,input_mode});
         }
         return regions;
+    };
+    probe.nativeType = nativeType;
+    probe.nativeValue = nativeValue;
+    probe.nativeReadOnly = nativeReadOnly;
+    probe.setNativeValue = (element, value) => writeNative(element, 'value', value);
+    probe.representable = (element, text, attributes) => {
+        const multiline = element instanceof HTMLTextAreaElement;
+        const candidate = element.ownerDocument.createElement(
+            multiline ? 'textarea' : 'input');
+        if (!multiline) {
+            writeNative(candidate, 'type', attributes.input_type);
+            writeNative(candidate, 'multiple', attributes.multiple);
+        }
+        writeNative(candidate, 'value', text);
+        return nativeValue(candidate) === text;
     };
     probe.focused = id => {
         let active = document.activeElement;
@@ -83,7 +122,87 @@ _PROBE = """() => {
         return active?.isConnected && ids.get(active) === id &&
             probe().some(region => region.id === id);
     };
+    probe.attributes = element => {
+        const input = element instanceof HTMLInputElement;
+        const capitalize = readNative(element, 'autocapitalize');
+        const correct = readNative(element, 'autocorrect');
+        const mode = readNative(element, 'inputMode');
+        const form = readNative(element, 'form');
+        const maximum = readNative(element, 'maxLength');
+        const minimum = readNative(element, 'minLength');
+        return {
+            input_type:nativeType(element),
+            input_mode:modes.has(mode) || mode === 'none' ? mode : null,
+            autocomplete:readNative(element, 'autocomplete') ||
+                (form ? formAutocomplete.call(form) : ''),
+            autocapitalize:['off','none','on','sentences','words','characters']
+                .includes(capitalize) ? capitalize : null,
+            autocorrect:typeof correct === 'boolean' ? correct ? 'on' : 'off' : null,
+            spellcheck:readNative(element, 'spellcheck'),
+            enter_key_hint:['enter','done','go','next','previous','search','send']
+                .includes(readNative(element, 'enterKeyHint')) ?
+                readNative(element, 'enterKeyHint') : null,
+            max_length:maximum < 0 ? null : maximum,
+            min_length:minimum < 0 ? null : minimum,
+            pattern:input ? readNative(element, 'pattern') : '',
+            required:readNative(element, 'required'),
+            multiple:input && readNative(element, 'multiple'),
+            placeholder:readNative(element, 'placeholder'),
+            name:readNative(element, 'name'),
+        };
+    };
+    probe.open = id => {
+        if (!probe.focused(id)) return null;
+        let element = document.activeElement;
+        while (element?.shadowRoot?.activeElement)
+            element = element.shadowRoot.activeElement;
+        const multiline = element instanceof HTMLTextAreaElement;
+        if (!multiline && (!(element instanceof HTMLInputElement) ||
+            !['text','email','url','tel','password','search']
+                .includes(nativeType(element))))
+            return null;
+        const value = nativeValue(element);
+        if (value.length > 32768) return null;
+        return {element, value, id, probe,
+            attributes:probe.attributes(element),
+            kind:multiline ? 'multiline' :
+                nativeType(element) === 'password' ? 'password' : 'text'};
+    };
     return probe;
+}"""
+
+_REPLACE_FIELD = """(snapshot, text) => {
+    const element = snapshot.element;
+    const valid = () => element.isConnected &&
+        snapshot.probe.focused(snapshot.id) &&
+        JSON.stringify(snapshot.probe.attributes(element)) ===
+            JSON.stringify(snapshot.attributes) &&
+        !element.matches(':disabled') && !snapshot.probe.nativeReadOnly(element) &&
+        snapshot.probe.nativeValue(element) === snapshot.value &&
+        (element instanceof HTMLTextAreaElement ||
+            (element instanceof HTMLInputElement &&
+                ['text','email','url','tel','password','search']
+                    .includes(snapshot.probe.nativeType(element))));
+    if (snapshot.consumed || !valid()) return false;
+    snapshot.consumed = true;
+    const representable = () => snapshot.probe.representable(
+        element, text, snapshot.attributes);
+    if (!representable()) return false;
+    const before = new InputEvent('beforeinput', {
+        bubbles:true, composed:true, cancelable:true,
+        inputType:'insertReplacementText', data:text
+    });
+    if (!element.dispatchEvent(before) || !valid() || !representable()) return false;
+    snapshot.probe.setNativeValue(element, text);
+    if (typeof element.setSelectionRange === 'function' &&
+        (element instanceof HTMLTextAreaElement ||
+            ['text','tel','password','search']
+                .includes(snapshot.attributes.input_type)))
+        element.setSelectionRange(text.length,text.length);
+    element.dispatchEvent(new InputEvent('input', {
+        bubbles:true, composed:true, inputType:'insertReplacementText', data:text
+    }));
+    return true;
 }"""
 
 _FRAME_PROJECT = """(element, regions) => {
@@ -123,6 +242,44 @@ _FRAME_PROJECT = """(element, regions) => {
 class _Probe:
     prefix: str
     handle: JSHandle
+
+
+@dataclass(frozen=True)
+class EditableFieldValue:
+    kind: Literal["text", "password", "multiline"]
+    value: str = field(repr=False)
+    attributes: ViewerFieldAttributes = field(repr=False)
+
+
+@dataclass(frozen=True)
+class EditableFieldSnapshot:
+    identifier: str
+    handle: JSHandle = field(repr=False)
+
+    async def value(self) -> EditableFieldValue:
+        raw: object = await self.handle.evaluate(
+            "snapshot => ({kind:snapshot.kind,value:snapshot.value,"
+            "attributes:snapshot.attributes})"
+        )
+        if not isinstance(raw, dict):
+            raise ValueError("Invalid native Browser field snapshot")
+        kind, value = raw.get("kind"), raw.get("value")
+        if not isinstance(value, str) or len(value) > 32768:
+            raise ValueError("Invalid native Browser field value")
+        match kind:
+            case "text" | "password" | "multiline":
+                return EditableFieldValue(
+                    kind, value, decode_viewer_field_attributes(raw.get("attributes"))
+                )
+            case _:
+                raise ValueError("Unsupported native Browser field kind")
+
+    async def replace(self, text: str) -> bool:
+        result: object = await self.handle.evaluate(_REPLACE_FIELD, text)
+        return result is True
+
+    async def close(self) -> None:
+        await self.handle.dispose()
 
 
 class BrowserEditableRegions:
@@ -206,6 +363,23 @@ class BrowserEditableRegions:
         for probe in self.probes.values():
             await probe.handle.dispose()
         self.probes.clear()
+
+    async def open_edit(self, identifier: str) -> EditableFieldSnapshot | None:
+        """Snapshot only a focused native field on explicit participant request."""
+        if not await self.focused(identifier):
+            return None
+        for probe in self.probes.values():
+            prefix = f"{probe.prefix}-"
+            if not identifier.startswith(prefix):
+                continue
+            handle = await probe.handle.evaluate_handle(
+                "(probe, id) => probe.open(id)", identifier.removeprefix(prefix)
+            )
+            if await handle.evaluate("snapshot => snapshot === null"):
+                await handle.dispose()
+                return None
+            return EditableFieldSnapshot(identifier, handle)
+        return None
 
     async def focused(self, identifier: str) -> bool:
         """Check the same current editable and every active ancestor frame."""
