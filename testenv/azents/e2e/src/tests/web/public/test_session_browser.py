@@ -488,8 +488,12 @@ document.activeElement.dispatchEvent(new ClipboardEvent('paste', {
             (By.CSS_SELECTOR, 'input[aria-label="Browser address"]:not([readonly])')
         )
     )
-    address.send_keys(Keys.CONTROL, "a")
-    address.send_keys("http://127.0.0.1:8766/navigation", Keys.ENTER)
+    address.send_keys(Keys.CONTROL, "a", Keys.NULL)
+    address.send_keys("http://127.0.0.1:8766/navigation")
+    wait.until(
+        lambda _: address.get_attribute("value") == "http://127.0.0.1:8766/navigation"
+    )
+    address.send_keys(Keys.ENTER)
 
     def current_page() -> BrowserPageResponse:
         projection = _projection(public_url, resource_path, token)
@@ -557,7 +561,7 @@ def test_session_browser_engine_native_input_dialog_and_reconnect(
     azents_public_server_url: str,
     azents_runtime_provider_docker_container: object,
     mock_openai_url: str,
-    browser_driver: WebDriver,
+    request: pytest.FixtureRequest,
     azents_main_web_url: str,
 ) -> None:
     """Exercise authenticated API/Control/Owner/Runner without pre-admitted state."""
@@ -808,8 +812,12 @@ def test_session_browser_engine_native_input_dialog_and_reconnect(
         assert reconnected.status.attachment_id != first_attachment
         assert reconnected.frame is not None
         assert reconnected.frame.target == target
+        # Native Runtime setup can exceed Selenium's unused-session lifetime.
+        # Create the Web session only when the first Web interaction is ready.
+        driver = request.getfixturevalue("browser_driver")
+        assert isinstance(driver, WebDriver)
         _verify_live_panel(
-            driver=browser_driver,
+            driver=driver,
             web_url=azents_main_web_url,
             public_url=azents_public_server_url,
             resource_path=resource_path,

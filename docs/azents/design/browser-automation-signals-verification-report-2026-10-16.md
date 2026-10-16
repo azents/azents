@@ -26,7 +26,7 @@ Independent review found two issues in an initial implementation: a synthesized 
 
 The complete Runner suite passed: 571 tests in 100.68 seconds. Ruff, formatting, the configured type checker, E2E fixture static checks, documentation catalog and whitespace validation also passed. Runner regression includes existing dialogs, popup/download/upload handling, native input, stale targets, Session persistence/isolation, live viewing, field editing and shutdown cleanup. The assembled-product authenticated Browser E2E fixture also rejects exposed webdriver, User-Agent, appVersion and low-entropy HTTP/page client-hint HeadlessChrome markers before its existing handoff/input/reconnect flow can pass.
 
-Submitted-SHA CI evidence is recorded in the PR; local synthetic checks are not represented as assembled-product E2E.
+Submitted-SHA CI evidence is recorded in the PR; local synthetic checks are not represented as assembled-product E2E. The initial CI attempt passed Runner and all four required E2E lanes but failed the Browser Web flow at address navigation. A same-SHA retry instead failed at first WebDriver use: Selenium explicitly reported its 120-second unused-session expiration during prior native Runtime preparation. The fixture now creates its function-owned WebDriver immediately before first Web interaction, preserving cleanup/artifact ownership. Address input also explicitly releases Control and confirms the complete controlled URL value before Enter; no retries, sleeps, timeout increases or assertion removal were added. The initial navigation failure remains distinct until the updated flow is measured in CI.
 
 ## Live site diagnostic
 
