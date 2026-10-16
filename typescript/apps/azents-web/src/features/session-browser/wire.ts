@@ -1,5 +1,6 @@
 import type {
   BrowserEditable,
+  BrowserFieldAttributes,
   BrowserFieldValue,
   BrowserFrame,
   BrowserInputAck,
@@ -91,6 +92,116 @@ function parse(textValue: string): unknown {
   }
 }
 
+function member<T extends string>(
+  value: unknown,
+  choices: readonly T[],
+): value is T {
+  return choices.some((choice) => choice === value);
+}
+
+function nativeLength(value: unknown): value is number | null {
+  return (
+    value === null ||
+    (typeof value === "number" &&
+      Number.isInteger(value) &&
+      value >= 0 &&
+      value <= 2147483647)
+  );
+}
+
+function boundedText(value: unknown, maximum: number): value is string {
+  return typeof value === "string" && [...value].length <= maximum;
+}
+
+function fieldAttributes(value: unknown): BrowserFieldAttributes | null {
+  if (
+    !object(value) ||
+    !keys(value, [
+      "input_type",
+      "input_mode",
+      "autocomplete",
+      "autocapitalize",
+      "autocorrect",
+      "spellcheck",
+      "enter_key_hint",
+      "max_length",
+      "min_length",
+      "pattern",
+      "required",
+      "multiple",
+      "placeholder",
+      "name",
+    ]) ||
+    !member(value.input_type, [
+      "text",
+      "password",
+      "email",
+      "url",
+      "tel",
+      "search",
+      "textarea",
+    ]) ||
+    (value.input_mode !== null &&
+      !member(value.input_mode, [
+        "none",
+        "text",
+        "email",
+        "url",
+        "tel",
+        "numeric",
+        "decimal",
+        "search",
+      ])) ||
+    !boundedText(value.autocomplete, 256) ||
+    (value.autocapitalize !== null &&
+      !member(value.autocapitalize, [
+        "off",
+        "none",
+        "on",
+        "sentences",
+        "words",
+        "characters",
+      ])) ||
+    (value.autocorrect !== null && !member(value.autocorrect, ["on", "off"])) ||
+    typeof value.spellcheck !== "boolean" ||
+    (value.enter_key_hint !== null &&
+      !member(value.enter_key_hint, [
+        "enter",
+        "done",
+        "go",
+        "next",
+        "previous",
+        "search",
+        "send",
+      ])) ||
+    !nativeLength(value.max_length) ||
+    !nativeLength(value.min_length) ||
+    !boundedText(value.pattern, 2048) ||
+    typeof value.required !== "boolean" ||
+    typeof value.multiple !== "boolean" ||
+    !boundedText(value.placeholder, 2048) ||
+    !boundedText(value.name, 256)
+  ) {
+    return null;
+  }
+  return {
+    input_type: value.input_type,
+    input_mode: value.input_mode,
+    autocomplete: value.autocomplete,
+    autocapitalize: value.autocapitalize,
+    autocorrect: value.autocorrect,
+    spellcheck: value.spellcheck,
+    enter_key_hint: value.enter_key_hint,
+    max_length: value.max_length,
+    min_length: value.min_length,
+    pattern: value.pattern,
+    required: value.required,
+    multiple: value.multiple,
+    placeholder: value.placeholder,
+    name: value.name,
+  };
+}
+
 export function decodeBrowserText(
   raw: string,
 ): BrowserStatus | BrowserInputAck | BrowserFieldValue | null {
@@ -102,6 +213,7 @@ export function decodeBrowserText(
     return null;
   }
   if (value.type === "field_value") {
+    const attributes = fieldAttributes(value.attributes);
     if (
       !keys(value, [
         "type",
@@ -110,6 +222,7 @@ export function decodeBrowserText(
         "editable_id",
         "edit_id",
         "kind",
+        "attributes",
         "value",
       ]) ||
       !integer(value.sequence, Number.MAX_SAFE_INTEGER) ||
@@ -121,7 +234,14 @@ export function decodeBrowserText(
         value.kind !== "password" &&
         value.kind !== "multiline") ||
       typeof value.value !== "string" ||
-      [...value.value].length > 32768
+      [...value.value].length > 32768 ||
+      attributes === null ||
+      value.kind !==
+        (attributes.input_type === "textarea"
+          ? "multiline"
+          : attributes.input_type === "password"
+            ? "password"
+            : "text")
     ) {
       return null;
     }
@@ -132,6 +252,7 @@ export function decodeBrowserText(
       editable_id: value.editable_id,
       edit_id: value.edit_id,
       kind: value.kind,
+      attributes,
       value: value.value,
     };
   }

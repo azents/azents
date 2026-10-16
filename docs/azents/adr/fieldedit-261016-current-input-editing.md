@@ -42,3 +42,11 @@ Authority: REQ-3, REQ-5 and the existing source-fenced no-input-replay contract.
 Explicit whole-field editing is not evidence that direct-mode IME is fixed. Native input owns language composition; no Hangul/kana/pinyin reconstruction is authorized. Direct editing must preserve existing remote value/selection context before a local replacement can be mapped safely. Detailed direct-mode replacement semantics require repository feasibility evidence and must not be inferred from empty synthetic fields alone. REQ-8 remains separately tracked until that evidence and implementation pass.
 
 Authority: REQ-8, REQ-9 and the requester's explicit objection to fragile local-buffer diffing over pre-existing remote text.
+
+## D5. Preserve original native editing hints
+
+The requester explicitly requires original input types and attributes in the modal, including email keyboard and autocomplete. Transfer bounded native editing metadata only through the already explicit private field read. The modal uses the supported original input type, input mode, autocomplete, capitalization/correction, spelling, enter-key, length, pattern, required/multiple, name and placeholder hints. These are local native-control semantics, not page execution or submission authority.
+
+Reject the former hardcoded generic text/autocomplete-off behavior. Do not spread arbitrary page attributes, event handlers, form association/actions, styles or original DOM IDs into the local application. Browser/OS suggestions and saved credentials remain governed by the local application origin and native policy; no remote-origin credential extraction or simulated suggestion popup is introduced.
+
+Authority: the requester's additive original-type/attribute instruction on 2026-10-16 KST, captured by REQ-2, and the unchanged privacy/authority constraints in REQ-5 and ADR-D2.

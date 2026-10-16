@@ -16,6 +16,7 @@ interface Options {
   open: (frame: BrowserFrame, editableId: string) => boolean;
   finish: (text: string | null) => boolean;
   cancelInput: () => void;
+  readClipboard: (() => Promise<string>) | null;
 }
 type EditorState =
   | { type: "idle"; animate: boolean }
@@ -89,6 +90,7 @@ export function useBrowserFieldEditor(
         draft: {
           label: options.label,
           kind: result.field.kind,
+          attributes: result.field.attributes,
           value: result.field.value,
         },
       };
@@ -180,17 +182,14 @@ export function useBrowserFieldEditor(
         current.current = { type: "idle", animate: true };
         setState(current.current);
       },
-      onPaste: (start, end) => {
+      onPaste: (insertNative) => {
         const before = current.current;
-        if (
-          before.type !== "editing" ||
-          typeof navigator.clipboard === "undefined" ||
-          typeof navigator.clipboard.readText !== "function"
-        ) {
+        const readClipboard = latest.current.readClipboard;
+        if (before.type !== "editing" || readClipboard === null) {
           return;
         }
         // Clipboard admission must happen synchronously in the trusted activation.
-        const read = navigator.clipboard.readText();
+        const read = readClipboard();
         void read.then(
           (text) => {
             if (
@@ -201,14 +200,17 @@ export function useBrowserFieldEditor(
             ) {
               return;
             }
-            const value =
-              before.draft.value.slice(0, start) +
-              text +
-              before.draft.value.slice(end);
-            if ([...value].length > 32768) {
+            if ([...text].length > 32768) {
               return;
             }
-            current.current = { ...before, draft: { ...before.draft, value } };
+            const nativeValue = insertNative(text);
+            if (nativeValue === null) {
+              return;
+            }
+            current.current = {
+              ...before,
+              draft: { ...before.draft, value: nativeValue },
+            };
             setState(current.current);
           },
           () => {

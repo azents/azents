@@ -17,11 +17,13 @@ import { useBrowserFieldEditorTransition } from "../containers/useBrowserFieldEd
 import { useBrowserToolbarTouch } from "../containers/useBrowserToolbarTouch";
 import { BrowserKeyboardToolbar } from "./BrowserKeyboardToolbar";
 import type { BrowserEditorViewport } from "../containers/useBrowserEditorViewport";
+import type { BrowserFieldAttributes } from "../types";
 import type { ReactElement } from "react";
 
 export interface BrowserFieldEditorDraft {
   label: string;
   kind: "text" | "password" | "multiline";
+  attributes: BrowserFieldAttributes;
   value: string;
 }
 
@@ -41,7 +43,7 @@ export interface BrowserFieldEditorControls {
   onChange: (value: string) => void;
   onConfirm: () => void;
   onCancel: () => void;
-  onPaste: (start: number, end: number) => void;
+  onPaste: (insertNative: (text: string) => string | null) => void;
   onDirectPaste: () => void;
 }
 
@@ -56,6 +58,28 @@ export function BrowserFieldEditor({
     controls.retainClosingDraft,
   );
   const draft = motion.draft;
+  const nativeProps =
+    draft === null
+      ? {}
+      : {
+          autoComplete: draft.attributes.autocomplete,
+          autoCapitalize: draft.attributes.autocapitalize ?? "",
+          autoCorrect: draft.attributes.autocorrect ?? "",
+          spellCheck: draft.attributes.spellcheck,
+          maxLength: Math.min(draft.attributes.max_length ?? 32768, 32768),
+          ...(draft.attributes.min_length === null
+            ? {}
+            : { minLength: draft.attributes.min_length }),
+          ...(draft.attributes.input_mode === null
+            ? {}
+            : { inputMode: draft.attributes.input_mode }),
+          ...(draft.attributes.enter_key_hint === null
+            ? {}
+            : { enterKeyHint: draft.attributes.enter_key_hint }),
+          name: draft.attributes.name,
+          placeholder: draft.attributes.placeholder,
+          required: draft.attributes.required,
+        };
   const viewport = controls.viewport;
   const textRef = useRef<HTMLInputElement>(null);
   const multilineRef = useRef<HTMLTextAreaElement>(null);
@@ -65,10 +89,22 @@ export function BrowserFieldEditor({
     }
     const input =
       draft.kind === "multiline" ? multilineRef.current : textRef.current;
-    controls.onPaste(
-      input?.selectionStart ?? draft.value.length,
-      input?.selectionEnd ?? draft.value.length,
-    );
+    if (input === null) {
+      return;
+    }
+    controls.onPaste((text) => {
+      if (
+        !input.isConnected ||
+        document.activeElement !== input ||
+        typeof document.execCommand !== "function"
+      ) {
+        return null;
+      }
+      // Native insertion retains email selection where selectionStart is unavailable.
+      return document.execCommand("insertText", false, text)
+        ? input.value
+        : null;
+    });
   };
   const cancelRef = useBrowserToolbarTouch(controls.onCancel);
   const confirmRef = useBrowserToolbarTouch(controls.onConfirm);
@@ -165,6 +201,7 @@ export function BrowserFieldEditor({
                   <Text size="sm">{t("fieldEditorDescription")}</Text>
                   {draft.kind === "multiline" ? (
                     <Textarea
+                      {...nativeProps}
                       ref={multilineRef}
                       readOnly={controls.pending}
                       error={controls.sendFailed && t("fieldEditorSendFailed")}
@@ -175,26 +212,29 @@ export function BrowserFieldEditor({
                       autosize
                       minRows={6}
                       maxRows={16}
-                      maxLength={32768}
                       size="md"
-                      autoComplete="off"
                       onChange={(event) =>
                         controls.onChange(event.currentTarget.value)
                       }
                     />
                   ) : (
                     <TextInput
+                      {...nativeProps}
                       ref={textRef}
                       readOnly={controls.pending}
                       error={controls.sendFailed && t("fieldEditorSendFailed")}
                       data-autofocus
                       autoFocus
                       label={draft.label}
-                      type={draft.kind === "password" ? "password" : "text"}
+                      type={
+                        draft.attributes.input_type === "textarea"
+                          ? "text"
+                          : draft.attributes.input_type
+                      }
+                      pattern={draft.attributes.pattern}
+                      multiple={draft.attributes.multiple}
                       value={draft.value}
-                      maxLength={32768}
                       size="md"
-                      autoComplete="off"
                       onChange={(event) =>
                         controls.onChange(event.currentTarget.value)
                       }

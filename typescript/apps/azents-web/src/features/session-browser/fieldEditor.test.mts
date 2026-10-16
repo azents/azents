@@ -3,10 +3,28 @@ import test from "node:test";
 import { BrowserConnection } from "./connection.ts";
 import { decodeBrowserText } from "./wire.ts";
 import type {
+  BrowserFieldAttributes,
   BrowserFieldResult,
   BrowserFrame,
   BrowserStatus,
 } from "./types.ts";
+
+const attributes: BrowserFieldAttributes = {
+  input_type: "password",
+  input_mode: null,
+  autocomplete: "current-password",
+  autocapitalize: null,
+  autocorrect: null,
+  spellcheck: false,
+  enter_key_hint: null,
+  max_length: null,
+  min_length: null,
+  pattern: "",
+  required: false,
+  multiple: false,
+  placeholder: "",
+  name: "password",
+};
 
 const target = {
   task_id: "task",
@@ -45,6 +63,7 @@ const value = {
   editable_id: "native",
   edit_id: "edit",
   kind: "password",
+  attributes,
   value: "synthetic-private-value",
 };
 function ack(
@@ -230,6 +249,42 @@ void test("a new validated frame without the original editable immediately disca
   });
   assert.equal(connection.finishField("Must not overwrite"), false);
   assert.equal(connection.snapshot().connection, "stale");
+});
+
+void test("native field attributes are exact, bounded and cannot carry page execution", () => {
+  const email = {
+    ...attributes,
+    input_type: "email",
+    input_mode: "email",
+    autocomplete: "email",
+  };
+  const reply = { ...value, kind: "text", attributes: email };
+  assert.deepEqual(decodeBrowserText(JSON.stringify(reply)), reply);
+  for (const patch of [
+    { input_type: "file" },
+    { input_mode: "arbitrary" },
+    { autocomplete: "x".repeat(257) },
+    { max_length: -1 },
+    { min_length: true },
+    { spellcheck: "true" },
+    { enter_key_hint: "invalid" },
+    { autocapitalize: "invalid" },
+    { autocorrect: "invalid" },
+    { pattern: "x".repeat(2049) },
+    { form: "not allowed" },
+    { oninput: "not allowed" },
+  ]) {
+    assert.equal(
+      decodeBrowserText(
+        JSON.stringify({ ...reply, attributes: { ...email, ...patch } }),
+      ),
+      null,
+    );
+  }
+  assert.equal(
+    decodeBrowserText(JSON.stringify({ ...reply, kind: "password" })),
+    null,
+  );
 });
 
 void test("oversized encoded replacement is rejected before send without an uncertain outcome", () => {

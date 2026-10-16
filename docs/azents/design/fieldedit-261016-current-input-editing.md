@@ -19,7 +19,7 @@ Earlier tab, popup, unmasked-image, native-receiver, zoom and touch repairs are 
 
 ## Design Authority
 
-- Design revision: `1`
+- Design revision: `2`
 
 | ID | Mechanism | Authority | Classification |
 | --- | --- | --- | --- |
@@ -27,7 +27,7 @@ Earlier tab, popup, unmasked-image, native-receiver, zoom and touch repairs are 
 | M2 | Explicit value read and one confirmed original-field replacement | REQ-2, REQ-3, ADR-D1 | required |
 | M3 | Existing Browser direct logical stream and current input authority, no Agent/history path | REQ-5, ADR-D2, current Session Browser flow | existing |
 | M4 | One transient attachment/document/element-bound snapshot and atomic unchanged-value check, no retry | REQ-3, REQ-5, ADR-D3, existing no-replay contract | derived |
-| M5 | Native local input/textarea and password semantics with bounded transient draft | REQ-2, REQ-5 | required |
+| M5 | Original supported native input type/editing attributes, password semantics and bounded transient draft | REQ-2, REQ-5, ADR-D5 | required |
 | M6 | VisualViewport-following controls, selected-field reveal and keyboard-preserving participant scrolling | REQ-6, existing Browser view/source contract | derived |
 | M7 | Explicit real Clipboard API/native paste; native OS consent retained | REQ-4, ADR-D1 | required |
 | M8 | Address first-focus selection and editor enter/exit transitions with reduced motion | REQ-7, REQ-10 | required |
@@ -47,7 +47,9 @@ Read/replace uses the current private Browser stream rather than generated publi
 
 Add typed field-open, field-replace and field-cancel actions on the existing sequenced source-fenced input path, plus a typed field-value reply correlated with the originating sequence. Open requires a current acknowledged field and no held input/composition. It returns the attachment-local operation handle, exact editable ID, native kind and unchanged value; an empty value is valid. Only native textual input/textarea is accepted initially; custom/contenteditable targets fail closed rather than being flattened.
 
-A snapshot belongs to one attachment, navigation and exact element. Opening another retires the former. Ordinary direct input, target/document change, disconnect, access loss, cancellation or apply retire relevant snapshots. Apply validates identity, focus, writability and original value in one document turn before the native value setter and input notification. A cancelled beforeinput or handler-induced pre-mutation change rejects without overwrite. The snapshot is consumed before the effect; there is no retry.
+A snapshot belongs to one attachment, navigation and exact element. Opening another retires the former. Ordinary direct input, target/document change, disconnect, access loss, cancellation or apply retire relevant snapshots. Apply validates identity, focus, writability, original value and captured native editing configuration in one document turn before the native value setter and input notification. A detached native same-type/configuration control must represent the draft exactly before any original-field event or mutation; repeat validation after beforeinput. A cancelled event, configuration change or unrepresentable draft rejects without overwrite. The snapshot is consumed before the effect; there is no retry.
+
+The private read also returns a bounded closed native-attribute record: supported input type, input mode, autocomplete, effective capitalization/correction, spelling, enter-key hint, min/max length, pattern, required/multiple, name and placeholder. Native IDL getters preserve associated-form inheritance and native defaults without inventing generic-ancestor inheritance. The web maps only these explicit hints to the local input/textarea; it retains independent local identity, explicit focus and transport limits, and copies no page script, arbitrary attribute, form/action, original DOM ID or submission routing. Actual autofill availability remains browser/OS/local-origin controlled, not access to credentials saved for a remote origin. Local explicit Paste uses native insertion and derives state from the actual control, preserving email selection where standard range APIs are unavailable; unsupported native insertion fails without blind append or a hidden differently sanitized draft. Native OS Paste remains available.
 
 The UI distinguishes closed, reading, editing, applying and closing states. Read-only, pending or stale targets provide no effect-bearing action. Closing via Cancel discards the operation without altering the page. Apply closes only when the explicit exchange is confirmed; unknown outcomes stay unknown. No clipboard/value queues are introduced.
 
@@ -100,6 +102,7 @@ M1-M9 have local implementation and verification evidence in the [field-editor v
 
 - Mode: Collaborative.
 - Decision owner: requester.
+- Authorized revision: `2`; exact authority ID set: `M1`, `M2`, `M3`, `M4`, `M5`, `M6`, `M7`, `M8`, `M9`. The same-date original-type/attribute instruction extends M5 under REQ-2/ADR-D5 without expanding execution or deployment authority.
 - Execution authorization: requester finalized the demonstrated behavior and explicitly requested implementation with earlier outstanding outcomes on 2026-10-16 KST; later the same date added animation.
 - Authorized implementation direction: M1-M9, as required/existing/derived mechanisms of that approved behavior and the unchanged Browser security boundary. This records the existing implementation instruction rather than claiming the requester separately reviewed this document's exact wording.
 - Any new material direct-mode text transport, expanded custom-editor scope, privacy relaxation, deployment or migration remains outside that authorization and must return to the decision owner.

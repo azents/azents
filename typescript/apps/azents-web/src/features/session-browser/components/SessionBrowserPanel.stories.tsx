@@ -1,5 +1,5 @@
 import { Box, Button, rem } from "@mantine/core";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   expect,
   fireEvent,
@@ -17,6 +17,7 @@ import { useBrowserTouchView } from "../containers/useBrowserTouchView";
 import { browserDialogInput, browserFrameMatchesStatus } from "../input";
 import { SessionBrowserPanel } from "./SessionBrowserPanel";
 import type {
+  BrowserFieldAttributes,
   BrowserFrame,
   BrowserInput,
   BrowserInputAction,
@@ -28,6 +29,23 @@ import type { BrowserFieldEditorDraft } from "./BrowserFieldEditor";
 import type { SessionBrowserPanelProps } from "./SessionBrowserPanel";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 import type { ReactElement } from "react";
+
+const fieldAttributes: BrowserFieldAttributes = {
+  input_type: "text",
+  input_mode: null,
+  autocomplete: "",
+  autocapitalize: null,
+  autocorrect: null,
+  spellcheck: true,
+  enter_key_hint: null,
+  max_length: null,
+  min_length: null,
+  pattern: "",
+  required: false,
+  multiple: false,
+  placeholder: "",
+  name: "",
+};
 
 const target = {
   task_id: "synthetic-task",
@@ -466,6 +484,8 @@ function FieldEditorPreviewFixture(
       })
     | null
   >(null);
+  const latestDraft = useRef(draft);
+  latestDraft.current = draft;
   const editorViewport = useBrowserEditorViewport(
     draft !== null || directActive,
   );
@@ -582,6 +602,15 @@ function FieldEditorPreviewFixture(
           }
           setDraft({
             field: selected,
+            attributes: {
+              ...fieldAttributes,
+              input_type:
+                selected === "password"
+                  ? "password"
+                  : props.multiline
+                    ? "textarea"
+                    : "text",
+            },
             label:
               selected === "password"
                 ? "비밀번호"
@@ -659,7 +688,7 @@ function FieldEditorPreviewFixture(
             () => {},
           );
         },
-        onPaste: (start, end) => {
+        onPaste: (insertNative) => {
           if (draft === null) {
             return;
           }
@@ -672,7 +701,14 @@ function FieldEditorPreviewFixture(
           }
           void navigator.clipboard.readText().then(
             (text) => {
-              if (original.value.length - (end - start) + text.length > 32768) {
+              if (
+                latestDraft.current !== original ||
+                [...text].length > 32768
+              ) {
+                return;
+              }
+              const value = insertNative(text);
+              if (value === null) {
                 return;
               }
               setDraft((current) =>
@@ -680,10 +716,7 @@ function FieldEditorPreviewFixture(
                   ? current
                   : {
                       ...current,
-                      value:
-                        current.value.slice(0, start) +
-                        text +
-                        current.value.slice(end),
+                      value,
                     },
               );
             },

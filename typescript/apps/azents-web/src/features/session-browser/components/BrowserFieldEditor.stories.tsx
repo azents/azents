@@ -4,9 +4,30 @@ import { expect, userEvent, waitFor, within } from "storybook/test";
 import { useBrowserFieldEditor } from "../containers/useBrowserFieldEditor";
 import { useBrowserInteraction } from "../containers/useBrowserInteraction";
 import { BrowserFieldEditor } from "./BrowserFieldEditor";
-import type { BrowserFieldResult, BrowserFrame } from "../types";
+import type {
+  BrowserFieldAttributes,
+  BrowserFieldResult,
+  BrowserFrame,
+} from "../types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 import type { ReactElement } from "react";
+
+const nativeAttributes: BrowserFieldAttributes = {
+  input_type: "text",
+  input_mode: null,
+  autocomplete: "",
+  autocapitalize: null,
+  autocorrect: null,
+  spellcheck: true,
+  enter_key_hint: null,
+  max_length: null,
+  min_length: null,
+  pattern: "",
+  required: false,
+  multiple: false,
+  placeholder: "",
+  name: "",
+};
 
 const frame: BrowserFrame = {
   type: "frame",
@@ -35,10 +56,25 @@ const frame: BrowserFrame = {
 
 function Fixture({
   kind = "text",
+  clipboardText = "Clipboard fixture",
+  attributes: suppliedAttributes,
+  initialValue = "Synthetic original value",
 }: {
   kind?: "text" | "password" | "multiline";
+  clipboardText?: string;
+  attributes?: BrowserFieldAttributes;
+  initialValue?: string;
 }): ReactElement {
-  const [remote, setRemote] = useState("Synthetic original value");
+  const [remote, setRemote] = useState(initialValue);
+  const attributes: BrowserFieldAttributes = suppliedAttributes ?? {
+    ...nativeAttributes,
+    input_type:
+      kind === "multiline"
+        ? "textarea"
+        : kind === "password"
+          ? "password"
+          : "text",
+  };
   const cancelInput = useRef<() => void>(() => {});
   const [enabled, setEnabled] = useState(true);
   const result = useRef<(result: BrowserFieldResult) => void>(() => {});
@@ -48,6 +84,7 @@ function Fixture({
     frame,
     label: "Synthetic field",
     cancelInput: () => cancelInput.current(),
+    readClipboard: () => Promise.resolve(clipboardText),
     open: () => {
       queueMicrotask(() =>
         result.current({
@@ -58,7 +95,13 @@ function Fixture({
             sequence: 1,
             editable_id: "native-fixture",
             edit_id: "fixture-edit",
-            kind,
+            kind:
+              attributes.input_type === "textarea"
+                ? "multiline"
+                : attributes.input_type === "password"
+                  ? "password"
+                  : "text",
+            attributes,
             value: remote,
           },
         }),
@@ -83,7 +126,7 @@ function Fixture({
       }
       return true;
     },
-    readClipboard: () => Promise.resolve("Clipboard fixture"),
+    readClipboard: () => Promise.resolve(clipboardText),
   });
   cancelInput.current = interaction.cancel;
   useEffect(() => {
@@ -194,6 +237,96 @@ export const PasswordSecurityInvalidation = {
 } satisfies Story;
 
 export const Multiline = { args: { kind: "multiline" } } satisfies Story;
+
+export const OriginalEmailAttributes = {
+  args: {
+    initialValue: "reader@example.test",
+    clipboardText: "new@example.test",
+    attributes: {
+      ...nativeAttributes,
+      input_type: "email",
+      input_mode: "email",
+      autocomplete: "email",
+      autocapitalize: "off",
+      autocorrect: "off",
+      spellcheck: false,
+      enter_key_hint: "next",
+      max_length: 80,
+      min_length: 3,
+      pattern: ".+@.+",
+      required: true,
+      multiple: true,
+      placeholder: "name@example.test",
+      name: "contact",
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    await userEvent.click(
+      canvas.getByRole("textbox", { name: "Remote receiver" }),
+    );
+    await userEvent.click(canvas.getByRole("button", { name: "Edit" }));
+    const input = await canvas.findByRole("textbox", {
+      name: /Synthetic field/,
+    });
+    for (const [name, value] of Object.entries({
+      type: "email",
+      inputmode: "email",
+      autocomplete: "email",
+      autocapitalize: "off",
+      autocorrect: "off",
+      spellcheck: "false",
+      enterkeyhint: "next",
+      maxlength: "80",
+      minlength: "3",
+      pattern: ".+@.+",
+      placeholder: "name@example.test",
+      name: "contact",
+    })) {
+      await expect(input).toHaveAttribute(name, value);
+    }
+    await expect(input).toHaveAttribute("required");
+    await expect(input).toHaveAttribute("multiple");
+    if (!(input instanceof HTMLInputElement)) {
+      throw new Error("Native input is required");
+    }
+    await expect(input.selectionStart).toBeNull();
+    input.focus();
+    input.select();
+    await userEvent.click(canvas.getByRole("button", { name: "Paste" }));
+    await waitFor(() => expect(input).toHaveValue("new@example.test"));
+    await userEvent.click(canvas.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(canvas.queryByRole("dialog")).toBeNull());
+    await expect(canvas.getByTestId("remote-value")).toHaveTextContent(
+      "new@example.test",
+    );
+  },
+} satisfies Story;
+
+export const NativePasswordPaste = {
+  args: { kind: "password", clipboardText: "Synthetic\r\nClipboard" },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    await userEvent.click(
+      canvas.getByRole("textbox", { name: "Remote receiver" }),
+    );
+    await userEvent.click(canvas.getByRole("button", { name: "Edit" }));
+    const input = await canvas.findByLabelText("Synthetic field");
+    await userEvent.clear(input);
+    await userEvent.click(canvas.getByRole("button", { name: "Paste" }));
+    const expected =
+      args.kind === "multiline" ? "Synthetic\nClipboard" : "SyntheticClipboard";
+    await waitFor(() => expect(input).toHaveValue(expected));
+    await userEvent.click(canvas.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(canvas.queryByRole("dialog")).toBeNull());
+    await expect(canvas.getByTestId("remote-value").textContent).toBe(expected);
+  },
+} satisfies Story;
+
+export const NativeMultilinePaste = {
+  ...NativePasswordPaste,
+  args: { kind: "multiline", clipboardText: "Synthetic\r\nClipboard" },
+} satisfies Story;
 
 export const LowerToolbarUsesSelectedReceiver = {
   play: async ({ canvasElement }) => {

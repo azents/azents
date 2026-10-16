@@ -61,6 +61,8 @@ The participant directly types in a current Browser input by default. A compact 
 
 - Opening the editor loads the selected field's existing complete value rather than an empty or example value.
 - Text, multiline, and password editing retain their native editing semantics.
+- The modal matches the original supported input type and native editing attributes. An email input uses the email keyboard and the original autocomplete hints; password, URL, telephone, search and multiline inputs retain their corresponding native behavior.
+- Preserve applicable input-mode, capitalization/correction, spelling, enter-key, length, pattern and multiple-value hints without copying page scripts or submission behavior. Native browser/OS suggestions remain under browser/OS control rather than being simulated.
 - Unsupported or unavailable targets are reported without silently editing a different target.
 
 ### REQ-3. Cancel or replace
@@ -150,4 +152,4 @@ The participant directly types in a current Browser input by default. A compact 
 
 ## Confirmation
 
-The requester specified the one-shot workflow and real value/clipboard access, then explicitly confirmed the final compact-floating-controls/full-screen-modal prototype and requested implementation of it and the earlier outstanding requirements on 2026-10-16 KST. The same date's follow-up adds editor opening/closing animation. The explicit implementation request is execution authority for these confirmed outcomes; it does not authorize merge, deployment, unrelated product changes or weakening existing Browser privacy/authority boundaries.
+The requester specified the one-shot workflow and real value/clipboard access, then explicitly confirmed the final compact-floating-controls/full-screen-modal prototype and requested implementation of it and the earlier outstanding requirements on 2026-10-16 KST. The same date's follow-ups add editor opening/closing animation and explicitly require the modal's input type and native attributes to match the original, including email keyboard and autocomplete behavior. The explicit implementation request is execution authority for these confirmed outcomes; it does not authorize merge, deployment, unrelated product changes or weakening existing Browser privacy/authority boundaries.

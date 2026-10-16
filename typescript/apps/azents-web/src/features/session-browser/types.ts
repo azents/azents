@@ -75,6 +75,35 @@ export interface BrowserInputAck {
   outcome: "dispatched" | "rejected" | "outcome_unknown";
 }
 
+export interface BrowserFieldAttributes {
+  input_type:
+    "text" | "password" | "email" | "url" | "tel" | "search" | "textarea";
+  input_mode:
+    | "none"
+    | "text"
+    | "email"
+    | "url"
+    | "tel"
+    | "numeric"
+    | "decimal"
+    | "search"
+    | null;
+  autocomplete: string;
+  autocapitalize:
+    "off" | "none" | "on" | "sentences" | "words" | "characters" | null;
+  autocorrect: "on" | "off" | null;
+  spellcheck: boolean;
+  enter_key_hint:
+    "enter" | "done" | "go" | "next" | "previous" | "search" | "send" | null;
+  max_length: number | null;
+  min_length: number | null;
+  pattern: string;
+  required: boolean;
+  multiple: boolean;
+  placeholder: string;
+  name: string;
+}
+
 export interface BrowserFieldValue {
   type: "field_value";
   attachment_id: string;
@@ -82,6 +111,7 @@ export interface BrowserFieldValue {
   editable_id: string;
   edit_id: string;
   kind: "text" | "password" | "multiline";
+  attributes: BrowserFieldAttributes;
   value: string;
 }
 

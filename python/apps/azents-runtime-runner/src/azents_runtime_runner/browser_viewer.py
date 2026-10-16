@@ -851,7 +851,14 @@ class _Attachment:
                             uuid.uuid4().hex, self.page.navigation_id, snapshot
                         )
                         self.field_edit = edit
-                        value = await snapshot.value()
+                        try:
+                            value = await snapshot.value()
+                        except ValueError:
+                            await self.discard_field_edit()
+                            raise BrowserFailure(
+                                "browser_field_unsupported",
+                                "Browser native field attributes are unsupported",
+                            ) from None
                         self.current()
                         if (
                             request.source is None
@@ -871,6 +878,7 @@ class _Attachment:
                                     action.editable_id,
                                     edit.id,
                                     value.kind,
+                                    value.attributes,
                                     value.value,
                                 )
                             )

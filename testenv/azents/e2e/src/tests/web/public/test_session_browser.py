@@ -61,7 +61,7 @@ import socketserver
 HTML = b"""<!doctype html><title>Synthetic Browser ready</title>
 <style>body{margin:0;background:white}button,input{position:absolute;left:20px;
 width:200px;height:40px;box-sizing:border-box}button{top:20px}
-#entry{top:100px}#secret{top:180px}</style>
+#entry{top:100px}#secret{top:180px}#email{top:340px}</style>
 <button onclick="alert('Synthetic handoff');document.title='Browser handoff completed'">
 Continue</button><input id="entry" oninput="document.title=
 this.value.includes('Synthetic GUI input')?String.fromCodePoint(0x2705):
@@ -72,6 +72,9 @@ oninput="document.title=this.value==='Synthetic GUI edit value'?
 'Browser GUI paste verified':'Browser GUI paste mismatch'">
 <button style="top:260px" onclick="document.title='Browser GUI pointer verified'">
 Verify GUI</button>
+<input id=email type=email inputmode=email autocomplete=email name=contact
+autocapitalize=off autocorrect=off spellcheck=false enterkeyhint=next maxlength=80
+value='reader@example.test'>
 """
 class Handler(http.server.BaseHTTPRequestHandler):
     count = 0
@@ -392,6 +395,44 @@ document.activeElement.dispatchEvent(new ClipboardEvent('paste', {
         timeout=15,
         interval=0.1,
         message="The Web panel editor did not replace the original password field",
+    )
+    click_native(100, 360)
+    wait.until(ec.element_to_be_clickable(edit_button)).click()
+    email_input = wait.until(
+        ec.visibility_of_element_located(
+            (
+                By.CSS_SELECTOR,
+                '[data-browser-field-editor] input[type="email"]',
+            )
+        )
+    )
+    assert email_input.get_attribute("value") == "reader@example.test"
+    for name, value in {
+        "inputmode": "email",
+        "autocomplete": "email",
+        "name": "contact",
+        "autocapitalize": "none",
+        "autocorrect": "off",
+        "spellcheck": "false",
+        "enterkeyhint": "next",
+        "maxlength": "80",
+    }.items():
+        assert email_input.get_dom_attribute(name) == value
+    wait.until(
+        ec.element_to_be_clickable(
+            (
+                By.XPATH,
+                '//*[@data-browser-field-editor]//button[normalize-space(.)="Cancel"]',
+            )
+        )
+    ).click()
+    wait.until(
+        ec.invisibility_of_element_located(
+            (
+                By.CSS_SELECTOR,
+                "[data-browser-field-editor]",
+            )
+        )
     )
     ActionChains(driver).send_keys(Keys.ESCAPE).perform()
     wait.until(

@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from azents_runtime_control.browser_viewer_contract import (
+    ViewerFieldAttributes,
     ViewerFieldValue,
     ViewerFrame,
     ViewerSource,
@@ -482,10 +483,51 @@ def _field_value(
                 editable_id,
                 "edit-1",
                 "password",
+                ViewerFieldAttributes(
+                    "password",
+                    None,
+                    "current-password",
+                    None,
+                    None,
+                    False,
+                    None,
+                    None,
+                    None,
+                    "",
+                    False,
+                    False,
+                    "",
+                    "password",
+                ),
                 "Synthetic private value",
             )
         ),
     )
+
+
+@pytest.mark.parametrize(
+    "patch",
+    [
+        {"form": "not allowed"},
+        {"input_type": "email"},
+        {"autocomplete": "x" * 257},
+    ],
+)
+async def test_private_native_attributes_fail_closed(
+    patch: dict[str, object],
+) -> None:
+    h = _harness()
+    task = await _connected(h)
+    await _open_field(h)
+    value = json.loads(_field_value().payload)
+    value["attributes"].update(patch)
+    h.connection.incoming.put_nowait(
+        BrowserSourceWebSocketMessage(WebSocketOpcode.TEXT, json.dumps(value).encode())
+    )
+    with pytest.raises(BrowserSocketFailure) as captured:
+        await asyncio.wait_for(task, 2)
+    assert captured.value.code == 4500 and len(h.socket.texts) == 1
+    assert "Synthetic private value" not in str(captured.value)
 
 
 async def _open_field(h: _Harness) -> None:

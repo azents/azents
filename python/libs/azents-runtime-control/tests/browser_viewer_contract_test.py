@@ -1,13 +1,14 @@
 """Closed Browser application wire boundaries independent of Web forwarding."""
 
 import json
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 import pytest
 
 from azents_runtime_control.browser_viewer_contract import (
     MAX_VIEWER_MESSAGE_BYTES,
     BrowserViewerContractError,
+    ViewerFieldAttributes,
     ViewerFieldCancel,
     ViewerFieldOpen,
     ViewerFieldReplace,
@@ -21,11 +22,59 @@ from azents_runtime_control.browser_viewer_contract import (
     ViewerSource,
     ViewerTarget,
     decode_viewer_editables,
+    decode_viewer_field_attributes,
     decode_viewer_frame,
     decode_viewer_request,
     encode_viewer_event,
     encode_viewer_frame,
 )
+
+_ATTRIBUTES = ViewerFieldAttributes(
+    "text", None, "", None, None, True, None, None, None, "", False, False, "", ""
+)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"input_type": "file"},
+        {"input_mode": "arbitrary"},
+        {"autocomplete": "x" * 257},
+        {"autocapitalize": "invalid"},
+        {"autocorrect": "invalid"},
+        {"spellcheck": "true"},
+        {"enter_key_hint": "invalid"},
+        {"max_length": -1},
+        {"max_length": True},
+        {"min_length": 1.5},
+        {"pattern": "x" * 2049},
+        {"required": None},
+        {"multiple": "true"},
+        {"placeholder": "x" * 2049},
+        {"name": "x" * 257},
+        {"oninput": "not allowed"},
+        {"form": "not allowed"},
+    ],
+)
+def test_native_attributes_are_closed_and_bounded(change: dict[str, object]) -> None:
+    with pytest.raises(BrowserViewerContractError):
+        decode_viewer_field_attributes(asdict(_ATTRIBUTES) | change)
+
+
+def test_native_attribute_defaults_and_kind_are_preserved() -> None:
+    assert decode_viewer_field_attributes(asdict(_ATTRIBUTES)) == _ATTRIBUTES
+    attrs = replace(
+        _ATTRIBUTES,
+        input_type="email",
+        input_mode="email",
+        autocomplete="email",
+        max_length=0,
+    )
+    assert decode_viewer_field_attributes(asdict(attrs)) == attrs
+    with pytest.raises(BrowserViewerContractError, match="Inconsistent"):
+        encode_viewer_event(
+            ViewerFieldValue("a", 1, "e", "edit", "password", attrs, "")
+        )
 
 
 def _input() -> dict[str, object]:
@@ -148,7 +197,15 @@ def test_field_editor_invalid_requests_fail_before_effects(action: object) -> No
 
 def test_explicit_field_value_reply_is_bounded_and_repr_is_content_free() -> None:
     value = "Synthetic private value 한글 🔑\n"
-    reply = ViewerFieldValue("attachment", 1, "doc-1", "edit-1", "password", value)
+    reply = ViewerFieldValue(
+        "attachment",
+        1,
+        "doc-1",
+        "edit-1",
+        "password",
+        replace(_ATTRIBUTES, input_type="password"),
+        value,
+    )
     encoded = encode_viewer_event(reply)
     assert json.loads(encoded)["value"] == value
     assert json.loads(encoded)["type"] == "field_value"
@@ -156,11 +213,15 @@ def test_explicit_field_value_reply_is_bounded_and_repr_is_content_free() -> Non
     assert value not in repr(ViewerFieldReplace("doc-1", "edit-1", value))
     with pytest.raises(BrowserViewerContractError):
         encode_viewer_event(
-            ViewerFieldValue("attachment", 1, "doc-1", "edit-1", "text", "x" * 32769)
+            ViewerFieldValue(
+                "attachment", 1, "doc-1", "edit-1", "text", _ATTRIBUTES, "x" * 32769
+            )
         )
     with pytest.raises(BrowserViewerContractError):
         encode_viewer_event(
-            ViewerFieldValue("attachment", 1, "doc-1", "edit-1", "text", "界" * 24000)
+            ViewerFieldValue(
+                "attachment", 1, "doc-1", "edit-1", "text", _ATTRIBUTES, "界" * 24000
+            )
         )
 
 

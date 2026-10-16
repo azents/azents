@@ -11,13 +11,16 @@ from typing import Annotated, Literal, Protocol
 from azents_runtime_control.browser_viewer_contract import (
     MAX_VIEWER_TEXT_BYTES,
     BrowserViewerContractError,
+    ViewerFieldAttributes,
     ViewerFieldOpen,
     ViewerFrameAck,
     ViewerInput,
     ViewerInputReason,
     ViewerTarget,
+    decode_viewer_field_attributes,
     decode_viewer_frame,
     decode_viewer_request,
+    viewer_field_kind,
 )
 from azents_runtime_control.grpc_browser_source_client import (
     BrowserSourceError,
@@ -35,6 +38,7 @@ from pydantic import (
     Field,
     TypeAdapter,
     ValidationError,
+    field_validator,
     model_validator,
 )
 
@@ -145,7 +149,19 @@ class _FieldValue(BaseModel):
     editable_id: str = Field(min_length=1, max_length=48)
     edit_id: str = Field(min_length=1, max_length=48)
     kind: Literal["text", "password", "multiline"]
+    attributes: ViewerFieldAttributes = Field(repr=False)
     value: str = Field(max_length=32768, repr=False)
+
+    @field_validator("attributes", mode="before")
+    @classmethod
+    def validate_attributes(cls, value: object) -> ViewerFieldAttributes:
+        return decode_viewer_field_attributes(value)
+
+    @model_validator(mode="after")
+    def validate_kind(self) -> "_FieldValue":
+        if viewer_field_kind(self.attributes) != self.kind:
+            raise ValueError("Inconsistent Browser native field kind")
+        return self
 
 
 _SERVER_MESSAGE = TypeAdapter(

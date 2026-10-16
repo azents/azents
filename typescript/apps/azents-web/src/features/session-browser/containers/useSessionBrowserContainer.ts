@@ -344,6 +344,12 @@ export function useSessionBrowserContainer(
     open: live.openField,
     finish: live.finishField,
     cancelInput: () => cancel.current(),
+    readClipboard:
+      typeof navigator !== "undefined" &&
+      typeof navigator.clipboard !== "undefined" &&
+      typeof navigator.clipboard.readText === "function"
+        ? () => navigator.clipboard.readText()
+        : null,
   });
   fieldResult.current = fieldEditor.result;
   cancelField.current = fieldEditor.active

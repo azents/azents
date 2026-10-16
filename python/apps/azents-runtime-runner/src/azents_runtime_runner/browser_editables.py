@@ -6,7 +6,9 @@ from typing import Literal
 
 from azents_runtime_control.browser_viewer_contract import (
     ViewerEditable,
+    ViewerFieldAttributes,
     decode_viewer_editables,
+    decode_viewer_field_attributes,
 )
 from playwright.async_api import Error, Frame, JSHandle, Page
 
@@ -84,6 +86,30 @@ _PROBE = """() => {
         return active?.isConnected && ids.get(active) === id &&
             probe().some(region => region.id === id);
     };
+    probe.attributes = element => {
+        const input = element instanceof HTMLInputElement;
+        const capitalize = element.autocapitalize;
+        return {
+            input_type:input ? element.type : 'textarea',
+            input_mode:modes.has(element.inputMode) || element.inputMode === 'none' ?
+                element.inputMode : null,
+            autocomplete:element.autocomplete || element.form?.autocomplete || '',
+            autocapitalize:['off','none','on','sentences','words','characters']
+                .includes(capitalize) ? capitalize : null,
+            autocorrect:typeof element.autocorrect === 'boolean' ?
+                element.autocorrect ? 'on' : 'off' : null,
+            spellcheck:element.spellcheck,
+            enter_key_hint:['enter','done','go','next','previous','search','send']
+                .includes(element.enterKeyHint) ? element.enterKeyHint : null,
+            max_length:element.maxLength < 0 ? null : element.maxLength,
+            min_length:element.minLength < 0 ? null : element.minLength,
+            pattern:input ? element.pattern : '',
+            required:element.required,
+            multiple:input && element.multiple,
+            placeholder:element.placeholder,
+            name:element.name,
+        };
+    };
     probe.open = id => {
         if (!probe.focused(id)) return null;
         let element = document.activeElement;
@@ -94,7 +120,8 @@ _PROBE = """() => {
             !['text','email','url','tel','password','search'].includes(element.type)))
             return null;
         if (element.value.length > 32768) return null;
-        return {element, value:element.value, id, probe, nativeType:element.type,
+        return {element, value:element.value, id, probe,
+            attributes:probe.attributes(element),
             kind:multiline ? 'multiline' :
                 element.type === 'password' ? 'password' : 'text'};
     };
@@ -105,7 +132,8 @@ _REPLACE_FIELD = """(snapshot, text) => {
     const element = snapshot.element;
     const valid = () => element.isConnected &&
         snapshot.probe.focused(snapshot.id) &&
-        element.type === snapshot.nativeType &&
+        JSON.stringify(snapshot.probe.attributes(element)) ===
+            JSON.stringify(snapshot.attributes) &&
         !element.matches(':disabled') && !element.readOnly &&
         element.value === snapshot.value &&
         (element instanceof HTMLTextAreaElement ||
@@ -113,14 +141,27 @@ _REPLACE_FIELD = """(snapshot, text) => {
                 ['text','email','url','tel','password','search'].includes(element.type)));
     if (snapshot.consumed || !valid()) return false;
     snapshot.consumed = true;
+    const multiline = element instanceof HTMLTextAreaElement;
+    const prototype = multiline ?
+        HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const setValue = Object.getOwnPropertyDescriptor(prototype, 'value').set;
+    const representable = () => {
+        const candidate = element.ownerDocument.createElement(
+            multiline ? 'textarea' : 'input');
+        if (!multiline) {
+            candidate.type = snapshot.attributes.input_type;
+            candidate.multiple = snapshot.attributes.multiple;
+        }
+        setValue.call(candidate, text);
+        return candidate.value === text;
+    };
+    if (!representable()) return false;
     const before = new InputEvent('beforeinput', {
         bubbles:true, composed:true, cancelable:true,
         inputType:'insertReplacementText', data:text
     });
-    if (!element.dispatchEvent(before) || !valid()) return false;
-    const prototype = element instanceof HTMLTextAreaElement ?
-        HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-    Object.getOwnPropertyDescriptor(prototype, 'value').set.call(element, text);
+    if (!element.dispatchEvent(before) || !valid() || !representable()) return false;
+    setValue.call(element, text);
     if (typeof element.setSelectionRange === 'function' &&
         (element instanceof HTMLTextAreaElement ||
             ['text','tel','password','search'].includes(element.type)))
@@ -174,6 +215,7 @@ class _Probe:
 class EditableFieldValue:
     kind: Literal["text", "password", "multiline"]
     value: str = field(repr=False)
+    attributes: ViewerFieldAttributes = field(repr=False)
 
 
 @dataclass(frozen=True)
@@ -183,7 +225,8 @@ class EditableFieldSnapshot:
 
     async def value(self) -> EditableFieldValue:
         raw: object = await self.handle.evaluate(
-            "snapshot => ({kind:snapshot.kind,value:snapshot.value})"
+            "snapshot => ({kind:snapshot.kind,value:snapshot.value,"
+            "attributes:snapshot.attributes})"
         )
         if not isinstance(raw, dict):
             raise ValueError("Invalid native Browser field snapshot")
@@ -192,7 +235,9 @@ class EditableFieldSnapshot:
             raise ValueError("Invalid native Browser field value")
         match kind:
             case "text" | "password" | "multiline":
-                return EditableFieldValue(kind, value)
+                return EditableFieldValue(
+                    kind, value, decode_viewer_field_attributes(raw.get("attributes"))
+                )
             case _:
                 raise ValueError("Unsupported native Browser field kind")
 

@@ -89,12 +89,38 @@ class ViewerFieldCancel:
 
 
 @dataclass(frozen=True)
+class ViewerFieldAttributes:
+    input_type: Literal["text", "password", "email", "url", "tel", "search", "textarea"]
+    input_mode: (
+        Literal["none", "text", "email", "url", "tel", "numeric", "decimal", "search"]
+        | None
+    )
+    autocomplete: str = field(repr=False)
+    autocapitalize: (
+        Literal["off", "none", "on", "sentences", "words", "characters"] | None
+    )
+    autocorrect: Literal["on", "off"] | None
+    spellcheck: bool
+    enter_key_hint: (
+        Literal["enter", "done", "go", "next", "previous", "search", "send"] | None
+    )
+    max_length: int | None
+    min_length: int | None
+    pattern: str = field(repr=False)
+    required: bool
+    multiple: bool
+    placeholder: str = field(repr=False)
+    name: str = field(repr=False)
+
+
+@dataclass(frozen=True)
 class ViewerFieldValue:
     attachment_id: str
     sequence: int
     editable_id: str
     edit_id: str
     kind: Literal["text", "password", "multiline"]
+    attributes: ViewerFieldAttributes = field(repr=False)
     value: str = field(repr=False)
 
 
@@ -248,6 +274,118 @@ class _Fields:
         if not isinstance(value, bool):
             raise BrowserViewerContractError("Invalid Browser viewer boolean")
         return value
+
+
+def _native_length(value: object) -> int | None:
+    if value is None:
+        return None
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 0 <= value <= (1 << 31) - 1
+    ):
+        raise BrowserViewerContractError("Invalid Browser native length")
+    return value
+
+
+def decode_viewer_field_attributes(value: object) -> ViewerFieldAttributes:
+    fields = _Fields(
+        value,
+        {
+            "input_type",
+            "input_mode",
+            "autocomplete",
+            "autocapitalize",
+            "autocorrect",
+            "spellcheck",
+            "enter_key_hint",
+            "max_length",
+            "min_length",
+            "pattern",
+            "required",
+            "multiple",
+            "placeholder",
+            "name",
+        },
+    )
+    input_type = fields.text("input_type", 16)
+    input_mode = fields.nullable_text("input_mode", 16)
+    autocapitalize = fields.nullable_text("autocapitalize", 16)
+    autocorrect = fields.nullable_text("autocorrect", 3)
+    enter_key_hint = fields.nullable_text("enter_key_hint", 16)
+    if input_type not in {
+        "text",
+        "password",
+        "email",
+        "url",
+        "tel",
+        "search",
+        "textarea",
+    }:
+        raise BrowserViewerContractError("Unsupported Browser native input type")
+    if input_mode not in {
+        None,
+        "none",
+        "text",
+        "email",
+        "url",
+        "tel",
+        "numeric",
+        "decimal",
+        "search",
+    }:
+        raise BrowserViewerContractError("Unsupported Browser native input mode")
+    if autocapitalize not in {
+        None,
+        "off",
+        "none",
+        "on",
+        "sentences",
+        "words",
+        "characters",
+    }:
+        raise BrowserViewerContractError("Unsupported Browser native capitalization")
+    if autocorrect not in {None, "on", "off"}:
+        raise BrowserViewerContractError("Unsupported Browser native correction")
+    if enter_key_hint not in {
+        None,
+        "enter",
+        "done",
+        "go",
+        "next",
+        "previous",
+        "search",
+        "send",
+    }:
+        raise BrowserViewerContractError("Unsupported Browser native enter-key hint")
+    return ViewerFieldAttributes(
+        input_type,
+        input_mode,
+        fields.text("autocomplete", 256, empty=True),
+        autocapitalize,
+        autocorrect,
+        fields.boolean("spellcheck"),
+        enter_key_hint,
+        _native_length(fields.value["max_length"]),
+        _native_length(fields.value["min_length"]),
+        fields.text("pattern", 2048, empty=True),
+        fields.boolean("required"),
+        fields.boolean("multiple"),
+        fields.text("placeholder", 2048, empty=True),
+        fields.text("name", 256, empty=True),
+    )
+
+
+def viewer_field_kind(
+    attributes: ViewerFieldAttributes,
+) -> Literal["text", "password", "multiline"]:
+    return (
+        "multiline"
+        if attributes.input_type == "textarea"
+        else "password"
+        if attributes.input_type == "password"
+        else "text"
+    )
 
 
 def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -493,6 +631,11 @@ def encode_viewer_event(
         case ViewerInputAck():
             value = {"type": "input_ack", **asdict(event)}
         case ViewerFieldValue():
+            attributes = decode_viewer_field_attributes(asdict(event.attributes))
+            if viewer_field_kind(attributes) != event.kind:
+                raise BrowserViewerContractError(
+                    "Inconsistent Browser native field kind"
+                )
             if len(event.value) > 32768:
                 raise BrowserViewerContractError(
                     "Browser field value exceeds its bound"

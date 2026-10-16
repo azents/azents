@@ -44,6 +44,8 @@ class FieldTransport(Transport):
     [
         ("<input>", "text", "Changed value"),
         ("<input type=password>", "password", "Synthetic replacement"),
+        ("<input type=email>", "text", "user@example.test"),
+        ("<input type=url>", "text", "https://example.test"),
         ("<textarea></textarea>", "multiline", "First\nSecond"),
         ("<input>", "text", ""),
     ],
@@ -74,6 +76,9 @@ async def test_private_field_read_and_single_replace(
         )["accepted"] is True
         value = await transport.value()
         assert value["value"] == "Original synthetic value" and value["kind"] == kind
+        attributes = value["attributes"]
+        assert isinstance(attributes, dict)
+        assert attributes["input_type"] == await field.evaluate("field=>field.type")
         assert value["sequence"] == 1 and value["attachment_id"] == frame.attachment_id
         action = {
             "kind": "field_replace",
@@ -159,6 +164,32 @@ async def test_private_field_rejects_stale_or_cancelled_replacement(
         )
         assert result["accepted"] is False
         assert await native.locator("input").first.input_value() != "Must not overwrite"
+    finally:
+        await stop(running, transport)
+
+
+async def test_unbounded_native_attributes_reject_read_without_private_value(
+    manager: RunnerBrowserManager, tmp_path: Path, site: str
+) -> None:
+    authority = await scope(manager, tmp_path, site)
+    native = manager.tasks[authority.task_id].pages[authority.page_id].page
+    await native.set_content("<input value='Synthetic private value'>")
+    field = native.locator("input")
+    await field.evaluate("field=>field.name='x'.repeat(257)")
+    await field.focus()
+    viewer = RunnerBrowserViewer(manager, Budget())
+    transport = FieldTransport()
+    running = asyncio.create_task(
+        viewer.run(authority, transport.receive, transport.send)
+    )
+    try:
+        frame = await transport.frame()
+        result = await transport.input(
+            1, {"kind": "field_open", "editable_id": frame.editables[0].id}
+        )
+        assert result["reason_code"] == "browser_field_unsupported"
+        assert transport.values.empty()
+        assert await field.input_value() == "Synthetic private value"
     finally:
         await stop(running, transport)
 
