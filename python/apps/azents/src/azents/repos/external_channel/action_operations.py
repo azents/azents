@@ -5,10 +5,19 @@ import datetime
 from collections.abc import Sequence
 from typing import Annotated
 
+import sqlalchemy as sa
 from fastapi import Depends
 
-from azents.core.enums import ExternalChannelActionMode
+from azents.core.enums import (
+    AgentLifecycleStatus,
+    AgentSessionStatus,
+    ExternalChannelActionMode,
+)
 from azents.core.external_channel_file import ExternalChannelOutboundFileManifest
+from azents.core.external_channel_navigation import (
+    ChannelNavigationContext,
+    ChannelNavigationLink,
+)
 from azents.core.external_channel_progress import (
     ExternalChannelWorkTask as ChannelWorkTask,
 )
@@ -18,6 +27,11 @@ from azents.core.external_channel_provider_effect import (
 )
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.rdb.deps import get_read_only_session_manager, get_session_manager
+from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.external_channel import RDBExternalChannelBinding
+from azents.rdb.models.runtime_web import RDBRuntimeWebService
+from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadOnlySession, WriteSession
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
@@ -107,9 +121,52 @@ class ExternalChannelActionOperations:
             )
         return result
 
+    async def navigation_context(
+        self,
+        *,
+        session_id: str,
+        agent_id: str,
+        binding_id: str,
+        service_ids: Sequence[str],
+    ) -> ChannelNavigationContext:
+        """Read exact publication scope and service ownership before any effects."""
+        async with self.read_only_session_manager() as session:
+            handle = await session.read_session.scalar(
+                sa.select(RDBWorkspace.handle)
+                .join(RDBAgent, RDBAgent.workspace_id == RDBWorkspace.id)
+                .join(RDBAgentSession, RDBAgentSession.agent_id == RDBAgent.id)
+                .join(
+                    RDBExternalChannelBinding,
+                    RDBExternalChannelBinding.agent_session_id == RDBAgentSession.id,
+                )
+                .where(
+                    RDBAgent.id == agent_id,
+                    RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
+                    RDBAgentSession.id == session_id,
+                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                    RDBExternalChannelBinding.id == binding_id,
+                    RDBExternalChannelBinding.disconnected_at.is_(None),
+                )
+            )
+            if handle is None:
+                raise ValueError("External Channel navigation scope is unavailable.")
+            rows = await session.read_session.execute(
+                sa.select(
+                    RDBRuntimeWebService.id, RDBRuntimeWebService.hostname_key
+                ).where(
+                    RDBRuntimeWebService.agent_id == agent_id,
+                    RDBRuntimeWebService.id.in_(service_ids),
+                )
+            )
+            hosts = {row.id: row.hostname_key for row in rows}
+            if any(service_id not in hosts for service_id in service_ids):
+                raise ValueError("Web service action target is unavailable.")
+        return ChannelNavigationContext(workspace_handle=handle, service_hosts=hosts)
+
     async def commit_direct_action(
         self,
         *,
+        links: Sequence[ChannelNavigationLink],
         session_id: str,
         agent_id: str,
         run_id: str | None,
@@ -128,6 +185,7 @@ class ExternalChannelActionOperations:
                 await validate_session_execution_owner(session, self.execution_owner)
             result = await self.repository.commit_direct_action(
                 session,
+                links=links,
                 session_id=session_id,
                 agent_id=agent_id,
                 run_id=run_id,

@@ -36,6 +36,11 @@ from azents.core.external_channel_limits import (
     DISCORD_DEFAULT_MAX_FILE_BYTES,
     SLACK_MARKDOWN_TEXT_MAX_LENGTH,
 )
+from azents.core.external_channel_navigation import (
+    ChannelNavigationLink,
+    discord_navigation_rows,
+    slack_navigation_block,
+)
 from azents.core.external_channel_progress import ExternalChannelDesiredProgress
 from azents.core.external_channel_provider import (
     decode_provider_connection_configuration,
@@ -455,6 +460,7 @@ class ExternalChannelWorkRepository:
         self,
         session: ReadSession,
         *,
+        links: Sequence[ChannelNavigationLink],
         agent_id: str,
         session_id: str,
         binding_id: str,
@@ -521,6 +527,7 @@ class ExternalChannelWorkRepository:
             return ()
         binding, resource, route, connection = row
         payloads = _reply_parts(
+            links=links,
             provider=connection.provider,
             labels=resource.labels,
             text=text,
@@ -1178,6 +1185,7 @@ class ExternalChannelWorkRepository:
         self,
         session: WriteSession,
         *,
+        links: Sequence[ChannelNavigationLink],
         session_id: str,
         agent_id: str,
         run_id: str | None,
@@ -1371,6 +1379,7 @@ class ExternalChannelWorkRepository:
             )
             reply_parts = (
                 _reply_parts(
+                    links=links,
                     provider=connection.provider,
                     labels=resource.labels,
                     text=message,
@@ -2066,6 +2075,7 @@ def _slack_resource_thread_ts(
 
 def _reply_parts(
     *,
+    links: Sequence[ChannelNavigationLink],
     provider: ExternalChannelProvider,
     labels: dict[str, object] | None,
     text: str,
@@ -2073,9 +2083,8 @@ def _reply_parts(
     slack_text_limit: int | None = None,
 ) -> tuple[ProviderReplyPart, ...]:
     """Decode internally produced reply scopes before application decisions."""
-    return tuple(
-        ProviderReplyPart.decode(payload)
-        for payload in _raw_reply_parts(
+    payloads = list(
+        _raw_reply_parts(
             provider=provider,
             labels=labels,
             text=text,
@@ -2083,6 +2092,34 @@ def _reply_parts(
             slack_text_limit=slack_text_limit,
         )
     )
+    if links:
+        if payloads[-1].get("files"):
+            # File transports do not all support interactive controls. Keep the
+            # controls in one ordered ordinary reply after the attachments.
+            payloads.append(
+                _provider_payload(provider, labels, text="Open in Azents", files=())
+            )
+        payload = payloads[-1]
+        match provider:
+            case ExternalChannelProvider.DISCORD:
+                payload["components"] = discord_navigation_rows(links)
+            case ExternalChannelProvider.SLACK:
+                body = payload["text"]
+                if not isinstance(body, str):
+                    raise ValueError("Slack navigation reply text is invalid.")
+                payload["blocks"] = [
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": body[offset : offset + 2900],
+                        },
+                    }
+                    for offset in range(0, len(body), 2900)
+                ] + [slack_navigation_block(links)]
+            case _ as unreachable:
+                assert_never(unreachable)
+    return tuple(ProviderReplyPart.decode(payload) for payload in payloads)
 
 
 def _raw_reply_parts(

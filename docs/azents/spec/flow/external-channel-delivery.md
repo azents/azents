@@ -25,6 +25,7 @@ code_paths:
   - python/apps/azents/src/azents/core/external_channel_provider.py
   - python/apps/azents/src/azents/core/external_channel_provider_effect.py
   - python/apps/azents/src/azents/core/external_channel_effect_intent.py
+  - python/apps/azents/src/azents/core/external_channel_navigation.py
   - python/apps/azents/src/azents/core/external_channel_session_presence.py
   - python/apps/azents/src/azents/core/external_channel_title.py
   - python/apps/azents/src/azents/core/discord_external_channel_presentation.py
@@ -63,8 +64,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/file_access.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-10-07
-spec_version: 68
+last_verified_at: 2026-10-16
+spec_version: 69
 ---
 
 # External Channel Delivery and Channel Work
@@ -96,7 +97,7 @@ model input boundary exposes four atomic modes:
   that binding until newly created same-binding human input or `continue`.
 - `finish`: send one required final reply and finish Channel Work.
 - `ignore`: finish existing active Work silently, regardless of recorded task status.
-  It accepts no message, title, task update, or files. The transition advances the
+  It accepts no message, title, task update, files, or actions. The transition advances the
   existing Work revisions, sets its finish time, and clears desired progress while
   retaining current provider projection observation until cleanup settles. It returns
   one deletion effect for each current `PRESENT` Activity Tracker on only the selected
@@ -140,6 +141,42 @@ is valid only for active Work, is not exposed through public management state, a
 cleared by terminal or replacement transitions. Whole-state optimistic-lock retries
 are isolated per binding.
 The ordinary Session Todo toolkit is not the Channel Work source of truth.
+
+## Semantic Navigation Actions
+
+`channel_action` may attach one to five independent `actions` to a non-empty
+conversational message in `continue`, `request_input`, or `finish`. Actions are
+product destinations, not references to another tool invocation or its result.
+The Agent never assembles internal browser URLs or provider component JSON.
+
+- `{"type": "browser"}` opens the current Binding's concrete Session Browser
+  panel. It takes no tab, task, Session, or resource-incarnation identifiers.
+  Existing Browser tab selection, availability, and human-input permissions apply.
+- `{"type": "web_service", "service_id": "...", "path": "/reports?q=month#chart"}`
+  opens an existing service owned by the current Agent at the requested application
+  path. Omitting `path` selects `/`. The original safe query and fragment remain
+  part of navigation. Absolute external URLs, protocol-relative paths, backslashes,
+  control characters, and encoded authority escapes are rejected.
+- `label` is optional (at most 75 characters); defaults are `Open browser` and
+  `Open web service`.
+
+Scope and service ownership are read before canonical Work mutation or provider
+effects. Missing/foreign services, disconnected or mismatched Session bindings,
+unconfigured URLs, and URLs exceeding Discord's 512-character bound fail without
+publishing. The service's On/Off state is unchanged. Opening retains the existing
+Gateway authentication, destination preservation, and user-controlled activation;
+it neither grants access nor enables or extends exposure.
+
+Slack renders native URL buttons in Block Kit; Discord renders link-style
+buttons. Split replies place the controls on only the final part. File-bearing
+replies append one ordinary action-control reply after attachments because file
+transports do not all support interactive components. These are process-local
+reply effects, not durable action jobs or new Channel Work projections.
+Scheduled progress publication uses the same reply presentation.
+
+Actions never resume execution or acknowledge completion: existing `mode` and
+participant input continue to govern waiting and finishing. Static Session/settings,
+account, model, approval, and Scheduled Task controls retain their existing behavior.
 
 ## Agent Presentation
 

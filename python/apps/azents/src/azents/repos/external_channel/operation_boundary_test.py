@@ -290,6 +290,7 @@ async def test_direct_work_commits_under_held_session_owner_row(
                 transition = await asyncio.wait_for(
                     repository.commit_direct_action(
                         session,
+                        links=(),
                         session_id=seeded.owner_session_id,
                         agent_id=seeded.owner_agent_id,
                         run_id=None,
