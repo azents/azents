@@ -1,15 +1,14 @@
 {
   "change_checkpoint": {
-    "checked_at": "2026-10-15T22:42:11Z",
+    "checked_at": "2026-10-16T22:18:44Z",
     "checked_ruleset_revisions": [
       "1a20f0b0040f5867251874f2f51afde1051e59c29a1aea59650e93daeb66ce9d",
       "27090dfbb643163110b41d91462c4d2455bb024416896d88067d8bdb05b520f5",
-      "7938fddbec63f2bd90521cce732ffdfa6aab738736f324b6bcdadae2dc4d3fb4",
       "b28dd359ab885a353fe9a3a84a088c980974ede0e4b31af189a66feac8a11c58",
       "ce4ed60d01f8f4493abdc5e541c07f524f0511ffeab06c8e6fca47ed03366709",
       "dee40c24e2143112ee9589d8a267ff5294a635bdc89b2dfd91e79cd31396b1b7"
     ],
-    "checked_through_commit": "3e2ed11f9a174f96cb5bae9ed38508a152605b3b"
+    "checked_through_commit": "a75090bdcd2c41b90ebf889e915561b0a9d3ece0"
   },
   "ranges": {
     ".::bucket-1-of-8": {
@@ -637,6 +636,11 @@
       "checked_ruleset_revision": "03a79b1cb3b0cd3fab3981885c9ee35e3094d6ee83a993eda8955c559bc5a525",
       "checked_through_commit": "25517e3d8c60dc0d8029f9bac5f4a7ebda1be51d"
     },
+    "scripts/**::bucket-2-of-8": {
+      "checked_at": "2026-10-16T22:18:44Z",
+      "checked_ruleset_revision": "dee40c24e2143112ee9589d8a267ff5294a635bdc89b2dfd91e79cd31396b1b7",
+      "checked_through_commit": "a75090bdcd2c41b90ebf889e915561b0a9d3ece0"
+    },
     "scripts/**::bucket-3-of-8": {
       "checked_at": "2026-10-03T03:37:48Z",
       "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
@@ -661,6 +665,11 @@
       "checked_at": "2026-10-11T22:10:55Z",
       "checked_ruleset_revision": "62f8502dfaead68e71a6667c5d096e57071fa99d0d528840ea2505268d711835",
       "checked_through_commit": "25517e3d8c60dc0d8029f9bac5f4a7ebda1be51d"
+    },
+    "scripts/**::bucket-8-of-8": {
+      "checked_at": "2026-10-16T22:18:44Z",
+      "checked_ruleset_revision": "dee40c24e2143112ee9589d8a267ff5294a635bdc89b2dfd91e79cd31396b1b7",
+      "checked_through_commit": "a75090bdcd2c41b90ebf889e915561b0a9d3ece0"
     },
     "swift/**::bucket-2-of-8": {
       "checked_at": "2026-10-15T22:42:11Z",
@@ -928,29 +937,29 @@
       "checked_through_commit": "dfff3ad6c92497e43e86fce93fe4efafb0693dba"
     },
     "typescript/packages/azents-session-core/**::bucket-1-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-10-16T22:18:44Z",
+      "checked_ruleset_revision": "b28dd359ab885a353fe9a3a84a088c980974ede0e4b31af189a66feac8a11c58",
+      "checked_through_commit": "a75090bdcd2c41b90ebf889e915561b0a9d3ece0"
     },
     "typescript/packages/azents-session-core/**::bucket-2-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-10-16T22:18:44Z",
+      "checked_ruleset_revision": "b28dd359ab885a353fe9a3a84a088c980974ede0e4b31af189a66feac8a11c58",
+      "checked_through_commit": "a75090bdcd2c41b90ebf889e915561b0a9d3ece0"
     },
     "typescript/packages/azents-session-core/**::bucket-3-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-10-16T22:18:44Z",
+      "checked_ruleset_revision": "b28dd359ab885a353fe9a3a84a088c980974ede0e4b31af189a66feac8a11c58",
+      "checked_through_commit": "a75090bdcd2c41b90ebf889e915561b0a9d3ece0"
     },
     "typescript/packages/azents-session-core/**::bucket-4-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-10-16T22:18:44Z",
+      "checked_ruleset_revision": "b28dd359ab885a353fe9a3a84a088c980974ede0e4b31af189a66feac8a11c58",
+      "checked_through_commit": "a75090bdcd2c41b90ebf889e915561b0a9d3ece0"
     },
     "typescript/packages/azents-session-core/**::bucket-5-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-10-16T22:18:44Z",
+      "checked_ruleset_revision": "b28dd359ab885a353fe9a3a84a088c980974ede0e4b31af189a66feac8a11c58",
+      "checked_through_commit": "a75090bdcd2c41b90ebf889e915561b0a9d3ece0"
     },
     "typescript/packages/azents-session-core/**::bucket-6-of-8": {
       "checked_at": null,
