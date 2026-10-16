@@ -3,8 +3,7 @@
 from pathlib import Path
 
 import pytest
-
-from support.ci_observability import (
+from scripts.ci.observability import (
     parse_image_build_timings,
     parse_junit,
     parse_timings,

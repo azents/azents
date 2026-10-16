@@ -23,7 +23,9 @@ code_paths:
   - typescript/apps/azents-web/src/shared/model-options/image-generation-config.test.mts
   - typescript/apps/azents-web/src/shared/model-options/model-selection.test.mts
   - typescript/apps/azents-web/src/features/toolkits/toolkit-config-projection.test.mts
-  - .claude/skills/e2e-ci-optimization/**
+  - .claude/skills/ci-optimization/**
+  - scripts/ci/**
+  - .github/actions/ci-test-observability/**
   - .claude/skills/technical-feature-design/SKILL.md
   - .claude/skills/ship-feature/SKILL.md
   - .github/actions/expose-github-runtime/**
@@ -47,7 +49,7 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-10-15
+last_verified_at: 2026-10-16
 spec_version: 87
 ---
 
@@ -691,14 +693,40 @@ Always-on required CI does not depend on external credentials.
   pytest fails. The artifact contains JUnit XML, the complete pytest output, the
   slow-test report, and Docker process/storage diagnostics. Failed browser calls also
   capture a screenshot and page HTML when the WebDriver remains available.
-- Same-repository pull requests receive one sticky E2E observability comment. The
-  comment is updated in place and contains only bounded JUnit-derived counts, failed
-  node IDs, slow-test timing, wall-clock pytest execution time per lane, lane job
-  results, and a link to the workflow artifacts. Test execution jobs retain read-only
-  permissions; only the dedicated comment job receives `pull-requests: write`. Fork
-  pull requests remain read-only and skip comment publication. The default view uses
-  short status labels and key metrics for scanning; raw evidence and timing diagnostics
-  remain in expandable sections.
+- The upload TLS gateway resolves its existing nginx image explicitly before
+  Testcontainers construction. Cached local image IDs avoid registry access; an
+  absent image is pulled once within the shared existing 300-second Docker budget,
+  then its immutable local ID is used for container creation. Acquisition errors,
+  invalid IDs and deadline exhaustion fail visibly instead of entering an implicit
+  streamed pull. Safe gateway-image stage/outcome/timing evidence excludes raw
+  registry output. TLS configuration, readiness and S3/browser assertions remain.
+- General CI observability includes every Python matrix pytest project, migration
+  tests, Docker-free support tests and Helm pytest, using the shared
+  `scripts/ci/pytest_timing.py` plugin. It records only test identifiers, phases,
+  durations, outcomes and fixture scope, not fixture values or captured logs.
+  The observer binds its performance clock and output path at startup so application
+  clock/environment mocks cannot consume mock values or redirect hook evidence.
+  Existing E2E image/browser diagnostics and the E2E duration gate remain separate.
+- Same-repository pull requests receive one sticky CI observability comment combining
+  safe pytest counts, failed node IDs, phase/fixture timing and all CI job/step
+  wall-clock durations, including TypeScript lint/typecheck/tests and Docker builds.
+  Long details are bounded with full evidence linked in artifacts. Missing results
+  remain unavailable rather than passing. Only the reporting job has PR write access;
+  forks publish artifacts/job summaries but remain read-only and never post comments.
+- Whole-CI gate-completion elapsed time spans workflow creation to the last configured
+  gate, including dependency scheduling and queues. Maximum job wall, aggregate
+  runner job-seconds and E2E max-lane wall are distinct metrics. Reporting overhead is
+  named separately. The `ci-optimization` Skill and shared collection/analysis/chart
+  tools cover general CI; iOS/native diagnostics are analyzed as a separate workflow.
+  Same-SHA experiments require identical enabled scope, complete test evidence and
+  two successful complete attempts. Testcase multisets are compared across numbered
+  lanes within Required and Web separately because the planner may rebalance lane
+  assignments; multiplicity, suite boundaries, general pytest producer identities,
+  enabled lane jobs and original per-lane metrics are preserved. Historical
+  E2E-only history is retained under
+  its original scope, never relabeled as whole-CI performance. Daily charts show only
+  the most recent 30 KST dates with mean/median/min–max/n and explicit failed/missing
+  gaps. No branch-protection, failing duration threshold or test selection is changed.
 - Web Surface path filtering includes backend/E2E dependencies, both web Dockerfiles, and the TypeScript workspace.
 - testenv fixture/prerequisite unit, contract lint.
 

@@ -1,4 +1,4 @@
-"""Render bounded E2E CI observability summaries from pytest JUnit output."""
+"""Render bounded CI observability summaries from pytest JUnit output."""
 
 import argparse
 import html
@@ -603,7 +603,7 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     summarize = subparsers.add_parser(
         "summarize",
-        help="Render one E2E lane Markdown summary.",
+        help="Render one CI test-job Markdown summary.",
     )
     summarize.add_argument("--lane", required=True)
     summarize.add_argument("--job-result", required=True)

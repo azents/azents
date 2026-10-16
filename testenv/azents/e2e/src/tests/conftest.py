@@ -31,6 +31,9 @@ from docker.errors import APIError, DockerException, NotFound
 from docker.models.containers import Container
 from pydantic import TypeAdapter
 from python_on_whales import docker as pow_docker
+from scripts.ci.pytest_timing import (
+    record_fixture_phase,
+)
 from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.options import Options as ChromeOptions
@@ -53,6 +56,7 @@ from support.docker_fixture_observations import (
     decode_docker_network_address,
 )
 from support.e2e_image_preparation import E2EImagePreparation as _E2EImagePreparation
+from support.gateway_image import prepare_gateway_image, run_gateway_image_command
 from support.google_provider_fake import HOSTS as GOOGLE_FIXTURE_HOSTS
 from support.google_provider_fixture import (
     GoogleProviderFixture,
@@ -79,11 +83,6 @@ from support.strict_network_control_plane import (
     load_control_plane_evidence,
 )
 from support.system_bootstrap import SystemBootstrapEvidence
-from support.timing_observability import (
-    TimingObservabilityPlugin,
-    record_fixture_phase,
-    timing_path,
-)
 
 _AIMOCK_FIXTURE_DIR = REPOSITORY_ROOT / "testenv/azents/e2e/src/support/aimock_fixtures"
 _IMAGE_GENERATION_PROXY = (
@@ -289,15 +288,6 @@ def pytest_runtest_makereport(
         if report.failed:
             _emit_active_server_logs(item.config)
     return report
-
-
-def pytest_configure(config: pytest.Config) -> None:
-    """Register timing hooks globally so session fixtures are observable."""
-    if timing_path() is not None:
-        config.pluginmanager.register(
-            TimingObservabilityPlugin(),
-            "azents-e2e-timing-observability",
-        )
 
 
 def random_secret(length: int = 32) -> str:
@@ -2993,6 +2983,12 @@ def azents_workspace_upload_gateway_container(
 ) -> Generator[DockerContainer, None, None]:
     """Expose the workspace upload object store through its TLS boundary."""
     del rustfs_container
+    artifact_dir = os.environ.get(_E2E_ARTIFACT_DIR_ENV)
+    image_id = prepare_gateway_image(
+        artifact_dir=Path(artifact_dir) if artifact_dir is not None else None,
+        budget_seconds=_DOCKER_CLIENT_TIMEOUT_SECONDS,
+        command_runner=run_gateway_image_command,
+    )
     config = """
 server {
     listen 8446 ssl;
@@ -3020,7 +3016,7 @@ server {
         config_path.write_text(config, encoding="utf-8")
         container = (
             DockerContainer(
-                image="nginx:1.29-alpine",
+                image=image_id,
                 docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
             )
             .with_name(f"azents-workspace-upload-gateway-{random_secret(4)}")

@@ -12,6 +12,22 @@ def _step_block(workflow: str, name: str) -> str:
     return workflow[start:] if end == -1 else workflow[start:end]
 
 
+def test_general_report_can_checkout_and_keeps_forks_read_only() -> None:
+    """Job-scoped permissions retain source reads and bound comment publication."""
+    workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
+    report = workflow.split("  ci_observability:\n", 1)[1].split(
+        "\n  ci_typescript_run:\n", 1
+    )[0]
+    permissions = report.split("    permissions:\n", 1)[1].split("    steps:\n", 1)[0]
+    assert "contents: read" in permissions
+    assert "actions: read" in permissions
+    comment = _step_block(report, "Update sticky CI observability comment")
+    assert (
+        "github.event.pull_request.head.repo.full_name == github.repository" in comment
+    )
+    assert "header: e2e-observability" in comment
+
+
 def test_timing_cache_restore_keys_support_reruns_and_later_runs() -> None:
     """Restores prefer the current attempt and retain rolling history fallbacks."""
     workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
@@ -109,16 +125,16 @@ def test_duration_gate_compares_base_once_without_retry() -> None:
 
 def test_comment_and_status_are_rechecked_when_base_ci_completes() -> None:
     workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
-    comment = workflow.split("  ci_e2e_observability_comment:\n", 1)[1].split(
+    comment = workflow.split("  ci_observability:\n", 1)[1].split(
         "\n  ci_typescript_run:\n", 1
     )[0]
     recheck = (
         REPOSITORY_ROOT / ".github/workflows/e2e-duration-recheck.yaml"
     ).read_text(encoding="utf-8")
 
-    assert "## E2E CI observability" in comment
-    assert "Commit:" in comment
-    assert "Workflow run and full artifacts" in comment
+    assert "scripts/ci/workflow_report.py" in comment
+    assert "ci-workflow/summary.md" in comment
+    assert "ci-observability" in comment
     assert "e2e-duration-gate/summary.md" in comment
     assert "pull_request_target:" in recheck
     assert "workflow_run:" in recheck
