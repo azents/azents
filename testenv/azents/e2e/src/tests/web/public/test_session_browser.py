@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import time
+import zlib
 from dataclasses import asdict
 from urllib.parse import urlencode
 
@@ -150,9 +151,13 @@ while True:
         print('SESSION_BROWSER_APP_READY')
         break
 """
-    payload = base64.b64encode(script.encode()).decode()
+    # Fixture uploads must not burst PTY echo/output ACKs as the page grows.
+    commands.command("stty -echo", f"SESSION_BROWSER_QUIET_{unique()}")
+    payload = base64.b64encode(zlib.compress(script.encode())).decode()
     output = commands.command(
-        "python -c \"import base64;exec(base64.b64decode('" + payload + "'))\"",
+        "python -c \"import base64,zlib;exec(zlib.decompress(base64.b64decode('"
+        + payload
+        + "')))\"",
         f"SESSION_BROWSER_SETUP_{unique()}",
     )
     assert b"SESSION_BROWSER_APP_READY" in output
