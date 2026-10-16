@@ -44,7 +44,7 @@ class RuntimeRunnerOperationAdapter:
 
     def __init__(self, client: ControlRuntimeRunnerOperationClient) -> None:
         """Initialize Adapter."""
-        self._client = client
+        self.client = client
 
     async def run_browser_command(
         self,
@@ -57,7 +57,7 @@ class RuntimeRunnerOperationAdapter:
     ) -> BrowserResult:
         """Preserve typed browser results and translate operation failures."""
         return await _translate_runtime_errors(
-            self._client.run_browser_command(
+            self.client.run_browser_command(
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 owner_session_id=owner_session_id,
@@ -80,7 +80,7 @@ class RuntimeRunnerOperationAdapter:
     ) -> RuntimeBashResult:
         """Run bash operation and convert to engine result."""
         result = await _translate_runtime_errors(
-            self._client.run_bash(
+            self.client.run_bash(
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 owner_session_id=owner_session_id,
@@ -114,7 +114,7 @@ class RuntimeRunnerOperationAdapter:
     ) -> RuntimeProcessResult:
         """Start process operation and convert to engine result."""
         result = await _translate_runtime_errors(
-            self._client.start_process(
+            self.client.start_process(
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 command=command,
@@ -146,7 +146,7 @@ class RuntimeRunnerOperationAdapter:
     ) -> RuntimeProcessResult:
         """Write process stdin or poll, and convert to engine result."""
         result = await _translate_runtime_errors(
-            self._client.write_process_stdin(
+            self.client.write_process_stdin(
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 process_id=process_id,
@@ -172,7 +172,7 @@ class RuntimeRunnerOperationAdapter:
     ) -> None:
         """Terminate all Runner-owned processes for one AgentSession."""
         await _translate_runtime_errors(
-            self._client.terminate_session_processes(
+            self.client.terminate_session_processes(
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 owner_session_id=owner_session_id,
@@ -193,7 +193,7 @@ class RuntimeRunnerOperationAdapter:
     ) -> RuntimeFileReadResult:
         """Run file read operation and convert to engine result."""
         result = await _translate_runtime_errors(
-            self._client.read_file(
+            self.client.read_file(
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 owner_session_id=owner_session_id,
@@ -219,7 +219,7 @@ class RuntimeRunnerOperationAdapter:
     ) -> RuntimeFileTextReadResult:
         """Run decoded character-range operation and convert to engine result."""
         result = await _translate_runtime_errors(
-            self._client.read_text_file(
+            self.client.read_text_file(
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 owner_session_id=owner_session_id,
@@ -250,7 +250,7 @@ class RuntimeRunnerOperationAdapter:
     ) -> RuntimeFileWriteResult:
         """Run file write operation and convert to engine result."""
         result = await _translate_runtime_errors(
-            self._client.write_file(
+            self.client.write_file(
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 owner_session_id=owner_session_id,
@@ -277,7 +277,7 @@ class RuntimeRunnerOperationAdapter:
     ) -> RuntimeFileApplyPatchResult:
         """Run one Runtime patch operation and preserve typed failure detail."""
         result = await _translate_runtime_errors(
-            self._client.apply_patch(
+            self.client.apply_patch(
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 owner_session_id=owner_session_id,
@@ -315,7 +315,7 @@ class RuntimeRunnerOperationAdapter:
     ) -> RuntimeFileEditResult:
         """Run one Runtime text replacement and convert its result."""
         result = await _translate_runtime_errors(
-            self._client.edit_file(
+            self.client.edit_file(
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 owner_session_id=owner_session_id,
@@ -344,7 +344,7 @@ class RuntimeRunnerOperationAdapter:
     ) -> RuntimeFileListResult:
         """Run file list operation and convert to engine result."""
         result = await _translate_runtime_errors(
-            self._client.list_files(
+            self.client.list_files(
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 owner_session_id=owner_session_id,
@@ -368,7 +368,7 @@ class RuntimeRunnerOperationAdapter:
     ) -> RuntimeFileListResult:
         """Run file glob operation and convert to engine result."""
         result = await _translate_runtime_errors(
-            self._client.glob_files(
+            self.client.glob_files(
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 owner_session_id=owner_session_id,
@@ -390,7 +390,7 @@ class RuntimeRunnerOperationAdapter:
     ) -> RuntimeFileStatResult:
         """Run file stat operation and convert to engine result."""
         result = await _translate_runtime_errors(
-            self._client.stat_file(
+            self.client.stat_file(
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 owner_session_id=owner_session_id,
@@ -426,7 +426,7 @@ class RuntimeRunnerOperationAdapter:
     ) -> RuntimeGrepResult:
         """Run file grep operation and convert to engine result."""
         result = await _translate_runtime_errors(
-            self._client.grep_files(
+            self.client.grep_files(
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 owner_session_id=owner_session_id,

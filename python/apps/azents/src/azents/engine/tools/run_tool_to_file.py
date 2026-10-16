@@ -14,6 +14,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Protocol, assert_never, runtime_checkable
 
+from azcommon.logging import bind_extra
 from azcommon.result import Failure
 from azcommon.types import JSONObject
 from azcommon.uuid import uuid7
@@ -317,6 +318,16 @@ def make_run_tool_to_file_tool(
         failed: list[_FailedPart] = []
         used_names: set[str] = {_MANIFEST_NAME}
         for part in planned:
+            L = bind_extra(
+                logger,
+                {
+                    "tool_name": input.tool_name,
+                    "part_order": part.order,
+                    "part_kind": part.kind,
+                    "session_id": runtime.authority.session_id,
+                    "run_id": runtime.authority.run_id,
+                },
+            )
             try:
                 relative_path = await _select_relative_path(
                     runtime.session_storage,
@@ -345,15 +356,8 @@ def make_run_tool_to_file_tool(
                 )
                 continue
             except Exception:
-                logger.exception(
+                L.exception(
                     "Failed to select higher-order Tool output path",
-                    extra={
-                        "tool_name": input.tool_name,
-                        "part_order": part.order,
-                        "part_kind": part.kind,
-                        "session_id": runtime.authority.session_id,
-                        "run_id": runtime.authority.run_id,
-                    },
                 )
                 failed.append(
                     _FailedPart(
@@ -415,15 +419,8 @@ def make_run_tool_to_file_tool(
                 )
                 continue
             except Exception:
-                logger.exception(
+                L.exception(
                     "Failed to store higher-order Tool output part",
-                    extra={
-                        "tool_name": input.tool_name,
-                        "part_order": part.order,
-                        "part_kind": part.kind,
-                        "session_id": runtime.authority.session_id,
-                        "run_id": runtime.authority.run_id,
-                    },
                 )
                 failed.append(
                     _FailedPart(

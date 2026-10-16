@@ -394,7 +394,9 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                 browser_capabilities = (*registration.capabilities, "browser.v1")
             except BrowserFailure as exc:
                 L.warning(
-                    "Product browser is unavailable", extra={"reason_code": exc.code}
+                    "Product browser is unavailable",
+                    exc_info=True,
+                    extra={"reason_code": exc.code},
                 )
                 browser_capabilities = tuple(registration.capabilities)
             operations = RunnerOperations(

@@ -7,7 +7,7 @@ import uuid
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Literal, Protocol, assert_never
+from typing import Literal, NamedTuple, Protocol, assert_never
 
 from azents_runtime_control.browser_contract import (
     BrowserActCommand,
@@ -121,6 +121,9 @@ class _LatestPage:
             self.failed = True
             logging.getLogger(__name__).warning(
                 "Browser live capture stopped",
+                exc_info=BrowserFailure(
+                    "browser_capture_failed", "Browser live capture failed"
+                ).with_traceback(error.__traceback__),
                 extra={
                     "page_id": self.page.id,
                     "reason_code": (
@@ -218,7 +221,12 @@ class _LatestPage:
         await self.popups.close()
 
 
-def _viewport(page: Page) -> tuple[int, int]:
+class _Viewport(NamedTuple):
+    width: int
+    height: int
+
+
+def _viewport(page: Page) -> _Viewport:
     viewport = page.viewport_size
     if viewport is None:
         raise BrowserFailure(
@@ -233,7 +241,7 @@ def _viewport(page: Page) -> tuple[int, int]:
         raise BrowserFailure(
             "browser_resource_exhausted", "Browser source viewport exceeds its bound"
         )
-    return width, height
+    return _Viewport(width=width, height=height)
 
 
 def _target(authority: BrowserStreamAuthority) -> BrowserTarget:
@@ -806,9 +814,12 @@ class _Attachment:
                         await self.page.page.mouse.up(button=button)
                     for key in tuple(self.keys):
                         await self.page.page.keyboard.up(key)
-        except Error, TimeoutError:
+        except (Error, TimeoutError) as error:
             logging.getLogger(__name__).info(
                 "Browser attachment cleanup outcome is unconfirmed",
+                exc_info=BrowserFailure(
+                    "browser_outcome_unknown", "Browser attachment cleanup failed"
+                ).with_traceback(error.__traceback__),
                 extra={"reason_code": "browser_outcome_unknown"},
             )
         finally:

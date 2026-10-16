@@ -3,6 +3,7 @@
 import asyncio
 import dataclasses
 from datetime import UTC, datetime, timedelta
+from typing import NamedTuple
 
 import grpc
 import pytest
@@ -43,7 +44,12 @@ from azents.runtime.control_protocol.grpc.runtime_stream_session_server_test imp
 )
 
 
-def _certificate() -> tuple[bytes, bytes]:
+class _Certificate(NamedTuple):
+    private_key: bytes
+    certificate: bytes
+
+
+def _certificate() -> _Certificate:
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
     now = datetime.now(UTC)
@@ -61,11 +67,14 @@ def _certificate() -> tuple[bytes, bytes]:
         .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
         .sign(key, hashes.SHA256())
     )
-    return key.private_bytes(
-        serialization.Encoding.PEM,
-        serialization.PrivateFormat.PKCS8,
-        serialization.NoEncryption(),
-    ), certificate.public_bytes(serialization.Encoding.PEM)
+    return _Certificate(
+        private_key=key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        ),
+        certificate=certificate.public_bytes(serialization.Encoding.PEM),
+    )
 
 
 @pytest.mark.parametrize("tls_enabled", [False, True])

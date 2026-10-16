@@ -14,6 +14,7 @@ from azents_runtime_control.browser_contract import (
 )
 from azents_runtime_control.browser_viewer_contract import ViewerTarget
 from azents_runtime_control.runtime_stream_session import BrowserStreamAuthority
+from pydantic import BaseModel, ConfigDict, StrictStr, ValidationError
 
 from azents.core.enums import (
     AgentRuntimeCapability,
@@ -50,6 +51,26 @@ from azents.services.session_working_folder_binding import (
     SessionWorkingFolderBindingError,
     SessionWorkingFolderBindingService,
 )
+
+
+class _RunnerWorkspaceObservation(BaseModel):
+    """Project the interpreted registration field without narrowing extensions."""
+
+    model_config = ConfigDict(
+        extra="ignore", frozen=True, strict=True, hide_input_in_errors=True
+    )
+
+    workspace_path: StrictStr
+
+
+class _RunnerCapabilitiesObservation(BaseModel):
+    """Validate capability selection separately to retain failure classification."""
+
+    model_config = ConfigDict(
+        extra="ignore", frozen=True, strict=True, hide_input_in_errors=True
+    )
+
+    capabilities: list[StrictStr]
 
 
 class RuntimeBrowserAuthorityResolver(Protocol):
@@ -118,23 +139,31 @@ class DatabaseRuntimeBrowserAuthorityResolver:
         runner = await self.runtime_coordination.get_connection(
             kind=RuntimeConnectionKind.RUNNER, subject_id=runtime.id
         )
-        workspace = None if runner is None else runner.metadata.get("workspace_path")
         if (
             runner is None
             or runner.generation != runtime.runner_generation
             or runner.expires_at <= resolved_at
-            or not isinstance(workspace, str)
-            or not PurePosixPath(workspace).is_absolute()
+        ):
+            return RuntimeBrowserUnavailable("runtime_unavailable")
+        try:
+            workspace = _RunnerWorkspaceObservation.model_validate(
+                runner.metadata
+            ).workspace_path
+        except ValidationError:
+            return RuntimeBrowserUnavailable("runtime_unavailable")
+        if (
+            not PurePosixPath(workspace).is_absolute()
             or ".." in PurePosixPath(workspace).parts
             or workspace != runtime.workspace_path
         ):
             return RuntimeBrowserUnavailable("runtime_unavailable")
-        capabilities = runner.metadata.get("capabilities")
-        if (
-            not isinstance(capabilities, list)
-            or not all(isinstance(value, str) for value in capabilities)
-            or "browser.v1" not in capabilities
-        ):
+        try:
+            capabilities = _RunnerCapabilitiesObservation.model_validate(
+                runner.metadata
+            ).capabilities
+        except ValidationError:
+            return RuntimeBrowserUnavailable("browser_unavailable")
+        if "browser.v1" not in capabilities:
             return RuntimeBrowserUnavailable("browser_unavailable")
         target = RuntimeOperationTarget(
             id=runtime.id,
