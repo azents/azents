@@ -183,7 +183,7 @@ export const MemoryChannelAndExistingRenderers = {
       "Searched Session history",
       "Read Session history",
       "Read previous tool result",
-      "Sent channel reply",
+      "Channel send",
       "Downloaded channel file",
       "Managed web service",
       "Searched tools",
@@ -192,10 +192,95 @@ export const MemoryChannelAndExistingRenderers = {
     }
     await expect(canvas.queryByText("private reply")).toBeNull();
     await expect(
-      canvasElement.querySelector(".tabler-icon-messages"),
+      canvasElement.querySelector(".tabler-icon-send"),
     ).not.toBeNull();
     await expect(
       canvasElement.querySelector(".tabler-icon-brain"),
     ).not.toBeNull();
+  },
+} satisfies Story;
+
+export const ChannelSendProgressAndClose = {
+  args: { toolCall: builtinRows[3] ?? browser },
+  render: () => (
+    <Stack gap="xs">
+      <ToolCallCardContainer
+        toolCall={call(
+          "channel_action",
+          { mode: "continue", binding: "binding-1", message: "private reply" },
+          {},
+        )}
+      />
+      <ToolCallCardContainer
+        toolCall={call(
+          "channel_action",
+          { mode: "continue", binding: "binding-1", title: "Working…" },
+          {},
+        )}
+      />
+      <ToolCallCardContainer
+        toolCall={call(
+          "channel_action",
+          { mode: "ignore", binding: "binding-1" },
+          {},
+        )}
+      />
+      <ToolCallCardContainer
+        toolCall={{
+          ...call(
+            "channel_action",
+            {
+              mode: "request_input",
+              binding: "binding-1",
+              message: "private question",
+            },
+            {},
+          ),
+          status: "running",
+        }}
+      />
+      <ToolCallCardContainer
+        toolCall={{
+          ...call(
+            "channel_action",
+            { mode: "continue", binding: "binding-1" },
+            {},
+          ),
+          status: "running",
+        }}
+      />
+      <ToolCallCardContainer
+        toolCall={{
+          ...call(
+            "channel_action",
+            { mode: "ignore", binding: "binding-1" },
+            {},
+          ),
+          status: "running",
+        }}
+      />
+      <ToolCallCardContainer toolCall={builtinRows[4] ?? browser} />
+    </Stack>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    for (const label of [
+      "Channel send",
+      "Channel progress update",
+      "Channel work closed",
+      "Sending to channel",
+      "Updating channel progress",
+      "Closing channel work",
+      "Downloaded channel file",
+    ]) {
+      await expect(canvas.getByText(label, { exact: true })).toBeVisible();
+    }
+    await expect(
+      canvasElement.querySelectorAll(".tabler-icon-send"),
+    ).toHaveLength(6);
+    await expect(
+      canvasElement.querySelectorAll(".tabler-icon-download"),
+    ).toHaveLength(1);
+    await expect(canvas.queryByText("private reply")).toBeNull();
   },
 } satisfies Story;

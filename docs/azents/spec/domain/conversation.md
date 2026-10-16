@@ -196,8 +196,8 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
-last_verified_at: 2026-10-15
-spec_version: 192
+last_verified_at: 2026-10-16
+spec_version: 193
 ---
 
 # Conversation & Events
@@ -1191,6 +1191,13 @@ retain the existing explicit-page Browser-panel link. Expanded history rows show
 Session matches, visible events, or the selected previous tool result. Existing
 web-service and Tool Search semantic renderers remain in use. Invalid payloads
 and unrelated Toolkit-owned names retain Generic presentation and Raw diagnostics.
+
+`channel_action` uses a Send (paper-plane) icon and selects its display action in
+priority order: `ignore` is Channel work closed; other calls with a message are
+Channel send; other calls without a message are Channel progress update. Running
+states use the corresponding in-progress localized labels. `download_external_file`
+keeps its distinct Download icon. This presentation does not rename either tool or
+change its execution contract.
 
 Reasoning, Skill, client-tool, provider-tool, and non-interactive control events use one canonical
 Activity-row grid for vertical padding, disclosure-chevron space, icon size, text baseline, status, and
