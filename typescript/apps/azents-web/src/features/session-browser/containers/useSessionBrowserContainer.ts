@@ -24,6 +24,7 @@ import {
 import { useBrowserFieldEditor } from "./useBrowserFieldEditor";
 import { useBrowserFieldVisibility } from "./useBrowserFieldVisibility";
 import { useBrowserInteraction } from "./useBrowserInteraction";
+import { useBrowserManualKeyboard } from "./useBrowserManualKeyboard";
 import { useBrowserTouchView } from "./useBrowserTouchView";
 import type { SessionBrowserPanelProps } from "../components/SessionBrowserPanel";
 import type { BrowserPopupHint } from "../popup";
@@ -378,6 +379,16 @@ export function useSessionBrowserContainer(
     onAction: (frame, action) =>
       query.data?.allow_input === true && live.coordinate(frame, action),
   });
+  const manualKeyboard = useBrowserManualKeyboard({
+    enabled: interaction.interaction !== null && !fieldEditor.active,
+    scope: JSON.stringify([
+      resourceKey,
+      selectedTarget,
+      source?.attachment_id,
+      source?.navigation_id,
+    ]),
+    cancelInput: interaction.cancel,
+  });
   const touchView = useBrowserTouchView({
     enabled:
       focused &&
@@ -596,6 +607,7 @@ export function useSessionBrowserContainer(
     onDialogTextChange: setDialogText,
     keyboardRef: interaction.keyboardRef,
     interaction: interaction.interaction,
+    manualKeyboard,
     touchView,
     paste: interaction.paste,
     fieldEditor: {

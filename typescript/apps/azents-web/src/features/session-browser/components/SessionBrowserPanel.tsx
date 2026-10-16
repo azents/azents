@@ -23,6 +23,7 @@ import {
   IconArrowRight,
   IconClipboard,
   IconDots,
+  IconKeyboard,
   IconMaximize,
   IconMinimize,
   IconPlus,
@@ -43,6 +44,7 @@ import {
 import { BrowserFieldEditor } from "./BrowserFieldEditor";
 import classes from "./SessionBrowserPanel.module.css";
 import type { BrowserAddressSelection } from "../containers/useBrowserAddressSelection";
+import type { BrowserManualKeyboardControls } from "../containers/useBrowserManualKeyboard";
 import type { BrowserPasteControls } from "../containers/useBrowserPaste";
 import type { BrowserTouchView } from "../containers/useBrowserTouchView";
 import type {
@@ -107,6 +109,7 @@ export interface SessionBrowserPanelProps {
   dialogText: string;
   onDialogTextChange: (text: string) => void;
   keyboardRef: RefObject<HTMLTextAreaElement | null> | null;
+  manualKeyboard: BrowserManualKeyboardControls | null;
   interaction: BrowserInteractionHandlers | null;
   touchView: BrowserTouchView | null;
   paste: BrowserPasteControls | null;
@@ -182,6 +185,7 @@ export function SessionBrowserPanel({
   dialogText,
   onDialogTextChange,
   keyboardRef,
+  manualKeyboard,
   interaction,
   touchView,
   paste,
@@ -567,6 +571,21 @@ export function SessionBrowserPanel({
               </span>
             </Tooltip>
           )}
+          {focused && manualKeyboard !== null && (
+            <Tooltip label={t("showKeyboard")}>
+              <ActionIcon
+                ref={manualKeyboard.buttonRef}
+                variant="subtle"
+                color="gray"
+                aria-label={t("showKeyboard")}
+                disabled={handlers === null || !manualKeyboard.enabled}
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={manualKeyboard.onOpen}
+              >
+                <IconKeyboard size={16} aria-hidden />
+              </ActionIcon>
+            </Tooltip>
+          )}
           <Menu
             withinPortal
             position="bottom-end"
@@ -613,7 +632,12 @@ export function SessionBrowserPanel({
                   <Menu.Item
                     onClick={() => {
                       handlers.onSendTab(false);
-                      keyboardRef?.current?.focus({ preventScroll: true });
+                      (
+                        manualKeyboard?.receiverRef.current ??
+                        keyboardRef?.current
+                      )?.focus({
+                        preventScroll: true,
+                      });
                     }}
                   >
                     {t("sendTab")}
@@ -621,7 +645,12 @@ export function SessionBrowserPanel({
                   <Menu.Item
                     onClick={() => {
                       handlers.onSendTab(true);
-                      keyboardRef?.current?.focus({ preventScroll: true });
+                      (
+                        manualKeyboard?.receiverRef.current ??
+                        keyboardRef?.current
+                      )?.focus({
+                        preventScroll: true,
+                      });
                     }}
                   >
                     {t("sendShiftTab")}
@@ -861,7 +890,7 @@ export function SessionBrowserPanel({
             {focused && state.canClose && (
               <textarea
                 maxLength={32768}
-                ref={keyboardRef}
+                ref={manualKeyboard?.receiverRef ?? keyboardRef}
                 className={classes.keyboard}
                 rows={1}
                 tabIndex={0}
@@ -874,6 +903,7 @@ export function SessionBrowserPanel({
                 inputMode="none"
                 readOnly={handlers === null}
                 onFocus={handlers?.onKeyboardFocus}
+                onBlur={manualKeyboard?.onBlur}
                 onPaste={handlers?.onPaste}
                 onCompositionStart={handlers?.onCompositionStart}
                 onCompositionEnd={handlers?.onCompositionEnd}
