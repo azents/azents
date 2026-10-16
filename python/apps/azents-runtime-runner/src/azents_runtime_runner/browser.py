@@ -47,6 +47,12 @@ from playwright.async_api import (
 )
 
 from azents_runtime_runner.browser_popups import BrowserPopupTracker
+from azents_runtime_runner.browser_stealth import (
+    BROWSER_ARGS,
+    BROWSER_CHANNEL,
+    BROWSER_IGNORE_DEFAULT_ARGS,
+    prepare_browser_stealth,
+)
 
 _MAX_TASKS = 64
 _MAX_PAGES = 8
@@ -184,6 +190,7 @@ class RunnerBrowserManager:
         self.tasks: dict[str, _Task] = {}
         self.session_directories: dict[str, Path] = {}
         self.sandbox: bool | None = None
+        self.user_agent: str | None = None
         self.start_lock = asyncio.Lock()
         self.session_locks: dict[str, asyncio.Lock] = {}
         self.closed = False
@@ -276,9 +283,12 @@ class RunnerBrowserManager:
             driver = await async_playwright().start()
             try:
                 probe = await driver.chromium.launch(
-                    headless=True, chromium_sandbox=True
+                    channel=BROWSER_CHANNEL,
+                    headless=True,
+                    chromium_sandbox=True,
+                    args=BROWSER_ARGS,
+                    ignore_default_args=BROWSER_IGNORE_DEFAULT_ARGS,
                 )
-                await probe.close()
                 self.sandbox = True
             except Error as exc:
                 # Only known native containment startup diagnostics permit downgrade.
@@ -290,14 +300,29 @@ class RunnerBrowserManager:
                 self.sandbox = False
                 try:
                     probe = await driver.chromium.launch(
-                        headless=True, chromium_sandbox=False
+                        channel=BROWSER_CHANNEL,
+                        headless=True,
+                        chromium_sandbox=False,
+                        args=BROWSER_ARGS,
+                        ignore_default_args=BROWSER_IGNORE_DEFAULT_ARGS,
                     )
-                    await probe.close()
                 except Error:
                     await driver.stop()
                     raise BrowserFailure(
                         "browser_unavailable", "Product browser startup failed"
                     ) from None
+            try:
+                try:
+                    page = await probe.new_page()
+                    native_user_agent: str = await page.evaluate("navigator.userAgent")
+                    self.user_agent = native_user_agent.replace(
+                        "HeadlessChrome/", "Chrome/"
+                    )
+                finally:
+                    await probe.close()
+            except BaseException:
+                await driver.stop()
+                raise
             self.driver = driver
             return driver
 
@@ -308,6 +333,7 @@ class RunnerBrowserManager:
             if existing is not None:
                 return existing
             driver = await self._initialize()
+            assert self.user_agent is not None
             token = hashlib.sha256(authority.session_id.encode()).hexdigest()
             path = self.workspace_root / ".azents" / "browser-state" / token
             if path.resolve() != path or path.is_symlink():
@@ -318,7 +344,11 @@ class RunnerBrowserManager:
             try:
                 context = await driver.chromium.launch_persistent_context(
                     path,
+                    channel=BROWSER_CHANNEL,
                     headless=True,
+                    user_agent=self.user_agent,
+                    args=BROWSER_ARGS,
+                    ignore_default_args=BROWSER_IGNORE_DEFAULT_ARGS,
                     chromium_sandbox=self.sandbox is True,
                     proxy=None
                     if self.proxy is None
@@ -330,8 +360,14 @@ class RunnerBrowserManager:
                 raise BrowserFailure(
                     "browser_unavailable", "Product browser context could not start"
                 ) from None
-            for initial in context.pages:
-                await initial.close()
+            try:
+                await prepare_browser_stealth(context, self.user_agent)
+                for initial in context.pages:
+                    await initial.close()
+            except BaseException:
+                # Never retain an incompletely configured Session context.
+                await context.close()
+                raise
             self.contexts[authority.session_id] = context
             return context
 

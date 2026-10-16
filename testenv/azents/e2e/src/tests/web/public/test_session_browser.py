@@ -81,12 +81,23 @@ value='reader@example.test'>
 onfocus="document.title='Browser manual focus verified'"
 oninput="document.title=this.value==='Synthetic manual input'?
 'Browser manual keyboard verified':'Browser manual input pending'">
+<script>
+if (navigator.webdriver || /HeadlessChrome/.test(navigator.userAgent) ||
+    /HeadlessChrome/.test(navigator.appVersion) ||
+    (navigator.userAgentData?.brands || []).some(b => /HeadlessChrome/.test(b.brand))) {
+  document.title = 'Browser automation markers exposed';
+}
+</script>
 """
 class Handler(http.server.BaseHTTPRequestHandler):
     count = 0
     def do_GET(self):
         Handler.count += 1
         body = HTML
+        if any('HeadlessChrome' in self.headers.get(name, '')
+               for name in ('User-Agent', 'sec-ch-ua')):
+            body = body.replace(b'Synthetic Browser ready',
+                                b'Browser automation headers exposed')
         if self.path == '/navigation':
             body = HTML.replace(b'Synthetic Browser ready',
                 ('Navigation ' + str(Handler.count)).encode())
@@ -477,8 +488,12 @@ document.activeElement.dispatchEvent(new ClipboardEvent('paste', {
             (By.CSS_SELECTOR, 'input[aria-label="Browser address"]:not([readonly])')
         )
     )
-    address.send_keys(Keys.CONTROL, "a")
-    address.send_keys("http://127.0.0.1:8766/navigation", Keys.ENTER)
+    address.send_keys(Keys.CONTROL, "a", Keys.NULL)
+    address.send_keys("http://127.0.0.1:8766/navigation")
+    wait.until(
+        lambda _: address.get_attribute("value") == "http://127.0.0.1:8766/navigation"
+    )
+    address.send_keys(Keys.ENTER)
 
     def current_page() -> BrowserPageResponse:
         projection = _projection(public_url, resource_path, token)
@@ -546,7 +561,7 @@ def test_session_browser_engine_native_input_dialog_and_reconnect(
     azents_public_server_url: str,
     azents_runtime_provider_docker_container: object,
     mock_openai_url: str,
-    browser_driver: WebDriver,
+    request: pytest.FixtureRequest,
     azents_main_web_url: str,
 ) -> None:
     """Exercise authenticated API/Control/Owner/Runner without pre-admitted state."""
@@ -797,8 +812,12 @@ def test_session_browser_engine_native_input_dialog_and_reconnect(
         assert reconnected.status.attachment_id != first_attachment
         assert reconnected.frame is not None
         assert reconnected.frame.target == target
+        # Native Runtime setup can exceed Selenium's unused-session lifetime.
+        # Create the Web session only when the first Web interaction is ready.
+        driver = request.getfixturevalue("browser_driver")
+        assert isinstance(driver, WebDriver)
         _verify_live_panel(
-            driver=browser_driver,
+            driver=driver,
             web_url=azents_main_web_url,
             public_url=azents_public_server_url,
             resource_path=resource_path,

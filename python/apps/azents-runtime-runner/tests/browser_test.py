@@ -550,6 +550,9 @@ async def test_initialization_support_probe_does_not_hide_generic_failure(
     driver = MagicMock(spec=Playwright)
     probe = MagicMock()
     probe.close = AsyncMock()
+    probe_page = MagicMock()
+    probe_page.evaluate = AsyncMock(return_value="Synthetic HeadlessChrome/156.0")
+    probe.new_page = AsyncMock(return_value=probe_page)
     driver.stop = AsyncMock()
     driver.chromium.launch = AsyncMock(
         side_effect=[probe] if failure is None else [Error(failure), probe]
@@ -572,6 +575,11 @@ async def test_initialization_support_probe_does_not_hide_generic_failure(
             assert len(calls) == 2 and calls[1].kwargs["chromium_sandbox"] is False
         await manager.close()
     assert not list(tmp_path.iterdir())
+    for call in driver.chromium.launch.call_args_list:
+        assert call.kwargs["args"] == ["--disable-blink-features=AutomationControlled"]
+        assert call.kwargs["ignore_default_args"] == ["--enable-automation"]
+        assert call.kwargs["headless"] is True
+        assert call.kwargs["channel"] == "chromium"
 
 
 async def test_open_navigation_dialog_returns_current_resources_without_deadlock(
