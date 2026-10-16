@@ -11,6 +11,7 @@ from azents_runtime_control.browser_contract import BrowserAuthority, BrowserOpe
 
 import azents_runtime_runner.browser as browser_module
 from azents_runtime_runner.browser import RunnerBrowserManager
+from azents_runtime_runner.browser_input import BrowserInputKey
 
 
 @pytest.fixture
@@ -59,7 +60,9 @@ window.firstFingerprint = {
 async def test_context_stealth_precedes_navigation_and_covers_frames_and_popups(
     tmp_path: Path, fingerprint_site: str
 ) -> None:
-    manager = RunnerBrowserManager(workspace_root=tmp_path, proxy=None)
+    manager = RunnerBrowserManager(
+        workspace_root=tmp_path, proxy=None, input_key=BrowserInputKey()
+    )
     authority = BrowserAuthority("session-a", str(tmp_path / "a"))
     try:
         opened = await manager.execute(
@@ -118,7 +121,9 @@ async def test_context_stealth_precedes_navigation_and_covers_frames_and_popups(
 async def test_failed_stealth_setup_closes_unpublished_context(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    manager = RunnerBrowserManager(workspace_root=tmp_path, proxy=None)
+    manager = RunnerBrowserManager(
+        workspace_root=tmp_path, proxy=None, input_key=BrowserInputKey()
+    )
     failed = AsyncMock(side_effect=RuntimeError("Synthetic stealth setup failure"))
     monkeypatch.setattr(browser_module, "prepare_browser_stealth", failed)
     authority = BrowserAuthority("failed-session", str(tmp_path / "failed"))

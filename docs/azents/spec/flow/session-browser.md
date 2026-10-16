@@ -17,6 +17,7 @@ code_paths:
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_editables.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_popups.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser.py
+  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_input.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_stealth.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/operations.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/main.py
@@ -25,6 +26,8 @@ code_paths:
   - python/apps/azents/src/azents/engine/tools/browser.py
   - python/apps/azents/src/azents/engine/tools/builtin.py
   - python/apps/azents/src/azents/resources/vfs/global/skills/browser/SKILL.md
+  - python/apps/azents/src/azents/resources/vfs/global/skills/browser/scripts/encrypt.py
+  - python/apps/azents/src/azents/resources/vfs/global/skills/browser/references/confidential-input.md
   - python/apps/azents/src/azents/engine/tools/runtime_io.py
   - python/apps/azents/src/azents/runtime/control_protocol/runner_operations.py
   - python/apps/azents/src/azents/runtime/control_protocol/grpc/runner_server.py
@@ -195,6 +198,45 @@ native held state. Spatial effects retain exact displayed-frame fencing.
 
 ## Managed Browser Skill
 
+### Delegated confidential field input
+
+Browser `fill` accepts exactly one of literal `text` or `encrypted_text`.
+Encrypted input is explicit and fill-only; Base64-like ordinary text remains
+literal. Ciphertext passes unchanged through the server, tool history and Control
+codec. After current target, observation and interaction admission, the Runner
+decrypts into a local value for the native fill call. Invalid ciphertext and
+confidential native SDK errors return fixed value-free errors without a plaintext
+fallback or automatic replay.
+
+One recipient key pair belongs to the Runner process. Recreated transport and
+Browser managers reuse it; process exit loses the private key. New Agent command
+processes receive the public key in `AZENTS_BROWSER_INPUT_PUBLIC_KEY`, applied
+after normal environment composition. The private key is not persisted or put
+in command environment. Terminal environment behavior is unchanged.
+
+The release Browser Skill includes `scripts/encrypt.py`. The Agent imports
+`azents://skills/azents/browser/scripts/encrypt.py` through existing current-Run
+VFS transfer and executes the actual returned Runtime path using
+`uv run --no-project --script ... --env VARIABLE_NAME`. Inline metadata supplies
+PyNaCl in a Runtime-side script environment. The Runner separately depends on
+PyNaCl for decryption; its internal interpreter is not an Agent helper contract.
+The script reads the named value and public key internally, accepts up to 4096
+UTF-8 bytes, and prints one padded URL-safe Base64 ciphertext line. SealedBox
+ciphertext is bounded to 4144 bytes / 5528 encoded characters.
+
+Skill guidance covers dependency prerequisites, process completion/polling and
+copying stdout unchanged into `encrypted_text`. Package access follows current
+Runtime policy. Missing prerequisites or an incompatible old Runner fail without
+weakening that policy. Older Runs retain their projected resources; loading a
+Skill does not materialize a script, mutate the projection or install packages.
+
+Environment provisioning still delegates reading and use to the Agent. This
+reduces routine plaintext propagation, not the Agent's existing authority or the
+receiving site's ability to see or later echo input. There is no key registry,
+vault, one-use ledger, expiration, domain allowlist or new approval ceremony.
+
+### Source projection
+
 The release-bundled `browser` Skill is projected from the global `release:azents`
 source into each immutable Run VFS projection at
 `azents://skills/azents/browser/SKILL.md`. Its focused references explain
@@ -274,6 +316,17 @@ Initialization probes native sandbox startup using a blank browser under the cur
 The assessment is local to the current manager environment and is re-established after replacement. No user sandbox setting, durable compatibility registry, privileged container change or kernel/AppArmor/seccomp mutation is created. Existing Runtime network and Session/task authority remain applicable in both branches.
 
 ## Verification Boundaries
+
+The confidential-input Engine E2E provisions account/password entries through
+public settings, imports the actual projected Skill script and executes separate
+Runtime-side encryption commands before native fills. A controlled site verifies
+a combined hash, and Session history plus Worker/Public/Control logs are scanned
+for plaintext. The same isolated test Runtime is restarted through the public
+API; old ciphertext fails on a fresh target without a site input event, and fresh
+commands supply new ciphertext that succeeds. Narrow tests cover malformed
+input, native SDK failure sanitization, stale-reference ordering and process-key
+manager reuse. These synthetic checks do not establish real-account or
+production deployment acceptance.
 
 Shared strict DTO/codec, current generations/targets, native Session state, dialog/event/file combinations, observations/capture bounds and transient conflict behavior have focused unit/real-SDK coverage. Engine tests cover full catalog/provider schema lowering, access revocation, current working-folder binding, mandatory action-state/result scope and image failure propagation.
 

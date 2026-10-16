@@ -137,7 +137,13 @@ def _projection(
 
 
 def _start_application(commands: _RuntimeApplicationCommands) -> None:
-    encoded = base64.b64encode(_APP.encode()).decode()
+    _start_application_source(commands, _APP)
+
+
+def _start_application_source(
+    commands: _RuntimeApplicationCommands, application: str
+) -> None:
+    encoded = base64.b64encode(application.encode()).decode()
     script = f"""
 import base64
 import socket

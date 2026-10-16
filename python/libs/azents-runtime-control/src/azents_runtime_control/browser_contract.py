@@ -53,6 +53,7 @@ class BrowserAction:
     ref: str | None
     observation_id: str | None
     text: str | None
+    encrypted_text: str | None
     url: str | None
     values: tuple[str, ...] | None
     checked: bool | None
@@ -319,6 +320,7 @@ def _action(value: object) -> BrowserAction:
         ref=o.string("ref", nullable=True),
         observation_id=o.string("observation_id", nullable=True),
         text=o.string("text", nullable=True, empty=True),
+        encrypted_text=o.string("encrypted_text", nullable=True),
         url=o.string("url", nullable=True),
         values=o.strings("values"),
         checked=o.boolean("checked", nullable=True),
@@ -341,10 +343,12 @@ def _action(value: object) -> BrowserAction:
         raise BrowserContractError(
             "Element action requires a current observation reference"
         )
+    if kind == "fill" and (action.text is None) == (action.encrypted_text is None):
+        raise BrowserContractError("Fill requires exactly one text input")
+    if action.encrypted_text is not None and len(action.encrypted_text) > 5528:
+        raise BrowserContractError("Browser encrypted input is out of bounds")
     if (
-        kind == "fill"
-        and action.text is None
-        or kind == "select"
+        kind == "select"
         and action.values is None
         or kind == "check"
         and action.checked is None
@@ -378,7 +382,7 @@ def _action(value: object) -> BrowserAction:
         "forward": set(),
         "reload": set(),
         "click": {"ref", "observation_id"},
-        "fill": {"ref", "observation_id", "text"},
+        "fill": {"ref", "observation_id", "text", "encrypted_text"},
         "select": {"ref", "observation_id", "values"},
         "check": {"ref", "observation_id", "checked"},
         "press": {"ref", "observation_id", "key"},

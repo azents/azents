@@ -27,6 +27,7 @@ from azents_runtime_runner.browser import (
     RunnerBrowserManager,
     _sandbox_unavailable,
 )
+from azents_runtime_runner.browser_input import BrowserInputKey
 
 
 def _action(
@@ -55,6 +56,7 @@ def _action(
         ref,
         observation_id,
         text,
+        None,
         url,
         values,
         checked,
@@ -130,7 +132,9 @@ async def site() -> AsyncIterator[str]:
 
 @pytest.fixture
 async def manager(tmp_path: Path) -> AsyncIterator[RunnerBrowserManager]:
-    manager = RunnerBrowserManager(workspace_root=tmp_path, proxy=None)
+    manager = RunnerBrowserManager(
+        workspace_root=tmp_path, proxy=None, input_key=BrowserInputKey()
+    )
     yield manager
     await manager.close()
 
@@ -200,7 +204,9 @@ async def test_session_state_reuse_isolation_and_persistence(
     with pytest.raises(BrowserFailure, match="not authorized"):
         await observe(manager, b, target(first))
     await manager.close()
-    fresh = RunnerBrowserManager(workspace_root=tmp_path, proxy=None)
+    fresh = RunnerBrowserManager(
+        workspace_root=tmp_path, proxy=None, input_key=BrowserInputKey()
+    )
     try:
         await fresh.execute(BrowserOpenCommand(a, None, site, None))
         assert any(
@@ -456,7 +462,9 @@ async def test_closing_manager_drains_outstanding_dialog_task(
 
 
 def test_transport_generation_is_bound_separately_from_session(tmp_path: Path) -> None:
-    manager = RunnerBrowserManager(workspace_root=tmp_path, proxy=None)
+    manager = RunnerBrowserManager(
+        workspace_root=tmp_path, proxy=None, input_key=BrowserInputKey()
+    )
     generation = 7
     manager.bind_runtime("runtime", lambda: generation)
     manager.validate_operation("runtime", 7)
@@ -560,7 +568,9 @@ async def test_initialization_support_probe_does_not_hide_generic_failure(
     factory = MagicMock()
     factory.start = AsyncMock(return_value=driver)
     monkeypatch.setattr(browser_module, "async_playwright", lambda: factory)
-    manager = RunnerBrowserManager(workspace_root=tmp_path, proxy=None)
+    manager = RunnerBrowserManager(
+        workspace_root=tmp_path, proxy=None, input_key=BrowserInputKey()
+    )
     if expected_sandbox is None:
         with pytest.raises(BrowserFailure, match="startup"):
             await manager.initialize()

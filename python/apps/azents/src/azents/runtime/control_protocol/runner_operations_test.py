@@ -118,6 +118,7 @@ async def test_browser_action_reply_preserves_execution_state_without_replay(
             ref=None,
             observation_id=None,
             text=None,
+            encrypted_text=None,
             url=None,
             values=None,
             checked=None,

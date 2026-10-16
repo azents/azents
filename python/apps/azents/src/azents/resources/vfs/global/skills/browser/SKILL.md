@@ -40,10 +40,18 @@ Read the focused references as needed:
   dialogs, expected events, sign-in and actual input conflicts.
 - [Captures and files](references/captures-and-files.md): original PNGs, model
   images, downloads, uploads and verified publication.
+- [Delegated confidential input](references/confidential-input.md): import the
+  encryption script, run it inside Runtime using an environment variable name,
+  and pass its ciphertext output to an encrypted field fill.
 
 ## Human help and native state
 
-When the user must sign in or complete a challenge, identify the current Browser
+Configured Runtime environment values delegate reading and use to the Agent.
+For an authorized account/password value, follow the confidential-input reference
+to avoid putting plaintext in tool arguments or routine output. The script runs
+inside Runtime; loading this Skill does not install it or its dependencies.
+
+When human sign-in or challenge completion is needed, identify the current Browser
 page and explain the specific step. The user can use the Session's Browser panel.
 Continue unrelated work when useful, then obtain a fresh observation after the
 user reports completion. Credentials belong in the site, not in chat or tool logs.

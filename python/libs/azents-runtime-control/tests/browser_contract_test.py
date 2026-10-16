@@ -55,6 +55,7 @@ def _action(
         ref,
         observation_id,
         text,
+        None,
         url,
         values,
         checked,
@@ -73,6 +74,38 @@ def _action(
 
 AUTHORITY = BrowserAuthority("session", "/workspace/session")
 TARGET = BrowserTarget("task", "page", "incarnation", None)
+
+
+@pytest.mark.parametrize(
+    "text,encrypted_text,kind,valid",
+    [
+        (None, "A" * 64, "fill", True),
+        ("", None, "fill", True),
+        ("literal", "A" * 64, "fill", False),
+        (None, None, "fill", False),
+        (None, "A" * 5529, "fill", False),
+        (None, "A" * 64, "click", False),
+    ],
+)
+def test_exclusive_encrypted_fill_contract(
+    text: str | None,
+    encrypted_text: str | None,
+    kind: BrowserActionKind,
+    valid: bool,
+) -> None:
+    action = replace(
+        _action(kind, ref="r", observation_id="o", text=text),
+        encrypted_text=encrypted_text,
+    )
+    command = BrowserActCommand(AUTHORITY, TARGET, action)
+    if valid:
+        assert (
+            decode_browser_command("browser.act", encode_browser_command(command))
+            == command
+        )
+    else:
+        with pytest.raises(BrowserContractError):
+            decode_browser_command("browser.act", encode_browser_command(command))
 
 
 @pytest.mark.parametrize(

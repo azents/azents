@@ -85,6 +85,7 @@ dev = [
     "testcontainers[postgres,redis]>=4.15.0",
     "types-croniter>=6.0.0",
     "pytest-alembic>=0.12.1",
+    "pynacl>=1.6.2",
 ]
 
 [tool.uv]

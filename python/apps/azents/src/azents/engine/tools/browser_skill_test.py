@@ -95,6 +95,21 @@ async def test_release_browser_package_is_discoverable_and_loads_from_projection
     assert service.resolve_calls[-1]["workspace_id"] == "workspace-1"
 
 
+async def test_confidential_script_and_guidance_are_current_run_resources(
+    projection: VfsProjection,
+) -> None:
+    script = projection.find(_ROOT + "scripts/encrypt.py")
+    guide = projection.find(_ROOT + "references/confidential-input.md")
+    assert script is not None and guide is not None
+    source = script.decode_body().decode("utf-8")
+    guidance = guide.decode_body().decode("utf-8")
+    assert 'dependencies = ["PyNaCl==1.6.2"]' in source
+    assert "--env" in source and "AZENTS_BROWSER_INPUT_PUBLIC_KEY" in source
+    assert "import_file" in guidance and "write_stdin" in guidance
+    assert "uv run --no-project --script" in guidance
+    assert "encrypted_text" in guidance
+
+
 @pytest.mark.parametrize("provider", list(LLMProvider))
 async def test_browser_skill_examples_match_final_tools_and_provider_lowering(
     projection: VfsProjection, provider: LLMProvider
