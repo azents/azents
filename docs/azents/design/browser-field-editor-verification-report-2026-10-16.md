@@ -16,6 +16,7 @@ Scope: the one-shot field editor, original native editing attributes, compact lo
 - The private Browser stream carries one correlated value/native-attribute record and one single-use replacement/cancellation identity. API, connection and Runner validate their respective authority and correlation boundaries.
 - Empty replacement is valid. Original element/document/focus/writability/value/native-configuration changes fail closed. Unsupported custom/contenteditable editors are not flattened into native fields.
 - A detached native same-type/configuration control must represent the draft exactly before original-field beforeinput or mutation. Validation repeats after beforeinput. Native newline/whitespace sanitization cannot silently alter the confirmed remote draft.
+- Captured native descriptors consistently own value reads/comparisons/writes, supported types/password classification, readonly eligibility and editing configuration. Instance property wrappers cannot hide changed native values or misclassify native passwords.
 - The modal preserves the original supported input type, input mode, autocomplete, effective capitalization/correction, spelling, enter-key hint, lengths, pattern, required/multiple, name and placeholder. Native IDL getters respect associated-form behavior rather than inventing generic-ancestor inheritance. No page scripts, arbitrary attributes, form/action association or original DOM IDs are copied.
 - Local explicit Paste uses native insertion and takes its value from the real local control, including email selection where selectionStart is unavailable. Password/textarea newline behavior does not leave a different hidden React draft. Unsupported native insertion does not fabricate success; the native OS Paste menu remains available.
 - Private values remain outside ordinary status, frame, projection, logs and Agent history. Security invalidation clears local visual content immediately and retires the attachment/snapshot.
@@ -29,7 +30,7 @@ Scope: the one-shot field editor, original native editing attributes, compact lo
 | Boundary | Result |
 | --- | --- |
 | Runtime-control complete pytest suite | 479 passed |
-| Runner complete pytest suite | 550 passed |
+| Runner complete pytest suite | 557 passed |
 | Runner field viewer transport tests, included above | 17 passed |
 | API Browser socket tests | 38 passed; two existing testcontainers deprecation warnings |
 | Web Node suite after main synchronization | 563 passed |
@@ -56,8 +57,9 @@ The implementation owner requested read-only independent review. Accepted findin
 - byte-size preflight rejects unsent oversized replacement safely;
 - exact native representation is checked before original-field events/mutation;
 - effective native IDL attributes preserve associated-form hints and detect their changes without inventing generic-ancestor inheritance.
+- matching captured native getters/setters prevent instance wrappers from concealing native value/configuration changes, readonly status or password type.
 
-The targeted re-reviews reported no remaining blocking finding in the corrected scopes. The reviewer independently passed 14 focused Node tests and 31 native field-editor tests.
+The targeted re-reviews reported no remaining blocking finding in the corrected scopes. The reviewer independently passed 14 focused Node tests and 38 native field-editor tests.
 
 ## Assembled product and remaining acceptance
 

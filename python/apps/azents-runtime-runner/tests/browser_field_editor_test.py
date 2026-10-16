@@ -223,6 +223,96 @@ async def test_changed_native_attributes_reject_before_replacement(
     await regions.close()
 
 
+@pytest.mark.parametrize("markup", ["<input>", "<textarea></textarea>"])
+@pytest.mark.parametrize("phase", ["before", "during"])
+async def test_value_wrapper_cannot_hide_changed_native_value(
+    field_page: Page, markup: str, phase: str
+) -> None:
+    await field_page.set_content(markup)
+    field = field_page.locator("input,textarea")
+    await field.fill("Original")
+    await field.evaluate("""element => Object.defineProperty(element, 'value', {
+        configurable:true, get:()=>'Stale wrapper value'
+    })""")
+    regions = BrowserEditableRegions(field_page)
+    edit = await regions.open_edit((await regions.read())[0].id)
+    assert edit is not None and (await edit.value()).value == "Original"
+    await field_page.evaluate(
+        """phase => {
+        const field=document.querySelector('input,textarea');
+        const prototype=field instanceof HTMLInputElement ?
+            HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+        const setter=Object.getOwnPropertyDescriptor(prototype,'value').set;
+        const change=()=>setter.call(field,'Independent native change');
+        if (phase==='before') change();
+        else field.addEventListener('beforeinput',change,{once:true});
+    }""",
+        phase,
+    )
+    assert not await edit.replace("Must not overwrite")
+    actual = await field.evaluate("""element => {
+        const prototype=element instanceof HTMLInputElement ?
+            HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+        return Object.getOwnPropertyDescriptor(prototype,'value').get.call(element);
+    }""")
+    assert actual == "Independent native change"
+    await edit.close()
+    await regions.close()
+
+
+async def test_type_wrapper_cannot_unmask_native_password(field_page: Page) -> None:
+    await field_page.set_content("<input type=password value=SyntheticSecret>")
+    field = field_page.locator("input")
+    await field.focus()
+    await field.evaluate("""element => Object.defineProperty(element,'type',{
+        configurable:true, get:()=>'text'
+    })""")
+    regions = BrowserEditableRegions(field_page)
+    edit = await regions.open_edit((await regions.read())[0].id)
+    assert edit is not None
+    value = await edit.value()
+    assert value.kind == "password" and value.attributes.input_type == "password"
+    assert value.value == "SyntheticSecret"
+    assert await edit.replace("Replacement")
+    await edit.close()
+    await regions.close()
+
+
+async def test_readonly_wrapper_cannot_expose_native_readonly_field(
+    field_page: Page,
+) -> None:
+    await field_page.set_content("<input readonly value=Original>")
+    await field_page.locator("input").evaluate("""element =>
+        Object.defineProperty(element,'readOnly',{get:()=>false})""")
+    regions = BrowserEditableRegions(field_page)
+    assert await regions.read() == ()
+    await regions.close()
+
+
+async def test_hint_wrapper_cannot_hide_native_configuration_change(
+    field_page: Page,
+) -> None:
+    await field_page.set_content(
+        "<input type=email autocomplete=email maxlength=80 value=reader@example.test>"
+    )
+    field = field_page.locator("input")
+    await field.focus()
+    await field.evaluate("""element => {
+        Object.defineProperty(element,'autocomplete',{get:()=>'off'});
+        Object.defineProperty(element,'maxLength',{get:()=>1000});
+    }""")
+    regions = BrowserEditableRegions(field_page)
+    edit = await regions.open_edit((await regions.read())[0].id)
+    assert edit is not None
+    attributes = (await edit.value()).attributes
+    assert attributes.autocomplete == "email" and attributes.max_length == 80
+    await field.evaluate("element=>element.setAttribute('maxlength','20')")
+    assert not await edit.replace("new@example.test")
+    assert await field.input_value() == "reader@example.test"
+    await edit.close()
+    await regions.close()
+
+
 async def test_empty_replacement_and_unsupported_editor(field_page: Page) -> None:
     await field_page.set_content(
         "<input value='Clear me'><div contenteditable=true>Custom editor</div>"
