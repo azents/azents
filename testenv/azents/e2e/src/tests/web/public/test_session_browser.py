@@ -892,7 +892,9 @@ def test_session_browser_engine_native_input_dialog_and_reconnect(
     )
     disabled_response.raise_for_status()
     assert disabled_response.json()["browser_enabled"] is False
-    browser_driver.get(
+    # The earlier revocation phase invalidated the Web session's cookies.
+    _login_main_web(driver, base_url=azents_main_web_url, email=workspace.email)
+    driver.get(
         f"{azents_main_web_url}/w/{workspace.handle}/agents/{workspace.agent_id}"
         f"/sessions/{workspace.session_id}?"
         + urlencode(
@@ -905,23 +907,23 @@ def test_session_browser_engine_native_input_dialog_and_reconnect(
             }
         )
     )
-    WebDriverWait(browser_driver, 60).until(
-        lambda _: browser_driver.execute_script(
+    WebDriverWait(driver, 60).until(
+        lambda _: driver.execute_script(
             "return new URLSearchParams(location.search).get('page') === 'files';"
         )
     )
-    assert browser_driver.execute_script(
+    assert driver.execute_script(
         "const p = new URLSearchParams(location.search);"
         "return p.get('retained') === 'fixture' && "
         "!p.has('browserTaskId') && !p.has('browserPageId') && "
         "!p.has('browserIncarnation');"
     )
-    assert not browser_driver.find_elements(
+    assert not driver.find_elements(
         By.XPATH, '//*[@role="tab" and normalize-space(.)="Browser"]'
     )
-    assert not browser_driver.find_elements(
+    assert not driver.find_elements(
         By.CSS_SELECTOR, '[aria-label="Remote browser page"]'
     )
-    assert not browser_driver.find_elements(
+    assert not driver.find_elements(
         By.XPATH, '//a[normalize-space(.)="Open in Browser"]'
     )
