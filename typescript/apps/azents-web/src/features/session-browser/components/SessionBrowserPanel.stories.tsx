@@ -13,6 +13,7 @@ import { useBrowserAddressSelection } from "../containers/useBrowserAddressSelec
 import { useBrowserEditorViewport } from "../containers/useBrowserEditorViewport";
 import { useBrowserFieldVisibility } from "../containers/useBrowserFieldVisibility";
 import { useBrowserInteraction } from "../containers/useBrowserInteraction";
+import { useBrowserManualKeyboard } from "../containers/useBrowserManualKeyboard";
 import { useBrowserTouchView } from "../containers/useBrowserTouchView";
 import { browserDialogInput, browserFrameMatchesStatus } from "../input";
 import { SessionBrowserPanel } from "./SessionBrowserPanel";
@@ -253,6 +254,19 @@ function BrowserFixture(
       props.state.type === "READY" ? (props.state.image?.frame ?? null) : null,
     onAction,
   });
+  const manualKeyboard = useBrowserManualKeyboard({
+    enabled: active && focused && props.fieldEditor?.draft == null,
+    scope: JSON.stringify(
+      props.state.type === "READY"
+        ? [
+            props.state.selected.target,
+            props.state.image?.frame.attachment_id,
+            props.state.image?.frame.navigation_id,
+          ]
+        : props.state.type,
+    ),
+    cancelInput: interaction.cancel,
+  });
   const touchView = useBrowserTouchView({
     enabled:
       focused &&
@@ -286,6 +300,7 @@ function BrowserFixture(
         {...props}
         interaction={interaction.interaction}
         keyboardRef={interaction.keyboardRef}
+        manualKeyboard={manualKeyboard}
         touchView={touchView}
         addressSelection={addressSelection}
         paste={interaction.paste}
@@ -332,6 +347,69 @@ function BrowserFixture(
         />
       )}
     </Box>
+  );
+}
+
+function ManualKeyboardFixture(props: SessionBrowserPanelProps): ReactElement {
+  const [change, setChange] = useState("initial");
+  useEffect(() => {
+    const handlers = [
+      "navigation",
+      "attachment",
+      "target",
+      "frame",
+      "readonly",
+      "disconnect",
+      "dialog",
+      "stale",
+    ].map((kind) => {
+      const listener = (): void => setChange(kind);
+      window.addEventListener(`fixture-keyboard-${kind}`, listener);
+      return (): void =>
+        window.removeEventListener(`fixture-keyboard-${kind}`, listener);
+    });
+    return () => handlers.forEach((remove) => remove());
+  }, []);
+  const currentTarget =
+    change === "target" ? { ...target, page_id: "next-page" } : target;
+  const currentPage = { ...page, target: currentTarget };
+  const currentFrame: BrowserFrame = {
+    ...frame,
+    target: currentTarget,
+    frame_sequence: change === "frame" ? 2 : 1,
+    navigation_id:
+      change === "navigation" ? "next-document" : frame.navigation_id,
+    attachment_id:
+      change === "attachment" ? "next-attachment" : frame.attachment_id,
+  };
+  const dialog = change === "dialog" ? promptDialog : null;
+  if (ready.image === null || ready.status === null) {
+    throw new Error(
+      "Manual keyboard fixture requires the ready image and status",
+    );
+  }
+  return (
+    <BrowserFixture
+      {...props}
+      state={{
+        ...ready,
+        connection: change === "disconnect" ? "connecting" : "connected",
+        pages: [currentPage],
+        selected: currentPage,
+        canInput: change !== "readonly",
+        dialog,
+        image: { ...ready.image, frame: currentFrame },
+        status: {
+          ...ready.status,
+          attachment_id: currentFrame.attachment_id,
+          target: currentTarget,
+          navigation_id:
+            change === "stale" ? "other-document" : currentFrame.navigation_id,
+          allow_input: change !== "readonly",
+          dialog,
+        },
+      }}
+    />
   );
 }
 
@@ -762,6 +840,7 @@ const meta = {
     dialogText: "",
     onDialogTextChange: fn(),
     keyboardRef: null,
+    manualKeyboard: null,
     interaction: null,
     touchView: null,
     paste: null,
@@ -774,6 +853,126 @@ const meta = {
 } satisfies Meta<typeof SessionBrowserPanel>;
 export default meta;
 type Story = StoryObj<typeof meta>;
+
+export const ManualKeyboardWithoutRecognizedInput = {
+  render: (props) => <ManualKeyboardFixture {...props} />,
+  play: async ({ canvasElement }) => {
+    const body = canvasElement.ownerDocument.body;
+    const canvas = within(body);
+    const button = canvas.getByRole("button", { name: "Show keyboard" });
+    const receiver = body.querySelector(
+      "textarea:not([data-browser-native-input])",
+    );
+    if (!(receiver instanceof HTMLTextAreaElement)) {
+      throw new Error("Missing generic native keyboard receiver");
+    }
+    await expect(
+      body.querySelectorAll("[data-browser-native-input]"),
+    ).toHaveLength(0);
+    await expect(receiver).toHaveAttribute("inputmode", "none");
+    // First-open remote Tab must still restore the generic keyboard stop.
+    for (const name of ["Send Tab", "Send Shift+Tab"]) {
+      await userEvent.click(
+        canvas.getByRole("button", { name: "Browser actions" }),
+      );
+      await userEvent.click(canvas.getByRole("menuitem", { name }));
+      await expect(receiver).toHaveFocus();
+      await expect(receiver).toHaveAttribute("inputmode", "none");
+    }
+    actions.mockClear();
+    await userEvent.click(button);
+    await expect(receiver).toHaveFocus();
+    await expect(receiver).toHaveAttribute("inputmode", "text");
+    await expect(actions).not.toHaveBeenCalled();
+    window.dispatchEvent(new Event("fixture-keyboard-frame"));
+    await waitFor(() => expect(receiver).toHaveFocus());
+    await expect(receiver).toHaveAttribute("inputmode", "text");
+    await userEvent.type(receiver, "Manual", { skipClick: true });
+    const committed = actions.mock.calls
+      .flatMap(([, action]) =>
+        action.kind === "composition" && action.phase === "commit"
+          ? [action.text]
+          : [],
+      )
+      .join("");
+    await expect(committed).toBe("Manual");
+    await expect(actions.mock.calls[0]?.[0].frame_sequence).toBe(2);
+    await expect(
+      actions.mock.calls.every(
+        ([, action]) => action.kind !== "paste" && action.kind !== "pointer",
+      ),
+    ).toBe(true);
+    await expect(receiver).toHaveValue("");
+    await userEvent.click(
+      canvas.getByRole("textbox", { name: "Browser address" }),
+    );
+    await expect(receiver).toHaveAttribute("inputmode", "none");
+    for (const kind of ["navigation", "attachment", "target"]) {
+      await userEvent.click(button);
+      await expect(receiver).toHaveFocus();
+      window.dispatchEvent(new Event(`fixture-keyboard-${kind}`));
+      await waitFor(() =>
+        expect(receiver).toHaveAttribute("inputmode", "none"),
+      );
+      await expect(receiver).not.toHaveFocus();
+    }
+  },
+} satisfies Story;
+
+export const ManualKeyboardAfterNativeSelection = {
+  render: (props) => <NativeReceiverFixture {...props} />,
+  play: async ({ canvasElement }) => {
+    const body = canvasElement.ownerDocument.body;
+    const canvas = within(body);
+    const native = body.querySelector(
+      '[data-browser-native-input="native-main"]',
+    );
+    const generic = body.querySelector(
+      "textarea:not([data-browser-native-input])",
+    );
+    if (
+      !(native instanceof HTMLTextAreaElement) ||
+      !(generic instanceof HTMLTextAreaElement)
+    ) {
+      throw new Error("Native and generic fixture receivers are required");
+    }
+    await userEvent.click(native);
+    await expect(native).toHaveFocus();
+    actions.mockClear();
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Show keyboard" }),
+    );
+    await expect(generic).toHaveFocus();
+    await expect(generic).toHaveAttribute("inputmode", "text");
+    await expect(native).not.toHaveFocus();
+    await expect(actions).not.toHaveBeenCalled();
+    await expect(canvas.getByRole("button", { name: "Paste" })).toBeDisabled();
+    await expect(
+      canvas.queryByRole("dialog", { name: "Edit input" }),
+    ).toBeNull();
+  },
+} satisfies Story;
+
+export const ManualKeyboardAuthorityLoss = {
+  render: (props) => <ManualKeyboardFixture {...props} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const button = canvas.getByRole("button", { name: "Show keyboard" });
+    const receiver = canvas.getByRole("textbox", {
+      name: "Remote browser keyboard",
+    });
+    for (const kind of ["readonly", "disconnect", "dialog", "stale"]) {
+      window.dispatchEvent(new Event("fixture-keyboard-navigation"));
+      await waitFor(() => expect(button).toBeEnabled());
+      await userEvent.click(button);
+      await expect(receiver).toHaveFocus();
+      window.dispatchEvent(new Event(`fixture-keyboard-${kind}`));
+      await waitFor(() => expect(button).toBeDisabled());
+      await expect(receiver).toHaveAttribute("inputmode", "none");
+      await expect(receiver).not.toHaveFocus();
+    }
+  },
+} satisfies Story;
 
 export const PasteButtonPreview = {
   render: (props) => <PastePreviewFixture {...props} />,

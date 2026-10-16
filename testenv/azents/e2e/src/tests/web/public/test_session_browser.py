@@ -61,7 +61,8 @@ import socketserver
 HTML = b"""<!doctype html><title>Synthetic Browser ready</title>
 <style>body{margin:0;background:white}button,input{position:absolute;left:20px;
 width:200px;height:40px;box-sizing:border-box}button{top:20px}
-#entry{top:100px}#secret{top:180px}#email{top:340px}</style>
+#entry{top:100px}#secret{top:180px;border-radius:8px}
+#email{top:340px}#manual{top:420px}</style>
 <button onclick="alert('Synthetic handoff');document.title='Browser handoff completed'">
 Continue</button><input id="entry" oninput="document.title=
 this.value.includes('Synthetic GUI input')?String.fromCodePoint(0x2705):
@@ -75,6 +76,10 @@ Verify GUI</button>
 <input id=email type=email inputmode=email autocomplete=email name=contact
 autocapitalize=off autocorrect=off spellcheck=false enterkeyhint=next maxlength=80
 value='reader@example.test'>
+<input id=manual inputmode=none
+onfocus="document.title='Browser manual focus verified'"
+oninput="document.title=this.value==='Synthetic manual input'?
+'Browser manual keyboard verified':'Browser manual input pending'">
 """
 class Handler(http.server.BaseHTTPRequestHandler):
     count = 0
@@ -427,6 +432,34 @@ document.activeElement.dispatchEvent(new ClipboardEvent('paste', {
         lambda _: (
             not driver.find_elements(By.CSS_SELECTOR, "[data-browser-field-editor]")
         )
+    )
+    # This native field intentionally publishes no editable receiver. The manual
+    # keyboard action must retain its existing remote focus and ordinary text path.
+    click_native(100, 440)
+    wait_until(
+        lambda: title_is("Browser manual focus verified"),
+        timeout=15,
+        interval=0.1,
+        message="The unrecognized native field did not receive the participant tap",
+    )
+    wait.until(
+        ec.element_to_be_clickable(
+            (By.CSS_SELECTOR, 'button[aria-label="Show keyboard"]')
+        )
+    ).click()
+    wait.until(
+        lambda _: driver.execute_script(
+            "return document.activeElement?.tagName === 'TEXTAREA' && "
+            "!document.activeElement.hasAttribute('data-browser-native-input') && "
+            "document.activeElement.inputMode === 'text';"
+        )
+    )
+    ActionChains(driver).send_keys("Synthetic manual input").perform()
+    wait_until(
+        lambda: title_is("Browser manual keyboard verified"),
+        timeout=15,
+        interval=0.1,
+        message="The manual keyboard did not type into the existing remote focus",
     )
     ActionChains(driver).send_keys(Keys.ESCAPE).perform()
     wait.until(

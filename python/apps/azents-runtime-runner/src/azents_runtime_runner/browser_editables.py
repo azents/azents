@@ -12,7 +12,7 @@ from azents_runtime_control.browser_viewer_contract import (
 )
 from playwright.async_api import Error, Frame, JSHandle, Page
 
-_PROBE = """() => {
+_PROBE = r"""() => {
     const ids = new WeakMap(); let sequence = 0;
     const modes = new Set(['text','email','url','tel','numeric','decimal','search']);
     const types = new Set(['text','email','url','tel','password','search','number']);
@@ -35,6 +35,38 @@ _PROBE = """() => {
     const nativeReadOnly = element => readNative(element, 'readOnly');
     const formAutocomplete = Object.getOwnPropertyDescriptor(
         HTMLFormElement.prototype, 'autocomplete').get;
+    const innerBounds = element => {
+        const rect = element.getBoundingClientRect();
+        if (!(element instanceof HTMLInputElement ||
+            element instanceof HTMLTextAreaElement)) return rect;
+        const width = element.offsetWidth, height = element.offsetHeight;
+        if (!width || !height || !rect.width || !rect.height) return null;
+        const style = getComputedStyle(element);
+        const length = (value, size) => {
+            if (!/^[\d.]+(?:px|%)$/.test(value)) return NaN;
+            const number = Number.parseFloat(value);
+            return value.endsWith('%') ? number * size / 100 : number;
+        };
+        const radii = ['borderTopLeftRadius','borderTopRightRadius',
+            'borderBottomRightRadius','borderBottomLeftRadius'].map(name => {
+                const parts = style[name].split(/\s+/);
+                return [length(parts[0], width),
+                    length(parts[1] || parts[0], height)];
+            });
+        if (radii.flat().some(value => !Number.isFinite(value))) return null;
+        const [tl,tr,br,bl] = radii;
+        const factor = Math.min(1, width / (tl[0]+tr[0] || 1),
+            width / (bl[0]+br[0] || 1), height / (tl[1]+bl[1] || 1),
+            height / (tr[1]+br[1] || 1));
+        // The ellipse's 45-degree point defines an inscribed rectangular receiver.
+        const inset = factor * (1 - Math.SQRT1_2);
+        return {
+            left:rect.left + Math.max(tl[0],bl[0]) * inset * rect.width / width,
+            right:rect.right - Math.max(tr[0],br[0]) * inset * rect.width / width,
+            top:rect.top + Math.max(tl[1],tr[1]) * inset * rect.height / height,
+            bottom:rect.bottom - Math.max(bl[1],br[1]) * inset * rect.height / height
+        };
+    };
     const hit = (root, x, y) => {
         let element = root.elementFromPoint(x, y);
         while (element?.shadowRoot) {
@@ -69,7 +101,8 @@ _PROBE = """() => {
                     (input && !types.has(type))) continue;
             } else if (!element.isContentEditable ||
                 element.parentElement?.isContentEditable) continue;
-            const rect = element.getBoundingClientRect();
+            const rect = innerBounds(element);
+            if (rect === null) continue;
             let x = Math.max(0, rect.left), y = Math.max(0, rect.top);
             let right = Math.min(innerWidth, rect.right);
             let bottom = Math.min(innerHeight, rect.bottom);
@@ -86,7 +119,9 @@ _PROBE = """() => {
             }
             if (right - x < 4 || bottom - y < 4) continue;
             const points = [[x+1,y+1],[right-1,y+1],
-                [x+1,bottom-1],[right-1,bottom-1],[(x+right)/2,(y+bottom)/2]];
+                [x+1,bottom-1],[right-1,bottom-1],[(x+right)/2,(y+bottom)/2],
+                [(x+right)/2,y+1],[(x+right)/2,bottom-1],
+                [x+1,(y+bottom)/2],[right-1,(y+bottom)/2]];
             if (!points.every(([px,py]) => {
                 const target=hit(document,px,py);
                 return target && (target===element || element.contains(target));
