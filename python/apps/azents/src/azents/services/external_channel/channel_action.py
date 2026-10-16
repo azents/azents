@@ -35,6 +35,10 @@ from azents.core.external_channel_file import (
     ExternalChannelOutboundFileManifest,
     ExternalChannelOutboundFileSource,
 )
+from azents.core.external_channel_navigation import (
+    ChannelNavigationAction,
+    ChannelNavigationLink,
+)
 from azents.core.external_channel_progress import (
     ExternalChannelWorkTask as ChannelWorkTask,
 )
@@ -129,6 +133,10 @@ from azents.services.external_channel.slack_settings import (
 )
 from azents.services.file_storage import FileStorage, RangedFileStorage
 from azents.services.runtime_storage_error import RuntimeStorageError
+from azents.services.runtime_web.service_url import (
+    RuntimeWebServiceUrlResolver,
+    get_runtime_web_service_url_resolver,
+)
 from azents.services.scheduled_task.control import (
     render_scheduled_task_discord_controls,
 )
@@ -262,6 +270,9 @@ class ExternalChannelActionService:
         Depends(ExchangeFileService),
     ]
     config: Annotated[Config, Depends(get_config)]
+    navigation_urls: Annotated[
+        RuntimeWebServiceUrlResolver, Depends(get_runtime_web_service_url_resolver)
+    ]
     binding_locks: dict[str, asyncio.Lock] = dataclass_field(
         default_factory=dict,
         init=False,
@@ -289,6 +300,9 @@ class ExternalChannelActionService:
             ExchangeFileService, Depends(ExchangeFileService)
         ],
         config: Annotated[Config, Depends(get_config)],
+        navigation_urls: Annotated[
+            RuntimeWebServiceUrlResolver, Depends(get_runtime_web_service_url_resolver)
+        ],
     ) -> "ExternalChannelActionService":
         """Construct the provider orchestrator from completed repository operations."""
         return cls(
@@ -298,6 +312,7 @@ class ExternalChannelActionService:
             discord_client=discord_client,
             exchange_file_service=exchange_file_service,
             config=config,
+            navigation_urls=navigation_urls,
         )
 
     def for_execution_owner(
@@ -347,9 +362,60 @@ class ExternalChannelActionService:
             agent_id=agent_id,
         )
 
+    async def prepare_navigation(
+        self,
+        *,
+        actions: Sequence[ChannelNavigationAction],
+        session_id: str,
+        agent_id: str,
+        binding_id: str,
+    ) -> tuple[ChannelNavigationLink, ...]:
+        """Resolve independent product destinations before publishing any Work."""
+        context = await self.operations.navigation_context(
+            session_id=session_id,
+            agent_id=agent_id,
+            binding_id=binding_id,
+            service_ids=[
+                action.service_id for action in actions if action.service_id is not None
+            ],
+        )
+        links: list[ChannelNavigationLink] = []
+        for action in actions:
+            match action.type:
+                case "browser":
+                    base = build_external_channel_session_url(
+                        self.config.web_url,
+                        context.workspace_handle,
+                        agent_id,
+                        session_id,
+                    )
+                    url = None if base is None else f"{base}?page=browser"
+                    label = action.label or "Open browser"
+                case "web_service":
+                    if action.service_id is None:
+                        raise ValueError("Web service action requires service_id.")
+                    base = self.navigation_urls.resolve(
+                        context.service_hosts[action.service_id]
+                    )
+                    url = (
+                        None
+                        if base is None
+                        else base.rstrip("/") + (action.path or "/")
+                    )
+                    label = action.label or "Open web service"
+                case _ as unreachable:
+                    assert_never(unreachable)
+            if url is None or len(url) > 512:
+                raise ValueError(
+                    "Channel action URL is unavailable or exceeds the provider limit."
+                )
+            links.append(ChannelNavigationLink(label=label, url=url))
+        return tuple(links)
+
     async def execute(
         self,
         *,
+        links: Sequence[ChannelNavigationLink],
         session_id: str,
         agent_id: str,
         run_id: str,
@@ -377,6 +443,7 @@ class ExternalChannelActionService:
         lock = self.binding_locks.setdefault(binding_id, asyncio.Lock())
         async with lock:
             return await self._execute_serialized(
+                links=links,
                 session_id=session_id,
                 agent_id=agent_id,
                 run_id=run_id,
@@ -396,6 +463,7 @@ class ExternalChannelActionService:
     async def _execute_serialized(
         self,
         *,
+        links: Sequence[ChannelNavigationLink],
         session_id: str,
         agent_id: str,
         run_id: str,
@@ -414,6 +482,7 @@ class ExternalChannelActionService:
         """Commit canonical state, then execute ordered provider effects once."""
         operations = self._operations_for_authority(authority)
         transition = await operations.commit_direct_action(
+            links=links,
             session_id=session_id,
             agent_id=agent_id,
             run_id=run_id,
@@ -1303,7 +1372,15 @@ class ExternalChannelActionService:
                         provider_delivery_service=provider_delivery_service,
                         resolve_runtime_target=resolve_runtime_target,
                     )
+                navigation_blocks = _blocks(payload.get("blocks"))
+                if payload.get("blocks") is not None and navigation_blocks is None:
+                    return _invalid_payload()
                 return await self.slack_client.post_message(
+                    blocks=(
+                        None
+                        if navigation_blocks is None
+                        else prepend_agent_blocks(presentation, navigation_blocks)
+                    ),
                     bot_token=bot_token,
                     tenant_id=tenant_id,
                     channel_id=channel_id,

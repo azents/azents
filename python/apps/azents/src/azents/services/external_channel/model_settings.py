@@ -271,6 +271,7 @@ class ExternalModelSettingsService:
         match plan.provider:
             case ExternalChannelProvider.SLACK:
                 delivered = await self.slack_client.post_message(
+                    blocks=None,
                     bot_token=credentials.bot_token,
                     tenant_id=actor.provider_tenant_id,
                     channel_id=plan.provider_conversation_id,

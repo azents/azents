@@ -73,6 +73,7 @@ class ScheduledTaskChannelOperations:
         async with self.session_manager() as session:
             reply_plans = await self.repository.prepare_binding_reply_effects(
                 session,
+                links=(),
                 agent_id=snapshot.agent_id,
                 session_id=snapshot.session_id,
                 binding_id=snapshot.binding_id,

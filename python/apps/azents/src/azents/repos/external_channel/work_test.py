@@ -308,6 +308,7 @@ async def test_binding_reply_effects_preserve_exact_thread_surfacing(
 
     plans = await repository.prepare_binding_reply_effects(
         session,
+        links=(),
         agent_id="agent-1",
         session_id="session-1",
         binding_id=binding.id,
@@ -381,6 +382,7 @@ async def test_slack_binding_reply_effects_split_oversized_terminal_text() -> No
 
     plans = await repository.prepare_binding_reply_effects(
         session,
+        links=(),
         agent_id="agent-1",
         session_id="session-1",
         binding_id=binding.id,
@@ -895,6 +897,7 @@ async def test_channel_action_ignores_connection_health_status() -> None:
     with pytest.raises(ResourceLookupReached):
         await repository.commit_direct_action(
             session,
+            links=(),
             session_id="session-1",
             agent_id="agent-1",
             run_id="run-1",
@@ -919,6 +922,7 @@ async def test_request_input_requires_participant_visible_message() -> None:
     with pytest.raises(ValueError, match="Request input requires"):
         await repository.commit_direct_action(
             _session_mock(),
+            links=(),
             session_id="session-1",
             agent_id="agent-1",
             run_id="run-1",
@@ -1141,6 +1145,7 @@ async def test_hidden_continue_with_unfinished_tasks_creates_tracker() -> None:
 
     transition = await repository.commit_direct_action(
         session,
+        links=(),
         session_id="session-1",
         agent_id="agent-1",
         run_id="run-1",
@@ -1263,6 +1268,7 @@ async def test_continue_after_finished_work_with_tasks_is_visible(
     repository = ExternalChannelWorkRepository(work_state_store=state_store)
     transition = await repository.commit_direct_action(
         session,
+        links=(),
         session_id="session-1",
         agent_id="agent-1",
         run_id="run-1",
@@ -1397,6 +1403,7 @@ async def _commit_action(
     repository = ExternalChannelWorkRepository(work_state_store=state_store)
     transition = await repository.commit_direct_action(
         session,
+        links=(),
         session_id="session-1",
         agent_id="agent-1",
         run_id="run-1",

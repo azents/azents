@@ -243,6 +243,7 @@ async def test_prepare_progress_commits_plans_and_stable_operation_seeds() -> No
     provider_repository.prepare_binding_reply_effects.side_effect = prepare_reply
 
     first = await repository.prepare_progress(
+        links=(),
         agent_id=_AGENT_ID,
         session_id=_SESSION_ID,
         run_id=_RUN_ID,
@@ -254,6 +255,7 @@ async def test_prepare_progress_commits_plans_and_stable_operation_seeds() -> No
         files=(),
     )
     second = await repository.prepare_progress(
+        links=(),
         agent_id=_AGENT_ID,
         session_id=_SESSION_ID,
         run_id=_RUN_ID,
@@ -328,6 +330,7 @@ async def test_not_scheduled_precedes_scheduled_only_validation() -> None:
     run_repository.get_by_id.return_value = None
 
     preparation = await repository.prepare_progress(
+        links=(),
         agent_id=_AGENT_ID,
         session_id=_SESSION_ID,
         run_id=_RUN_ID,

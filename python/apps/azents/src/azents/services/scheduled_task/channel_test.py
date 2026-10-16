@@ -416,6 +416,7 @@ async def test_scheduled_continue_updates_and_settles_tracker() -> None:
     )
 
     execution = await service.execute_progress(
+        links=(),
         agent_id=_AGENT_ID,
         session_id=_SESSION_ID,
         run_id=_RUN_ID,
@@ -543,6 +544,7 @@ async def test_external_effects_observe_zero_active_database_transactions() -> N
     )
 
     execution = await service.execute_progress(
+        links=(),
         agent_id=_AGENT_ID,
         session_id=_SESSION_ID,
         run_id=_RUN_ID,
@@ -592,6 +594,7 @@ async def test_terminalization_winning_after_progress_commit_suppresses_effects(
     )
 
     execution = await service.execute_progress(
+        links=(),
         agent_id=_AGENT_ID,
         session_id=_SESSION_ID,
         run_id=_RUN_ID,
@@ -649,6 +652,7 @@ async def test_newer_progress_revision_suppresses_prepared_reply_and_tracker() -
 
     execution_task = asyncio.create_task(
         service.execute_progress(
+            links=(),
             agent_id=_AGENT_ID,
             session_id=_SESSION_ID,
             run_id=_RUN_ID,
@@ -697,6 +701,7 @@ async def test_newer_progress_revision_suppresses_message_only_reply() -> None:
     )
 
     execution = await service.execute_progress(
+        links=(),
         agent_id=_AGENT_ID,
         session_id=_SESSION_ID,
         run_id=_RUN_ID,
@@ -743,6 +748,7 @@ async def test_tracker_desired_revision_check_preserves_admitted_reply() -> None
     )
 
     execution = await service.execute_progress(
+        links=(),
         agent_id=_AGENT_ID,
         session_id=_SESSION_ID,
         run_id=_RUN_ID,
@@ -828,6 +834,7 @@ async def test_tracker_outcomes_settle_without_retry(
     action_service.execute_binding_effect.return_value = provider_outcome
 
     execution = await service.execute_progress(
+        links=(),
         agent_id=_AGENT_ID,
         session_id=_SESSION_ID,
         run_id=_RUN_ID,
@@ -896,6 +903,7 @@ async def test_cancellation_after_provider_return_does_not_replay_or_settle() ->
     progress_repository.settle_tracker.side_effect = settle_tracker
     execution_task = asyncio.create_task(
         service.execute_progress(
+            links=(),
             agent_id=_AGENT_ID,
             session_id=_SESSION_ID,
             run_id=_RUN_ID,
@@ -948,6 +956,7 @@ async def test_scheduled_non_continue_modes_and_wrong_binding_are_rejected(
 
     with pytest.raises(ValueError, match="only supports continue"):
         await service.execute_progress(
+            links=(),
             agent_id=_AGENT_ID,
             session_id=_SESSION_ID,
             run_id=_RUN_ID,
@@ -967,6 +976,7 @@ async def test_scheduled_non_continue_modes_and_wrong_binding_are_rejected(
     )
     with pytest.raises(ValueError, match="exact current Binding"):
         await service.execute_progress(
+            links=(),
             agent_id=_AGENT_ID,
             session_id=_SESSION_ID,
             run_id=_RUN_ID,

@@ -15,6 +15,7 @@ from azents.core.enums import (
     ExternalChannelWorkProjectionStatus,
 )
 from azents.core.external_channel_file import ExternalChannelOutboundFileManifest
+from azents.core.external_channel_navigation import ChannelNavigationLink
 from azents.core.external_channel_progress import (
     ExternalChannelDesiredProgress,
     ExternalChannelWorkTask,
@@ -89,6 +90,7 @@ class ScheduledTaskProgressRepository:
     async def prepare_progress(
         self,
         *,
+        links: Sequence[ChannelNavigationLink],
         agent_id: str,
         session_id: str,
         run_id: str,
@@ -162,6 +164,7 @@ class ScheduledTaskProgressRepository:
                 if message is None
                 else await self.provider_repository.prepare_binding_reply_effects(
                     session,
+                    links=links,
                     agent_id=agent_id,
                     session_id=session_id,
                     binding_id=binding_id,

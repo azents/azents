@@ -15,6 +15,7 @@ from azents.core.enums import (
     ExternalChannelWorkStatus,
 )
 from azents.core.external_channel_file import ExternalChannelOutboundFileManifest
+from azents.core.external_channel_navigation import ChannelNavigationLink
 from azents.core.external_channel_progress import ExternalChannelWorkTask
 from azents.core.external_channel_provider_effect import (
     ProviderEffectOutcome,
@@ -242,6 +243,7 @@ class ScheduledTaskChannelService:
     async def execute_progress(
         self,
         *,
+        links: Sequence[ChannelNavigationLink],
         agent_id: str,
         session_id: str,
         run_id: str,
@@ -258,6 +260,7 @@ class ScheduledTaskChannelService:
     ) -> ScheduledTaskProgressExecution:
         """Route one current Scheduled Run action before Channel Work mutation."""
         preparation = await self.progress_repository.prepare_progress(
+            links=links,
             agent_id=agent_id,
             session_id=session_id,
             run_id=run_id,

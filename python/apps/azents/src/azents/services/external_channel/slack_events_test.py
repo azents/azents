@@ -1202,6 +1202,7 @@ async def test_channel_action_message_mutations_are_single_provider_requests(
         client = _client(http)
         if operation == "post":
             result = await client.post_message(
+                blocks=None,
                 bot_token="xoxb-secret",
                 tenant_id="T1",
                 channel_id="C1",
@@ -1529,6 +1530,7 @@ async def test_channel_action_rate_limit_is_terminal_failed_without_retry() -> N
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
         result = await _client(http).post_message(
+            blocks=None,
             bot_token="xoxb-secret",
             tenant_id="T1",
             channel_id="C1",
@@ -1553,6 +1555,7 @@ async def test_thread_reply_broadcast_is_opt_in() -> None:
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
         client = _client(http)
         default = await client.post_message(
+            blocks=None,
             bot_token="xoxb-secret",
             tenant_id="T1",
             channel_id="C1",
@@ -1561,6 +1564,7 @@ async def test_thread_reply_broadcast_is_opt_in() -> None:
             icon_url=None,
         )
         broadcast = await client.post_message(
+            blocks=None,
             bot_token="xoxb-secret",
             tenant_id="T1",
             channel_id="C1",
@@ -1595,6 +1599,7 @@ async def test_custom_icon_rejection_falls_back_without_replaying_content() -> N
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
         result = await _client(http).post_message(
+            blocks=None,
             bot_token="xoxb-secret",
             tenant_id="T1",
             channel_id="C1",
@@ -1623,6 +1628,7 @@ async def test_channel_action_rejects_over_limit_markdown_without_request() -> N
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
         result = await _client(http).post_message(
+            blocks=None,
             bot_token="xoxb-secret",
             tenant_id="T1",
             channel_id="C1",

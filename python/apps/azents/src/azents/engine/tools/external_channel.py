@@ -19,6 +19,7 @@ from azents.core.external_channel_file import (
 from azents.core.external_channel_limits import (
     SLACK_MARKDOWN_TEXT_MAX_LENGTH,
 )
+from azents.core.external_channel_navigation import ChannelNavigationAction
 from azents.core.external_channel_progress import (
     MAX_EXTERNAL_CHANNEL_TASK_SOURCES,
     MAX_EXTERNAL_CHANNEL_TASK_TEXT_LENGTH,
@@ -191,6 +192,19 @@ class ChannelActionInput(BaseModel):
         ),
     )
 
+    actions: list[ChannelNavigationAction] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=5,
+        description=(
+            "Independent semantic buttons attached to the message. browser opens "
+            "this Session's browser without IDs or URLs. web_service uses a known "
+            "service_id and optional path (including query/fragment). Opening never "
+            "enables a service or resumes work. Requires message; "
+            "unavailable for ignore."
+        ),
+    )
+
     @model_validator(mode="after")
     def validate_action(self) -> "ChannelActionInput":
         """Validate the fields that apply to the selected action mode."""
@@ -202,12 +216,16 @@ class ChannelActionInput(BaseModel):
                     self.title,
                     self.todo_update,
                     self.files,
+                    self.actions,
                 )
             ):
                 raise ValueError(
-                    "Ignore does not accept a message, title, task update, or files."
+                    "Ignore does not accept a message, title, task update, "
+                    "files, or actions."
                 )
             return self
+        if self.actions is not None and self.message is None:
+            raise ValueError("Channel actions require a message.")
         if self.mode == "finish":
             if self.message is None:
                 raise ValueError("Finish requires a message.")
@@ -448,6 +466,16 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                     if self.runtime_context_store is None
                     else self.runtime_context_store.get()
                 )
+                links = (
+                    ()
+                    if value.actions is None
+                    else await self.service.prepare_navigation(
+                        actions=value.actions,
+                        session_id=self.session_id,
+                        agent_id=self.agent_id,
+                        binding_id=value.binding,
+                    )
+                )
                 manifests = ()
                 if value.files is not None:
                     manifests = await self.file_transfer_service.prepare_outbound(
@@ -476,6 +504,7 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                     else runtime_context.resolve_runtime_target
                 )
                 scheduled = await self.scheduled_channel_service.execute_progress(
+                    links=links,
                     session_id=self.session_id,
                     agent_id=self.agent_id,
                     run_id=self.run_id,
@@ -493,6 +522,7 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                 result = scheduled.result
                 if result is None:
                     result = await self.service.execute(
+                        links=links,
                         session_id=self.session_id,
                         agent_id=self.agent_id,
                         run_id=self.run_id,
