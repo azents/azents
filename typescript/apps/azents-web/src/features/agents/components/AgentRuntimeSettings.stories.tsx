@@ -2,8 +2,8 @@ import { rem } from "@mantine/core";
 import { NextIntlClientProvider } from "next-intl";
 import { expect, fn, userEvent, within } from "storybook/test";
 import koreanMessages from "@/i18n/ko-KR-messages";
+import { RuntimeEnvironmentPreview } from "@/shared/runtime-environment/AgentRuntimeEnvironmentVariables.story-fixtures";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
-import { RuntimeEnvironmentPreview } from "./AgentRuntimeEnvironmentVariables.story-fixtures";
 import { AgentRuntimeSettings } from "./AgentRuntimeSettings";
 import type {
   AgentResponse,

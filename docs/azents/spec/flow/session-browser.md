@@ -37,6 +37,7 @@ code_paths:
   - python/apps/azents/src/azents/services/runtime_browser/service.py
   - python/apps/azents/src/azents/repos/runtime_browser_authority_read.py
   - typescript/apps/azents-web/src/features/session-browser/SessionBrowserPage.tsx
+  - typescript/apps/azents-web/src/shared/session-browser/**
   - typescript/apps/azents-web/src/features/session-browser/containers/useSessionBrowserContainer.ts
   - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserPaste.ts
   - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserConnection.ts

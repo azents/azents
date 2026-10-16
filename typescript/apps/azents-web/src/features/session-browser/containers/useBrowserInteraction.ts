@@ -1,5 +1,6 @@
 "use client";
 
+import { useWindowEvent } from "@mantine/hooks";
 import { useCallback, useEffect, useRef } from "react";
 import {
   browserKey,
@@ -114,30 +115,30 @@ export function useBrowserInteraction({
 
   const attachment = frame?.attachment_id;
   const navigation = frame?.navigation_id;
+  useWindowEvent("blur", cancel);
+  useWindowEvent("pagehide", cancel);
+  useWindowEvent(
+    "pointerdown",
+    (event: globalThis.PointerEvent): void => {
+      if (composing.current !== null && event.target !== keyboardRef.current) {
+        cancel();
+      }
+    },
+    true,
+  );
   useEffect(() => {
     if (!enabled) {
       cancel();
     }
-    window.addEventListener("blur", cancel);
-    window.addEventListener("pagehide", cancel);
     const visibility = (): void => {
       if (document.hidden) {
         cancel();
       }
     };
     document.addEventListener("visibilitychange", visibility);
-    const outsideComposition = (event: globalThis.PointerEvent): void => {
-      if (composing.current !== null && event.target !== keyboardRef.current) {
-        cancel();
-      }
-    };
-    window.addEventListener("pointerdown", outsideComposition, true);
     return () => {
       cancel();
-      window.removeEventListener("blur", cancel);
-      window.removeEventListener("pagehide", cancel);
       document.removeEventListener("visibilitychange", visibility);
-      window.removeEventListener("pointerdown", outsideComposition, true);
     };
   }, [enabled, attachment, navigation, cancel]);
 

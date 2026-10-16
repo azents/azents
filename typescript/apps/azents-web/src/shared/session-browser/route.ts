@@ -1,4 +1,8 @@
-import type { BrowserTarget } from "./types";
+export interface BrowserTarget {
+  task_id: string;
+  page_id: string;
+  resource_incarnation: string;
+}
 
 export const browserLinkKeys = [
   "browserTaskId",

@@ -3,10 +3,10 @@
 import { Anchor, Box, rem, Stack } from "@mantine/core";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { AgentRuntimeEnvironmentVariables } from "@/features/agents/components/AgentRuntimeEnvironmentVariables";
 import { createReactContainer } from "@/shared/lib/createReactContainer";
+import { AgentRuntimeEnvironmentVariables } from "@/shared/runtime-environment/AgentRuntimeEnvironmentVariables";
 import { useWorkspaceEnvironmentContainer } from "./containers/useWorkspaceEnvironmentContainer";
-import type { RuntimeEnvironmentVariablesProps } from "@/features/agents/runtime-environment-types";
+import type { RuntimeEnvironmentVariablesProps } from "@/shared/runtime-environment/types";
 
 function WorkspaceEnvironmentView(
   props: RuntimeEnvironmentVariablesProps & { handle: string },

@@ -149,6 +149,43 @@ void test("matches native reasoning identity from the raw event", () => {
   assert.equal(activityEvent.message?.id, reasoningMessage.id);
 });
 
+void test("projects activity decision fields once before matching and grouping", () => {
+  let reads = 0;
+  const original = event("call-event", "client_tool_call", {});
+  const observed: TimelineEvent = {
+    ...original,
+    get payload(): Record<string, unknown> {
+      reads += 1;
+      return {
+        call_id: "call-1",
+        extension: { opaque: [null, true, 42] },
+      };
+    },
+  };
+  const items = projectChatPresentationItems(
+    [observed],
+    [clientToolMessage("tool-message", "call-1")],
+  );
+  assert.equal(reads, 1);
+  assert.equal(activityAt(items, 0).events[0]?.id, "tool:call-1");
+});
+
+void test("keeps malformed native identity fallback and opaque usage extensions", () => {
+  const usage = { extension: [null, { unknown: true }], input_tokens: 7 };
+  const items = projectChatPresentationItems(
+    [
+      event("reasoning", "reasoning", {
+        native_artifact: { item: { id: 123, extension: "opaque" } },
+      }),
+      event("turn", "turn_marker", { usage }),
+    ],
+    [message("reasoning", { reasoningSummary: "Inspect." })],
+  );
+  const activity = activityAt(items, 0);
+  assert.equal(activity.events[0]?.id, "reasoning:event:reasoning");
+  assert.equal(activity.usage, usage);
+});
+
 void test("keeps skill-loaded messages inside Activity", () => {
   const skillMessage = message("skill-message", {
     role: "skill_loaded",

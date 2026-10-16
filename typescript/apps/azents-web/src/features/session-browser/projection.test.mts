@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import {
+  browserPanelHref,
+  parseBrowserTarget,
+} from "../../shared/session-browser/route.ts";
 import { browserProjectionState } from "./projection.ts";
-import { browserPanelHref, parseBrowserTarget } from "./route.ts";
 
 const target = {
   task_id: "task",

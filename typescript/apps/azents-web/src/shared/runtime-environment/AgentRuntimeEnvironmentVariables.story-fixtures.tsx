@@ -4,7 +4,7 @@ import { AgentRuntimeEnvironmentVariables } from "./AgentRuntimeEnvironmentVaria
 import type {
   RuntimeEnvironmentEditorStatus,
   RuntimeEnvironmentVariableDraft,
-} from "../runtime-environment-types";
+} from "@/shared/runtime-environment/types";
 
 export const storedEntries: RuntimeEnvironmentVariableDraft[] = [
   {

@@ -1,5 +1,3 @@
-"use client";
-
 /** common layout for input-buffer bubbles. */
 
 import { Box, Group, Paper, rem, Stack, Text } from "@mantine/core";

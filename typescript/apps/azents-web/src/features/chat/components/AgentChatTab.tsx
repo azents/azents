@@ -72,6 +72,7 @@ export function AgentChatTab(
   return (
     <Box className={styles.chatArea} style={{ flex: 1, minHeight: 0 }}>
       <ChatSessionViewContainer
+        renderSupportingContent={props.renderSupportingContent}
         key={mountKey}
         handle={props.handle}
         sessionId={mountSessionId}

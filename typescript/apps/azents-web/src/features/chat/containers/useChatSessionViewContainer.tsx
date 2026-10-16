@@ -10,13 +10,8 @@
 import { useMantineTheme } from "@mantine/core";
 import { useFocusReturn, useMediaQuery } from "@mantine/hooks";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AgentContextPage } from "@/features/agents/AgentContextPage";
-import { AgentSubagentsPage } from "@/features/agents/AgentSubagentsPage";
 import { useRuntimeTerminalContainer } from "@/features/chat/containers/useRuntimeTerminalContainer";
 import { useSubagentTreePanelContainer } from "@/features/chat/containers/useSubagentTreePanelContainer";
-import { ScheduledTasksPage } from "@/features/scheduled-tasks/ScheduledTasksPage";
-import { SessionBrowserPage } from "@/features/session-browser/SessionBrowserPage";
-import { SessionChannelsPage } from "@/features/session-channels/SessionChannelsPage";
 import { isTerminalProjectionConnectable } from "@/shared/runtime-terminal/protocol";
 import { resolveComposerSubscriptionSelection } from "@/shared/subscription-usage/composerSubscriptionUsage";
 import { trpc } from "@/trpc/client";
@@ -36,6 +31,7 @@ import { useAgentSessionTitleUpdater } from "./useAgentSessionTitleUpdater";
 import { useChatSessionContainer } from "./useChatSessionContainer";
 import { useSubscriptionUsageContainer } from "./useSubscriptionUsageContainer";
 import type { CurrentWorkspaceProfile } from "../senderPresentation";
+import type { SupportingPanelRenderer } from "../session-panel/supportingPanel";
 import type { SessionPanelState } from "../session-panel/useSessionPanelState";
 import type { WorkspacePanelContainerOutput } from "../workspace/containers/useWorkspacePanelContainer";
 import type { RuntimeTerminalContainerOutput } from "@/shared/runtime-terminal/types";
@@ -49,6 +45,7 @@ import type { ConnectionStatus } from "@azents/session-core/types";
 import type { ReactNode } from "react";
 
 export interface ChatSessionViewContainerProps {
+  renderSupportingContent: SupportingPanelRenderer;
   handle: string;
   /** URL-selected AgentSession ID */
   sessionId: string;
@@ -271,44 +268,13 @@ export function useChatSessionViewContainer(
     agent.effective_terminal_enabled,
   ]);
 
-  let supportingContent: ReactNode = null;
-  const supportingProps = { handle, agent, sessionId, session: headerSession };
-  switch (panel.activeView) {
-    case "browser":
-      supportingContent = panel.opened ? (
-        <SessionBrowserPage
-          handle={handle}
-          agentId={agent.id}
-          sessionId={sessionId}
-        />
-      ) : null;
-      break;
-    case "context":
-    case "system-prompt":
-    case "raw-events":
-      supportingContent = (
-        <AgentContextPage {...supportingProps} view={panel.activeView} />
-      );
-      break;
-    case "subagents":
-      supportingContent = <AgentSubagentsPage {...supportingProps} />;
-      break;
-    case "channels":
-      supportingContent = <SessionChannelsPage {...supportingProps} />;
-      break;
-    case "scheduled-tasks":
-      supportingContent = (
-        <ScheduledTasksPage
-          {...supportingProps}
-          activationRevision={panel.activationRevision}
-          initialTaskId={panel.initialTaskId}
-          openInitialTaskForEdit={panel.openInitialTaskForEdit}
-        />
-      );
-      break;
-    default:
-      break;
-  }
+  const supportingContent = props.renderSupportingContent({
+    handle,
+    agent,
+    sessionId,
+    session: headerSession,
+    panel,
+  });
   const onSessionTitleChange = useCallback(
     (nextSession: AgentSessionResponse): void => {
       setHeaderSession(nextSession);

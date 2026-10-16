@@ -2,13 +2,13 @@ import { rem, Stack, Text } from "@mantine/core";
 import { NextIntlClientProvider } from "next-intl";
 import { expect, userEvent, within } from "storybook/test";
 import koreanMessages from "@/i18n/ko-KR-messages";
-import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
-import { AgentRuntimeEnvironmentVariables } from "./AgentRuntimeEnvironmentVariables";
 import {
   editingEntries,
   RuntimeEnvironmentPreview,
   storedEntries,
-} from "./AgentRuntimeEnvironmentVariables.story-fixtures";
+} from "@/shared/runtime-environment/AgentRuntimeEnvironmentVariables.story-fixtures";
+import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
+import { AgentRuntimeEnvironmentVariables } from "./AgentRuntimeEnvironmentVariables";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const noop = (): void => {};

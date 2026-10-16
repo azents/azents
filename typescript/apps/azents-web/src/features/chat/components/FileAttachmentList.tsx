@@ -4,236 +4,30 @@
 import { ActionIcon, Box, Group, Paper, rem, Text } from "@mantine/core";
 import { IconDownload, IconFile } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import { createReactContainer } from "@/shared/lib/createReactContainer";
 import {
-  type CSSProperties,
-  type KeyboardEvent,
-  useCallback,
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+  useAttachmentStrip,
+  useFileAttachmentList,
+} from "../containers/useFileAttachmentList";
 import {
-  type AttachmentPreviewContent,
-  AttachmentPreviewViewer,
-} from "./AttachmentPreviewViewer";
+  availabilityLabel,
+  buildDownloadUrl,
+  extractFilename,
+  fileTypeLabel,
+  formatFileSize,
+  isFileAvailable,
+  isImageFile,
+  previewSelection,
+} from "../fileAttachmentPresentation";
+import { AttachmentPreviewViewer } from "./AttachmentPreviewViewer";
 import type { FileAttachment } from "@azents/session-core/types";
+import type { KeyboardEvent } from "react";
 
-interface FileAttachmentListProps {
-  files: FileAttachment[];
-  presentation?: "agent" | "compact";
-}
-
-type FileAvailability = NonNullable<FileAttachment["availability"]>;
-
-interface PreviewSelection {
-  file: FileAttachment;
-  preview: AttachmentPreviewContent;
-  downloadUrl: string;
-}
-
-interface OverflowMaskState {
-  ref: React.RefObject<HTMLDivElement | null>;
-  style: CSSProperties;
-}
-
-const fadeWidth = rem(40);
-const previewHistoryStateKey = "__azentsAttachmentPreview";
-
-interface PreviewHistoryMarker {
-  viewerId: string;
-  index: number;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function previewHistoryMarker(state: unknown): PreviewHistoryMarker | null {
-  if (!isRecord(state)) {
-    return null;
-  }
-  const marker = state[previewHistoryStateKey];
-  if (
-    !isRecord(marker) ||
-    typeof marker.viewerId !== "string" ||
-    typeof marker.index !== "number"
-  ) {
-    return null;
-  }
-  return { viewerId: marker.viewerId, index: marker.index };
-}
-
-function historyStateWithPreview(
-  viewerId: string,
-  index: number,
-): Record<string, unknown> {
-  return {
-    [previewHistoryStateKey]: { viewerId, index },
-  };
-}
-
-function isImageFile(mediaType: string): boolean {
-  return mediaType.startsWith("image/");
-}
-
-function isMarkdownFile(file: FileAttachment): boolean {
-  const mediaType = file.mediaType.split(";", 1)[0]?.trim().toLowerCase();
-  if (mediaType === "text/markdown") {
-    return true;
-  }
-  const name = file.name ?? extractFilename(file.uri);
-  const normalizedName = name.toLowerCase();
-  return [".md", ".markdown", ".mdx"].some((extension) =>
-    normalizedName.endsWith(extension),
-  );
-}
-
-function fileAvailability(file: FileAttachment): FileAvailability {
-  return file.availability ?? "available";
-}
-
-function isFileAvailable(file: FileAttachment): boolean {
-  return fileAvailability(file) === "available";
-}
-
-function availabilityLabel(
-  t: ReturnType<typeof useTranslations<"chat.attachment">>,
-  file: FileAttachment,
-): string | null {
-  switch (fileAvailability(file)) {
-    case "available":
-      return null;
-    case "expired":
-      return t("expired");
-    case "unavailable":
-      return t("unavailable");
-  }
-}
-
-export function extractFilename(uri: string): string {
-  const parts = uri.split("/");
-  return parts[parts.length - 1] ?? uri;
-}
-
-export function formatFileSize(bytes: number): string {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  }
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-export function buildDownloadUrl(file: FileAttachment): string | null {
-  if (!file.uri.startsWith("exchange://") || !file.attachmentId) {
-    return null;
-  }
-  return `/api/chat/exchange-files/${encodeURIComponent(file.attachmentId)}/download`;
-}
-
-function fileTypeLabel(file: FileAttachment): string {
-  const extension = (file.name ?? extractFilename(file.uri))
-    .split(".")
-    .at(-1)
-    ?.toUpperCase();
-  return extension && extension.length <= 6
-    ? extension
-    : file.mediaType.split("/").at(-1)?.toUpperCase() || "FILE";
-}
-
-function previewSelection(file: FileAttachment): PreviewSelection | null {
-  if (!isFileAvailable(file)) {
-    return null;
-  }
-  const downloadUrl = buildDownloadUrl(file);
-  if (downloadUrl === null) {
-    return null;
-  }
-  if (isImageFile(file.mediaType)) {
-    return {
-      file,
-      downloadUrl,
-      preview: {
-        type: "image",
-        url: downloadUrl,
-        altText: file.name ?? extractFilename(file.uri),
-      },
-    };
-  }
-  if (file.textPreview != null) {
-    return {
-      file,
-      downloadUrl,
-      preview: {
-        type: isMarkdownFile(file) ? "markdown" : "text",
-        text: file.textPreview,
-      },
-    };
-  }
-  return {
-    file,
-    downloadUrl,
-    preview: { type: "unsupported" },
-  };
-}
-
-function useOverflowMask(): OverflowMaskState {
-  const ref = useRef<HTMLDivElement>(null);
-  const [edges, setEdges] = useState({ left: false, right: false });
-
-  const update = useCallback((): void => {
-    const element = ref.current;
-    if (element === null) {
-      return;
-    }
-    const maxScrollLeft = Math.max(
-      0,
-      element.scrollWidth - element.clientWidth,
-    );
-    setEdges({
-      left: element.scrollLeft > 1,
-      right: element.scrollLeft < maxScrollLeft - 1,
-    });
-  }, []);
-
-  useEffect(() => {
-    const element = ref.current;
-    if (element === null) {
-      return;
-    }
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(element);
-    for (const child of element.children) {
-      observer.observe(child);
-    }
-    element.addEventListener("scroll", update, { passive: true });
-    return () => {
-      observer.disconnect();
-      element.removeEventListener("scroll", update);
-    };
-  }, [update]);
-
-  let maskImage = "none";
-  if (edges.left && edges.right) {
-    maskImage = `linear-gradient(to right, transparent 0, var(--mantine-color-black) ${fadeWidth}, var(--mantine-color-black) calc(100% - ${fadeWidth}), transparent 100%)`;
-  } else if (edges.left) {
-    maskImage = `linear-gradient(to right, transparent 0, var(--mantine-color-black) ${fadeWidth}, var(--mantine-color-black) 100%)`;
-  } else if (edges.right) {
-    maskImage = `linear-gradient(to right, var(--mantine-color-black) 0, var(--mantine-color-black) calc(100% - ${fadeWidth}), transparent 100%)`;
-  }
-
-  return {
-    ref,
-    style: {
-      maskImage,
-      WebkitMaskImage: maskImage,
-    },
-  };
-}
+export {
+  buildDownloadUrl,
+  extractFilename,
+  formatFileSize,
+} from "../fileAttachmentPresentation";
 
 function activateDownload(downloadUrl: string | null): void {
   if (downloadUrl === null) {
@@ -368,42 +162,23 @@ function AttachmentTile({
   );
 }
 
-function AttachmentStrip({
+export function AttachmentStripView({
   files,
   onPreview,
-}: {
-  files: FileAttachment[];
-  onPreview: (file: FileAttachment) => void;
-}): React.ReactElement {
-  const { ref, style } = useOverflowMask();
-  const pointerStartX = useRef<number | null>(null);
-  const dragged = useRef(false);
-
+  ref,
+  style,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onClickCapture,
+}: ReturnType<typeof useAttachmentStrip>): React.ReactElement {
   return (
     <Group
       ref={ref}
-      onPointerDown={(event) => {
-        pointerStartX.current = event.clientX;
-        dragged.current = false;
-      }}
-      onPointerMove={(event) => {
-        if (
-          pointerStartX.current !== null &&
-          Math.abs(event.clientX - pointerStartX.current) > 6
-        ) {
-          dragged.current = true;
-        }
-      }}
-      onPointerUp={() => {
-        pointerStartX.current = null;
-      }}
-      onClickCapture={(event) => {
-        if (dragged.current) {
-          event.preventDefault();
-          event.stopPropagation();
-          dragged.current = false;
-        }
-      }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onClickCapture={onClickCapture}
       gap="xs"
       py="xs"
       wrap="nowrap"
@@ -521,133 +296,22 @@ function AgentImageGallery({
   );
 }
 
-export function FileAttachmentList({
+const AttachmentStrip = createReactContainer(
+  "AttachmentStrip",
+  useAttachmentStrip,
+  AttachmentStripView,
+);
+export function FileAttachmentListView({
   files,
   presentation = "agent",
-}: FileAttachmentListProps): React.ReactElement | null {
-  const viewerId = useId();
-  const { prominentImages, compactFiles, previewFiles } = useMemo(() => {
-    const nextProminentImages = files.filter(
-      (file) =>
-        isImageFile(file.mediaType) &&
-        isFileAvailable(file) &&
-        buildDownloadUrl(file) !== null,
-    );
-    const nextCompactFiles = files.filter(
-      (file) => !nextProminentImages.includes(file),
-    );
-    const usesAgentGallery =
-      presentation === "agent" && nextProminentImages.length > 0;
-    return {
-      prominentImages: nextProminentImages,
-      compactFiles: nextCompactFiles,
-      previewFiles: usesAgentGallery
-        ? [...nextProminentImages, ...nextCompactFiles]
-        : files,
-    };
-  }, [files, presentation]);
-  const previewSelections = useMemo(
-    () =>
-      previewFiles.flatMap((file) => {
-        const selection = previewSelection(file);
-        return selection === null ? [] : [selection];
-      }),
-    [previewFiles],
-  );
-  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-  const previewOpenerRef = useRef<HTMLElement | null>(null);
-  const historyEntryActiveRef = useRef(false);
-  const historyClosePendingRef = useRef(false);
-
-  const restorePreviewOpener = useCallback((): void => {
-    requestAnimationFrame(() => previewOpenerRef.current?.focus());
-  }, []);
-  const writePreviewHistory = useCallback(
-    (index: number, mode: "push" | "replace"): void => {
-      const state = historyStateWithPreview(viewerId, index);
-      if (mode === "push") {
-        window.history.pushState(state, "", window.location.href);
-      } else {
-        window.history.replaceState(state, "", window.location.href);
-      }
-    },
-    [viewerId],
-  );
-
-  useEffect(() => {
-    const handlePopState = (event: PopStateEvent): void => {
-      const marker = previewHistoryMarker(event.state);
-      if (
-        marker?.viewerId === viewerId &&
-        Number.isInteger(marker.index) &&
-        marker.index >= 0 &&
-        marker.index < previewSelections.length
-      ) {
-        historyEntryActiveRef.current = true;
-        historyClosePendingRef.current = false;
-        setSelectedIndex(marker.index);
-        return;
-      }
-      if (!historyEntryActiveRef.current) {
-        return;
-      }
-      historyEntryActiveRef.current = false;
-      historyClosePendingRef.current = false;
-      setSelectedIndex(null);
-      restorePreviewOpener();
-    };
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, [previewSelections.length, restorePreviewOpener, viewerId]);
-
-  const openPreview = useCallback(
-    (file: FileAttachment): void => {
-      const nextIndex = previewSelections.findIndex(
-        (selection) => selection.file === file,
-      );
-      if (nextIndex < 0) {
-        return;
-      }
-      if (document.activeElement instanceof HTMLElement) {
-        previewOpenerRef.current = document.activeElement;
-      }
-      writePreviewHistory(
-        nextIndex,
-        historyEntryActiveRef.current ? "replace" : "push",
-      );
-      historyEntryActiveRef.current = true;
-      historyClosePendingRef.current = false;
-      setSelectedIndex(nextIndex);
-    },
-    [previewSelections, writePreviewHistory],
-  );
-  const closePreview = useCallback((): void => {
-    if (historyEntryActiveRef.current) {
-      if (historyClosePendingRef.current) {
-        return;
-      }
-      historyClosePendingRef.current = true;
-      window.history.back();
-      return;
-    }
-    setSelectedIndex(null);
-    restorePreviewOpener();
-  }, [restorePreviewOpener]);
-  const movePreview = useCallback(
-    (offset: -1 | 1): void => {
-      if (selectedIndex === null) {
-        return;
-      }
-      const nextIndex = selectedIndex + offset;
-      if (nextIndex < 0 || nextIndex >= previewSelections.length) {
-        return;
-      }
-      writePreviewHistory(nextIndex, "replace");
-      setSelectedIndex(nextIndex);
-    },
-    [previewSelections.length, selectedIndex, writePreviewHistory],
-  );
-
+  prominentImages,
+  compactFiles,
+  previewSelections,
+  selectedIndex,
+  openPreview,
+  closePreview,
+  movePreview,
+}: ReturnType<typeof useFileAttachmentList>): React.ReactElement | null {
   if (files.length === 0) {
     return null;
   }
@@ -697,3 +361,9 @@ export function FileAttachmentList({
     </>
   );
 }
+
+export const FileAttachmentList = createReactContainer(
+  "FileAttachmentList",
+  useFileAttachmentList,
+  FileAttachmentListView,
+);

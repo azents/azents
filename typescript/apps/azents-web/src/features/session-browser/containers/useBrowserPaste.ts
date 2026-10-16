@@ -1,5 +1,6 @@
 "use client";
 
+import { useWindowEvent } from "@mantine/hooks";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { browserPasteAction, browserReleaseFrame } from "../input";
 import type { BrowserCoordinateAction, BrowserFrame } from "../types";
@@ -78,6 +79,7 @@ export function useBrowserPaste(options: Options): Output {
   const eligible = valid(selection);
   const attachment = options.frame?.attachment_id;
   const navigation = options.frame?.navigation_id;
+  useWindowEvent("pagehide", clear);
   useEffect(() => {
     if (!eligible) {
       clear();
@@ -102,7 +104,6 @@ export function useBrowserPaste(options: Options): Output {
       }
     };
     document.addEventListener("visibilitychange", visibility);
-    window.addEventListener("pagehide", clear);
     return () => {
       epoch.current += 1;
       selected.current = null;
@@ -110,7 +111,6 @@ export function useBrowserPaste(options: Options): Output {
       document.removeEventListener("pointerdown", outside, true);
       document.removeEventListener("focusin", outside, true);
       document.removeEventListener("visibilitychange", visibility);
-      window.removeEventListener("pagehide", clear);
     };
   }, [attachment, navigation, clear]);
   const insert = useCallback(

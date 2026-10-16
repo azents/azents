@@ -1,5 +1,5 @@
 "use client";
-
+import { useWindowEvent } from "@mantine/hooks";
 import {
   useCallback,
   useEffect,
@@ -78,10 +78,10 @@ export function useBrowserTouchView(options: Options): BrowserTouchView {
   }, []);
   const attachment = options.frame?.attachment_id;
   const navigation = options.frame?.navigation_id;
+  useWindowEvent("blur", clear);
+  useWindowEvent("pagehide", clear);
   useEffect(() => {
     clear();
-    window.addEventListener("blur", clear);
-    window.addEventListener("pagehide", clear);
     const visibility = (): void => {
       if (document.hidden) {
         clear();
@@ -90,8 +90,6 @@ export function useBrowserTouchView(options: Options): BrowserTouchView {
     document.addEventListener("visibilitychange", visibility);
     return () => {
       clear();
-      window.removeEventListener("blur", clear);
-      window.removeEventListener("pagehide", clear);
       document.removeEventListener("visibilitychange", visibility);
     };
   }, [options.enabled, options.canInput, attachment, navigation, clear]);

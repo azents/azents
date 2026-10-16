@@ -10,12 +10,12 @@ import {
   Text,
   UnstyledButton,
 } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
 import { IconCheck, IconChevronRight } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
+import { createReactContainer } from "@/shared/lib/createReactContainer";
 import { ProviderToolCallCardContainer } from "../containers/ProviderToolCallCardContainer";
 import { ToolCallCardContainer } from "../containers/ToolCallCardContainer";
+import { useToolActivityGroup } from "../containers/useToolActivityGroup";
 import { ActivityMessageRow } from "./ActivityMessageRow";
 import {
   activityRowChevronSize,
@@ -27,61 +27,20 @@ import {
   chatChevronTransition,
   chatCollapseTransitionProps,
 } from "./collapsiblePresentation";
-import {
-  formatElapsedDuration,
-  startElapsedDurationTimer,
-  visibleElapsedDurationSeconds,
-} from "./elapsedDuration";
+import { formatElapsedDuration } from "./elapsedDuration";
 import { ReasoningActivityRow } from "./ReasoningActivityRow";
 import { SkillLoadedActivityRow } from "./SkillLoadedActivityRow";
+import type { ToolActivityGroupViewProps } from "../containers/useToolActivityGroup";
 import type {
   ActivityCategory,
   ActivityEvent,
-  ToolActivityGroup as ToolActivityGroupModel,
 } from "@azents/session-core/toolActivityPresentation";
-import type { ReactNode } from "react";
-
-interface ToolActivityGroupProps {
-  activity: ToolActivityGroupModel;
-  authorizationAction?: ReactNode;
-  dimmed?: boolean;
-  active?: boolean;
-}
 
 interface CategorySummary extends ActivityCategory {
   count: number;
 }
 
-const ACTIVITY_DURATION_VISIBILITY_THRESHOLD_SECONDS = 10;
 const MAX_VISIBLE_CATEGORIES = 5;
-
-function useVisibleElapsedDuration(
-  startedAt: string | null,
-  visibilityThresholdSeconds: number,
-  enabled: boolean,
-): number | null {
-  const [, setTick] = useState(0);
-
-  useEffect(() => {
-    if (!enabled) {
-      return;
-    }
-    return startElapsedDurationTimer(
-      startedAt,
-      () => setTick((tick) => tick + 1),
-      (callback, delay) => window.setInterval(callback, delay),
-      (timerId) => window.clearInterval(timerId),
-    );
-  }, [enabled, startedAt]);
-
-  return enabled
-    ? visibleElapsedDurationSeconds(
-        startedAt,
-        Date.now(),
-        visibilityThresholdSeconds,
-      )
-    : null;
-}
 
 function categorySummaries(events: ActivityEvent[]): CategorySummary[] {
   const categories: CategorySummary[] = [];
@@ -173,29 +132,17 @@ function eventDetail(event: ActivityEvent): React.ReactElement | null {
   return <ActivityMessageRow event={event} />;
 }
 
-export function ToolActivityGroup({
+export function ToolActivityGroupView({
   activity,
   authorizationAction,
   dimmed = false,
   active = false,
-}: ToolActivityGroupProps): React.ReactElement {
+  opened,
+  toggle,
+  groupDurationSeconds,
+}: ToolActivityGroupViewProps): React.ReactElement {
   const t = useTranslations("chat.toolActivity");
-  const [opened, { close, open, toggle }] = useDisclosure(active);
-
-  useEffect(() => {
-    if (active) {
-      open();
-      return;
-    }
-    close();
-  }, [active, close, open]);
-
   const hasDetails = activity.events.length > 0;
-  const groupDurationSeconds = useVisibleElapsedDuration(
-    activity.startedAt,
-    ACTIVITY_DURATION_VISIBILITY_THRESHOLD_SECONDS,
-    active && hasDetails,
-  );
   const categories = categorySummaries(activity.events);
   const failedCount = activity.events.filter(
     (event) => event.status === "failed",
@@ -348,3 +295,9 @@ export function ToolActivityGroup({
     </Box>
   );
 }
+
+export const ToolActivityGroup = createReactContainer(
+  "ToolActivityGroup",
+  useToolActivityGroup,
+  ToolActivityGroupView,
+);
