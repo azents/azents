@@ -360,11 +360,8 @@ document.activeElement.dispatchEvent(new ClipboardEvent('paste', {
         )
     ).click()
     wait.until(
-        ec.invisibility_of_element_located(
-            (
-                By.CSS_SELECTOR,
-                "[data-browser-field-editor]",
-            )
+        lambda _: (
+            not driver.find_elements(By.CSS_SELECTOR, "[data-browser-field-editor]")
         )
     )
     assert title_is("Browser GUI paste verified")
@@ -383,11 +380,8 @@ document.activeElement.dispatchEvent(new ClipboardEvent('paste', {
         )
     ).click()
     wait.until(
-        ec.invisibility_of_element_located(
-            (
-                By.CSS_SELECTOR,
-                "[data-browser-field-editor]",
-            )
+        lambda _: (
+            not driver.find_elements(By.CSS_SELECTOR, "[data-browser-field-editor]")
         )
     )
     wait_until(
@@ -427,11 +421,8 @@ document.activeElement.dispatchEvent(new ClipboardEvent('paste', {
         )
     ).click()
     wait.until(
-        ec.invisibility_of_element_located(
-            (
-                By.CSS_SELECTOR,
-                "[data-browser-field-editor]",
-            )
+        lambda _: (
+            not driver.find_elements(By.CSS_SELECTOR, "[data-browser-field-editor]")
         )
     )
     ActionChains(driver).send_keys(Keys.ESCAPE).perform()
