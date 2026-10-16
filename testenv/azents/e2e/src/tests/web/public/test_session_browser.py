@@ -349,8 +349,10 @@ document.activeElement.dispatchEvent(new ClipboardEvent('paste', {
     )
     local = wait.until(ec.visibility_of_element_located(editor_input))
     assert local.get_attribute("value") == "Synthetic GUI paste value"
-    local.clear()
+    # Native deletion updates the controlled draft, unlike WebDriver clear().
+    local.send_keys(Keys.CONTROL, "a", Keys.NULL, Keys.BACKSPACE)
     local.send_keys("Discard this synthetic edit")
+    assert local.get_attribute("value") == "Discard this synthetic edit"
     wait.until(
         ec.element_to_be_clickable(
             (
@@ -369,8 +371,9 @@ document.activeElement.dispatchEvent(new ClipboardEvent('paste', {
     wait.until(ec.element_to_be_clickable(edit_button)).click()
     local = wait.until(ec.visibility_of_element_located(editor_input))
     assert local.get_attribute("value") == "Synthetic GUI paste value"
-    local.clear()
+    local.send_keys(Keys.CONTROL, "a", Keys.NULL, Keys.BACKSPACE)
     local.send_keys("Synthetic GUI edit value")
+    assert local.get_attribute("value") == "Synthetic GUI edit value"
     wait.until(
         ec.element_to_be_clickable(
             (

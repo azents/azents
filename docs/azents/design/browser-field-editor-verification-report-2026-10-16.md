@@ -61,6 +61,12 @@ The implementation owner requested read-only independent review. Accepted findin
 
 The targeted re-reviews reported no remaining blocking finding in the corrected scopes. The reviewer independently passed 14 focused Node tests and 38 native field-editor tests.
 
+## WebDriver controlled-input synchronization
+
+CI run [38861227138](https://github.com/azents/azents/actions/runs/38861227138) at `53f543e724a18e6ed9c7d3102d2ddec855ee3afc` passed the backend, Runner, runtime-control, TypeScript, builds and required API E2E lanes, but the Web Browser editor test failed its exact synthetic password replacement outcome. Failure imagery showed the source input handler ran and reported a value mismatch, not a disconnected editor.
+
+A real component/Selenium reproduction isolated a controlled-input test problem: WebDriver `clear()` left the React draft unchanged. An explicit VisualViewport resize/rerender restored the original native value, and subsequent typing appended to it. The same reproduction using ordinary Ctrl+A/Backspace kept the native field empty across rerender and applied the exact synthetic replacement. The E2E now uses native keyboard deletion and also asserts the exact local native value before Cancel/Apply. The source outcome assertion and production replacement fences are unchanged. This local reproduction is not an assembled-product pass; the corrected test requires a new submitted-SHA CI result.
+
 ## Assembled product and remaining acceptance
 
 The authenticated Browser Web E2E covers actual password read, local Cancel without source change, re-entry, Apply and original email keyboard/autocomplete attributes through the Web/API/Control/Runner boundary. It requires content-matched Web and Runner fixture images. The earlier editor revision passed required CI; the additive native-attribute/value-integrity revision requires its own submitted-SHA CI evidence. This report does not claim a local assembled-product pass.
