@@ -430,6 +430,32 @@ export const Conversation = {
   },
 } satisfies Story;
 
+export const BrowserDisabled = {
+  args: {
+    agent: { ...agent, browser_enabled: false },
+    panel: { ...args.panel, activeView: "browser" },
+    supportingContent: (
+      <div data-browser-panel-probe>Browser content must not mount</div>
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.queryByRole("tab", { name: "Browser" })).toBeNull();
+    await expect(
+      canvasElement.querySelector("[data-browser-panel-probe]"),
+    ).toBeNull();
+  },
+} satisfies Story;
+
+export const BrowserEnabled = {
+  args: { agent: { ...agent, browser_enabled: true } },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByRole("tab", { name: "Browser" }),
+    ).toBeInTheDocument();
+  },
+} satisfies Story;
+
 export const MobilePanel = {
   args: { terminalMobile: true },
   globals: { viewport: { value: "mobile1", isRotated: false } },

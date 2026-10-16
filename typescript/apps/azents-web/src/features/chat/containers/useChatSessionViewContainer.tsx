@@ -84,7 +84,10 @@ export function useChatSessionViewContainer(
   const isWorkspacePanelDocked = useMediaQuery(
     `(min-width: ${theme.breakpoints.lg})`,
   );
-  const panel = useSessionPanelState(!isWorkspacePanelDocked);
+  const panel = useSessionPanelState({
+    mobile: !isWorkspacePanelDocked,
+    browserEnabled: agent.browser_enabled,
+  });
   const utils = trpc.useUtils();
   useFocusReturn({ opened: !isWorkspacePanelDocked && panel.opened });
   const [headerSession, setHeaderSession] =

@@ -39,6 +39,9 @@ code_paths:
   - python/apps/azents/src/azents/services/runtime_browser/socket.py
   - python/apps/azents/src/azents/repos/runtime_browser_authority_read.py
   - typescript/apps/azents-web/src/features/session-browser/SessionBrowserPage.tsx
+  - typescript/apps/azents-web/src/features/chat/components/ChatSessionView.tsx
+  - typescript/apps/azents-web/src/features/chat/containers/useAgentChatContainer.ts
+  - typescript/apps/azents-web/src/features/chat/session-panel/useSessionPanelState.ts
   - typescript/apps/azents-web/src/shared/session-browser/**
   - typescript/apps/azents-web/src/features/session-browser/containers/useSessionBrowserContainer.ts
   - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserPaste.ts
@@ -67,7 +70,7 @@ The Agent has three Runtime-backed browser tool roles: `browser_open`, `browser_
 Browser tools require a current managed Runtime, explicit Agent `browser_enabled`
 opt-in and concrete Session/Run resource authority. Existing and new Agents default
 to disabled; an authorized manager enables Browser in Agent Runtime settings.
-Disabled Agents omit all three Browser tools. Already projected handlers recheck
+Disabled Agents omit all three Browser tools and all Browser-use UI entry points: the supporting-panel Browser destination, its live/page content and historical tool-result Open in Browser actions. The enabling control remains in Agent Runtime settings. Direct or stale `page=browser` links on a disabled Agent resolve to Files, clearing Browser target parameters while retaining unrelated query state. Current Agent flag changes unmount Browser content and remove action links; this does not close native tabs, erase profiles, redact tool history or restart the Runtime. Scoped action-link availability defaults to disabled without a current Agent flag. Already projected handlers recheck
 the current setting before dispatch, and API/Control live admission and periodic
 revalidation use that same current setting. Disabling does not delete profiles or
 stop unrelated Runtime features. It is a product capability switch, not a sandbox

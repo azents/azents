@@ -20,7 +20,7 @@ function supportingContent({
   const supportingProps = { handle, agent, sessionId, session };
   switch (panel.activeView) {
     case "browser":
-      return panel.opened ? (
+      return agent.browser_enabled && panel.opened ? (
         <SessionBrowserPage
           handle={handle}
           agentId={agent.id}

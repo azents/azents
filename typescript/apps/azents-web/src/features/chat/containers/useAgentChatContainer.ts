@@ -7,7 +7,7 @@
  * through the backend before mounting chat state.
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { trpc } from "@/trpc/client";
 import type {
   AgentResponse,
@@ -45,6 +45,40 @@ export function useAgentChatContainer(
   props: AgentChatContainerProps,
 ): AgentChatContainerOutput {
   const { handle, agent, sessionId, session } = props;
+  const utils = trpc.useUtils();
+  const agentQuery = trpc.agent.get.useQuery(
+    { handle, agentId: agent.id },
+    {
+      initialData: agent,
+      staleTime: 0,
+      refetchOnMount: false,
+      refetchOnWindowFocus: true,
+    },
+  );
+  const [hydratedAgent, setHydratedAgent] = useState<{
+    agent: AgentResponse;
+    handle: string;
+  } | null>(null);
+  useEffect(() => {
+    let current = true;
+    const input = { handle, agentId: agent.id };
+    // Retire pre-boundary reads before seeding current server props or refreshing.
+    void utils.agent.get.cancel(input).then(() => {
+      if (!current) {
+        return;
+      }
+      utils.agent.get.setData(input, agent);
+      setHydratedAgent({ agent, handle });
+      void utils.agent.get.invalidate(input);
+    });
+    return () => {
+      current = false;
+    };
+  }, [agent, handle, utils.agent.get]);
+  const currentAgent =
+    hydratedAgent?.agent === agent && hydratedAgent.handle === handle
+      ? agentQuery.data
+      : agent;
   const sessionQuery = trpc.chat.getAgentSession.useQuery(
     {
       agentId: agent.id,
@@ -73,7 +107,7 @@ export function useAgentChatContainer(
   return {
     renderSupportingContent: props.renderSupportingContent,
     handle,
-    agent,
+    agent: currentAgent,
     sessionId,
     sessionState,
     mountKey,

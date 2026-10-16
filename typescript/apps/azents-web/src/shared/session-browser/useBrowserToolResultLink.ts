@@ -1,6 +1,7 @@
 "use client";
 
 import { usePathname, useSearchParams } from "next/navigation";
+import { useBrowserEnabled } from "./BrowserAvailability";
 import {
   browserPanelHref,
   browserToolTarget,
@@ -15,11 +16,12 @@ export function useBrowserToolResultLink({
   result,
 }: BrowserToolResultLinkProps): { href: string | null } {
   const pathname = usePathname();
+  const enabled = useBrowserEnabled();
   const search = useSearchParams();
   const target = browserToolTarget(name, result);
   return {
     href:
-      target === null || !isBrowserSessionPath(pathname)
+      !enabled || target === null || !isBrowserSessionPath(pathname)
         ? null
         : browserPanelHref(pathname, search.toString(), target),
   };
