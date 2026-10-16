@@ -1,0 +1,132 @@
+"""Real browser checks for pre-navigation marker reduction and Session isolation."""
+
+import re
+from collections.abc import AsyncIterator
+from pathlib import Path
+from unittest.mock import AsyncMock
+
+import pytest
+from aiohttp import web
+from azents_runtime_control.browser_contract import BrowserAuthority, BrowserOpenCommand
+
+import azents_runtime_runner.browser as browser_module
+from azents_runtime_runner.browser import RunnerBrowserManager
+
+
+@pytest.fixture
+async def fingerprint_site() -> AsyncIterator[str]:
+    async def handler(request: web.Request) -> web.Response:
+        # The first page script records values before product observation occurs.
+        return (
+            web.Response(
+                text="""<!doctype html><script>
+window.firstFingerprint = {
+  webdriver: navigator.webdriver,
+  ua: navigator.userAgent,
+  appVersion: navigator.appVersion,
+  platform: navigator.platform,
+  brands: navigator.userAgentData?.brands ?? [],
+  languages: navigator.languages
+};
+</script><iframe src='/frame'></iframe>""",
+                content_type="text/html",
+                headers={
+                    "X-Seen-User-Agent": request.headers.get("User-Agent", "missing"),
+                    "X-Seen-Client-Hint": request.headers.get("sec-ch-ua", "missing"),
+                },
+            )
+            if request.path != "/frame"
+            else web.Response(
+                text="<script>window.firstWebdriver = navigator.webdriver;</script>",
+                content_type="text/html",
+            )
+        )
+
+    app = web.Application()
+    app.router.add_get("/{path:.*}", handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    server = web.TCPSite(runner, "127.0.0.1", 0)
+    await server.start()
+    address = runner.addresses[0]
+    port = address[1]
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        await runner.cleanup()
+
+
+async def test_context_stealth_precedes_navigation_and_covers_frames_and_popups(
+    tmp_path: Path, fingerprint_site: str
+) -> None:
+    manager = RunnerBrowserManager(workspace_root=tmp_path, proxy=None)
+    authority = BrowserAuthority("session-a", str(tmp_path / "a"))
+    try:
+        opened = await manager.execute(
+            BrowserOpenCommand(authority, None, fingerprint_site, None)
+        )
+        assert opened.page is not None
+        context = manager.contexts[authority.session_id]
+        page = context.pages[0]
+        first = await page.evaluate("window.firstFingerprint")
+        assert first["webdriver"] is False
+        assert "HeadlessChrome" not in first["ua"]
+        assert "HeadlessChrome" not in first["appVersion"]
+        assert "HeadlessChrome" not in str(first["brands"])
+        if "Linux" in first["ua"]:
+            assert "Linux" in first["platform"]
+        frame = page.frames[1]
+        await frame.wait_for_function("window.firstWebdriver === false")
+        response = await page.reload(wait_until="load")
+        assert response is not None
+        headers = await response.all_headers()
+        assert headers["x-seen-user-agent"] == first["ua"]
+        assert "HeadlessChrome" not in headers["x-seen-client-hint"]
+        assert "Chromium" in headers["x-seen-client-hint"]
+        assert [
+            {"brand": brand, "version": version}
+            for brand, version in re.findall(
+                r'"([^"]+)";v="([^"]+)"', headers["x-seen-client-hint"]
+            )
+        ] == first["brands"]
+        async with context.expect_page() as popup_info:
+            await page.evaluate("window.open(location.origin + '/popup')")
+        popup = await popup_info.value
+        await popup.wait_for_load_state()
+        assert await popup.evaluate("window.firstFingerprint.webdriver") is False
+        assert await popup.evaluate("window.firstFingerprint.ua") == first["ua"]
+        assert (
+            await popup.evaluate("window.firstFingerprint.appVersion")
+            == first["appVersion"]
+        )
+        await context.add_cookies(
+            [{"name": "session_secret", "value": "a", "url": fingerprint_site}]
+        )
+        await manager.execute(
+            BrowserOpenCommand(
+                BrowserAuthority("session-b", str(tmp_path / "b")),
+                None,
+                fingerprint_site,
+                None,
+            )
+        )
+        assert not await manager.contexts["session-b"].cookies()
+    finally:
+        await manager.close()
+
+
+async def test_failed_stealth_setup_closes_unpublished_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager = RunnerBrowserManager(workspace_root=tmp_path, proxy=None)
+    failed = AsyncMock(side_effect=RuntimeError("Synthetic stealth setup failure"))
+    monkeypatch.setattr(browser_module, "prepare_browser_stealth", failed)
+    authority = BrowserAuthority("failed-session", str(tmp_path / "failed"))
+    try:
+        with pytest.raises(RuntimeError, match="Synthetic stealth setup failure"):
+            await manager.execute(BrowserOpenCommand(authority, None, None, None))
+        assert authority.session_id not in manager.contexts
+        context = failed.call_args.args[0]
+        assert not context.pages
+    finally:
+        await manager.close()

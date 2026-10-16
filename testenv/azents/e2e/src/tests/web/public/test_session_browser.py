@@ -81,12 +81,23 @@ value='reader@example.test'>
 onfocus="document.title='Browser manual focus verified'"
 oninput="document.title=this.value==='Synthetic manual input'?
 'Browser manual keyboard verified':'Browser manual input pending'">
+<script>
+if (navigator.webdriver || /HeadlessChrome/.test(navigator.userAgent) ||
+    /HeadlessChrome/.test(navigator.appVersion) ||
+    (navigator.userAgentData?.brands || []).some(b => /HeadlessChrome/.test(b.brand))) {
+  document.title = 'Browser automation markers exposed';
+}
+</script>
 """
 class Handler(http.server.BaseHTTPRequestHandler):
     count = 0
     def do_GET(self):
         Handler.count += 1
         body = HTML
+        if any('HeadlessChrome' in self.headers.get(name, '')
+               for name in ('User-Agent', 'sec-ch-ua')):
+            body = body.replace(b'Synthetic Browser ready',
+                                b'Browser automation headers exposed')
         if self.path == '/navigation':
             body = HTML.replace(b'Synthetic Browser ready',
                 ('Navigation ' + str(Handler.count)).encode())

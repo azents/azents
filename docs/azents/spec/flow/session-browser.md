@@ -17,6 +17,7 @@ code_paths:
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_editables.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_popups.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser.py
+  - python/apps/azents-runtime-runner/src/azents_runtime_runner/browser_stealth.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/operations.py
   - python/apps/azents-runtime-runner/src/azents_runtime_runner/main.py
   - python/apps/azents-runtime-runner/pyproject.toml
@@ -85,6 +86,26 @@ Availability reports `runtime_unavailable`, `browser_unavailable`, or `working_f
 The service sends typed status/open/close commands and revalidates current account, Session and Runtime authority before returning the result. Creation requires the returned page to be present in the current task list. Close requires SDK dispatch and the selected target's absence from that list. Unknown/failed operations raise rather than masquerading as successful creation/closure or an unavailable read, and are never replayed.
 
 The Session supporting panel has a Browser destination using source-generated REST clients through tRPC. Task/page/incarnation links are separate from scheduled-task identifiers. A valid explicit live tab wins. Missing, malformed or closed links select the most recently worked live Agent tab known from a bounded authorized snapshot of the latest 100 history events and current partial live history; when unknown, the first live tab is selected. Event results supply preference only and must match the current projection exactly. Target rejection excludes that exact identity from the local candidates and refreshes the projection. A replacement tab always receives a fresh independently admitted attachment, never replayed input. No tabs shows an empty state with a New tab action, disabled for read-only viewers. Each tab has its own close button and the strip has a New tab button. Successful creation selects the returned exact new page; closing the active tab reuses the default selection rule. Panel dismissal or another destination unmounts the Browser Page without closing browser resources. REST tab permissions are independent of live-preview availability, and errors suppress cached unauthorized content.
+
+## Browser Automation Markers
+
+Managed Session contexts use standard Playwright with the installed full
+Chromium's new headless mode rather than headless shell, retaining the existing
+sandbox/proxy policy. Launch removes the `--enable-automation` default
+when present and disables Blink's `AutomationControlled` feature. Before any
+site navigation, the Runner explicitly installs `playwright-stealth` scripts
+on the persistent context, including later pages, frames and popups. The native
+OS, language and GPU identity are retained instead of spoofing Windows defaults.
+The readiness probe derives the native User-Agent from that same browser; a
+native context override removes its HeadlessChrome token consistently from
+User-Agent, appVersion and request headers. Client-hint brands remain native to
+full Chromium, including GREASE entries, rather than synthesizing HTTP brands.
+
+This reduces explicit automation advertising; it is not an authorization change,
+CAPTCHA solver, proxy rotation, or guarantee of undetectability or site access.
+Playwright's CDP transport and internal domain calls remain. Scripts do not claim
+complete worker or high-entropy fingerprint coverage. Existing live contexts are
+not replaced; the policy is installed when a Session context is next created.
 
 ## Authenticated Live Attachment
 
