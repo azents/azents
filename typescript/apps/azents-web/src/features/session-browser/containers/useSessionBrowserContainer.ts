@@ -594,6 +594,7 @@ export function useSessionBrowserContainer(
     paste: interaction.paste,
     fieldEditor: {
       ...fieldEditor.controls,
+      canOpen: live.state.pendingInputs === 0,
       toolbarVisible: interaction.paste.enabled,
       onDirectPaste: interaction.paste.onPaste,
     },

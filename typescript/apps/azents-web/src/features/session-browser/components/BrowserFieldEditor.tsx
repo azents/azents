@@ -28,6 +28,7 @@ export interface BrowserFieldEditorDraft {
 /** Pure UI for the private one-field edit flow. */
 export interface BrowserFieldEditorControls {
   enabled: boolean;
+  canOpen?: boolean;
   pending?: boolean;
   failed?: boolean;
   sendFailed?: boolean;
@@ -81,6 +82,7 @@ export function BrowserFieldEditor({
           <BrowserKeyboardToolbar
             viewport={viewport}
             appearance={controls.toolbarAppearance}
+            editDisabled={controls.canOpen === false}
             onPaste={controls.onDirectPaste}
             onOpen={controls.onOpen}
           />

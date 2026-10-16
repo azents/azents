@@ -13,6 +13,10 @@ export function useBrowserToolbarTouch(
     }
     let start: { id: number; x: number; y: number } | null = null;
     const down = (event: TouchEvent): void => {
+      if (button.disabled) {
+        start = null;
+        return;
+      }
       const touch = event.changedTouches.item(0);
       start =
         event.touches.length === 1 && touch !== null
@@ -41,7 +45,7 @@ export function useBrowserToolbarTouch(
       start = null;
       // Suppress the synthetic mouse click; keyboard/mouse onClick stays native.
       event.preventDefault();
-      if (held === null || event.touches.length !== 0) {
+      if (button.disabled || held === null || event.touches.length !== 0) {
         return;
       }
       const touch = Array.from(event.changedTouches).find(

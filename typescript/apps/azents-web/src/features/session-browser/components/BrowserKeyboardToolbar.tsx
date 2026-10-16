@@ -12,6 +12,7 @@ export interface BrowserKeyboardToolbarProps {
   appearance: "bar" | "floating";
   onPaste: () => void;
   onOpen: () => void;
+  editDisabled?: boolean;
 }
 
 /** Action buttons only: native editing remains in the separate modal. */
@@ -20,6 +21,7 @@ export function BrowserKeyboardToolbar({
   appearance,
   onPaste,
   onOpen,
+  editDisabled = false,
 }: BrowserKeyboardToolbarProps): ReactElement {
   const t = useTranslations("chat.browser");
   const pasteRef = useBrowserToolbarTouch(onPaste);
@@ -95,6 +97,7 @@ export function BrowserKeyboardToolbar({
           </Button>
           <Button
             ref={openRef}
+            disabled={editDisabled}
             variant={floating ? "filled" : "light"}
             radius={floating ? "xl" : "sm"}
             size={floating ? "xs" : "md"}
