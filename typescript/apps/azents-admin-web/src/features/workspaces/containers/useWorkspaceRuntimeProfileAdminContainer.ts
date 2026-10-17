@@ -1,5 +1,7 @@
 "use client";
 
+import { useConfig } from "@/config/client";
+import { getPublicRoutePath } from "@/shared/lib/auth-policy";
 import { trpc } from "@/trpc/client";
 import type { AdminWorkspaceRuntimeProfileDetailResponse } from "@azents/admin-client";
 
@@ -16,26 +18,26 @@ export interface WorkspaceRuntimeProfileAdminContainerProps {
 
 export interface WorkspaceRuntimeProfileAdminComponentProps {
   state: WorkspaceRuntimeProfileAdminState;
+  workspacesPath: string;
 }
 
 export function useWorkspaceRuntimeProfileAdminContainer({
   workspaceHandle,
   profileId,
 }: WorkspaceRuntimeProfileAdminContainerProps): WorkspaceRuntimeProfileAdminComponentProps {
+  const { publicBaseUrl } = useConfig();
+  const workspacesPath = getPublicRoutePath(publicBaseUrl, "/workspaces");
   const detailQuery =
     trpc.runtimeProvider.getWorkspaceProfileAdminDetail.useQuery(
-      {
-        workspaceHandle,
-        profileId,
-      },
+      { workspaceHandle, profileId },
       { retry: false },
     );
-
   if (detailQuery.isLoading) {
-    return { state: { type: "LOADING" } };
+    return { state: { type: "LOADING" }, workspacesPath };
   }
   if (detailQuery.isError) {
     return {
+      workspacesPath,
       state:
         detailQuery.error.data?.code === "NOT_FOUND"
           ? { type: "NOT_FOUND" }
@@ -43,12 +45,10 @@ export function useWorkspaceRuntimeProfileAdminContainer({
     };
   }
   if (detailQuery.data == null) {
-    return { state: { type: "LOADING" } };
+    return { state: { type: "LOADING" }, workspacesPath };
   }
   return {
-    state: {
-      type: "LOADED",
-      detail: detailQuery.data,
-    },
+    workspacesPath,
+    state: { type: "LOADED", detail: detailQuery.data },
   };
 }

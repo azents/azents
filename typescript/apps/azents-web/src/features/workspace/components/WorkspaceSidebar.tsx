@@ -18,21 +18,23 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { AgentSidebarSection } from "@/features/agents/components/AgentSidebarSection";
+import { createReactContainer } from "@/shared/lib/createReactContainer";
+import { useWorkspaceSidebar } from "../containers/useWorkspaceSidebar";
+import type { WorkspaceSidebarViewProps } from "../containers/useWorkspaceSidebar";
 
-interface WorkspaceSidebarProps {
-  handle: string;
-  /** Called on NavLink click (for closing Mobile Drawer) */
-  onNavigate?: () => void;
-}
+export const WorkspaceSidebar = createReactContainer(
+  "WorkspaceSidebar",
+  useWorkspaceSidebar,
+  WorkspaceSidebarView,
+);
 
-export function WorkspaceSidebar({
+export function WorkspaceSidebarView({
   handle,
   onNavigate,
-}: WorkspaceSidebarProps): React.ReactElement {
+  pathname,
+  renderAgentSection,
+}: WorkspaceSidebarViewProps): React.ReactElement {
   const t = useTranslations("workspace.sidebar");
-  const pathname = usePathname();
   const basePath = `/w/${handle}`;
 
   const isHome = pathname === basePath;
@@ -76,7 +78,7 @@ export function WorkspaceSidebar({
 
       <Divider my="xs" />
 
-      <AgentSidebarSection handle={handle} onNavigate={onNavigate} />
+      {renderAgentSection({ handle, onNavigate })}
 
       <Divider my="xs" />
 

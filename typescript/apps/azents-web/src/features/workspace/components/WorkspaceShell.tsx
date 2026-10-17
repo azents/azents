@@ -7,24 +7,27 @@
  * Mobile: toggle Drawer sidebar with AppBar Burger.
  */
 import { Box, Drawer, Group, rem } from "@mantine/core";
-import { useSidebar } from "@/shared/providers/sidebar";
+import { createReactContainer } from "@/shared/lib/createReactContainer";
+import { useWorkspaceShell } from "../containers/useWorkspaceShell";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
-import type { ReactNode } from "react";
-
-interface WorkspaceShellProps {
-  handle: string;
-  children: ReactNode;
-}
+import type { WorkspaceShellViewProps } from "../containers/useWorkspaceShell";
 
 /** Sidebar width. */
 const SIDEBAR_WIDTH = rem(250);
 
-export function WorkspaceShell({
+export const WorkspaceShell = createReactContainer(
+  "WorkspaceShell",
+  useWorkspaceShell,
+  WorkspaceShellView,
+);
+
+export function WorkspaceShellView({
   handle,
   children,
-}: WorkspaceShellProps): React.ReactElement {
-  const { opened, close } = useSidebar();
-
+  renderAgentSection,
+  opened,
+  close,
+}: WorkspaceShellViewProps): React.ReactElement {
   return (
     <>
       {/* Mobile Drawer */}
@@ -36,7 +39,11 @@ export function WorkspaceShell({
         withCloseButton={false}
         padding="sm"
       >
-        <WorkspaceSidebar handle={handle} onNavigate={close} />
+        <WorkspaceSidebar
+          handle={handle}
+          onNavigate={close}
+          renderAgentSection={renderAgentSection}
+        />
       </Drawer>
 
       {/* Main layout — ensure full height */}
@@ -59,7 +66,10 @@ export function WorkspaceShell({
           }}
           py="sm"
         >
-          <WorkspaceSidebar handle={handle} />
+          <WorkspaceSidebar
+            handle={handle}
+            renderAgentSection={renderAgentSection}
+          />
         </Box>
 
         {/* Content area */}

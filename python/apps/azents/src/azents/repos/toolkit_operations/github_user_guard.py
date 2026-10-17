@@ -1,5 +1,7 @@
 """Bind user-credential mutation guards to current locked Toolkit facts."""
 
+from dataclasses import dataclass
+
 import sqlalchemy as sa
 from pydantic import ConfigDict, TypeAdapter
 
@@ -28,17 +30,26 @@ _adapter: TypeAdapter[GitHubSecrets] = TypeAdapter(
 _USER_MODES = frozenset(("github_app_user", "github_app_platform_user"))
 
 
+@dataclass(frozen=True)
+class _RegistrationIdentity:
+    mode: str
+    app_id: str
+    client_id: str | None
+
+
 def _registration_identity(
     credentials: str | None,
-) -> tuple[str, str, str | None] | None:
+) -> _RegistrationIdentity | None:
     if credentials is None:
         return None
     registration = _adapter.validate_json(credentials)
     match registration:
         case GitHubSecretsAppUser():
-            return registration.type, registration.app_id, registration.client_id
+            return _RegistrationIdentity(
+                registration.type, registration.app_id, registration.client_id
+            )
         case GitHubSecretsAppPlatformUser():
-            return registration.type, registration.app_id, None
+            return _RegistrationIdentity(registration.type, registration.app_id, None)
         case _:
             return None
 

@@ -34,6 +34,7 @@ from azents.repos.github_user_oauth.payloads import encode_registration
 from azents.repos.toolkit import ToolkitRepository
 from azents.repos.toolkit.data import ToolkitConfig, ToolkitUpdate
 from azents.repos.toolkit_operations.github_user_guard import (
+    _registration_identity,
     capture_user_toolkit_delete,
     guard_user_registration_update,
 )
@@ -41,6 +42,36 @@ from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_selectable_model_option_dicts,
 )
+
+
+def test_registration_identity_compares_named_fields_not_rotated_secrets() -> None:
+    registration = {
+        "type": "github_app_user",
+        "app_id": "app",
+        "client_id": "client",
+        "client_secret": "synthetic-client-secret",
+        "private_key": "synthetic-private-key",
+    }
+    identity = _registration_identity(json.dumps(registration))
+    assert identity is not None
+    assert identity.mode == "github_app_user"
+    assert identity.app_id == "app"
+    assert identity.client_id == "client"
+    assert identity == _registration_identity(
+        json.dumps(
+            {**registration, "client_secret": "rotated", "private_key": "rotated"}
+        )
+    )
+    assert identity != _registration_identity(
+        json.dumps({**registration, "client_id": "other"})
+    )
+    platform = _registration_identity(
+        json.dumps({"type": "github_app_platform_user", "app_id": "app"})
+    )
+    assert platform is not None
+    assert platform.client_id is None
+    assert platform != identity
+    assert _registration_identity(None) is None
 
 
 @dataclasses.dataclass(frozen=True)

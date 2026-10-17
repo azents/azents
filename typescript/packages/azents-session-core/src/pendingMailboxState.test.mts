@@ -8,7 +8,10 @@ import {
   selectPendingMailboxEntries,
 } from "./pendingMailboxState.ts";
 
-function envelope(id: string, keys: string[]) {
+function envelope(
+  id: string,
+  keys: string[],
+): import("@azents/public-client/types").PendingMailboxEnvelope {
   return {
     mailbox_item_id: id,
     session_id: "session-1",

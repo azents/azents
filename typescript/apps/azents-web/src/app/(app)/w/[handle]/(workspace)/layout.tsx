@@ -4,7 +4,7 @@
  * Workspace shell with sidebar navigation. Agent detail routes live in the
  * sibling (agent) group so they can use a focused chat shell instead.
  */
-import { WorkspaceShell } from "@/features/workspace/components/WorkspaceShell";
+import { WorkspaceComposition } from "./WorkspaceComposition";
 
 export default async function WorkspaceShellLayout({
   children,
@@ -14,5 +14,7 @@ export default async function WorkspaceShellLayout({
   params: Promise<{ handle: string }>;
 }): Promise<React.ReactElement> {
   const { handle } = await params;
-  return <WorkspaceShell handle={handle}>{children}</WorkspaceShell>;
+  return (
+    <WorkspaceComposition handle={handle}>{children}</WorkspaceComposition>
+  );
 }

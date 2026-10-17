@@ -8,7 +8,11 @@ import { useConfig } from "@/config/client";
 import { getPublicRouteUrl } from "@/shared/lib/auth-policy";
 import { trpc } from "@/trpc/client";
 
-export function TRPCProvider({ children }: { children: React.ReactNode }) {
+export function TRPCProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}): React.ReactElement {
   const config = useConfig();
 
   const [queryClient] = useState(

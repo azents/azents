@@ -5,6 +5,8 @@ import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { isRecord } from "@/shared/lib/unknown-value";
 import { trpc } from "@/trpc/client";
+import { decodeGitHubPopupMessage } from "../popup-messages";
+import { projectGitHubAuthEvidence } from "../provider-config-views";
 import { pickToolkitOwnerScope } from "../toolkit-owner-scope";
 import type { GithubFieldsViewProps } from "../components/GithubFieldsView";
 import type { ToolkitOwnerScope } from "../toolkit-owner-scope";
@@ -110,19 +112,16 @@ export function useGithubConfigFieldsContainer(
     }
   }
   useWindowEvent("message", (event: MessageEvent<unknown>): void => {
-    if (
-      popup.current == null ||
-      event.origin !== window.location.origin ||
-      event.source !== popup.current ||
-      !isRecord(event.data)
-    ) {
+    const message = decodeGitHubPopupMessage(
+      event,
+      window.location.origin,
+      popup.current,
+      true,
+    );
+    if (message === null) {
       return;
     }
-    if (
-      event.data.type === "azents-github-installations-code" &&
-      typeof event.data.code === "string" &&
-      typeof event.data.state === "string"
-    ) {
+    if (message.type === "azents-github-installations-code") {
       popup.current = null;
       stop();
       setInstallationState((current) => ({
@@ -132,8 +131,8 @@ export function useGithubConfigFieldsContainer(
       void getInstallations
         .mutateAsync({
           ...scope,
-          code: event.data.code,
-          state: event.data.state,
+          code: message.code,
+          state: message.state,
         })
         .then((data) => {
           setInstallationState({
@@ -147,7 +146,7 @@ export function useGithubConfigFieldsContainer(
             installations: current.installations,
           })),
         );
-    } else if (event.data.type === "azents-github-app-installed") {
+    } else {
       popup.current = null;
       stop();
       void connectInstallations();
@@ -166,7 +165,7 @@ export function useGithubConfigFieldsContainer(
     installationState,
     runtimeAcknowledged,
     canTest: ["pat", "github_app", "github_app_platform"].includes(
-      String(props.config.github_auth_type),
+      projectGitHubAuthEvidence(props.config).savedDisplay,
     ),
     testState: test.isPending
       ? { type: "TESTING" }

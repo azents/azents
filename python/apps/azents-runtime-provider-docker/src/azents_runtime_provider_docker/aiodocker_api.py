@@ -1,6 +1,7 @@
 """aiodocker adapter for the Docker Provider."""
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 
 import aiodocker
 from aiodocker.containers import DockerContainer
@@ -12,6 +13,17 @@ from azents_runtime_provider_docker.docker_api import (
     DockerContainerSpec,
     DockerContainerState,
 )
+
+
+@dataclass(frozen=True)
+class _NetworkName:
+    name: str | None
+
+
+def _network_name(value: object) -> _NetworkName:
+    """Decode only the exact-match field; absent or malformed names do not match."""
+    name = _mapping(value).get("Name")
+    return _NetworkName(name if isinstance(name, str) else None)
 
 
 class AioDockerApi(DockerApi):
@@ -34,8 +46,11 @@ class AioDockerApi(DockerApi):
     async def ensure_network(self, name: str) -> None:
         """Create the Docker network when missing."""
         docker = await self._get_docker()
-        networks = await docker.networks.list(filters={"name": [name]})
-        if not any(_mapping(network).get("Name") == name for network in networks):
+        networks = tuple(
+            _network_name(network)
+            for network in await docker.networks.list(filters={"name": [name]})
+        )
+        if not any(network.name == name for network in networks):
             await docker.networks.create(
                 {
                     "Name": name,

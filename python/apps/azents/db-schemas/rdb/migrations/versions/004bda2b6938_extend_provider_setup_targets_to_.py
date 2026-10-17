@@ -1,18 +1,9 @@
-"""extend provider setup targets to personal ownership
-
-Revision ID: 004bda2b6938
-Revises: 716e7468e1f5
-Create Date: 2026-10-17 08:40:14.853607
-
-"""
-
 from typing import Sequence
 
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-# revision identifiers, used by Alembic.
 revision: str = "004bda2b6938"
 down_revision: str | Sequence[str] | None = "716e7468e1f5"
 branch_labels: str | Sequence[str] | None = None
