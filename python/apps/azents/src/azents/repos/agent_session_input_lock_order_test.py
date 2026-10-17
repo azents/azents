@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import sqlalchemy as sa
@@ -15,6 +16,7 @@ from azents.core.enums import (
     AgentRuntimeCapability,
     AgentSessionProductMode,
     AgentSessionStatus,
+    AgentSessionTitleSource,
 )
 from azents.engine.run.input import InputMessage
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -35,6 +37,7 @@ from azents.repos.agent_session_input_operations import (
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox_database import MailboxDatabaseRepository
+from azents.repos.session_title import SessionTitleRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.services.agent_session_input_test import (
     _TEST_INFERENCE_PROFILE,
@@ -172,4 +175,91 @@ async def test_human_admission_cannot_hold_session_while_waiting_for_worker_agen
             human.cancel()
             with suppress(asyncio.CancelledError):
                 await human
+        await _cleanup_workspace_fixture(rdb_engine, workspace_id)
+
+
+async def test_title_snapshot_cannot_hold_session_while_waiting_for_input_agent(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+) -> None:
+    """Human admission can lock Session while the title snapshot waits on Agent."""
+    del latest_db_schema
+    suffix = uuid4().hex[:8]
+    sessions = AgentSessionRepository()
+    async with AsyncSession(rdb_engine, expire_on_commit=False) as raw:
+        setup = ReadWriteSession(raw)
+        workspace_id = await _create_workspace(setup, f"title-lock-{suffix}")
+        agent_id = await _create_agent(
+            setup,
+            workspace_id,
+            f"title-lock-{suffix}",
+            runtime_capability=AgentRuntimeCapability.NONE,
+        )
+        root = await sessions.create(
+            setup,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+                title=None,
+            ),
+        )
+        await sessions.set_initial_auto_title_if_unset(
+            setup, session_id=root.id, title="Initial", event_id="title-event"
+        )
+        await raw.commit()
+
+    @asynccontextmanager
+    async def manager() -> AsyncIterator[WriteSession]:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as raw:
+            async with raw.begin():
+                yield ReadWriteSession(raw)
+
+    agents = _ObservedAgentRepository()
+    active_capabilities = AsyncMock()
+    title_repository = SessionTitleRepository(
+        agent_repository=agents,
+        agent_session_repository=sessions,
+        health_repository=AsyncMock(),
+        active_capabilities_repository=active_capabilities,
+        session_manager=manager,
+    )
+    title_task = None
+    try:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as human_raw:
+            human = ReadWriteSession(human_raw)
+            await AgentRepository().lock_by_id(human, agent_id)
+            human_pid = await human_raw.scalar(sa.text("SELECT pg_backend_pid()"))
+            assert isinstance(human_pid, int)
+            title_task = asyncio.create_task(
+                title_repository.load_generation_snapshot(
+                    session_id=root.id, generation_event_id="title-event"
+                )
+            )
+            title_pid = await asyncio.wait_for(agents.backend_pid, timeout=5)
+            await asyncio.wait_for(
+                _wait_for_database_blocker(
+                    rdb_engine, blocked_pid=title_pid, blocker_pid=human_pid
+                ),
+                timeout=5,
+            )
+            locked = await asyncio.wait_for(
+                sessions.lock_by_id(human, root.id), timeout=5
+            )
+            assert locked is not None
+            await sessions.update_title(
+                human,
+                session_id=root.id,
+                title="Explicit title",
+                title_source=AgentSessionTitleSource.MANUAL,
+            )
+            await human_raw.commit()
+        assert await asyncio.wait_for(title_task, timeout=5) is None
+        active_capabilities.capture_exact_choices_in_session.assert_not_awaited()
+    finally:
+        if title_task is not None and not title_task.done():
+            title_task.cancel()
+        if title_task is not None:
+            await asyncio.gather(title_task, return_exceptions=True)
         await _cleanup_workspace_fixture(rdb_engine, workspace_id)
