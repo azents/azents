@@ -371,3 +371,28 @@ is outside the confirmed scope.
 - Verify later export rechecks current allowance, while an already started process is not falsely
   claimed to be revoked or erased.
 - Reflect this parity and shared-Runtime limitation accurately in the final Design and test report.
+
+## Workspace Scope Clarification Requiring Design Correction
+
+On 2026-10-17 the requester clarified the product boundary now recorded in
+personaltools-261017/REQ-1, REQ-2 and REQ-4:
+
+- A personal Toolkit is connected within one Workspace. The same User's connection in Workspace A
+  must not appear in Workspace B or be available to its Agents.
+- Allowed Agents are configured independently for each Toolkit and are limited to its Workspace.
+  Workspace search and cross-Workspace selection groups are not part of that allowance editor.
+- Existing All/Selected behavior, Provider coverage, withdrawal timing, User-root identity and
+  Runtime-injection parity remain unchanged within the corrected Workspace boundary.
+
+This supersedes the global-scope premise in the earlier ADR-D1 and cross-Workspace eligibility
+consequences in ADR-D2. Their original accepted records remain historical; they do not override the
+requester's current clarified Requirements. ADR-D3's Provider and Runtime trust boundary is unchanged.
+
+The initial unmerged schema explicitly requires a null Workspace for User ownership, management
+predicates select only by User, and eligible-Agent queries span all of the User's Workspaces. API,
+Provider setup/callback, generated-client, Web and runtime boundaries must be assessed together;
+removing a search field would not correct that implementation.
+
+This entry records confirmed product scope, not acceptance of a new persistence, API, migration or
+navigation mechanism. Complete the corrected technical decision map and Design before resuming
+implementation. The previous Design revision 1 approval is no longer sufficient for that work.

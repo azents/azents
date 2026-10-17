@@ -50,7 +50,6 @@ def upgrade() -> None:
         )
     )
     op.alter_column("toolkit_configs", "owner_kind", nullable=False)
-    op.alter_column("toolkit_configs", "workspace_id", nullable=True)
     op.add_column(
         "toolkit_configs", sa.Column("owner_user_id", sa.String(32), nullable=True)
     )
@@ -75,27 +74,42 @@ def upgrade() -> None:
         "(owner_kind = 'agent' AND workspace_id IS NOT NULL "
         "AND owner_agent_id IS NOT NULL AND owner_user_id IS NULL "
         "AND personal_access_mode IS NULL) OR "
-        "(owner_kind = 'user' AND workspace_id IS NULL AND owner_agent_id IS NULL "
+        "(owner_kind = 'user' AND workspace_id IS NOT NULL AND owner_agent_id IS NULL "
         "AND owner_user_id IS NOT NULL AND personal_access_mode IS NOT NULL)",
     )
     op.create_index(
         "ix_toolkit_configs_owner_user_id", "toolkit_configs", ["owner_user_id"]
     )
     op.create_unique_constraint(
-        "uq_toolkit_configs_id_owner_user", "toolkit_configs", ["id", "owner_user_id"]
+        "uq_toolkit_configs_id_owner_user",
+        "toolkit_configs",
+        ["id", "owner_user_id", "workspace_id"],
+    )
+    op.create_unique_constraint(
+        "uq_agents_id_workspace", "agents", ["id", "workspace_id"]
     )
     op.create_table(
         "personal_toolkit_agents",
         sa.Column("toolkit_id", sa.String(32), nullable=False),
         sa.Column("owner_user_id", sa.String(32), nullable=False),
+        sa.Column("workspace_id", sa.String(32), nullable=False),
         sa.Column("agent_id", sa.String(32), nullable=False),
         sa.ForeignKeyConstraint(
-            ["toolkit_id", "owner_user_id"],
-            ["toolkit_configs.id", "toolkit_configs.owner_user_id"],
+            ["toolkit_id", "owner_user_id", "workspace_id"],
+            [
+                "toolkit_configs.id",
+                "toolkit_configs.owner_user_id",
+                "toolkit_configs.workspace_id",
+            ],
             ondelete="CASCADE",
             name="fk_personal_toolkit_agents_owner",
         ),
-        sa.ForeignKeyConstraint(["agent_id"], ["agents.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["agent_id", "workspace_id"],
+            ["agents.id", "agents.workspace_id"],
+            ondelete="CASCADE",
+            name="fk_personal_toolkit_agents_agent_workspace",
+        ),
         sa.PrimaryKeyConstraint("toolkit_id", "agent_id"),
     )
     op.create_index(
@@ -112,6 +126,7 @@ def downgrade() -> None:
             "Cannot discard personal Toolkits; back up and account for personal data"
         )
     op.drop_table("personal_toolkit_agents")
+    op.drop_constraint("uq_agents_id_workspace", "agents", type_="unique")
     op.drop_constraint(
         "uq_toolkit_configs_id_owner_user", "toolkit_configs", type_="unique"
     )
@@ -125,6 +140,5 @@ def downgrade() -> None:
     )
     op.drop_column("toolkit_configs", "owner_user_id")
     op.drop_column("toolkit_configs", "owner_kind")
-    op.alter_column("toolkit_configs", "workspace_id", nullable=False)
     postgresql.ENUM(name="personal_toolkit_access_mode").drop(op.get_bind())
     postgresql.ENUM(name="toolkit_owner_kind").drop(op.get_bind())

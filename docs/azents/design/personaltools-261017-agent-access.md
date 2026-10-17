@@ -10,664 +10,574 @@ snapshot_id: personaltools-261017
 
 # Personal Tool Connections and Agent Access Design
 
-- Snapshot: `personaltools-261017`
-- Reference: `personaltools-261017/DESIGN`
-- Design revision: `1`
-- Requirements: [personaltools-261017/REQ](../requirements/personaltools-261017-agent-access.md)
-- Decisions: [personaltools-261017/ADR](../adr/personaltools-261017-agent-access.md), D1-D3 accepted.
-- Mode: Collaborative. Revision 1 and its complete M1-M11 authority set were approved by the
-  requester on 2026-10-17; the requester separately instructed implementation in the same reply.
-- Evidence baseline: `4fffac9133934f5b85027b50842b1dc5a48da3b2`, rechecked against origin/main on
-  2026-10-17. This is repository evidence, not evidence of a production deployment or live Provider test.
+- Snapshot: `personaltools-261017`; reference: `personaltools-261017/DESIGN`.
+- Design revision: `2`.
+- Requirements: [personaltools-261017/REQ](../requirements/personaltools-261017-agent-access.md).
+- Decisions: [personaltools-261017/ADR](../adr/personaltools-261017-agent-access.md), retained canonical
+  Toolkit identity from D1, per-Toolkit All/Selected policy from D2, Provider/Runtime parity from D3,
+  and the appended Workspace-scope clarification superseding their global-scope premises.
+- Mode: Collaborative. The requester confirmed Workspace scope and per-Toolkit allowance on
+  2026-10-17. The requester instructed immediate corrective implementation after the complete revision 2
+  approval brief; revision 2 is approved as recorded in section 13.
+- Revision 1 was approved and partially implemented under a User-global interpretation. That approval
+  does not authorize this material correction or continued shipping of the contradicted scope.
+- Evidence: original main baseline `4fffac9133934f5b85027b50842b1dc5a48da3b2`, unmerged foundation,
+  management and execution phases through `153ea8ab636232a2d5855b24a3fd3ecf3d106bc1`, and the current
+  uncommitted Web integration. This is repository evidence, not deployment or live interoperability.
 
-## 1. Scope and Current-System Gap
+## 1. Current-System Gap and Fixed Outcomes
 
-The feature adds User-global ownership to the existing Toolkit, not a second Provider platform.
-Personal connections have the same Provider fields, authentication methods, setup/reconnect flows,
-connection tests and optional Runtime credential injection as equivalent shared connections. Their
-management and eligible execution selection differ by ownership.
+The original product has Workspace-shared and Agent-owned configurable Toolkits, existing Provider
+forms/setup/grants and source-bound execution. Initial feature phases added a canonical User owner,
+owner-only management, per-Toolkit policy and User-root execution, but explicitly required a null
+Workspace for personal ownership and enumerated Agents across the User's Workspaces. Those global
+assumptions contradict the requester's clarified outcome.
 
-Current code provides the following reusable foundations:
+The corrected connection belongs to one User **within one real Workspace**. Workspace A's connection
+is absent and unusable in Workspace B, including for the same User. Connecting the same external
+account in B creates a distinct personal Toolkit there. Each Toolkit independently owns its allowed
+Agent policy, limited to its own Workspace. It is not a Workspace-wide grant for all of a User's
+Toolkits and not a global credential with cross-Workspace attachments.
 
-- `rdb/models/toolkit.py` and `repos/toolkit/data.py`: canonical Toolkit identity, encrypted Provider
-  settings, source revision, shared attachments and Agent-only ownership. Workspace is currently
-  mandatory and User ownership is absent.
-- `engine/tools/deps.py:get_toolkit_registry`: the configurable MCP, GitHub, Notion, Sentry, GCP,
-  AWS, Google Analytics, Google, Brave Search and Kubernetes Providers.
-- `rdb/models/toolkit.py`, `github_user_oauth.py`, `google_oauth.py`: current Provider grants refer to
-  Toolkit IDs. Staged GitHub/Google setup additionally assumes Workspace/Agent management context.
-- `repos/memory/operations.py:resolve_associated_user_id`: existing root/subagent association model.
-  This helper is evidence for lineage, not sufficient current personal-Tool admission by itself.
-- `engine/run/resolve.py`: effective Toolkit loading, Provider resolution and Tool binding.
-  `engine/tooling/session_toolkits.py`: stable Session Toolkit lifecycle and source reconciliation.
-- `repos/toolkit_namespace.py`: durable Agent/Toolkit namespace reservations. These distinguish
-  separate sources even when their Provider, display name or requested slug is the same.
-- `shared/toolkits/ToolkitFormContainer.tsx`, Provider field containers and shared views, GitHub
-  Wizard and Google setup: reusable management surfaces without personal-specific Provider forks.
+Unchanged confirmed outcomes are:
 
-The gap is ownership, personal access policy, owner-authorized setup/callback admission and a
-User-root-only effective-source path. Adding `user_id` to generic RunContext or simply passing the
-latest sender's credentials would implement the wrong authority model.
+- default ongoing All, followed by Selected on first restriction, for eligible Agents in the same
+  Workspace only; Agent reenabling adds only that Agent to the affected Toolkit;
+- owner-only personal management without Toolkit-manager or AgentAdmin solely for personal policy;
+- canonical User-root association, current ordinary Agent access and current per-effect admission;
+- the full configurable Provider/auth/settings catalog and optional Runtime-injection parity;
+- shared Runtime/result visibility and the already-admitted-call withdrawal boundary;
+- Toolkit-side and Agent-side entry points editing the same per-Toolkit policy, with composer
+  navigation and no persistent mobile Session-header button; and
+- existing shared/Agent-owned identities, grants, routes and execution behavior.
 
-## 2. Design Authority
+The required correction spans persistence, management, Provider attempts and callbacks, generated
+interfaces, runtime discovery/admission/export, and Web navigation. Hiding Workspace search alone
+would leave the security and ownership defect in place.
 
-The following is the complete material mechanism set for revision 1. Identifiers and equivalent
-helper/file choices are not additional authority.
+Current Spec inputs: [Toolkit](../spec/domain/toolkit.md),
+[Conversation](../spec/domain/conversation.md), [MCP OAuth](../spec/flow/mcp-oauth.md),
+[Google Connection](../spec/domain/google-connection.md), and
+[E2E Primary Test Strategy](../spec/flow/test-strategy-e2e-primary.md).
+The branch's personal sections currently describe the old implementation; they are evidence of
+reachable code, not authority to retain its contradicted global scope.
+
+## 2. Decision Map and Design Authority
+
+### Fixed and retained outcomes
+
+Workspace scope and independently configured per-Toolkit allowance are requester-confirmed product
+outcomes. Retain D1's single canonical Toolkit/grant identity rather than introduce another Provider
+aggregate. Retain D2's policy representation and D3's Provider/Runtime behavior within the corrected
+boundary. The Workspace is real workload/management scope, not a synthetic home or a replacement
+for the personal User owner.
+
+No new credential parent, global binding authority, per-Session policy, Runtime, relay, feature flag,
+permission version or compatibility mode is proposed. Route spelling, helper boundaries, equivalent
+strict DTO factoring and fixture names remain implementation details. The Workspace-bound management
+entry and corrected material mechanisms below are included explicitly in revision 2 approval.
+
+### Complete material mechanism set
+
+Unchanged mechanism identities retain M1-M11; their revised scope is bound to revision 2.
 
 | ID | Material mechanism | Authority | Classification |
 | --- | --- | --- | --- |
-| M1 | One canonical Toolkit with mutually exclusive Workspace, Agent and User ownership | ADR-D1; REQ-1, REQ-7, REQ-9 | decided |
-| M2 | All/Selected policy and atomic positive Agent membership, including All-to-Selected restriction | ADR-D2; REQ-2, REQ-5 | decided |
-| M3 | Owner-only personal management and common Provider forms/operations | REQ-1, REQ-3, REQ-7, REQ-9; ADR-D1, ADR-D3 | required |
-| M4 | Owner-bound Provider setup, callbacks, publication and current grants using existing Provider lifecycles | REQ-4, REQ-5, REQ-6, REQ-9; ADR-D1; current MCP/Google Specs | derived |
-| M5 | Explicit personal capability projection from canonical User-root lineage, with no ambient execution User | REQ-4; session-260724/ADR-D2; conversation Spec | derived |
-| M6 | Current per-invocation allowance admission and later export checks, with already-admitted effects allowed to finish | REQ-4, REQ-6; ADR-D2, ADR-D3 | required |
-| M7 | Existing Provider settings, auth and Runtime-injection behavior, including shared-Runtime limitations | ADR-D3; REQ-4, REQ-7, REQ-9 | decided |
-| M8 | Reused durable source identity/namespace and Session lifecycle, without personal/shared fallback | REQ-4, REQ-7; ADR-D1; Toolkit Spec | derived |
-| M9 | Account connection management and independent Agent access page with two navigation entries | REQ-1, REQ-2, REQ-3, REQ-5 | required |
-| M10 | Forward ownership migration preserving existing identities/grants/contracts and normal coordinated upgrade | ADR-D1; REQ-7; project migration conventions | derived |
-| M11 | Deterministic cross-boundary verification plus component interaction coverage and optional live interoperability | REQ-8, REQ-9; E2E-primary Spec | required |
+| M1 | One canonical Toolkit with Workspace-shared, Agent-owned or User-within-Workspace ownership; Workspace required for every variant | corrected REQ-1/4/7; retained canonical-identity decision D1; Toolkit Spec | derived |
+| M2 | Independent per-Toolkit All/Selected policy and positive Agent membership confined to that Toolkit's Workspace, with atomic first restriction | corrected REQ-2/5; retained D2 | required |
+| M3 | Active owner plus explicit Workspace admission for personal management, reusing common Provider forms/operations | corrected REQ-1/3/7/9; D1/D3 | derived |
+| M4 | User/Auth-Session/Workspace/Toolkit-bound Provider setup, callbacks, current grants and final publication | corrected REQ-4/5/6/9; D1; MCP/Google Specs | derived |
+| M5 | Personal capability projection from canonical User-root lineage and executing Workspace, without ambient execution User | corrected REQ-4; conversation Spec | derived |
+| M6 | Current same-Workspace per-invocation and later export admission; already-admitted effects may finish | corrected REQ-4/6; D2/D3 | required |
+| M7 | Existing Provider settings/auth/Runtime-injection behavior, including shared-resource limitations | REQ-4/7/9; D3 | decided |
+| M8 | Reused canonical source identity, namespaces and Session lifecycle, without cross-Workspace or shared credential fallback | corrected REQ-4/7; D1; Toolkit Spec | derived |
+| M9 | Workspace-scoped personal management plus independent Agent access and composer entry; clear Toolkit-specific UI without Workspace search/groups | corrected REQ-1/2/3/5; retained navigation outcome | derived |
+| M10 | Correct the unmerged forward ownership migration from the pre-feature baseline, preserving existing resources and refusing inferred placement of incompatible global personal state | corrected REQ-1/7; D1; migration conventions | derived |
+| M11 | Deterministic assembled-product verification including same-User cross-Workspace denial, Provider parity and real component interactions | corrected REQ-8/9 | required |
 
-Current Spec references: [Toolkit](../spec/domain/toolkit.md),
-[Conversation](../spec/domain/conversation.md), [MCP OAuth](../spec/flow/mcp-oauth.md),
-[Google Connection](../spec/domain/google-connection.md),
-[E2E Primary Test Strategy](../spec/flow/test-strategy-e2e-primary.md).
-The historical Team-only wording in the Toolkit Spec is not authority to ignore currently reachable
-User Session behavior; canonical root association is verified against current code.
-
-## 3. Ownership and Architecture
+## 3. Canonical Ownership and Permission Data
 
 ```mermaid
 flowchart TD
-  Account[Account personal connections] --> Management[Owner-authorized Toolkit management]
-  AgentUI[Agent personal access page] --> Policy[All or Selected policy operations]
-  Shortcut[Conversation add-menu shortcut] --> AgentUI
-  Management --> Toolkit[Canonical ToolkitConfig]
-  Policy --> Toolkit
-  Toolkit --> Grants[Existing Provider grants and setup state]
-  Root[Canonical root Session and associated User] --> Personal[Personal capability projection]
-  Toolkit --> Personal
-  Policy --> Personal
-  Shared[Unchanged shared and Agent-owned projection] --> Sources[Current Session effective sources]
-  Personal --> Sources
-  Sources --> Admission[Current call or export admission]
+  Workspace[Explicit real Workspace] --> Personal[User-owned personal Toolkit in that Workspace]
+  User[Authenticated active User] --> Personal
+  Personal --> Policy[This Toolkit's All or Selected policy]
+  Policy --> Agents[Eligible Agents in the same Workspace]
+  Personal --> Grants[Existing Provider grants keyed by Toolkit ID]
+  Root[Canonical User-root lineage and executing Workspace] --> Projection[Workspace-bound personal source projection]
+  Personal --> Projection
+  Agents --> Projection
+  Projection --> Admission[Current exact-source admission]
   Grants --> Admission
-  Admission --> Provider[Same Provider implementation]
-  Provider --> External[External service]
-  Provider --> Runtime[Existing optional shared Runtime export]
+  Admission --> Provider[Existing Provider implementation]
+  Provider --> External[External service or existing optional Runtime export]
 ```
 
-### 3.1 Canonical owner variants
+### 3.1 Legal owner variants
 
-Represent ownership at the domain boundary as a closed tagged union:
+Keep the closed owner union and one canonical `toolkit_configs.id`:
 
-- Workspace-owned: canonical Workspace ID; no Agent owner and no User owner.
-- Agent-owned: canonical Agent ID and its Workspace ID; no User owner.
-- User-owned: canonical User ID; no owning Workspace or Agent.
+- Workspace owner: Workspace ID, no owner Agent or owner User.
+- Agent owner: Workspace ID and canonical owning Agent ID, no owner User.
+- User owner: Workspace ID and canonical owner User ID, no owning Agent.
 
-Use the same `toolkit_configs.id` and Provider-specific config for every variant. Database storage
-adds User ownership and relaxes the universal Workspace requirement only for that variant. Enforce
-mutual exclusion with explicit named constraints; do not accept arbitrary combinations of nullable
-IDs. The owner representation is decoded at ingress to typed variants rather than repeatedly
-interpreted through truthiness throughout services.
+Workspace ID is non-null for all variants. A personal connection's Workspace and owner are immutable
+through ordinary update; no move, copy, reassignment or cross-Workspace attachment operation is added.
+The authenticated account chooses the User. An explicit management route identifies a Workspace;
+server admission resolves that Workspace and verifies the account's ordinary access before using it.
+A viewer, sender, Workspace administrator or callback parameter cannot choose another personal owner.
 
-Retain the existing Workspace/Agent columns, add `owner_user_id` and persist an owner-kind PostgreSQL
-enum. Enforce these shapes: Workspace has only Workspace ID; Agent has Workspace and Agent ID; User
-has only User ID. `owner_user_id` references the current User identity with the existing account
-deletion boundary. Existing Agent ownership admission still verifies that the Agent belongs to the
-stored Workspace. These fields constitute one canonical owner, not multiple alternative authorities.
-Existing records are classified without changing IDs. Ownership is immutable through ordinary
-Toolkit update; converting a shared connection to a personal one is not this feature.
+Retain the owner-kind PostgreSQL enum and named legal-shape constraints. Restore mandatory Workspace
+storage instead of the initial User-global null shape. Existing shared/Agent-owned rows retain their
+identities and exact legal shapes. Personal projections and setup targets carry a typed User owner
+with its Workspace, rather than optional fields repeatedly interpreted by truthiness.
 
-Keep Workspace-only public response models and their non-null Workspace contract unchanged. Add
-personal response shapes or explicit owner-aware internal projections rather than widening every
-unchanged response into an optional-Workspace DTO. Neither returned JSON nor client input contains
-decrypted Provider credentials.
+Keep existing shared/Agent public contracts non-null and unchanged. Personal responses expose the
+Workspace-scoped owner/resource identity and redacted common Provider metadata, never credentials.
+Personal create/update cannot accept a caller-selected owner User, move the connection, or create a
+hidden Workspace. Scope is required, not an optional fallback to a global personal record.
 
-### 3.2 Permission data
+### 3.2 Per-Toolkit policy and membership
 
-A User-owned Toolkit stores one personal access mode, `all` or `selected`. Existing shared/Agent-owned
-rows have no personal policy. New User-owned creation explicitly stores `all`; adding a database
-default must not accidentally assign a personal policy to existing ownership variants.
+Store All/Selected on each personal parent. Creation deliberately writes All; non-personal parents
+have no personal policy. Selected membership is positive and unique by Toolkit/Agent, separate from
+shared `agent_toolkits` attachments.
 
-Store positive Selected-Agent membership in a dependent relation keyed uniquely by Toolkit ID and
-Agent ID. Its non-null owner User ID is tied by a composite FK to the parent's Toolkit/owner key, so
-it cannot target a shared or Agent-owned parent with no User owner. The Agent FK cascades when that
-Agent is actually deleted. The parent exposes the corresponding unique composite key; the child
-owner key is a constrained dependent copy, not separately writable authority. Add lookup indexes
-for owner listing and Agent membership; no per-Session permission table is added.
+Every selected Agent belongs to the parent's Workspace. Carry the parent's Workspace in the dependent
+membership identity alongside the existing constrained owner-User copy. Parent and Agent composite
+foreign keys enforce same-Workspace membership, using named supporting unique keys and indexes.
+The dependent Workspace/User values are constrained parent copies, not independently writable owner
+or scope authorities. Agent deletion removes its selections. Workspace deletion removes its personal
+connections and dependent grants/selections under the existing Workspace deletion boundary. User
+account deletion removes that User's owned connections using the existing account lifecycle.
 
-The access-mode column is a PostgreSQL enum with a named constraint requiring `all`/`selected` only
-for User-owned rows and null for other owners. Explicit parent row locking and relation mutation
-maintain the no-selected-membership-under-All invariant. New User creation writes All deliberately;
-the migration does not assign it to existing rows.
-
-Do not use `agent_toolkits` as personal permission: that relation makes shared configurations
-available to an Agent independently of a particular User root. Do not materialize every eligible
-Agent as an attachment in All mode. Current eligibility is resolved from ordinary User/Workspace/
-Agent access and the active personal parent.
+Ordinary membership/Agent access loss immediately denies use and management; stored Selected choices
+may remain while access is unavailable, without disclosing inaccessible Agent names. Regaining
+ordinary access in the same surviving Workspace does not create a new connection or grant access in
+another Workspace. No new retention scheduler is introduced.
 
 The effective predicate is:
 
 ```text
-User-root association matches Toolkit owner
-AND canonical Agent/Workspace ordinary access is currently valid
-AND Toolkit is enabled and current Provider credentials are usable
-AND (mode = all OR exact Agent is in selected membership)
+canonical User root belongs to the exact active owner
+AND canonical execution Workspace equals the personal Toolkit's Workspace
+AND current ordinary Workspace/Agent access is valid
+AND Toolkit enabled/current Provider authority is usable
+AND (this Toolkit's mode is All OR the exact Agent is selected for this Toolkit)
 ```
 
-Selected membership can persist while ordinary access is unavailable; it never bypasses ordinary
-access. Agent deletion removes its dependent memberships. Workspace deletion does not delete a
-User-global connection, although deleting its Agents removes those selections. User decommission
-immediately invalidates active-user admission through the existing lifecycle; eventual User deletion
-cascades owned connections and Provider grant children under the current account deletion boundary.
-No new retention scheduler or personal credential cleanup daemon is added.
+### 3.3 Atomic editing
 
-### 3.3 All-to-Selected transition and editing
+Lock the exact User/Workspace/Toolkit parent before policy changes. First restriction under All
+computes the full currently eligible Agent set **inside that Workspace** in the transaction, subtracts
+the restricted Agent and stores Selected atomically. Eligibility follows ordinary access, not Provider
+readiness, a visible page, search results or an open Session. Another Workspace never contributes an
+Agent to this snapshot.
 
-Both editors call the same database composition. Lock the target personal Toolkit before modifying
-its policy and membership. For a first Agent restriction in All mode, compute the currently eligible
-Agent set server-side in the transaction, subtract the restricted Agent, store positive membership
-and set Selected atomically. Never infer the baseline from the current page, search filter, one
-Workspace, or an untrusted browser-supplied list.
-For this copy, eligibility means ordinary owner access to the Agent, not current Provider readiness,
-whether a Session is open, or whether the Agent was visible in a filtered page. Temporary credential
-failure must not turn the copied selection into an empty set.
+Connection-side edits carry explicit mode intent and exact add/remove deltas; filtered lists never
+replace membership. Explicit All clears Selected membership and resumes future eligibility only in
+the same Workspace. In Selected, Agent reenabling adds only that exact Agent to that one Toolkit.
 
-In Selected mode, Agent-side changes add/remove that exact Agent without replacing other membership.
-User-side editing submits explicit mode changes and membership deltas rather than a filtered-page
-replacement. An explicit owner choice of All clears Selected membership and resumes dynamic eligibility;
-re-enabling one Agent alone under Selected does not silently reset All.
+An Agent page may save several personal Toolkits, but each intent updates that Toolkit's own parent
+policy. Authorize all target parents as owned by the current User in the Agent's canonical Workspace,
+lock in deterministic parent-ID order, and commit one atomic batch. A foreign/other-Workspace parent
+rejects the batch rather than exposing partial success. Loaded expected-mode preconditions yield a
+normal conflict/reload result if stale. Reuse existing source revision for stale prepared-source
+reconciliation; add no policy epoch, history or permission-version feature.
 
-For an Agent page saving several connections, apply its per-Toolkit intents in deterministic parent
-ID order in one database operation after authorizing every target. A denied target rejects the batch
-rather than reporting partial success as a complete save. Check the current policy under the lock;
-a stale expected-mode assumption produces a normal conflict/reload outcome rather than accidentally
-performing a different global transition. Serial parent locking and intent updates prevent mixed
-policy/membership without introducing a new revision, epoch or permission-version feature.
+## 4. Management, Public Interfaces and Common Forms
 
-Existing `ToolkitConfig.revision` continues to describe source changes and is bumped when a policy
-change makes the prepared personal source stale. It is reused for the existing Session lifecycle,
-not replaced by a new versioning or credential history system. Current invocation checks remain
-mandatory even when a previously prepared source has the same identity.
+### 4.1 Admission and safe lookup
 
-## 4. Personal Management and Public Interfaces
+Personal management requires an active authenticated User/Auth Session and ordinary access to the
+explicit Workspace. Toolkit-specific operations additionally require exact User ownership and exact
+Workspace equality. They do not require shared Toolkit-manager or AgentAdmin solely to edit personal
+configuration. Agent-side access additionally checks ordinary access to that exact Agent and confirms
+its Workspace matches the route and every affected personal Toolkit.
 
-### 4.1 Authorization
+Shared and Agent-owned endpoints retain their existing ownership/admin rules and reject personal IDs.
+A Workspace owner is not a personal connection owner. Personal endpoints reject shared, Agent-owned,
+foreign-User and other-Workspace IDs using existing not-found-safe conventions. No labels, readiness,
+grant status or operation outcomes from A are returned through B, including for the same User.
 
-Personal routes derive the owner from the authenticated active account/Auth Session. A request cannot
-supply an arbitrary owner User. Personal connection management itself does not require Workspace
-Toolkit write permission or AgentAdmin. Managing allowance for an Agent additionally verifies the
-current owner's ordinary access to the canonical Agent and its Workspace.
+Scope all parent reads, locks, lists, deletes, Provider lookup/publication and policy compositions by
+both owner User and canonical Workspace. Replace User-only helper signatures rather than retrieving
+an account-global parent and filtering the rendered result afterward.
 
-Shared routes continue checking their exact Workspace and shared ownership. Agent-owned routes
-continue checking the exact Agent owner and existing administrator policy. User-owned IDs are not
-admitted by either route, even if the requester is a Workspace Owner or AgentAdmin. Personal routes
-likewise do not accept Workspace or Agent-owned Toolkit IDs. Unknown or foreign IDs use existing
-not-found-safe response conventions without exposing another owner's labels or grant state.
+### 4.2 Route families and generated interfaces
 
-Repository predicates make ownership explicit. In particular, the existing shared relation cannot
-continue treating `owner_agent_id IS NULL` alone as sufficient to classify an item as shared.
-Extend that predicate to the exact Workspace-owned variant. Current shared attachment mutation must
-reject a User-owned Toolkit ID rather than attaching personal credentials to the Agent globally.
+Personal route families require explicit Workspace context using the repository's existing
+Workspace-handle routing convention. Concrete equivalent path spelling is implementation-owned;
+there is no remaining account-global personal endpoint. Resources cover:
 
-### 4.2 Route families
+- scoped personal Toolkit list/create/read/update/delete;
+- currently eligible Agents in that Workspace and per-Toolkit policy/delta writes;
+- the current User's connections and atomic per-Toolkit intents for one canonical Agent there; and
+- the same existing Provider tests, saved tests, setup, review, confirm, outcome, reconnect,
+  disconnect and MCP OAuth operations against those scoped targets.
 
-Use owner-specific management endpoints over common service/Provider logic. Concrete local path and
-DTO names can be refined during implementation without changing authority. The planned route family
-is under `/toolkit/v1/me`:
+The account identity is implicit from authentication, never a request-supplied owner ID. Workspace
+handle is required location metadata resolved and authorized by the server, not authority by itself.
+Reject omitted/foreign scope before protected Provider work. Personal ownership cannot be inferred
+from the currently viewed Agent or a previous account-global cache entry.
 
-- Personal Toolkit list/create/read/update/delete and existing Provider catalog/connection tests.
-- Per-Toolkit personal access projection and typed policy/membership mutations.
-- Per-Agent view of the current User's connections and a batch of exact allowance changes.
-- Personal targets for existing MCP OAuth, GitHub setup/creation and Google staged setup operations.
+Regenerate public OpenAPI and TypeScript/Python clients from source. tRPC adapters call those
+operations and carry the exact owner/Workspace target. The strict frontend scope union retains the
+existing shared/Agent variants and changes personal scope to an explicit User owner plus required
+Workspace handle. Personal scope cannot include an owning Agent or arbitrary User/Workspace IDs.
+Cache keys include Workspace; acknowledged mutations invalidate corresponding list/detail and both
+access views there rather than refreshing account-global personal data.
 
-The concrete resource contracts are:
+### 4.3 Provider parity and transaction boundaries
 
-| Resource | Read/write contract |
-| --- | --- |
-| `/me/toolkit-configs` and `/{toolkit_id}` | Owner-only list/create/read/update/delete; common Provider fields and redacted readiness |
-| `/me/toolkit-configs/{toolkit_id}/agent-access` | Policy plus paginated currently accessible Agent projection; mutation carries explicit mode intent and exact add/remove Agent deltas |
-| `/me/agents/{agent_id}/toolkit-access` | This owner's connection choices for that canonical Agent; batch mutation carries per-Toolkit allow/disallow intents and loaded mode preconditions |
-| Personal Provider setup/test subresources | The existing Provider actions and review/outcome contracts, with a User-owned target instead of a Workspace or owning Agent |
+Reuse the registered catalog and its existing deployment availability conditions. There is one common
+Toolkit form, one set of Provider fields and the existing staged Google/GitHub Wizards; no personal
+catalog subset or parallel form implementation is added. Required Workspace context does not grant
+shared management permissions or change User ownership.
 
-The `/toolkit/v1` prefix applies to the paths above. The authenticated User is implicit; owner IDs
-are not accepted as authority. Read pagination/filtering does not define the replacement write set.
-Inaccessible previously selected Agents are not disclosed by name through the current projection;
-intent-based changes preserve their stored selection unless the owner explicitly resets policy.
-Reject unknown/foreign targets with the existing safe error shape. Mode conflicts return an explicit
-reload outcome; API/database failures are not disguised as successful saves.
+Preserve redacted credential edits: omitted replacement secrets retain stored credentials. Preserve
+Google metadata-only saves, which omit independently confirmed Provider configuration. A failed save
+retains the draft; uncertain outcomes are not reported as success or automatically replayed.
 
-Reuse the registered Provider catalog and its deployment availability conditions. A Provider has no
-separate personal eligibility flag. Runtime/Memory/Skill/etc stay outside this configurable catalog.
-Global Toolkit list/CRUD models do not expose another User's personal records. List projections are
-redacted; connection tests receive saved/replacement credentials through the same existing trusted
-service path and never return them.
-
-Keep APIs -> services -> completed repository operations. Capture authorization and detached data,
-close the database scope, perform Provider discovery/validation, then re-admit current owner/target
-and commit the result in a new database operation. Do not keep a database transaction open over
+APIs call services and completed repository operations. Capture detached authorized scope, close the
+database operation, perform external discovery/test/exchange, then re-admit the exact current
+User/Auth Session/Workspace/Toolkit before the final durable write. No database scope stays open over
 HTTP, SDK, Runtime or broker work.
 
-### 4.3 Generated clients and frontend adapters
+## 5. Provider Setup, Callbacks and Credential Lifecycle
 
-Regenerate public OpenAPI and TypeScript/Python clients for the new personal route families and
-owner-aware response types. Do not hand-edit generated output. tRPC adapters use the generated
-public client. Existing Workspace/Agent callers retain their route and ownership-correct response
-shapes.
+### 5.1 Explicit scoped personal target
 
-The shared Toolkit form lifecycle accepts an owner-specific management target, with one set of
-Provider configuration views and lifecycle transitions. New personal feature containers own queries,
-mutations, return navigation and state; pure views receive typed props. Shared form code does not
-import another feature's private state or infer a Workspace from the currently viewed Agent.
+Keep existing Workspace-shared and Agent-owned target variants and persisted production callback
+shapes valid. The corrected User target requires its real Workspace ID, owner User and initiating
+User/Auth Session, plus the existing Toolkit/attempt, nonce/PKCE and callback information. Its owning
+Agent is absent. An optional originating Agent/Session is navigation metadata in the same Workspace,
+not the owner or credential subject.
 
-## 5. Provider Authentication and Callback Lifecycle
+Update legal target constraints, detached target types, captures, setup admission and finalization
+together. Personal owner equals the active initiating account; ordinary Workspace access and exact
+parent scope must still be valid before/after external I/O. Account identity remains distinct from
+external Provider identity. The same external account may be separately connected in two Workspaces,
+but attempts, grants, Toolkit IDs and policies are not shared by that coincidence.
 
-### 5.1 One Provider implementation, explicit setup target
+Remove the obsolete unmerged personal-global callback/input forms rather than retaining a fallback
+that invents a Workspace. A missing, mixed, repeated, changed or mismatched personal Workspace target
+fails closed before exchange/publication. Existing shared and Agent callback shapes remain first-class
+contracts, not a legacy decoder or protocol version.
 
-Retain current encrypted credential storage (`CredentialCipher`) and canonical Toolkit grant FKs.
-Provider-specific managers consume an explicitly typed target: Workspace-shared, Agent-owned or
-User-owned. They share validation/exchange/refresh logic; owner admission is not copied into a
-parallel personal Provider implementation.
+### 5.2 Provider families
 
-For User-owned setup, bind active initiating User and Auth Session, canonical target owner/Toolkit
-when present, deployment callback/client information, PKCE/nonce and Provider target. No Workspace
-is invented for a personal creation. An optional origin Workspace/Agent from a navigation return is
-not the connection owner or authorization source.
+- MCP, Notion and Sentry retain discovery, DCR/pre-registration, PKCE/resource/transport choices and
+  refresh behavior. Exact current parent/grant checks include the personal Workspace before/after
+  external gaps, and stale callbacks cannot resurrect a removed/replaced grant.
+- GitHub retains PAT, provided/platform App installation and provided/platform user-account flows,
+  platform registration/inventory checks, installation/resource validation, review, identity changes,
+  reconnect and existing Runtime injection. External account installation inventory is not itself a
+  personal Toolkit and does not authorize publication or execution in another Workspace.
+- Google retains operator registration readiness, task selection, verified identity, actual grants,
+  renewal credential requirements, staged review/confirm and exact outcome recovery. Scope the
+  existing attempt/current-grant operations; do not clone a grant into a shared Toolkit.
+- AWS, GCP, Google Analytics, Kubernetes and Brave Search retain config, credential validation,
+  connection tests, SDKs and ordinary resolve behavior. Scoped source admission precedes their
+  protected discovery, preparation, calls and export where supported.
 
-Google and GitHub creation/attempt storage gains legal User-owned target shapes while preserving
-existing Workspace/Agent attempts. Current shared callback/state shapes remain first-class for
-current shared routes; personal targets add an explicit variant. Do not introduce protocol versions,
-a legacy fallback decoder, dual token ownership or a forced cancellation of valid shared attempts.
-Migrations backfill the stored target variant for current shared/Agent attempts. Existing fields that
-represent an initiating User/Auth Session keep that meaning and are not reused as ambient execution
-identity.
-Store the new setup target's owner kind and User owner separately from the existing initiating
-`user_id`/Auth Session fields. Workspace and owning-Agent fields are null for a User target. A User
-target requires the owner to equal the active initiating account. Existing rows are backfilled from
-their canonical Workspace/Agent target, not from the identity of whoever last used a connection.
-Owner and initiating-subject predicates are checked together before and after external I/O.
+Every Provider uses the same source/grant/refresh CAS and cleanup semantics as before. Reconnect
+retains that personal Toolkit's ID, Workspace and policy, subject to its existing review/identity
+rules. A callback cannot move it to another Workspace, replace another connection or switch owner.
 
-### 5.2 MCP, Notion and Sentry
+### 5.3 Navigation, cancellation and uncertainty
 
-Reuse remote MCP discovery, PKCE, DCR/pre-registered clients, resource indication and the current
-transport/auth settings. Store the grant against the personal canonical Toolkit ID. A personal
-connect/exchange/disconnect operation must validate exact active owner/Auth Session and target at
-its final write, not use Workspace manager authorization copied from the shared route.
+Derive return destinations from explicit owner/Workspace route families. Reauthorize any originating
+Agent/Session before displaying or following its return. No arbitrary URL, other-Workspace origin or
+callback parameter supplies credential authority. Personal callbacks return to that Workspace's
+personal management/setup surface; they never fall back to a global account list.
 
-Retain provider-supported reconnection and token refresh behavior. Current-grant writes recheck
-parent ownership and connection state so an old callback or refresh cannot recreate a deleted
-connection or overwrite a later replacement. Existing shared routes are not implicitly converted
-into personal ones by their initiating User field.
+Cancel/denial affects only the exact current attempt under its existing Provider lifecycle. Inspect
+existing exact review/outcome mechanisms after uncertain exchange/publication responses; do not
+replay external effects or add a universal recovery service. Disconnect removes local current
+usable authority and invalidates stale targets. It does not promise remote revocation or token recall.
 
-### 5.3 GitHub
+## 6. Projection, Invocation and Runtime Export
 
-All current modes remain supported: PAT, provided-App installation, platform-App installation,
-provided-App user-account authorization and platform-App user-account authorization. Retain current
-App preparation, installation/resource validation, user-account verification, reviewed publication,
-non-expiring-token assumptions and Provider recovery. Connecting an installation with a personal
-Toolkit owner does not turn it into a GitHub user-account token; execution authority still follows
-the chosen existing auth method.
+### 6.1 Canonical User and Workspace
 
-Extend current creation, setup, grant and runtime admission operations to the User-owned target.
-Owner and account identity stay separate. Platform App installation checks remain necessary;
-personal ownership does not bypass GitHub or platform validation.
+Use the current Session execution owner and canonical durable root lineage to resolve an active
+associated User in User mode, canonical executing Agent and Workspace, and ordinary current access.
+Team roots and inconsistent/missing lineage receive no personal source. Recovery, continuation and
+subagents repeat that canonical resolution; sender/viewer/broker/Tool parameters do not select a
+User or connection Workspace.
 
-### 5.4 Google
+Select only personal parents matching both that User and that canonical Workspace. Carry the
+Workspace in the personal capability/source identity and include it in every later exact parent
+lookup and lock. The existing personal execution target already captures canonical Workspace;
+correct the current User-only parent predicate instead of adding ambient User identity to generic
+RunContext, TurnContext, Worker input or Provider context.
 
-Reuse operator registration readiness, task selection, verified identity, actual granted scopes,
-renewal credential requirements, staged review and explicit confirm. Generalize management target and
-current-grant access to User-owned Toolkits. Provider call/grant constraints and stale-candidate/
-replacement checks remain the same. Do not bypass Google review or clone grants into Workspace
-Toolkits to make them executable.
+The normal Provider ResolveContext keeps workload Workspace/Agent/Session identity. For a personal
+source, its canonical parent Workspace must equal that workload Workspace. Source management URLs
+use the authorized Workspace-scoped personal route; they are not constructed from an arbitrary
+viewer or used as authorization.
 
-### 5.5 Remaining Providers
+### 6.2 Identity, caches and reconciliation
 
-AWS, GCP, Google Analytics, Kubernetes and Brave Search keep their existing config models, credential
-validation/connection-test behavior, clients and tool implementations. Pass the selected personal
-Toolkit's config/credentials through the ordinary Provider resolve path after admission. Replace
-ownership assumptions in dependency lookups rather than adding a Provider-specific personal feature
-allowlist. Temporary worker-side credential material, if used by a Provider, follows its existing
-cleanup and redaction behavior.
+Keep shared/Agent-owned projection and ordering unchanged, and merge only already admitted same-
+Workspace personal sources for the User root. Reuse canonical Toolkit IDs, source revision and the
+Agent/Toolkit durable namespace allocator. Allocate lazily when a source becomes effective, never
+for every Agent under All or during read-only management.
 
-### 5.6 Reconnect, cancel and uncertain outcomes
+Tool Search, routing, Activity and hooks consume the same exact source/schema/executor mapping.
+Same names, slugs, Providers or external account identities across A/B never alias authority. Caches
+and prepared transports carry exact scoped source identity, not account-global credential authority.
+Reject a stale/missing/other-Workspace source; do not substitute shared authority or another personal
+connection. Withdrawal retains existing namespace retention and transcript/result behavior.
 
-Reconnection retains the Toolkit ID and its access policy and follows the existing Provider's
-identity-change/review rules. Add no personal-only same-account restriction. A missing/denied
-callback changes only the exact setup attempt according to the existing Provider lifecycle.
-Redirect destinations are same-origin owner/Agent pages selected from explicit route families;
-foreign, tampered or no-longer-accessible return targets never grant access.
+### 6.3 Current effect admission and ordering
 
-A lost exchange/publication response is inspected through the existing exact outcome/review
-mechanism where that Provider supports it; do not replay external effects automatically or add a new
-universal replay service. Expose Provider-specific recovery honestly. Disconnect deletes/invalidates
-local current authority using the existing lifecycle and invalidates stale setup targets. It does not
-promise remote revocation, undo or erasure of exported tokens.
+At final catalog-selected dispatch, after name/wire/hook resolution, re-admit the exact capability:
+current execution/root/User, personal owner and Workspace, canonical Agent and ordinary access,
+Toolkit enabled/revision/policy and current Provider authority. A source prepared in A cannot run
+for B by changing a Tool argument, mailbox sender or cached catalog reference.
 
-## 6. Runtime Projection, Invocation and Withdrawal
+The short parent boundary orders dispatch versus withdrawal. Lock order remains Toolkit parent,
+dependent policy/current-grant state. External I/O begins only after admission closes. An admitted
+call may finish after withdrawal; a later call must reject. Cancellation/cleanup of an already
+admitted operation retains existing behavior rather than being blocked as a new effect.
 
-### 6.1 Resolve the User only at a narrow personal boundary
+Authenticated discovery/background transport work, credential refresh, post-gap credential use,
+snapshot publication and grant finalization repeat the same scoped current check at their existing
+boundaries. Durable writes combine exact current admission and the write in one database operation.
+Cached descriptions are not permission, and configurable hooks cannot turn denial into authority.
+Reuse existing grant/source CAS; introduce no global policy generation, replay ledger or remote abort.
 
-The personal capability resolver receives canonical Session identity, loads its root through existing
-SessionAgent lineage, and verifies a live User root and associated active User. It loads that User's
-eligible personal Toolkits for the canonical Agent under the saved policy and current ordinary access.
-A Team root returns no personal source. Missing or inconsistent lineage fails closed.
+### 6.4 Existing Runtime-injection parity
 
-This operation constructs a personal source/admission handle that captures only the exact owner and
-Toolkit relation it needs. The User ID is not added to RunContext, TurnContext, generic Worker input
-or ordinary Toolkit context. Generic Provider ResolveContext retains canonical execution Workspace,
-Agent and Session information; its Workspace identifies workload placement, not ownership of a
-personal Toolkit. Provider grant repositories obtain owner eligibility through the scoped admission
-boundary rather than guessing from that execution Workspace. Settings/reconnect links are built
-from the already authorized management target: personal account paths for a User-owned source and
-unchanged Workspace/Agent paths for existing owners. A public management destination can be passed
-to common presentation code without adding the User identity to generic execution context; the
-executing Workspace handle must not be mistaken for a personal connection's owning Workspace.
+Enabled GitHub injection checks current User/Workspace/Toolkit/Agent allowance before collecting
+credentials and again after an external credential gap before returning an export. Disabled
+injection obtains no credential and does not gate unrelated Runtime work. Keep the common
+last-source-wins environment merge and redacted key-collision warnings; no cross-Workspace credential
+fallback or personal precedence rule is added.
 
-Root and subagent work resolve the same root User association and check the canonical Agent for that
-execution. Recovery/continuation rebuilds from durable lineage. Neither a mailbox sender nor a
-broker field chooses the personal owner.
+An already exported token/process may persist under the existing shared-Runtime model. The feature
+does not recall copies, revoke remote authority, erase written results or isolate User Sessions.
+Workspace scope governs new management/selection/admission/export, not retrospective erasure of
+existing shared resource content. Preserve English redacted failures and ordinary Runtime cleanup.
 
-### 6.2 Effective sources and naming
+## 7. Web Flow and Visual Requirements
 
-Keep existing shared and Agent-owned effective-source queries independent of personal context. Add
-a User-scoped source variant only in the personal projection and merge the already-authorized sources
-for the current User Session. Never make all personal Toolkits effective for an Agent globally.
+### 7.1 Workspace personal connection management
 
-Reuse durable Agent/Toolkit namespace reservations and the common collision allocator. Allocate a
-missing personal reservation only when an authorized personal source actually becomes effective,
-using the existing short allocation transaction and Agent namespace fence. All mode does not eagerly
-create rows for every future Agent. Read-only user-facing lists do not allocate namespaces.
+Place personal management inside the real current Workspace shell, distinct from shared Toolkit
+administration. The canonical route family carries the Workspace handle, for example
+`/w/{handle}/personal-tools` with create/edit and per-Toolkit Agent-access descendants. Remove the
+unmerged account-global personal list/form/access routes and account-sidebar entry. Account settings
+retain identity-only links and unrelated account/security behavior.
 
-Keep source identity bound to canonical Toolkit ID, config and existing revision. Equal Provider
-names or slugs do not alias another credential. Source projections show this User's personal source
-and allowed shared sources only. Namespace retention/deletion follows the current reservation rules;
-removing allowance does not make a previously used name a different credential.
+Show the actual Workspace context, personal connection identity, Provider/account information when
+available, readiness and that Toolkit's All/Selected state. Reuse the common form/Wizards and saved
+connection tests. Same-User connections from another Workspace are not loaded and then hidden; they
+are absent from the authorized query. There is no Workspace selector/search in a Toolkit's Agent
+allowance editor.
 
-Tool Search, routing, Activity and hooks consume the same effective source metadata and exact
-executor/schema pairing. Refuse a stale/missing source instead of redirecting to a similarly named
-shared or personal Toolkit. Already-returned transcript content is not retroactively removed.
+A Toolkit-specific access surface identifies the connection prominently and lists only eligible
+Agents in its Workspace. Use a coherent operational row list with clear labels, selected states and
+keyboard focus, not ambiguous cross-Workspace headings or a detached checkbox dump. All/Selected is
+explicit and not inferred from a checkbox count. Search filters Agent names only and preserves
+non-visible/inaccessible saved choices through intent-based writes.
 
-### 6.3 Current dispatch admission
+### 7.2 Independent Agent page and composer entry
 
-A personal Tool wrapper performs a completed database admission immediately before managed external
-Tool dispatch, using canonical root/workload identity, active User and ordinary Agent access,
-Toolkit owner/enabled state, saved policy and current Provider authority. Treat model-visible tools
-and cached discovery as descriptions, never as permission. Apply this to generic MCP/static-credential
-Providers as well as GitHub/Google services that already have current-grant guards. Personal
-credential refresh and authenticated discovery/background snapshot requests also use this bound
-admission before their external operation. A cached transport's background task is not a way to
-continue newly admitted authenticated work after withdrawal; purely local retained descriptions
-remain lag-tolerant until ordinary reconciliation.
+Retain the canonical Agent personal-access route and navigation entry separate from Sessions. It
+identifies the Agent, real Workspace and current User, and explains application to all that User's
+personal Sessions with that Agent. List only this User's personal Toolkits in that same Workspace.
+Each toggle edits that Toolkit's own policy; the Agent page is a reverse editor, not another global
+allowance authority.
 
-The current final invocation site is `engine/events/tools.py` immediately before dispatching the
-catalog-selected handler. Bind the source-specific guard to that exact handler/source, after final
-hook/name resolution rather than to an earlier model-suggested name. Preserve the FunctionTool spec,
-wire variants and executor pairing across all supported lowerers. An ordinary configurable hook
-cannot turn a failed personal admission into an allowed result. Cancellation/cleanup of an already
-admitted call retains its existing behavior rather than being blocked as a new protected effect.
+Reuse AgentSettingsHeader/Layout, and keep the mobile Session header unchanged. The composer add
+menu retains attachment handling and links to this Agent-scoped page. A User with no personal
+connection there is directed to personal setup in the same Workspace. Return to an originating
+conversation only after current ordinary access and same-Workspace identity are reauthorized.
+No AgentAdmin requirement is added solely to edit the User's own allowance.
 
-Policy mutation and personal dispatch serialize on the same short Toolkit parent boundary where
-needed to order a withdrawal against admission. Lock order is Toolkit parent, dependent permission/
-current-grant state. Provider I/O begins only after the database operation closes. An admission that
-precedes withdrawal may finish; one that follows its effective commit must reject. Do not hold a
-Session tree or Toolkit database lock for the network call or attempt to abort remote effects.
+### 7.3 UI state, drafts and visual acceptance
 
-Refresh/exchange operations repeat current target and allowance checks after their external gap
-before publishing usable credentials or making a later protected call. Preserve existing
-current-connection comparisons; no new grant history, epoch or permission-version system is added.
+Containers project explicit loading/error/ready ADTs and own queries/mutations/drafts. Views receive
+typed props/callbacks; thin pages resolve route identity and required authorization. Saving uses
+normal scoped query invalidation only after acknowledgment. Cancel performs no policy write. Save
+failures/conflicts retain drafts and expected-mode preconditions; uncertain results do not claim
+success. Keep Save/Cancel outside the scrolling selection region, reachable on small screens and
+long lists without hiding the current draft/error state.
 
-### 6.4 Runtime injection parity and its limits
-
-Use the same `inject_runtime_environment` setting and `expose_env` behavior as shared GitHub
-Toolkits. Do not hide or force-disable it for User-owned sources. The active peer Toolkit list must
-already contain only sources allowed for this User root. Personal environment collection repeats
-current admission before obtaining/exporting credentials for a new Runtime process.
-
-Keep the existing common environment merge behavior and warning for duplicate keys. Source ordering
-uses the common deterministic effective-source ordering, preserving existing sources' relative order;
-no personal-only fallback, second CLI identity selector or new secret preference setting is added.
-Function Tools remain bound to their exact source even when optional environment keys collide. Cover
-mixed personal/shared enabled exports in the test matrix and report which normal merge order applies.
-
-Once credentials are passed into a Runtime process, they can be read, printed or persisted under the
-existing shared-Runtime trust model. User Session privacy is not OS/process/filesystem isolation.
-Personal withdrawal blocks later managed Tool/export admissions, not an already running process or
-credential copies it created. The existing Runner and Runtime process-lifetime behavior remains
-unchanged. Do not add a personal Runtime, credential relay, network service or special confirmation
-flow. Normal control-plane metadata and logging remain redacted; tests use fake tokens.
-
-### 6.5 Reconciliation and errors
-
-The Session Toolkit lifecycle continues using stable identity and existing source revision. The next
-Run/turn preparation reconciles removed/changed sources; current invocation admission is the safety
-boundary before that reconciliation catches up. A prepared instance denied by a later mutation yields
-a safe capability/authorization failure, not another account's credential.
-
-Distinguish owner/ordinary-access denial, absent/disabled source, Provider reconnect requirement and
-upstream execution failure through current safe failure conventions. Do not map database/cipher/
-programming failures to ordinary successful Tool payloads. Log unexpected failures once at the owning
-boundary and use existing logging-based Sentry integration, not new direct SDK calls.
-
-## 7. User Interface and State Model
-
-### 7.1 Account settings
-
-Add `/account/personal-tools` using existing account shell and navigation. Reuse common Toolkit
-catalog, form/wizard, Provider fields, setup callbacks, connection readiness and connection-test UI.
-This is external capability management, distinct from Slack/Discord identity-only linking.
-
-The list shows the existing Name/type/account/readiness information and `Allow all` or
-`Selected Agents` status. A new connection visibly starts All after the Provider's ordinary creation/
-review completes; unpublished credentials do not execute before their ordinary lifecycle permits it.
-
-Connection-level Agent access groups eligible Agents by Workspace. Selected state is not inferred
-from checkbox count and search filters never become replacement authority. Show the effect of
-All-to-Selected transition before save. Explicit All resumes future eligibility; normal Agent-side
-reenabling only adds that Agent under Selected.
-
-### 7.2 Agent page and conversation shortcut
-
-Add a personal entry in Agent navigation, separated from Sessions. The independent page under the
-canonical Agent route shows Agent identity, current account and application to all of the account's
-personal Sessions with that Agent. It does not require AgentAdmin solely to edit the User's own
-personal allowance.
-
-The existing composer add menu links to that page with an explicitly Agent-scoped label. Keep the
-mobile Session header unchanged. Use existing AgentSettingsHeader on the settings page rather than
-the originating Session header. Save/cancel actions remain reachable outside the scrolling selection
-area. Validate origin-return navigation and reauthorize before returning or reading a Session.
-
-A User with no personal connection is directed to account setup. Existing Provider setup return
-navigation can return to the Agent access page only after validating that the current owner can still
-access it. The connection remains User-global regardless of the entry origin.
-
-### 7.3 State and conflict handling
-
-Containers project loading/error/loaded states as ADTs. Views are pure props and callbacks. Keep
-unsaved state local; cancel performs no permission mutation. Save failures retain the draft with
-safe retry/reload guidance, and uncertain responses do not claim success. Invalidate both Agent-side
-and connection-side queries after an acknowledged commit using existing tRPC invalidation patterns.
-No live API calls are made from Storybook fixtures.
-
-Use all supported locale files with aligned keys; retain English repository artifacts and natural
-localized UI text. Cover keyboard operation, labels, small screens, long account/Agent names and
-mobile closed/menu/page states. The earlier prototype's default-none and header-button examples are
-not implementation authority; update production-oriented stories to the confirmed defaults and flow.
+Preserve shared/Agent form behavior, redacted credential omission and Google metadata-only saves.
+Align all four locale structures and natural copy. Real-component stories use static fixtures, not
+live API calls. Validate actual fonts/theme, keyboard labels/focus, loading/error/empty/readiness,
+long names, mobile menu/page/closed states and fixed actions. Render representative actual Workspace
+and Agent-shell states before presenting visual acceptance; a screenshot of only the bottom of a
+stress list is not a usable product review. Historical global mock labels and old default-none/header
+patterns do not define the corrected UI.
 
 ## 8. Migration, Rollout and Rollback
 
-Generate a forward Alembic revision through the supported CLI and update the repository revision
-file. Do not rewrite an executed migration. The migration:
+Revise the feature's unmerged forward migration against the pre-feature main baseline rather than
+introduce a global-to-scoped compatibility mode. Existing Workspace-shared/Agent-owned rows, Toolkit
+IDs, grants, attachments and namespaces remain unchanged. Classify existing ownership, add explicit
+personal owner/policy/membership and legal setup targets, and keep Workspace mandatory throughout.
+Verify named constraints, composite dependent scope, backfills and inconsistent-row failure.
 
-1. Adds constrained User ownership to canonical Toolkit storage and classifies existing Workspace/
-   Agent owners without changing their IDs or credentials.
-2. Adds the User-only All/Selected policy and dependent positive membership relation. Existing
-   shared/Agent rows receive no personal policy and are not copied to Users.
-3. Extends GitHub/Google setup-target storage to legal User-global context, preserving valid existing
-   shared/Agent rows and current callback behavior.
-4. Preserves current MCP/GitHub/Google Toolkit foreign keys, namespace reservations and delete rules;
-   adds User-owned cleanup dependencies without creating a synthetic Workspace.
-5. Verifies legal owner shapes and rejects inconsistent preexisting data explicitly rather than
-   guessing an owner.
+The original main baseline has no new personal ownership rows. Do not infer a Workspace for any
+unexpected User-global rows or unpublished attempts from an already-applied draft migration. Stop
+and diagnose that exact environment, preserving data; an explicit mapping would be a separately
+authorized remediation, not a default Workspace, hidden home, deletion or automatic rehome. Tests
+must exercise the corrected migration from its supported baseline and preserve normal existing data.
+Do not relabel a draft database's revision marker to pretend the schema was migrated.
 
-Use the normal coordinated schema/application upgrade; do not introduce a feature flag, dual-write,
-shadow mode, fallback ownership path or new operational service. Before enabling admission on new
-code, verify old API/Worker binaries will not resolve or mutate User-owned rows under their old
-Workspace assumptions. Use ordinary rollout/draining, not mixed compatibility behavior.
-
-Existing stored shared callback payloads remain valid current shared contracts. A newly issued
-personal callback must not be handled by an old binary. If rollback is needed after personal rows
-exist, stop affected admission, retain/backup data, and restore a schema/application pair that can
-represent it. Do not run an old Workspace-only application against new User-owned state or downgrade
-by silently discarding personal grants. Before any destructive downgrade the operator must account
-for personal rows explicitly; a backup restore is the conservative rollback boundary.
-
-No production migration or deployment is performed by this Design task.
+Use a coordinated schema/API/Worker upgrade and ordinary draining. Old binaries must not operate on
+new personal rows through older shared predicates. No feature flag, dual write, shadow service,
+optional global mode, protocol version or new rollback system is added. If rollback is needed after
+personal data exists, preserve/backup it and restore a compatible schema/application pair; do not
+silently discard personal grants. No production migration, merge or deployment is authorized here.
 
 ## 9. Removal and Replacement
 
-| Existing unit/assumption | Authority | Replacement or retained authority | Boundary | Absence/regression evidence |
-| --- | --- | --- | --- | --- |
-| Universal non-null owning Workspace in canonical Toolkit internals | ADR-D1 | Explicit legal owner variants; execution Workspace remains canonical workload context | Schema, detached types, repos and management/resolve adapters | Legal-shape tests; no synthetic Workspace for personal rows |
-| Null Agent owner alone classifies shared configuration | ADR-D1; REQ-7 | Exact Workspace-owned branch predicates | Shared discovery, attachment, CRUD and summaries | Foreign personal IDs never appear or attach through shared routes |
-| Workspace/Agent-only setup target assumptions | ADR-D1; REQ-9 | Existing target variants plus User-owned target | MCP/GitHub/Google admission, attempt state, callbacks and refresh | Existing targets still work; owner-swap/replay/foreign target tests |
-| Effective-source variants omit personal ownership | REQ-4; ADR-D1 | Explicit personal projection limited to User root | Runtime source/catalog and grant adapters | Team/other User roots have no automatic personal source |
-| A prepared source alone remains executable after allowance removal | REQ-6 | Current personal invocation/export admission | Tool wrapper and credential hooks | Prepare, revoke, then call/export denies without fallback |
-| Prototype default-none, Session header button and personal-only export ban | Confirmed REQ-2/3/9; ADR-D2/D3 | Default All, selected policy after restriction, Agent page and existing config parity | Feature views/stories implemented from approved behavior | Story/component matrix and owner-specific option parity |
-| Duplicating Provider forms or personal-specific reduced catalogs | REQ-9; ADR-D1/D3 | Shared Provider views and lifecycle with owner adapters | Frontend and Provider composition | Field/auth option parity across ownership |
+| Obsolete behavior/unit | Removal authority | Replacement | Boundary and absence evidence |
+| --- | --- | --- | --- |
+| User owner requires null Workspace; optional owning Workspace in personal types | corrected REQ-1/4 | canonical User owner inside mandatory Workspace | schema/owner DTO/migration tests reject null or mismatched personal scope |
+| User-only management predicates and account-global personal route/client inputs | corrected REQ-1/2/4 | exact current User plus authorized Workspace at every operation | same-User A/B list/get/mutate/test/setup/outcome denials; no scope-less route |
+| All-to-Selected baseline spans all User Workspaces | corrected REQ-2 | full ordinary-access snapshot within the Toolkit's Workspace | filtered-list and A/B policy tests; foreign Agent IDs reject atomically |
+| User-global setup/callback target and account-only returns | corrected REQ-1/4/5 | owner/Auth Session/Workspace/Toolkit targets and reauthorized scoped returns | missing/changed/mixed scope has zero exchange/publication; shared callbacks regress normally |
+| User-only source candidates/current parent admission/export | corrected REQ-4/6 | canonical owner and executing Workspace equality at each protected boundary | prepare in A then use/export in B denies without fallback |
+| Account-global Web personal pages and Workspace search/groups | corrected REQ-1/2; clarified UX | Workspace personal management, Toolkit-specific same-Workspace Agent list | route/navigation/story tests; actual scoped shell renders |
+| Global scope assertions and misleading fixture/mocks | corrected REQ-8; M11 | same-User A/B separation and scope-correct real-component fixtures | obsolete assertions removed; full supported Provider and existing-owner regression remains |
 
-Retain existing shared credentials, attachments, namespaces, public route contracts, current Provider
-behavior, automatic Toolkits, account links and the generic Userless execution contract. No obsolete
-per-user OAuth implementation or legacy PAT table is revived. Generated client changes replace their
-source contracts through regeneration; stale tests describing new personal default-none/header
-behavior are replaced, not kept as alternate product modes.
+Retain one canonical Provider/Toolkit platform, existing shared/Agent current callbacks, source
+revision/namespace semantics, Userless generic execution, optional Runtime export and ordinary
+result visibility. Remove obsolete tests with removed behavior rather than assert deleted global
+features are absent as a separate product mode. Final Specs replace old branch behavior only after
+the corrected implementation is reachable and verified.
 
 ## 10. Test Strategy
 
-### 10.1 E2E-primary verification
+### 10.1 Deterministic assembled-product matrix
 
-Extend current required public journeys in `testenv/azents/e2e/src/tests/required/public` and Web
-journeys in `testenv/azents/e2e/src/tests/web/public`. Use real public API, persistence, worker dispatch
-and controlled Provider fixtures to prove cross-boundary outcomes. Reuse `test_user_sessions.py`,
-`test_toolkit.py`, `test_github_user_toolkit.py`, `test_google_connection.py` and the corresponding Web
-Toolkit/Provider flows as baselines. Do not claim static parsing or Storybook alone proves execution.
+Primary verification uses real API/persistence/Worker/Web and isolated fake Providers. Narrow unit,
+database integration and component tests own detailed permutations and presentation. Required flows:
 
-Required matrix:
+- Two active Users, two Workspaces and multiple Agents, including matching names. The same User
+  connects in A and cannot list/read/configure/allow/discover/call/export that connection in B.
+  Connecting the same external account separately in B yields a distinct Toolkit/grant/policy.
+- Owner personal management works with ordinary Workspace/public-Agent access without shared
+  Toolkit-manager or AgentAdmin. Another User and a Workspace owner cannot read private metadata.
+  Shared/Agent endpoints reject personal IDs and personal endpoints reject other ownership/scope.
+- Each Toolkit starts All for its eligible Agents in its Workspace. New same-Workspace Agents become
+  eligible under All; Agents in B never do. First restriction snapshots all current eligible Agents
+  in A only, independent of search/Provider readiness. Selected preserves hidden choices and does not
+  add future Agents; explicit All resets only that Toolkit. Editing Toolkit A does not change B.
+- Both editor entries, cancel, failed/conflicted save and an atomic multi-Toolkit Agent save project
+  one per-Toolkit authority. Foreign-parent/Agent intents reject the whole batch, not partial success.
+- Team root, owner User root, other User root, recovery/continuation and User-root subagent use canonical
+  lineage and Workspace. Forged sender/wakeup/Tool/callback scope cannot change owner or Workspace.
+- All configurable Provider and current auth families have ownership/management coverage. Use focused
+  real Worker calls for each distinct execution/transport family; no inconvenient Provider is omitted.
+- Prepare then withdraw/disable/disconnect/lose ordinary access, then invoke/export: reject. Admit then
+  withdraw behind an explicit fake-Provider barrier: admitted call may finish, next admission rejects.
+  Cached/background discovery, refresh gaps, snapshot publication and grant finalization recheck scope.
+- Provider connect/cancel/replay/foreign Auth Session/changed Workspace/current-grant replacement and
+  exact outcome recovery. Reconnect retains the same Toolkit's Workspace and allowance. Existing
+  shared and Agent Provider callbacks remain compatible, without accepting obsolete personal globals.
+- GitHub Runtime injection on/off for all existing auth families with fake credentials, shared parity,
+  no newly denied credential collection/export and no false recall assertion for running processes.
+- Same Provider/name/slug across owners or Workspaces never aliases source schema/executor, namespace,
+  Activity, Tool Search or ordinary environment merge. Read-only listing does not allocate namespaces.
+- User disable/decommission, membership loss, Agent deletion and Workspace deletion obey exact scoped
+  admission and existing resource lifecycle, without synthetic ownership transfer.
+- Forward migration preserves pre-feature shared/Agent resources, setup/grants and identifiers, admits
+  only legal scoped personal shapes and fails inconsistent/unplaceable draft data without guessing.
 
-- Two active Users; two Workspaces; at least two Agents in one Workspace and one in the other; one
-  identically named Agent; a Team root, two User roots and a User-root subagent.
-- Every configurable Provider, with current static/OAuth auth families represented. Validate the full
-  ownership/management matrix for every type and focused real worker calls per distinct execution/
-  transport family; no Provider omitted because it is less convenient to fake.
-- Global personal creation defaults All; add a newly accessible Agent and verify eligibility; first
-  restriction stores Selected across all current Workspaces; a subsequent Agent remains unallowed;
-  modifying one Agent preserves other and filtered-out selections.
-- Two editor entries update the same authority. Save/cancel, concurrent edits and All-to-Selected
-  conversion never expose mixed parent/membership or partial multi-connection success.
-- Owner can manage without Toolkit-manager/AgentAdmin. Another User/Workspace Owner cannot read or
-  mutate private connections; shared routes reject personal IDs and personal routes reject shared IDs.
-- User root selects its owner; Team/other User root does not; continuation/recovery/subagent rechecks
-  canonical lineage; forged sender/wake-up/Tool parameters do not change credential owner.
-- Prepare, then revoke/disable/disconnect/remove ordinary access, then invoke/export: current admission
-  denies. Admit, then revoke while fake Provider waits: already admitted call may finish, next call
-  denies. Synchronize through explicit fixture barriers, not sleeps.
-- Provider connect/cancel/replay/foreign Auth Session, changed target, stale refresh and exact outcome
-  recovery. Reconnect follows the existing Provider review/identity behavior and keeps allowance.
-- GitHub Runtime injection on/off across existing auth families using fake tokens; both shared and
-  personal modes retain the same options. New denied export produces no credential. Existing running
-  process behavior is not tested as if local withdrawal recalled its token.
-- Personal/shared same Provider and equal names: exact source schema/executor mapping, Tool Search,
-  Activity and namespace identity; shared resource compatibility; ordinary environment key collision
-  handling remains the common documented merge rule rather than an account fallback.
-- User disable/decommission, Agent deletion and Workspace deletion: no synthetic ownership transfer,
-  no personal connection removal solely because an unrelated Workspace disappears.
-- Migration from current shared, Agent-owned, staged attempts and grants with unchanged identifiers;
-  legal new owner forms and explicit inconsistent-row failure.
+### 10.2 Fixtures and evidence
 
-### 10.2 Fixtures, prerequisites and evidence
+Reuse existing required/Web E2E substrate, Google fake, GitHub setup/validation proxy and deterministic
+model/Worker responses. Extend fake support only for missing Provider requests and explicit barriers.
+Use public management/UI paths to create state; no direct database mutation in E2E. Required missing
+fake prerequisites fail rather than skip. Paid model calls and live end-user Provider credentials are
+not prerequisites for mandatory correctness. Optional live interoperability is separately opt-in and
+may skip only for named missing external credentials; such a skip proves no live acceptance.
 
-Use isolated test database/Runtime environments and fake Provider accounts/tokens. Current Google
-Provider fake and GitHub validation/setup proxy fixtures provide the starting point; extend testenv
-support only for missing deterministic Provider requests/barriers. Use a deterministic model response
-or existing worker fixture when actual model reasoning is not the property under test. Real paid
-model/provider access is not required for mandatory correctness checks.
+Record code SHA, environment identity, exact selection/results, safe Provider call counters, expected
+User/Workspace/Agent/source and redacted error categories. Preserve trustworthy component/product
+screenshots and layout/font metadata, not secrets, cookies, codes/state or complete environment dumps.
+The previous global-scope test/build/story results are historical evidence, not corrected acceptance.
 
-Record code SHA, environment identity, exact test selection/results, skipped prerequisites, fake
-Provider observed calls, expected owner/Agent/source and redacted error category. Retain screenshots
-and safe request/call counters, not OAuth codes/state, real credentials, cookies or complete environment
-dumps. Fake token assertions can run in process but must not be copied into generic reports as if
-live credentials had been tested.
+### 10.3 Integrated quality
 
-Required fake prerequisites missing in required CI are failures, not silent skips. Existing optional
-live interoperability checks stay separately opt-in and may skip only for explicitly unavailable
-credentials/provider prerequisites with a named reason. A live skip is not proof of live acceptance.
-No change to CI coverage/gates or relaxed timeouts is authorized.
-
-### 10.3 Component, integration and quality checks
-
-Colocated Storybook/component play checks own the detailed state matrix: All/Selected, transition
-notice, search preservation, empty, reconnect, save/cancel/error, foreign-return denial, mobile
-closed/composer-menu/Agent-navigation/page, keyboard focus and fixed save region. Use actual shared
-forms/theme/fonts and static fixtures. Unit tests own pure predicate/owner union parsing; database
-integration tests own constraints, locks and mutation interleavings. These supplement E2E.
-
-Run repository-required format, lint and Python/TypeScript type checks, scoped tests and public client
-regeneration. Update applicable Living Specs with reachable behavior during implementation. Current
-Design validation is a source/authority audit only; no feature implementation or live tests have run.
+Run format/lint/configured type checks, backend focused/full regression as invalidated, ownership and
+migration integration, generated OpenAPI/client consistency, full Web tests/build, actual Storybook
+plays/renders, assembled required/Web E2E, documentation catalog and diff/hooks. Keep CI gates and
+normal timeouts unchanged. Primary Agent executes integration; the single assigned read-only reviewer
+reviews the stable complete corrected phase diff after root validation, and root applies findings.
+Exact-SHA CI must pass for the corrected stack before completion; no merge or deployment is implied.
 
 ## 11. Feasibility and Authority Audit
 
-| Requirements | Mechanisms | Evidence and feasibility |
+| Requirements | Mechanisms | Current evidence and correction feasibility |
 | --- | --- | --- |
-| REQ-1 | M1, M3, M4 | Feasible through constrained owner extension and owner-specific CRUD/setup adapters; current Toolkit/grant FK reuse supports the selected model |
-| REQ-2 | M2, M6, M9 | Feasible with parent-serialized policy/membership intents and server-side current eligibility; requires multi-Workspace/concurrency integration tests |
-| REQ-3 | M9 | Feasible with actual Agent navigation, AgentSettingsHeader and existing composer menu; prior component renders proved the layout concept, not API execution |
-| REQ-4 | M1, M4, M5, M6, M7, M8 | Feasible with root lineage and explicit personal admission; existing root resolver/Provider guards support the boundary; no claim of isolation after export |
-| REQ-5 | M2, M3, M4, M9 | Feasible by common Provider lifecycle and pure view/container composition; preserve each Provider's actual recovery contract |
-| REQ-6 | M4, M6, M7 | Feasible for managed future admissions with short DB ordering; not remote abort/recall of exported tokens |
-| REQ-7 | M1, M3, M8, M10 | Feasible subject to owner-predicate audit and migration/response regression coverage; no data conversion or renamed existing namespaces |
-| REQ-8 | M11 | Feasible using current required/Web E2E substrate and deterministic fixture extensions; live Provider acceptance remains unverified |
-| REQ-9 | M1, M3, M4, M7, M11 | Feasible by registry/form/Provider reuse, with explicit auth-target adaptation for MCP/GitHub/Google; all mode/config parity is a required test, not an assertion that existing code works unchanged |
+| REQ-1 | M1/M3/M4/M9/M10 | canonical parent/grant identity already exists; correct null-Workspace owner and User-only predicates/targets. Existing Workspace routing/shell supplies explicit scope |
+| REQ-2 | M2/M6/M9 | existing parent serialization, positive deltas and expected-mode conflicts are reusable; narrow eligibility and dependent membership to one Workspace |
+| REQ-3 | M9 | Agent route/Header/Layout and composer entry are reusable; return authorization already reads canonical Agent/Session, now requiring same-Workspace personal origin |
+| REQ-4 | M1/M4/M5/M6/M7/M8 | execution target already captures canonical Workspace; candidate/parent/provider guards must consume it rather than User-only lookup |
+| REQ-5/6 | M2/M3/M4/M6/M7/M9 | common Provider draft/outcome/CAS and admission-gap boundaries exist; thread required Workspace consistently and revalidate every final protected write/export |
+| REQ-7 | M1/M3/M8/M10 | existing owner tags separate shared/Agent resources; mandatory Workspace does not require renaming IDs/grants or a second Provider platform |
+| REQ-8/9 | M11/M3/M4/M7 | required/Web fixtures and common form/Provider tests exist; corrected full matrix and visual acceptance remain implementation work, not claimed results |
 
-Every material mechanism maps to confirmed Requirements, accepted D1-D3, unchanged Specs or project
-constraints. The rejected personal export restriction is absent. The initial stronger secrecy wording
-has been replaced by the requester's explicit Runtime-option parity boundary. This removes the
-isolation contradiction without pretending it was solved by new infrastructure.
+The proposed mechanisms are feasible with cross-cutting correction, conditional on complete generated
+interface/Provider admission coverage and supported-baseline migration validation. No repository
+constraint requires retaining User-global ownership. No new unresolved product question about scope
+or per-Toolkit permission remains. No new isolated Runtime, global credential binding, personal-only
+Provider restriction, fallback or version system is authorized.
 
-No unapproved feature flag, token relay, personal Runtime, ownership fallback, credential history or
-new versioning system is included. Identifiers/helper placement, typed projection factoring and
-fixture internals remain Agent-owned local details. Any discovered need to alter these material
-boundaries returns to the corresponding Requirements/ADR before implementation.
+Reverse authority check: M1-M6/M8-M10 implement corrected Workspace/owner outcomes using retained
+canonical Toolkit, policy, identity and existing transaction boundaries; M7 retains explicitly
+confirmed parity; M11 supplies required verification. Navigation changes are disclosed in M9 rather
+than hidden as a cosmetic fix. Removal obligations target contradicted feature surfaces, not unrelated
+production account/shared behavior. Revision-bound approval remains the gate before code correction.
 
-## 12. Risks and Delivery Shape
+## 12. Delivery, Risks and Remaining Validation
 
-- Broad coverage touches common models, three authentication families, generated clients and runtime
-  composition. Split delivery into reviewable layers only after this Design is approved; phases do
-  not create partial product behavior or approval authority.
-- Suggested delivery sequence: constrained data/domain foundations; common owner-aware management and
-  Provider setup; permission/runtime projection and invocation admission; Web entries/shared form
-  integration; combined Spec/compatibility/E2E and migration verification. Shipping must preserve an
-  internally coherent schema/application pair rather than introduce a feature-flagged second mode.
-- Optional Runtime export retains a known shared-resource risk. Do not market personal connection
-  ownership as private storage or process isolation.
-- Auth refresh and current permission races require deterministic barrier tests. All Provider grant
-  implementations must follow the parent/current-grant lock order used by the new admission helper.
-- Existing Provider side effects, scope availability, external account policy and live interoperability
-  cannot be proved by this repository-only Design audit. Track them as explicit implementation and
-  optional live acceptance evidence, not unverified guarantees.
-- Initial prototypes still show now-superseded default-none/header patterns in historical captures.
-  New implementation stories and final documentation must use this snapshot's confirmed behavior.
+Correct the existing feature stack in dependency order: foundation/schema/owner and membership;
+management/Provider targets/OpenAPI/clients; source/admission/refresh/export; then scoped Web/visual
+integration and full acceptance. Preserve the current dirty Web work as reference and reusable common
+form work; do not overwrite unrelated worktrees or discard drafts to simplify rebasing. Retain one
+fixed reviewer and reviewable phase boundaries. Revised execution plans decompose this Design only
+after approval; they cannot create scope or infer approval from old CI.
+
+Main risks are missing scope propagation in late Provider writes/export, accidental mixing of User
+and Workspace authorization, source-cache reuse, stale callback navigation and unplaceable draft
+schema state. Address them with explicit typed targets, completed repository predicates, shared
+regression and deterministic barriers, not flags, duplicated Provider code or data guesses.
+
+Visual acceptance must be repeated after scope correction in actual Workspace/Agent shell context.
+Initial checkbox stress captures and successful presentation assertions did not establish adequate
+product quality. No corrected E2E, migration, live Provider or production rollout result is claimed.
 
 ## 13. Design Approval
 
-- Mode: Collaborative.
-- Decision owner: requester.
+### Historical revision 1
+
+- Mode: Collaborative; decision owner: requester.
+- Approved on: `2026-10-17`; revision: `1`.
+- Approved IDs: `M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11`.
+- That approval covered the earlier User-global design. The later confirmed Workspace boundary
+  invalidates it for continued implementation and does not imply approval of revision 2.
+
+### Approved revision 2
+
+- Mode: Collaborative; decision owner: requester.
 - Approved on: `2026-10-17`.
-- Approved Design revision: `1`.
-- Approved authority ID set: `M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11`.
-- Approved scope: canonical User Toolkit ownership, All/Selected permission, common Provider and
-  Runtime feature parity, owner-correct setup/current invocation, Agent-level navigation, preserving
-  shared data/contracts, forward migration and the complete verification plan.
-- The requester approved the complete mechanism set and explicitly requested implementation.
-  No implemented date is recorded until the feature and required validation are complete.
+- Approved revision: `2`.
+- Approved authority IDs: `M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11`.
+- The requester instructed immediate corrective development in response to the complete revision 2
+  approval brief; no further approval wait for this scope is required.
+- Approved scope: canonical User ownership inside a real mandatory Workspace; independently scoped
+  per-Toolkit All/Selected policy; explicit personal management/setup/callback scope; canonical
+  Workspace/User execution/admission/export; Workspace personal management and Agent/composer entries;
+  preserved Provider/shared Runtime behavior; corrected supported-baseline migration and full tests.
+- Corrective implementation, validation and PR submission are authorized. Merge and deployment remain
+  outside this approval.

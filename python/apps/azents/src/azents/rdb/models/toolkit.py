@@ -60,10 +60,10 @@ class RDBToolkitConfig(RDBModel):
     owner_kind: Mapped[ToolkitOwnerKind] = mapped_column(
         toolkit_owner_kind_enum, nullable=False
     )
-    workspace_id: Mapped[str | None] = mapped_column(
+    workspace_id: Mapped[str] = mapped_column(
         sa.String(32),
         sa.ForeignKey("workspaces.id", ondelete="CASCADE"),
-        nullable=True,
+        nullable=False,
     )
     owner_agent_id: Mapped[str | None] = mapped_column(
         sa.String(32),
@@ -131,12 +131,12 @@ class RDBToolkitConfig(RDBModel):
         "(owner_kind = 'agent' AND workspace_id IS NOT NULL "
         "AND owner_agent_id IS NOT NULL AND owner_user_id IS NULL "
         "AND personal_access_mode IS NULL) OR "
-        "(owner_kind = 'user' AND workspace_id IS NULL AND owner_agent_id IS NULL "
+        "(owner_kind = 'user' AND workspace_id IS NOT NULL AND owner_agent_id IS NULL "
         "AND owner_user_id IS NOT NULL AND personal_access_mode IS NOT NULL)",
         name="ck_toolkit_configs_owner_shape",
     )
     UQ_ID_OWNER_USER = sa.UniqueConstraint(
-        "id", "owner_user_id", name="uq_toolkit_configs_id_owner_user"
+        "id", "owner_user_id", "workspace_id", name="uq_toolkit_configs_id_owner_user"
     )
 
     __table_args__ = (
@@ -158,19 +158,29 @@ class RDBPersonalToolkitAgent(RDBModel):
         primary_key=True,
     )
     owner_user_id: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(sa.String(32), nullable=False)
     agent_id: Mapped[str] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("agents.id", ondelete="CASCADE"),
         primary_key=True,
     )
     IX_AGENT_ID = sa.Index("ix_personal_toolkit_agents_agent_id", "agent_id")
     FK_PERSONAL_OWNER = sa.ForeignKeyConstraint(
-        ["toolkit_id", "owner_user_id"],
-        ["toolkit_configs.id", "toolkit_configs.owner_user_id"],
+        ["toolkit_id", "owner_user_id", "workspace_id"],
+        [
+            "toolkit_configs.id",
+            "toolkit_configs.owner_user_id",
+            "toolkit_configs.workspace_id",
+        ],
         ondelete="CASCADE",
         name="fk_personal_toolkit_agents_owner",
     )
-    __table_args__ = (IX_AGENT_ID, FK_PERSONAL_OWNER)
+    FK_AGENT_WORKSPACE = sa.ForeignKeyConstraint(
+        ["agent_id", "workspace_id"],
+        ["agents.id", "agents.workspace_id"],
+        ondelete="CASCADE",
+        name="fk_personal_toolkit_agents_agent_workspace",
+    )
+    __table_args__ = (IX_AGENT_ID, FK_PERSONAL_OWNER, FK_AGENT_WORKSPACE)
 
 
 class RDBAgentToolkit(RDBModel):

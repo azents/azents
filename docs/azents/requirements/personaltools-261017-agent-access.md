@@ -17,14 +17,19 @@ snapshot_id: personaltools-261017
 
 The requester approved proceeding to technical design from the revised user experience on
 2026-10-17. This repository Requirements snapshot translates that experience into observable outcomes.
-On 2026-10-17 the requester confirmed User-global connection ownership and changed the new-Toolkit
-default to **Allow all**. The requester also confirmed that this is an ongoing policy covering
-subsequently accessible Agents, including those in newly joined Workspaces. The requester also
+The current scope is the requester's 2026-10-17 clarification: personal connections are confined to
+the Workspace in which they are connected, even for the same User. A connection in Workspace A must
+not appear in Workspace B or be available to B's Agents. Allowed Agents are configured independently
+for each Toolkit within its own Workspace. This supersedes the earlier User-global interpretation
+used by the initial implementation and Design revision 1.
+The creation default remains **Allow all**, evaluated continuously for currently and subsequently
+accessible Agents inside that connection's Workspace. The requester also
 confirmed coverage of all currently configurable external Toolkit types and their existing supported
 authentication methods, without a personal-only reduced catalog. The requester confirmed this
-complete Requirements snapshot on 2026-10-17, including existing shared-result visibility and the
-admitted-call withdrawal boundary. ADR and Design work may proceed. Implementation remains
-separately authorized. The requester subsequently selected a **Selected Agents** policy after the
+complete initial Requirements snapshot on 2026-10-17, including existing shared-result visibility and
+the admitted-call withdrawal boundary. Those unchanged outcomes remain in force. The scope
+clarification requires a corresponding ADR/Design correction before further implementation under
+the corrected boundary. The requester selected a **Selected Agents** policy after the
 first Agent restriction, as defined in REQ-2.
 The requester also rejected personal-only feature differences: existing settings, authentication
 methods and optional Runtime credential injection retain the same behavior for personal and shared
@@ -48,9 +53,11 @@ connection in their User Sessions without turning the connection into shared con
 
 ### Primary Scenario
 
-The member connects an external account through their account settings. The new personal Toolkit
-defaults to **Allow all** within the member's existing accessible Agent boundary, and the member uses
-it in a User Session with an eligible Agent. The member may restrict access to particular Agents.
+The member connects an external account as a personal Toolkit within one Workspace. The new personal
+Toolkit defaults to **Allow all** within the member's accessible Agents in that Workspace, and the
+member uses it in a User Session with an eligible Agent there. The member may restrict access to
+particular Agents for that Toolkit. Entering another Workspace does not expose the connection or
+reuse its allowance.
 From within a conversation,
 the member can open the same Agent-level personal-access settings, change the allowed connections,
 and return to the conversation. The selection applies to that member's personal conversations with
@@ -58,7 +65,7 @@ that Agent, not to Team Sessions or another member's work.
 
 ## Supporting Scenarios or Effects
 
-- The member inspects a connection in account settings and manages its allowed Agents.
+- The member inspects one personal connection in its Workspace context and manages its allowed Agents.
 - The member reaches the same permission relationship from Agent navigation or an in-conversation
   shortcut and sees the same saved selection.
 - Another member uses the same Agent without receiving the first member's personal connection.
@@ -69,7 +76,8 @@ that Agent, not to Team Sessions or another member's work.
 
 - Make personal connection ownership and per-Agent delegation understandable and independently
   manageable by the owner.
-- Keep connection management in account settings and permission management visibly Agent-scoped.
+- Make the personal connection's Workspace boundary visible while keeping permission management
+  independently available by Toolkit and by Agent.
 - Preserve discoverability from within a conversation without implying per-Session permission.
 - Use personal credentials only under the correct User Session ownership and owner-controlled Agent
   access policy, with **Allow all** as the confirmed creation default.
@@ -91,16 +99,20 @@ that Agent, not to Team Sessions or another member's work.
 
 ## Requirements
 
-### REQ-1. Owner-managed personal connections in account settings
+### REQ-1. Owner-managed personal connections within one Workspace
 
-The User must create and manage their personal external-service connections from account settings,
-separately from identity-only account links and shared Toolkit management.
-Connections belong to the User globally, not to a User-within-Workspace ownership container.
+The User must create and manage their personal external-service connections within an explicit
+Workspace context, separately from identity-only account links and shared Toolkit management.
+A personal connection belongs to its User within that Workspace. It is not an account-global
+connection that becomes available in other Workspaces.
 
 **Acceptance criteria**
 
-- Account settings provides a clearly personal connection list, connection entry, safe external-account
-  identity when available, connection readiness, and reconnect/disconnect actions.
+- Personal management provides a clearly personal, Workspace-scoped connection list, connection entry,
+  safe external-account identity when available, connection readiness, and reconnect/disconnect actions.
+- The same User's connection in Workspace A does not appear in Workspace B's management or
+  Agent-access surfaces. Access to both Workspaces does not share personal connection ownership,
+  credentials, configuration or allowance between them.
 - Creating or managing the member's own connection does not require Workspace Toolkit-management or
   Agent-admin authority solely because it is a Tool connection.
 - Only the authenticated connection owner may inspect or change private connection configuration,
@@ -109,31 +121,37 @@ Connections belong to the User globally, not to a User-within-Workspace ownershi
   not independently grant access to another User's personal connection.
 - Credentials and authorization secrets are never rendered as ordinary connection details.
 - Identity-only provider linking does not authorize personal Tool use.
-- The owner does not need to recreate the same connection in each Workspace. User-global ownership
-  does not grant new Workspace membership or Agent access.
+- Using the same external account in another Workspace requires a distinct personal connection there.
+  Creating a connection grants no new Workspace membership or Agent access.
 
 ### REQ-2. Default Allow all with owner-controlled Agent restrictions
 
-A newly added personal Toolkit defaults to **Allow all** for its owner's eligible Agents. The owner
+A newly added personal Toolkit defaults to **Allow all** for its owner's eligible Agents in that
+Toolkit's Workspace. The owner
 must be able to inspect that policy and restrict which Agents may use the connection. The same
 effective permission must be editable by connection or by Agent.
 
 **Acceptance criteria**
 
 - A newly added personal Toolkit visibly starts in **Allow all**, not an empty allowlist.
-- **Allow all** applies only to Agents the connection owner may already access, and only in that
+- **Allow all** applies only to Agents in the connection's Workspace that the owner may already
+  access, and only in that
   owner's User Sessions. It never authorizes automatic personal-Toolkit selection in Team Sessions
   or another User's execution. It is not a Runtime isolation guarantee.
-- Connection management shows the active allowance policy and affected Agents with their Workspace
-  context, distinguishing equally named Agents in different Workspaces.
-- Agent-side management lists the current User's eligible connections for that exact Agent.
+- Each Toolkit has its own active allowance policy and allowed-Agent relationship. Editing Toolkit A
+  does not change Toolkit B, even when both have the same Provider, name or external account.
+- Connection management identifies its Workspace and shows only eligible Agents in that Workspace.
+  No Workspace search or cross-Workspace grouping is needed to choose allowed Agents.
+- Agent-side management lists only the current User's personal connections within that exact
+  Agent's Workspace.
 - Saving through either management entry produces the same effective allowed relationship visible
   through the other entry; there are no independent per-page or per-Session permission copies.
 - The UI identifies the Agent, Workspace, current owner, and application to all of that owner's
   personal Sessions with that Agent.
 - Agent restrictions distinguish canonical Agents rather than matching by name.
-- **Allow all** includes subsequently accessible Agents, including new Agents and Agents in newly
-  joined Workspaces. It is not a one-time copy of the Agent list at connection creation.
+- **Allow all** includes subsequently accessible Agents within the same Workspace, including new
+  Agents there. It never expands to another Workspace. It is not a one-time copy of the Agent list
+  at connection creation.
 - Losing ordinary Agent or Workspace access makes the connection unavailable for that Agent even
   while the personal connection's **Allow all** policy remains enabled.
 - Restricting an Agent while in **Allow all** changes the connection to **Selected Agents**. The
@@ -167,8 +185,9 @@ owned by the conversation from which the User arrived.
 
 ### REQ-4. Private execution resolves the Session-associated User's allowed connections
 
-A User Session may use only User-global personal connections owned by its durable associated User
-and allowed by that owner's policy for its canonical Agent, subject to current access rules.
+A User Session may use only personal connections owned by its durable associated User within the
+executing Agent's canonical Workspace and allowed by that Toolkit's policy for the Agent, subject
+to current access rules.
 
 **Acceptance criteria**
 
@@ -179,6 +198,9 @@ and allowed by that owner's policy for its canonical Agent, subject to current a
   Workspace ownership cannot select or replace the associated User's personal credential.
 - Recovery, continuation, and subagent work preserve the same canonical User-root relationship; a
   broker wake-up or Tool argument cannot supply a different personal credential owner.
+- Another Workspace's personal connection is not selected, discovered, invoked or exported merely
+  because it has the same User owner, Provider or name. Listing, setup/callback admission, policy
+  mutation, execution and later credential export all respect the connection's Workspace boundary.
 - The connection's actual external permissions remain authoritative; Agent allowance does not expand
   the provider grant or bypass provider policy.
 - Failure or absence of the selected personal connection does not silently switch the operation to
@@ -202,7 +224,8 @@ allowed for the selected Agent, and must be able to cancel uncommitted changes.
 - Empty connection and fully restricted access states explain the next action. New-connection
   completion clearly states the default **Allow all** consequence rather than requiring an
   additional per-Agent opt-in before eligible use.
-- A User with no personal connections can navigate from Agent access to account connection setup.
+- A User with no personal connections in the Agent's Workspace can navigate from Agent access to
+  personal connection setup for that same Workspace.
 - Cancelling an access edit preserves the previous saved relationship.
 - Expected authorization, connection, and save failures are visible with a bounded retry or recovery
   action; an uncertain result is not reported as committed success.
@@ -256,6 +279,8 @@ requiring live end-user credentials in mandatory checks.
 
 - Verification covers two Users, distinct Workspaces/Agents, private and Team roots, root/subagent
   lineage, denied management, allowed execution, withdrawal, and stale authorization callbacks.
+- The same User's personal connection in Workspace A is absent and unusable in Workspace B, including
+  with guessed connection IDs, matching names, stale callbacks or prepared execution state.
 - Both user-side and Agent-side permission entry points update the same effective relationship.
 - Mobile entry, independent settings identity, selection search, save/cancel, and return navigation
   remain usable with keyboard/accessibility labels and without hidden primary actions.
@@ -294,9 +319,11 @@ currently supported authentication methods rather than selecting a smaller perso
 - Generic execution context remains Userless; only explicitly User-owned capabilities consume the
   canonical User association.
 - Agent access is an owner-controlled persistent relationship, not a per-call approval.
-- Personal connections are User-global. The new personal-Toolkit creation default is **Allow all**.
+- Personal connections are User-owned within one Workspace. The new personal-Toolkit creation default
+  is **Allow all** within that same Workspace.
 - **Allow all** is personal-Session authority within existing access, not shared credential ownership.
-- **Allow all** is ongoing and includes future accessible Agents rather than a creation-time list.
+- **Allow all** is ongoing and includes future accessible Agents in the connection's Workspace rather
+  than a creation-time list.
 - Once the owner restricts an Agent, the connection uses **Selected Agents** and does not inherit new
   eligible Agents. The initial default and the restricted policy have different future-Agent behavior.
 - All currently configurable external Toolkit types and their existing authentication methods are
@@ -333,16 +360,22 @@ currently supported authentication methods rather than selecting a smaller perso
 ## Confirmation
 
 The requester approved the revised user-experience direction and requested technical design on
-2026-10-17. The requester then confirmed User-global personal connections and instructed that newly
-added personal Toolkits default to **Allow all**, superseding the earlier no-Agent default in the
-draft and mock. The requester then confirmed that **Allow all** includes future accessible Agents
-and Agents in subsequently joined Workspaces. The requester further confirmed all existing
+2026-10-17. The initial snapshot used a User-global interpretation. The requester subsequently
+clarified on the same date that personal Toolkits are connected within a Workspace: a connection in
+Workspace A must not appear in Workspace B, including for the same User, and allowed Agents are
+configured independently per Toolkit. This Workspace boundary supersedes the initial global
+interpretation and its cross-Workspace future-Agent expansion.
+New personal Toolkits still default to **Allow all**, superseding the earlier no-Agent draft default.
+That ongoing policy includes future accessible Agents within the connection's Workspace only.
+The requester further confirmed all existing
 configurable external Toolkit types and existing authentication methods without a personal-only
 subset. On 2026-10-17 the requester confirmed the complete Requirements snapshot as presented,
 including unchanged shared-result visibility and allowing already admitted external calls to finish
 after withdrawal while rejecting later calls. The requester subsequently selected Option B for
 Agent restriction: transition from **Allow all** to a saved **Selected Agents** set, with no automatic
-future-Agent inclusion in that policy. No implementation has started under this snapshot.
+future-Agent inclusion in that policy. Initial implementation was submitted as unmerged phases under
+the earlier global interpretation; the corrected Workspace boundary is not yet implemented or
+verified. Design revision 1 approval does not authorize continuing under the contradicted scope.
 The requester subsequently instructed that personal connections must not acquire different feature
 restrictions, rejecting the proposed exclusion of optional Runtime token injection. REQ-4, REQ-6
 and REQ-9 therefore preserve its existing semantics and scope the personal credential guarantee to

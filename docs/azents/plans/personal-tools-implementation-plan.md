@@ -8,82 +8,96 @@ tags: [toolkit, implementation, security]
 # Personal Tools Implementation Plan
 
 - Authority: [Requirements](../requirements/personaltools-261017-agent-access.md),
-  [ADR D1-D3](../adr/personaltools-261017-agent-access.md),
-  [approved Design revision 1](../design/personaltools-261017-agent-access.md).
-- Approved mechanism IDs: M1-M11. Requester approved the complete Design and implementation on
-  2026-10-17. Design delta: None.
-- Implementation, integration, commands, corrections and phase progression: primary Agent `/root`.
-- Exact independent read-only reviewer for every integrated phase: `/root/personal-tools-reviewer`.
-- Source baseline: 4fffac9133934f5b85027b50842b1dc5a48da3b2. Implementation uses a dedicated feature
-  branch and worktree.
+  [ADR and scope clarification](../adr/personaltools-261017-agent-access.md),
+  [approved Design revision 2](../design/personaltools-261017-agent-access.md).
+- Approved mechanisms: M1-M11. The requester instructed immediate corrective development after the
+  complete revision 2 approval brief on 2026-10-17. Design delta: None.
+- Implementation, integration, validation, corrections and phase progression: `/root`.
+- Single independent read-only reviewer: `/root/personal-tools-reviewer`; root applies findings.
+- Initial baseline: `4fffac9133934f5b85027b50842b1dc5a48da3b2`. Existing unmerged feature phases used
+  a global-scope interpretation that is superseded by the confirmed Workspace boundary. Their test
+  successes remain historical evidence, not proof of the corrected scope.
 
-## Delivery Phases
+## Corrected Delivery Phases
 
-1. **Ownership and permission foundations.** Canonical owner/policy types, constrained schema and
-   forward migration, owner-safe shared projections, personal persistence and All/Selected atomic
-   operations. Includes authority documents and this plan; no extra design-only PR. M1/M2/M10/M11.
-2. **Personal management and Provider authentication.** Owner-only CRUD/policy API, common Provider
-   adapters, MCP/GitHub/Google personal setup targets and callbacks, generated clients. Depends on 1;
-   M3/M4/M10/M11 plus M1/M2 interface consumption.
-3. **User-root execution and source identity.** Personal effective sources, root identity and current
-   allowance dispatch/export checks, namespace/lifecycle integration and Runtime parity. Depends on
-   2; M5/M6/M7/M8/M11.
-4. **Web journey and combined verification.** Account connections, Agent personal access, composer
-   shortcut, common Provider views, locale/stories, cross-boundary deterministic E2E, Spec promotion
-   and plan cleanup. Depends on 3; M3/M9/M11 and complete M1-M11 acceptance.
+1. **Ownership and permission foundations.** Correct the existing foundation layer: mandatory real
+   Workspace in User ownership, owner+Workspace predicates, scoped All/Selected intents, constrained
+   positive membership and corrected unmerged migration. M1/M2/M10/M11. Current correction branch
+   `fix/personal-tools-workspace-foundation-261017` starts at Phase 1 commit
+   `e5add532e987645bc5228a833a4e43f25da55f45`; detailed contract is
+   [foundation correction plan](personal-tools-workspace-foundation-correction.md).
+2. **Personal management and Provider authentication.** Integrate the corrected foundation into the
+   existing management phase; require authorized Workspace context for CRUD/access/tests and every
+   Provider setup, callback, refresh and publication target. Regenerate public interfaces/clients.
+   Preserve all Provider options and existing shared/Agent contracts. M3/M4/M10/M11 consuming M1/M2.
+3. **User-root execution and source identity.** Integrate scoped personal selection and exact current
+   parent/provider admission, discovery/refresh/publication/export checks. Canonical root User and
+   execution Workspace must both match. Preserve namespace/lifecycle and Runtime parity. M5-M8/M11.
+4. **Workspace Web and complete acceptance.** Preserve reusable common owner-form work from the dirty
+   Web draft, replace account-global routes with Workspace personal management, correct Toolkit-side
+   same-Workspace Agent selection and Agent/composer entry/return, and improve visual quality in real
+   shells. Finish locales/stories, deterministic API/Worker/Web matrix, Spec promotion and cleanup.
+   M3/M9/M11 and complete M1-M11 acceptance.
 
-Use sequential PRs with `Personal tools [n/4]: ...` titles. Open each phase PR before beginning the
-next. Subsequent branches base on the preceding phase branch. No merge or production deployment is
-authorized. Track CI through all created PRs; correct failures without weakening gates.
+Keep reviewable layer boundaries and existing PR provenance. Open each corrected phase as a PR or
+update its existing phase PR before starting the next implementation layer. Do not rewrite another
+worktree or discard the current Web draft. Rebase/retarget the dependent stack only after corrected
+foundation review/validation. Track exact-SHA CI across the final corrected stack. No merge or
+production migration/deployment is authorized.
 
-## Interfaces and Integration
+## Fixed Interfaces and Removal Boundaries
 
-- Keep one canonical Toolkit identity; distinguish Workspace/Agent/User owners and preserve unchanged
-  Workspace-only public contracts. Shared attachment/effective sources exclude personal records.
-- A personal Toolkit has All/Selected policy; positive membership is independent of shared
-  AgentToolkit attachment. All-to-Selected derives current eligible Agents in the transaction.
-- Common services/Provider adapters own external work outside DB scopes. Owner-aware callback and
-  current-grant checks retain existing lifecycle semantics and all Provider settings.
-- User-root lineage, not sender/requester, selects personal authority. Current allowance is checked
-  on each managed dispatch and new credential export; no recall of already exported credentials.
-- Account and Agent views share policy authority. Session shortcuts navigate to the independent
-  Agent page, not a Session-owned policy.
+- One canonical Toolkit ID and common Provider/grant platform. Shared, Agent and User owners all
+  carry the real Workspace; only personal ownership adds the authenticated owner User.
+- Every personal repository read/lock/write carries both User and Workspace. First restriction derives
+  the full eligible Agent set inside that Workspace in the transaction. Positive membership constrains
+  both its canonical parent scope and Agent scope; no cross-Workspace personal binding is retained.
+- All/Selected is independent per Toolkit. Both editors issue intents against that authority; filtered
+  read lists are not replacement writes. Own policy requires ordinary Workspace/Agent access but no
+  shared Toolkit-manager/AgentAdmin role solely for personal settings.
+- Common Provider operations perform external work outside DB transactions and re-admit the exact
+  current User/Auth Session/Workspace/Toolkit before final writes. Shared callbacks remain unchanged;
+  obsolete personal-global targets are removed rather than silently upgraded.
+- Canonical durable User-root and execution Workspace select personal capabilities. Sender, viewer,
+  broker and Tool args do not. Current scope/allowance gates managed dispatch and later export; already
+  admitted calls/tokens retain their existing lifetime and shared-resource behavior.
+- Workspace and Agent views edit the same per-Toolkit authority. Remove account-global personal
+  routes, Workspace search/groups and unrelated prototype defaults. Keep the mobile Session header
+  unchanged and reauthorize same-Workspace source returns.
 
 ## Validation and Prerequisites
 
-Primary Agent owns every integrated validation run. Each phase has format/lint/type checks and
-focused database/unit/route tests appropriate to its boundary. Use the existing isolated test DB
-fixture and current fake OAuth/Provider fixtures. Before full integration, prepare an owned isolated
-integration environment; do not use another test run's data. Required
-E2E verifies all Providers/auth families, two Users/Workspaces, Team/User/subagent roots, revocation
-interleavings, shared parity and mobile routing. Live-provider acceptance remains separate.
+Root runs each phase's format/lint/configured types, focused DB/route/Provider and migration regression,
+client generation consistency and integrated checks. Mandatory product verification uses owned isolated
+real API/persistence/Worker/Web and deterministic fake Providers, with two Users and Workspaces,
+matching names, same-User A/B separation, independent Toolkit policies, Team/User/subagent roots,
+stale callbacks, withdrawal interleavings and Runtime export parity. Missing required fake prerequisites
+fail, not skip. Live Provider checks remain optional and separately reported.
 
-Review only a stable integrated diff after focused validation; fix findings directly and rerun
-invalidated evidence. Use the same reviewer for any material re-review. Never claim tests passed
-without actual output.
+Real-component stories own presentation/state permutations, keyboard, search/cancel/error/conflict,
+mobile navigation/page/menu and long-list fixed actions. Render actual Workspace/Agent-shell context
+with real theme/fonts; prior checkbox stress captures were not accepted visual quality. Old tests and
+screenshots cannot stand in for corrected scope or complete product acceptance.
 
-## Removal, Specs and Rollout
+Request the fixed reviewer only after the complete layer's integrated diff is stable and root validation
+is complete; root directly resolves findings and reruns invalidated checks. Do not weaken gates,
+enlarge timeouts or claim unexecuted checks.
 
-Own each Design removal obligation in its activating phase: universal Workspace schema/domain
-assumptions and shared owner predicates in 1; Workspace-only personal setup assumptions in 2;
-prepared-source authority shortcuts in 3; obsolete prototype UI/defaults in 4. Retain legitimate
-existing shared authority and credentials. Search for obsolete assumptions and prove absence through
-negative/compatibility tests rather than deleting current shared workflows.
+## Specs, Migration and Closure
 
-Specs impacted: toolkit, conversation execution, MCP OAuth, Google connection, applicable Agent and
-Runtime/credential behavior. Update current behavior when it becomes reachable, and perform the
-combined Spec review before final promotion. Set matching Requirements/Design implemented dates only
-after integrated verification completes. Remove these temporary plans in phase 4 after final
-verification; do not create an extra cleanup PR solely for process.
+Update reachable Specs as each corrected layer becomes current, and perform final combined Spec review
+before promotion. Set matching Requirements/Design implemented dates only after complete acceptance.
+Remove feature implementation/phase plans after validated promotion, not before. Do not create extra
+cleanup/design-only PRs solely for process.
 
-A normal coordinated schema/application rollout must avoid old binaries using the new User-owned
-rows. No feature flag, dual write, relay or compatibility mode is introduced. Migrations are prepared
-and tested locally only. Operational application and merge require separate authority.
+Correct the unmerged migration from the supported pre-feature baseline without relabeling an already
+applied draft schema or guessing a Workspace for incompatible global rows. Preserve data and diagnose
+such state explicitly. Existing shared/Agent resources keep IDs/grants/attachments/namespaces. Use the
+normal coordinated schema/application rollout; no flags, global fallback, dual write or new Runtime.
 
-## Checkpoints
+## Current Checkpoint
 
-- Initial: Design r1 M1-M11 approved; D1 common identity, D2 All/Selected, D3 parity resolved. No
-  feature code or migrations applied yet. Phase 1 starts on the current dedicated feature branch.
-- Phase boundaries: append completed behavior, stable interfaces, exact commands/results, review,
-  PR/CI status, remaining scope and blockers. New product/material findings return to design; local
-  implementation details stay within approved scope.
+The correction worktree is separate from the preserved uncommitted Web draft. Foundation scoped
+repository/ownership tests and migration/model alignment are being executed before fixed-reviewer
+review. Management, execution, Web redesign and full product acceptance remain pending. No corrected
+phase commit/PR/CI or merge/deployment completion is claimed here.

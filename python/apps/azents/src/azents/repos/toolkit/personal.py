@@ -59,21 +59,29 @@ class PersonalToolkitAccessMutation:
             raise ValueError("Allow all cannot be combined with membership deltas")
 
 
-def active_owner_predicate(user_id: str) -> sa.ColumnElement[bool]:
-    """Require current active User ownership without any Workspace surrogate."""
+def active_owner_predicate(user_id: str, workspace_id: str) -> sa.ColumnElement[bool]:
+    """Require exact active User ownership and ordinary Workspace membership."""
     return sa.and_(
         RDBToolkitConfig.owner_kind == ToolkitOwnerKind.USER,
         RDBToolkitConfig.owner_user_id == user_id,
-        RDBToolkitConfig.workspace_id.is_(None),
+        RDBToolkitConfig.workspace_id == workspace_id,
         RDBToolkitConfig.owner_agent_id.is_(None),
         sa.select(RDBUser.id)
         .where(RDBUser.id == user_id, RDBUser.access_disabled_at.is_(None))
         .exists(),
+        sa.select(RDBWorkspaceUser.id)
+        .where(
+            RDBWorkspaceUser.workspace_id == workspace_id,
+            RDBWorkspaceUser.user_id == user_id,
+        )
+        .exists(),
     )
 
 
-def eligible_personal_agent_ids(user_id: str) -> sa.Select[tuple[str]]:
-    """Select the full ordinary-access set across all of the owner's Workspaces."""
+def eligible_personal_agent_ids(
+    user_id: str, workspace_id: str
+) -> sa.Select[tuple[str]]:
+    """Select ordinary-access Agents within the personal Toolkit's Workspace."""
     admin = (
         sa.select(RDBAgentAdmin.id)
         .where(
@@ -90,6 +98,7 @@ def eligible_personal_agent_ids(user_id: str) -> sa.Select[tuple[str]]:
         .where(
             RDBUser.id == user_id,
             RDBUser.access_disabled_at.is_(None),
+            RDBAgent.workspace_id == workspace_id,
             RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
             sa.or_(
                 RDBWorkspaceUser.role == WorkspaceUserRole.OWNER,
@@ -104,18 +113,27 @@ class PersonalToolkitRepository(ToolkitRepository):
     """Reuse canonical configuration/encryption with exact User ownership guards."""
 
     async def create_personal(
-        self, session: WriteSession, *, user_id: str, create: ToolkitCreation
+        self,
+        session: WriteSession,
+        *,
+        user_id: str,
+        workspace_id: str,
+        create: ToolkitCreation,
     ) -> PersonalToolkitConfig:
         """Create a canonical record with an explicit dynamic All policy."""
         active = await session.read_session.scalar(
-            sa.select(RDBUser.id).where(
-                RDBUser.id == user_id, RDBUser.access_disabled_at.is_(None)
+            sa.select(RDBUser.id)
+            .join(RDBWorkspaceUser, RDBWorkspaceUser.user_id == RDBUser.id)
+            .where(
+                RDBUser.id == user_id,
+                RDBUser.access_disabled_at.is_(None),
+                RDBWorkspaceUser.workspace_id == workspace_id,
             )
         )
         if active is None:
             raise PersonalToolkitNotFound("Active personal Toolkit owner not found")
         row = RDBToolkitConfig(
-            workspace_id=None,
+            workspace_id=workspace_id,
             owner_kind=ToolkitOwnerKind.USER,
             owner_agent_id=None,
             owner_user_id=user_id,
@@ -135,34 +153,38 @@ class PersonalToolkitRepository(ToolkitRepository):
         return self._build_personal(row)
 
     async def list_personal(
-        self, session: ReadSession, *, user_id: str
+        self, session: ReadSession, *, user_id: str, workspace_id: str
     ) -> list[PersonalToolkitConfig]:
-        """List only the active owner's User-global connections."""
+        """List this owner's personal connections in this Workspace."""
         rows = await session.read_session.scalars(
             sa.select(RDBToolkitConfig)
-            .where(active_owner_predicate(user_id))
+            .where(active_owner_predicate(user_id, workspace_id))
             .order_by(RDBToolkitConfig.created_at.desc(), RDBToolkitConfig.id)
         )
         return [self._build_personal(row) for row in rows]
 
     async def get_personal(
-        self, session: ReadSession, *, user_id: str, toolkit_id: str
+        self, session: ReadSession, *, user_id: str, workspace_id: str, toolkit_id: str
     ) -> PersonalToolkitConfig | None:
         """Read one exact personal target, excluding shared and foreign IDs."""
         row = await session.read_session.scalar(
             sa.select(RDBToolkitConfig).where(
-                RDBToolkitConfig.id == toolkit_id, active_owner_predicate(user_id)
+                RDBToolkitConfig.id == toolkit_id,
+                active_owner_predicate(user_id, workspace_id),
             )
         )
         return None if row is None else self._build_personal(row)
 
     async def lock_personal(
-        self, session: WriteSession, *, user_id: str, toolkit_id: str
+        self, session: WriteSession, *, user_id: str, workspace_id: str, toolkit_id: str
     ) -> RDBToolkitConfig:
         """Serialize policy and later dispatch admission on the canonical parent."""
         row = await session.write_session.scalar(
             sa.select(RDBToolkitConfig)
-            .where(RDBToolkitConfig.id == toolkit_id, active_owner_predicate(user_id))
+            .where(
+                RDBToolkitConfig.id == toolkit_id,
+                active_owner_predicate(user_id, workspace_id),
+            )
             .with_for_update()
             .execution_options(populate_existing=True)
         )
@@ -175,11 +197,14 @@ class PersonalToolkitRepository(ToolkitRepository):
         session: WriteSession,
         *,
         user_id: str,
+        workspace_id: str,
         toolkit_id: str,
         update: ToolkitUpdate,
     ) -> PersonalToolkitConfig:
         """Update common configuration while preserving owner and permission state."""
-        row = await self.lock_personal(session, user_id=user_id, toolkit_id=toolkit_id)
+        row = await self.lock_personal(
+            session, user_id=user_id, workspace_id=workspace_id, toolkit_id=toolkit_id
+        )
         values = dict(update)
         if "credentials" in values:
             credentials = update["credentials"]
@@ -188,7 +213,10 @@ class PersonalToolkitRepository(ToolkitRepository):
         values["revision"] = RDBToolkitConfig.revision + 1
         result = await session.write_session.scalar(
             sa.update(RDBToolkitConfig)
-            .where(RDBToolkitConfig.id == row.id, active_owner_predicate(user_id))
+            .where(
+                RDBToolkitConfig.id == row.id,
+                active_owner_predicate(user_id, workspace_id),
+            )
             .values(**values)
             .returning(RDBToolkitConfig)
             .execution_options(populate_existing=True)
@@ -198,15 +226,17 @@ class PersonalToolkitRepository(ToolkitRepository):
         return self._build_personal(result)
 
     async def delete_personal(
-        self, session: WriteSession, *, user_id: str, toolkit_id: str
+        self, session: WriteSession, *, user_id: str, workspace_id: str, toolkit_id: str
     ) -> None:
         """Delete the exact owned parent and its dependent grants/memberships."""
-        row = await self.lock_personal(session, user_id=user_id, toolkit_id=toolkit_id)
+        row = await self.lock_personal(
+            session, user_id=user_id, workspace_id=workspace_id, toolkit_id=toolkit_id
+        )
         await session.write_session.delete(row)
         await session.write_session.flush()
 
     async def read_access(
-        self, session: ReadSession, *, user_id: str, toolkit_id: str
+        self, session: ReadSession, *, user_id: str, workspace_id: str, toolkit_id: str
     ) -> PersonalToolkitAccess | None:
         """Read parent and membership in one statement-consistent snapshot."""
         rows = (
@@ -220,7 +250,8 @@ class PersonalToolkitRepository(ToolkitRepository):
                     RDBPersonalToolkitAgent.toolkit_id == RDBToolkitConfig.id,
                 )
                 .where(
-                    RDBToolkitConfig.id == toolkit_id, active_owner_predicate(user_id)
+                    RDBToolkitConfig.id == toolkit_id,
+                    active_owner_predicate(user_id, workspace_id),
                 )
                 .order_by(RDBPersonalToolkitAgent.agent_id)
             )
@@ -233,6 +264,7 @@ class PersonalToolkitRepository(ToolkitRepository):
         return PersonalToolkitAccess(
             toolkit_id=toolkit_id,
             owner_user_id=user_id,
+            workspace_id=workspace_id,
             mode=mode,
             selected_agent_ids=tuple(
                 row.agent_id for row in rows if row.agent_id is not None
@@ -244,18 +276,24 @@ class PersonalToolkitRepository(ToolkitRepository):
         session: WriteSession,
         *,
         user_id: str,
+        workspace_id: str,
         mutation: PersonalToolkitAccessMutation,
     ) -> PersonalToolkitAccess:
         """Apply intent, snapshotting All under the parent lock on restriction."""
         row = await self.lock_personal(
-            session, user_id=user_id, toolkit_id=mutation.toolkit_id
+            session,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            toolkit_id=mutation.toolkit_id,
         )
         if row.personal_access_mode is not mutation.expected_mode:
             raise PersonalToolkitAccessConflict(
                 "Personal Toolkit access mode changed; reload before saving"
             )
         eligible = set(
-            await session.read_session.scalars(eligible_personal_agent_ids(user_id))
+            await session.read_session.scalars(
+                eligible_personal_agent_ids(user_id, workspace_id)
+            )
         )
         if not (mutation.allow_agent_ids | mutation.restrict_agent_ids) <= eligible:
             raise PersonalToolkitAgentIneligible("Agent is not currently accessible")
@@ -295,6 +333,7 @@ class PersonalToolkitRepository(ToolkitRepository):
                             {
                                 "toolkit_id": row.id,
                                 "owner_user_id": user_id,
+                                "workspace_id": workspace_id,
                                 "agent_id": agent_id,
                             }
                             for agent_id in sorted(additions)
@@ -304,22 +343,22 @@ class PersonalToolkitRepository(ToolkitRepository):
                 )
         row.revision += 1
         await session.write_session.flush()
-        access = await self.read_access(session, user_id=user_id, toolkit_id=row.id)
+        access = await self.read_access(
+            session, user_id=user_id, workspace_id=workspace_id, toolkit_id=row.id
+        )
         if access is None:
             raise PersonalToolkitNotFound("Personal Toolkit not found")
         return access
 
     def _build_personal(self, row: RDBToolkitConfig) -> PersonalToolkitConfig:
-        if (
-            row.owner_user_id is None
-            or row.workspace_id is not None
-            or row.personal_access_mode is None
-        ):
+        if row.owner_user_id is None or row.personal_access_mode is None:
             raise ValueError("Expected a User-owned Toolkit")
         return PersonalToolkitConfig(
             id=row.id,
             owner=UserToolkitOwner(
-                kind=ToolkitOwnerKind.USER, user_id=row.owner_user_id
+                kind=ToolkitOwnerKind.USER,
+                user_id=row.owner_user_id,
+                workspace_id=row.workspace_id,
             ),
             access_mode=row.personal_access_mode,
             toolkit_type=row.toolkit_type,
@@ -345,55 +384,76 @@ class PersonalToolkitOperations:
     repository: PersonalToolkitRepository
 
     async def create(
-        self, *, user_id: str, create: ToolkitCreation
+        self, *, user_id: str, workspace_id: str, create: ToolkitCreation
     ) -> PersonalToolkitConfig:
         """Commit one owner-scoped canonical creation."""
         async with self.session_manager() as session:
             return await self.repository.create_personal(
-                session, user_id=user_id, create=create
+                session, user_id=user_id, workspace_id=workspace_id, create=create
             )
 
-    async def list_personal(self, *, user_id: str) -> list[PersonalToolkitConfig]:
+    async def list_personal(
+        self, *, user_id: str, workspace_id: str
+    ) -> list[PersonalToolkitConfig]:
         """Return detached User-owned configuration after closing the read."""
         async with self.session_manager() as session:
-            return await self.repository.list_personal(session, user_id=user_id)
+            return await self.repository.list_personal(
+                session, user_id=user_id, workspace_id=workspace_id
+            )
 
     async def get(
-        self, *, user_id: str, toolkit_id: str
+        self, *, user_id: str, workspace_id: str, toolkit_id: str
     ) -> PersonalToolkitConfig | None:
         """Return only the exact owner's current target."""
         async with self.session_manager() as session:
             return await self.repository.get_personal(
-                session, user_id=user_id, toolkit_id=toolkit_id
+                session,
+                user_id=user_id,
+                workspace_id=workspace_id,
+                toolkit_id=toolkit_id,
             )
 
     async def update(
-        self, *, user_id: str, toolkit_id: str, update: ToolkitUpdate
+        self, *, user_id: str, workspace_id: str, toolkit_id: str, update: ToolkitUpdate
     ) -> PersonalToolkitConfig:
         """Commit configuration without replacing permission state."""
         async with self.session_manager() as session:
             return await self.repository.update_personal(
-                session, user_id=user_id, toolkit_id=toolkit_id, update=update
+                session,
+                user_id=user_id,
+                workspace_id=workspace_id,
+                toolkit_id=toolkit_id,
+                update=update,
             )
 
-    async def delete(self, *, user_id: str, toolkit_id: str) -> None:
+    async def delete(self, *, user_id: str, workspace_id: str, toolkit_id: str) -> None:
         """Commit exact-owner deletion and existing dependent cascades."""
         async with self.session_manager() as session:
             await self.repository.delete_personal(
-                session, user_id=user_id, toolkit_id=toolkit_id
+                session,
+                user_id=user_id,
+                workspace_id=workspace_id,
+                toolkit_id=toolkit_id,
             )
 
     async def read_access(
-        self, *, user_id: str, toolkit_id: str
+        self, *, user_id: str, workspace_id: str, toolkit_id: str
     ) -> PersonalToolkitAccess | None:
         """Return one statement-consistent snapshot after closing the read."""
         async with self.session_manager() as session:
             return await self.repository.read_access(
-                session, user_id=user_id, toolkit_id=toolkit_id
+                session,
+                user_id=user_id,
+                workspace_id=workspace_id,
+                toolkit_id=toolkit_id,
             )
 
     async def mutate_access(
-        self, *, user_id: str, mutations: Sequence[PersonalToolkitAccessMutation]
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        mutations: Sequence[PersonalToolkitAccessMutation],
     ) -> list[PersonalToolkitAccess]:
         """Commit every requested connection or none, locking parents in ID order."""
         by_id = {mutation.toolkit_id: mutation for mutation in mutations}
@@ -402,7 +462,10 @@ class PersonalToolkitOperations:
         async with self.session_manager() as session:
             results = [
                 await self.repository.mutate_access(
-                    session, user_id=user_id, mutation=by_id[toolkit_id]
+                    session,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    mutation=by_id[toolkit_id],
                 )
                 for toolkit_id in sorted(by_id)
             ]

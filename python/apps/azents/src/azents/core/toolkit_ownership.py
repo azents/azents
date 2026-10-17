@@ -41,11 +41,12 @@ class AgentToolkitOwner(BaseModel):
 
 
 class UserToolkitOwner(BaseModel):
-    """A User-global connection without an owning Workspace."""
+    """A personal connection owned by one User within one real Workspace."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
     kind: Literal[ToolkitOwnerKind.USER]
     user_id: str
+    workspace_id: str
 
 
 ToolkitOwner = Annotated[
@@ -61,6 +62,7 @@ class PersonalToolkitAccess:
 
     toolkit_id: str
     owner_user_id: str
+    workspace_id: str
     mode: PersonalToolkitAccessMode
     selected_agent_ids: tuple[str, ...]
 

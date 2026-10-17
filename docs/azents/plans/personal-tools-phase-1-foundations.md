@@ -7,6 +7,12 @@ tags: [toolkit, implementation, database, security]
 
 # Phase Execution Plan
 
+> Historical revision 1 execution record. Its User-global scope is superseded by the requester-
+> confirmed Workspace boundary and approved Design revision 2. Continue under the
+> [Workspace foundation correction plan](personal-tools-workspace-foundation-correction.md), not the
+> global ownership or cross-Workspace selection described below. Prior evidence proves only its
+> original diff; it is not corrected-scope acceptance.
+
 - Phase: 1/4, ownership and permission foundations.
 - Branch/base: `design/personal-tool-access-261017` -> `main` at 4fffac913.
 - PR boundary: constrained owner/policy persistence, safe existing shared projections, personal

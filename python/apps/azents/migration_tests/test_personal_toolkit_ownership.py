@@ -105,6 +105,12 @@ def test_downgrade_refuses_to_discard_user_owned_data(
     alembic_runner.migrate_up_to(_REVISION)
     with alembic_engine.begin() as connection:
         connection.execute(
+            sa.text(
+                "INSERT INTO workspaces (id, name, handle) "
+                "VALUES ('personal-w1', 'One', 'personal-one')"
+            )
+        )
+        connection.execute(
             sa.text("""
             INSERT INTO users (id, primary_email_id)
             VALUES ('personal-user', 'personal-email')
@@ -119,10 +125,10 @@ def test_downgrade_refuses_to_discard_user_owned_data(
         connection.execute(
             sa.text("""
             INSERT INTO toolkit_configs (
-                id, owner_user_id, personal_access_mode, owner_kind,
+                id, workspace_id, owner_user_id, personal_access_mode, owner_kind,
                 toolkit_type, slug, name, config, enabled
             ) VALUES (
-                'personal-toolkit', 'personal-user', 'all', 'user',
+                'personal-toolkit', 'personal-w1', 'personal-user', 'all', 'user',
                 'mcp', 'personal', 'Personal', '{}'::jsonb, TRUE
             )
         """)

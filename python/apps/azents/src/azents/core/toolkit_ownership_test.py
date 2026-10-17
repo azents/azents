@@ -19,7 +19,7 @@ from azents.core.toolkit_ownership import (
             {"kind": "agent", "workspace_id": "w", "agent_id": "a"},
             ToolkitOwnerKind.AGENT,
         ),
-        ({"kind": "user", "user_id": "u"}, ToolkitOwnerKind.USER),
+        ({"kind": "user", "user_id": "u", "workspace_id": "w"}, ToolkitOwnerKind.USER),
     ],
 )
 def test_explicit_legal_owner_variants(
@@ -34,7 +34,8 @@ def test_explicit_legal_owner_variants(
 @pytest.mark.parametrize(
     "payload",
     [
-        {"kind": "user", "user_id": "u", "workspace_id": "w"},
+        {"kind": "user", "user_id": "u"},
+        {"kind": "user", "user_id": "u", "workspace_id": "w", "agent_id": "a"},
         {"kind": "workspace", "workspace_id": "w", "user_id": "u"},
         {"kind": "agent", "agent_id": "a"},
         {"workspace_id": "w"},
@@ -49,9 +50,9 @@ def test_reject_ambiguous_owner_payloads(payload: dict[str, str]) -> None:
 
 def test_policy_only_predicate_does_not_pretend_to_check_ordinary_access() -> None:
     """All and Selected represent saved permission, not current User admission."""
-    all_access = PersonalToolkitAccess("t", "u", PersonalToolkitAccessMode.ALL, ())
+    all_access = PersonalToolkitAccess("t", "u", "w", PersonalToolkitAccessMode.ALL, ())
     selected = PersonalToolkitAccess(
-        "t", "u", PersonalToolkitAccessMode.SELECTED, ("a",)
+        "t", "u", "w", PersonalToolkitAccessMode.SELECTED, ("a",)
     )
     assert all_access.allows_agent("future")
     assert selected.allows_agent("a")

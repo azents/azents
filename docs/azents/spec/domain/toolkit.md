@@ -20,6 +20,7 @@ code_paths:
   - python/apps/azents/src/azents/core/memory_scope.py
   - python/apps/azents/src/azents/core/session_resource_authority.py
   - python/apps/azents/src/azents/core/toolkit_errors.py
+  - python/apps/azents/src/azents/core/toolkit_ownership.py
   - python/apps/azents/src/azents/repos/engine_event_repositories.py
   - python/apps/azents/src/azents/repos/engine_resolve.py
   - python/apps/azents/src/azents/repos/engine_tool_repositories.py
@@ -123,8 +124,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/github-setup.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-10-15
-spec_version: 149
+last_verified_at: 2026-10-17
+spec_version: 150
 ---
 
 # Toolkit
@@ -163,6 +164,26 @@ Brave-proxied thumbnails in the same tool result. Later entries can be omitted
 with a count when the text budget is exhausted. Hosted model `web_search` and
 explicit External Channel publication remain separate capabilities. Invalid or missing credentials and
 upstream authorization/quota failures produce safe failures without revealing keys.
+
+### Personal ownership persistence
+
+Canonical Toolkit storage distinguishes Workspace-shared, Agent-owned and User-owned
+connections. Every variant requires a real Workspace. A User-owned personal connection has an
+owner User inside that Workspace and no owning Agent; configuration updates cannot move ownership.
+Shared readers, attachments and effective-source projections exclude the personal owner variant.
+
+Personal repository operations require exact User and Workspace scope, active User status and
+current ordinary Workspace membership. A parent in Workspace A is not found through Workspace B,
+including for the same User. These internal operations are distinct from shared management
+permissions; public personal APIs, Provider targets and execution are integrated in their owning
+delivery layers.
+
+Each personal Toolkit independently stores All or Selected access. All-to-Selected snapshots only
+currently eligible Agents in its Workspace under the parent lock. Positive membership carries
+constrained parent User/Workspace identity and an Agent/Workspace foreign key; another Workspace's
+Agent cannot be stored even by a direct membership write. Explicit deltas preserve unseen choices,
+mode preconditions reject stale edits, and multi-Toolkit batches commit atomically in parent-ID
+order. Workspace deletion removes its scoped personal parents under the existing deletion boundary.
 
 ### Team Session execution boundary
 

@@ -131,6 +131,14 @@ async def fixture(
             for w in workspaces
         ]
         session.write_session.add_all(members)
+        session.write_session.add(
+            RDBWorkspaceUser(
+                workspace_id=workspaces[0].id,
+                user_id=users[1].id,
+                name="Other member",
+                role=WorkspaceUserRole.MEMBER,
+            )
+        )
         agents = [
             agent(workspaces[0].id),
             agent(workspaces[0].id),
@@ -166,22 +174,27 @@ async def fixture(
             )
 
 
-async def test_default_all_and_first_restriction_across_workspaces(
+async def test_default_all_and_first_restriction_within_workspace(
     fixture: Fixture,
 ) -> None:
-    """First restriction snapshots dynamic All across every Workspace."""
+    """First restriction snapshots eligible Agents only inside the Toolkit Workspace."""
     f = fixture
-    toolkit = await f.operations.create(user_id=f.user_id, create=creation())
+    toolkit = await f.operations.create(
+        user_id=f.user_id, workspace_id=f.workspace_ids[0], create=creation()
+    )
     assert toolkit.owner.user_id == f.user_id
     assert toolkit.access_mode is Mode.ALL
     async with f.writes() as session:
-        later_all = agent(f.workspace_ids[1])
+        later_all = agent(f.workspace_ids[0])
         session.write_session.add(later_all)
         await session.write_session.flush()
-    before = await f.operations.read_access(user_id=f.user_id, toolkit_id=toolkit.id)
+    before = await f.operations.read_access(
+        user_id=f.user_id, workspace_id=f.workspace_ids[0], toolkit_id=toolkit.id
+    )
     assert before is not None and before.allows_agent(later_all.id)
     [selected] = await f.operations.mutate_access(
         user_id=f.user_id,
+        workspace_id=f.workspace_ids[0],
         mutations=[
             Mutation(
                 toolkit.id,
@@ -195,17 +208,19 @@ async def test_default_all_and_first_restriction_across_workspaces(
     assert selected.mode is Mode.SELECTED
     assert set(selected.selected_agent_ids) == {
         f.agent_ids[1],
-        f.agent_ids[2],
         later_all.id,
     }
     async with f.writes() as session:
         later_selected = agent(f.workspace_ids[0])
         session.write_session.add(later_selected)
         await session.write_session.flush()
-    after = await f.operations.read_access(user_id=f.user_id, toolkit_id=toolkit.id)
+    after = await f.operations.read_access(
+        user_id=f.user_id, workspace_id=f.workspace_ids[0], toolkit_id=toolkit.id
+    )
     assert after is not None and not after.allows_agent(later_selected.id)
     [edited] = await f.operations.mutate_access(
         user_id=f.user_id,
+        workspace_id=f.workspace_ids[0],
         mutations=[
             Mutation(
                 toolkit.id,
@@ -218,11 +233,11 @@ async def test_default_all_and_first_restriction_across_workspaces(
     )
     assert set(edited.selected_agent_ids) == {
         f.agent_ids[0],
-        f.agent_ids[2],
         later_all.id,
     }
     [all_again] = await f.operations.mutate_access(
         user_id=f.user_id,
+        workspace_id=f.workspace_ids[0],
         mutations=[
             Mutation(
                 toolkit.id,
@@ -240,11 +255,17 @@ async def test_default_all_and_first_restriction_across_workspaces(
 async def test_ordinary_private_agent_access_is_not_provider_readiness(
     fixture: Fixture,
 ) -> None:
-    """Private access uses ordinary roles independently of Provider readiness."""
+    """Selected private membership persists but cannot bypass ordinary access loss."""
     f = fixture
-    toolkit = await f.operations.create(user_id=f.user_id, create=creation())
+    workspace_id = f.workspace_ids[1]
+    toolkit = await f.operations.create(
+        user_id=f.user_id, workspace_id=workspace_id, create=creation()
+    )
     await f.operations.update(
-        user_id=f.user_id, toolkit_id=toolkit.id, update={"enabled": False}
+        user_id=f.user_id,
+        workspace_id=workspace_id,
+        toolkit_id=toolkit.id,
+        update={"enabled": False},
     )
     async with f.writes() as session:
         session.write_session.add(
@@ -252,30 +273,36 @@ async def test_ordinary_private_agent_access_is_not_provider_readiness(
         )
     [snapshot] = await f.operations.mutate_access(
         user_id=f.user_id,
+        workspace_id=workspace_id,
         mutations=[
             Mutation(
                 toolkit.id,
                 None,
                 frozenset(),
-                frozenset([f.agent_ids[0]]),
+                frozenset([f.agent_ids[2]]),
                 expected_mode=Mode.ALL,
             )
         ],
     )
-    assert set(snapshot.selected_agent_ids) == set(f.agent_ids[1:])
+    assert set(snapshot.selected_agent_ids) == {f.agent_ids[3]}
     async with f.writes() as session:
         await session.write_session.execute(
-            sa.delete(RDBWorkspaceUser).where(RDBWorkspaceUser.id == f.member_id)
+            sa.delete(RDBAgentAdmin).where(RDBAgentAdmin.agent_id == f.agent_ids[3])
         )
         eligible = set(
-            await session.read_session.scalars(eligible_personal_agent_ids(f.user_id))
+            await session.read_session.scalars(
+                eligible_personal_agent_ids(f.user_id, workspace_id)
+            )
         )
-    assert not ({f.agent_ids[2], f.agent_ids[3]} & eligible)
-    retained = await f.operations.read_access(user_id=f.user_id, toolkit_id=toolkit.id)
+    assert f.agent_ids[3] not in eligible
+    retained = await f.operations.read_access(
+        user_id=f.user_id, workspace_id=workspace_id, toolkit_id=toolkit.id
+    )
     assert retained is not None and f.agent_ids[3] in retained.selected_agent_ids
     with pytest.raises(PersonalToolkitAgentIneligible):
         await f.operations.mutate_access(
             user_id=f.user_id,
+            workspace_id=workspace_id,
             mutations=[
                 Mutation(
                     toolkit.id,
@@ -286,6 +313,23 @@ async def test_ordinary_private_agent_access_is_not_provider_readiness(
                 )
             ],
         )
+    async with f.writes() as session:
+        await session.write_session.execute(
+            sa.delete(RDBWorkspaceUser).where(RDBWorkspaceUser.id == f.member_id)
+        )
+    assert (
+        await f.operations.get(
+            user_id=f.user_id, workspace_id=workspace_id, toolkit_id=toolkit.id
+        )
+        is None
+    )
+    with pytest.raises(PersonalToolkitNotFound):
+        await f.operations.update(
+            user_id=f.user_id,
+            workspace_id=workspace_id,
+            toolkit_id=toolkit.id,
+            update={"enabled": True},
+        )
 
 
 async def test_owner_scoped_crud_shared_projection_and_cascades(
@@ -293,18 +337,37 @@ async def test_owner_scoped_crud_shared_projection_and_cascades(
 ) -> None:
     """Personal IDs cannot leak through shared readers, writes or attachments."""
     f = fixture
-    toolkit = await f.operations.create(user_id=f.user_id, create=creation())
+    toolkit = await f.operations.create(
+        user_id=f.user_id, workspace_id=f.workspace_ids[0], create=creation()
+    )
     assert toolkit.credentials == creation().credentials
-    assert await f.operations.list_personal(user_id=f.other_user_id) == []
     assert (
-        await f.operations.get(user_id=f.other_user_id, toolkit_id=toolkit.id) is None
+        await f.operations.list_personal(
+            user_id=f.other_user_id, workspace_id=f.workspace_ids[0]
+        )
+        == []
+    )
+    assert (
+        await f.operations.get(
+            user_id=f.other_user_id,
+            workspace_id=f.workspace_ids[0],
+            toolkit_id=toolkit.id,
+        )
+        is None
     )
     with pytest.raises(PersonalToolkitNotFound):
         await f.operations.update(
-            user_id=f.other_user_id, toolkit_id=toolkit.id, update={"name": "Foreign"}
+            user_id=f.other_user_id,
+            workspace_id=f.workspace_ids[0],
+            toolkit_id=toolkit.id,
+            update={"name": "Foreign"},
         )
     with pytest.raises(PersonalToolkitNotFound):
-        await f.operations.delete(user_id=f.other_user_id, toolkit_id=toolkit.id)
+        await f.operations.delete(
+            user_id=f.other_user_id,
+            workspace_id=f.workspace_ids[0],
+            toolkit_id=toolkit.id,
+        )
     shared_repo = ToolkitRepository(f.repository.cipher)
     attachments = AgentToolkitRepository()
     async with f.writes() as session:
@@ -357,7 +420,10 @@ async def test_owner_scoped_crud_shared_projection_and_cascades(
         await shared_repo.delete_by_id(session, toolkit.id)
         assert (
             await f.repository.get_personal(
-                session, user_id=f.user_id, toolkit_id=toolkit.id
+                session,
+                user_id=f.user_id,
+                workspace_id=f.workspace_ids[0],
+                toolkit_id=toolkit.id,
             )
             is not None
         )
@@ -383,12 +449,16 @@ async def test_owner_scoped_crud_shared_projection_and_cascades(
         assert {shared.id, owned.id} <= effective and toolkit.id not in effective
         assert (
             await f.repository.get_personal(
-                session, user_id=f.user_id, toolkit_id=shared.id
+                session,
+                user_id=f.user_id,
+                workspace_id=f.workspace_ids[0],
+                toolkit_id=shared.id,
             )
             is None
         )
     await f.operations.mutate_access(
         user_id=f.user_id,
+        workspace_id=f.workspace_ids[0],
         mutations=[
             Mutation(
                 toolkit.id,
@@ -401,6 +471,7 @@ async def test_owner_scoped_crud_shared_projection_and_cascades(
     )
     updated = await f.operations.update(
         user_id=f.user_id,
+        workspace_id=f.workspace_ids[0],
         toolkit_id=toolkit.id,
         update={"name": "Updated", "credentials": None},
     )
@@ -417,9 +488,13 @@ async def test_owner_scoped_crud_shared_projection_and_cascades(
         await session.write_session.execute(
             sa.delete(RDBWorkspace).where(RDBWorkspace.id == f.workspace_ids[1])
         )
-    snapshot = await f.operations.read_access(user_id=f.user_id, toolkit_id=toolkit.id)
+    snapshot = await f.operations.read_access(
+        user_id=f.user_id, workspace_id=f.workspace_ids[0], toolkit_id=toolkit.id
+    )
     assert snapshot is not None and set(snapshot.selected_agent_ids) == {f.agent_ids[1]}
-    await f.operations.delete(user_id=f.user_id, toolkit_id=toolkit.id)
+    await f.operations.delete(
+        user_id=f.user_id, workspace_id=f.workspace_ids[0], toolkit_id=toolkit.id
+    )
     async with f.writes() as session:
         assert not list(
             await session.read_session.scalars(
@@ -435,12 +510,17 @@ async def test_multi_connection_mutation_rolls_back_on_later_failure(
 ) -> None:
     """No earlier connection is committed when a later target is foreign."""
     f = fixture
-    first = await f.operations.create(user_id=f.user_id, create=creation())
-    foreign = await f.operations.create(user_id=f.other_user_id, create=creation())
+    first = await f.operations.create(
+        user_id=f.user_id, workspace_id=f.workspace_ids[0], create=creation()
+    )
+    foreign = await f.operations.create(
+        user_id=f.other_user_id, workspace_id=f.workspace_ids[0], create=creation()
+    )
     assert first.id < foreign.id
     with pytest.raises(PersonalToolkitNotFound):
         await f.operations.mutate_access(
             user_id=f.user_id,
+            workspace_id=f.workspace_ids[0],
             mutations=[
                 Mutation(
                     first.id,
@@ -458,7 +538,9 @@ async def test_multi_connection_mutation_rolls_back_on_later_failure(
                 ),
             ],
         )
-    snapshot = await f.operations.read_access(user_id=f.user_id, toolkit_id=first.id)
+    snapshot = await f.operations.read_access(
+        user_id=f.user_id, workspace_id=f.workspace_ids[0], toolkit_id=first.id
+    )
     assert (
         snapshot is not None
         and snapshot.mode is Mode.ALL
@@ -469,9 +551,12 @@ async def test_multi_connection_mutation_rolls_back_on_later_failure(
 async def test_concurrent_restrictions_serialize_on_parent(fixture: Fixture) -> None:
     """A contender waits for the parent then changes committed Selected state."""
     f = fixture
-    toolkit = await f.operations.create(user_id=f.user_id, create=creation())
+    toolkit = await f.operations.create(
+        user_id=f.user_id, workspace_id=f.workspace_ids[0], create=creation()
+    )
     await f.operations.mutate_access(
         user_id=f.user_id,
+        workspace_id=f.workspace_ids[0],
         mutations=[
             Mutation(
                 toolkit.id,
@@ -491,6 +576,7 @@ async def test_concurrent_restrictions_serialize_on_parent(fixture: Fixture) -> 
             await f.repository.mutate_access(
                 session,
                 user_id=f.user_id,
+                workspace_id=f.workspace_ids[0],
                 mutation=Mutation(
                     toolkit.id,
                     None,
@@ -506,6 +592,7 @@ async def test_concurrent_restrictions_serialize_on_parent(fixture: Fixture) -> 
             await f.repository.mutate_access(
                 session,
                 user_id=f.user_id,
+                workspace_id=f.workspace_ids[0],
                 mutation=Mutation(
                     toolkit.id,
                     None,
@@ -527,9 +614,11 @@ async def test_concurrent_restrictions_serialize_on_parent(fixture: Fixture) -> 
         if task is not None and not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
-    snapshot = await f.operations.read_access(user_id=f.user_id, toolkit_id=toolkit.id)
+    snapshot = await f.operations.read_access(
+        user_id=f.user_id, workspace_id=f.workspace_ids[0], toolkit_id=toolkit.id
+    )
     assert snapshot is not None and snapshot.mode is Mode.SELECTED
-    assert set(snapshot.selected_agent_ids) == {f.agent_ids[2]}
+    assert set(snapshot.selected_agent_ids) == set()
 
 
 async def test_stale_selected_editor_cannot_restrict_new_all_policy(
@@ -537,9 +626,12 @@ async def test_stale_selected_editor_cannot_restrict_new_all_policy(
 ) -> None:
     """Expected mode is checked under the lock before changing future eligibility."""
     f = fixture
-    toolkit = await f.operations.create(user_id=f.user_id, create=creation())
+    toolkit = await f.operations.create(
+        user_id=f.user_id, workspace_id=f.workspace_ids[0], create=creation()
+    )
     await f.operations.mutate_access(
         user_id=f.user_id,
+        workspace_id=f.workspace_ids[0],
         mutations=[
             Mutation(toolkit.id, Mode.SELECTED, frozenset(), frozenset(), Mode.ALL)
         ],
@@ -549,27 +641,41 @@ async def test_stale_selected_editor_cannot_restrict_new_all_policy(
     )
     await f.operations.mutate_access(
         user_id=f.user_id,
+        workspace_id=f.workspace_ids[0],
         mutations=[
             Mutation(toolkit.id, Mode.ALL, frozenset(), frozenset(), Mode.SELECTED)
         ],
     )
-    before = await f.operations.get(user_id=f.user_id, toolkit_id=toolkit.id)
+    before = await f.operations.get(
+        user_id=f.user_id, workspace_id=f.workspace_ids[0], toolkit_id=toolkit.id
+    )
     with pytest.raises(PersonalToolkitAccessConflict, match="reload"):
-        await f.operations.mutate_access(user_id=f.user_id, mutations=[stale])
-    after = await f.operations.get(user_id=f.user_id, toolkit_id=toolkit.id)
+        await f.operations.mutate_access(
+            user_id=f.user_id, workspace_id=f.workspace_ids[0], mutations=[stale]
+        )
+    after = await f.operations.get(
+        user_id=f.user_id, workspace_id=f.workspace_ids[0], toolkit_id=toolkit.id
+    )
     assert before is not None and after is not None
     assert after.revision == before.revision and after.access_mode is Mode.ALL
-    snapshot = await f.operations.read_access(user_id=f.user_id, toolkit_id=toolkit.id)
+    snapshot = await f.operations.read_access(
+        user_id=f.user_id, workspace_id=f.workspace_ids[0], toolkit_id=toolkit.id
+    )
     assert snapshot is not None and snapshot.selected_agent_ids == ()
 
 
 async def test_stale_mode_conflict_rolls_back_complete_batch(fixture: Fixture) -> None:
     """A stale All editor cannot commit earlier changes in a multi-target save."""
     f = fixture
-    first = await f.operations.create(user_id=f.user_id, create=creation())
-    second = await f.operations.create(user_id=f.user_id, create=creation())
+    first = await f.operations.create(
+        user_id=f.user_id, workspace_id=f.workspace_ids[0], create=creation()
+    )
+    second = await f.operations.create(
+        user_id=f.user_id, workspace_id=f.workspace_ids[0], create=creation()
+    )
     await f.operations.mutate_access(
         user_id=f.user_id,
+        workspace_id=f.workspace_ids[0],
         mutations=[
             Mutation(second.id, Mode.SELECTED, frozenset(), frozenset(), Mode.ALL)
         ],
@@ -577,6 +683,7 @@ async def test_stale_mode_conflict_rolls_back_complete_batch(fixture: Fixture) -
     with pytest.raises(PersonalToolkitAccessConflict):
         await f.operations.mutate_access(
             user_id=f.user_id,
+            workspace_id=f.workspace_ids[0],
             mutations=[
                 Mutation(
                     first.id, None, frozenset(), frozenset([f.agent_ids[0]]), Mode.ALL
@@ -586,7 +693,9 @@ async def test_stale_mode_conflict_rolls_back_complete_batch(fixture: Fixture) -
                 ),
             ],
         )
-    unchanged = await f.operations.read_access(user_id=f.user_id, toolkit_id=first.id)
+    unchanged = await f.operations.read_access(
+        user_id=f.user_id, workspace_id=f.workspace_ids[0], toolkit_id=first.id
+    )
     assert unchanged is not None and unchanged.mode is Mode.ALL
 
 
@@ -597,12 +706,14 @@ async def test_database_rejects_personal_keys_with_non_user_kind(
 ) -> None:
     """Persisted ownership discriminator and keys are one constrained authority."""
     f = fixture
-    with pytest.raises(IntegrityError, match="ck_toolkit_configs_owner_shape"):
+    with pytest.raises(
+        IntegrityError, match="ck_toolkit_configs_owner_shape|not-null constraint"
+    ):
         async with f.writes() as session:
             session.write_session.add(
                 RDBToolkitConfig(
                     owner_kind=kind,
-                    workspace_id=None,
+                    workspace_id=f.workspace_ids[0],
                     owner_agent_id=None,
                     owner_user_id=f.user_id,
                     personal_access_mode=Mode.ALL,
@@ -619,7 +730,7 @@ async def test_database_rejects_personal_keys_with_non_user_kind(
     "shape",
     [
         "missing_owner",
-        "workspace_and_user",
+        "user_without_workspace",
         "agent_and_user",
         "shared_policy",
         "user_without_policy",
@@ -632,16 +743,19 @@ async def test_database_rejects_invalid_owner_shapes(
     f = fixture
     values = {
         "missing_owner": (None, None, None, None),
-        "workspace_and_user": (f.workspace_ids[0], None, f.user_id, Mode.ALL),
-        "agent_and_user": (None, f.agent_ids[0], f.user_id, Mode.ALL),
+        "user_without_workspace": (None, None, f.user_id, Mode.ALL),
+        "agent_and_user": (f.workspace_ids[0], f.agent_ids[0], f.user_id, Mode.ALL),
         "shared_policy": (f.workspace_ids[0], None, None, Mode.ALL),
-        "user_without_policy": (None, None, f.user_id, None),
+        "user_without_policy": (f.workspace_ids[0], None, f.user_id, None),
     }
     workspace, owner_agent, owner_user, mode = values[shape]
-    with pytest.raises(IntegrityError, match="ck_toolkit_configs_owner_shape"):
+    with pytest.raises(
+        IntegrityError, match="ck_toolkit_configs_owner_shape|not-null constraint"
+    ):
         async with f.writes() as session:
-            session.write_session.add(
-                RDBToolkitConfig(
+            await session.write_session.execute(
+                sa.insert(RDBToolkitConfig).values(
+                    id=uuid4().hex,
                     workspace_id=workspace,
                     owner_agent_id=owner_agent,
                     owner_user_id=owner_user,
@@ -661,13 +775,16 @@ async def test_database_rejects_invalid_owner_shapes(
 async def test_membership_owner_fk_and_user_disable(fixture: Fixture) -> None:
     """Membership cannot target shared/foreign owners; disabled Users lose admission."""
     f = fixture
-    toolkit = await f.operations.create(user_id=f.user_id, create=creation())
+    toolkit = await f.operations.create(
+        user_id=f.user_id, workspace_id=f.workspace_ids[0], create=creation()
+    )
     with pytest.raises(IntegrityError, match="fk_personal_toolkit_agents_owner"):
         async with f.writes() as session:
             session.write_session.add(
                 RDBPersonalToolkitAgent(
                     toolkit_id=toolkit.id,
                     owner_user_id=f.other_user_id,
+                    workspace_id=f.workspace_ids[0],
                     agent_id=f.agent_ids[0],
                 )
             )
@@ -691,6 +808,7 @@ async def test_membership_owner_fk_and_user_disable(fixture: Fixture) -> None:
                 RDBPersonalToolkitAgent(
                     toolkit_id=shared.id,
                     owner_user_id=f.user_id,
+                    workspace_id=f.workspace_ids[0],
                     agent_id=f.agent_ids[0],
                 )
             )
@@ -701,13 +819,22 @@ async def test_membership_owner_fk_and_user_disable(fixture: Fixture) -> None:
             .where(RDBUser.id == f.user_id)
             .values(access_disabled_at=sa.func.now())
         )
-    assert await f.operations.list_personal(user_id=f.user_id) == []
     assert (
-        await f.operations.read_access(user_id=f.user_id, toolkit_id=toolkit.id) is None
+        await f.operations.list_personal(
+            user_id=f.user_id, workspace_id=f.workspace_ids[0]
+        )
+        == []
+    )
+    assert (
+        await f.operations.read_access(
+            user_id=f.user_id, workspace_id=f.workspace_ids[0], toolkit_id=toolkit.id
+        )
+        is None
     )
     with pytest.raises(PersonalToolkitNotFound):
         await f.operations.mutate_access(
             user_id=f.user_id,
+            workspace_id=f.workspace_ids[0],
             mutations=[
                 Mutation(
                     toolkit.id,
