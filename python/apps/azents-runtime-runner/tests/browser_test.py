@@ -219,6 +219,39 @@ async def test_session_state_reuse_isolation_and_persistence(
         await fresh.close()
 
 
+async def test_replaced_runtime_reopens_profile_with_stale_process_markers(
+    manager: RunnerBrowserManager, site: str, tmp_path: Path
+) -> None:
+    actor = authority(tmp_path)
+    opened = await manager.execute(
+        BrowserOpenCommand(actor, None, site + "/login", None)
+    )
+    await manager.close()
+    [profile] = list((tmp_path / ".azents" / "browser-state").iterdir())
+    socket_target = tmp_path / "old-native-socket"
+    cookie_target = tmp_path / "old-native-cookie"
+    socket_target.write_text("Retain external socket target")
+    cookie_target.write_text("Retain external cookie target")
+    (profile / "SingletonLock").symlink_to("previous-runtime-host-999999")
+    (profile / "SingletonSocket").symlink_to(socket_target)
+    (profile / "SingletonCookie").symlink_to(cookie_target)
+    fresh = RunnerBrowserManager(
+        workspace_root=tmp_path, proxy=None, input_key=BrowserInputKey()
+    )
+    try:
+        await fresh.execute(BrowserOpenCommand(actor, None, site, None))
+        assert any(
+            cookie["name"] == "synthetic_login"
+            for cookie in await fresh.contexts[actor.session_id].cookies()
+        )
+        assert socket_target.read_text() == "Retain external socket target"
+        assert cookie_target.read_text() == "Retain external cookie target"
+        with pytest.raises(BrowserFailure, match="closed"):
+            await observe(fresh, actor, target(opened))
+    finally:
+        await fresh.close()
+
+
 async def test_dom_glance_raw_and_capture_original(
     manager: RunnerBrowserManager, site: str, tmp_path: Path
 ) -> None:

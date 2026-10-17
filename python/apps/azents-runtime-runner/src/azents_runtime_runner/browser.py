@@ -345,6 +345,11 @@ class RunnerBrowserManager:
                     "browser_invalid_authority", "Native browser state path is invalid"
                 )
             path.mkdir(parents=True, exist_ok=True)
+            # The fenced Runner owns this profile and has no live Session context.
+            # Container removal can leave Chromium's former host/PID/socket links;
+            # unlink only these process markers, retaining all native site state.
+            for marker in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
+                (path / marker).unlink(missing_ok=True)
             try:
                 context = await driver.chromium.launch_persistent_context(
                     path,
