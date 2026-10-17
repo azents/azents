@@ -100,6 +100,35 @@ $ pnpm run lint
 $ pnpm run typecheck
 ```
 
+### Native compiler cache in shared development environments
+
+SWC's native loader requires an executable cache whose full ancestor chain is
+owned by the current user or root and is not group/world-writable, except for
+trusted sticky directories. A shared writable `HOME` can therefore cause
+`ERR_SWC_NATIVE_CACHE` even when its `.cache` child is private. Disabling persistent
+caching with `SWC_NATIVE_BINDING_CACHE=0` still uses that cache root for temporary
+materialization.
+
+For a POSIX development environment with a trusted, executable `/var/tmp`, run
+installation and builds with an owner-only temporary cache:
+
+```sh
+cd typescript
+(
+  swc_cache="$(mktemp -d /var/tmp/azents-swc.XXXXXX)" || exit
+  trap 'rm -rf "$swc_cache"' EXIT
+  export SWC_NATIVE_BINDING_CACHE="$swc_cache"
+  pnpm install --frozen-lockfile &&
+    pnpm run build
+)
+```
+
+Choose a different trusted parent when `/var/tmp` is unavailable or mounted
+`noexec`. A private directory beneath an unsafe shared parent is insufficient;
+retain the loader's ownership, permission and integrity checks. CI and Docker
+builds with an ordinary private user cache do not need this adaptation. The
+compiler cache is build tooling, not persistent application data.
+
 Azents E2E:
 
 ```console

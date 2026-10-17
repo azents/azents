@@ -1,5 +1,8 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalPassThroughEnv": [
+    "SWC_NATIVE_BINDING_CACHE"
+  ],
   "tasks": {
     "generate": {
       "cache": false

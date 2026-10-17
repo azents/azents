@@ -63,6 +63,18 @@ class SessionTitleRepository:
     ) -> SessionTitleGenerationSnapshot | None:
         """Freeze and select the current Lightweight title candidate."""
         async with self.session_manager() as session:
+            observed = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+            if observed is None:
+                return None
+            agent = await self.agent_repository.lock_by_id(
+                session,
+                observed.agent_id,
+            )
+            if agent is None:
+                return None
             agent_session = await self.agent_session_repository.lock_by_id(
                 session,
                 session_id,
@@ -72,13 +84,7 @@ class SessionTitleRepository:
                 generation_event_id=generation_event_id,
             ):
                 return None
-            if agent_session is None:
-                return None
-            agent = await self.agent_repository.lock_by_id(
-                session,
-                agent_session.agent_id,
-            )
-            if agent is None:
+            if agent_session is None or agent_session.agent_id != agent.id:
                 return None
             option = next(
                 (

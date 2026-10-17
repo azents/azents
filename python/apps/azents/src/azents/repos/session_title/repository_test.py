@@ -65,6 +65,7 @@ async def test_load_generation_snapshot_freezes_title_operation_in_one_context(
         title_model_operation_state=None,
     )
     agent_session_repository = AsyncMock()
+    agent_session_repository.get_by_id.return_value = agent_session
     agent_session_repository.lock_by_id.return_value = agent_session
     agent_session_repository.set_title_model_operation_state.return_value = (
         agent_session

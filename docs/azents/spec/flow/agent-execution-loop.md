@@ -26,6 +26,7 @@ code_paths:
   - python/apps/azents/src/azents/core/session_workspace_paths.py
   - python/apps/azents/src/azents/core/toolkit_errors.py
   - python/apps/azents/src/azents/repos/agent_session_input_operations.py
+  - python/apps/azents/src/azents/repos/session_title/__init__.py
   - python/apps/azents/src/azents/repos/chat_write_operations.py
   - python/apps/azents/src/azents/repos/engine_event_contracts.py
   - python/apps/azents/src/azents/repos/engine_event_repositories.py
@@ -192,7 +193,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/packages/azents-session-core/src/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-10-09
+last_verified_at: 2026-10-17
 spec_version: 220
 ---
 
@@ -1549,6 +1550,11 @@ worker profile-commit prefix. Session identity, status and root-kind rejection
 precedence remains unchanged, followed by Agent lifecycle/Workspace validation.
 This prevents admission from holding Session while waiting for a worker-held
 Agent; it does not relax authority fences or retry hidden database failures.
+Initial automatic title snapshots use the same Agent-before-Session order. An
+unlocked Session lookup discovers Agent identity; after locking Agent and Session,
+the snapshot revalidates their association and the current title-generation event
+before selecting or persisting a candidate. Concurrent manual titles therefore
+invalidate stale generation without a Session-to-Agent lock cycle.
 
 Web chat user writes enter through REST commit endpoints. Message writes create or reuse an
 `AgentSession`, materialize user input attachments, record the accepted write under
