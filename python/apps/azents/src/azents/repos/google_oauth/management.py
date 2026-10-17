@@ -22,13 +22,15 @@ from azents.core.google_oauth import (
     GoogleConnection,
     GoogleConnectionStatus,
     GoogleFinalSettings,
+    GoogleManager,
     GoogleOAuthError,
+    GooglePersonalSubject,
     GooglePublication,
     GoogleReconnectSettings,
     GoogleSavedConnection,
     GoogleSavedTarget,
     GoogleSetup,
-    GoogleSubject,
+    google_manager_for_owner,
 )
 from azents.core.google_policy import GoogleService, permitted_tools
 from azents.core.google_system_setting import (
@@ -41,6 +43,9 @@ from azents.core.system_setting_payload import SystemSettingPayloadResolver
 from azents.core.toolkit_identifiers import (
     IdentifierValidationError,
     resolve_create_identifiers,
+)
+from azents.core.toolkit_ownership import (
+    toolkit_owner_from_fields,
 )
 from azents.core.tools import GoogleToolkitConfig
 from azents.rdb.deps import get_session_manager
@@ -56,7 +61,9 @@ from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.session import SessionRepository
 from azents.repos.system_setting.repository import SystemSettingRepository
 from azents.repos.toolkit import ToolkitRepository
-from azents.repos.toolkit.data import ToolkitCreate
+from azents.repos.toolkit.data import ToolkitCreate, ToolkitCreation
+from azents.repos.toolkit.personal import PersonalToolkitRepository
+from azents.repos.toolkit.personal_management import get_personal_toolkit_repository
 from azents.repos.toolkit_namespace import ToolkitNamespaceRepository
 from azents.repos.toolkit_operations import get_encrypted_toolkit_repository
 from azents.repos.user import UserRepository
@@ -70,8 +77,15 @@ def attempt_from(row: RDBGoogleAttempt, cipher: CredentialCipher) -> GoogleAttem
     """Return detached typed records, never an ORM instance across operation scope."""
     return GoogleAttempt(
         id=row.id,
-        subject=GoogleSubject(
-            row.user_id, row.session_id, row.workspace_id, row.agent_id
+        subject=google_manager_for_owner(
+            row.user_id,
+            row.session_id,
+            toolkit_owner_from_fields(
+                row.owner_kind,
+                workspace_id=row.workspace_id,
+                agent_id=row.agent_id,
+                user_id=row.owner_user_id,
+            ),
         ),
         status=row.status,
         expires_at=row.expires_at,
@@ -121,9 +135,12 @@ class GoogleOAuthRepository:
     payloads: Annotated[SystemSettingPayloadResolver, Depends()]
     toolkits: Annotated[ToolkitRepository, Depends(get_encrypted_toolkit_repository)]
     namespaces: Annotated[ToolkitNamespaceRepository, Depends()]
+    personal_toolkits: Annotated[
+        PersonalToolkitRepository, Depends(get_personal_toolkit_repository)
+    ]
 
     async def _scope(
-        self, session: WriteSession, subject: GoogleSubject, *, lock: bool
+        self, session: WriteSession, subject: GoogleManager, *, lock: bool
     ) -> None:
         active = await evaluate_active_subject(
             session,
@@ -134,6 +151,12 @@ class GoogleOAuthRepository:
         )
         if active is not ActiveAccountSubjectStatus.ACTIVE:
             raise GoogleOAuthError("not_authenticated", "Not authenticated.")
+        if isinstance(subject, GooglePersonalSubject):
+            if subject.owner.user_id != subject.user_id:
+                raise GoogleOAuthError(
+                    "forbidden", "Google setup owner does not match."
+                )
+            return
         if lock:
             # Parent lifecycle locks precede candidate/Toolkit locks, including
             # FK-cascade deletion and owning-Agent namespace publication.
@@ -176,7 +199,7 @@ class GoogleOAuthRepository:
             ):
                 raise GoogleOAuthError("not_found", "Google setup context not found.")
 
-    async def authorize(self, subject: GoogleSubject) -> None:
+    async def authorize(self, subject: GoogleManager) -> None:
         """Completed current-manager admission before any provider work."""
         async with self.session_manager() as session:
             await self._scope(session, subject, lock=False)
@@ -227,7 +250,7 @@ class GoogleOAuthRepository:
     async def _row(
         self,
         session: WriteSession,
-        subject: GoogleSubject,
+        subject: GoogleManager,
         attempt_id: str,
     ) -> RDBGoogleAttempt:
         await self._scope(session, subject, lock=True)
@@ -239,6 +262,13 @@ class GoogleOAuthRepository:
                 RDBGoogleAttempt.session_id == subject.session_id,
                 RDBGoogleAttempt.workspace_id == subject.workspace_id,
                 RDBGoogleAttempt.agent_id == subject.agent_id,
+                RDBGoogleAttempt.owner_kind == subject.owner.kind,
+                RDBGoogleAttempt.owner_user_id
+                == (
+                    subject.user_id
+                    if isinstance(subject, GooglePersonalSubject)
+                    else None
+                ),
             )
         )
         if target is not None:
@@ -255,6 +285,13 @@ class GoogleOAuthRepository:
                 RDBGoogleAttempt.session_id == subject.session_id,
                 RDBGoogleAttempt.workspace_id == subject.workspace_id,
                 RDBGoogleAttempt.agent_id == subject.agent_id,
+                RDBGoogleAttempt.owner_kind == subject.owner.kind,
+                RDBGoogleAttempt.owner_user_id
+                == (
+                    subject.user_id
+                    if isinstance(subject, GooglePersonalSubject)
+                    else None
+                ),
             )
             .with_for_update()
             .execution_options(populate_existing=True)
@@ -266,7 +303,7 @@ class GoogleOAuthRepository:
     async def _target(
         self,
         session: WriteSession,
-        subject: GoogleSubject,
+        subject: GoogleManager,
         toolkit_id: str,
     ) -> GoogleSavedTarget:
         toolkit = await session.write_session.scalar(
@@ -275,6 +312,13 @@ class GoogleOAuthRepository:
                 RDBToolkitConfig.id == toolkit_id,
                 RDBToolkitConfig.workspace_id == subject.workspace_id,
                 RDBToolkitConfig.owner_agent_id == subject.agent_id,
+                RDBToolkitConfig.owner_kind == subject.owner.kind,
+                RDBToolkitConfig.owner_user_id
+                == (
+                    subject.user_id
+                    if isinstance(subject, GooglePersonalSubject)
+                    else None
+                ),
                 RDBToolkitConfig.toolkit_type == "google",
             )
             .with_for_update()
@@ -312,7 +356,7 @@ class GoogleOAuthRepository:
 
     async def start(
         self,
-        subject: GoogleSubject,
+        subject: GoogleManager,
         *,
         registration: GoogleApplicationRegistration,
         setup: GoogleSetup,
@@ -330,6 +374,13 @@ class GoogleOAuthRepository:
                     RDBGoogleAttempt.session_id == subject.session_id,
                     RDBGoogleAttempt.workspace_id == subject.workspace_id,
                     RDBGoogleAttempt.agent_id == subject.agent_id,
+                    RDBGoogleAttempt.owner_kind == subject.owner.kind,
+                    RDBGoogleAttempt.owner_user_id
+                    == (
+                        subject.user_id
+                        if isinstance(subject, GooglePersonalSubject)
+                        else None
+                    ),
                     RDBGoogleAttempt.status != GoogleAttemptStatus.PUBLISHED,
                     RDBGoogleAttempt.expires_at <= datetime.datetime.now(datetime.UTC),
                 )
@@ -348,6 +399,10 @@ class GoogleOAuthRepository:
             row = RDBGoogleAttempt(
                 user_id=subject.user_id,
                 session_id=subject.session_id,
+                owner_kind=subject.owner.kind,
+                owner_user_id=subject.user_id
+                if isinstance(subject, GooglePersonalSubject)
+                else None,
                 workspace_id=subject.workspace_id,
                 agent_id=subject.agent_id,
                 target_toolkit_id=target_toolkit_id,
@@ -366,7 +421,7 @@ class GoogleOAuthRepository:
 
     async def saved(
         self,
-        subject: GoogleSubject,
+        subject: GoogleManager,
         toolkit_id: str,
     ) -> GoogleSavedConnection:
         """Current projection uses exact ownership, not an unpublished attempt."""
@@ -397,7 +452,7 @@ class GoogleOAuthRepository:
                 toolkit_id, target.tasks, target.timeout, connection
             )
 
-    async def load(self, subject: GoogleSubject, attempt_id: str) -> GoogleAttempt:
+    async def load(self, subject: GoogleManager, attempt_id: str) -> GoogleAttempt:
         """Commit expired-secret cleanup before reporting expiry to the service."""
         result: GoogleAttempt | None = None
         async with self.session_manager() as session:
@@ -410,7 +465,7 @@ class GoogleOAuthRepository:
 
     async def claim(
         self,
-        subject: GoogleSubject,
+        subject: GoogleManager,
         *,
         attempt_id: str,
         nonce: str,
@@ -441,7 +496,7 @@ class GoogleOAuthRepository:
 
     async def stage(
         self,
-        subject: GoogleSubject,
+        subject: GoogleManager,
         *,
         attempt_id: str,
         registration: GoogleApplicationRegistration,
@@ -503,6 +558,8 @@ class GoogleOAuthRepository:
                 RDBGoogleConnection.toolkit_id == row.published_toolkit_id,
                 RDBToolkitConfig.workspace_id == row.workspace_id,
                 RDBToolkitConfig.owner_agent_id == row.agent_id,
+                RDBToolkitConfig.owner_kind == row.owner_kind,
+                RDBToolkitConfig.owner_user_id == row.owner_user_id,
                 RDBToolkitConfig.toolkit_type == "google",
             )
         )
@@ -514,7 +571,7 @@ class GoogleOAuthRepository:
 
     async def confirm(
         self,
-        subject: GoogleSubject,
+        subject: GoogleManager,
         *,
         attempt_id: str,
         registration: GoogleApplicationRegistration | None,
@@ -597,22 +654,32 @@ class GoogleOAuthRepository:
                             "invalid_selection",
                             "Invalid Google connection name or slug.",
                         )
-                    toolkit = await self.toolkits.create(
-                        session,
-                        ToolkitCreate(
-                            workspace_id=subject.workspace_id,
-                            owner_agent_id=subject.agent_id,
-                            toolkit_type="google",
-                            name=identifiers.name,
-                            slug=identifiers.slug,
-                            description=settings.description,
-                            prompt=settings.prompt,
-                            config=config,
-                            credentials=None,
-                            enabled=settings.enabled,
-                            always_expose_tools=settings.always_expose_tools,
-                        ),
+                    creation = ToolkitCreation(
+                        toolkit_type="google",
+                        name=identifiers.name,
+                        slug=identifiers.slug,
+                        description=settings.description,
+                        prompt=settings.prompt,
+                        config=config,
+                        credentials=None,
+                        enabled=settings.enabled,
+                        always_expose_tools=settings.always_expose_tools,
                     )
+                    if isinstance(subject, GooglePersonalSubject):
+                        toolkit = await self.personal_toolkits.create_personal(
+                            session,
+                            user_id=subject.owner.user_id,
+                            create=creation,
+                        )
+                    else:
+                        toolkit = await self.toolkits.create(
+                            session,
+                            ToolkitCreate(
+                                workspace_id=subject.workspace_id,
+                                owner_agent_id=subject.agent_id,
+                                **creation.model_dump(),
+                            ),
+                        )
                     toolkit_id = toolkit.id
                     if subject.agent_id is not None:
                         await self.namespaces.ensure_active(
@@ -667,7 +734,7 @@ class GoogleOAuthRepository:
         return result
 
     async def cancel(
-        self, subject: GoogleSubject, attempt_id: str
+        self, subject: GoogleManager, attempt_id: str
     ) -> GooglePublication | None:
         """A completed publication is not reported as proven cancellation."""
         async with self.session_manager() as session:
@@ -680,7 +747,7 @@ class GoogleOAuthRepository:
         return None
 
     async def outcome(
-        self, subject: GoogleSubject, attempt_id: str
+        self, subject: GoogleManager, attempt_id: str
     ) -> GooglePublication:
         """Inspect a published result under exact authority without credentials."""
         async with self.session_manager() as session:
@@ -689,7 +756,7 @@ class GoogleOAuthRepository:
                 raise GoogleOAuthError("stale", "Google setup is not published.")
             return await self._outcome(session, row)
 
-    async def disconnect(self, subject: GoogleSubject, toolkit_id: str) -> None:
+    async def disconnect(self, subject: GoogleManager, toolkit_id: str) -> None:
         """Local disconnect permanently defeats pending reconnect targets."""
         async with self.session_manager() as session:
             await self._scope(session, subject, lock=True)
@@ -699,6 +766,13 @@ class GoogleOAuthRepository:
                     RDBToolkitConfig.id == toolkit_id,
                     RDBToolkitConfig.workspace_id == subject.workspace_id,
                     RDBToolkitConfig.owner_agent_id == subject.agent_id,
+                    RDBToolkitConfig.owner_kind == subject.owner.kind,
+                    RDBToolkitConfig.owner_user_id
+                    == (
+                        subject.user_id
+                        if isinstance(subject, GooglePersonalSubject)
+                        else None
+                    ),
                     RDBToolkitConfig.toolkit_type == "google",
                 )
                 .with_for_update()

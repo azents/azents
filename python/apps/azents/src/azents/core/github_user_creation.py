@@ -2,6 +2,7 @@
 
 import dataclasses
 import datetime
+from typing import assert_never
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -9,6 +10,8 @@ from azents.core.github_setup import GitHubSetupTransport
 from azents.core.github_user_oauth import (
     GitHubUserAttemptStatus,
     GitHubUserCandidate,
+    GitHubUserErrorCode,
+    GitHubUserOAuthError,
     GitHubUserRegistration,
     GitHubUserRevocation,
 )
@@ -16,8 +19,15 @@ from azents.core.toolkit_identifiers import (
     IdentifierValidationError,
     resolve_create_identifiers,
 )
+from azents.core.toolkit_ownership import (
+    AgentToolkitOwner,
+    ToolkitOwner,
+    ToolkitOwnerKind,
+    UserToolkitOwner,
+    WorkspaceToolkitOwner,
+)
 from azents.core.tools import GitHubToolkitConfig
-from azents.repos.toolkit.data import ToolkitCreate
+from azents.repos.toolkit.data import ToolkitCreation
 
 
 @dataclasses.dataclass(frozen=True)
@@ -29,14 +39,80 @@ class GitHubUserCreationSubject:
     workspace_id: str
     agent_id: str | None
 
+    @property
+    def owner(self) -> WorkspaceToolkitOwner | AgentToolkitOwner:
+        if self.agent_id is not None:
+            return AgentToolkitOwner(
+                kind=ToolkitOwnerKind.AGENT,
+                workspace_id=self.workspace_id,
+                agent_id=self.agent_id,
+            )
+        return WorkspaceToolkitOwner(
+            kind=ToolkitOwnerKind.WORKSPACE,
+            workspace_id=self.workspace_id,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class GitHubPersonalCreationSubject:
+    """Explicit unpublished personal target bound to the exact initiating account."""
+
+    user_id: str
+    session_id: str
+    owner: UserToolkitOwner
+
+    def __post_init__(self) -> None:
+        if self.user_id != self.owner.user_id:
+            raise GitHubUserOAuthError(
+                GitHubUserErrorCode.AUTHORITY, "GitHub personal owner does not match."
+            )
+
+    @property
+    def workspace_id(self) -> None:
+        return None
+
+    @property
+    def agent_id(self) -> None:
+        return None
+
+
+GitHubCreationSubject = GitHubUserCreationSubject | GitHubPersonalCreationSubject
+
+
+def github_creation_subject_for_owner(
+    user_id: str,
+    session_id: str,
+    owner: ToolkitOwner,
+) -> GitHubCreationSubject:
+    """Decode canonical persisted ownership without converting valid shared attempts."""
+    match owner:
+        case UserToolkitOwner():
+            return GitHubPersonalCreationSubject(user_id, session_id, owner)
+        case AgentToolkitOwner():
+            return GitHubUserCreationSubject(
+                user_id,
+                session_id,
+                owner.workspace_id,
+                owner.agent_id,
+            )
+        case WorkspaceToolkitOwner():
+            return GitHubUserCreationSubject(
+                user_id,
+                session_id,
+                owner.workspace_id,
+                None,
+            )
+        case _:
+            assert_never(owner)
+
 
 @dataclasses.dataclass(frozen=True)
 class GitHubUserCreationAttempt:
     """A pending authorization, never a saved or executable Toolkit."""
 
     id: str
-    subject: GitHubUserCreationSubject
-    desired: ToolkitCreate = dataclasses.field(repr=False)
+    subject: GitHubCreationSubject
+    desired: ToolkitCreation = dataclasses.field(repr=False)
     registration: GitHubUserRegistration
     redirect_uri: str
     nonce: str = dataclasses.field(repr=False)
@@ -117,7 +193,7 @@ class GitHubUserCreationSettings:
     timeout: float
     inject_runtime_environment: bool
 
-    def apply(self, desired: ToolkitCreate) -> ToolkitCreate:
+    def apply[T: ToolkitCreation](self, desired: T) -> T:
         """Combine only allowlisted settings with this attempt's retained authority."""
         previous = GitHubToolkitConfig.model_validate(desired.config)
         config = GitHubToolkitConfig(
@@ -126,16 +202,14 @@ class GitHubUserCreationSettings:
             timeout=self.timeout,
             inject_runtime_environment=self.inject_runtime_environment,
         )
-        return ToolkitCreate(
-            workspace_id=desired.workspace_id,
-            owner_agent_id=desired.owner_agent_id,
-            toolkit_type=desired.toolkit_type,
-            credentials=desired.credentials,
-            name=self.name,
-            slug=self.slug,
-            description=self.description,
-            prompt=self.prompt,
-            enabled=self.enabled,
-            always_expose_tools=self.always_expose_tools,
-            config=config.model_dump(),
+        return desired.model_copy(
+            update={
+                "name": self.name,
+                "slug": self.slug,
+                "description": self.description,
+                "prompt": self.prompt,
+                "enabled": self.enabled,
+                "always_expose_tools": self.always_expose_tools,
+                "config": config.model_dump(),
+            }
         )

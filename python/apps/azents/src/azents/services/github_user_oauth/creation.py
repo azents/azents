@@ -17,9 +17,10 @@ from azents.core.github_user_auth import (
     GitHubUserTokenRejected,
 )
 from azents.core.github_user_creation import (
+    GitHubCreationSubject,
+    GitHubPersonalCreationSubject,
     GitHubUserCreationAttempt,
     GitHubUserCreationFinalSettings,
-    GitHubUserCreationSubject,
 )
 from azents.core.github_user_oauth import (
     GitHubUserAttemptStatus,
@@ -40,7 +41,7 @@ from azents.services.github_user_oauth.data import (
 )
 from azents.services.github_user_oauth.service import GitHubUserOAuthService
 from azents.services.toolkit import ToolkitService
-from azents.services.toolkit.data import ToolkitCreateInput
+from azents.services.toolkit.data import ToolkitConfigurationInput, ToolkitCreateInput
 
 
 @dataclasses.dataclass(frozen=True)
@@ -52,12 +53,20 @@ class GitHubUserCreationService:
     toolkits: Annotated[ToolkitService, Depends()]
 
     async def connect(
-        self, subject: GitHubUserCreationSubject, create: ToolkitCreateInput
+        self, subject: GitHubCreationSubject, create: ToolkitConfigurationInput
     ) -> GitHubUserConnectOutput:
         await self.repository.authorize(subject)
-        desired = await self.toolkits.prepare_user_creation(
-            create, owner_agent_id=subject.agent_id
-        )
+        if isinstance(subject, GitHubPersonalCreationSubject):
+            desired = await self.toolkits.prepare_user_configuration(create)
+        else:
+            if not isinstance(create, ToolkitCreateInput):
+                raise GitHubUserOAuthError(
+                    GitHubUserErrorCode.INVALID,
+                    "Shared GitHub creation requires Workspace context.",
+                )
+            desired = await self.toolkits.prepare_user_creation(
+                create, owner_agent_id=subject.agent_id
+            )
         prepared = await self.oauth.prepare_registration(
             credentials_json=desired.credentials, revision=1
         )
@@ -136,7 +145,7 @@ class GitHubUserCreationService:
         return prepared.registration
 
     async def exchange(
-        self, subject: GitHubUserCreationSubject, *, code: str, state: str
+        self, subject: GitHubCreationSubject, *, code: str, state: str
     ) -> GitHubUserCreationReview:
         parts = state.split(".")
         if (
@@ -237,9 +246,13 @@ class GitHubUserCreationService:
                 account_avatar_url=candidate.account_avatar_url,
                 app_id=attempt.registration.app_id,
                 source=attempt.registration.source,
-                sharing_scope="workspace_shared"
-                if attempt.subject.agent_id is None
-                else "agent_only",
+                sharing_scope=(
+                    "personal"
+                    if isinstance(attempt.subject, GitHubPersonalCreationSubject)
+                    else "workspace_shared"
+                    if attempt.subject.agent_id is None
+                    else "agent_only"
+                ),
             ),
             name=desired.name,
             slug=desired.slug,
@@ -251,7 +264,7 @@ class GitHubUserCreationService:
         )
 
     async def review(
-        self, subject: GitHubUserCreationSubject, attempt_id: str
+        self, subject: GitHubCreationSubject, attempt_id: str
     ) -> GitHubUserCreationReview:
         attempt = await self.repository.load(subject, attempt_id)
         await self._current(attempt)
@@ -259,7 +272,7 @@ class GitHubUserCreationService:
 
     async def confirm(
         self,
-        subject: GitHubUserCreationSubject,
+        subject: GitHubCreationSubject,
         attempt_id: str,
         settings: GitHubUserCreationFinalSettings,
     ) -> GitHubUserCreatedOutput:
@@ -281,7 +294,7 @@ class GitHubUserCreationService:
         return GitHubUserCreatedOutput(toolkit_id=toolkit_id)
 
     async def app(
-        self, subject: GitHubUserCreationSubject, attempt_id: str
+        self, subject: GitHubCreationSubject, attempt_id: str
     ) -> GitHubSetupAppOutput:
         """Observe the candidate's actual App without publishing or mutating it."""
         attempt = await self.repository.load_review(subject, attempt_id)
@@ -308,7 +321,7 @@ class GitHubUserCreationService:
             )
         return GitHubSetupAppOutput(app=app)
 
-    async def cancel(self, subject: GitHubUserCreationSubject, attempt_id: str) -> None:
+    async def cancel(self, subject: GitHubCreationSubject, attempt_id: str) -> None:
         await self.oauth.cleanup_revocations(
             await self.repository.cancel(subject, attempt_id)
         )

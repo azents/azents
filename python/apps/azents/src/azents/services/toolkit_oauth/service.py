@@ -13,6 +13,7 @@ from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.core.enums import MCPOAuthConnectionStatus
 from azents.core.github_auth import (
+    GitHubClientFactory,
     create_github_app_jwt,
     create_github_client,
     exchange_oauth_code,
@@ -38,6 +39,7 @@ from azents.core.toolkit_errors import NotFound
 from azents.core.tools import TestConnectionResult, ToolkitProvider
 from azents.engine.tools.deps import get_toolkit_registry
 from azents.repos.toolkit_oauth_data import (
+    GithubInstallationRecord,
     ToolkitOAuthDenialReason,
     ToolkitOAuthDenied,
     ToolkitOAuthRequester,
@@ -47,6 +49,7 @@ from azents.repos.toolkit_operations.owned_data import OAuthConnectionWrite
 from azents.services.agent.data import NotAdmin
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
+    ResolvedPlatformGitHubApp,
 )
 from azents.services.toolkit import ToolkitService
 from azents.services.toolkit.data import (
@@ -62,6 +65,81 @@ from azents.services.toolkit_oauth.data import (
     ToolkitOAuthError,
     ToolkitOAuthFailureReason,
 )
+
+
+@dataclasses.dataclass(frozen=True)
+class PlatformInstallationReceipt:
+    """Transient SDK receipt, retained only until the ordinary sync/cleanup sequence."""
+
+    token: str = dataclasses.field(repr=False)
+    client_factory: GitHubClientFactory = dataclasses.field(repr=False)
+    records: tuple[GithubInstallationRecord, ...]
+    installations: tuple[GitHubInstallationProjection, ...]
+
+
+async def exchange_platform_installations(
+    config: Config,
+    platform: ResolvedPlatformGitHubApp,
+    code: str,
+) -> PlatformInstallationReceipt:
+    """Reuse the established SDK exchange/list behavior for every management owner."""
+    if (
+        platform.app_id is None
+        or platform.client_id is None
+        or platform.client_secret is None
+    ):
+        raise ToolkitOAuthError(
+            ToolkitOAuthFailureReason.RESOURCE_NOT_FOUND,
+            "GitHub Platform App OAuth is not configured.",
+        )
+    base_url = config.testenv_github_platform_validation_base_url
+    client_factory = (
+        github_user_testenv_client_factory(base_url)
+        if config.testenv_api_enabled and base_url is not None
+        else create_github_client
+    )
+    try:
+        token = await exchange_oauth_code(
+            platform.client_id,
+            platform.client_secret,
+            code,
+            client_factory=client_factory,
+        )
+    except ValueError as exc:
+        raise ToolkitOAuthError(
+            ToolkitOAuthFailureReason.INVALID_REQUEST, str(exc)
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        raise RuntimeError(
+            f"GitHub OAuth token exchange failed: HTTP {exc.response.status_code}"
+        ) from exc
+    try:
+        raw = await list_user_installations(token, client_factory=client_factory)
+    except httpx.HTTPStatusError as exc:
+        raise RuntimeError(
+            f"Failed to fetch user installations: HTTP {exc.response.status_code}"
+        ) from exc
+    return PlatformInstallationReceipt(
+        token=token,
+        client_factory=client_factory,
+        records=helpers.decode_installations(raw),
+        installations=helpers.project_installations(raw),
+    )
+
+
+async def revoke_platform_installation_receipt(
+    platform: ResolvedPlatformGitHubApp,
+    receipt: PlatformInstallationReceipt,
+) -> None:
+    """Perform the existing token revocation only after successful local sync."""
+    if platform.client_id is None or platform.client_secret is None:
+        raise RuntimeError("Admitted Platform registration is incomplete")
+    await revoke_oauth_token(
+        platform.client_id,
+        platform.client_secret,
+        receipt.token,
+        client_factory=receipt.client_factory,
+    )
 
 
 def _require_authority(result: Result[None, ToolkitOAuthDenied]) -> None:
@@ -125,45 +203,9 @@ class ToolkitOAuthService:
                 ToolkitOAuthFailureReason.PLATFORM_SETTINGS_CHANGED,
                 "Platform GitHub App settings changed. Restart OAuth.",
             )
-        if (
-            platform.app_id is None
-            or platform.client_id is None
-            or platform.client_secret is None
-        ):
-            raise ToolkitOAuthError(
-                ToolkitOAuthFailureReason.RESOURCE_NOT_FOUND,
-                "GitHub Platform App OAuth is not configured.",
-            )
-        base_url = self.config.testenv_github_platform_validation_base_url
-        client_factory = (
-            github_user_testenv_client_factory(base_url)
-            if self.config.testenv_api_enabled and base_url is not None
-            else create_github_client
-        )
-        try:
-            user_token = await exchange_oauth_code(
-                platform.client_id,
-                platform.client_secret,
-                code,
-                client_factory=client_factory,
-            )
-        except ValueError as exc:
-            raise ToolkitOAuthError(
-                ToolkitOAuthFailureReason.INVALID_REQUEST, str(exc)
-            ) from exc
-        except httpx.HTTPStatusError as exc:
-            raise RuntimeError(
-                f"GitHub OAuth token exchange failed: HTTP {exc.response.status_code}"
-            ) from exc
-        try:
-            raw_installations = await list_user_installations(
-                user_token, client_factory=client_factory
-            )
-        except httpx.HTTPStatusError as exc:
-            raise RuntimeError(
-                f"Failed to fetch user installations: HTTP {exc.response.status_code}"
-            ) from exc
-        records = helpers.decode_installations(raw_installations)
+        receipt = await exchange_platform_installations(self.config, platform, code)
+        if platform.app_id is None:
+            raise RuntimeError("Admitted Platform registration is incomplete")
         result = await self.repository.sync_installations(
             requester=ToolkitOAuthRequester(
                 user_id=user_id,
@@ -171,16 +213,11 @@ class ToolkitOAuthService:
                 workspace_id=workspace_id,
             ),
             platform_app_id=platform.app_id,
-            installations=records,
+            installations=receipt.records,
         )
         _require_authority(result)
-        await revoke_oauth_token(
-            platform.client_id,
-            platform.client_secret,
-            user_token,
-            client_factory=client_factory,
-        )
-        return helpers.project_installations(raw_installations)
+        await revoke_platform_installation_receipt(platform, receipt)
+        return receipt.installations
 
     async def connect(
         self,
@@ -200,49 +237,21 @@ class ToolkitOAuthService:
                 ToolkitOAuthFailureReason.RESOURCE_NOT_FOUND,
                 "Toolkit config not found.",
             )
-        mcp_config = helpers.resolve_mcp_config(
-            toolkit.toolkit_type, toolkit.config, self.registry
-        )
-        if mcp_config.auth_type != "oauth2":
-            raise ToolkitOAuthError(
-                ToolkitOAuthFailureReason.INVALID_REQUEST,
-                "Toolkit does not use OAuth2 authentication.",
-            )
-        metadata = await helpers.discover_required_metadata(
-            mcp_config, self.config.mcp_proxy_url
-        )
         redirect_uri = (
             f"{self.config.web_url}/oauth/mcp/callback"
             f"?handle={handle}&toolkit_config_id={toolkit_id}"
             if self.config.web_url
             else ""
         )
-        client_id = existing.client_id if existing is not None else None
-        client_secret = existing.client_secret if existing is not None else None
-        if client_id is None:
-            manual = helpers.extract_oauth_client_credentials(toolkit.credentials)
-            if manual is not None:
-                client_id, client_secret = manual
-            elif metadata.registration_endpoint is not None:
-                try:
-                    dcr = await register_client(
-                        metadata.registration_endpoint,
-                        redirect_uri,
-                        proxy_url=self.config.mcp_proxy_url,
-                    )
-                except DcrError as exc:
-                    raise ToolkitOAuthError(
-                        ToolkitOAuthFailureReason.INVALID_REQUEST,
-                        f"Dynamic client registration failed: {exc}",
-                    ) from exc
-                client_id = dcr.client_id
-                client_secret = dcr.client_secret
-            else:
-                raise ToolkitOAuthError(
-                    ToolkitOAuthFailureReason.INVALID_REQUEST,
-                    "OAuth2 client credentials are not configured "
-                    "and server does not support DCR.",
-                )
+        prepared = await helpers.prepare_mcp_authorization(
+            toolkit,
+            existing,
+            redirect_uri=redirect_uri,
+            proxy_url=self.config.mcp_proxy_url,
+            registry=self.registry,
+        )
+        mcp_config = prepared.config
+        connection = prepared.connection
         pkce = generate_pkce_pair()
         oauth_state = create_toolkit_oauth_state(
             toolkit_id=toolkit_id,
@@ -259,28 +268,12 @@ class ToolkitOAuthService:
                 workspace_id=workspace_id,
             ),
             toolkit_id=toolkit_id,
-            connection=OAuthConnectionWrite(
-                issuer=metadata.issuer,
-                resource=mcp_config.server_url,
-                server_url=mcp_config.server_url,
-                authorization_endpoint=metadata.authorization_endpoint,
-                token_endpoint=metadata.token_endpoint,
-                registration_endpoint=metadata.registration_endpoint,
-                client_id=client_id,
-                client_secret=client_secret,
-                token_endpoint_auth_method=(
-                    "client_secret_post" if client_secret is not None else "none"
-                ),
-                scope=" ".join(mcp_config.scopes) if mcp_config.scopes else None,
-                access_token=existing.access_token if existing is not None else None,
-                refresh_token=existing.refresh_token if existing is not None else None,
-                expires_at=existing.expires_at if existing is not None else None,
-            ),
+            connection=connection,
         )
         _require_authority(result)
         return build_authorization_url(
-            auth_url=metadata.authorization_endpoint,
-            client_id=client_id,
+            auth_url=connection.authorization_endpoint,
+            client_id=connection.client_id,
             redirect_uri=redirect_uri,
             scopes=mcp_config.scopes,
             state=oauth_state,

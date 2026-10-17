@@ -3,9 +3,16 @@
 import dataclasses
 import datetime
 import enum
-from typing import Literal
+from typing import Literal, assert_never
 
-from azents.repos.toolkit.data import ToolkitConfig
+from azents.core.toolkit_ownership import (
+    AgentToolkitOwner,
+    ToolkitOwner,
+    ToolkitOwnerKind,
+    UserToolkitOwner,
+    WorkspaceToolkitOwner,
+)
+from azents.repos.toolkit.data import PersonalToolkitConfig, ToolkitConfig
 
 
 class GitHubUserAttemptStatus(enum.StrEnum):
@@ -50,6 +57,72 @@ class GitHubUserRequester:
     agent_id: str | None
     toolkit_id: str
 
+    @property
+    def owner(self) -> WorkspaceToolkitOwner | AgentToolkitOwner:
+        """Expose the existing shared/Agent ownership as a closed owner target."""
+        if self.agent_id is not None:
+            return AgentToolkitOwner(
+                kind=ToolkitOwnerKind.AGENT,
+                workspace_id=self.workspace_id,
+                agent_id=self.agent_id,
+            )
+        return WorkspaceToolkitOwner(
+            kind=ToolkitOwnerKind.WORKSPACE,
+            workspace_id=self.workspace_id,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class GitHubPersonalRequester:
+    """Exact active owner, Auth Session and canonical personal Toolkit target."""
+
+    user_id: str
+    session_id: str
+    toolkit_id: str
+    owner: UserToolkitOwner
+
+    def __post_init__(self) -> None:
+        if self.owner.user_id != self.user_id:
+            raise GitHubUserOAuthError(
+                GitHubUserErrorCode.AUTHORITY, "GitHub personal owner does not match."
+            )
+
+    @property
+    def workspace_id(self) -> None:
+        """User-global setup has no owning Workspace."""
+        return None
+
+    @property
+    def agent_id(self) -> None:
+        """Agent origin is not connection ownership."""
+        return None
+
+
+GitHubToolkitRequester = GitHubUserRequester | GitHubPersonalRequester
+
+
+def github_requester_for_owner(
+    *,
+    user_id: str,
+    session_id: str,
+    toolkit_id: str,
+    owner: ToolkitOwner,
+) -> GitHubToolkitRequester:
+    """Decode persisted setup context into an exact closed management target."""
+    match owner:
+        case UserToolkitOwner():
+            return GitHubPersonalRequester(user_id, session_id, toolkit_id, owner)
+        case AgentToolkitOwner():
+            return GitHubUserRequester(
+                user_id, session_id, owner.workspace_id, owner.agent_id, toolkit_id
+            )
+        case WorkspaceToolkitOwner():
+            return GitHubUserRequester(
+                user_id, session_id, owner.workspace_id, None, toolkit_id
+            )
+        case _:
+            assert_never(owner)
+
 
 @dataclasses.dataclass(frozen=True)
 class GitHubUserRegistration:
@@ -92,7 +165,7 @@ class GitHubUserConnection:
 class GitHubUserContext:
     """Authorized current Toolkit state for service preparation."""
 
-    toolkit: ToolkitConfig = dataclasses.field(repr=False)
+    toolkit: ToolkitConfig | PersonalToolkitConfig = dataclasses.field(repr=False)
     connection: GitHubUserConnection | None
 
 
@@ -101,7 +174,7 @@ class GitHubUserAttempt:
     """Bound one-use setup record after its database operation completes."""
 
     id: str
-    requester: GitHubUserRequester
+    requester: GitHubToolkitRequester
     registration: GitHubUserRegistration
     redirect_uri: str
     nonce: str = dataclasses.field(repr=False)

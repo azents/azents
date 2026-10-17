@@ -2,7 +2,7 @@
 
 import dataclasses
 from enum import StrEnum
-from typing import Literal
+from typing import Literal, assert_never
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from typing_extensions import Annotated
@@ -54,6 +54,33 @@ ToolkitOwner = Annotated[
     Field(discriminator="kind"),
 ]
 toolkit_owner_adapter: TypeAdapter[ToolkitOwner] = TypeAdapter(ToolkitOwner)
+
+
+def toolkit_owner_from_fields(
+    kind: ToolkitOwnerKind,
+    *,
+    workspace_id: str | None,
+    agent_id: str | None,
+    user_id: str | None,
+) -> ToolkitOwner:
+    """Decode the constrained canonical key shape once at a detached boundary."""
+    match kind:
+        case ToolkitOwnerKind.WORKSPACE:
+            if workspace_id is None or agent_id is not None or user_id is not None:
+                raise ValueError("Invalid Workspace Toolkit owner shape")
+            return WorkspaceToolkitOwner(kind=kind, workspace_id=workspace_id)
+        case ToolkitOwnerKind.AGENT:
+            if workspace_id is None or agent_id is None or user_id is not None:
+                raise ValueError("Invalid Agent Toolkit owner shape")
+            return AgentToolkitOwner(
+                kind=kind, workspace_id=workspace_id, agent_id=agent_id
+            )
+        case ToolkitOwnerKind.USER:
+            if workspace_id is not None or agent_id is not None or user_id is None:
+                raise ValueError("Invalid User Toolkit owner shape")
+            return UserToolkitOwner(kind=kind, user_id=user_id)
+        case _:
+            assert_never(kind)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

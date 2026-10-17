@@ -42,7 +42,7 @@ class GoogleReview(BaseModel):
     expires_at: datetime.datetime
     identity: GoogleIdentity
     client_id: str
-    ownership: Literal["agent_only", "workspace_shared"]
+    ownership: Literal["agent_only", "workspace_shared", "personal"]
     reconnect_toolkit_id: str | None
     requested_tasks: tuple[GoogleTask, ...]
     timeout: float

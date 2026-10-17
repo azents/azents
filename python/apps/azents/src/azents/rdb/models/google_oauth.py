@@ -9,7 +9,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 from uuid6 import uuid7
 
 from azents.core.google_oauth import GoogleAttemptStatus, GoogleConnectionStatus
+from azents.core.toolkit_ownership import ToolkitOwnerKind
 from azents.rdb.models.base import RDBModel
+from azents.rdb.models.toolkit import toolkit_owner_kind_enum
 from azents.rdb.types.datetime import TimeZoneDateTime
 
 google_attempt_status = ENUM(
@@ -66,8 +68,18 @@ class RDBGoogleAttempt(RDBModel):
     )
     user_id: Mapped[str] = mapped_column(sa.String(32))
     session_id: Mapped[str] = mapped_column(sa.String(32))
-    workspace_id: Mapped[str] = mapped_column(
-        sa.String(32), sa.ForeignKey("workspaces.id", ondelete="CASCADE")
+    workspace_id: Mapped[str | None] = mapped_column(
+        sa.String(32), sa.ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True
+    )
+    owner_kind: Mapped[ToolkitOwnerKind] = mapped_column(
+        toolkit_owner_kind_enum, nullable=False
+    )
+    owner_user_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey(
+            "users.id", ondelete="CASCADE", name="fk_google_attempts_owner_user"
+        ),
+        nullable=True,
     )
     agent_id: Mapped[str | None] = mapped_column(
         sa.String(32), sa.ForeignKey("agents.id", ondelete="CASCADE"), nullable=True
@@ -100,4 +112,14 @@ class RDBGoogleAttempt(RDBModel):
     )
     IX_EXPIRY = sa.Index("ix_google_oauth_attempts_expiry", "expires_at")
     IX_TARGET = sa.Index("ix_google_oauth_attempts_target", "target_toolkit_id")
-    __table_args__ = (IX_SCOPE, IX_EXPIRY, IX_TARGET)
+    IX_OWNER_USER = sa.Index("ix_google_oauth_attempts_owner_user", "owner_user_id")
+    CK_OWNER = sa.CheckConstraint(
+        "(owner_kind = 'workspace' AND workspace_id IS NOT NULL "
+        "AND agent_id IS NULL AND owner_user_id IS NULL) OR "
+        "(owner_kind = 'agent' AND workspace_id IS NOT NULL "
+        "AND agent_id IS NOT NULL AND owner_user_id IS NULL) OR "
+        "(owner_kind = 'user' AND workspace_id IS NULL AND agent_id IS NULL "
+        "AND owner_user_id IS NOT NULL AND owner_user_id = user_id)",
+        name="ck_google_oauth_attempts_owner_shape",
+    )
+    __table_args__ = (IX_SCOPE, IX_EXPIRY, IX_TARGET, IX_OWNER_USER, CK_OWNER)

@@ -42,6 +42,7 @@ from azents.repos.github_user_oauth.operations import GitHubUserOAuthOperationRe
 from azents.repos.session import SessionRepository
 from azents.repos.system_setting.repository import SystemSettingRepository
 from azents.repos.toolkit import ToolkitRepository
+from azents.repos.toolkit.personal import PersonalToolkitRepository
 from azents.repos.user import UserRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
@@ -105,6 +106,7 @@ async def _harness(manager: SessionManager[WriteSession]) -> _Harness:
         agent_admin_repository=AsyncMock(spec=AgentAdminRepository),
         system_setting_repository=AsyncMock(spec=SystemSettingRepository),
         setting_payloads=Mock(spec=SystemSettingPayloadResolver),
+        personal_toolkits=PersonalToolkitRepository(cipher),
     )
     return _Harness(
         repo,

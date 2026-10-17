@@ -3,10 +3,18 @@
 import dataclasses
 import datetime
 import enum
+from typing import assert_never
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from azents.core.google_policy import GoogleTask
+from azents.core.toolkit_ownership import (
+    AgentToolkitOwner,
+    ToolkitOwner,
+    ToolkitOwnerKind,
+    UserToolkitOwner,
+    WorkspaceToolkitOwner,
+)
 
 
 class GoogleOAuthError(ValueError):
@@ -43,6 +51,64 @@ class GoogleSubject:
     session_id: str
     workspace_id: str
     agent_id: str | None
+
+    @property
+    def owner(self) -> WorkspaceToolkitOwner | AgentToolkitOwner:
+        """Keep existing shared/Agent context explicit at the owner boundary."""
+        if self.agent_id is not None:
+            return AgentToolkitOwner(
+                kind=ToolkitOwnerKind.AGENT,
+                workspace_id=self.workspace_id,
+                agent_id=self.agent_id,
+            )
+        return WorkspaceToolkitOwner(
+            kind=ToolkitOwnerKind.WORKSPACE, workspace_id=self.workspace_id
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class GooglePersonalSubject:
+    """Exact active account and explicit User-global setup target."""
+
+    user_id: str
+    session_id: str
+    owner: UserToolkitOwner
+
+    def __post_init__(self) -> None:
+        if self.owner.user_id != self.user_id:
+            raise GoogleOAuthError("forbidden", "Google setup owner does not match.")
+
+    @property
+    def workspace_id(self) -> None:
+        """Personal ownership never creates an owning Workspace."""
+        return None
+
+    @property
+    def agent_id(self) -> None:
+        """Personal setup origin is not an Agent ownership relation."""
+        return None
+
+
+GoogleManager = GoogleSubject | GooglePersonalSubject
+
+
+def google_manager_for_owner(
+    user_id: str,
+    session_id: str,
+    owner: ToolkitOwner,
+) -> GoogleManager:
+    """Decode canonical ownership into the exact supported management variants."""
+    match owner:
+        case UserToolkitOwner():
+            return GooglePersonalSubject(user_id, session_id, owner)
+        case AgentToolkitOwner():
+            return GoogleSubject(
+                user_id, session_id, owner.workspace_id, owner.agent_id
+            )
+        case WorkspaceToolkitOwner():
+            return GoogleSubject(user_id, session_id, owner.workspace_id, None)
+        case _:
+            assert_never(owner)
 
 
 class GoogleIdentity(BaseModel):
@@ -141,7 +207,7 @@ class GoogleAttempt:
     """Detached exact attempt; published outcomes retain no candidate secrets."""
 
     id: str
-    subject: GoogleSubject
+    subject: GoogleManager
     status: GoogleAttemptStatus
     expires_at: datetime.datetime
     setup: GoogleSetup | None = dataclasses.field(repr=False)

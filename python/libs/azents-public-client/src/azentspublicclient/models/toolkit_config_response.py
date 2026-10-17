@@ -28,10 +28,9 @@ from typing_extensions import Self
 
 class ToolkitConfigResponse(BaseModel):
     """
-    Toolkit Config response model.
+    Existing Workspace/Agent response with its non-null Workspace contract.
     """ # noqa: E501
     id: StrictStr
-    workspace_id: StrictStr
     toolkit_type: StrictStr
     slug: StrictStr
     name: StrictStr
@@ -46,8 +45,9 @@ class ToolkitConfigResponse(BaseModel):
     github_user_connection: Optional[GitHubUserConnectionSummaryResponse] = None
     created_at: datetime
     updated_at: datetime
+    workspace_id: StrictStr
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "workspace_id", "toolkit_type", "slug", "name", "description", "config", "prompt", "has_credentials", "enabled", "always_expose_tools", "oauth_connection", "authorization_state", "github_user_connection", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "toolkit_type", "slug", "name", "description", "config", "prompt", "has_credentials", "enabled", "always_expose_tools", "oauth_connection", "authorization_state", "github_user_connection", "created_at", "updated_at", "workspace_id"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -144,7 +144,6 @@ class ToolkitConfigResponse(BaseModel):
         _obj = cls.model_validate({
             _key: _value for _key, _value in {
             "id": obj.get("id"),
-            "workspace_id": obj.get("workspace_id"),
             "toolkit_type": obj.get("toolkit_type"),
             "slug": obj.get("slug"),
             "name": obj.get("name"),
@@ -158,7 +157,8 @@ class ToolkitConfigResponse(BaseModel):
             "authorization_state": GitHubPlatformAuthorizationStateResponse.from_dict(obj["authorization_state"]) if obj.get("authorization_state") is not None else None,
             "github_user_connection": GitHubUserConnectionSummaryResponse.from_dict(obj["github_user_connection"]) if obj.get("github_user_connection") is not None else None,
             "created_at": obj.get("created_at"),
-            "updated_at": obj.get("updated_at")
+            "updated_at": obj.get("updated_at"),
+            "workspace_id": obj.get("workspace_id")
             }.items() if _key in obj
         })
         # store additional fields in additional_properties

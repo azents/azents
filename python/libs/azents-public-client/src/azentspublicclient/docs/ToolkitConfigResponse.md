@@ -1,13 +1,12 @@
 # ToolkitConfigResponse
 
-Toolkit Config response model.
+Existing Workspace/Agent response with its non-null Workspace contract.
 
 ## Properties
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **id** | **str** |  | 
-**workspace_id** | **str** |  | 
 **toolkit_type** | **str** |  | 
 **slug** | **str** |  | 
 **name** | **str** |  | 
@@ -22,6 +21,7 @@ Name | Type | Description | Notes
 **github_user_connection** | [**GitHubUserConnectionSummaryResponse**](GitHubUserConnectionSummaryResponse.md) |  | [optional] 
 **created_at** | **datetime** |  | 
 **updated_at** | **datetime** |  | 
+**workspace_id** | **str** |  | 
 
 ## Example
 

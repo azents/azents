@@ -59,11 +59,10 @@ class GitHubUserConnectionSummaryResponse(BaseModel):
     failure_reason: str | None
 
 
-class ToolkitConfigResponse(BaseModel):
-    """Toolkit Config response model."""
+class ToolkitConfigurationResponse(BaseModel):
+    """Common allowlisted Toolkit response fields, excluding credential material."""
 
     id: str
-    workspace_id: str
     toolkit_type: str
     slug: str
     name: str
@@ -81,6 +80,12 @@ class ToolkitConfigResponse(BaseModel):
     github_user_connection: GitHubUserConnectionSummaryResponse | None = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
+
+
+class ToolkitConfigResponse(ToolkitConfigurationResponse):
+    """Existing Workspace/Agent response with its non-null Workspace contract."""
+
+    workspace_id: str
 
 
 class ToolkitConfigListResponse(BaseModel):

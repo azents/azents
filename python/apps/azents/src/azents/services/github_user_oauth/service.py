@@ -27,6 +27,8 @@ from azents.core.github_user_auth import (
     GitHubUserTokenRejected,
 )
 from azents.core.github_user_oauth import (
+    GitHubPersonalRequester,
+    GitHubToolkitRequester,
     GitHubUserAttempt,
     GitHubUserCandidate,
     GitHubUserConnection,
@@ -36,7 +38,6 @@ from azents.core.github_user_oauth import (
     GitHubUserErrorCode,
     GitHubUserOAuthError,
     GitHubUserRegistration,
-    GitHubUserRequester,
     GitHubUserRevocation,
 )
 from azents.core.oauth2 import generate_pkce_pair
@@ -118,6 +119,23 @@ class GitHubUserOAuthService:
             workspace_id=workspace_id,
             agent_id=agent_id,
         )
+        return await self._availability()
+
+    async def personal_availability(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+    ) -> GitHubSetupAvailability:
+        """Project common registration options after personal account admission."""
+        await self.repository.authorize_personal_scope(
+            user_id=user_id,
+            session_id=session_id,
+        )
+        return await self._availability()
+
+    async def _availability(self) -> GitHubSetupAvailability:
+        """Common readiness of every existing GitHub acquisition mode."""
         platform = await self.platform_runtime.resolve()
         values = (
             platform.app_id,
@@ -148,7 +166,7 @@ class GitHubUserOAuthService:
             ),
         )
 
-    async def status(self, requester: GitHubUserRequester) -> GitHubUserStatusOutput:
+    async def status(self, requester: GitHubToolkitRequester) -> GitHubUserStatusOutput:
         """Read saved connection identity under the setup management boundary."""
         context = await self.repository.read_context(requester=requester)
         return GitHubUserStatusOutput(
@@ -224,7 +242,9 @@ class GitHubUserOAuthService:
             "Toolkit does not use GitHub App user-account authentication.",
         )
 
-    async def connect(self, requester: GitHubUserRequester) -> GitHubUserConnectOutput:
+    async def connect(
+        self, requester: GitHubToolkitRequester
+    ) -> GitHubUserConnectOutput:
         """Reserve a bound attempt without replacing an existing credential."""
         context = await self.repository.read_context(requester=requester)
         prepared = await self._registration(context)
@@ -290,7 +310,7 @@ class GitHubUserOAuthService:
 
     async def exchange(
         self,
-        requester: GitHubUserRequester,
+        requester: GitHubToolkitRequester,
         *,
         code: str,
         state: str,
@@ -402,14 +422,16 @@ class GitHubUserOAuthService:
             app_id=attempt.registration.app_id,
             source=attempt.registration.source,
             sharing_scope=(
-                "agent_only"
+                "personal"
+                if isinstance(attempt.requester, GitHubPersonalRequester)
+                else "agent_only"
                 if attempt.requester.agent_id is not None
                 else "workspace_shared"
             ),
         )
 
     async def review(
-        self, requester: GitHubUserRequester, *, attempt_id: str
+        self, requester: GitHubToolkitRequester, *, attempt_id: str
     ) -> GitHubUserCandidateSummary:
         """Read verified details after a fixed popup completion event."""
         attempt = await self.repository.read_review(
@@ -426,7 +448,7 @@ class GitHubUserOAuthService:
         return self._project_candidate(attempt)
 
     async def confirm(
-        self, requester: GitHubUserRequester, *, attempt_id: str
+        self, requester: GitHubToolkitRequester, *, attempt_id: str
     ) -> GitHubUserConnectionSummary:
         """Publish a current candidate, then attempt its old token's revocation."""
         prepared = await self._registration(
@@ -440,14 +462,16 @@ class GitHubUserOAuthService:
         await self.cleanup_revocations(result.revocations)
         return project_connection(result.connection)
 
-    async def cancel(self, requester: GitHubUserRequester, *, attempt_id: str) -> None:
+    async def cancel(
+        self, requester: GitHubToolkitRequester, *, attempt_id: str
+    ) -> None:
         """Remove the initiating attempt and attempt cleanup of its known token."""
         revocations = await self.repository.cancel(
             requester=requester, attempt_id=attempt_id
         )
         await self.cleanup_revocations(revocations)
 
-    async def disconnect(self, requester: GitHubUserRequester) -> None:
+    async def disconnect(self, requester: GitHubToolkitRequester) -> None:
         """Remove local authority; provider failure cannot restore or block it."""
         context = await self.repository.read_context(requester=requester)
         registration = None
@@ -531,7 +555,7 @@ class GitHubUserOAuthService:
                 )
 
     async def access(
-        self, requester: GitHubUserRequester, *, cursor: str | None
+        self, requester: GitHubToolkitRequester, *, cursor: str | None
     ) -> GitHubUserAccessPage:
         """Observe App/account access without a local permissions ledger."""
         context = await self.repository.read_context(requester=requester)

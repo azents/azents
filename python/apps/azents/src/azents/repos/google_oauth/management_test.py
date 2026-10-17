@@ -46,6 +46,7 @@ from azents.rdb.session_capabilities import (
 from azents.repos.github_user_oauth.operations_test import _harness
 from azents.repos.google_oauth.management import GoogleOAuthRepository
 from azents.repos.system_setting.repository import SystemSettingRepository
+from azents.repos.toolkit.personal import PersonalToolkitRepository
 from azents.repos.toolkit_namespace import ToolkitNamespaceRepository
 
 
@@ -88,6 +89,7 @@ async def _google(manager: SessionManager[WriteSession]) -> Harness:
         payloads,
         old.toolkit_repository,
         ToolkitNamespaceRepository(),
+        PersonalToolkitRepository(seed.cipher),
     )
     subject = GoogleSubject(
         seed.requester.user_id,

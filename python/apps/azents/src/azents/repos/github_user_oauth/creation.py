@@ -10,10 +10,12 @@ from fastapi import Depends
 from pydantic import BaseModel, ConfigDict
 
 from azents.core.github_user_creation import (
+    GitHubCreationSubject,
+    GitHubPersonalCreationSubject,
     GitHubUserCreationAttempt,
     GitHubUserCreationSettings,
     GitHubUserCreationStart,
-    GitHubUserCreationSubject,
+    github_creation_subject_for_owner,
 )
 from azents.core.github_user_oauth import (
     GitHubUserAttemptStatus,
@@ -24,6 +26,7 @@ from azents.core.github_user_oauth import (
     GitHubUserRegistration,
     GitHubUserRevocation,
 )
+from azents.core.toolkit_ownership import ToolkitOwnerKind, toolkit_owner_from_fields
 from azents.rdb.models.github_user_oauth import (
     RDBGitHubUserConnection,
     RDBGitHubUserCreation,
@@ -36,7 +39,7 @@ from azents.repos.github_user_oauth.payloads import (
     SetupPayload,
     encode_registration,
 )
-from azents.repos.toolkit.data import ToolkitCreate
+from azents.repos.toolkit.data import ToolkitCreate, ToolkitCreation
 from azents.repos.toolkit_namespace import ToolkitNamespaceRepository
 
 
@@ -48,10 +51,37 @@ class CreationPayload(BaseModel):
     setup: SetupPayload
 
 
+class PersonalCreationPayload(BaseModel):
+    """Explicit User-owned creation keeps the same Provider fields without Workspace."""
+
+    model_config = ConfigDict(hide_input_in_errors=True, extra="forbid")
+    desired: ToolkitCreation
+    setup: SetupPayload
+
+
+def creation_subject(row: RDBGitHubUserCreation) -> GitHubCreationSubject:
+    """Decode exact persisted setup ownership, retaining old shared callback context."""
+    return github_creation_subject_for_owner(
+        row.user_id,
+        row.session_id,
+        toolkit_owner_from_fields(
+            row.owner_kind,
+            workspace_id=row.workspace_id,
+            agent_id=row.agent_id,
+            user_id=row.owner_user_id,
+        ),
+    )
+
+
 def creation_from(
     row: RDBGitHubUserCreation, operations: GitHubUserOAuthOperationRepository
 ) -> GitHubUserCreationAttempt:
-    payload = CreationPayload.model_validate_json(
+    payload_type = (
+        PersonalCreationPayload
+        if row.owner_kind is ToolkitOwnerKind.USER
+        else CreationPayload
+    )
+    payload = payload_type.model_validate_json(
         operations.cipher.decrypt(row.encrypted_setup)
     )
     candidate = (
@@ -63,9 +93,7 @@ def creation_from(
     )
     return GitHubUserCreationAttempt(
         id=row.id,
-        subject=GitHubUserCreationSubject(
-            row.user_id, row.session_id, row.workspace_id, row.agent_id
-        ),
+        subject=creation_subject(row),
         desired=payload.desired,
         registration=payload.setup.registration,
         redirect_uri=payload.setup.redirect_uri,
@@ -94,20 +122,33 @@ class GitHubUserCreationRepository:
     operations: Annotated[GitHubUserOAuthOperationRepository, Depends()]
     namespaces: Annotated[ToolkitNamespaceRepository, Depends()]
 
-    async def authorize(self, subject: GitHubUserCreationSubject) -> None:
-        await self.operations.authorize_scope(**dataclasses.asdict(subject))
+    async def authorize(self, subject: GitHubCreationSubject) -> None:
+        if isinstance(subject, GitHubPersonalCreationSubject):
+            await self.operations.authorize_personal_scope(
+                user_id=subject.user_id,
+                session_id=subject.session_id,
+            )
+        else:
+            await self.operations.authorize_scope(**dataclasses.asdict(subject))
 
     async def _scope(
-        self, session: WriteSession, subject: GitHubUserCreationSubject
+        self, session: WriteSession, subject: GitHubCreationSubject
     ) -> None:
-        await self.operations.authorize_scope_in_session(
-            session, **dataclasses.asdict(subject)
-        )
+        if isinstance(subject, GitHubPersonalCreationSubject):
+            await self.operations.authorize_personal_scope_in_session(
+                session,
+                user_id=subject.user_id,
+                session_id=subject.session_id,
+            )
+        else:
+            await self.operations.authorize_scope_in_session(
+                session, **dataclasses.asdict(subject)
+            )
 
     async def _row(
         self,
         session: WriteSession,
-        subject: GitHubUserCreationSubject,
+        subject: GitHubCreationSubject,
         attempt_id: str,
         *,
         live: bool,
@@ -123,9 +164,7 @@ class GitHubUserCreationRepository:
             raise GitHubUserOAuthError(
                 GitHubUserErrorCode.NOT_FOUND, "GitHub creation attempt not found."
             )
-        admitted = GitHubUserCreationSubject(
-            row.user_id, row.session_id, row.workspace_id, row.agent_id
-        )
+        admitted = creation_subject(row)
         if admitted != subject:
             raise GitHubUserOAuthError(
                 GitHubUserErrorCode.AUTHORITY,
@@ -139,9 +178,9 @@ class GitHubUserCreationRepository:
 
     async def start(
         self,
-        subject: GitHubUserCreationSubject,
+        subject: GitHubCreationSubject,
         *,
-        desired: ToolkitCreate,
+        desired: ToolkitCreation,
         setup: SetupPayload,
         expires_at: datetime.datetime,
     ) -> GitHubUserCreationStart:
@@ -156,20 +195,37 @@ class GitHubUserCreationRepository:
             await self.operations.validate_platform_registration(
                 session, setup.registration
             )
-            if (
-                desired.workspace_id != subject.workspace_id
+            if isinstance(subject, GitHubPersonalCreationSubject):
+                if isinstance(desired, ToolkitCreate):
+                    raise GitHubUserOAuthError(
+                        GitHubUserErrorCode.AUTHORITY,
+                        "Personal GitHub creation cannot have Workspace ownership.",
+                    )
+                payload = PersonalCreationPayload(desired=desired, setup=setup)
+            elif (
+                not isinstance(desired, ToolkitCreate)
+                or desired.workspace_id != subject.workspace_id
                 or desired.owner_agent_id != subject.agent_id
             ):
                 raise GitHubUserOAuthError(
                     GitHubUserErrorCode.AUTHORITY,
                     "GitHub creation ownership does not match.",
                 )
+            else:
+                payload = CreationPayload(desired=desired, setup=setup)
             old = await session.write_session.scalar(
                 sa.select(RDBGitHubUserCreation)
                 .where(
                     RDBGitHubUserCreation.session_id == subject.session_id,
                     RDBGitHubUserCreation.workspace_id == subject.workspace_id,
                     RDBGitHubUserCreation.agent_id == subject.agent_id,
+                    RDBGitHubUserCreation.owner_kind == subject.owner.kind,
+                    RDBGitHubUserCreation.owner_user_id
+                    == (
+                        subject.user_id
+                        if isinstance(subject, GitHubPersonalCreationSubject)
+                        else None
+                    ),
                 )
                 .with_for_update()
             )
@@ -182,10 +238,14 @@ class GitHubUserCreationRepository:
             row = RDBGitHubUserCreation(
                 user_id=subject.user_id,
                 session_id=subject.session_id,
+                owner_kind=subject.owner.kind,
+                owner_user_id=subject.user_id
+                if isinstance(subject, GitHubPersonalCreationSubject)
+                else None,
                 workspace_id=subject.workspace_id,
                 agent_id=subject.agent_id,
                 encrypted_setup=self.operations.cipher.encrypt(
-                    CreationPayload(desired=desired, setup=setup).model_dump_json()
+                    payload.model_dump_json()
                 ),
                 encrypted_candidate=None,
                 status=GitHubUserAttemptStatus.PENDING,
@@ -198,7 +258,7 @@ class GitHubUserCreationRepository:
             )
 
     async def load(
-        self, subject: GitHubUserCreationSubject, attempt_id: str
+        self, subject: GitHubCreationSubject, attempt_id: str
     ) -> GitHubUserCreationAttempt:
         async with self.operations.session_manager() as session:
             return creation_from(
@@ -207,7 +267,7 @@ class GitHubUserCreationRepository:
             )
 
     async def load_review(
-        self, subject: GitHubUserCreationSubject, attempt_id: str
+        self, subject: GitHubCreationSubject, attempt_id: str
     ) -> GitHubUserCreationAttempt:
         """Admit live REVIEW and current registration for metadata observations."""
         async with self.operations.session_manager() as session:
@@ -230,7 +290,7 @@ class GitHubUserCreationRepository:
 
     async def claim(
         self,
-        subject: GitHubUserCreationSubject,
+        subject: GitHubCreationSubject,
         *,
         attempt_id: str,
         nonce: str,
@@ -257,7 +317,7 @@ class GitHubUserCreationRepository:
 
     async def stage(
         self,
-        subject: GitHubUserCreationSubject,
+        subject: GitHubCreationSubject,
         *,
         attempt_id: str,
         registration: GitHubUserRegistration,
@@ -282,7 +342,7 @@ class GitHubUserCreationRepository:
             return creation_from(row, self.operations)
 
     async def cancel(
-        self, subject: GitHubUserCreationSubject, attempt_id: str
+        self, subject: GitHubCreationSubject, attempt_id: str
     ) -> tuple[GitHubUserRevocation, ...]:
         async with self.operations.session_manager() as session:
             row = await self._row(session, subject, attempt_id, live=False)
@@ -302,7 +362,7 @@ class GitHubUserCreationRepository:
 
     async def confirm(
         self,
-        subject: GitHubUserCreationSubject,
+        subject: GitHubCreationSubject,
         *,
         attempt_id: str,
         registration: GitHubUserRegistration,
@@ -321,9 +381,21 @@ class GitHubUserCreationRepository:
                     "GitHub creation account is not ready for confirmation.",
                 )
             await self.operations.validate_platform_registration(session, registration)
-            toolkit = await self.operations.toolkit_repository.create(
-                session, settings.apply(attempt.desired)
-            )
+            desired = settings.apply(attempt.desired)
+            if isinstance(subject, GitHubPersonalCreationSubject):
+                toolkit = await self.operations.personal_toolkits.create_personal(
+                    session,
+                    user_id=subject.owner.user_id,
+                    create=desired,
+                )
+            else:
+                if not isinstance(desired, ToolkitCreate):
+                    raise RuntimeError(
+                        "Shared GitHub creation is missing its owner keys"
+                    )
+                toolkit = await self.operations.toolkit_repository.create(
+                    session, desired
+                )
             if subject.agent_id is not None:
                 await self.namespaces.ensure_active(
                     session,

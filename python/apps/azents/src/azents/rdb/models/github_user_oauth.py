@@ -11,7 +11,9 @@ from azents.core.github_user_oauth import (
     GitHubUserAttemptStatus,
     GitHubUserConnectionStatus,
 )
+from azents.core.toolkit_ownership import ToolkitOwnerKind
 from azents.rdb.models.base import RDBModel
+from azents.rdb.models.toolkit import toolkit_owner_kind_enum
 from azents.rdb.types.datetime import TimeZoneDateTime
 
 attempt_status_enum = ENUM(
@@ -74,7 +76,9 @@ class RDBGitHubUserAttempt(RDBModel):
     )
     user_id: Mapped[str] = mapped_column(sa.String(32))
     session_id: Mapped[str] = mapped_column(sa.String(32))
-    workspace_id: Mapped[str] = mapped_column(sa.String(32))
+    workspace_id: Mapped[str | None] = mapped_column(sa.String(32), nullable=True)
+    owner_kind: Mapped[ToolkitOwnerKind] = mapped_column(toolkit_owner_kind_enum)
+    owner_user_id: Mapped[str | None] = mapped_column(sa.String(32), nullable=True)
     agent_id: Mapped[str | None] = mapped_column(sa.String(32), nullable=True)
     encrypted_setup: Mapped[str] = mapped_column(sa.Text, repr=False)
     encrypted_candidate: Mapped[str | None] = mapped_column(
@@ -94,7 +98,22 @@ class RDBGitHubUserAttempt(RDBModel):
         "toolkit_id",
         unique=True,
     )
-    __table_args__ = (IX_TOOLKIT, UQ_CURRENT)
+    FK_PERSONAL_PARENT = sa.ForeignKeyConstraint(
+        ["toolkit_id", "owner_user_id"],
+        ["toolkit_configs.id", "toolkit_configs.owner_user_id"],
+        ondelete="CASCADE",
+        name="fk_github_user_attempts_personal_owner",
+    )
+    CK_OWNER = sa.CheckConstraint(
+        "(owner_kind = 'workspace' AND workspace_id IS NOT NULL "
+        "AND agent_id IS NULL AND owner_user_id IS NULL) OR "
+        "(owner_kind = 'agent' AND workspace_id IS NOT NULL "
+        "AND agent_id IS NOT NULL AND owner_user_id IS NULL) OR "
+        "(owner_kind = 'user' AND workspace_id IS NULL AND agent_id IS NULL "
+        "AND owner_user_id IS NOT NULL AND owner_user_id = user_id)",
+        name="ck_github_user_oauth_attempts_owner_shape",
+    )
+    __table_args__ = (IX_TOOLKIT, UQ_CURRENT, FK_PERSONAL_PARENT, CK_OWNER)
 
 
 class RDBGitHubUserCreation(RDBModel):
@@ -106,8 +125,16 @@ class RDBGitHubUserCreation(RDBModel):
     )
     user_id: Mapped[str] = mapped_column(sa.String(32))
     session_id: Mapped[str] = mapped_column(sa.String(32))
-    workspace_id: Mapped[str] = mapped_column(
-        sa.String(32), sa.ForeignKey("workspaces.id", ondelete="CASCADE")
+    workspace_id: Mapped[str | None] = mapped_column(
+        sa.String(32), sa.ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True
+    )
+    owner_kind: Mapped[ToolkitOwnerKind] = mapped_column(toolkit_owner_kind_enum)
+    owner_user_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey(
+            "users.id", ondelete="CASCADE", name="fk_github_user_creations_owner_user"
+        ),
+        nullable=True,
     )
     agent_id: Mapped[str | None] = mapped_column(
         sa.String(32), sa.ForeignKey("agents.id", ondelete="CASCADE"), nullable=True
@@ -126,4 +153,17 @@ class RDBGitHubUserCreation(RDBModel):
         unique=True,
         postgresql_nulls_not_distinct=True,
     )
-    __table_args__ = (UQ_SUBJECT,)
+    IX_OWNER_USER = sa.Index(
+        "ix_github_user_oauth_creations_owner_user",
+        "owner_user_id",
+    )
+    CK_OWNER = sa.CheckConstraint(
+        "(owner_kind = 'workspace' AND workspace_id IS NOT NULL "
+        "AND agent_id IS NULL AND owner_user_id IS NULL) OR "
+        "(owner_kind = 'agent' AND workspace_id IS NOT NULL "
+        "AND agent_id IS NOT NULL AND owner_user_id IS NULL) OR "
+        "(owner_kind = 'user' AND workspace_id IS NULL AND agent_id IS NULL "
+        "AND owner_user_id IS NOT NULL AND owner_user_id = user_id)",
+        name="ck_github_user_oauth_creations_owner_shape",
+    )
+    __table_args__ = (UQ_SUBJECT, IX_OWNER_USER, CK_OWNER)

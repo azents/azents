@@ -45,8 +45,8 @@ class GitHubUserCandidateSummary(BaseModel):
     @field_validator('sharing_scope')
     def sharing_scope_validate_enum(cls, value):
         """Validates the enum"""
-        if value not in set(['workspace_shared', 'agent_only']):
-            raise ValueError("must be one of enum values ('workspace_shared', 'agent_only')")
+        if value not in set(['workspace_shared', 'agent_only', 'personal']):
+            raise ValueError("must be one of enum values ('workspace_shared', 'agent_only', 'personal')")
         return value
 
     model_config = ConfigDict(

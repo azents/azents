@@ -293,7 +293,7 @@ async def test_connect_metadata_dcr_store_and_public_reply_follow_closure(
         harness.boundary.external("dcr")
         return DcrRegistrationResult(client_id="dcr-client", client_secret=None)
 
-    monkeypatch.setattr(service_module, "register_client", register)
+    monkeypatch.setattr(helpers, "register_client", register)
     response_model = oauth.OAuthAuthorizeResponse
 
     def reply(*, authorization_url: str) -> oauth.OAuthAuthorizeResponse:
@@ -413,7 +413,7 @@ async def test_external_failure_or_cancellation_never_starts_final_store(
     if stage == "metadata":
         monkeypatch.setattr(helpers, "discover_oauth_metadata", fail)
     elif stage == "dcr":
-        monkeypatch.setattr(service_module, "register_client", fail)
+        monkeypatch.setattr(helpers, "register_client", fail)
     else:
         monkeypatch.setattr(helpers, "exchange_authorization_code", fail)
     with pytest.raises(type(failure)) as raised:
@@ -761,7 +761,7 @@ async def test_expected_setup_errors_preserve_api_400_after_read_closure(
         monkeypatch.setattr(helpers, "discover_oauth_metadata", fail_discovery)
         detail = "OAuth metadata discovery failed: discovery failed"
     else:
-        monkeypatch.setattr(service_module, "register_client", fail_dcr)
+        monkeypatch.setattr(helpers, "register_client", fail_dcr)
         detail = "Dynamic client registration failed: dcr failed"
     with pytest.raises(HTTPException) as rejected:
         await oauth.connect_oauth(

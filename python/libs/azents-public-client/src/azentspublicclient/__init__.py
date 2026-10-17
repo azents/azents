@@ -34,6 +34,10 @@ __all__ = [
     "JoinRequestV1Api",
     "KimiOAuthV1Api",
     "LLMProviderIntegrationV1Api",
+    "PersonalGitHubToolkitV1Api",
+    "PersonalGoogleToolkitV1Api",
+    "PersonalToolkitOAuthV1Api",
+    "PersonalToolkitV1Api",
     "RuntimeProfileV1Api",
     "RuntimeProviderEnrollmentV1Api",
     "RuntimeProviderV1Api",
@@ -453,6 +457,19 @@ __all__ = [
     "PendingMailboxItem",
     "PendingMailboxScheduledTaskPresentation",
     "PendingMailboxUserMessagePresentation",
+    "PersonalConnectionTestRequest",
+    "PersonalOAuthExchangeRequest",
+    "PersonalToolkitAccessMode",
+    "PersonalToolkitAccessRequest",
+    "PersonalToolkitAccessResponse",
+    "PersonalToolkitAgentBatchRequest",
+    "PersonalToolkitBatchEntry",
+    "PersonalToolkitBatchResponse",
+    "PersonalToolkitCreateRequest",
+    "PersonalToolkitEligibleAgentListResponse",
+    "PersonalToolkitEligibleAgentResponse",
+    "PersonalToolkitListResponse",
+    "PersonalToolkitResponse",
     "PlatformGitHubAppAuthorizationReason",
     "PrepareSessionWorkingFolderRequest",
     "Presentation",
@@ -620,6 +637,7 @@ __all__ = [
     "UpdateWorkspaceUserRoleRequest",
     "UploadResponse",
     "UploadedImage",
+    "UserToolkitOwner",
     "ValidationError",
     "ValidationErrorLocInner",
     "Value",
@@ -690,6 +708,10 @@ from azentspublicclient.api.invitation_v1_api import InvitationV1Api as Invitati
 from azentspublicclient.api.join_request_v1_api import JoinRequestV1Api as JoinRequestV1Api
 from azentspublicclient.api.kimi_o_auth_v1_api import KimiOAuthV1Api as KimiOAuthV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import LLMProviderIntegrationV1Api as LLMProviderIntegrationV1Api
+from azentspublicclient.api.personal_git_hub_toolkit_v1_api import PersonalGitHubToolkitV1Api as PersonalGitHubToolkitV1Api
+from azentspublicclient.api.personal_google_toolkit_v1_api import PersonalGoogleToolkitV1Api as PersonalGoogleToolkitV1Api
+from azentspublicclient.api.personal_toolkit_o_auth_v1_api import PersonalToolkitOAuthV1Api as PersonalToolkitOAuthV1Api
+from azentspublicclient.api.personal_toolkit_v1_api import PersonalToolkitV1Api as PersonalToolkitV1Api
 from azentspublicclient.api.runtime_profile_v1_api import RuntimeProfileV1Api as RuntimeProfileV1Api
 from azentspublicclient.api.runtime_provider_enrollment_v1_api import RuntimeProviderEnrollmentV1Api as RuntimeProviderEnrollmentV1Api
 from azentspublicclient.api.runtime_provider_v1_api import RuntimeProviderV1Api as RuntimeProviderV1Api
@@ -1113,6 +1135,19 @@ from azentspublicclient.models.pending_mailbox_goal_continuation_presentation im
 from azentspublicclient.models.pending_mailbox_item import PendingMailboxItem as PendingMailboxItem
 from azentspublicclient.models.pending_mailbox_scheduled_task_presentation import PendingMailboxScheduledTaskPresentation as PendingMailboxScheduledTaskPresentation
 from azentspublicclient.models.pending_mailbox_user_message_presentation import PendingMailboxUserMessagePresentation as PendingMailboxUserMessagePresentation
+from azentspublicclient.models.personal_connection_test_request import PersonalConnectionTestRequest as PersonalConnectionTestRequest
+from azentspublicclient.models.personal_o_auth_exchange_request import PersonalOAuthExchangeRequest as PersonalOAuthExchangeRequest
+from azentspublicclient.models.personal_toolkit_access_mode import PersonalToolkitAccessMode as PersonalToolkitAccessMode
+from azentspublicclient.models.personal_toolkit_access_request import PersonalToolkitAccessRequest as PersonalToolkitAccessRequest
+from azentspublicclient.models.personal_toolkit_access_response import PersonalToolkitAccessResponse as PersonalToolkitAccessResponse
+from azentspublicclient.models.personal_toolkit_agent_batch_request import PersonalToolkitAgentBatchRequest as PersonalToolkitAgentBatchRequest
+from azentspublicclient.models.personal_toolkit_batch_entry import PersonalToolkitBatchEntry as PersonalToolkitBatchEntry
+from azentspublicclient.models.personal_toolkit_batch_response import PersonalToolkitBatchResponse as PersonalToolkitBatchResponse
+from azentspublicclient.models.personal_toolkit_create_request import PersonalToolkitCreateRequest as PersonalToolkitCreateRequest
+from azentspublicclient.models.personal_toolkit_eligible_agent_list_response import PersonalToolkitEligibleAgentListResponse as PersonalToolkitEligibleAgentListResponse
+from azentspublicclient.models.personal_toolkit_eligible_agent_response import PersonalToolkitEligibleAgentResponse as PersonalToolkitEligibleAgentResponse
+from azentspublicclient.models.personal_toolkit_list_response import PersonalToolkitListResponse as PersonalToolkitListResponse
+from azentspublicclient.models.personal_toolkit_response import PersonalToolkitResponse as PersonalToolkitResponse
 from azentspublicclient.models.platform_git_hub_app_authorization_reason import PlatformGitHubAppAuthorizationReason as PlatformGitHubAppAuthorizationReason
 from azentspublicclient.models.prepare_session_working_folder_request import PrepareSessionWorkingFolderRequest as PrepareSessionWorkingFolderRequest
 from azentspublicclient.models.presentation import Presentation as Presentation
@@ -1280,6 +1315,7 @@ from azentspublicclient.models.update_my_user_request import UpdateMyUserRequest
 from azentspublicclient.models.update_workspace_user_role_request import UpdateWorkspaceUserRoleRequest as UpdateWorkspaceUserRoleRequest
 from azentspublicclient.models.upload_response import UploadResponse as UploadResponse
 from azentspublicclient.models.uploaded_image import UploadedImage as UploadedImage
+from azentspublicclient.models.user_toolkit_owner import UserToolkitOwner as UserToolkitOwner
 from azentspublicclient.models.validation_error import ValidationError as ValidationError
 from azentspublicclient.models.validation_error_loc_inner import ValidationErrorLocInner as ValidationErrorLocInner
 from azentspublicclient.models.value import Value as Value

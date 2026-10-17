@@ -18,7 +18,9 @@ from azents.core.google_oauth import (
     GoogleCandidate,
     GoogleConnectionStatus,
     GoogleFinalSettings,
+    GoogleManager,
     GoogleOAuthError,
+    GooglePersonalSubject,
     GooglePublication,
     GoogleReconnectSettings,
     GoogleSetup,
@@ -36,6 +38,7 @@ from azents.core.google_system_setting import (
     GooglePreparation,
 )
 from azents.core.oauth2 import generate_pkce_pair
+from azents.core.toolkit_ownership import UserToolkitOwner
 from azents.repos.google_oauth.management import GoogleOAuthRepository
 from azents.services.google_application.service import GoogleApplicationService
 from azents.services.google_oauth.data import (
@@ -64,6 +67,18 @@ class _CallbackState(BaseModel):
     nonce: str
 
 
+class _PersonalCallbackState(BaseModel):
+    """Explicit User-global callback contract, distinct from existing shared state."""
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    purpose: Literal["google_personal_connection"]
+    attempt_id: str
+    user_id: str
+    session_id: str
+    owner: UserToolkitOwner
+    nonce: str
+
+
 @dataclasses.dataclass(frozen=True)
 class GoogleOAuthService:
     """Services sequence completed DB operations around SDK-owned provider I/O."""
@@ -81,7 +96,7 @@ class GoogleOAuthService:
                 "operator_setup_required", "Google operator preparation is required."
             ) from None
 
-    async def preparation(self, subject: GoogleSubject) -> GooglePreparation:
+    async def preparation(self, subject: GoogleManager) -> GooglePreparation:
         """Managers see preparation only after exact current scope admission."""
         await self.repository.authorize(subject)
         try:
@@ -93,7 +108,7 @@ class GoogleOAuthService:
 
     async def connect(
         self,
-        subject: GoogleSubject,
+        subject: GoogleManager,
         desired: GoogleConnectInput,
         *,
         target_toolkit_id: str | None,
@@ -119,8 +134,18 @@ class GoogleOAuthService:
             setup=setup,
             target_toolkit_id=target_toolkit_id,
         )
-        state = self.cipher.encrypt(
-            _CallbackState(
+        callback: _CallbackState | _PersonalCallbackState
+        if isinstance(subject, GooglePersonalSubject):
+            callback = _PersonalCallbackState(
+                purpose="google_personal_connection",
+                attempt_id=attempt.id,
+                user_id=subject.user_id,
+                session_id=subject.session_id,
+                owner=subject.owner,
+                nonce=setup.state_nonce,
+            )
+        else:
+            callback = _CallbackState(
                 purpose="google_connection",
                 attempt_id=attempt.id,
                 user_id=subject.user_id,
@@ -128,8 +153,8 @@ class GoogleOAuthService:
                 workspace_id=subject.workspace_id,
                 agent_id=subject.agent_id,
                 nonce=setup.state_nonce,
-            ).model_dump_json()
-        )
+            )
+        state = self.cipher.encrypt(callback.model_dump_json())
         return GoogleConnectOutput(
             attempt_id=attempt.id,
             expires_at=attempt.expires_at,
@@ -138,10 +163,25 @@ class GoogleOAuthService:
             ),
         )
 
-    def _state(self, subject: GoogleSubject, state: str) -> _CallbackState:
+    def _state(
+        self, subject: GoogleManager, state: str
+    ) -> _CallbackState | _PersonalCallbackState:
         if len(state) > 16384:
             raise GoogleOAuthError("invalid_state", "Google callback state is invalid.")
         try:
+            if isinstance(subject, GooglePersonalSubject):
+                personal = _PersonalCallbackState.model_validate_json(
+                    self.cipher.decrypt(state)
+                )
+                if (
+                    personal.user_id != subject.user_id
+                    or personal.session_id != subject.session_id
+                    or personal.owner != subject.owner
+                ):
+                    raise GoogleOAuthError(
+                        "invalid_state", "Google callback context does not match."
+                    )
+                return personal
             decoded = _CallbackState.model_validate_json(self.cipher.decrypt(state))
         except InvalidToken, ValidationError, UnicodeError:
             raise GoogleOAuthError(
@@ -176,7 +216,7 @@ class GoogleOAuthService:
 
     async def exchange(
         self,
-        subject: GoogleSubject,
+        subject: GoogleManager,
         *,
         code: str,
         state: str,
@@ -287,9 +327,13 @@ class GoogleOAuthService:
             expires_at=attempt.expires_at,
             identity=candidate.identity,
             client_id=setup.client_id,
-            ownership="workspace_shared"
-            if attempt.subject.agent_id is None
-            else "agent_only",
+            ownership=(
+                "personal"
+                if isinstance(attempt.subject, GooglePersonalSubject)
+                else "workspace_shared"
+                if attempt.subject.agent_id is None
+                else "agent_only"
+            ),
             reconnect_toolkit_id=None
             if setup.target is None
             else setup.target.toolkit_id,
@@ -305,7 +349,7 @@ class GoogleOAuthService:
             security_notice=GOOGLE_SECURITY_NOTICE,
         )
 
-    async def review(self, subject: GoogleSubject, attempt_id: str) -> GoogleReview:
+    async def review(self, subject: GoogleManager, attempt_id: str) -> GoogleReview:
         attempt = await self.repository.load(subject, attempt_id)
         if attempt.setup is None:
             raise GoogleOAuthError("stale", "Google setup has no unpublished review.")
@@ -322,7 +366,7 @@ class GoogleOAuthService:
 
     async def confirm(
         self,
-        subject: GoogleSubject,
+        subject: GoogleManager,
         *,
         attempt_id: str,
         settings: GoogleFinalSettings | GoogleReconnectSettings,
@@ -344,13 +388,13 @@ class GoogleOAuthService:
 
     async def outcome(
         self,
-        subject: GoogleSubject,
+        subject: GoogleManager,
         attempt_id: str,
     ) -> GooglePublishedOutput:
         return self._publication(await self.repository.outcome(subject, attempt_id))
 
     async def cancel(
-        self, subject: GoogleSubject, attempt_id: str
+        self, subject: GoogleManager, attempt_id: str
     ) -> GoogleCancelOutput:
         outcome = await self.repository.cancel(subject, attempt_id)
         return GoogleCancelOutput(
@@ -358,12 +402,12 @@ class GoogleOAuthService:
             publication=None if outcome is None else self._publication(outcome),
         )
 
-    async def disconnect(self, subject: GoogleSubject, toolkit_id: str) -> None:
+    async def disconnect(self, subject: GoogleManager, toolkit_id: str) -> None:
         await self.repository.disconnect(subject, toolkit_id)
 
     async def status(
         self,
-        subject: GoogleSubject,
+        subject: GoogleManager,
         toolkit_id: str,
     ) -> GoogleConnectionOutput:
         """Read a saved account without secret material, renewal or resource probes."""

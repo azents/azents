@@ -20,7 +20,7 @@ from azents.repos.github_user_oauth.guards import (
     capture_and_clear_user_tokens,
 )
 from azents.repos.toolkit import ToolkitRepository
-from azents.repos.toolkit.data import ToolkitConfig, ToolkitUpdate
+from azents.repos.toolkit.data import ToolkitConfig, ToolkitConfiguration, ToolkitUpdate
 
 _adapter: TypeAdapter[GitHubSecrets] = TypeAdapter(
     GitHubSecrets, config=ConfigDict(hide_input_in_errors=True)
@@ -78,6 +78,17 @@ async def guard_user_registration_update(
     if toolkit.toolkit_type != "github":
         return
     current = await _current_github_toolkit(session, toolkit, repository)
+    await guard_locked_user_registration_update(session, current, update)
+
+
+async def guard_locked_user_registration_update(
+    session: WriteSession,
+    current: ToolkitConfiguration,
+    update: ToolkitUpdate,
+) -> None:
+    """Check a current canonical parent already locked by its exact owner adapter."""
+    if current.toolkit_type != "github":
+        return
     old_mode = current.config.get("github_auth_type")
     if old_mode not in _USER_MODES:
         return

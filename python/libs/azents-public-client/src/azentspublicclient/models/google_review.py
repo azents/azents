@@ -50,8 +50,8 @@ class GoogleReview(BaseModel):
     @field_validator('ownership')
     def ownership_validate_enum(cls, value):
         """Validates the enum"""
-        if value not in set(['agent_only', 'workspace_shared']):
-            raise ValueError("must be one of enum values ('agent_only', 'workspace_shared')")
+        if value not in set(['agent_only', 'workspace_shared', 'personal']):
+            raise ValueError("must be one of enum values ('agent_only', 'workspace_shared', 'personal')")
         return value
 
     @field_validator('grant_result')

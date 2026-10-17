@@ -1,5 +1,6 @@
 """Canonical pure projections and external helpers for Toolkit OAuth setup."""
 
+import dataclasses
 import json
 from collections.abc import Mapping, Sequence
 from typing import Any, NamedTuple
@@ -14,9 +15,11 @@ from azents.core.mcp_credentials import (
     McpSecretsOAuth2Token,
 )
 from azents.core.mcp_discovery import (
+    DcrError,
     DiscoveryError,
     OAuthServerMetadata,
     discover_oauth_metadata,
+    register_client,
 )
 from azents.core.oauth2 import (
     OAuthTokenError,
@@ -24,9 +27,13 @@ from azents.core.oauth2 import (
     exchange_authorization_code,
 )
 from azents.core.tools import McpToolkitConfig, ToolkitProvider
+from azents.repos.mcp_oauth_connection.data import MCPOAuthConnection
+from azents.repos.toolkit.data import ToolkitConfiguration
 from azents.repos.toolkit_oauth_data import GithubInstallationRecord
+from azents.repos.toolkit_operations.owned_data import OAuthConnectionWrite
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
+    ResolvedPlatformGitHubApp,
 )
 from azents.services.toolkit.credential_edits import (
     decode_credential_values,
@@ -50,6 +57,76 @@ class OAuthClientCredentials(NamedTuple):
 
     client_id: str
     client_secret: str | None
+
+
+@dataclasses.dataclass(frozen=True)
+class PreparedMcpAuthorization:
+    """Common Provider discovery/registration result, before ownership publication."""
+
+    config: McpToolkitConfig
+    connection: OAuthConnectionWrite = dataclasses.field(repr=False)
+
+
+async def prepare_mcp_authorization(
+    toolkit: ToolkitConfiguration,
+    existing: MCPOAuthConnection | None,
+    *,
+    redirect_uri: str,
+    proxy_url: str | None,
+    registry: Mapping[str, ToolkitProvider[Any]],
+) -> PreparedMcpAuthorization:
+    """Reuse common discovery, client registration and retained-token behavior."""
+    mcp_config = resolve_mcp_config(toolkit.toolkit_type, toolkit.config, registry)
+    if mcp_config.auth_type != "oauth2":
+        raise ToolkitOAuthError(
+            ToolkitOAuthFailureReason.INVALID_REQUEST,
+            "Toolkit does not use OAuth2 authentication.",
+        )
+    metadata = await discover_required_metadata(mcp_config, proxy_url)
+    client_id = existing.client_id if existing is not None else None
+    client_secret = existing.client_secret if existing is not None else None
+    if client_id is None:
+        manual = extract_oauth_client_credentials(toolkit.credentials)
+        if manual is not None:
+            client_id, client_secret = manual
+        elif metadata.registration_endpoint is not None:
+            try:
+                dcr = await register_client(
+                    metadata.registration_endpoint, redirect_uri, proxy_url=proxy_url
+                )
+            except DcrError as exc:
+                raise ToolkitOAuthError(
+                    ToolkitOAuthFailureReason.INVALID_REQUEST,
+                    f"Dynamic client registration failed: {exc}",
+                ) from exc
+            client_id = dcr.client_id
+            client_secret = dcr.client_secret
+        else:
+            raise ToolkitOAuthError(
+                ToolkitOAuthFailureReason.INVALID_REQUEST,
+                "OAuth2 client credentials are not configured "
+                "and server does not support DCR.",
+            )
+    return PreparedMcpAuthorization(
+        config=mcp_config,
+        connection=OAuthConnectionWrite(
+            issuer=metadata.issuer,
+            resource=mcp_config.server_url,
+            server_url=mcp_config.server_url,
+            authorization_endpoint=metadata.authorization_endpoint,
+            token_endpoint=metadata.token_endpoint,
+            registration_endpoint=metadata.registration_endpoint,
+            client_id=client_id,
+            client_secret=client_secret,
+            token_endpoint_auth_method="client_secret_post"
+            if client_secret is not None
+            else "none",
+            scope=" ".join(mcp_config.scopes) if mcp_config.scopes else None,
+            access_token=existing.access_token if existing is not None else None,
+            refresh_token=existing.refresh_token if existing is not None else None,
+            expires_at=existing.expires_at if existing is not None else None,
+        ),
+    )
 
 
 def resolve_mcp_config(
@@ -213,20 +290,40 @@ def merge_saved_test_credentials(
     return json.dumps(saved.to_payload()) if saved.fields else None
 
 
-async def bind_platform_app_test_credentials(
+@dataclasses.dataclass(frozen=True)
+class PreparedPlatformTestCredentials:
+    """Normalized test credentials and the exact Platform registration observed."""
+
+    credentials_json: str | None = dataclasses.field(repr=False)
+    platform: ResolvedPlatformGitHubApp | None = dataclasses.field(repr=False)
+
+
+async def prepare_platform_app_test_credentials(
     credentials_json: str | None,
     platform_runtime: PlatformGitHubAppRuntimeService,
-) -> str | None:
-    """Bind unsaved Platform GitHub credentials to the server App identity."""
+) -> PreparedPlatformTestCredentials:
+    """Retain the registration needed for current installation-use admission."""
     if credentials_json is None:
-        return None
+        return PreparedPlatformTestCredentials(None, None)
     parsed = decode_credential_values(json.loads(credentials_json))
     if parsed.credential_type != "github_app_platform":
-        return credentials_json
+        return PreparedPlatformTestCredentials(credentials_json, None)
     platform = await platform_runtime.resolve()
     if platform.app_id is None:
         raise ToolkitOAuthError(
             ToolkitOAuthFailureReason.RESOURCE_NOT_FOUND,
             "GitHub Platform App is not configured.",
         )
-    return json.dumps({**parsed.to_payload(), "app_id": platform.app_id})
+    return PreparedPlatformTestCredentials(
+        json.dumps({**parsed.to_payload(), "app_id": platform.app_id}), platform
+    )
+
+
+async def bind_platform_app_test_credentials(
+    credentials_json: str | None,
+    platform_runtime: PlatformGitHubAppRuntimeService,
+) -> str | None:
+    """Preserve common test credential normalization without changing its contract."""
+    return (
+        await prepare_platform_app_test_credentials(credentials_json, platform_runtime)
+    ).credentials_json
