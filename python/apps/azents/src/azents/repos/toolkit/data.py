@@ -8,13 +8,19 @@ from typing import Annotated, Any
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
+from azents.core.toolkit_ownership import (
+    AgentToolkitOwner,
+    PersonalToolkitAccessMode,
+    ToolkitOwnerKind,
+    UserToolkitOwner,
+    WorkspaceToolkitOwner,
+)
 
-class ToolkitConfig(BaseModel):
-    """Toolkit Config domain model (toolkit type + config stored in DB)."""
+
+class ToolkitConfiguration(BaseModel):
+    """Common canonical Toolkit fields across ownership projections."""
 
     id: str = Field(description="Toolkit ID")
-    workspace_id: str = Field(description="Workspace ID")
-    owner_agent_id: str | None = Field(description="Owning Agent ID when Agent-only")
     toolkit_type: str = Field(description="Tool type")
     slug: str = Field(description="Unique slug within the ownership scope")
     name: str = Field(description="Display name")
@@ -33,6 +39,33 @@ class ToolkitConfig(BaseModel):
     updated_at: datetime.datetime = Field(description="Updated time")
 
 
+class ToolkitConfig(ToolkitConfiguration):
+    """Workspace/Agent management projection preserving existing contracts."""
+
+    workspace_id: str = Field(description="Workspace ID")
+    owner_agent_id: str | None = Field(description="Owning Agent ID when Agent-only")
+
+    @property
+    def owner(self) -> WorkspaceToolkitOwner | AgentToolkitOwner:
+        """Expose explicit domain ownership without changing shared wire fields."""
+        if self.owner_agent_id is not None:
+            return AgentToolkitOwner(
+                kind=ToolkitOwnerKind.AGENT,
+                workspace_id=self.workspace_id,
+                agent_id=self.owner_agent_id,
+            )
+        return WorkspaceToolkitOwner(
+            kind=ToolkitOwnerKind.WORKSPACE, workspace_id=self.workspace_id
+        )
+
+
+class PersonalToolkitConfig(ToolkitConfiguration):
+    """User-owned projection of the same canonical Toolkit record."""
+
+    owner: UserToolkitOwner
+    access_mode: PersonalToolkitAccessMode
+
+
 class AgentToolkit(BaseModel):
     """AgentToolkit domain model."""
 
@@ -43,11 +76,9 @@ class AgentToolkit(BaseModel):
     created_at: datetime.datetime = Field(description="Created time")
 
 
-class ToolkitCreate(BaseModel):
-    """Toolkit create schema."""
+class ToolkitCreation(BaseModel):
+    """Common configurable fields for creating a canonical Toolkit."""
 
-    workspace_id: str = Field(description="Workspace ID")
-    owner_agent_id: str | None = Field(description="Owning Agent ID when Agent-only")
     toolkit_type: str = Field(description="Tool type")
     slug: str = Field(description="Unique slug within the ownership scope")
     name: str = Field(description="Display name")
@@ -63,6 +94,13 @@ class ToolkitCreate(BaseModel):
     always_expose_tools: bool = Field(
         description="Whether every tool bypasses Tool Search and remains visible",
     )
+
+
+class ToolkitCreate(ToolkitCreation):
+    """Workspace/Agent-owned Toolkit creation with explicit ownership."""
+
+    workspace_id: str = Field(description="Workspace ID")
+    owner_agent_id: str | None = Field(description="Owning Agent ID when Agent-only")
 
 
 class ToolkitUpdate(TypedDict, total=False):

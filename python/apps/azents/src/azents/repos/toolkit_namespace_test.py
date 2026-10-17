@@ -66,7 +66,7 @@ async def _seed_namespace_fixture(session: WriteSession) -> None:
             """
             INSERT INTO toolkit_configs (
                 id, workspace_id, owner_agent_id, toolkit_type, slug, name, config,
-                enabled
+                enabled, owner_kind
             )
             VALUES
                 (
@@ -77,7 +77,7 @@ async def _seed_namespace_fixture(session: WriteSession) -> None:
                     'stored_a',
                     'A',
                     '{}'::jsonb,
-                    TRUE
+                    TRUE, 'workspace'
                 ),
                 (
                     'toolkit-namespace-b',
@@ -87,7 +87,7 @@ async def _seed_namespace_fixture(session: WriteSession) -> None:
                     'stored_b',
                     'B',
                     '{}'::jsonb,
-                    TRUE
+                    TRUE, 'workspace'
                 ),
                 (
                     'toolkit-namespace-c',
@@ -97,7 +97,7 @@ async def _seed_namespace_fixture(session: WriteSession) -> None:
                     'stored_c',
                     'C',
                     '{}'::jsonb,
-                    TRUE
+                    TRUE, 'workspace'
                 )
             """
         )

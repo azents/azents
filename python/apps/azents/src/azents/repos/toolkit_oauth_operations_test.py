@@ -42,6 +42,7 @@ from azents.core.oauth2 import (
     create_toolkit_oauth_state,
 )
 from azents.core.system_setting import SystemSettingFieldSource
+from azents.core.toolkit_ownership import ToolkitOwnerKind
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.github_user_installation import RDBGithubUserInstallation
@@ -552,7 +553,7 @@ async def make_owned(fixture: OAuthFixture) -> None:
         await session.write_session.execute(
             sa.update(RDBToolkitConfig)
             .where(RDBToolkitConfig.id == fixture.subject.toolkit_id)
-            .values(owner_agent_id=agent.id)
+            .values(owner_agent_id=agent.id, owner_kind=ToolkitOwnerKind.AGENT)
         )
 
 

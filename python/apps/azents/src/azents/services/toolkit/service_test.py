@@ -619,7 +619,7 @@ async def _seed_slug_race(
                 """
                 INSERT INTO toolkit_configs (
                     id, workspace_id, owner_agent_id, toolkit_type, slug, name,
-                    config, enabled
+                    config, enabled, owner_kind
                 )
                 VALUES
                     (
@@ -630,7 +630,7 @@ async def _seed_slug_race(
                         'shared',
                         'Shared race',
                         '{}'::jsonb,
-                        TRUE
+                        TRUE, 'workspace'
                     ),
                     (
                         'toolkit-race-owned',
@@ -640,7 +640,7 @@ async def _seed_slug_race(
                         'conflict',
                         'Owned race',
                         '{}'::jsonb,
-                        TRUE
+                        TRUE, 'agent'
                     )
                 """
             )

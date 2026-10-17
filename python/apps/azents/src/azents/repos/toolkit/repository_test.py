@@ -172,7 +172,7 @@ async def _seed_effective_toolkits(session: WriteSession) -> None:
             """
             INSERT INTO toolkit_configs (
                 id, workspace_id, owner_agent_id, toolkit_type, slug, name, config,
-                enabled
+                enabled, owner_kind
             )
             VALUES
                 (
@@ -183,7 +183,7 @@ async def _seed_effective_toolkits(session: WriteSession) -> None:
                     'shared',
                     'Shared',
                     '{}'::jsonb,
-                    true
+                    true, 'workspace'
                 ),
                 (
                     'toolkit-effective-owned-1',
@@ -193,7 +193,7 @@ async def _seed_effective_toolkits(session: WriteSession) -> None:
                     'private',
                     'Owned 1',
                     '{}'::jsonb,
-                    true
+                    true, 'agent'
                 ),
                 (
                     'toolkit-effective-owned-2',
@@ -203,7 +203,7 @@ async def _seed_effective_toolkits(session: WriteSession) -> None:
                     'private',
                     'Owned 2',
                     '{}'::jsonb,
-                    true
+                    true, 'agent'
                 ),
                 (
                     'toolkit-effective-disabled',
@@ -213,7 +213,7 @@ async def _seed_effective_toolkits(session: WriteSession) -> None:
                     'disabled',
                     'Disabled',
                     '{}'::jsonb,
-                    false
+                    false, 'agent'
                 )
             """
         )

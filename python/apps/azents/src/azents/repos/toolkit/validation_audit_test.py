@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from unittest.mock import AsyncMock, MagicMock
 
 import psycopg
+import pytest
 import sqlalchemy as sa
 from azcommon.result import Failure
 from sqlalchemy.dialects import postgresql
@@ -11,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.toolkit_errors import DuplicateAgentToolkit
+from azents.core.toolkit_ownership import ToolkitOwnerKind
 from azents.rdb.models.toolkit import RDBAgentToolkit
 from azents.rdb.session_capabilities import ReadWriteSession
 from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
@@ -40,10 +42,13 @@ class _DuplicateSession(AsyncSession):
         await super().rollback()
 
 
-async def test_duplicate_attachment_uses_declared_constraint_and_rolls_back() -> None:
+async def test_duplicate_attachment_uses_declared_constraint_and_rolls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     constraint = RDBAgentToolkit.UQ_AGENT_TOOLKIT
     assert list(constraint.columns.keys()) == ["agent_id", "toolkit_id"]
     async with _DuplicateSession(constraint) as session:
+        monkeypatch.setattr(session, "scalar", AsyncMock(return_value="toolkit-1"))
         result = await AgentToolkitRepository().create(
             ReadWriteSession(session),
             AgentToolkitCreate(
@@ -86,4 +91,8 @@ async def test_available_query_preserves_workspace_member_eligibility() -> None:
     assert "JOIN" not in sql
     assert "DISTINCT" not in sql
     assert compiled.params is not None
-    assert set(compiled.params.values()) == {"workspace-1", "member-1"}
+    assert set(compiled.params.values()) == {
+        "workspace-1",
+        "member-1",
+        ToolkitOwnerKind.WORKSPACE,
+    }

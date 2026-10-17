@@ -20,6 +20,7 @@ from azents.core.github_user_oauth import (
     GitHubUserRegistration,
     GitHubUserRevocation,
 )
+from azents.core.toolkit_ownership import ToolkitOwnerKind
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.github_user_oauth import RDBGitHubUserConnection
 from azents.rdb.models.toolkit import RDBToolkitConfig
@@ -79,8 +80,13 @@ async def guard_database(
         await session.write_session.flush()
         toolkits = [
             RDBToolkitConfig(
+                owner_kind=ToolkitOwnerKind.AGENT
+                if owner is not None
+                else ToolkitOwnerKind.WORKSPACE,
                 workspace_id=workspace.id,
                 owner_agent_id=owner,
+                owner_user_id=None,
+                personal_access_mode=None,
                 toolkit_type="github",
                 slug="github",
                 name="GitHub user",

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import MCPOAuthConnectionStatus
+from azents.core.toolkit_ownership import ToolkitOwnerKind
 from azents.rdb.models.toolkit import RDBToolkitConfig
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session_capabilities import (
@@ -49,8 +50,11 @@ async def test_held_replacement_credentials_fence_obsolete_mcp_finalization(
         setup.write_session.add(workspace)
         await setup.write_session.flush()
         toolkit = RDBToolkitConfig(
+            owner_kind=ToolkitOwnerKind.WORKSPACE,
             workspace_id=workspace.id,
             owner_agent_id=None,
+            owner_user_id=None,
+            personal_access_mode=None,
             toolkit_type="mcp",
             slug=f"mcp-{suffix}",
             name="MCP finalization boundary",

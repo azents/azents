@@ -18,6 +18,7 @@ from azents.core.google_system_setting import (
     GoogleApplicationSecrets,
 )
 from azents.core.session_resource_authority import SessionExecutionOwner
+from azents.core.toolkit_ownership import ToolkitOwnerKind
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.toolkit import RDBAgentToolkit, RDBToolkitConfig
@@ -91,7 +92,7 @@ async def _runtime(
             await session.write_session.execute(
                 sa.update(RDBToolkitConfig)
                 .where(RDBToolkitConfig.id == outcome.toolkit_id)
-                .values(owner_agent_id=agent.id)
+                .values(owner_agent_id=agent.id, owner_kind=ToolkitOwnerKind.AGENT)
             )
         else:
             session.write_session.add(

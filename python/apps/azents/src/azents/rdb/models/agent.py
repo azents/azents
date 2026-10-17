@@ -259,7 +259,12 @@ class RDBAgent(RDBModel):
         name="ck_agents_subagent_settings_shape",
     )
 
+    UQ_ID_WORKSPACE = sa.UniqueConstraint(
+        "id", "workspace_id", name="uq_agents_id_workspace"
+    )
+
     __table_args__ = (
+        UQ_ID_WORKSPACE,
         IX_WORKSPACE_ID,
         IX_RUNTIME_PROFILE_ID,
         CK_RUNTIME_PROFILE_SELECTION_VERSION_POSITIVE,
