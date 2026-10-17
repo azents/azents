@@ -51,6 +51,7 @@ def _context() -> ResolveContext:
         oauth_secret_key="",
         workspace_id="workspace-1",
         workspace_handle="workspace",
+        effect_admission=None,
     )
 
 

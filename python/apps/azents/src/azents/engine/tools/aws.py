@@ -39,6 +39,7 @@ from azents.core.mcp_transport import (
 from azents.core.mcp_transport import (
     list_tools as mcp_list_tools,
 )
+from azents.core.personal_toolkit_runtime import ToolkitEffectAdmission
 from azents.core.session_resource_authority import (
     SessionExecutionOwner,
     accepts_execution_owner,
@@ -59,6 +60,7 @@ from azents.engine.run.types import (
     FunctionToolResult,
     FunctionToolSpec,
 )
+from azents.engine.tooling.personal_admission import publish_tool_snapshot
 from azents.engine.tools.background_discovery import (
     DISCOVERY_ERRORS,
     observe_discovery_failure,
@@ -364,7 +366,9 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
     async def _refresh_tool_snapshot(self) -> None:
         """Refresh the AWS MCP tool snapshot in the background."""
         try:
+            await self.assert_effect_current()
             credentials = await self.credential_provider.get_credentials()
+            await self.assert_effect_current()
             sigv4_auth = AwsSigV4Auth(credentials, _AWS_MCP_REGION, _AWS_MCP_SERVICE)
             discovery = await mcp_list_tools(
                 _AWS_MCP_ENDPOINT,
@@ -375,6 +379,8 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
             )
         except asyncio.CancelledError:
             raise
+        except FunctionToolError:
+            return
         except (*DISCOVERY_ERRORS, ExceptionGroup) as error:
             require_expected_discovery_failure(error)
             logger.exception(
@@ -391,6 +397,8 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
         )
         try:
             await self._save_tool_snapshot(snapshot)
+        except FunctionToolError:
+            return
         except CanonicalExecutionOwnerGenerationStaleError:
             self._owner_stale = True
             return
@@ -430,8 +438,11 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
 
     async def _save_tool_snapshot(self, snapshot: McpToolSnapshotState) -> None:
         """Atomically save a successful AWS MCP tool snapshot."""
-        if self.snapshot_store is not None:
-            await self.snapshot_store.replace(snapshot)
+        await publish_tool_snapshot(
+            store=self.snapshot_store,
+            snapshot=snapshot,
+            admission=self.effect_admission,
+        )
 
     def _tools_from_snapshot(
         self, snapshot: McpToolSnapshotState
@@ -444,6 +455,7 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
                 timeout=self._timeout,
                 proxy_url=self._proxy_url,
                 artifact_sink_getter=self._current_artifact_sink,
+                effect_admission=self.effect_admission,
             )
             for item in sorted(snapshot.tools, key=lambda tool: tool.model_name)
         ]
@@ -492,6 +504,7 @@ def _wrap_aws_snapshot_tool(
     timeout: float,
     proxy_url: str | None,
     artifact_sink_getter: Callable[[], McpArtifactSink | None] | None,
+    effect_admission: ToolkitEffectAdmission | None,
 ) -> FunctionTool:
     """Wrap an AWS MCP snapshot item as a FunctionTool."""
     spec = FunctionToolSpec(
@@ -507,7 +520,11 @@ def _wrap_aws_snapshot_tool(
             )
         except json.JSONDecodeError as exc:
             raise FunctionToolError(f"Invalid JSON in tool arguments: {exc}") from None
+        if effect_admission is not None:
+            await effect_admission.assert_current()
         credentials = await credential_provider.get_credentials()
+        if effect_admission is not None:
+            await effect_admission.assert_current()
         auth = AwsSigV4Auth(credentials, _AWS_MCP_REGION, _AWS_MCP_SERVICE)
         result = await mcp_call_tool(
             item.server_url,

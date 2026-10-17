@@ -47,6 +47,7 @@ def _context() -> GitHubUserExecutionContext:
         source="byoa_user",
         app_id="123",
         client_id="client",
+        personal_target=None,
     )
 
 
@@ -342,6 +343,7 @@ async def test_provider_resolves_user_mode_using_team_context_only(
             session_id="session",
             workspace_id="workspace",
             workspace_handle=None,
+            effect_admission=None,
             web_url=None,
             oauth_secret_key=None,
         ),

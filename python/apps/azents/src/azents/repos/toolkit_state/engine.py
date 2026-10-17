@@ -21,9 +21,11 @@ from azents.core.engine_tool_state import (
     TodoState,
     ToolWorkingSetState,
 )
+from azents.core.personal_toolkit_runtime import PersonalToolkitExecutionTarget
 from azents.core.toolkit_state import ToolkitStateIdentity
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.repos.toolkit.personal_runtime import PersonalToolkitRuntimeRepository
 from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.toolkit_state.store import ToolkitStateHandle, ToolkitStateStore
 
@@ -398,6 +400,26 @@ class McpToolSnapshotStore:
             agent_id=agent_id,
             session_id=session_id,
         )
+
+    async def replace_personal(
+        self,
+        snapshot: McpToolSnapshotState,
+        *,
+        repository: PersonalToolkitRuntimeRepository,
+        target: PersonalToolkitExecutionTarget,
+    ) -> None:
+        """Serialize current source admission with post-discovery publication."""
+        if (
+            self.agent_id != target.agent_id
+            or self.session_id != target.execution_owner.session_id
+        ):
+            raise ValueError("Personal snapshot identity does not match its source")
+        if not self._available():
+            return
+        assert self.session_manager is not None  # noqa: S101
+        async with self.session_manager() as session:
+            await repository.admit_in_session(session, target)
+            await self._handle(session).save(snapshot)
 
     def _available(self) -> bool:
         """Return whether persistence and state identity are available."""

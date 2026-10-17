@@ -10,6 +10,7 @@ from types import MappingProxyType
 
 from pydantic import TypeAdapter, ValidationError
 
+from azents.core.personal_toolkit_runtime import ToolkitEffectAdmission
 from azents.core.tools import ToolkitStatus, TurnContext
 from azents.engine.client_tools import ClientToolWireDialect
 from azents.engine.events.execution import ClientToolExecutor
@@ -64,6 +65,7 @@ class ToolCatalog:
     tools: Mapping[str, FunctionTool]
     wire_dialects: Mapping[str, ClientToolWireDialect]
     entries: Mapping[str, CatalogTool]
+    effect_admissions: Mapping[str, ToolkitEffectAdmission]
     static_prompt_fragment_inputs: list[ToolkitPromptInput]
     dynamic_prompt_fragment_inputs: list[ToolkitPromptInput]
     native_replay_context: str | None
@@ -247,6 +249,13 @@ def project_tool_catalog_for_client_compatibility(
         tools=MappingProxyType(tools),
         wire_dialects=MappingProxyType(wire_dialects),
         entries=MappingProxyType(entries),
+        effect_admissions=MappingProxyType(
+            {
+                name: guard
+                for name, guard in catalog.effect_admissions.items()
+                if name in tools
+            }
+        ),
         static_prompt_fragment_inputs=[
             *catalog.static_prompt_fragment_inputs,
             *variant_prompt_inputs,
@@ -331,6 +340,7 @@ def extend_tool_catalog_candidates(
         tools=MappingProxyType(tools),
         wire_dialects=catalog.wire_dialects,
         entries=MappingProxyType(entries),
+        effect_admissions=catalog.effect_admissions,
         static_prompt_fragment_inputs=catalog.static_prompt_fragment_inputs,
         dynamic_prompt_fragment_inputs=catalog.dynamic_prompt_fragment_inputs,
         native_replay_context=catalog.native_replay_context,
@@ -378,6 +388,7 @@ def extend_prepared_tool_catalog_with_json_functions(
         tools=MappingProxyType(tools),
         wire_dialects=MappingProxyType(wire_dialects),
         entries=MappingProxyType(entries),
+        effect_admissions=catalog.effect_admissions,
         static_prompt_fragment_inputs=catalog.static_prompt_fragment_inputs,
         dynamic_prompt_fragment_inputs=catalog.dynamic_prompt_fragment_inputs,
         native_replay_context=catalog.native_replay_context,
@@ -406,6 +417,7 @@ async def build_tool_catalog(
     tools: dict[str, FunctionTool] = {}
     wire_dialects: dict[str, ClientToolWireDialect] = {}
     entries: dict[str, CatalogTool] = {}
+    effect_admissions: dict[str, ToolkitEffectAdmission] = {}
     static_prompt_fragment_inputs: list[ToolkitPromptInput] = []
     dynamic_prompt_fragment_inputs: list[ToolkitPromptInput] = []
     native_replay_contexts: list[str] = []
@@ -481,6 +493,8 @@ async def build_tool_catalog(
                     f"{bound.spec.name}: {previous}, {binding.toolkit_config_id}"
                 )
             tools[bound.spec.name] = bound
+            if binding.toolkit.effect_admission is not None:
+                effect_admissions[bound.spec.name] = binding.toolkit.effect_admission
             entries[bound.spec.name] = CatalogTool(
                 tool=bound,
                 source=source,
@@ -493,6 +507,7 @@ async def build_tool_catalog(
         tools=MappingProxyType(tools),
         wire_dialects=MappingProxyType(wire_dialects),
         entries=MappingProxyType(entries),
+        effect_admissions=MappingProxyType(effect_admissions),
         static_prompt_fragment_inputs=static_prompt_fragment_inputs,
         dynamic_prompt_fragment_inputs=dynamic_prompt_fragment_inputs,
         native_replay_context=(
@@ -654,6 +669,9 @@ class ToolCatalogClientToolInvoker:
                 expected_wire_dialect=expected_wire_dialect,
             )
         try:
+            admission = self.catalog.effect_admissions.get(call.name)
+            if admission is not None:
+                await admission.assert_current()
             with client_tool_execution_context(
                 call_id=call.call_id,
                 name=call.name,

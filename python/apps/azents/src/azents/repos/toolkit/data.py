@@ -134,6 +134,7 @@ class EffectiveToolkitSource(enum.StrEnum):
 
     SHARED_ATTACHMENT = "shared_attachment"
     AGENT_OWNED = "agent_owned"
+    USER_OWNED = "user_owned"
 
 
 class EffectiveToolkitConfig(BaseModel):

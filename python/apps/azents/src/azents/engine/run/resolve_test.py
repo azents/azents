@@ -46,6 +46,8 @@ from azents.core.model_capability_projection import project_capabilities
 from azents.core.model_catalog_source import CatalogFact
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.runtime_capabilities import RuntimeCapabilityResolver
+from azents.core.session_resource_authority import SessionExecutionOwner
+from azents.core.system_setting_payload import SystemSettingPayloadResolver
 from azents.core.tools import (
     ResolveContext,
     Toolkit,
@@ -92,6 +94,7 @@ from azents.repos.toolkit.data import (
     EffectiveToolkitSource,
     ToolkitConfig,
 )
+from azents.repos.toolkit.personal_runtime import PersonalToolkitRuntimeRepository
 from azents.runtime.types import RuntimeDomainConfig
 from azents.services.engine_runtime_tokens import EngineRuntimeTokenResolver
 from azents.services.historical_memory.context_snapshot import (
@@ -123,6 +126,16 @@ from .resolve import (
 )
 
 _NOW = datetime.datetime.now(datetime.timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def no_personal_sources_in_shared_resolution_units(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep this unit module's absent canonical Session boundary explicit."""
+    monkeypatch.setattr(
+        PersonalToolkitRuntimeRepository, "list_effective", AsyncMock(return_value=[])
+    )
 
 
 def test_attachment_preview_does_not_advertise_withheld_resource_tools() -> None:
@@ -451,6 +464,7 @@ async def _resolve_failing_registered_toolkit(
     return await resolve_agent_tools(
         "agent-1",
         _make_toolkit_context(),
+        execution_owner=SessionExecutionOwner("session-1", 1),
         execution_mode=ToolkitExecutionMode.ROOT,
         toolkit_registry={"test": provider},
         web_url="https://example.test",
@@ -463,6 +477,7 @@ async def _resolve_failing_registered_toolkit(
         memory_enabled=False,
         runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
         repositories=get_engine_resolve_repositories(
+            setting_payloads=Mock(spec=SystemSettingPayloadResolver),
             session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
             agent_repository=AgentRepository(),
             integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
@@ -500,6 +515,7 @@ async def test_registered_toolkit_missing_namespace_fails_before_resolution() ->
         await resolve_agent_tools(
             "agent-1",
             _make_toolkit_context(),
+            execution_owner=SessionExecutionOwner("session-1", 1),
             execution_mode=ToolkitExecutionMode.ROOT,
             toolkit_registry={"test": provider},
             web_url="https://example.test",
@@ -512,6 +528,7 @@ async def test_registered_toolkit_missing_namespace_fails_before_resolution() ->
             memory_enabled=False,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=AgentRepository(),
                 integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
@@ -664,6 +681,7 @@ class TestResolveInvokeInput:
             ),
             model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
@@ -733,6 +751,7 @@ class TestResolveInvokeInput:
             image_generation_catalog_service=_make_image_generation_catalog_service(),
             model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
@@ -797,6 +816,7 @@ class TestResolveInvokeInput:
             image_generation_catalog_service=_make_image_generation_catalog_service(),
             model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
@@ -842,6 +862,7 @@ class TestResolveInvokeInput:
             image_generation_catalog_service=_make_image_generation_catalog_service(),
             model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=session_manager,
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
@@ -894,6 +915,7 @@ class TestResolveInvokeInput:
             image_generation_catalog_service=image_service,
             model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
@@ -956,6 +978,7 @@ class TestResolveInvokeInput:
             image_generation_catalog_service=image_service,
             model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
@@ -1025,6 +1048,7 @@ class TestResolveInvokeInput:
             image_generation_catalog_service=image_service,
             model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
@@ -1083,6 +1107,7 @@ class TestResolveInvokeInput:
             image_generation_catalog_service=image_service,
             model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
@@ -1146,6 +1171,7 @@ class TestResolveInvokeInput:
             image_generation_catalog_service=image_service,
             model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
@@ -1211,6 +1237,7 @@ class TestResolveInvokeInput:
             image_generation_catalog_service=_make_image_generation_catalog_service(),
             model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
@@ -1252,6 +1279,7 @@ class TestResolveInvokeInput:
             image_generation_catalog_service=_make_image_generation_catalog_service(),
             model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
@@ -1325,6 +1353,7 @@ class TestResolveInvokeInput:
             image_generation_catalog_service=_make_image_generation_catalog_service(),
             model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=session_manager,
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
@@ -1366,6 +1395,7 @@ class TestResolveInvokeInput:
             image_generation_catalog_service=_make_image_generation_catalog_service(),
             model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=session_manager,
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
@@ -1404,6 +1434,7 @@ class TestResolveInvokeInput:
             image_generation_catalog_service=_make_image_generation_catalog_service(),
             model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
@@ -1441,6 +1472,7 @@ class TestResolveInvokeInput:
             image_generation_catalog_service=_make_image_generation_catalog_service(),
             model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=_session_manager_for(AsyncMock(spec=AsyncSession)),
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
@@ -1482,6 +1514,7 @@ class TestResolveInvokeInput:
             image_generation_catalog_service=_make_image_generation_catalog_service(),
             model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=session_manager,
                 agent_repository=agent_repository,
                 integration_repository=AsyncMock(),
@@ -1524,6 +1557,7 @@ class TestResolveInvokeInput:
             image_generation_catalog_service=_make_image_generation_catalog_service(),
             model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=session_manager,
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
@@ -1567,6 +1601,7 @@ class TestResolveInvokeInput:
             image_generation_catalog_service=_make_image_generation_catalog_service(),
             model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=session_manager,
                 agent_repository=agent_repository,
                 integration_repository=AsyncMock(),
@@ -1611,6 +1646,7 @@ class TestResolveInvokeInput:
             image_generation_catalog_service=_make_image_generation_catalog_service(),
             model_metadata_service=make_test_model_metadata_service(source=None),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=session_manager,
                 agent_repository=agent_repository,
                 integration_repository=AsyncMock(),
@@ -1647,6 +1683,7 @@ class TestResolveAgentTools:
         bindings = await resolve_agent_tools(
             "agent-1",
             _make_toolkit_context(),
+            execution_owner=SessionExecutionOwner("session-1", 1),
             execution_mode=execution_mode,
             toolkit_registry={},
             web_url="https://example.test",
@@ -1660,6 +1697,7 @@ class TestResolveAgentTools:
             memory_enabled=False,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=_session_manager_for(session),
                 agent_repository=AgentRepository(),
                 integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
@@ -1685,6 +1723,7 @@ class TestResolveAgentTools:
         bindings = await resolve_agent_tools(
             "agent-1",
             _make_toolkit_context(),
+            execution_owner=SessionExecutionOwner("session-1", 1),
             execution_mode=execution_mode,
             toolkit_registry={},
             web_url="https://example.test",
@@ -1698,6 +1737,7 @@ class TestResolveAgentTools:
             memory_enabled=False,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=_session_manager_for(session),
                 agent_repository=AgentRepository(),
                 integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
@@ -1744,6 +1784,7 @@ class TestResolveAgentTools:
         bindings = await resolve_agent_tools(
             "agent-1",
             _make_toolkit_context(),
+            execution_owner=SessionExecutionOwner("session-1", 1),
             execution_mode=ToolkitExecutionMode.ROOT,
             toolkit_registry={},
             web_url="https://example.test",
@@ -1760,6 +1801,7 @@ class TestResolveAgentTools:
             memory_enabled=True,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=True),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=_session_manager_for(session),
                 agent_repository=AgentRepository(),
                 integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
@@ -1794,6 +1836,7 @@ class TestResolveAgentTools:
         bindings = await resolve_agent_tools(
             "agent-1",
             _make_toolkit_context(),
+            execution_owner=SessionExecutionOwner("session-1", 1),
             execution_mode=ToolkitExecutionMode.ROOT,
             toolkit_registry={},
             web_url="https://example.test",
@@ -1810,6 +1853,7 @@ class TestResolveAgentTools:
             memory_enabled=True,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=_session_manager_for(session),
                 agent_repository=AgentRepository(),
                 integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
@@ -1831,6 +1875,7 @@ class TestResolveAgentTools:
         bindings = await resolve_agent_tools(
             "agent-1",
             _make_toolkit_context(),
+            execution_owner=SessionExecutionOwner("session-1", 1),
             execution_mode=ToolkitExecutionMode.ROOT,
             toolkit_registry={},
             web_url="https://example.test",
@@ -1844,6 +1889,7 @@ class TestResolveAgentTools:
             memory_enabled=False,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=_session_manager_for(session),
                 agent_repository=AgentRepository(),
                 integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
@@ -1873,6 +1919,7 @@ class TestResolveAgentTools:
         bindings = await resolve_agent_tools(
             "agent-1",
             _make_toolkit_context(),
+            execution_owner=SessionExecutionOwner("session-1", 1),
             execution_mode=ToolkitExecutionMode.SUBAGENT,
             toolkit_registry={},
             web_url="https://example.test",
@@ -1893,6 +1940,7 @@ class TestResolveAgentTools:
             memory_enabled=True,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=True),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=_session_manager_for(session),
                 agent_repository=AgentRepository(),
                 integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
@@ -1916,6 +1964,7 @@ class TestResolveAgentTools:
         root = await resolve_agent_tools(
             "agent-1",
             _make_toolkit_context(),
+            execution_owner=SessionExecutionOwner("session-1", 1),
             execution_mode=ToolkitExecutionMode.ROOT,
             toolkit_registry={},
             web_url="https://example.test",
@@ -1930,6 +1979,7 @@ class TestResolveAgentTools:
             memory_enabled=False,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=True),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=_session_manager_for(session),
                 agent_repository=AgentRepository(),
                 integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
@@ -1940,6 +1990,7 @@ class TestResolveAgentTools:
         subagent = await resolve_agent_tools(
             "agent-1",
             _make_toolkit_context(),
+            execution_owner=SessionExecutionOwner("session-1", 1),
             execution_mode=ToolkitExecutionMode.SUBAGENT,
             toolkit_registry={},
             web_url="https://example.test",
@@ -1953,6 +2004,7 @@ class TestResolveAgentTools:
             memory_enabled=False,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
             repositories=get_engine_resolve_repositories(
+                setting_payloads=Mock(spec=SystemSettingPayloadResolver),
                 session_manager=_session_manager_for(session),
                 agent_repository=AgentRepository(),
                 integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
@@ -1993,6 +2045,7 @@ async def test_existing_agent_top_k_reaches_run_and_retry_carrier(
     result = await resolve_invoke_input(
         InvokeInput(agent_id="agent-1", session_id="session-1", messages=[]),
         repositories=get_engine_resolve_repositories(
+            setting_payloads=Mock(spec=SystemSettingPayloadResolver),
             agent_repository=agent_repository,
             integration_repository=integration_repository,
             session_manager=session_manager,

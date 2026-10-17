@@ -14,6 +14,7 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 from azents.core.google_policy import GoogleTask
 from azents.core.mailbox_activity import MailboxActivityObserverProtocol
+from azents.core.personal_toolkit_runtime import ToolkitEffectAdmission
 from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.hooks.types import RuntimeHooks
 from azents.engine.run.emit import PublishedEvent
@@ -187,6 +188,7 @@ class ResolveContext:
     oauth_secret_key: str | None
     workspace_id: str
     workspace_handle: str | None
+    effect_admission: ToolkitEffectAdmission | None
     mcp_proxy_url: str | None = None
 
 
@@ -208,8 +210,20 @@ class Toolkit(ABC, Generic[ConfigT]):
     display_name: str = ""
     """Name displayed in toolkit prompt. Injected by Provider.resolve()."""
 
+    effect_admission: ToolkitEffectAdmission | None = None
+    """Exact protected-effect capability; absent for non-personal sources."""
+
     source_identity: tuple[tuple[str, str], ...] = ()
     """Bounded non-secret connection identity included in catalog source metadata."""
+
+    def bind_effect_admission(self, admission: ToolkitEffectAdmission | None) -> None:
+        """Bind exact source authority before lifecycle entry or external work."""
+        self.effect_admission = admission
+
+    async def assert_effect_current(self) -> None:
+        """Admit a new authenticated operation on an explicitly scoped source."""
+        if self.effect_admission is not None:
+            await self.effect_admission.assert_current()
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Receive current turn context and immediately return tool state.

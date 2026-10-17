@@ -12,6 +12,7 @@ from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_capability_evidence import ProviderCapabilityEvidence
 from azents.core.model_capability_projection import project_capabilities
 from azents.core.model_catalog_source import CatalogFact
+from azents.core.system_setting_payload import SystemSettingPayloadResolver
 from azents.engine.run.input import InvokeInput
 from azents.engine.run.resolve import resolve_invoke_input_with_resolved_profile
 from azents.engine.run.resolve_test import (
@@ -66,6 +67,7 @@ async def test_frozen_model_validates_effective_not_raw_agent_effort(
         resolved_reasoning_effort=applied,
         resolved_enabled_execution_options=[],
         repositories=get_engine_resolve_repositories(
+            setting_payloads=AsyncMock(spec=SystemSettingPayloadResolver),
             agent_repository=agent_repository,
             integration_repository=integrations,
             session_manager=manager,

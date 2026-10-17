@@ -348,6 +348,7 @@ def _make_resolve_context(
         oauth_secret_key="test-secret",
         workspace_id=workspace_id,
         workspace_handle="test-workspace",
+        effect_admission=None,
     )
 
 
@@ -3138,6 +3139,7 @@ class TestProcessToolHandler:
         )
         toolkit = _make_toolkit(runtime_capability_resolver=resolver)
         peer = AsyncMock()
+        peer.effect_admission = None
         toolkit.set_peer_toolkits([peer])
         state = await toolkit.update_context(_make_context())
         tool = _find_tool(state.tools, "exec_command")
@@ -3633,6 +3635,7 @@ async def test_agent_runtime_environment_overrides_peer_without_exposing_values(
     environment = require_instance(toolkit.repositories.runtime_environment, AsyncMock)
     environment.read_values.return_value = {"API_TOKEN": "agent-only-secret"}
     peer = AsyncMock()
+    peer.effect_admission = None
     peer.expose_env.return_value = {"API_TOKEN": "peer-secret", "OTHER": "peer-only"}
     toolkit.set_peer_toolkits([peer])
     prompt = await toolkit.get_static_prompt(_make_context())

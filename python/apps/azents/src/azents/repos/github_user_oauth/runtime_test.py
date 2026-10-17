@@ -111,6 +111,7 @@ async def _runtime_fixture(
             source="byoa_user",
             app_id="123",
             client_id="Iv1.client",
+            personal_target=None,
         )
     repository = GitHubUserRuntimeOperationRepository(
         session_manager=manager,

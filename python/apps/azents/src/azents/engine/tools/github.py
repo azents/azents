@@ -35,6 +35,7 @@ from azents.core.github_credentials import (
 from azents.core.github_user_oauth import GitHubUserOAuthError
 from azents.core.github_user_runtime import GitHubUserExecutionContext
 from azents.core.mcp_transport import test_mcp_transport
+from azents.core.personal_toolkit_runtime import ToolkitEffectAdmission
 from azents.core.session_resource_authority import (
     SessionExecutionOwner,
     accepts_execution_owner,
@@ -377,6 +378,14 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
         self.selected_installation_store = selected_installation_store
         self._execution_owner: SessionExecutionOwner | None = None
 
+    def bind_effect_admission(self, admission: ToolkitEffectAdmission | None) -> None:
+        super().bind_effect_admission(admission)
+        if self._mcp is not None:
+            self._mcp.bind_effect_admission(admission)
+        for binding in self._installation_bindings:
+            if binding.mcp_toolkit is not None:
+                binding.mcp_toolkit.bind_effect_admission(admission)
+
     def bind_execution_owner(self, owner: SessionExecutionOwner) -> None:
         """Bind session-scoped GitHub and MCP state before lifecycle entry."""
         session_id = (
@@ -410,12 +419,15 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
         Empty dict when disabled or token provider is absent.
         Memoize within TTL; do not reissue on every runtime command.
         """
-        if not self._config.inject_runtime_environment:
+        if not self._config.inject_runtime_environment or (
+            not self._installation_token_providers
+            and self.runtime_environment_token_provider is None
+        ):
             return {}
+        if self.effect_admission is not None:
+            await self.effect_admission.assert_current()
         if self._installation_token_providers:
             return await self._expose_multi_installation_env()
-        if self.runtime_environment_token_provider is None:
-            return {}
         token = await self._get_cached_runtime_environment_token()
         if not token:
             return {}
@@ -429,7 +441,7 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
             if expires_at > now:
                 return cached_token
         assert self.runtime_environment_token_provider is not None  # noqa: S101
-        token = await self.runtime_environment_token_provider()
+        token = await self._admitted_token(self.runtime_environment_token_provider)
         if token is not None:
             self._runtime_environment_token_cache = (
                 token,
@@ -443,13 +455,15 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
         provider: Callable[[], Awaitable[str | None]],
     ) -> str | None:
         """Check the per-installation TTL cache and return a token."""
+        if self.effect_admission is not None:
+            await self.effect_admission.assert_current()
         now = time.monotonic()
         cached = self._installation_token_cache.get(installation_id)
         if cached is not None:
             cached_token, expires_at = cached
             if expires_at > now:
                 return cached_token
-        token = await provider()
+        token = await self._admitted_token(provider)
         if token is not None:
             self._installation_token_cache[installation_id] = (
                 token,
@@ -582,14 +596,31 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
         if binding.mcp_toolkit is not None:
             await binding.mcp_toolkit.__aexit__(*exc)
 
+    async def _admitted_token(
+        self,
+        provider: Callable[[], Awaitable[str | None]],
+    ) -> str | None:
+        """Prevent new token work and token use across a personal admission gap."""
+        if self.effect_admission is not None:
+            await self.effect_admission.assert_current()
+        token = await provider()
+        if self.effect_admission is not None:
+            await self.effect_admission.assert_current()
+        return token
+
     async def _prepare_installation_mcp(
         self, binding: GitHubInstallationBinding
     ) -> None:
         """Issue an installation token and start the lazy MCP connection."""
         assert binding.lazy_mcp_config is not None  # noqa: S101
         assert binding.lazy_mcp_secret_provider is not None  # noqa: S101
+
+        async def refresh() -> str | None:
+            assert binding.lazy_mcp_secret_provider is not None
+            return await self._admitted_token(binding.lazy_mcp_secret_provider)
+
         try:
-            secret = await binding.lazy_mcp_secret_provider()
+            secret = await refresh()
             if secret is None:
                 binding.lazy_mcp_error = (
                     "GitHub credential is unavailable for "
@@ -599,17 +630,20 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
             binding.mcp_toolkit = McpToolkit(
                 config=binding.lazy_mcp_config,
                 secret=secret,
-                on_auth_failure=binding.lazy_mcp_secret_provider,
+                on_auth_failure=refresh,
                 proxy_url=binding.lazy_mcp_proxy_url,
                 snapshot_factory=binding.snapshot_factory,
                 agent_id=binding.agent_id,
                 session_id=binding.session_id,
                 state_name=binding.state_name,
             )
+            binding.mcp_toolkit.bind_effect_admission(self.effect_admission)
             await binding.mcp_toolkit.__aenter__()
             binding.lazy_mcp_error = None
         except asyncio.CancelledError:
             raise
+        except FunctionToolError as error:
+            binding.lazy_mcp_error = str(error)
         except (*DISCOVERY_ERRORS, ExceptionGroup) as exc:
             require_expected_discovery_failure(exc)
             logger.exception(
@@ -685,6 +719,11 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
         async def headers_provider() -> dict[str, str]:
             return await self._installation_auth_headers(binding)
 
+        async def refresh() -> str | None:
+            if binding.lazy_mcp_secret_provider is None:
+                return None
+            return await self._admitted_token(binding.lazy_mcp_secret_provider)
+
         tools: list[FunctionTool] = []
         for item in sorted(snapshot.tools, key=lambda tool: tool.model_name):
             mcp_tool = McpBaseTool(
@@ -698,7 +737,9 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
                 {},
                 config.timeout,
                 use_streamable_http=item.use_streamable_http,
-                on_auth_failure=binding.lazy_mcp_secret_provider,
+                on_auth_failure=refresh
+                if binding.lazy_mcp_secret_provider is not None
+                else None,
                 proxy_url=binding.lazy_mcp_proxy_url,
                 headers_provider=headers_provider,
                 authorization_provider=None,
@@ -728,24 +769,32 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
         """Issue GitHub token in background and start MCP lazy load."""
         assert self._lazy_mcp_config is not None
         assert self._lazy_mcp_secret_provider is not None
+
+        async def refresh() -> str | None:
+            assert self._lazy_mcp_secret_provider is not None
+            return await self._admitted_token(self._lazy_mcp_secret_provider)
+
         try:
-            secret = await self._lazy_mcp_secret_provider()
+            secret = await refresh()
             if secret is None:
                 self._lazy_mcp_error = "GitHub credential is unavailable."
                 return
             self._mcp = McpToolkit(
                 config=self._lazy_mcp_config,
                 secret=secret,
-                on_auth_failure=self._lazy_mcp_secret_provider,
+                on_auth_failure=refresh,
                 proxy_url=self._lazy_mcp_proxy_url,
                 snapshot_factory=None,
                 agent_id=None,
                 session_id=None,
             )
+            self._mcp.bind_effect_admission(self.effect_admission)
             await self._mcp.__aenter__()
             self._lazy_mcp_error = None
         except asyncio.CancelledError:
             raise
+        except FunctionToolError as error:
+            self._lazy_mcp_error = str(error)
         except (*DISCOVERY_ERRORS, ExceptionGroup) as exc:
             require_expected_discovery_failure(exc)
             logger.exception(
@@ -940,6 +989,8 @@ class GitHubUserToolkit(GitHubToolkit):
     async def expose_env(self) -> dict[str, str]:
         if not self._config.inject_runtime_environment:
             return {}
+        if self.effect_admission is not None:
+            await self.effect_admission.assert_current()
         try:
             return await self.user_runtime.runtime_environment(self.user_context)
         except GitHubUserOAuthError as exc:
@@ -1248,6 +1299,11 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
             source=source,
             app_id=secrets.app_id,
             client_id=client_id,
+            personal_target=(
+                context.effect_admission.target
+                if context.effect_admission is not None
+                else None
+            ),
         )
         try:
             await runtime.current_connection(execution)

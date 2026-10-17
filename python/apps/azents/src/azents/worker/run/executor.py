@@ -679,6 +679,9 @@ class RunExecutor:
             snapshot.agent_id,
             context,
             execution_mode=execution_mode,
+            execution_owner=SessionExecutionOwner(
+                snapshot.session_id, snapshot.owner_generation
+            ),
             toolkit_registry=self.toolkit_registry,
             repositories=self.resolve_repositories,
             web_url=self.worker_config.web_url,
@@ -1359,6 +1362,9 @@ class RunExecutor:
             invoke_input.agent_id,
             context,
             execution_mode=execution_mode,
+            execution_owner=SessionExecutionOwner(
+                snapshot.session_id, snapshot.owner_generation
+            ),
             toolkit_registry=self.toolkit_registry,
             repositories=self.resolve_repositories,
             web_url=self.worker_config.web_url,

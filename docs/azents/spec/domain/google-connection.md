@@ -133,8 +133,14 @@ atomically with default dynamic `all` access. Reconnect preserves the current
 personal access policy and unrelated metadata while applying the existing
 grant/client/attempt replacement checks. Personal User ownership is legal in
 the staged-attempt schema; existing Workspace/Agent attempt identities and
-encrypted payloads are preserved. This API boundary does not enable personal
-Session execution or provide a personal Web management surface.
+encrypted payloads are preserved. Personal Web management remains a separate surface.
+
+Personal Session execution uses an exact source-bound adapter to the common current
+grant/client/task checks. Its canonical User-root association, active owner, ordinary Agent
+access, personal policy and source revision are rechecked before discovery, renewal and
+calls. Post-renewal publication repeats personal parent admission inside the existing
+current-grant CAS operation; withdrawal, source change and changed client evidence defeat
+stale success and failure. Shared/Agent delegation behavior remains unchanged.
 
 Connect stores an unpublished encrypted attempt with separate callback-state
 nonce, OIDC nonce, PKCE verifier, exact callback/client generation, selected tasks

@@ -95,6 +95,14 @@ class GitHubUserRuntimeService:
             or registration.client_id != client_id
         ):
             raise _unavailable()
+        if context.personal_target is not None:
+            current = await self.repository.load(context)
+            if (
+                current.toolkit.revision != state.toolkit.revision
+                or current.connection != connection
+            ):
+                raise _unavailable()
+            return current
         return state
 
     async def current_connection(

@@ -182,6 +182,7 @@ from azents.repos.session_execution.data import (
     CanonicalExecutionSnapshot,
     PendingCommandSnapshot,
 )
+from azents.repos.toolkit.personal_runtime import PersonalToolkitRuntimeRepository
 from azents.repos.worker_executor_model import WorkerExecutorModelOperationRepository
 from azents.repos.worker_executor_model_data import (
     FreshModelPreparation,
@@ -2098,6 +2099,7 @@ def _executor(
             invoke_read=Mock(spec=EngineInvokeReadRepository),
             model_read=Mock(spec=EngineModelReadRepository),
             toolkit_read=Mock(spec=EngineToolkitReadRepository),
+            personal_toolkits=Mock(spec=PersonalToolkitRuntimeRepository),
             chatgpt_oauth=Mock(spec=ChatGPTOAuthRuntimeRepository),
             xai_oauth=Mock(spec=XaiOAuthRuntimeRepository),
             kimi_oauth=Mock(spec=KimiOAuthRuntimeRepository),

@@ -69,6 +69,7 @@ def _harness() -> Harness:
             oauth_secret_key=None,
             workspace_id="workspace",
             workspace_handle="ws",
+            effect_admission=None,
             mcp_proxy_url=None,
         ),
         timeout=30.0,

@@ -64,6 +64,7 @@ from azents.core.openai_client_config import OpenAIResponsesClientConfig
 from azents.core.openrouter import OPENROUTER_API_BASE_URL, OPENROUTER_APP_TITLE
 from azents.core.session_execution_data import SessionExecutionRecord
 from azents.core.session_resource_authority import SessionExecutionOwner
+from azents.core.system_setting_payload import SystemSettingPayloadResolver
 from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
 from azents.engine.context.compaction import (
     SummaryModelCall,
@@ -3751,6 +3752,7 @@ def _agent_engine_adapter(
     return AgentEngineAdapter(
         repository_factory=repository_factory,
         resolve_repositories=get_engine_resolve_repositories(
+            setting_payloads=AsyncMock(spec=SystemSettingPayloadResolver),
             session_manager=session_manager,
             agent_repository=AgentRepository(),
             integration_repository=integration,

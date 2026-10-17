@@ -283,6 +283,7 @@ def _catalog(
         raise ValueError("Duplicate internal tool name.")
     candidate = ToolCatalog(
         native_replay_context=None,
+        effect_admissions=MappingProxyType({}),
         tools=MappingProxyType(by_name),
         wire_dialects=MappingProxyType({}),
         entries=MappingProxyType(

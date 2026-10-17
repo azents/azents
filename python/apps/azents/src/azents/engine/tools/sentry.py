@@ -10,6 +10,7 @@ Adds skill group filtering to the same pattern as Notion Toolkit.
 import logging
 from textwrap import dedent
 
+from azents.core.personal_toolkit_runtime import ToolkitEffectAdmission
 from azents.core.tools import (
     McpToolkitConfig,
     ResolveContext,
@@ -109,6 +110,10 @@ class SentryToolkit(Toolkit[SentryToolkitConfig]):
         """
         self.mcp = mcp_toolkit
         self._enabled_skills = enabled_skills
+
+    def bind_effect_admission(self, admission: ToolkitEffectAdmission | None) -> None:
+        super().bind_effect_admission(admission)
+        self.mcp.bind_effect_admission(admission)
 
     async def __aenter__(self) -> SentryToolkit:
         """Delegate to internal McpToolkit to start background connection."""

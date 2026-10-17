@@ -15,6 +15,7 @@ from azents.core.google_oauth import (
 from azents.core.google_policy import GoogleService, permitted_tools
 from azents.core.google_runtime import GoogleExecutionState
 from azents.core.google_system_setting import GoogleApplicationUnavailable
+from azents.core.personal_toolkit_runtime import PersonalToolkitExecutionTarget
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.repos.google_oauth.runtime import GoogleRuntimeRepository
 from azents.services.google_application.service import GoogleApplicationService
@@ -28,6 +29,14 @@ class GoogleRuntimeService:
     repository: Annotated[GoogleRuntimeRepository, Depends()]
     application: Annotated[GoogleApplicationService, Depends()]
     provider: Annotated[GoogleOAuthProvider, Depends()]
+
+    def for_personal(
+        self, target: PersonalToolkitExecutionTarget
+    ) -> "GoogleRuntimeService":
+        """Retain common current grant/client/task logic under exact personal scope."""
+        return dataclasses.replace(
+            self, repository=self.repository.for_personal(target)
+        )
 
     async def _state(
         self,
