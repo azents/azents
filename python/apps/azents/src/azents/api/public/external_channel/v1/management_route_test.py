@@ -4,6 +4,7 @@ import datetime
 import json
 import logging
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -13,7 +14,6 @@ from fastapi.testclient import TestClient
 from azents.api.public.external_channel.v1 import (
     management_route as management_route_module,
 )
-from azents.app import create_dummy_public_app
 from azents.core.auth.deps import (
     CurrentUser,
     WorkspaceMember,
@@ -1132,9 +1132,11 @@ def test_multi_connection_impact_returns_generation_fenced_preview() -> None:
     )
 
 
-def test_openapi_includes_management_but_excludes_provider_callback() -> None:
+def test_openapi_includes_management_but_excludes_provider_callback(
+    full_public_openapi: dict[str, Any],
+) -> None:
     """Generated clients receive management operations, never raw callbacks."""
-    paths = create_dummy_public_app().openapi()["paths"]
+    paths = full_public_openapi["paths"]
     connection_path = (
         "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/"
         "external-channels/{connection_id}"

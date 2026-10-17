@@ -3,10 +3,10 @@
 from typing import NoReturn
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from azents.api.public.chat import v1 as chat_v1
+from azents.api.public.chat.v1.route_test_support import focused_chat_app
 from azents.broker.deps import get_broker
 from azents.core.auth.deps import CurrentUser, get_current_user
 from azents.services.agent_session_input import AgentSessionInputService
@@ -47,8 +47,7 @@ def test_invalid_speed_wire_body_never_reaches_rest_admission(
         raise AssertionError("Invalid speed preferences reached REST admission.")
 
     monkeypatch.setattr(chat_v1, "_write_input_via_rest", forbid_admission)
-    app = FastAPI()
-    app.include_router(chat_v1.router)
+    app = focused_chat_app("/sessions/{session_id}/inputs")
     app.dependency_overrides[get_current_user] = _user
     for dependency in (
         ChatSessionService,
@@ -64,7 +63,7 @@ def test_invalid_speed_wire_body_never_reaches_rest_admission(
         app.dependency_overrides[dependency] = _unused_collaborator
     with TestClient(app) as client:
         response = client.post(
-            "/sessions/" + "a" * 32 + "/inputs",
+            "/chat/v1/sessions/" + "a" * 32 + "/inputs",
             json={
                 "agent_id": "b" * 32,
                 "client_request_id": "invalid-speed",

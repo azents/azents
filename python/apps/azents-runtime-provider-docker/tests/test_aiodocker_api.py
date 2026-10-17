@@ -1,9 +1,55 @@
 """Docker API adapter decoding tests."""
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
-from azents_runtime_provider_docker.aiodocker_api import _container_info
-from azents_runtime_provider_docker.docker_api import DockerBindMount
+from azents_runtime_provider_docker.aiodocker_api import AioDockerApi, _container_info
+from azents_runtime_provider_docker.docker_api import (
+    DockerBindMount,
+    DockerContainerSpec,
+)
+
+
+@pytest.mark.parametrize("name", ["azents-runtime-first", "azents-runtime-second"])
+async def test_create_preserves_runtime_hostname_across_container_replacement(
+    name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Native persistent profiles must see the same machine after replacement."""
+    create = AsyncMock()
+    docker = MagicMock()
+    docker.containers.create = create
+    adapter = AioDockerApi()
+    monkeypatch.setattr(adapter, "_get_docker", AsyncMock(return_value=docker))
+    spec = DockerContainerSpec(
+        name=name,
+        image="runner:synthetic",
+        user="1000:1000",
+        working_dir="/runtime/home",
+        env={},
+        labels={},
+        binds=(),
+        network="runtime-network",
+        memory_bytes=None,
+        memory_reservation_bytes=None,
+        cpu_quota=None,
+        cpu_period=100000,
+        cpu_shares=None,
+        extra_hosts=(),
+        cap_add=(),
+        cap_drop=("ALL",),
+        security_options=("no-new-privileges",),
+        userns_mode=None,
+        masked_paths=None,
+        readonly_paths=None,
+        privileged=False,
+    )
+    await adapter.create_container(spec)
+    await adapter.create_container(spec)
+    assert create.await_count == 2
+    for call in create.await_args_list:
+        assert call.kwargs["name"] == name
+        assert call.kwargs["config"]["Hostname"] == name
 
 
 def test_container_info_decodes_security_mount_and_terminal_evidence() -> None:

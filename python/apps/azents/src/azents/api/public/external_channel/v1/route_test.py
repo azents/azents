@@ -2,6 +2,7 @@
 
 import datetime
 import logging
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -448,11 +449,13 @@ def test_oversized_body_is_rejected_before_service_admission() -> None:
     service.handle.assert_not_awaited()
 
 
-def test_callback_is_mounted_but_excluded_from_public_openapi() -> None:
+def test_callback_is_mounted_but_excluded_from_public_openapi(
+    full_public_openapi: dict[str, Any],
+) -> None:
     """Keep provider reachability outside generated authenticated clients."""
     app = create_dummy_public_app()
 
     assert str(app.url_path_for("receive_slack_event")) == (
         "/external-channel/v1/slack/events"
     )
-    assert "/external-channel/v1/slack/events" not in app.openapi()["paths"]
+    assert "/external-channel/v1/slack/events" not in full_public_openapi["paths"]

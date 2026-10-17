@@ -18,7 +18,6 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import DBAPIError
 from testcontainers.postgres import PostgresContainer
 
-from azents.consts import PROJECT_ROOT
 from azents.core.agent import SelectableModelOption
 from azents.core.enums import LLMProvider
 from azents.core.inference_profile import RequestedInferenceProfile
@@ -36,6 +35,7 @@ from azents.core.model_operation import (
     mark_model_operation_succeeded,
 )
 from azents.core.model_pricing import ModelPricingDefinition, normalize_model_pricing
+from azents.testing.migration_database import isolated_migration_database
 from azents.testing.model_selection import make_test_model_selection
 
 from .data_source_cutover_test import _historical_source_hash
@@ -127,32 +127,33 @@ class _Database:
     before: dict[str, Any]
 
 
+@pytest.fixture(scope="module")
+def historical_database_template(
+    postgres_container: PostgresContainer,
+) -> Generator[str]:
+    """Retain the original historical upgrade/seed sequence on pristine bytes."""
+    with isolated_migration_database(postgres_container, template=None) as source:
+        command.upgrade(source.config, _BEFORE_SOURCE_FENCES)
+        _seed_retired_source(source.engine)
+        command.upgrade(source.config, _PARENT)
+        _seed_legacy(source.engine)
+        source.engine.dispose()
+        yield source.name
+
+
 @pytest.fixture
-def database(postgres_container: PostgresContainer) -> Generator[_Database]:
-    """Allocate a new database only inside the disposable Docker fixture."""
-    name = "catalog_current_cutover_" + uuid4().hex
-    admin = sa.create_engine(
-        postgres_container.get_connection_url(), isolation_level="AUTOCOMMIT"
-    )
-    with admin.connect() as connection:
-        connection.execute(sa.text(f"CREATE DATABASE {name}"))
-    url = sa.engine.make_url(postgres_container.get_connection_url()).set(database=name)
-    config = AlembicConfig(PROJECT_ROOT / "db-schemas/rdb/alembic.ini")
-    config.set_main_option(
-        "sqlalchemy.url", url.render_as_string(hide_password=False).replace("%", "%%")
-    )
-    engine = sa.create_engine(url)
-    try:
-        command.upgrade(config, _BEFORE_SOURCE_FENCES)
-        _seed_retired_source(engine)
-        command.upgrade(config, _PARENT)
-        _seed_legacy(engine)
-        yield _Database(engine=engine, config=config, before=_preserved_data(engine))
-    finally:
-        engine.dispose()
-        with admin.connect() as connection:
-            connection.execute(sa.text(f"DROP DATABASE {name} WITH (FORCE)"))
-        admin.dispose()
+def database(
+    postgres_container: PostgresContainer, historical_database_template: str
+) -> Generator[_Database]:
+    """Allocate a physical clone so cutover, rollback and writes remain isolated."""
+    with isolated_migration_database(
+        postgres_container, template=historical_database_template
+    ) as isolated:
+        yield _Database(
+            engine=isolated.engine,
+            config=isolated.config,
+            before=_preserved_data(isolated.engine),
+        )
 
 
 @pytest.fixture

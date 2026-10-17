@@ -1,14 +1,16 @@
 """Real retained Session diagnostic endpoints and their admin authority."""
 
 import datetime
+from collections.abc import Sequence
 from unittest.mock import AsyncMock, create_autospec
 
 import httpx
 import pytest
 import sqlalchemy as sa
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI, params
 
-from azents.app import create_dummy_admin_app, create_dummy_public_app
+from azents.api.admin import mount as mount_admin
+from azents.app import create_dummy_public_app
 from azents.core.auth.deps import CurrentUser, get_current_user
 from azents.core.config import (
     AuthConfig,
@@ -53,11 +55,38 @@ from azents.services.chat import ChatSessionService
 from azents.services.chat.team_session_test import _service as _chat_service
 from azents.services.session_diagnostics import SessionDiagnosticService
 from azents.services.system_user_role.service import SystemUserRoleService
+from azents.utils.fastapi.route import as_route_mounter, generate_short_operation_id
+
+
+def _diagnostic_app() -> FastAPI:
+    """Use the actual Admin protection mount without unrelated operational APIs."""
+    app = FastAPI(generate_unique_id_function=generate_short_operation_id)
+    mount = as_route_mounter(app)
+
+    def diagnostic_only(
+        router: APIRouter,
+        *,
+        prefix: str,
+        tag: str,
+        description: str | None = None,
+        dependencies: Sequence[params.Depends] | None = None,
+    ) -> None:
+        if prefix == "/debug/v1":
+            mount(
+                router,
+                prefix=prefix,
+                tag=tag,
+                description=description,
+                dependencies=dependencies,
+            )
+
+    mount_admin(diagnostic_only)
+    return app
 
 
 def _app(manager: SessionManager[WriteSession], *, system_admin: bool) -> FastAPI:
     """Use the actual Admin mount and role check with controlled role data."""
-    app = create_dummy_admin_app()
+    app = _diagnostic_app()
     role_service = create_autospec(SystemUserRoleService, instance=True)
     role_service.require_system_admin = AsyncMock(return_value=system_admin)
     app.dependency_overrides[get_current_user] = lambda: CurrentUser(
@@ -73,7 +102,7 @@ def _app(manager: SessionManager[WriteSession], *, system_admin: bool) -> FastAP
 
 async def test_session_diagnostics_require_authenticated_system_admin() -> None:
     """Missing authentication cannot read retained content through Admin routes."""
-    app = create_dummy_admin_app()
+    app = _diagnostic_app()
     app.dependency_overrides[get_auth_config] = lambda: AuthConfig(
         jwt=JWTConfig(secret_key="test-only-auth-key"),
         refresh_token=RefreshTokenConfig(),

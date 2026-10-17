@@ -8,11 +8,10 @@ from unittest.mock import Mock, create_autospec
 
 import httpx
 import pytest
-from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.api.public.chat.v1 import router
 from azents.api.public.chat.v1.data import ChatSessionModelProfileResponse
+from azents.api.public.chat.v1.route_test_support import focused_chat_app
 from azents.core.agent_session_data import AgentSession, SessionAgent
 from azents.core.auth.deps import CurrentUser, get_current_user
 from azents.core.enums import (
@@ -232,8 +231,7 @@ async def profile_http() -> AsyncIterator[_ProfileHTTPFixture]:
             session_manager=_session_manager,
         )
     )
-    app = FastAPI()
-    app.include_router(router, prefix="/chat/v1")
+    app = focused_chat_app("/sessions/{session_id}/model-profile")
     app.dependency_overrides[get_current_user] = lambda: CurrentUser(
         user_id="user-1", session_id="auth-session"
     )

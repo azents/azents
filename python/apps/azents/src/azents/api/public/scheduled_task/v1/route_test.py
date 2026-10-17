@@ -2,12 +2,13 @@
 
 import datetime
 import json
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from azents.app import create_dummy_public_app
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.auth.roles import get_permissions_for_role
 from azents.core.enums import (
@@ -20,8 +21,9 @@ from azents.core.scheduled_task_management import (
     ScheduledTaskSessionProjection,
 )
 from azents.services.scheduled_task.management import ScheduledTaskManagementService
+from azents.utils.fastapi.route import as_route_mounter, generate_short_operation_id
 
-from . import get_scheduled_task_management_service
+from . import get_scheduled_task_management_service, mount
 
 _NOW = datetime.datetime(2026, 8, 16, tzinfo=datetime.UTC)
 _BASE = "/scheduled-task/v1/workspaces/ws/agents/agent-1/scheduled-tasks"
@@ -49,8 +51,15 @@ def _projection() -> ScheduledTaskManagementProjection:
     )
 
 
+def _route_app() -> FastAPI:
+    """Mount real scheduled routes without compiling unrelated API dependencies."""
+    app = FastAPI(generate_unique_id_function=generate_short_operation_id)
+    mount(as_route_mounter(app))
+    return app
+
+
 def _client(service: AsyncMock) -> TestClient:
-    app = create_dummy_public_app()
+    app = _route_app()
     app.dependency_overrides[get_scheduled_task_management_service] = lambda: service
     app.dependency_overrides[get_workspace_member] = lambda: WorkspaceMember(
         user_id="user-1",
@@ -81,9 +90,11 @@ def _replace_payload() -> dict[str, str | None]:
     return payload
 
 
-def test_openapi_has_exact_route_set_and_sanitized_schemas() -> None:
+def test_openapi_has_exact_route_set_and_sanitized_schemas(
+    full_public_openapi: dict[str, Any],
+) -> None:
     """Generated clients see CRUD/cycle projections without internal authority."""
-    spec = create_dummy_public_app().openapi()
+    spec = full_public_openapi
     base = "/scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks"
     item = f"{base}/{{task_id}}"
     cycle = f"{item}/cycle"
@@ -91,6 +102,12 @@ def test_openapi_has_exact_route_set_and_sanitized_schemas() -> None:
     assert set(spec["paths"][base]) == {"get", "post"}
     assert set(spec["paths"][item]) == {"get", "put", "delete"}
     assert set(spec["paths"][cycle]) == {"get"}
+    local_spec = _route_app().openapi()
+    assert local_spec["paths"] == {
+        path: spec["paths"][path] for path in (base, item, cycle)
+    }
+    for name, schema in local_spec["components"]["schemas"].items():
+        assert schema == spec["components"]["schemas"][name]
     response_properties = set(
         spec["components"]["schemas"]["ScheduledTaskResponse"]["properties"]
     )

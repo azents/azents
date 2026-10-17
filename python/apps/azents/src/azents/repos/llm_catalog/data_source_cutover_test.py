@@ -5,7 +5,6 @@ import json
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from uuid import uuid4
 
 import httpx
 import psycopg
@@ -17,7 +16,6 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import DBAPIError
 from testcontainers.postgres import PostgresContainer
 
-from azents.consts import PROJECT_ROOT
 from azents.core.model_catalog_source import (
     CATALOG_SOURCE_KEY,
     CATALOG_SOURCE_KIND,
@@ -25,6 +23,7 @@ from azents.core.model_catalog_source import (
     CatalogSourcePayload,
     decode_catalog_source,
 )
+from azents.testing.migration_database import isolated_migration_database
 
 _PARENT = "459a4285993c"
 _CUTOVER = "c8bc0a5dcab0"
@@ -55,30 +54,27 @@ def _rejected(engine: Engine) -> Generator[Connection]:
     assert failure.value.orig.sqlstate in {"P0001", "23503", "23514"}
 
 
+@pytest.fixture(scope="module")
+def historical_database_template(
+    postgres_container: PostgresContainer,
+) -> Generator[str]:
+    """Build the actual historical migration/seed state once, then close it."""
+    with isolated_migration_database(postgres_container, template=None) as source:
+        command.upgrade(source.config, _PARENT)
+        _seed_old_only(source.engine)
+        source.engine.dispose()
+        yield source.name
+
+
 @pytest.fixture
-def database(postgres_container: PostgresContainer) -> Generator[_Database]:
-    """Create and discard a distinct database, never an application database."""
-    name = "catalog_data_cutover_" + uuid4().hex
-    admin = sa.create_engine(
-        postgres_container.get_connection_url(), isolation_level="AUTOCOMMIT"
-    )
-    with admin.connect() as connection:
-        connection.execute(sa.text(f"CREATE DATABASE {name}"))
-    url = sa.engine.make_url(postgres_container.get_connection_url()).set(database=name)
-    config = AlembicConfig(PROJECT_ROOT / "db-schemas/rdb/alembic.ini")
-    config.set_main_option(
-        "sqlalchemy.url", url.render_as_string(hide_password=False).replace("%", "%%")
-    )
-    engine = sa.create_engine(url)
-    try:
-        command.upgrade(config, _PARENT)
-        _seed_old_only(engine)
-        yield _Database(engine=engine, config=config)
-    finally:
-        engine.dispose()
-        with admin.connect() as connection:
-            connection.execute(sa.text(f"DROP DATABASE {name} WITH (FORCE)"))
-        admin.dispose()
+def database(
+    postgres_container: PostgresContainer, historical_database_template: str
+) -> Generator[_Database]:
+    """Run every cutover in its own physical database, never the template."""
+    with isolated_migration_database(
+        postgres_container, template=historical_database_template
+    ) as isolated:
+        yield _Database(engine=isolated.engine, config=isolated.config)
 
 
 @pytest.fixture
