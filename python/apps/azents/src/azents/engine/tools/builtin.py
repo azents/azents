@@ -25,6 +25,7 @@ from azents.core.enums import (
     RuntimeProviderObservedState,
     RuntimeRunnerState,
 )
+from azents.core.personal_toolkit_runtime import ToolkitEffectAdmission
 from azents.core.runtime_capabilities import (
     RuntimeCapability,
     RuntimeCapabilityDeniedError,
@@ -795,6 +796,11 @@ class BuiltinToolkit(Toolkit[ShellToolkitConfig]):
 
 class RuntimeEnvProvider(Protocol):
     """Runtime shell env provider protocol."""
+
+    @property
+    def effect_admission(self) -> ToolkitEffectAdmission | None:
+        """Return exact personal source admission when this peer owns one."""
+        ...
 
     async def expose_env(self) -> dict[str, str]:
         """Return env vars to inject into runtime shell commands."""
@@ -1845,7 +1851,10 @@ async def _collect_secret_env(
     """
     merged: dict[str, str] = {}
     for toolkit in peer_toolkits:
+        admission = toolkit.effect_admission
         env_part = await toolkit.expose_env()
+        if env_part and admission is not None:
+            await admission.assert_current()
         for key, value in env_part.items():
             if key in merged:
                 logger.warning(

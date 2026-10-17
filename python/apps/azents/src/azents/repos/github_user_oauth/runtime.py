@@ -18,15 +18,19 @@ from azents.core.github_user_runtime import (
     GitHubUserExecutionContext,
     GitHubUserExecutionState,
 )
+from azents.core.personal_toolkit_runtime import PersonalToolkitExecutionDenied
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.github_user_oauth import RDBGitHubUserConnection
 from azents.rdb.models.toolkit import RDBAgentToolkit, RDBToolkitConfig
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.github_user_oauth.payloads import connection_from
 from azents.repos.toolkit import ToolkitRepository
+from azents.repos.toolkit.personal import PersonalToolkitRepository
+from azents.repos.toolkit.personal_runtime import PersonalToolkitRuntimeRepository
+from azents.repos.toolkit_namespace import ToolkitNamespaceRepository
 from azents.repos.toolkit_operations import get_encrypted_toolkit_repository
 
 
@@ -75,20 +79,44 @@ class GitHubUserRuntimeOperationRepository:
     cipher: Annotated[CredentialCipher, Depends(get_credential_cipher)]
 
     async def _state(
-        self, session: ReadSession, context: GitHubUserExecutionContext
+        self, session: WriteSession, context: GitHubUserExecutionContext
     ) -> GitHubUserExecutionState | None:
-        row = await session.read_session.scalar(_current_delegation(context))
-        if row is None:
-            return None
+        if context.personal_target is not None:
+            target = context.personal_target
+            if (
+                target.execution_owner.session_id != context.session_id
+                or target.workspace_id != context.workspace_id
+                or target.agent_id != context.agent_id
+                or target.toolkit_id != context.toolkit_id
+            ):
+                return None
+            personal = PersonalToolkitRuntimeRepository(
+                self.session_manager,
+                PersonalToolkitRepository(self.cipher),
+                ToolkitNamespaceRepository(),
+                None,
+            )
+            try:
+                toolkit = await personal.admit_in_session(session, target)
+            except PersonalToolkitExecutionDenied:
+                return None
+            if toolkit.toolkit_type != "github":
+                return None
+        else:
+            row = await session.read_session.scalar(_current_delegation(context))
+            if row is None:
+                return None
+            toolkit = await self.toolkit_repository.get_by_id(
+                session, context.toolkit_id
+            )
+            if toolkit is None:
+                return None
         connection = await session.read_session.scalar(
             sa.select(RDBGitHubUserConnection)
             .where(RDBGitHubUserConnection.toolkit_id == context.toolkit_id)
             .execution_options(populate_existing=True)
         )
         if connection is None:
-            return None
-        toolkit = await self.toolkit_repository.get_by_id(session, context.toolkit_id)
-        if toolkit is None:
             return None
         return GitHubUserExecutionState(
             toolkit=toolkit, connection=connection_from(connection, self.cipher)
@@ -112,8 +140,8 @@ class GitHubUserRuntimeOperationRepository:
     ) -> None:
         """A late 401 can affect only its admitted connection in the same context."""
         async with self.session_manager() as session:
-            toolkit = await session.read_session.scalar(_current_delegation(context))
-            if toolkit is None:
+            state = await self._state(session, context)
+            if state is None or state.connection.id != connection_id:
                 return
             await session.write_session.execute(
                 sa.update(RDBGitHubUserConnection)

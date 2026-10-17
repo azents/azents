@@ -7,6 +7,7 @@ from azcommon.result import Success
 
 from azents.core.agent import SelectableModelSettings
 from azents.core.enums import AgentRunStatus, EventKind
+from azents.core.system_setting_payload import SystemSettingPayloadResolver
 from azents.engine.events import execution_test as event_fixtures
 from azents.engine.events.execution import AgentRunExecutionRequest
 from azents.engine.events.types import TurnMarkerPayload
@@ -88,6 +89,7 @@ async def test_context_limit_matrix_reaches_prepared_inference_state(
         resolve_fixtures._make_integration()
     )
     executor.resolve_repositories = get_engine_resolve_repositories(
+        setting_payloads=AsyncMock(spec=SystemSettingPayloadResolver),
         session_manager=resolve_fixtures._session_manager_for(
             resolve_fixtures._resolution_session()
         ),

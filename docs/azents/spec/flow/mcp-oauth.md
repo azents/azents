@@ -30,7 +30,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/toolkits/**
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 last_verified_at: 2026-10-17
-spec_version: 14
+spec_version: 15
 ---
 
 # MCP OAuth Flow
@@ -88,8 +88,19 @@ User/Workspace personal-owner admission without shared-manager or AgentAdmin req
 and compares the captured source revision. Connect and exchange advance that
 revision under the Toolkit parent fence; source edits, disconnect and a previous
 exchange defeat a late callback or replay. External discovery, DCR and exchange
-remain outside transactions. Personal management does not activate personal
-runtime resolution or change existing shared/Agent callback semantics.
+remain outside transactions. Shared/Agent callback semantics remain unchanged.
+
+Personal runtime resolution binds the canonical User-root source capability before OAuth
+preparation or background lifecycle entry. Connection loads and refresh success/failure
+finalization repeat exact current personal admission under the Toolkit parent before the
+dependent grant lock. Existing current-connection comparisons still defeat stale refreshes.
+No external OAuth request runs while that database scope is open.
+
+Authenticated discovery and cached MCP calls check before and after authorization acquisition;
+Notion and Sentry composition retain the same source capability. A withdrawal during discovery
+also defeats snapshot publication, with current parent admission and snapshot write in one
+completed database operation. Local stale descriptions are not permission, and an old refresh
+cannot restore usable authority after withdrawal.
 
 ### Workspace-shared setup
 

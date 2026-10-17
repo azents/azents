@@ -959,6 +959,7 @@ def _catalog(tools: Mapping[str, FunctionTool]) -> ToolCatalog:
     )
     return ToolCatalog(
         native_replay_context=None,
+        effect_admissions=MappingProxyType({}),
         tools=MappingProxyType(typed_tools),
         wire_dialects=MappingProxyType({name: "json_function" for name in typed_tools}),
         entries=MappingProxyType(

@@ -61,6 +61,7 @@ from azents.engine.run.types import (
     FunctionToolResult,
     FunctionToolSpec,
 )
+from azents.engine.tooling.personal_admission import publish_tool_snapshot
 from azents.repos.engine_tool_repositories import EngineMcpSnapshotFactory
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
@@ -550,6 +551,8 @@ def wrap_mcp_tool(
             if on_auth_failure is not None and _is_http_401(exc):
                 new_token = await on_auth_failure()
                 if new_token is not None:
+                    if authorization_provider is not None:
+                        await authorization_provider()
                     new_headers = {
                         **call_headers,
                         "Authorization": f"Bearer {new_token}",
@@ -730,6 +733,15 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
             auth=None,
         )
 
+    async def _admitted_request_authorization(self) -> McpRequestAuthorization:
+        """Repeat source admission around authorization's external credential gap."""
+        if self.effect_admission is not None:
+            await self.effect_admission.assert_current()
+        result = await self._request_authorization()
+        if self.effect_admission is not None:
+            await self.effect_admission.assert_current()
+        return result
+
     async def __aenter__(self) -> McpBasedToolkit[McpConfigT]:
         """Start MCP server connection in background."""
         self._entered = True
@@ -781,7 +793,7 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
         config = self._config
         started = time.monotonic()
         try:
-            authorization = await self._request_authorization()
+            authorization = await self._admitted_request_authorization()
         except FunctionToolError as exc:
             self._bg_error = str(exc)
             return
@@ -860,6 +872,9 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
         )
         try:
             await self._save_tool_snapshot(snapshot)
+        except FunctionToolError as error:
+            self._bg_error = str(error)
+            return
         except CanonicalExecutionOwnerGenerationStaleError:
             self._owner_stale = True
             return
@@ -912,8 +927,11 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
 
     async def _save_tool_snapshot(self, snapshot: McpToolSnapshotState) -> None:
         """Atomically save a successful MCP tool snapshot."""
-        if self.snapshot_store is not None:
-            await self.snapshot_store.replace(snapshot)
+        await publish_tool_snapshot(
+            store=self.snapshot_store,
+            snapshot=snapshot,
+            admission=self.effect_admission,
+        )
 
     def _tools_from_snapshot(
         self, snapshot: McpToolSnapshotState
@@ -935,7 +953,7 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
                 config.timeout,
                 use_streamable_http=item.use_streamable_http,
                 on_auth_failure=self.on_auth_failure,
-                authorization_provider=self._request_authorization,
+                authorization_provider=self._admitted_request_authorization,
                 proxy_url=self._proxy_url,
                 artifact_sink_getter=self._current_artifact_sink,
             )

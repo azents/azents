@@ -35,6 +35,7 @@ from azents.core.mcp_transport import (
 from azents.core.mcp_transport import (
     list_tools as mcp_list_tools,
 )
+from azents.core.personal_toolkit_runtime import ToolkitEffectAdmission
 from azents.core.session_resource_authority import (
     SessionExecutionOwner,
     accepts_execution_owner,
@@ -56,6 +57,7 @@ from azents.engine.run.types import (
     FunctionToolResult,
     FunctionToolSpec,
 )
+from azents.engine.tooling.personal_admission import publish_tool_snapshot
 from azents.engine.tools.background_discovery import (
     DISCOVERY_ERRORS,
     observe_discovery_failure,
@@ -422,6 +424,8 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
                 items = await self._refresh_service_items(server)
             except asyncio.CancelledError:
                 raise
+            except FunctionToolError:
+                return
             except (*DISCOVERY_ERRORS, ExceptionGroup) as error:
                 require_expected_discovery_failure(error)
                 logger.exception(
@@ -453,6 +457,8 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
         snapshot = _build_gcp_tool_snapshot(items=merged, project_id=self._project_id)
         try:
             await self._save_tool_snapshot(snapshot)
+        except FunctionToolError:
+            return
         except CanonicalExecutionOwnerGenerationStaleError:
             self._owner_stale = True
             return
@@ -470,7 +476,9 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
         server: _GcpServerConfig,
     ) -> list[McpToolSnapshotItem]:
         """Refresh one GCP service and return snapshot items."""
+        await self.assert_effect_current()
         access_token = await self.token_provider.get_token()
+        await self.assert_effect_current()
         headers = {
             "Authorization": f"Bearer {access_token}",
             "x-goog-user-project": self._project_id,
@@ -526,8 +534,11 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
 
     async def _save_tool_snapshot(self, snapshot: McpToolSnapshotState) -> None:
         """Atomically save a successful GCP MCP tool snapshot."""
-        if self.snapshot_store is not None:
-            await self.snapshot_store.replace(snapshot)
+        await publish_tool_snapshot(
+            store=self.snapshot_store,
+            snapshot=snapshot,
+            admission=self.effect_admission,
+        )
 
     def _tools_from_snapshot(
         self, snapshot: McpToolSnapshotState
@@ -544,6 +555,7 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
                 project_id=self._project_id,
                 proxy_url=self._proxy_url,
                 artifact_sink_getter=self._current_artifact_sink,
+                effect_admission=self.effect_admission,
             )
             for item in sorted(snapshot.tools, key=lambda tool: tool.model_name)
             if item.server_url in server_timeout
@@ -584,6 +596,7 @@ def _wrap_gcp_snapshot_tool(
     project_id: str,
     proxy_url: str | None,
     artifact_sink_getter: ArtifactSinkGetter | None,
+    effect_admission: ToolkitEffectAdmission | None,
 ) -> FunctionTool:
     """Wrap a GCP MCP snapshot item as a FunctionTool."""
     spec = FunctionToolSpec(
@@ -599,7 +612,11 @@ def _wrap_gcp_snapshot_tool(
             )
         except json.JSONDecodeError as exc:
             raise FunctionToolError(f"Invalid JSON in tool arguments: {exc}") from None
+        if effect_admission is not None:
+            await effect_admission.assert_current()
         access_token = await token_provider.get_token()
+        if effect_admission is not None:
+            await effect_admission.assert_current()
         headers = {
             "Authorization": f"Bearer {access_token}",
             "x-goog-user-project": project_id,
@@ -616,7 +633,11 @@ def _wrap_gcp_snapshot_tool(
             )
         except Exception as exc:
             if _is_http_401(exc):
+                if effect_admission is not None:
+                    await effect_admission.assert_current()
                 refreshed_token = await token_provider.get_token()
+                if effect_admission is not None:
+                    await effect_admission.assert_current()
                 retry_headers = {
                     "Authorization": f"Bearer {refreshed_token}",
                     "x-goog-user-project": project_id,

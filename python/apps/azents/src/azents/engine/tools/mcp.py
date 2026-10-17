@@ -31,6 +31,10 @@ from azents.core.mcp_credentials import (
 from azents.core.mcp_discovery import DiscoveryError, discover_oauth_metadata
 from azents.core.mcp_transport import test_mcp_transport
 from azents.core.oauth2 import OAuthTokenError, refresh_access_token
+from azents.core.personal_toolkit_runtime import (
+    PersonalToolkitExecutionDenied,
+    ToolkitEffectAdmission,
+)
 from azents.core.tools import (
     McpToolkitConfig,
     ResolveContext,
@@ -38,6 +42,7 @@ from azents.core.tools import (
     Toolkit,
     ToolkitProvider,
 )
+from azents.engine.run.types import FunctionToolError
 from azents.engine.tools.mcp_base import McpBasedToolkit, _build_auth_headers
 from azents.repos.engine_tool_repositories import (
     EngineMcpSnapshotFactory,
@@ -194,11 +199,18 @@ class McpToolkitProvider(ToolkitProvider[McpToolkitConfig]):
         on_auth_failure: Callable[[], Awaitable[str | None]] | None = None
 
         if config.auth_type == "oauth2" and self.repositories is not None:
-            connection = await _ensure_oauth_connection_token(
-                operations=self.repositories.mcp_oauth,
-                toolkit_id=context.toolkit_id,
-                proxy_url=context.mcp_proxy_url,
-            )
+            operations = self.repositories.mcp_oauth
+            if context.effect_admission is not None:
+                await context.effect_admission.assert_current()
+                operations = operations.for_personal(context.effect_admission.target)
+            try:
+                connection = await _ensure_oauth_connection_token(
+                    operations=operations,
+                    toolkit_id=context.toolkit_id,
+                    proxy_url=context.mcp_proxy_url,
+                )
+            except PersonalToolkitExecutionDenied as error:
+                raise _personal_oauth_denied(error) from None
             if (
                 connection is not None
                 and connection.status == MCPOAuthConnectionStatus.CONNECTED
@@ -206,13 +218,14 @@ class McpToolkitProvider(ToolkitProvider[McpToolkitConfig]):
                 secret = connection.access_token
             on_auth_failure = _make_oauth_refresh_callback(
                 toolkit_id=context.toolkit_id,
-                operations=self.repositories.mcp_oauth,
+                operations=operations,
                 proxy_url=context.mcp_proxy_url,
+                effect_admission=context.effect_admission,
             )
         else:
             secret = _extract_static_secret(config, context.credentials_json)
 
-        return McpToolkit(
+        resolved = McpToolkit(
             config=config,
             secret=secret,
             on_auth_failure=on_auth_failure,
@@ -228,6 +241,8 @@ class McpToolkitProvider(ToolkitProvider[McpToolkitConfig]):
                 server_url=config.server_url,
             ),
         )
+        resolved.effect_admission = context.effect_admission
+        return resolved
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +254,7 @@ def _make_oauth_refresh_callback(
     *,
     toolkit_id: str,
     operations: MCPOAuthRuntimeOperationRepository,
+    effect_admission: ToolkitEffectAdmission | None,
     proxy_url: str | None = None,
 ) -> Callable[[], Awaitable[str | None]]:
     """Create callback that attempts toolkit OAuth refresh on 401.
@@ -250,12 +266,17 @@ def _make_oauth_refresh_callback(
     """
 
     async def _refresh() -> str | None:
-        connection = await _refresh_oauth_connection(
-            operations=operations,
-            toolkit_id=toolkit_id,
-            proxy_url=proxy_url,
-            force=True,
-        )
+        if effect_admission is not None:
+            await effect_admission.assert_current()
+        try:
+            connection = await _refresh_oauth_connection(
+                operations=operations,
+                toolkit_id=toolkit_id,
+                proxy_url=proxy_url,
+                force=True,
+            )
+        except PersonalToolkitExecutionDenied as error:
+            raise _personal_oauth_denied(error) from None
         if (
             connection is None
             or connection.status != MCPOAuthConnectionStatus.CONNECTED
@@ -264,6 +285,17 @@ def _make_oauth_refresh_callback(
         return connection.access_token
 
     return _refresh
+
+
+def _personal_oauth_denied(error: PersonalToolkitExecutionDenied) -> FunctionToolError:
+    """Expose the same bounded failure as the final source handler guard."""
+    return FunctionToolError(
+        "Personal Toolkit authorization is unavailable. Reload or reconnect.",
+        metadata={
+            "kind": "personal_toolkit_authorization_unavailable",
+            "reason": error.reason.value,
+        },
+    )
 
 
 def _mcp_snapshot_state_name(*, toolkit_id: str, server_url: str) -> str:

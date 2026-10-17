@@ -923,6 +923,7 @@ class KubernetesToolkit(Toolkit[KubernetesToolkitConfig]):
 
     async def _ensure_cluster_clients(self, cluster: str) -> KubernetesClusterClients:
         """Lazy-load cluster client and discovery cache at tool call time."""
+        await self.assert_effect_current()
         client = self._clients.get(cluster)
         exec_client = self._exec_clients.get(cluster)
         cache = self._discovery_caches.get(cluster)
@@ -934,6 +935,7 @@ class KubernetesToolkit(Toolkit[KubernetesToolkitConfig]):
             )
 
         async with self._get_cluster_lock(cluster):
+            await self.assert_effect_current()
             client = self._clients.get(cluster)
             exec_client = self._exec_clients.get(cluster)
             cache = self._discovery_caches.get(cluster)
@@ -961,13 +963,16 @@ class KubernetesToolkit(Toolkit[KubernetesToolkitConfig]):
                     cluster_cred,
                     proxy_url=self._proxy_url,
                 )
+                await self.assert_effect_current()
                 new_exec_client = await create_exec_api_client(
                     cluster_config,
                     cluster_cred,
                     proxy_url=self._proxy_url,
                 )
+                await self.assert_effect_current()
                 new_cache = ResourceDiscoveryCache()
                 await new_cache.discover(new_exec_client)
+                await self.assert_effect_current()
             except asyncio.CancelledError:
                 await _close_kubernetes_clients(new_client, new_exec_client)
                 raise

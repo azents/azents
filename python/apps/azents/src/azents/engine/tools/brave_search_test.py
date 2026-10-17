@@ -402,6 +402,7 @@ async def test_provider_resolves_only_configured_key_and_exposes_no_key_argument
         oauth_secret_key="unused",
         workspace_id="workspace-1",
         workspace_handle="workspace",
+        effect_admission=None,
     )
     toolkit = await provider.resolve(BraveSearchToolkitConfig(), context)
     state = await toolkit.update_context(

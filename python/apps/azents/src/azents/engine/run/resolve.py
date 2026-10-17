@@ -37,11 +37,15 @@ from azents.core.model_execution_options import (
     ModelExecutionOptionId,
     validate_execution_options,
 )
+from azents.core.personal_toolkit_runtime import ToolkitEffectAdmission
 from azents.core.runtime_capabilities import (
     RuntimeCapability,
     RuntimeCapabilityResolver,
 )
-from azents.core.session_resource_authority import SessionResourceAuthority
+from azents.core.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
+)
 from azents.core.tools import (
     ResolveContext,
     Toolkit,
@@ -68,7 +72,9 @@ from azents.engine.model_assembly import ModelAssemblyMetadata
 from azents.engine.run.contracts import RunRequest, ToolkitBinding
 from azents.engine.run.types import (
     BuiltinToolSpec,
+    FunctionToolError,
 )
+from azents.engine.tooling.personal_admission import PersonalToolkitAdmission
 from azents.engine.tools.builtin import (
     BuiltinToolkitProvider,
     MemoryContextToolkit,
@@ -106,6 +112,8 @@ from azents.repos.engine_resolve import EngineResolveRepositories
 from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.repos.model_metadata_source_data import CapturedContextSource
+from azents.repos.toolkit.data import EffectiveToolkitConfig
+from azents.repos.toolkit.personal_runtime import PersonalEffectiveToolkitConfig
 from azents.runtime.types import RuntimeDomainConfig
 from azents.services.engine_runtime_tokens import (
     EngineRuntimeTokenResolver,
@@ -1373,6 +1381,7 @@ async def resolve_agent_tools(
     agent_id: str,
     context: ToolkitContext,
     *,
+    execution_owner: SessionExecutionOwner,
     execution_mode: ToolkitExecutionMode,
     toolkit_registry: dict[str, ToolkitProvider[Any]],
     repositories: EngineResolveRepositories,
@@ -1419,10 +1428,21 @@ async def resolve_agent_tools(
     :param runtime_capability_resolver: Agent Runtime capability resolver.
     :return: List of (Toolkit, slug) tuples
     """
-    registered_toolkits = await repositories.toolkit_read.list_effective_for_agent(
+    if execution_owner.session_id != context.session_id or agent_id != context.agent_id:
+        raise ValueError("Toolkit execution workload does not match its Session owner")
+    shared_toolkits = await repositories.toolkit_read.list_effective_for_agent(
         agent_id,
         workspace_id=context.workspace_id,
     )
+    personal_toolkits = await repositories.personal_toolkits.list_effective(
+        owner=execution_owner, workspace_id=context.workspace_id, agent_id=agent_id
+    )
+    registered_toolkits: list[
+        EffectiveToolkitConfig | PersonalEffectiveToolkitConfig
+    ] = [
+        *shared_toolkits,
+        *personal_toolkits,
+    ]
     # (provider, resolved, config, slug, prompt, use_prefix, toolkit_type, modes)
     # toolkit_type is populated only for DB-registered toolkits; auto-binding is None
     registered_toolkit_config_ids: dict[int, str] = {}
@@ -1455,6 +1475,15 @@ async def resolve_agent_tools(
             )
             continue
 
+        effect_admission: ToolkitEffectAdmission | None = None
+        if isinstance(effective, PersonalEffectiveToolkitConfig):
+            effect_admission = PersonalToolkitAdmission(
+                repositories.personal_toolkits, effective.target
+            )
+            try:
+                await effect_admission.assert_current()
+            except FunctionToolError:
+                continue
         resolve_ctx = ResolveContext(
             toolkit_id=toolkit.id,
             toolkit_name=toolkit.name,
@@ -1465,6 +1494,7 @@ async def resolve_agent_tools(
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
             workspace_handle=workspace_handle,
+            effect_admission=effect_admission,
             mcp_proxy_url=mcp_proxy_url,
         )
         try:
@@ -1480,7 +1510,10 @@ async def resolve_agent_tools(
                 toolkit_name=toolkit.name,
                 resolve=provider.resolve(validated_config, resolve_ctx),
             )
+            if effect_admission is not None:
+                await effect_admission.assert_current()
             resolved.display_name = toolkit.name
+            resolved.bind_effect_admission(effect_admission)
             resolved.source_identity = provider.source_identity(validated_config)
             registered_toolkit_config_ids[id(resolved)] = toolkit.id
             registered_toolkit_revisions[id(resolved)] = str(toolkit.revision)
@@ -1488,6 +1521,10 @@ async def resolve_agent_tools(
             registered_toolkit_always_expose_tools[id(resolved)] = (
                 toolkit.always_expose_tools
             )
+        except FunctionToolError:
+            if effect_admission is None:
+                raise
+            continue
         except ValidationError, ValueError:
             L.warning(
                 "Skipping Toolkit with invalid persisted configuration",
@@ -1541,6 +1578,7 @@ async def resolve_agent_tools(
                     oauth_secret_key=oauth_secret_key,
                     workspace_id=context.workspace_id,
                     workspace_handle=workspace_handle,
+                    effect_admission=None,
                 )
                 memory_context_resolved = await _resolve_toolkit_with_logging(
                     agent_id=agent_id,
@@ -1582,6 +1620,7 @@ async def resolve_agent_tools(
                     oauth_secret_key=oauth_secret_key,
                     workspace_id=context.workspace_id,
                     workspace_handle=workspace_handle,
+                    effect_admission=None,
                 )
                 memory_write_resolved = await _resolve_toolkit_with_logging(
                     agent_id=agent_id,
@@ -1623,6 +1662,7 @@ async def resolve_agent_tools(
                 oauth_secret_key=oauth_secret_key,
                 workspace_id=context.workspace_id,
                 workspace_handle=workspace_handle,
+                effect_admission=None,
             )
             resolved_readable_storage = await _resolve_toolkit_with_logging(
                 agent_id=agent_id,
@@ -1674,6 +1714,7 @@ async def resolve_agent_tools(
                     oauth_secret_key=oauth_secret_key,
                     workspace_id=context.workspace_id,
                     workspace_handle=workspace_handle,
+                    effect_admission=None,
                 )
                 runtime_resolved = await _resolve_toolkit_with_logging(
                     agent_id=agent_id,
@@ -1735,6 +1776,7 @@ async def resolve_agent_tools(
                         oauth_secret_key=oauth_secret_key,
                         workspace_id=context.workspace_id,
                         workspace_handle=workspace_handle,
+                        effect_admission=None,
                     )
                     claude_rules_resolved = await _resolve_toolkit_with_logging(
                         agent_id=agent_id,
@@ -1787,6 +1829,7 @@ async def resolve_agent_tools(
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
             workspace_handle=workspace_handle,
+            effect_admission=None,
         )
         subagent_resolved = await _resolve_toolkit_with_logging(
             agent_id=agent_id,
@@ -1830,6 +1873,7 @@ async def resolve_agent_tools(
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
             workspace_handle=workspace_handle,
+            effect_admission=None,
         )
         dynamic_worktree_resolved = await _resolve_toolkit_with_logging(
             agent_id=agent_id,
@@ -1873,6 +1917,7 @@ async def resolve_agent_tools(
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
             workspace_handle=workspace_handle,
+            effect_admission=None,
         )
         runtime_web_resolved = await _resolve_toolkit_with_logging(
             agent_id=agent_id,
@@ -1916,6 +1961,7 @@ async def resolve_agent_tools(
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
             workspace_handle=workspace_handle,
+            effect_admission=None,
         )
         goal_resolved = await _resolve_toolkit_with_logging(
             agent_id=agent_id,
@@ -1962,6 +2008,7 @@ async def resolve_agent_tools(
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
             workspace_handle=workspace_handle,
+            effect_admission=None,
         )
         scheduled_resolved = await _resolve_toolkit_with_logging(
             agent_id=agent_id,
@@ -2010,6 +2057,7 @@ async def resolve_agent_tools(
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
             workspace_handle=workspace_handle,
+            effect_admission=None,
         )
         external_channel_resolved = await _resolve_toolkit_with_logging(
             agent_id=agent_id,
@@ -2059,6 +2107,7 @@ async def resolve_agent_tools(
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
             workspace_handle=workspace_handle,
+            effect_admission=None,
         )
         skill_resolved = await _resolve_toolkit_with_logging(
             agent_id=agent_id,
@@ -2106,6 +2155,7 @@ async def resolve_agent_tools(
             oauth_secret_key=oauth_secret_key,
             workspace_id=context.workspace_id,
             workspace_handle=workspace_handle,
+            effect_admission=None,
         )
         todo_resolved = await _resolve_toolkit_with_logging(
             agent_id=agent_id,

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import LLMProvider
 from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.system_setting_payload import SystemSettingPayloadResolver
 from azents.engine.run import resolve_test as fixtures
 from azents.engine.run.input import InvokeInput
 from azents.engine.run.resolve import (
@@ -136,6 +137,7 @@ async def test_real_resolver_respects_captured_context_even_when_new_source_exis
             image_generation_catalog_service=fixtures._make_image_generation_catalog_service(),
             model_metadata_service=metadata,
             repositories=get_engine_resolve_repositories(
+                setting_payloads=AsyncMock(spec=SystemSettingPayloadResolver),
                 session_manager=session_manager,
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,
@@ -158,6 +160,7 @@ async def test_real_resolver_respects_captured_context_even_when_new_source_exis
             image_generation_catalog_service=fixtures._make_image_generation_catalog_service(),
             model_metadata_service=metadata,
             repositories=get_engine_resolve_repositories(
+                setting_payloads=AsyncMock(spec=SystemSettingPayloadResolver),
                 session_manager=session_manager,
                 agent_repository=agent_repository,
                 integration_repository=integration_repository,

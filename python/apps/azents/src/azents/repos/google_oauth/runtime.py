@@ -22,6 +22,10 @@ from azents.core.google_system_setting import (
     GoogleApplicationUnavailable,
     resolve_google_registration,
 )
+from azents.core.personal_toolkit_runtime import (
+    PersonalToolkitExecutionDenied,
+    PersonalToolkitExecutionTarget,
+)
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.system_setting import SystemSettingSection
 from azents.core.system_setting_payload import SystemSettingPayloadResolver
@@ -35,6 +39,10 @@ from azents.repos.session_execution import SessionExecutionRepository
 from azents.repos.session_execution.ownership import fence_owned_session_mutation
 from azents.repos.system_setting.repository import SystemSettingRepository
 from azents.repos.toolkit import ToolkitRepository
+from azents.repos.toolkit.data import ToolkitConfiguration
+from azents.repos.toolkit.personal import PersonalToolkitRepository
+from azents.repos.toolkit.personal_runtime import PersonalToolkitRuntimeRepository
+from azents.repos.toolkit_namespace import ToolkitNamespaceRepository
 from azents.repos.toolkit_operations import get_encrypted_toolkit_repository
 
 
@@ -64,13 +72,33 @@ class GoogleRuntimeRepository:
     settings: Annotated[SystemSettingRepository, Depends()]
     payloads: Annotated[SystemSettingPayloadResolver, Depends()]
 
-    async def _state(
-        self,
-        session: WriteSession,
-        owner: SessionExecutionOwner,
-        toolkit_id: str,
-        registration: GoogleApplicationRegistration,
-    ) -> GoogleExecutionState:
+    def for_personal(
+        self, target: PersonalToolkitExecutionTarget
+    ) -> "PersonalGoogleRuntimeRepository":
+        """Bind exact personal authority without changing current Google grant logic."""
+        return PersonalGoogleRuntimeRepository(
+            self.session_manager,
+            self.cipher,
+            self.toolkits,
+            self.settings,
+            self.payloads,
+            PersonalToolkitRuntimeRepository(
+                self.session_manager,
+                PersonalToolkitRepository(self.cipher),
+                ToolkitNamespaceRepository(),
+                self.payloads,
+            ),
+            target,
+        )
+
+    async def _admit_parent(
+        self, session: WriteSession, owner: SessionExecutionOwner, toolkit_id: str
+    ) -> None:
+        """Shared execution retains its existing Toolkit delegation boundary."""
+
+    async def _delegated_toolkit(
+        self, session: WriteSession, owner: SessionExecutionOwner, toolkit_id: str
+    ) -> ToolkitConfiguration:
         current = await SessionExecutionRepository().load_common_snapshot(
             session,
             session_id=owner.session_id,
@@ -84,10 +112,24 @@ class GoogleRuntimeRepository:
         toolkit = next(
             (item.toolkit for item in effective if item.toolkit.id == toolkit_id), None
         )
-        if toolkit is None or toolkit.toolkit_type != "google":
+        if toolkit is None:
             raise GoogleOAuthError(
                 "authorization_unavailable",
                 "Google connection is not delegated to this Session.",
+            )
+        return toolkit
+
+    async def _state(
+        self,
+        session: WriteSession,
+        owner: SessionExecutionOwner,
+        toolkit_id: str,
+        registration: GoogleApplicationRegistration,
+    ) -> GoogleExecutionState:
+        toolkit = await self._delegated_toolkit(session, owner, toolkit_id)
+        if toolkit.toolkit_type != "google":
+            raise GoogleOAuthError(
+                "authorization_unavailable", "Google connection is unavailable."
             )
         stored = await self.settings.get_current(
             session, section=SystemSettingSection.GOOGLE_OAUTH
@@ -153,9 +195,17 @@ class GoogleRuntimeRepository:
     ) -> bool:
         """Stale successes and failures yield to newer saved authority."""
         async with self.session_manager() as session:
+            # Keep the existing global settings order shared with confirm, then
+            # acquire the personal parent before dependent credential/owner fences.
             await self.settings.acquire_section_lock(
                 session, section=SystemSettingSection.GOOGLE_OAUTH
             )
+            try:
+                await self._admit_parent(session, owner, snapshot.connection.toolkit_id)
+            except GoogleOAuthError as error:
+                if error.code == "authorization_unavailable":
+                    return False
+                raise
             await fence_owned_session_mutation(session, owner)
             await session.write_session.scalar(
                 sa.select(RDBToolkitConfig.id)
@@ -221,3 +271,37 @@ class GoogleRuntimeRepository:
                 raise AssertionError("Google refresh finalization has no result.")
             await session.write_session.flush()
             return True
+
+
+@dataclasses.dataclass(frozen=True)
+class PersonalGoogleRuntimeRepository(GoogleRuntimeRepository):
+    """Compose current personal allowance with existing Google grant/client checks."""
+
+    personal: PersonalToolkitRuntimeRepository
+    target: PersonalToolkitExecutionTarget
+
+    async def _delegated_toolkit(
+        self,
+        session: WriteSession,
+        owner: SessionExecutionOwner,
+        toolkit_id: str,
+    ) -> ToolkitConfiguration:
+        if owner != self.target.execution_owner or toolkit_id != self.target.toolkit_id:
+            raise GoogleOAuthError(
+                "authorization_unavailable", "Google connection is unavailable."
+            )
+        try:
+            return await self.personal.admit_in_session(session, self.target)
+        except PersonalToolkitExecutionDenied:
+            raise GoogleOAuthError(
+                "authorization_unavailable",
+                "Personal Google authorization is unavailable.",
+            ) from None
+
+    async def _admit_parent(
+        self,
+        session: WriteSession,
+        owner: SessionExecutionOwner,
+        toolkit_id: str,
+    ) -> None:
+        await self._delegated_toolkit(session, owner, toolkit_id)

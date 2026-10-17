@@ -64,6 +64,7 @@ def _make_resolve_context(credentials_json: str) -> ResolveContext:
         oauth_secret_key="test-key",
         workspace_id="ws-1",
         workspace_handle="ws",
+        effect_admission=None,
     )
 
 
