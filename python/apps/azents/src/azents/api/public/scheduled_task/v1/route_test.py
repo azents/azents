@@ -2,13 +2,13 @@
 
 import datetime
 import json
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from azents.app import create_dummy_public_app
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.auth.roles import get_permissions_for_role
 from azents.core.enums import (
@@ -90,9 +90,11 @@ def _replace_payload() -> dict[str, str | None]:
     return payload
 
 
-def test_openapi_has_exact_route_set_and_sanitized_schemas() -> None:
+def test_openapi_has_exact_route_set_and_sanitized_schemas(
+    full_public_openapi: dict[str, Any],
+) -> None:
     """Generated clients see CRUD/cycle projections without internal authority."""
-    spec = create_dummy_public_app().openapi()
+    spec = full_public_openapi
     base = "/scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks"
     item = f"{base}/{{task_id}}"
     cycle = f"{item}/cycle"
