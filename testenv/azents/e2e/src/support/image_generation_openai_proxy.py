@@ -2561,6 +2561,9 @@ class _Handler(BaseHTTPRequestHandler):
             return
         try:
             request = _decode_model_request(json.loads(body))
+        except browser_confidential_fixture.OutputDecodeError as error:
+            self._write_json(400, {"error": {"message": str(error)}})
+            return
         except ValueError:
             self._write_json(400, {"error": {"message": "invalid request"}})
             return

@@ -21,6 +21,25 @@ def test_proxy_does_not_decode_assistant_call_as_a_tool_result() -> None:
     assert item.confidential_output is None
 
 
+@pytest.mark.parametrize(
+    ("stage", "output", "reason"),
+    [
+        ("import", "private-value", "import has no absolute result path"),
+        ("encrypt", "private-value", "process identity is unavailable"),
+        ("oldfill", "private-value", "Old ciphertext was not rejected"),
+        ("open", "private-value", "Browser result is malformed"),
+    ],
+)
+def test_invalid_observation_diagnostics_are_stage_scoped_and_value_free(
+    stage: str, output: str, reason: str
+) -> None:
+    with pytest.raises(fixture.OutputDecodeError) as captured:
+        fixture.decode_output(fixture.REPLACEMENT_PREFIX + stage, output)
+    assert str(captured.value).startswith(stage + ": ")
+    assert reason in str(captured.value)
+    assert output not in str(captured.value)
+
+
 def observation(stage: str, output: object) -> fixture.Observation:
     value = fixture.decode_output(fixture.PREFIX + stage, output)
     assert value is not None

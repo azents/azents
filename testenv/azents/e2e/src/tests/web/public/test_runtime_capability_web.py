@@ -40,7 +40,10 @@ from azentspublicclient.models.runtime_system_metrics_summary import (
     RuntimeSystemMetricsSummary,
 )
 from azentspublicclient.models.secrets import Secrets
-from selenium.common.exceptions import StaleElementReferenceException
+from selenium.common.exceptions import (
+    ElementNotInteractableException,
+    StaleElementReferenceException,
+)
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
@@ -169,13 +172,40 @@ def _open_services_tab(driver: WebDriver) -> None:
     _assert_visible_text(driver, "Add service")
 
 
+def _close_mobile_session_panel(driver: WebDriver) -> bool:
+    """Observe the current closed state or close the still-open responsive panel."""
+    toggle = next(
+        (
+            item
+            for item in driver.find_elements(
+                By.CSS_SELECTOR, "button[aria-label='Toggle session panel']"
+            )
+            if item.is_displayed()
+        ),
+        None,
+    )
+    if toggle is None:
+        return False
+    if toggle.get_attribute("aria-expanded") == "false":
+        return True
+    close = ec.element_to_be_clickable(
+        (By.CSS_SELECTOR, "button[aria-label='Close session panel']")
+    )(driver)
+    if close:
+        try:
+            close.click()
+        except ElementNotInteractableException:
+            # Resizing can close the panel between its observation and the click.
+            return False
+    return False
+
+
 def _assert_mobile_session_panel(driver: WebDriver) -> None:
     """Keep the conversation draft while switching full-width panel contents."""
     driver.set_window_size(390, 844)
     toggle = (By.CSS_SELECTOR, "button[aria-label='Toggle session panel']")
     close = (By.CSS_SELECTOR, "button[aria-label='Close session panel']")
-    if _has_visible_css_element(driver, close[1]):
-        _wait(driver).until(ec.element_to_be_clickable(close)).click()
+    _wait(driver).until(_close_mobile_session_panel)
     composer = _wait(driver).until(
         ec.element_to_be_clickable((By.CSS_SELECTOR, "textarea"))
     )
