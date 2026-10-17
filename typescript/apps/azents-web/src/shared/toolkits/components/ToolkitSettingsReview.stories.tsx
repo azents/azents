@@ -8,7 +8,7 @@ const meta = {
   args: {
     provider: "AWS",
     name: "Cloud reports",
-    agentOwned: false,
+    ownership: "workspace",
     enabled: true,
     alwaysExposeTools: false,
   },
@@ -26,7 +26,7 @@ export const Shared: Story = {
   },
 };
 export const AgentDisabled: Story = {
-  args: { agentOwned: true, enabled: false, alwaysExposeTools: true },
+  args: { ownership: "agent", enabled: false, alwaysExposeTools: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByText("Only this Agent")).toBeVisible();
@@ -35,3 +35,13 @@ export const AgentDisabled: Story = {
   },
 };
 export const DefaultName: Story = { args: { name: "" } };
+export const Personal: Story = {
+  args: { ownership: "user" },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByText(
+        "Personal — only your personal Sessions with allowed Agents",
+      ),
+    ).toBeVisible();
+  },
+};

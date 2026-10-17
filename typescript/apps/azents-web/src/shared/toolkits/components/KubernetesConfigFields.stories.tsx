@@ -6,7 +6,10 @@ import { ProviderFieldStoryTransport } from "./provider-field-story-fixtures";
 import type { KubernetesConfigFieldsProps } from "../types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
-interface StoryProps extends Omit<KubernetesConfigFieldsProps, "view"> {
+interface StoryProps extends Omit<
+  Exclude<KubernetesConfigFieldsProps, { owner: "user" }>,
+  "view"
+> {
   onRequest: (input: unknown) => void;
 }
 function FieldStory(props: StoryProps): React.ReactElement {

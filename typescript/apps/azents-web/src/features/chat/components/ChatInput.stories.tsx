@@ -298,6 +298,39 @@ export const Ready = {
   args: baseArgs,
 } satisfies Story;
 
+export const PersonalToolsMenu = {
+  args: {
+    ...baseArgs,
+    personalToolsHref:
+      "/w/research/agents/assistant/personal-tools?originSession=conversation",
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Add to conversation" }),
+    );
+    const menu = within(canvasElement.ownerDocument.body);
+    await expect(
+      menu.getByRole("menuitem", { name: "Attach files" }),
+    ).toBeVisible();
+    await expect(
+      menu.getByRole("menuitem", { name: "Personal tools for this Agent" }),
+    ).toHaveAttribute(
+      "href",
+      "/w/research/agents/assistant/personal-tools?originSession=conversation",
+    );
+    await userEvent.keyboard("{Escape}");
+    await expect(
+      canvas.getByRole("button", { name: "Add to conversation" }),
+    ).toHaveFocus();
+  },
+} satisfies Story;
+
+export const PersonalToolsMenuMobile = {
+  ...PersonalToolsMenu,
+  args: { ...PersonalToolsMenu.args, isMobile: true },
+} satisfies Story;
+
 const noSpeedModelOptions = selectableModelOptions.map<
   AgentResponse["selectable_model_options"][number]
 >((option) => ({

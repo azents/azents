@@ -7,6 +7,7 @@ import {
   GITHUB_USER_COMPLETION_EVENT,
   githubUserErrorReason,
   gitHubUserResumeMatches,
+  gitHubUserScope,
   isGitHubUserMode,
   mergeGitHubUserAccess,
   parseGitHubUserState,
@@ -39,6 +40,48 @@ void test("returned review inherits only the exact original Toolkit context", ()
     ),
     null,
   );
+});
+void test("Personal GitHub reconnect cannot restore a workload or another source", () => {
+  const context = {
+    owner: "user",
+    handle: "workspace",
+    toolkitId: "saved",
+    returnPath: "/w/workspace/personal-tools/saved/edit",
+    returnView: "EDIT",
+    reviewAttemptId: "attempt",
+  };
+  const decoded = deserializeGitHubUserContext(JSON.stringify(context));
+  assert.ok(decoded);
+  assert.deepEqual(gitHubUserScope(decoded), {
+    owner: "user",
+    handle: "workspace",
+  });
+  assert.ok(gitHubUserResumeMatches(decoded, decoded));
+  for (const invalid of [
+    { handle: "workload" },
+    { agentId: "agent" },
+    { userId: "foreign" },
+    { returnPath: "/w/team/toolkits/saved/edit" },
+    { toolkitId: "other" },
+    { returnPath: "//evil.example" },
+    { returnPath: "/w/workspace/personal-tools/other/edit" },
+  ]) {
+    assert.equal(
+      deserializeGitHubUserContext(JSON.stringify({ ...context, ...invalid })),
+      null,
+    );
+  }
+  const shared = deserializeGitHubUserContext(
+    JSON.stringify({
+      handle: "team",
+      toolkitId: "saved",
+      returnView: "EDIT",
+      returnPath: "/w/team/toolkits/saved/edit",
+      reviewAttemptId: "attempt",
+    }),
+  );
+  assert.ok(shared);
+  assert.equal(gitHubUserResumeMatches(decoded, shared), false);
 });
 import type {
   GitHubUserInstallation,

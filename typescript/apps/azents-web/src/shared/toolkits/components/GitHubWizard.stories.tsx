@@ -370,6 +370,21 @@ export const AgentReview: Story = {
     ).not.toBeInTheDocument();
   },
 };
+export const PersonalReview: Story = {
+  args: { ...wizardReviewProps, sharingScope: "personal" },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getAllByText("My account").length).toBeGreaterThan(0);
+    await expect(
+      canvas.getByText(
+        "Personal connection: only your personal Sessions with allowed Agents use this GitHub account or App. New connections initially allow all Agents you can access.",
+      ),
+    ).toBeVisible();
+    await expect(
+      canvas.queryByText(/Workspace shared:/),
+    ).not.toBeInTheDocument();
+  },
+};
 export const PublicationPending: Story = {
   args: {
     ...wizardReviewProps,

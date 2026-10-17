@@ -8,11 +8,58 @@ import { z } from "zod/v4";
 import { normalizeCredentialEdits } from "../../shared/lib/redacted-credentials.ts";
 import { normalizeExplicitToolkitSlug } from "../../shared/lib/toolkit-identifiers.ts";
 import * as googleSchemas from "../../shared/toolkits/google-schemas.ts";
+import * as personalToolkitInputs from "../../shared/toolkits/personal-toolkit-inputs.ts";
+import * as toolkitOwnerScope from "../../shared/toolkits/toolkit-owner-scope.ts";
 
 interface OperationFixture {
   name: string;
   input: Record<string, unknown>;
 }
+const personalSaved = { handle: "workspace", toolkitId: "personal" };
+const accessDelta = {
+  expected_mode: "all",
+  mode: null,
+  allow_agent_ids: [],
+  restrict_agent_ids: ["agent"],
+};
+const personalFixtures: OperationFixture[] = [
+  { name: "list", input: { handle: "workspace" } },
+  { name: "eligibleAgents", input: { handle: "workspace" } },
+  { name: "get", input: personalSaved },
+  {
+    name: "create",
+    input: { handle: "workspace", toolkitType: "mcp", config: {} },
+  },
+  { name: "update", input: personalSaved },
+  { name: "remove", input: personalSaved },
+  { name: "accessForAgent", input: { handle: "workspace", agentId: "agent" } },
+  { name: "saveAccess", input: { ...personalSaved, ...accessDelta } },
+  {
+    name: "saveAccessForAgent",
+    input: {
+      handle: "workspace",
+      agentId: "agent",
+      mutations: [{ toolkit_id: "personal", ...accessDelta }],
+    },
+  },
+  {
+    name: "testConnection",
+    input: {
+      handle: "workspace",
+      toolkitType: "mcp",
+      toolkitConfigId: null,
+      config: {},
+      credentials: null,
+    },
+  },
+  { name: "testSavedConnection", input: personalSaved },
+  { name: "connectOauth", input: personalSaved },
+  {
+    name: "exchangeOauth",
+    input: { ...personalSaved, code: "fixture", state: "opaque" },
+  },
+  { name: "disconnectOauth", input: personalSaved },
+];
 const scope = { handle: "team" };
 const agentScope = { ...scope, agentId: "agent" };
 const saved = { ...scope, toolkitId: "saved" };
@@ -103,6 +150,67 @@ const toolkitFixtures: OperationFixture[] = [
   },
   { name: "testAgentConnection", input: { ...connection, agentId: "agent" } },
 ];
+const githubUserFixtures: OperationFixture[] = [
+  { name: "availability", input: scope },
+  { name: "connect", input: saved },
+  { name: "exchange", input: { ...saved, code: "fixture", state: "opaque" } },
+  { name: "review", input: { ...saved, attemptId: "attempt" } },
+  { name: "confirm", input: { ...saved, attemptId: "attempt" } },
+  { name: "cancel", input: { ...saved, attemptId: "attempt" } },
+  { name: "disconnect", input: saved },
+  { name: "status", input: saved },
+  { name: "access", input: { ...saved, cursor: null } },
+];
+const githubCreationFixtures: OperationFixture[] = [
+  { name: "app", input: attempt },
+  {
+    name: "connect",
+    input: {
+      ...scope,
+      toolkitType: "github",
+      description: null,
+      prompt: null,
+      config: { github_auth_type: "github_app_platform_user" },
+      enabled: true,
+      alwaysExposeTools: false,
+    },
+  },
+  { name: "exchange", input: { ...scope, code: "fixture", state: "opaque" } },
+  { name: "review", input: attempt },
+  {
+    name: "confirm",
+    input: {
+      ...attempt,
+      settings: {
+        name: null,
+        slug: null,
+        description: null,
+        prompt: null,
+        enabled: true,
+        always_expose_tools: false,
+        toolsets: ["repos"],
+        timeout: 30,
+        inject_runtime_environment: false,
+        runtime_risk_acknowledged: false,
+      },
+    },
+  },
+  { name: "cancel", input: attempt },
+];
+const githubSetupFixtures: OperationFixture[] = [
+  { name: "app", input: scope },
+  {
+    name: "verify",
+    input: {
+      ...scope,
+      verification: {
+        github_auth_type: "pat",
+        token: "fixture-token",
+        transport: { toolsets: ["repos"], timeout: 30 },
+      },
+    },
+  },
+];
 const googleFixtures: OperationFixture[] = [
   { name: "preparation", input: scope },
   { name: "connect", input: { ...scope, desired } },
@@ -171,9 +279,18 @@ function routerFixture(
       assert.ok(bindings && ts.isNamedImports(bindings));
       for (const binding of bindings.elements) {
         const name = binding.name.text;
-        sdk[name] = (input: unknown): Promise<{ data: null }> => {
+        sdk[name] = (
+          input: unknown,
+        ): Promise<{ data: null | { items: [] } }> => {
           sdkCalls.push({ name, input });
-          return Promise.resolve({ data: null });
+          return Promise.resolve({
+            data: [
+              "agentV1ListAgents",
+              "personalToolkitV1ListPersonalToolkitAgents",
+            ].includes(name)
+              ? { items: [] }
+              : null,
+          });
         };
       }
     }
@@ -185,6 +302,8 @@ function routerFixture(
     "@/shared/lib/redacted-credentials": { normalizeCredentialEdits },
     "@/shared/lib/toolkit-identifiers": { normalizeExplicitToolkitSlug },
     "@/shared/toolkits/google-schemas": googleSchemas,
+    "@/shared/toolkits/personal-toolkit-inputs": personalToolkitInputs,
+    "@/shared/toolkits/toolkit-owner-scope": toolkitOwnerScope,
     "../api-error": { mapExpectedError: (error: unknown): unknown => error },
     "../init": { publicProcedure: t.procedure, router: t.router },
     "./github-setup": { githubSetupRouter: t.router({}) },
@@ -238,9 +357,26 @@ async function parse(procedure: unknown, input: unknown): Promise<unknown> {
   const parser = inputParser(procedure);
   return await invoke(record(parser).parseAsync, parser, input);
 }
+function declaredInputKeys(parser: unknown): string[] {
+  const definition = record(record(parser).def);
+  if (definition.type === "object") {
+    return Object.keys(record(definition.shape));
+  }
+  assert.equal(definition.type, "union");
+  assert.ok(Array.isArray(definition.options));
+  return definition.options.flatMap(declaredInputKeys);
+}
 for (const [file, exportName, fixtures] of [
   ["./google.ts", "googleRouter", googleFixtures],
   ["./toolkit.ts", "toolkitRouter", toolkitFixtures],
+  ["./personal-toolkit.ts", "personalToolkitRouter", personalFixtures],
+  ["./github-user.ts", "githubUserRouter", githubUserFixtures],
+  [
+    "./github-user-creation.ts",
+    "githubUserCreationRouter",
+    githubCreationFixtures,
+  ],
+  ["./github-setup.ts", "githubSetupRouter", githubSetupFixtures],
 ] satisfies Array<[string, string, OperationFixture[]]>) {
   const fixture = routerFixture(file, exportName);
   void test(`${exportName} inventory covers every input-bearing operation`, () => {
@@ -271,16 +407,17 @@ for (const [file, exportName, fixtures] of [
       assert.equal(fixture.sdkCalls.length, count);
       await assert.rejects(() => parse(procedure, extra));
       await fixture.call(operation.name, operation.input);
-      assert.equal(fixture.sdkCalls.length, count + 1);
+      assert.equal(
+        fixture.sdkCalls.length,
+        count + (operation.name === "eligibleAgents" ? 2 : 1),
+      );
     });
   }
   void test(`${exportName} accepts declared Agent ownership without nullable/unknown widening`, async () => {
     for (const operation of fixtures) {
       const procedure = fixture.procedures[operation.name];
       const candidate = { ...operation.input, agentId: "agent" };
-      const keys = Object.keys(
-        record(record(record(inputParser(procedure)).def).shape),
-      );
+      const keys = declaredInputKeys(inputParser(procedure));
       if (keys.includes("agentId")) {
         await assert.doesNotReject(() => parse(procedure, candidate));
         await assert.rejects(() =>
@@ -365,3 +502,174 @@ void test("Google nested schemas retain required nullable settings and reject ne
     false,
   );
 });
+
+void test("Common Provider connection tests retain config and credentials for personal ownership", async () => {
+  const fixture = routerFixture("./toolkit.ts", "toolkitRouter");
+  for (const toolkitType of [
+    "mcp",
+    "notion",
+    "sentry",
+    "github",
+    "google",
+    "aws",
+    "gcp",
+    "kubernetes",
+    "google_analytics",
+    "brave_search",
+  ]) {
+    await fixture.call("testConnection", {
+      owner: "user",
+      handle: "workspace",
+      toolkitType,
+      toolkitConfigId: "personal",
+      config: opaque,
+      credentials: opaque,
+    });
+    const sdk = record(fixture.sdkCalls.at(-1));
+    assert.equal(sdk.name, "personalToolkitOauthV1TestPersonalConnection");
+    const input = record(sdk.input);
+    const body = record(input.body);
+    assert.equal(body.toolkit_type, toolkitType);
+    assert.equal(body.toolkit_config_id, "personal");
+    assert.deepEqual(body.config, opaque);
+    assert.deepEqual(body.credentials, opaque);
+    assert.equal(record(input.path).handle, "workspace");
+  }
+  const count = fixture.sdkCalls.length;
+  for (const injected of [
+    { handle: "" },
+    { agentId: "agent" },
+    { userId: "foreign" },
+  ]) {
+    await assert.rejects(() =>
+      fixture.call("testConnection", {
+        owner: "user",
+        handle: "workspace",
+        toolkitType: "mcp",
+        toolkitConfigId: null,
+        config: {},
+        credentials: null,
+        ...injected,
+      }),
+    );
+  }
+  assert.equal(fixture.sdkCalls.length, count);
+});
+
+for (const [file, routerName, fixtures, prefix] of [
+  [
+    "./github-user.ts",
+    "githubUserRouter",
+    githubUserFixtures,
+    "personalGithubToolkitV1PersonalGithub",
+  ],
+  [
+    "./github-user-creation.ts",
+    "githubUserCreationRouter",
+    githubCreationFixtures,
+    "personalGithubToolkitV1PersonalGithubCreation",
+  ],
+  [
+    "./github-setup.ts",
+    "githubSetupRouter",
+    githubSetupFixtures,
+    "personalGithubToolkitV1PersonalGithubSetup",
+  ],
+] satisfies Array<[string, string, OperationFixture[], string]>) {
+  for (const operation of fixtures) {
+    void test(`${routerName}.${operation.name} preserves exact personal authentication target`, async () => {
+      const fixture = routerFixture(file, routerName);
+      const personal = {
+        ...Object.fromEntries(
+          Object.entries(operation.input).filter(
+            ([key]) => key !== "handle" && key !== "agentId",
+          ),
+        ),
+        owner: "user",
+        handle: "workspace",
+      };
+      await fixture.call(operation.name, personal);
+      const call = record(fixture.sdkCalls[0]);
+      assert.equal(
+        call.name,
+        `${prefix}${operation.name[0]?.toUpperCase()}${operation.name.slice(1)}`,
+      );
+      const input = record(call.input);
+      if (input.path != null) {
+        assert.equal(record(input.path).handle, "workspace");
+        assert.equal(Object.hasOwn(record(input.path), "agent_id"), false);
+      }
+      for (const extra of [
+        { handle: "" },
+        { agentId: "agent" },
+        { userId: "foreign" },
+      ]) {
+        await assert.rejects(() =>
+          fixture.call(operation.name, { ...personal, ...extra }),
+        );
+        assert.equal(fixture.sdkCalls.length, 1);
+      }
+    });
+  }
+}
+
+void test("Personal GitHub Platform setup routes and OAuth inventory use User-global SDK operations", async () => {
+  const fixture = routerFixture("./toolkit.ts", "toolkitRouter");
+  for (const [operation, suffix, extra] of [
+    ["getGithubInstallUrl", "InstallUrl", {}],
+    ["getGithubOauthUrl", "InstallationOauthUrl", {}],
+    [
+      "getGithubInstallations",
+      "SyncInstallations",
+      { code: "fixture", state: "opaque" },
+    ],
+  ] satisfies Array<[string, string, Record<string, unknown>]>) {
+    await fixture.call(operation, {
+      owner: "user",
+      handle: "workspace",
+      ...extra,
+    });
+    const call = record(fixture.sdkCalls.at(-1));
+    assert.equal(call.name, `personalGithubToolkitV1PersonalGithub${suffix}`);
+    assert.equal(record(record(call.input).path).handle, "workspace");
+  }
+});
+
+for (const operation of googleFixtures) {
+  void test(`Google ${operation.name} uses only the personal SDK branch for User ownership`, async () => {
+    const fixture = routerFixture("./google.ts", "googleRouter");
+    const personal = {
+      ...Object.fromEntries(
+        Object.entries(operation.input).filter(
+          ([key]) => key !== "handle" && key !== "agentId",
+        ),
+      ),
+      owner: "user",
+      handle: "workspace",
+    };
+    await fixture.call(operation.name, personal);
+    assert.equal(fixture.sdkCalls.length, 1);
+    const sdkCall = record(fixture.sdkCalls[0]);
+    assert.equal(
+      sdkCall.name,
+      `personalGoogleToolkitV1PersonalGoogle${operation.name[0]?.toUpperCase()}${operation.name.slice(1)}`,
+    );
+    const sdkInput = record(sdkCall.input);
+    const path = sdkInput.path == null ? {} : record(sdkInput.path);
+    assert.equal(path.handle, "workspace");
+    assert.equal(Object.hasOwn(path, "agent_id"), false);
+    for (const injected of [
+      { handle: "" },
+      { agentId: "agent" },
+      { userId: "foreign" },
+      { workspaceId: "workload" },
+    ]) {
+      await assert.rejects(
+        () => fixture.call(operation.name, { ...personal, ...injected }),
+        (error: unknown) =>
+          error instanceof TRPCError && error.code === "BAD_REQUEST",
+      );
+      assert.equal(fixture.sdkCalls.length, 1);
+    }
+  });
+}

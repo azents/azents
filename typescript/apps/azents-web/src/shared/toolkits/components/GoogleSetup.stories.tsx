@@ -69,7 +69,7 @@ const props: GoogleSetupProps = {
   acknowledged: false,
   publishingAllowed: false,
   reconnect: false,
-  agentOwned: false,
+  ownership: "workspace",
   cancelling: false,
   disconnecting: false,
   disconnectConfirmation: false,
@@ -119,6 +119,26 @@ export const SelectedTasks: Story = {
     await expect(
       canvas.getAllByText("Sending mail is not included.", { exact: false }),
     ).toHaveLength(2);
+  },
+};
+export const PersonalReview: Story = {
+  args: {
+    ownership: "user",
+    flow: { type: "REVIEW", review: { ...review, ownership: "personal" } },
+    tasks: ["calendar_read"],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByText(
+        "This connection belongs to your account. Only your personal Sessions with allowed Agents can use it.",
+      ),
+    ).toBeVisible();
+    await expect(
+      canvas.queryByText(
+        "Workspace-shared connection: authorized users and Agents may act using this saved account.",
+      ),
+    ).not.toBeInTheDocument();
   },
 };
 function AcknowledgementFixture(args: GoogleSetupProps): React.ReactElement {

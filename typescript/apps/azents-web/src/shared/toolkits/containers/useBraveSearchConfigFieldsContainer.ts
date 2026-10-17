@@ -5,30 +5,24 @@
 import { useState } from "react";
 import { normalizeCredentialEdits } from "@/shared/lib/redacted-credentials";
 import { trpc } from "@/trpc/client";
+import { pickToolkitOwnerScope } from "../toolkit-owner-scope";
 
 import type { BraveSearchFieldsViewProps } from "../components/BraveSearchFieldsView";
+import type { ToolkitConfigFieldsInput } from "../types";
 
-export interface BraveSearchConfigFieldsProps {
-  config: Record<string, unknown>;
-  onConfigChange: (config: Record<string, unknown>) => void;
-  credentials: Record<string, unknown> | null;
-  onCredentialsChange: (credentials: Record<string, unknown> | null) => void;
-  hasCredentials: boolean;
-  handle: string;
-  agentId?: string;
-  toolkitConfigId?: string;
-}
+export type BraveSearchConfigFieldsProps = ToolkitConfigFieldsInput;
 
-export function useBraveSearchConfigFieldsContainer({
-  config,
-  onConfigChange,
-  credentials,
-  onCredentialsChange,
-  hasCredentials,
-  handle,
-  agentId,
-  toolkitConfigId,
-}: BraveSearchConfigFieldsProps): BraveSearchFieldsViewProps {
+export function useBraveSearchConfigFieldsContainer(
+  props: BraveSearchConfigFieldsProps,
+): BraveSearchFieldsViewProps {
+  const {
+    config,
+    onConfigChange,
+    credentials,
+    onCredentialsChange,
+    hasCredentials,
+    toolkitConfigId,
+  } = props;
   const [replacingKey, setReplacingKey] = useState(false);
   const testConnection = trpc.toolkit.testConnection.useMutation();
   const testState: BraveSearchFieldsViewProps["testState"] =
@@ -58,8 +52,7 @@ export function useBraveSearchConfigFieldsContainer({
     onReplaceKey: () => setReplacingKey(true),
     onTestConnection: () =>
       testConnection.mutate({
-        handle,
-        ...(agentId != null && { agentId }),
+        ...pickToolkitOwnerScope(props),
         toolkitType: "brave_search",
         toolkitConfigId: toolkitConfigId ?? null,
         config,

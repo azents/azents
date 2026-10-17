@@ -1,23 +1,11 @@
 "use client";
 
-/**
- * Toolkit create/update form container hook.
- *
- * Edit mode when toolkitId exists; creates the form state, performs API work,
- * and owns the behavioral callbacks consumed by the ToolkitForm view.
- */
-
-import { useForm, type UseFormReturnType } from "@mantine/form";
+/** Common Provider form state; owner-specific I/O is bound by the narrow adapter. */
+import { useForm } from "@mantine/form";
 import { readSessionStorageValue, useWindowEvent } from "@mantine/hooks";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
-import {
-  type FormEventHandler,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { normalizeCredentialEdits } from "@/shared/lib/redacted-credentials";
 import {
   resolveDefaultToolkitSlug,
@@ -25,9 +13,9 @@ import {
 } from "@/shared/lib/toolkit-identifiers";
 import { trpc } from "@/trpc/client";
 import {
-  creationReturnPath,
   deserializeGitHubUserCreation,
   GITHUB_USER_CREATION_KEY,
+  gitHubCreationMatches,
 } from "../github-user-creation-state";
 import {
   missingNewGitHubUserRegistration,
@@ -49,68 +37,31 @@ import {
   projectToolkitConfig,
   toolkitProjectionUsesOauth,
 } from "../toolkit-config-projection";
-import {
-  metadataProviderFields,
-  usesToolkitCreationWizard,
-} from "../toolkit-form-lifecycle";
+import { usesToolkitCreationWizard } from "../toolkit-form-lifecycle";
+import { useToolkitOwnerAdapter } from "./useToolkitOwnerAdapter";
+import type { ToolkitFormProps } from "../components/ToolkitForm";
 import type { GitHubUserCreationContext } from "../github-user-creation-state";
 import type { GoogleResume } from "../google-resume";
-import type { GitHubFormRegistration } from "../provider-config-views";
 import type { ToolkitFormValues } from "../schemas";
-import type { ToolkitConfigProjection } from "../toolkit-config-projection";
 import type {
-  MutationState,
-  ToolkitConfigFormState,
-  ToolkitListState,
-} from "../types";
+  PersonalToolkitOrigin,
+  ToolkitOwnerScope,
+} from "../toolkit-owner-scope";
+import type { MutationState, ToolkitListState } from "../types";
+import type { ToolkitSavedMetadata } from "./useToolkitOwnerAdapter";
+import type { FormEventHandler } from "react";
 
-export interface ToolkitFormContainerProps {
-  handle: string;
+export type ToolkitFormContainerProps = ToolkitOwnerScope & {
+  navigationOrigin?: PersonalToolkitOrigin;
   toolkitId?: string;
-  agentId?: string;
   embedded?: boolean;
   onComplete?: () => void;
   onPendingChange?: (pending: boolean) => void;
   onAbandonReady?: (abandon: (() => void) | null) => void;
   initialToolkitType?: string;
-}
+};
+export type ToolkitFormContainerOutput = ToolkitFormProps;
 
-export interface ToolkitFormContainerOutput {
-  githubRegistration: GitHubFormRegistration;
-  onComplete?: () => void;
-  onAbandonReady?: (abandon: (() => void) | null) => void;
-  configProjection: ToolkitConfigProjection;
-  handle: string;
-  agentId?: string;
-  embedded: boolean;
-  toolkitTypeLocked: boolean;
-  formState: ToolkitConfigFormState;
-  mutationState: MutationState;
-  operationPending: boolean;
-  form: UseFormReturnType<ToolkitFormValues>;
-  isEdit: boolean;
-  backPath: string;
-  toolOptions: Array<{ value: string; label: string }>;
-  currentToolSlug: string;
-  namePlaceholder: string;
-  slugPlaceholder: string;
-  nameRequired: boolean;
-  showOauthConnection: boolean;
-  oauthConnectionPending: {
-    connect: boolean;
-    disconnect: boolean;
-  };
-  onSubmit: FormEventHandler<HTMLFormElement>;
-  onUserSetupPendingChange: (pending: boolean) => void;
-  onToolSelect: (toolSlug: string | null) => void;
-  onConfigChange: (config: Record<string, unknown>) => void;
-  onCredentialsChange: (credentials: Record<string, unknown> | null) => void;
-  onConnectOauth: () => void;
-  onDisconnectOauth: () => void;
-  onCancel: () => void;
-}
-
-/** Default config initial value by tool. */
 const DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
   shell: { allowed_domains: [], denied_domains: [] },
   mcp: { server_url: "", auth_type: "none", timeout: 30 },
@@ -120,16 +71,8 @@ const DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
     writable_services: [],
     timeout: 30,
   },
-  aws: {
-    region: "us-east-1",
-    role_arn: null,
-    external_id: null,
-    timeout: 30,
-  },
-  google_analytics: {
-    default_property_id: null,
-    timeout: 30,
-  },
+  aws: { region: "us-east-1", role_arn: null, external_id: null, timeout: 30 },
+  google_analytics: { default_property_id: null, timeout: 30 },
   brave_search: {
     country: "US",
     search_lang: "en",
@@ -152,8 +95,6 @@ const DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
     timeout: 30,
   },
 };
-
-/** Default credentials initial value by tool. */
 const DEFAULT_CREDENTIALS: Record<string, Record<string, unknown> | null> = {
   shell: null,
   mcp: { type: "none" },
@@ -169,22 +110,34 @@ export function useToolkitFormContainer(
   props: ToolkitFormContainerProps,
 ): ToolkitFormContainerOutput {
   const {
-    handle,
     toolkitId,
-    agentId,
     embedded = false,
     onComplete,
     onPendingChange,
     initialToolkitType,
   } = props;
+  const handle = props.handle;
+  const agentId = "agentId" in props ? props.agentId : null;
+  const personalOwner = "owner" in props;
+  const scope = useMemo<ToolkitOwnerScope>(
+    () =>
+      personalOwner
+        ? { owner: "user", handle }
+        : { handle, ...(agentId != null && { agentId }) },
+    [personalOwner, handle, agentId],
+  );
   const router = useRouter();
   const t = useTranslations("workspace.toolkits");
-  const utils = trpc.useUtils();
+  const setup = useTranslations("toolkitSetup");
+  const adapter = useToolkitOwnerAdapter(scope, toolkitId ?? null);
+  const formState = adapter.state;
   const isEditMode = toolkitId != null;
   const backPath =
-    agentId == null
-      ? `/w/${handle}/toolkits`
-      : `/w/${handle}/agents/${agentId}/settings/capabilities#agent-toolkits`;
+    "owner" in scope
+      ? `/w/${encodeURIComponent(handle)}/personal-tools`
+      : scope.agentId == null
+        ? `/w/${scope.handle}/toolkits`
+        : `/w/${scope.handle}/agents/${scope.agentId}/settings/capabilities#agent-toolkits`;
   const form = useForm<ToolkitFormValues>({
     mode: "controlled",
     initialValues: {
@@ -209,7 +162,6 @@ export function useToolkitFormContainer(
       if (result.success) {
         return {};
       }
-
       const errors: Record<string, string> = {};
       for (const issue of result.error.issues) {
         const path = issue.path.join(".");
@@ -225,6 +177,8 @@ export function useToolkitFormContainer(
     error: null,
   });
   const [providerPending, setProviderPending] = useState(false);
+  const [oauthDisconnectConfirmation, setOauthDisconnectConfirmation] =
+    useState(false);
   useEffect(() => {
     if (isEditMode) {
       return;
@@ -233,48 +187,32 @@ export function useToolkitFormContainer(
       key: GITHUB_USER_CREATION_KEY,
       deserialize: deserializeGitHubUserCreation,
     });
-    if (
-      saved != null &&
-      saved.handle === handle &&
-      saved.agentId === agentId &&
-      saved.returnPath === creationReturnPath(handle, agentId)
-    ) {
+    if (saved != null && gitHubCreationMatches(saved, scope)) {
       form.setFieldValue("toolkitType", "github");
     }
     const google = readSessionStorageValue<GoogleResume | null>({
       key: GOOGLE_RESUME_KEY,
       deserialize: deserializeGoogleResume,
     });
-    if (google != null && googleResumeMatches(google, handle, agentId)) {
+    if (google != null && googleResumeMatches(google, scope)) {
       form.setFieldValue("toolkitType", "google");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- restore entry selection only; the Wizard owns exact review hydration.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- restore entry selection only; each Wizard owns exact review hydration.
   }, [agentId, handle, isEditMode]);
   const definitionsQuery = trpc.toolkit.listToolkits.useQuery();
-  const workspaceToolkitQuery = trpc.toolkit.getConfig.useQuery(
-    { handle, toolkitId: toolkitId ?? "" },
-    { enabled: isEditMode && agentId == null },
+  const toolkitListState: ToolkitListState = useMemo(
+    () =>
+      definitionsQuery.isLoading
+        ? { type: "LOADING" }
+        : definitionsQuery.isError
+          ? { type: "ERROR" }
+          : { type: "READY", toolkits: definitionsQuery.data?.items ?? [] },
+    [
+      definitionsQuery.data,
+      definitionsQuery.isError,
+      definitionsQuery.isLoading,
+    ],
   );
-  const agentToolkitQuery = trpc.toolkit.getAgentConfig.useQuery(
-    { handle, agentId: agentId ?? "", toolkitConfigId: toolkitId ?? "" },
-    { enabled: isEditMode && agentId != null },
-  );
-  const toolkitQuery =
-    agentId == null ? workspaceToolkitQuery : agentToolkitQuery;
-
-  const toolkitListState: ToolkitListState = useMemo(() => {
-    if (definitionsQuery.isLoading) {
-      return { type: "LOADING" };
-    }
-    if (definitionsQuery.isError) {
-      return { type: "ERROR" };
-    }
-    return { type: "READY", toolkits: definitionsQuery.data?.items ?? [] };
-  }, [
-    definitionsQuery.data,
-    definitionsQuery.isError,
-    definitionsQuery.isLoading,
-  ]);
   useEffect(() => {
     if (
       initialToolkitType == null ||
@@ -291,449 +229,176 @@ export function useToolkitFormContainer(
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- form is a stable Mantine ref.
   }, [initialToolkitType, toolkitListState]);
-
-  const formState: ToolkitConfigFormState = useMemo(() => {
-    if (!isEditMode) {
-      return { type: "CREATE" };
-    }
-    if (toolkitQuery.isLoading) {
-      return { type: "LOADING" };
-    }
-    if (toolkitQuery.isError || !toolkitQuery.data) {
-      return { type: "NOT_FOUND" };
-    }
-    return { type: "EDIT", config: toolkitQuery.data };
-  }, [
-    isEditMode,
-    toolkitQuery.data,
-    toolkitQuery.isError,
-    toolkitQuery.isLoading,
-  ]);
-
-  const createMutation = trpc.toolkit.createConfig.useMutation({
-    onSuccess: (data) => {
-      form.setValues({ name: data.name, slug: data.slug });
-      setMutationState({ type: "IDLE", error: null });
-      void utils.toolkit.listConfigs.invalidate({ handle });
-      if (embedded) {
-        onComplete?.();
-      } else {
-        router.push(backPath);
-      }
-    },
-    onError: (error) => {
-      setMutationState({ type: "IDLE", error: error.message });
-    },
-  });
-  const updateMutation = trpc.toolkit.updateConfig.useMutation({
-    onSuccess: () => {
-      setMutationState({ type: "IDLE", error: null });
-      void utils.toolkit.listConfigs.invalidate({ handle });
-      if (toolkitId) {
-        void utils.toolkit.getConfig.invalidate({ handle, toolkitId });
-      }
-      if (embedded) {
-        onComplete?.();
-      } else {
-        router.push(backPath);
-      }
-    },
-    onError: (error) => {
-      setMutationState({ type: "IDLE", error: error.message });
-    },
-  });
-  const createAgentMutation = trpc.toolkit.createAgentConfig.useMutation({
-    onSuccess: async (data) => {
-      form.setValues({ name: data.name, slug: data.slug });
-      setMutationState({ type: "IDLE", error: null });
-      onComplete?.();
-      if (agentId) {
-        // A committed create must not become an unsaved form after a read failure.
-        await utils.toolkit.listAgentManagement
-          .invalidate({ handle, agentId })
-          .catch(() => null);
-        await utils.toolkit.listAgentManagement
-          .fetch({ handle, agentId })
-          .catch(() => null);
-      }
-    },
-    onError: (error) => {
-      setMutationState({ type: "IDLE", error: error.message });
-    },
-  });
-  const updateAgentMutation = trpc.toolkit.updateAgentConfig.useMutation({
-    onSuccess: async () => {
-      setMutationState({ type: "IDLE", error: null });
-      onComplete?.();
-      const invalidations: Array<Promise<unknown>> = [];
-      if (agentId) {
-        invalidations.push(
-          utils.toolkit.listAgentManagement.invalidate({ handle, agentId }),
-        );
-      }
-      if (agentId && toolkitId) {
-        invalidations.push(
-          utils.toolkit.getAgentConfig.invalidate({
-            handle,
-            agentId,
-            toolkitConfigId: toolkitId,
-          }),
-        );
-      }
-      await Promise.allSettled(invalidations);
-      if (agentId) {
-        await utils.toolkit.listAgentManagement
-          .fetch({ handle, agentId })
-          .catch(() => null);
-      }
-    },
-    onError: (error) => {
-      setMutationState({ type: "IDLE", error: error.message });
-    },
-  });
-  const connectOauthMutation = trpc.toolkit.connectOauth.useMutation();
-  const connectAgentOauthMutation =
-    trpc.toolkit.connectAgentOauth.useMutation();
-  const disconnectOauthMutation = trpc.toolkit.disconnectOauth.useMutation({
-    onSuccess: () => {
-      if (formState.type === "EDIT") {
-        void utils.toolkit.getConfig.invalidate({
-          handle,
-          toolkitId: formState.config.id,
-        });
-      }
-    },
-  });
-  const disconnectAgentOauthMutation =
-    trpc.toolkit.disconnectAgentOauth.useMutation({
-      onSuccess: () => {
-        if (agentId && toolkitId) {
-          void utils.toolkit.getAgentConfig.invalidate({
-            handle,
-            agentId,
-            toolkitConfigId: toolkitId,
-          });
-          void utils.toolkit.listAgentManagement.invalidate({
-            handle,
-            agentId,
-          });
-        }
-      },
-    });
-
   const operationPending =
     mutationState.type === "SUBMITTING" ||
     providerPending ||
-    connectOauthMutation.isPending ||
-    connectAgentOauthMutation.isPending ||
-    disconnectOauthMutation.isPending ||
-    disconnectAgentOauthMutation.isPending;
+    adapter.saving ||
+    adapter.connecting ||
+    adapter.disconnecting;
   useEffect(() => {
     onPendingChange?.(operationPending);
   }, [operationPending, onPendingChange]);
 
-  const submitForm = useCallback(
-    (values: ToolkitFormValues): void => {
-      if (operationPending) {
-        return;
-      }
-      if (!isEditMode && usesToolkitCreationWizard(values.toolkitType)) {
-        return;
-      }
-      setMutationState({ type: "SUBMITTING" });
-      const credentials =
-        values.toolkitType === "github"
-          ? normalizeGitHubUserCredentialEdits(values.credentials ?? null)
-          : normalizeCredentialEdits(values.credentials ?? null);
-      if (
-        values.toolkitType === "github" &&
-        projectGitHubAuthEvidence(values.config).byoaUser &&
-        !(
-          formState.type === "EDIT" &&
-          formState.config.has_credentials &&
-          projectGitHubAuthEvidence(formState.config.config).byoaUser
-        ) &&
-        missingNewGitHubUserRegistration(credentials).length > 0
-      ) {
-        setMutationState({
-          type: "IDLE",
-          error: t("github.registrationRequired"),
-        });
-        return;
-      }
-
-      if (agentId) {
-        if (isEditMode && toolkitId) {
-          updateAgentMutation.mutate({
-            handle,
-            agentId,
-            toolkitConfigId: toolkitId,
-            slug: values.slug,
-            name: values.name,
-            description: values.description ?? null,
-            prompt: values.prompt ?? null,
-            ...metadataProviderFields(values.toolkitType, values.config),
-            ...(credentials != null && { credentials }),
-            enabled: values.enabled,
-            alwaysExposeTools: values.alwaysExposeTools,
-          });
-          return;
-        }
-        createAgentMutation.mutate({
-          handle,
-          agentId,
-          toolkitType: values.toolkitType,
-          ...(trimToolkitWhitespace(values.slug) && { slug: values.slug }),
-          ...(trimToolkitWhitespace(values.name) && { name: values.name }),
-          description: values.description,
-          prompt: values.prompt,
-          config: values.config,
-          ...(credentials != null && { credentials }),
-          enabled: values.enabled,
-          alwaysExposeTools: values.alwaysExposeTools,
-        });
-        return;
-      }
-
-      if (isEditMode && toolkitId) {
-        updateMutation.mutate({
-          handle,
-          toolkitId,
-          slug: values.slug,
-          name: values.name,
-          description: values.description ?? null,
-          prompt: values.prompt ?? null,
-          ...metadataProviderFields(values.toolkitType, values.config),
-          ...(credentials != null && { credentials }),
-          enabled: values.enabled,
-          alwaysExposeTools: values.alwaysExposeTools,
-        });
-        return;
-      }
-
-      createMutation.mutate({
-        handle,
-        toolkitType: values.toolkitType,
-        ...(trimToolkitWhitespace(values.slug) && { slug: values.slug }),
-        ...(trimToolkitWhitespace(values.name) && { name: values.name }),
-        description: values.description,
-        prompt: values.prompt,
-        config: values.config,
-        ...(credentials != null && { credentials }),
-        enabled: values.enabled,
-        alwaysExposeTools: values.alwaysExposeTools,
+  async function submitForm(values: ToolkitFormValues): Promise<void> {
+    if (
+      operationPending ||
+      (!isEditMode && usesToolkitCreationWizard(values.toolkitType))
+    ) {
+      return;
+    }
+    const credentials =
+      values.toolkitType === "github"
+        ? normalizeGitHubUserCredentialEdits(values.credentials ?? null)
+        : normalizeCredentialEdits(values.credentials ?? null);
+    if (
+      values.toolkitType === "github" &&
+      projectGitHubAuthEvidence(values.config).byoaUser &&
+      !(
+        formState.type === "EDIT" &&
+        formState.config.has_credentials &&
+        projectGitHubAuthEvidence(formState.config.config).byoaUser
+      ) &&
+      missingNewGitHubUserRegistration(credentials).length > 0
+    ) {
+      setMutationState({
+        type: "IDLE",
+        error: t("github.registrationRequired"),
       });
-    },
-    [
-      agentId,
-      createAgentMutation,
-      createMutation,
-      formState,
-      handle,
-      isEditMode,
-      operationPending,
-      t,
-      toolkitId,
-      updateAgentMutation,
-      updateMutation,
-    ],
-  );
+      return;
+    }
+    setMutationState({ type: "SUBMITTING" });
+    let saved: ToolkitSavedMetadata;
+    try {
+      saved = await adapter.save(values, credentials);
+    } catch (error: unknown) {
+      setMutationState({
+        type: "IDLE",
+        error:
+          error instanceof Error ? error.message : setup("operationFailed"),
+      });
+      return;
+    }
+    form.setValues({ name: saved.name, slug: saved.slug });
+    setMutationState({ type: "IDLE", error: null });
+    // The save is acknowledged before any optional follow-up read.
+    if (embedded || (!("owner" in scope) && scope.agentId != null)) {
+      onComplete?.();
+    } else {
+      router.push(backPath);
+    }
+    void adapter.invalidate();
+  }
   const onSubmit: FormEventHandler<HTMLFormElement> = form.onSubmit(submitForm);
-
-  const onToolSelect = useCallback(
-    (toolSlug: string | null): void => {
-      if (!toolSlug) {
-        return;
-      }
-      form.setFieldValue("toolkitType", toolSlug);
-      form.setFieldValue("config", DEFAULT_CONFIGS[toolSlug] ?? {});
-      form.setFieldValue("credentials", DEFAULT_CREDENTIALS[toolSlug] ?? null);
-
-      if (toolkitListState.type === "READY" && !form.getValues().description) {
-        const definition = toolkitListState.toolkits.find(
-          (toolkit) => toolkit.slug === toolSlug,
-        );
-        if (definition) {
-          form.setFieldValue("description", definition.description);
-        }
-      }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- form is a stable Mantine ref.
-    [isEditMode, toolkitListState],
-  );
-  const onConfigChange = useCallback(
-    (config: Record<string, unknown>): void => {
-      form.setFieldValue("config", config);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- form is a stable Mantine ref.
-    [],
-  );
-  const onCredentialsChange = useCallback(
-    (credentials: Record<string, unknown> | null): void => {
-      form.setFieldValue("credentials", credentials);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- form is a stable Mantine ref.
-    [],
-  );
-  const onConnectOauth = useCallback((): void => {
-    if (formState.type !== "EDIT") {
+  const onToolSelect = (toolSlug: string | null): void => {
+    if (!toolSlug) {
       return;
     }
-    if (agentId) {
-      connectAgentOauthMutation.mutate(
-        {
-          handle,
-          agentId,
-          toolkitConfigId: formState.config.id,
-        },
-        {
-          onSuccess: (data) => {
-            window.open(
-              data.authorization_url,
-              "mcp-oauth-popup",
-              "width=1024,height=768",
-            );
-          },
-        },
+    form.setFieldValue("toolkitType", toolSlug);
+    form.setFieldValue("config", DEFAULT_CONFIGS[toolSlug] ?? {});
+    form.setFieldValue("credentials", DEFAULT_CREDENTIALS[toolSlug] ?? null);
+    if (toolkitListState.type === "READY" && !form.getValues().description) {
+      const definition = toolkitListState.toolkits.find(
+        (toolkit) => toolkit.slug === toolSlug,
       );
+      if (definition) {
+        form.setFieldValue("description", definition.description);
+      }
+    }
+  };
+  const onConfigChange = (config: Record<string, unknown>): void => {
+    form.setFieldValue("config", config);
+  };
+  const onCredentialsChange = (
+    credentials: Record<string, unknown> | null,
+  ): void => {
+    form.setFieldValue("credentials", credentials);
+  };
+  async function connectOauth(): Promise<void> {
+    if (formState.type !== "EDIT" || operationPending) {
       return;
     }
-    connectOauthMutation.mutate(
-      { handle, toolkitConfigId: formState.config.id },
-      {
-        onSuccess: (data) => {
-          window.open(
-            data.authorization_url,
-            "mcp-oauth-popup",
-            "width=1024,height=768",
-          );
-        },
-      },
-    );
-  }, [
-    agentId,
-    connectAgentOauthMutation,
-    connectOauthMutation,
-    formState,
-    handle,
-  ]);
-  const onDisconnectOauth = useCallback((): void => {
-    if (formState.type !== "EDIT") {
-      return;
-    }
-    if (agentId) {
-      disconnectAgentOauthMutation.mutate({
-        handle,
-        agentId,
-        toolkitConfigId: formState.config.id,
+    try {
+      const url = await adapter.connect();
+      window.open(url, "mcp-oauth-popup", "width=1024,height=768");
+    } catch (error: unknown) {
+      setMutationState({
+        type: "IDLE",
+        error:
+          error instanceof Error ? error.message : setup("operationFailed"),
       });
+    }
+  }
+  async function disconnectOauth(): Promise<void> {
+    if (formState.type !== "EDIT" || operationPending) {
       return;
     }
-    disconnectOauthMutation.mutate({
-      handle,
-      toolkitConfigId: formState.config.id,
-    });
-  }, [
-    agentId,
-    disconnectAgentOauthMutation,
-    disconnectOauthMutation,
-    formState,
-    handle,
-  ]);
-
+    try {
+      await adapter.disconnect();
+      setOauthDisconnectConfirmation(false);
+    } catch (error: unknown) {
+      setMutationState({
+        type: "IDLE",
+        error:
+          error instanceof Error ? error.message : setup("operationFailed"),
+      });
+    }
+  }
   const handleOauthCallbackMessage = useCallback(
     (event: MessageEvent<unknown>): void => {
       if (
-        event.origin !== window.location.origin ||
-        formState.type !== "EDIT" ||
-        decodeOAuthCallbackMessage(event, window.location.origin) == null
+        event.origin === window.location.origin &&
+        formState.type === "EDIT" &&
+        decodeOAuthCallbackMessage(event, window.location.origin) != null
       ) {
-        return;
-      }
-      if (agentId) {
-        void utils.toolkit.getAgentConfig.invalidate({
-          handle,
-          agentId,
-          toolkitConfigId: formState.config.id,
-        });
-        void utils.toolkit.listAgentManagement.invalidate({ handle, agentId });
-      } else {
-        void utils.toolkit.getConfig.invalidate({
-          handle,
-          toolkitId: formState.config.id,
-        });
+        void adapter.invalidate();
       }
     },
-    [
-      agentId,
-      formState,
-      handle,
-      utils.toolkit.getAgentConfig,
-      utils.toolkit.getConfig,
-      utils.toolkit.listAgentManagement,
-    ],
+    [adapter, formState.type],
   );
   useWindowEvent("message", handleOauthCallbackMessage);
-
   useEffect(() => {
     if (formState.type !== "EDIT") {
       return;
     }
-
-    const toolkitConfig = formState.config;
-    const toolSlug = toolkitConfig.toolkit_type;
-    const hydrated = hydrateToolkitConfig(toolSlug, toolkitConfig.config);
-
+    const saved = formState.config;
+    const hydrated = hydrateToolkitConfig(saved.toolkit_type, saved.config);
     form.setValues({
-      toolkitType: toolSlug,
-      slug: toolkitConfig.slug || toolSlug,
-      name: toolkitConfig.name,
-      description: toolkitConfig.description ?? "",
-      prompt: toolkitConfig.prompt ?? "",
+      toolkitType: saved.toolkit_type,
+      slug: saved.slug || saved.toolkit_type,
+      name: saved.name,
+      description: saved.description ?? "",
+      prompt: saved.prompt ?? "",
       config: hydrated.config,
       credentials: hydrated.credentials,
-      enabled: toolkitConfig.enabled,
-      alwaysExposeTools: toolkitConfig.always_expose_tools,
+      enabled: saved.enabled,
+      alwaysExposeTools: saved.always_expose_tools,
     });
     form.resetDirty();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- hydrate once after the edit data reaches its terminal state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- hydrate once after edit data reaches its terminal state; retain unsaved metadata on grant refresh.
   }, [formState.type]);
-
   const toolOptions = useMemo(
     () =>
       toolkitListState.type === "READY"
         ? toolkitListState.toolkits
             .filter((toolkit) => agentId == null || toolkit.slug !== "shell")
-            .map((toolkit) => ({
-              value: toolkit.slug,
-              label: toolkit.name,
-            }))
+            .map((toolkit) => ({ value: toolkit.slug, label: toolkit.name }))
         : [],
     [agentId, toolkitListState],
   );
   const currentToolSlug = form.getValues().toolkitType;
-  const currentDefinition =
+  const definition =
     toolkitListState.type === "READY"
-      ? (toolkitListState.toolkits.find(
+      ? toolkitListState.toolkits.find(
           (toolkit) => toolkit.slug === currentToolSlug,
-        ) ?? null)
+        )
       : null;
-  const canonicalName = currentDefinition?.name ?? "";
-  const namePlaceholder = currentToolSlug === "mcp" ? "" : canonicalName;
-  const slugPlaceholder = canonicalName
-    ? resolveDefaultToolkitSlug(
-        trimToolkitWhitespace(form.getValues().name) || canonicalName,
-        canonicalName,
-      )
-    : "";
+  const canonicalName = definition?.name ?? "";
   const configProjection = projectToolkitConfig(
     currentToolSlug,
     form.getValues().config,
   );
-  const showOauthConnection =
-    formState.type === "EDIT" && toolkitProjectionUsesOauth(configProjection);
-
   return {
+    scope,
     githubRegistration: projectGitHubFormRegistration(
       formState.type === "EDIT" ? formState.config.config : null,
       form.getValues().config,
@@ -741,9 +406,8 @@ export function useToolkitFormContainer(
     ),
     onComplete,
     onAbandonReady: props.onAbandonReady,
+    navigationOrigin: props.navigationOrigin,
     configProjection,
-    handle,
-    ...(agentId != null && { agentId }),
     embedded,
     toolkitTypeLocked: initialToolkitType != null,
     formState,
@@ -754,24 +418,49 @@ export function useToolkitFormContainer(
     backPath,
     toolOptions,
     currentToolSlug,
-    namePlaceholder,
-    slugPlaceholder,
+    namePlaceholder: currentToolSlug === "mcp" ? "" : canonicalName,
+    slugPlaceholder: canonicalName
+      ? resolveDefaultToolkitSlug(
+          trimToolkitWhitespace(form.getValues().name) || canonicalName,
+          canonicalName,
+        )
+      : "",
     nameRequired: currentToolSlug === "mcp",
-    showOauthConnection,
+    showOauthConnection:
+      formState.type === "EDIT" && toolkitProjectionUsesOauth(configProjection),
     oauthConnectionPending: {
-      connect:
-        connectOauthMutation.isPending || connectAgentOauthMutation.isPending,
-      disconnect:
-        disconnectOauthMutation.isPending ||
-        disconnectAgentOauthMutation.isPending,
+      connect: adapter.connecting,
+      disconnect: adapter.disconnecting,
     },
     onSubmit,
     onUserSetupPendingChange: setProviderPending,
     onToolSelect,
     onConfigChange,
     onCredentialsChange,
-    onConnectOauth,
-    onDisconnectOauth,
+    onConnectOauth: () => {
+      void connectOauth();
+    },
+    onDisconnectOauth: () => {
+      if (!personalOwner || oauthDisconnectConfirmation) {
+        void disconnectOauth();
+      }
+    },
+    oauthDisconnectConfirmation,
+    onAskDisconnectOauth: () => {
+      if (operationPending) {
+        return;
+      }
+      if (personalOwner) {
+        setOauthDisconnectConfirmation(true);
+      } else {
+        void disconnectOauth();
+      }
+    },
+    onDismissDisconnectOauth: () => {
+      if (!operationPending) {
+        setOauthDisconnectConfirmation(false);
+      }
+    },
     onCancel: () => {
       if (operationPending) {
         return;

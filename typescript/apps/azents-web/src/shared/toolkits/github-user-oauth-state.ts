@@ -1,22 +1,28 @@
 import { z } from "zod/v4";
+import {
+  isToolkitManagementPath,
+  pickToolkitOwnerScope,
+  sameToolkitOwnerScope,
+  toolkitScopedInput,
+} from "./toolkit-owner-scope.ts";
+import type { ToolkitOwnerScope } from "./toolkit-owner-scope.ts";
 import type { GitHubUserInstallation } from "@azents/public-client";
 
 export const GITHUB_USER_CONTEXT_KEY = "azents.github-user.origin";
 export const GITHUB_USER_COMPLETION_EVENT = "azents-github-user-complete";
-const contextSchema = z
-  .object({
-    handle: z.string().min(1),
-    toolkitId: z.string().min(1),
-    agentId: z.string().min(1).optional(),
-    returnPath: z.string().startsWith("/w/"),
-    returnView: z.enum(["DETAIL", "EDIT"]),
-    reviewAttemptId: z
-      .string()
-      .regex(/^[a-zA-Z0-9_-]{1,64}$/)
-      .optional(),
-  })
-  .strict();
+const contextSchema = toolkitScopedInput({
+  toolkitId: z.string().min(1),
+  returnPath: z.string().startsWith("/"),
+  returnView: z.enum(["DETAIL", "EDIT"]),
+  reviewAttemptId: z
+    .string()
+    .regex(/^[a-zA-Z0-9_-]{1,64}$/)
+    .optional(),
+});
 export type GitHubUserContext = z.infer<typeof contextSchema>;
+export function gitHubUserScope(context: GitHubUserContext): ToolkitOwnerScope {
+  return pickToolkitOwnerScope(context);
+}
 
 /** Resume only the exact Toolkit ownership context; the server admits review. */
 export function gitHubUserResumeMatches(
@@ -25,9 +31,8 @@ export function gitHubUserResumeMatches(
 ): saved is GitHubUserContext & { reviewAttemptId: string } {
   return (
     saved?.reviewAttemptId != null &&
-    saved.handle === current.handle &&
+    sameToolkitOwnerScope(saved, current) &&
     saved.toolkitId === current.toolkitId &&
-    saved.agentId === current.agentId &&
     saved.returnPath === current.returnPath
   );
 }
@@ -49,7 +54,20 @@ export function parseGitHubUserContext(
   value: unknown,
 ): GitHubUserContext | null {
   const result = contextSchema.safeParse(value);
-  return result.success ? result.data : null;
+  if (!result.success) {
+    return null;
+  }
+  const context = result.data;
+  if ("owner" in context) {
+    return isToolkitManagementPath(
+      context,
+      context.toolkitId,
+      context.returnPath,
+    )
+      ? context
+      : null;
+  }
+  return context.returnPath.startsWith("/w/") ? context : null;
 }
 export function deserializeGitHubUserContext(
   value?: string,

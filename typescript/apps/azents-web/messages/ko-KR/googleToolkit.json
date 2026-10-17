@@ -28,6 +28,7 @@
   "reviewTitle": "2. 계정과 권한 확인",
   "agentOwnership": "이 연결은 이 Agent만 소유합니다. 실행에는 대화 참여자의 계정이 아닌 저장된 계정이 사용됩니다.",
   "sharedOwnership": "Workspace 공유 연결입니다. 권한이 있는 사용자와 Agent가 이 계정으로 작업할 수 있습니다.",
+  "personalOwnership": "내 계정이 소유하는 연결입니다. 허용한 Agent와의 내 개인 Session에서만 사용할 수 있습니다.",
   "actualPermissions": "Google이 실제 반환한 권한입니다. 요청한 모든 작업이 허용되었다는 뜻은 아닙니다.",
   "missingRenewal": "갱신 가능한 인증 정보가 반환되지 않았습니다. 이 후보는 저장할 수 없으며 새 동의 절차를 직접 시작해야 합니다.",
   "includeTask": "저장할 연결에 이 작업 포함",

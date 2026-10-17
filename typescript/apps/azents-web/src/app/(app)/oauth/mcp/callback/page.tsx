@@ -10,6 +10,10 @@
 import { TRPCError } from "@trpc/server";
 import { cache } from "react";
 import { OAuthMcpCallbackPage } from "@/features/toolkits/OAuthMcpCallbackPage";
+import {
+  decodeMcpCallbackTarget,
+  mcpCallbackReturnPath,
+} from "@/shared/toolkits/mcp-callback-target";
 import { trpc } from "@/trpc/server";
 
 type ExchangeResult = { success: true } | { success: false; message: string };
@@ -17,14 +21,25 @@ type ExchangeResult = { success: true } | { success: false; message: string };
 /** authorization code is one-time-use — prevent duplicate calls in same render cycle */
 const exchangeOnce = cache(
   async (
-    handle: string,
+    type: "personal" | "workload",
+    handle: string | null,
     toolkitConfigId: string,
     agentId: string | null,
     code: string,
     state: string,
   ): Promise<ExchangeResult> => {
     try {
-      if (agentId == null) {
+      if (handle == null) {
+        throw new Error("MCP callback requires a Workspace handle.");
+      }
+      if (type === "personal") {
+        await trpc.personalToolkit.exchangeOauth({
+          handle,
+          toolkitId: toolkitConfigId,
+          code,
+          state,
+        });
+      } else if (agentId == null) {
         await trpc.toolkit.oauthExchange({
           handle,
           toolkitConfigId,
@@ -60,36 +75,31 @@ export default async function Page({
   const params = await searchParams;
   const code = typeof params.code === "string" ? params.code : null;
   const state = typeof params.state === "string" ? params.state : null;
-  const handle = typeof params.handle === "string" ? params.handle : null;
-  const toolkitConfigId =
-    typeof params.toolkit_config_id === "string"
-      ? params.toolkit_config_id
-      : null;
-  const agentId = typeof params.agent_id === "string" ? params.agent_id : null;
+  const target = decodeMcpCallbackTarget(params);
   const error = typeof params.error === "string" ? params.error : null;
 
   const result: ExchangeResult =
-    !error &&
-    code != null &&
-    state != null &&
-    handle != null &&
-    toolkitConfigId != null
-      ? await exchangeOnce(handle, toolkitConfigId, agentId, code, state)
+    !error && code != null && state != null && target != null
+      ? await exchangeOnce(
+          target.type,
+          target.handle,
+          target.toolkitId,
+          target.type === "workload" ? target.agentId : null,
+          code,
+          state,
+        )
       : {
           success: false,
           message:
-            error ?? "Missing code, state, handle, or toolkit config ID.",
+            error ??
+            "Missing or invalid OAuth callback target, code, or state.",
         };
 
   return (
     <OAuthMcpCallbackPage
       success={result.success}
       message={result.success ? null : result.message}
-      returnHref={
-        handle != null && agentId != null
-          ? `/w/${handle}/agents/${agentId}/settings/capabilities#agent-toolkits`
-          : null
-      }
+      returnHref={target != null ? mcpCallbackReturnPath(target) : null}
     />
   );
 }

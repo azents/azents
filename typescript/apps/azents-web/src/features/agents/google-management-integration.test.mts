@@ -23,7 +23,10 @@ function context(attemptId = "old", toolkitId?: string): GoogleResume {
     expiresAt: deadline,
     stateDigest: "a".repeat(64),
     phase: "REVIEW",
-    returnPath: googleResume.googleReturnPath("team", "agent", toolkitId),
+    returnPath: googleResume.googleReturnPath(
+      { handle: "team", agentId: "agent" },
+      toolkitId,
+    ),
   };
 }
 function query(data: unknown): Record<string, unknown> {

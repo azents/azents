@@ -16,6 +16,7 @@ import {
   creationReturnPath,
   deserializeGitHubUserCreation,
   GITHUB_USER_CREATION_KEY,
+  gitHubCreationMatches,
 } from "../github-user-creation-state";
 import {
   acceptGitHubCreationResult,
@@ -34,6 +35,7 @@ import {
   projectGitHubReviewSettings,
   projectGitHubWizardMode,
 } from "../provider-config-views";
+import { toolkitManagementPath } from "../toolkit-owner-scope";
 import { useGitHubWizardProgression } from "./useGitHubWizardProgression";
 import type { GitHubWizardProps } from "../components/GitHubWizard";
 import type { GitHubUserCreationContext } from "../github-user-creation-state";
@@ -47,17 +49,20 @@ import type {
   GitHubWizardPublication,
   GitHubWizardSettings,
 } from "../github-wizard-state";
+import type {
+  PersonalToolkitOrigin,
+  ToolkitOwnerScope,
+} from "../toolkit-owner-scope";
 import type { GitHubUserCreationReview } from "@azents/public-client";
 
-export interface GitHubWizardContainerProps {
-  handle: string;
-  agentId?: string;
+export type GitHubWizardContainerProps = ToolkitOwnerScope & {
+  navigationOrigin?: PersonalToolkitOrigin;
   embedded?: boolean;
   initialDescription?: string;
   onComplete?: () => void;
   onPendingChange?: (pending: boolean) => void;
   onAbandonReady?: (abandon: (() => void) | null) => void;
-}
+};
 const EMPTY_CREDENTIALS: GitHubWizardCredentials = {
   token: "",
   appId: "",
@@ -84,19 +89,29 @@ function restoredSettings(
   };
 }
 
-export function useGitHubWizardContainer({
-  handle,
-  agentId,
-  embedded = false,
-  initialDescription = "",
-  onComplete,
-  onPendingChange,
-  onAbandonReady,
-}: GitHubWizardContainerProps): GitHubWizardProps {
+export function useGitHubWizardContainer(
+  props: GitHubWizardContainerProps,
+): GitHubWizardProps {
+  const {
+    embedded = false,
+    initialDescription = "",
+    onComplete,
+    onPendingChange,
+    onAbandonReady,
+  } = props;
   const t = useTranslations("workspace.toolkits.github.wizard");
   const router = useRouter();
   const utils = trpc.useUtils();
-  const scope = { handle, agentId };
+  const handle = props.handle;
+  const agentId = "agentId" in props ? props.agentId : null;
+  const personalOwner = "owner" in props;
+  const scope = useMemo<ToolkitOwnerScope>(
+    () =>
+      personalOwner
+        ? { owner: "user", handle }
+        : { handle, ...(agentId != null && { agentId }) },
+    [personalOwner, handle, agentId],
+  );
   const availability = trpc.toolkit.githubUser.availability.useQuery(scope, {
     retry: false,
   });
@@ -106,6 +121,7 @@ export function useGitHubWizardContainer({
   const confirmMutation = trpc.toolkit.githubUserCreation.confirm.useMutation();
   const createMutation = trpc.toolkit.createConfig.useMutation();
   const createAgentMutation = trpc.toolkit.createAgentConfig.useMutation();
+  const createPersonalMutation = trpc.personalToolkit.create.useMutation();
   const installationsMutation =
     trpc.toolkit.getGithubInstallations.useMutation();
   const [, saveContext, clearContext] =
@@ -160,7 +176,13 @@ export function useGitHubWizardContainer({
       : selection.type === "IDENTITY"
         ? selection.identity
         : wizardIdentity(selection.mode);
-  const returnPath = creationReturnPath(handle, agentId);
+  const returnPath = creationReturnPath(scope, props.navigationOrigin);
+  const listPath =
+    "owner" in scope
+      ? `/w/${encodeURIComponent(handle)}/personal-tools`
+      : scope.agentId == null
+        ? `/w/${scope.handle}/toolkits`
+        : returnPath;
   const { start: startPopupWatch, stop: stopPopupWatch } = useInterval(() => {
     if (popup.current?.closed) {
       popup.current = null;
@@ -180,10 +202,10 @@ export function useGitHubWizardContainer({
   const cancelExact = useCallback(
     (attemptId: string): void => {
       void cancelMutation
-        .mutateAsync({ handle, agentId, attemptId })
+        .mutateAsync({ ...scope, attemptId })
         .catch(() => null);
     },
-    [agentId, cancelMutation, handle],
+    [scope, cancelMutation],
   );
   const abandon = useCallback((): void => {
     if (pending.current) {
@@ -326,8 +348,7 @@ export function useGitHubWizardContainer({
     });
     if (
       saved == null ||
-      saved.handle !== handle ||
-      saved.agentId !== agentId ||
+      !gitHubCreationMatches(saved, scope) ||
       saved.returnPath !== returnPath
     ) {
       return;
@@ -625,7 +646,6 @@ export function useGitHubWizardContainer({
         toolkitId = result.toolkit_id;
       } else {
         const input = {
-          handle,
           toolkitType: "github",
           ...(trimToolkitWhitespace(settings.name) && { name: settings.name }),
           ...(trimToolkitWhitespace(settings.slug) && { slug: settings.slug }),
@@ -637,9 +657,21 @@ export function useGitHubWizardContainer({
           alwaysExposeTools: settings.alwaysExposeTools,
         };
         const result =
-          agentId == null
-            ? await createMutation.mutateAsync(input)
-            : await createAgentMutation.mutateAsync({ ...input, agentId });
+          "owner" in scope
+            ? await createPersonalMutation.mutateAsync({
+                ...input,
+                handle: scope.handle,
+              })
+            : scope.agentId == null
+              ? await createMutation.mutateAsync({
+                  ...input,
+                  handle: scope.handle,
+                })
+              : await createAgentMutation.mutateAsync({
+                  ...input,
+                  handle: scope.handle,
+                  agentId: scope.agentId,
+                });
         toolkitId = result.id;
       }
     } catch (error: unknown) {
@@ -666,22 +698,33 @@ export function useGitHubWizardContainer({
     setCredentials(EMPTY_CREDENTIALS);
     setPublication({ type: "SUCCESS" });
     onComplete?.();
-    void Promise.allSettled([
-      utils.toolkit.listConfigs.invalidate({ handle }),
-      utils.toolkit.listAvailableConfigs.invalidate({ handle }),
-      utils.toolkit.listAgentManagement.invalidate(),
-    ]);
+    if ("owner" in scope) {
+      void Promise.allSettled([
+        utils.personalToolkit.list.invalidate({ handle: scope.handle }),
+        utils.personalToolkit.get.invalidate({ handle: scope.handle }),
+        utils.personalToolkit.accessForAgent.invalidate({
+          handle: scope.handle,
+        }),
+      ]);
+    } else {
+      void Promise.allSettled([
+        utils.toolkit.listConfigs.invalidate({ handle: scope.handle }),
+        utils.toolkit.listAvailableConfigs.invalidate({ handle: scope.handle }),
+        utils.toolkit.listAgentManagement.invalidate(),
+      ]);
+    }
     if (!embedded) {
-      router.replace(
-        agentId == null
-          ? `/w/${handle}/toolkits/${toolkitId}/edit`
-          : returnPath,
-      );
+      router.replace(toolkitManagementPath(scope, toolkitId));
     }
   }
   return {
     embedded,
-    sharingScope: agentId == null ? "workspace_shared" : "agent_only",
+    sharingScope:
+      "owner" in scope
+        ? "personal"
+        : scope.agentId == null
+          ? "workspace_shared"
+          : "agent_only",
     identity,
     mode,
     connection,
@@ -797,14 +840,14 @@ export function useGitHubWizardContainer({
       if (embedded) {
         onComplete?.();
       } else {
-        router.push(agentId == null ? `/w/${handle}/toolkits` : returnPath);
+        router.push(listPath);
       }
     },
     onInspect: () => {
       if (embedded) {
         onComplete?.();
       } else {
-        router.push(agentId == null ? `/w/${handle}/toolkits` : returnPath);
+        router.push(listPath);
       }
     },
     onPublish: () => {

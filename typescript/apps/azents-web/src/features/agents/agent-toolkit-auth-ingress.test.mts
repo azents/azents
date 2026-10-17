@@ -78,6 +78,10 @@ function managementView(): unknown {
     "@/shared/toolkits/components/ToolkitTypeIcon": {
       ToolkitTypeIcon: "fixture-icon",
     },
+    "@/shared/toolkits/components/ToolkitCollection": {
+      ToolkitCard: "fixture-toolkit-card",
+      ToolkitCollection: "fixture-toolkit-collection",
+    },
     "@/shared/toolkits/GitHubUserAuthorizationContainer": {
       GitHubUserAuthorizationContainer: "fixture-user",
     },

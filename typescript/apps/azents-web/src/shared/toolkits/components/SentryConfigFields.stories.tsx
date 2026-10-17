@@ -6,9 +6,9 @@ import { SentryConfigFields } from "./SentryConfigFields";
 import type { SimpleProviderFieldsProps } from "../types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
-interface StoryProps extends SimpleProviderFieldsProps {
+type StoryProps = Exclude<SimpleProviderFieldsProps, { owner: "user" }> & {
   onRequest: (input: unknown) => void;
-}
+};
 function FieldStory(props: StoryProps): React.ReactElement {
   return (
     <SentryConfigFields {...props} view={projectSentryFields(props.config)} />

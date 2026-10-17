@@ -90,6 +90,14 @@ export function WorkspaceSidebar({
       />
       <NavLink
         component={Link}
+        href={`${basePath}/personal-tools`}
+        label={t("personalTools")}
+        leftSection={<IconPlugConnected size={18} />}
+        active={pathname.startsWith(`${basePath}/personal-tools`)}
+        onClick={onNavigate}
+      />
+      <NavLink
+        component={Link}
         href={`${basePath}/integrations`}
         label={t("integrations")}
         leftSection={<IconPlugConnected size={18} />}

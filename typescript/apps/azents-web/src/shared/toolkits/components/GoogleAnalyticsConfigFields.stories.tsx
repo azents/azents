@@ -6,9 +6,12 @@ import { ProviderFieldStoryTransport } from "./provider-field-story-fixtures";
 import type { ServiceAccountProviderFieldsProps } from "../types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
-interface StoryProps extends ServiceAccountProviderFieldsProps {
+type StoryProps = Exclude<
+  ServiceAccountProviderFieldsProps,
+  { owner: "user" }
+> & {
   onRequest: (input: unknown) => void;
-}
+};
 function FieldStory(props: StoryProps): React.ReactElement {
   return (
     <GoogleAnalyticsConfigFields

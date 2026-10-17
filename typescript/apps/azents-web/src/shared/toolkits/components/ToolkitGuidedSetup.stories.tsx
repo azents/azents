@@ -24,6 +24,7 @@ import { NotionConfigFields } from "./NotionConfigFields";
 import { SentryConfigFields } from "./SentryConfigFields";
 import { ToolkitForm } from "./ToolkitForm";
 import type { ToolkitFormValues } from "../schemas";
+import type { ToolkitOwnerScope } from "../toolkit-owner-scope";
 import type { ToolkitConfigFieldsInput } from "../types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 import type { ReactElement } from "react";
@@ -145,16 +146,22 @@ function Fields({
 interface StoryProps {
   provider: Provider;
   embedded: boolean;
-  agentOwned: boolean;
+  ownership: "workspace" | "agent" | "user";
   onSave: (values: ToolkitFormValues) => void;
 }
 function GuidedForm({
   provider,
   embedded,
-  agentOwned,
+  ownership,
   onSave,
 }: StoryProps): ReactElement {
   const definition = providers[provider];
+  const scope: ToolkitOwnerScope =
+    ownership === "user"
+      ? { owner: "user", handle: "workspace" }
+      : ownership === "agent"
+        ? { handle: "fixture", agentId: "fixture-agent" }
+        : { handle: "fixture" };
   const form = useForm<ToolkitFormValues>({
     mode: "controlled",
     initialValues: {
@@ -170,7 +177,7 @@ function GuidedForm({
     },
   });
   const input: ToolkitConfigFieldsInput = {
-    handle: "fixture",
+    ...scope,
     config: form.values.config,
     credentials: form.values.credentials ?? null,
     hasCredentials: false,
@@ -182,7 +189,7 @@ function GuidedForm({
       {...input}
       form={form}
       embedded={embedded}
-      agentId={agentOwned ? "fixture-agent" : void 0}
+      scope={scope}
       githubRegistration={projectGitHubFormRegistration(
         null,
         form.values.config,
@@ -206,6 +213,9 @@ function GuidedForm({
       onToolSelect={noOp}
       onConnectOauth={noOp}
       onDisconnectOauth={noOp}
+      oauthDisconnectConfirmation={false}
+      onAskDisconnectOauth={noOp}
+      onDismissDisconnectOauth={noOp}
       onCancel={noOp}
     />
   );
@@ -220,7 +230,12 @@ function GuidedForm({
 const meta = {
   title: "Toolkits/Guided setup/Real forms",
   component: GuidedForm,
-  args: { provider: "mcp", embedded: false, agentOwned: false, onSave: fn() },
+  args: {
+    provider: "mcp",
+    embedded: false,
+    ownership: "workspace",
+    onSave: fn(),
+  },
 } satisfies Meta<typeof GuidedForm>;
 export default meta;
 type Story = StoryObj<typeof meta>;
@@ -255,6 +270,25 @@ export const Mcp: Story = {
   },
 };
 export const Aws: Story = { args: { provider: "aws" } };
+export const PersonalMcp: Story = {
+  args: { provider: "mcp", ownership: "user" },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByText(
+        "Personal — only your personal Sessions with allowed Agents",
+      ),
+    ).toBeVisible();
+    await expect(
+      canvas.getByText(
+        "New personal connections initially allow all Agents you can access. You can restrict Agents after saving.",
+      ),
+    ).toBeVisible();
+  },
+};
+export const PersonalAws: Story = {
+  args: { provider: "aws", ownership: "user" },
+};
 export const Gcp: Story = { args: { provider: "gcp" } };
 export const Analytics: Story = { args: { provider: "google_analytics" } };
 export const Kubernetes: Story = { args: { provider: "kubernetes" } };
@@ -262,7 +296,7 @@ export const Sentry: Story = { args: { provider: "sentry" } };
 export const Notion: Story = { args: { provider: "notion" } };
 export const Brave: Story = { args: { provider: "brave_search" } };
 export const MobileAgent: Story = {
-  args: { provider: "mcp", embedded: true, agentOwned: true },
+  args: { provider: "mcp", embedded: true, ownership: "agent" },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement.ownerDocument.body);
     const dialog = canvas.getByRole("dialog");

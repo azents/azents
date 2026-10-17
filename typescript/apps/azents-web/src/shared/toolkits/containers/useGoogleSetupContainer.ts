@@ -10,6 +10,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -33,35 +34,48 @@ import type {
   GoogleSetupProps,
 } from "../google-types";
 import type {
+  PersonalToolkitOrigin,
+  ToolkitOwnerScope,
+} from "../toolkit-owner-scope";
+import type {
   GooglePublishedOutput,
   GoogleReview,
   GoogleTask,
 } from "@azents/public-client";
 
-export interface GoogleSetupContainerProps {
-  handle: string;
-  agentId?: string;
+export type GoogleSetupContainerProps = ToolkitOwnerScope & {
+  navigationOrigin?: PersonalToolkitOrigin;
   toolkitId?: string;
   embedded?: boolean;
   initialDescription?: string;
   onComplete?: () => void;
   onPendingChange?: (pending: boolean) => void;
   onAbandonReady?: (abandon: (() => void) | null) => void;
-}
-export function useGoogleSetupContainer({
-  handle,
-  agentId,
-  toolkitId,
-  embedded = false,
-  initialDescription = "",
-  onComplete,
-  onPendingChange,
-  onAbandonReady,
-}: GoogleSetupContainerProps): GoogleSetupProps {
+};
+export function useGoogleSetupContainer(
+  props: GoogleSetupContainerProps,
+): GoogleSetupProps {
+  const {
+    toolkitId,
+    embedded = false,
+    initialDescription = "",
+    onComplete,
+    onPendingChange,
+    onAbandonReady,
+  } = props;
   const t = useTranslations("googleToolkit");
   const router = useRouter();
   const utils = trpc.useUtils();
-  const scope = { handle, agentId };
+  const handle = props.handle;
+  const agentId = "agentId" in props ? props.agentId : null;
+  const personalOwner = "owner" in props;
+  const scope = useMemo<ToolkitOwnerScope>(
+    () =>
+      personalOwner
+        ? { owner: "user", handle }
+        : { handle, ...(agentId != null && { agentId }) },
+    [personalOwner, handle, agentId],
+  );
   const preparationQuery = trpc.toolkit.google.preparation.useQuery(scope, {
     retry: false,
   });
@@ -150,6 +164,17 @@ export function useGoogleSetupContainer({
     setFlow({ type: "SELECT" });
   };
   const invalidate = async (): Promise<void> => {
+    if ("owner" in scope) {
+      await Promise.all([
+        utils.personalToolkit.list.invalidate({ handle: scope.handle }),
+        utils.personalToolkit.get.invalidate({ handle: scope.handle }),
+        utils.personalToolkit.accessForAgent.invalidate({
+          handle: scope.handle,
+        }),
+        utils.toolkit.google.status.invalidate(),
+      ]);
+      return;
+    }
     await Promise.all([
       utils.toolkit.listConfigs.invalidate(),
       utils.toolkit.listAvailableConfigs.invalidate(),
@@ -195,9 +220,11 @@ export function useGoogleSetupContainer({
         onComplete();
       } else {
         router.push(
-          agentId == null
-            ? `/w/${handle}/toolkits`
-            : googleReturnPath(handle, agentId),
+          "owner" in scope
+            ? `/w/${encodeURIComponent(handle)}/personal-tools`
+            : scope.agentId == null
+              ? `/w/${scope.handle}/toolkits`
+              : googleReturnPath(scope),
         );
       }
     }
@@ -223,10 +250,7 @@ export function useGoogleSetupContainer({
       key: GOOGLE_RESUME_KEY,
       deserialize: deserializeGoogleResume,
     });
-    if (
-      context == null ||
-      !googleResumeMatches(context, handle, agentId, toolkitId)
-    ) {
+    if (context == null || !googleResumeMatches(context, scope, toolkitId)) {
       return;
     }
     active.current = context;
@@ -302,14 +326,13 @@ export function useGoogleSetupContainer({
         return;
       }
       writeResume({
-        handle,
-        agentId,
+        ...scope,
         toolkitId,
         attemptId: result.attempt_id,
         expiresAt: result.expires_at,
         stateDigest,
         phase: "AUTHORIZING",
-        returnPath: googleReturnPath(handle, agentId, toolkitId),
+        returnPath: googleReturnPath(scope, toolkitId, props.navigationOrigin),
       });
       window.location.assign(result.authorization_url);
     } catch {
@@ -417,8 +440,7 @@ export function useGoogleSetupContainer({
     setOperationError(null);
     try {
       const result = await cancel.mutateAsync({
-        handle,
-        agentId,
+        ...scope,
         attemptId: context.attemptId,
       });
       if (!sameGoogleResumeAttempt(readResume(), context)) {
@@ -503,7 +525,8 @@ export function useGoogleSetupContainer({
       flow.type === "REVIEW" &&
       canPublishGoogleReview(flow.review, tasks, acknowledged, Date.now()),
     reconnect: toolkitId != null,
-    agentOwned: agentId != null,
+    ownership:
+      "owner" in scope ? "user" : scope.agentId != null ? "agent" : "workspace",
     cancelling,
     disconnecting,
     disconnectConfirmation,

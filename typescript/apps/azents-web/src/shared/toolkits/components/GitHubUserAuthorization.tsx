@@ -10,6 +10,7 @@ import {
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
 import { GitHubUserConnectionDetails } from "./GitHubUserConnectionDetails";
+import { ToolkitDisconnectConfirmation } from "./ToolkitDisconnectConfirmation";
 import type { GitHubUserSetupState } from "../types";
 import type { GitHubUserConnectionDetailsProps } from "./GitHubUserConnectionDetails";
 import type { GitHubUserConnectionSummary } from "@azents/public-client";
@@ -167,35 +168,20 @@ export function GitHubUserAuthorization(
         closeOnEscape={props.operation.type !== "DISCONNECTING"}
         withCloseButton={props.operation.type !== "DISCONNECTING"}
       >
-        <Stack>
-          <Text>
-            {t(
-              props.sharingScope === "workspace_shared"
-                ? "sharedDisconnectWarning"
-                : "disconnectWarning",
-            )}
-          </Text>
-          <Text size="sm" c="dimmed">
-            {t("revocationLimit")}
-          </Text>
-          <Group justify="flex-end">
-            <Button
-              variant="default"
-              disabled={props.operation.type === "DISCONNECTING"}
-              onClick={props.onCancelDisconnect}
-              data-autofocus
-            >
-              {t("cancel")}
-            </Button>
-            <Button
-              color="red"
-              loading={props.operation.type === "DISCONNECTING"}
-              onClick={props.onDisconnect}
-            >
-              {t("disconnect")}
-            </Button>
-          </Group>
-        </Stack>
+        <ToolkitDisconnectConfirmation
+          personal={props.sharingScope === "personal"}
+          description={t(
+            props.sharingScope === "workspace_shared"
+              ? "sharedDisconnectWarning"
+              : "disconnectWarning",
+          )}
+          detail={t("revocationLimit")}
+          confirmLabel={t("disconnect")}
+          cancelLabel={t("cancel")}
+          pending={props.operation.type === "DISCONNECTING"}
+          onConfirm={props.onDisconnect}
+          onCancel={props.onCancelDisconnect}
+        />
       </Modal>
     </Stack>
   );

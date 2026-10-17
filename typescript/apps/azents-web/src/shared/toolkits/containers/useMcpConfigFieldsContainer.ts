@@ -2,6 +2,7 @@
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { trpc } from "@/trpc/client";
+import type { ToolkitOwnerScope } from "../toolkit-owner-scope";
 import type {
   McpConfigFieldsInput,
   McpConfigFieldsProps,
@@ -17,14 +18,20 @@ export function useMcpConfigFieldsContainer(
   });
   const mutation = trpc.toolkit.testConnection.useMutation();
   async function test(): Promise<void> {
-    if (!props.handle) {
-      return;
+    let scope: ToolkitOwnerScope;
+    if ("owner" in props) {
+      scope = { owner: props.owner, handle: props.handle };
+    } else {
+      const { handle, agentId } = props;
+      if (!handle) {
+        return;
+      }
+      scope = { handle, ...(agentId != null && { agentId }) };
     }
     setTestState({ type: "TESTING" });
     try {
       const result = await mutation.mutateAsync({
-        handle: props.handle,
-        ...(props.agentId != null && { agentId: props.agentId }),
+        ...scope,
         toolkitType: "mcp",
         toolkitConfigId: props.toolkitConfigId ?? null,
         config: props.config,

@@ -8,6 +8,7 @@ import {
   Divider,
   Drawer,
   Group,
+  Menu,
   Paper,
   Popover,
   rem,
@@ -24,9 +25,12 @@ import {
   IconChevronRight,
   IconPaperclip,
   IconPlayerStop,
+  IconPlus,
   IconSend,
   IconX,
 } from "@tabler/icons-react";
+import { useTranslations } from "next-intl";
+import Link from "next/link";
 import { memo, useId } from "react";
 import { AttachmentPreviewBarContainer } from "../containers/AttachmentPreviewBarContainer";
 import classes from "./ChatInput.module.css";
@@ -67,8 +71,10 @@ export const ChatInput = memo(function ChatInput({
   view: ChatInputContainer;
 }): React.ReactElement {
   const messageInputId = useId();
+  const tPersonalTools = useTranslations("account.personalTools");
   const {
     t,
+    personalToolsHref,
     isMobile,
     selectableModelOptions,
     inferenceProfileSelectionEnabled,
@@ -1121,21 +1127,53 @@ export const ChatInput = memo(function ChatInput({
               }}
             />
             <Group gap="xs" wrap="nowrap">
-              <ActionIcon
-                size={rem(36)}
-                radius={rem(12)}
-                variant="subtle"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={
-                  inputDisabled ||
-                  isUploading ||
-                  Boolean(editingMessageId) ||
-                  selectedAction?.attachments.policy === "unsupported"
-                }
-                aria-label={t("attachment.attach")}
-              >
-                <IconPaperclip size={17} />
-              </ActionIcon>
+              {personalToolsHref ? (
+                <Menu position="top-start" withinPortal>
+                  <Menu.Target>
+                    <ActionIcon
+                      size={rem(36)}
+                      radius={rem(12)}
+                      variant="subtle"
+                      aria-label={tPersonalTools("composerMenu")}
+                    >
+                      <IconPlus size={17} />
+                    </ActionIcon>
+                  </Menu.Target>
+                  <Menu.Dropdown>
+                    <Menu.Item
+                      leftSection={<IconPaperclip size={17} />}
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={
+                        inputDisabled ||
+                        isUploading ||
+                        Boolean(editingMessageId) ||
+                        selectedAction?.attachments.policy === "unsupported"
+                      }
+                    >
+                      {t("attachment.attach")}
+                    </Menu.Item>
+                    <Menu.Item component={Link} href={personalToolsHref}>
+                      {tPersonalTools("composerLink")}
+                    </Menu.Item>
+                  </Menu.Dropdown>
+                </Menu>
+              ) : (
+                <ActionIcon
+                  size={rem(36)}
+                  radius={rem(12)}
+                  variant="subtle"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={
+                    inputDisabled ||
+                    isUploading ||
+                    Boolean(editingMessageId) ||
+                    selectedAction?.attachments.policy === "unsupported"
+                  }
+                  aria-label={t("attachment.attach")}
+                >
+                  <IconPaperclip size={17} />
+                </ActionIcon>
+              )}
               {isMobile ? (
                 <>
                   {inferenceProfileSelectionEnabled ? profileTrigger : null}

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { skipToken } from "@tanstack/react-query";
 import {
   BrowserStorageFixture,
   deferred,
@@ -34,7 +35,10 @@ function context(attemptId = "old", toolkitId?: string): GoogleResume {
     expiresAt: deadline,
     stateDigest: "a".repeat(64),
     phase: "REVIEW",
-    returnPath: googleResume.googleReturnPath("team", "agent", toolkitId),
+    returnPath: googleResume.googleReturnPath(
+      { handle: "team", agentId: "agent" },
+      toolkitId,
+    ),
   };
 }
 const review = {
@@ -177,6 +181,55 @@ void test("actual callback survives Strict Mode probe and dispatches one exact e
   assert.equal(object(store.value).phase, "REVIEW");
   assert.deepEqual(routes, [context().returnPath]);
 });
+void test("actual personal Google callback exchanges with a required Workspace handle and returns to Workspace personal management", async () => {
+  const store = new BrowserStorageFixture(googleResume.GOOGLE_RESUME_KEY);
+  const personal: GoogleResume = {
+    owner: "user",
+    handle: "workspace",
+    toolkitId: "saved",
+    attemptId: "personal",
+    expiresAt: deadline,
+    stateDigest: await googleResume.googleStateDigest("opaque-personal-state"),
+    phase: "AUTHORIZING",
+    returnPath: googleResume.googleReturnPath(
+      { owner: "user", handle: "workspace" },
+      "saved",
+    ),
+  };
+  store.value = personal;
+  let input: unknown = null;
+  const dispatched = deferred<void>();
+  let response: NativeDeferred | null = null;
+  const { harness, routes } = callbackHarness(
+    store,
+    (value) => {
+      input = value;
+      dispatched.resolve();
+      return receipt(response);
+    },
+    () => Promise.reject(new Error("Unexpected cancellation.")),
+  );
+  response = harness.nativeDeferred();
+  harness.render({
+    code: "fixture-code",
+    state: "opaque-personal-state",
+    providerError: null,
+  });
+  harness.flushEffects();
+  await dispatched.promise;
+  assert.equal(object(input).owner, "user");
+  assert.equal(object(input).handle, "workspace");
+  assert.equal(Object.hasOwn(object(input), "agentId"), false);
+  response.resolve({
+    ...review,
+    attempt_id: "personal",
+    ownership: "personal",
+    reconnect_toolkit_id: "saved",
+  });
+  await response.promise;
+  assert.equal(object(store.value).phase, "REVIEW");
+  assert.deepEqual(routes, [personal.returnPath]);
+});
 void test("denial cancellation observes publication rather than labelling it discarded", async () => {
   const store = new BrowserStorageFixture(googleResume.GOOGLE_RESUME_KEY);
   store.value = {
@@ -279,7 +332,10 @@ for (const agentOwned of [false, true]) {
       tk[name] = {
         useMutation: () => ({
           ...noMutation(),
-          mutate: (input: unknown) => captured.push({ route: name, input }),
+          mutateAsync: (input: unknown): Promise<unknown> => {
+            captured.push({ route: name, input });
+            return Promise.resolve(toolkit);
+          },
         }),
       };
     }
@@ -295,6 +351,34 @@ for (const agentOwned of [false, true]) {
         fetch: () => Promise.resolve({}),
       };
     }
+    const personal = {
+      get: { useQuery: () => query(null) },
+      create: { useMutation: noMutation },
+      update: { useMutation: noMutation },
+      connectOauth: { useMutation: noMutation },
+      disconnectOauth: { useMutation: noMutation },
+    };
+    const api = {
+      toolkit: tk,
+      personalToolkit: personal,
+      useUtils: () => ({ toolkit: utilsTk }),
+    };
+    const ownerAdapter = harness.load(
+      new URL(
+        "../../shared/toolkits/containers/useToolkitOwnerAdapter.ts",
+        import.meta.url,
+      ),
+      "useToolkitOwnerAdapter",
+      {
+        "@tanstack/react-query": { skipToken },
+        "@/trpc/client": { trpc: api },
+        "@/shared/lib/toolkit-identifiers": {
+          trimToolkitWhitespace: (value: string): string => value.trim(),
+        },
+        "../toolkit-form-lifecycle": formLifecycle,
+      },
+      {},
+    );
     harness.load(
       new URL(
         "../../shared/toolkits/containers/useToolkitFormContainer.ts",
@@ -315,8 +399,9 @@ for (const agentOwned of [false, true]) {
         "next-intl": { useTranslations: translations },
         "next/navigation": { useRouter: () => ({ push: () => {} }) },
         "@/trpc/client": {
-          trpc: { toolkit: tk, useUtils: () => ({ toolkit: utilsTk }) },
+          trpc: api,
         },
+        "./useToolkitOwnerAdapter": { useToolkitOwnerAdapter: ownerAdapter },
         "@/shared/lib/redacted-credentials": {
           normalizeCredentialEdits: (value: unknown) => value,
         },

@@ -5,11 +5,13 @@ import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { isRecord } from "@/shared/lib/unknown-value";
 import { trpc } from "@/trpc/client";
+import { pickToolkitOwnerScope } from "../toolkit-owner-scope";
 import type { GithubFieldsViewProps } from "../components/GithubFieldsView";
+import type { ToolkitOwnerScope } from "../toolkit-owner-scope";
 import type { GithubInstallationState, InstallationTarget } from "../types";
 import type { GitHubPlatformAuthorizationStateResponse } from "@azents/public-client";
 
-export interface GithubConfigFieldsProps {
+export type GithubConfigFieldsProps = ToolkitOwnerScope & {
   config: Record<string, unknown>;
   onConfigChange: (config: Record<string, unknown>) => void;
   credentials: Record<string, unknown> | null;
@@ -17,10 +19,8 @@ export interface GithubConfigFieldsProps {
   hasCredentials: boolean;
   authorizationState: GitHubPlatformAuthorizationStateResponse | null;
   savedAuthType?: string;
-  handle?: string;
-  agentId?: string;
   toolkitConfigId?: string;
-}
+};
 function targets(value: unknown): InstallationTarget[] {
   if (!Array.isArray(value)) {
     return [];
@@ -50,10 +50,8 @@ export function useGithubConfigFieldsContainer(
 ): GithubFieldsViewProps {
   const t = useTranslations("workspace.toolkits.github");
   const utils = trpc.useUtils();
-  const availability = trpc.toolkit.githubUser.availability.useQuery(
-    { handle: props.handle ?? "", agentId: props.agentId },
-    { enabled: Boolean(props.handle) },
-  );
+  const scope = pickToolkitOwnerScope(props);
+  const availability = trpc.toolkit.githubUser.availability.useQuery(scope);
   const getInstallations = trpc.toolkit.getGithubInstallations.useMutation();
   const test = trpc.toolkit.testConnection.useMutation();
   const [runtimeAcknowledged, setRuntimeAcknowledged] = useState(false);
@@ -102,10 +100,7 @@ export function useGithubConfigFieldsContainer(
       installations: current.installations,
     }));
     try {
-      const data = await utils.toolkit.getGithubOauthUrl.fetch({
-        handle: props.handle ?? "",
-        agentId: props.agentId,
-      });
+      const data = await utils.toolkit.getGithubOauthUrl.fetch(scope);
       open(data.oauth_url);
     } catch {
       setInstallationState((current) => ({
@@ -136,8 +131,7 @@ export function useGithubConfigFieldsContainer(
       }));
       void getInstallations
         .mutateAsync({
-          handle: props.handle ?? "",
-          agentId: props.agentId,
+          ...scope,
           code: event.data.code,
           state: event.data.state,
         })
@@ -171,11 +165,9 @@ export function useGithubConfigFieldsContainer(
     selectedInstallations: targets(props.credentials?.installations),
     installationState,
     runtimeAcknowledged,
-    canTest:
-      Boolean(props.handle) &&
-      ["pat", "github_app", "github_app_platform"].includes(
-        String(props.config.github_auth_type),
-      ),
+    canTest: ["pat", "github_app", "github_app_platform"].includes(
+      String(props.config.github_auth_type),
+    ),
     testState: test.isPending
       ? { type: "TESTING" }
       : test.data
@@ -196,10 +188,7 @@ export function useGithubConfigFieldsContainer(
             }
           : { type: "IDLE" },
     onRetryAvailability: () => {
-      void utils.toolkit.githubUser.availability.invalidate({
-        handle: props.handle ?? "",
-        agentId: props.agentId,
-      });
+      void utils.toolkit.githubUser.availability.invalidate(scope);
     },
     onRuntimeAcknowledged: setRuntimeAcknowledged,
     onConnectInstallations: () => {
@@ -207,7 +196,7 @@ export function useGithubConfigFieldsContainer(
     },
     onInstallApp: () => {
       void utils.toolkit.getGithubInstallUrl
-        .fetch({ handle: props.handle ?? "", agentId: props.agentId })
+        .fetch(scope)
         .then((data) =>
           open(data.install_url, () => {
             void connectInstallations();
@@ -222,8 +211,7 @@ export function useGithubConfigFieldsContainer(
     },
     onTest: () =>
       test.mutate({
-        handle: props.handle ?? "",
-        agentId: props.agentId,
+        ...scope,
         toolkitType: "github",
         toolkitConfigId: props.toolkitConfigId ?? null,
         config: props.config,

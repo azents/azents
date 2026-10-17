@@ -3,15 +3,15 @@ import {
   githubSetupV1AgentSetupVerification,
   githubSetupV1SharedSetupApp,
   githubSetupV1SharedSetupVerification,
+  personalGithubToolkitV1PersonalGithubSetupApp,
+  personalGithubToolkitV1PersonalGithubSetupVerify,
 } from "@azents/public-client";
 import { z } from "zod/v4";
+import { toolkitScopedInput } from "@/shared/toolkits/toolkit-owner-scope";
 import { mapExpectedError } from "../api-error";
 import { publicProcedure, router } from "../init";
 
-const scope = z.object({
-  handle: z.string().min(1),
-  agentId: z.string().min(1).optional(),
-});
+const scope = toolkitScopedInput({});
 const numericId = z.string().regex(/^[1-9][0-9]*$/);
 const transport = z
   .object({ toolsets: z.array(z.string()), timeout: z.number().positive() })
@@ -57,6 +57,16 @@ async function request<T>(operation: () => Promise<T>): Promise<T> {
 }
 export const githubSetupRouter = router({
   app: publicProcedure.input(scope).query(async ({ ctx, input }) => {
+    if ("owner" in input) {
+      const { data } = await request(() =>
+        personalGithubToolkitV1PersonalGithubSetupApp({
+          client: ctx.apiClient,
+          path: { handle: input.handle },
+          throwOnError: true,
+        }),
+      );
+      return data;
+    }
     const { data } = await request(() =>
       input.agentId == null
         ? githubSetupV1SharedSetupApp({
@@ -73,8 +83,19 @@ export const githubSetupRouter = router({
     return data;
   }),
   verify: publicProcedure
-    .input(scope.extend({ verification }))
+    .input(toolkitScopedInput({ verification }))
     .mutation(async ({ ctx, input }) => {
+      if ("owner" in input) {
+        const { data } = await request(() =>
+          personalGithubToolkitV1PersonalGithubSetupVerify({
+            client: ctx.apiClient,
+            path: { handle: input.handle },
+            body: input.verification,
+            throwOnError: true,
+          }),
+        );
+        return data;
+      }
       const { data } = await request(() =>
         input.agentId == null
           ? githubSetupV1SharedSetupVerification({

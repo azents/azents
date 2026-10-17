@@ -4,6 +4,7 @@ import {
   decodeGoogleResume,
   deserializeGoogleResume,
   googleResumeMatches,
+  googleResumeScope,
   googleReturnPath,
   googleStateDigest,
 } from "../../shared/toolkits/google-resume.ts";
@@ -21,7 +22,7 @@ const fixture = {
   expiresAt: "2026-10-15T00:00:00Z",
   stateDigest: "a".repeat(64),
   phase: "AUTHORIZING",
-  returnPath: googleReturnPath("team", "agent"),
+  returnPath: googleReturnPath({ handle: "team", agentId: "agent" }),
 };
 void test("Google resume validates exact shared/Agent return destination", () => {
   const context = decodeGoogleResume(fixture);
@@ -29,8 +30,14 @@ void test("Google resume validates exact shared/Agent return destination", () =>
   assert.ok(
     decodeGoogleResume({ ...fixture, expiresAt: "2026-10-15T00:00:00+09:00" }),
   );
-  assert.equal(googleResumeMatches(context, "team", "other"), false);
-  assert.equal(googleResumeMatches(context, "team", "agent", "saved"), false);
+  assert.equal(
+    googleResumeMatches(context, { handle: "team", agentId: "other" }),
+    false,
+  );
+  assert.equal(
+    googleResumeMatches(context, { handle: "team", agentId: "agent" }, "saved"),
+    false,
+  );
   assert.equal(
     decodeGoogleResume({ ...fixture, returnPath: "/w/other/toolkits/new" }),
     null,
@@ -45,6 +52,47 @@ void test("Google resume validates exact shared/Agent return destination", () =>
     null,
   );
   assert.equal(deserializeGoogleResume("not-json"), null);
+});
+void test("Personal Google resume is account-scoped without a workload Workspace", () => {
+  const personal = {
+    owner: "user",
+    handle: "workspace",
+    toolkitId: "saved",
+    attemptId: "personal-attempt",
+    expiresAt: fixture.expiresAt,
+    stateDigest: fixture.stateDigest,
+    phase: "AUTHORIZING",
+    returnPath: googleReturnPath(
+      { owner: "user", handle: "workspace" },
+      "saved",
+    ),
+  };
+  const decoded = decodeGoogleResume(personal);
+  assert.ok(decoded);
+  assert.deepEqual(googleResumeScope(decoded), {
+    owner: "user",
+    handle: "workspace",
+  });
+  assert.ok(
+    googleResumeMatches(
+      decoded,
+      { owner: "user", handle: "workspace" },
+      "saved",
+    ),
+  );
+  assert.equal(
+    googleResumeMatches(decoded, { handle: "team", agentId: "agent" }, "saved"),
+    false,
+  );
+  for (const invalid of [
+    { handle: "team" },
+    { agentId: "agent" },
+    { userId: "foreign" },
+    { returnPath: "/w/team/agents/agent/settings/capabilities#agent-toolkits" },
+    { returnPath: "https://example.invalid/return" },
+  ]) {
+    assert.equal(decodeGoogleResume({ ...personal, ...invalid }), null);
+  }
 });
 void test("nonsecret state digests distinguish sibling callbacks", async () => {
   const first = await googleStateDigest("opaque-first-state");

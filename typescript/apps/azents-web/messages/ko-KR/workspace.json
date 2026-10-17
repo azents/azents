@@ -14,7 +14,8 @@
     "empty": "아직 에이전트가 없습니다",
     "viewAllAgents": "전체 에이전트 보기 ({count})",
     "slackApps": "외부 채널",
-    "integrations": "외부 채널"
+    "integrations": "외부 채널",
+    "personalTools": "개인 도구"
   },
   "settings": {
     "layout": {
@@ -1817,6 +1818,7 @@
         "notConnected": "GitHub 실행 계정이 연결되지 않았습니다.",
         "sharedScope": "워크스페이스 공유 툴킷: 연결된 에이전트와 권한이 있는 참여자는 각자의 계정이 아니라 여기에 연결된 GitHub 계정의 권한으로 작업합니다.",
         "agentScope": "이 에이전트 전용 툴킷: 이 에이전트와 권한이 있는 참여자는 각자의 계정이 아니라 여기에 연결된 GitHub 계정의 권한으로 작업합니다.",
+        "personalScope": "개인 연결: 허용한 Agent와의 내 개인 Session에서만 저장된 GitHub 계정을 사용합니다.",
         "statusError": "연결 상태를 불러오지 못했습니다. 계정이 연결되거나 해제되었다고 판단하기 전에 다시 확인하세요.",
         "statusLoading": "GitHub 계정 연결 상태를 불러오는 중…",
         "retry": "다시 시도",
@@ -1922,6 +1924,7 @@
         "off": "사용 안 함",
         "sharedScope": "워크스페이스 공유: 연결된 Agent와 권한이 있는 참여자는 각자의 계정이 아니라, 여기서 확인한 GitHub 계정이나 App으로 일반·자동 작업을 처리합니다.",
         "agentScope": "이 Agent 전용: 이 Agent와 권한이 있는 참여자만 각자의 계정이 아니라, 여기서 확인한 GitHub 계정이나 App으로 일반·자동 작업을 처리합니다.",
+        "personalScope": "개인 연결: 허용한 Agent와의 내 개인 Session에서만 이 GitHub 계정이나 App을 사용합니다. 새 연결은 처음에 내가 접근할 수 있는 모든 Agent에 허용됩니다.",
         "confirm": "GitHub 연결 저장",
         "saveError": "저장하지 못했어요. 설정을 확인하거나 연결을 다시 설정한 뒤 저장해 주세요.",
         "uncertain": "저장됐는지 확인하지 못했어요. 다시 저장하지 말고, 연결 목록에서 먼저 확인해 주세요.",
@@ -1931,6 +1934,7 @@
         "progressiveHint": "선택하면 아래에 다음 설정이 이어집니다.",
         "ownershipHint": "이 범위 안에서 저장된 연결을 사용할 수 있습니다.",
         "agentScopeShort": "이 Agent 전용",
+        "personalScopeShort": "내 계정",
         "sharedScopeShort": "워크스페이스 공유",
         "setupProgress": "설정 진행 상황",
         "identityHint": "GitHub 작업에 사용할 계정이나 App을 골라주세요.",

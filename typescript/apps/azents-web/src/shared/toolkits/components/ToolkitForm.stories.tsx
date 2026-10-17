@@ -13,7 +13,10 @@ import { GitHubWizard } from "./GitHubWizard";
 import { ToolkitForm } from "./ToolkitForm";
 import type { ToolkitFormValues } from "../schemas";
 import type { ToolkitFormProps } from "./ToolkitForm";
-import type { ToolkitConfigResponse } from "@azents/public-client";
+import type {
+  PersonalToolkitResponse,
+  ToolkitConfigResponse,
+} from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 import type { ReactElement } from "react";
 
@@ -85,7 +88,7 @@ const meta = {
     ),
   ],
   args: {
-    handle: "acme",
+    scope: { handle: "acme" },
     embedded: false,
     toolkitTypeLocked: false,
     formState: { type: "CREATE" },
@@ -104,6 +107,9 @@ const meta = {
     onCredentialsChange: () => {},
     onConnectOauth: () => {},
     onDisconnectOauth: () => {},
+    oauthDisconnectConfirmation: false,
+    onAskDisconnectOauth: fn(),
+    onDismissDisconnectOauth: fn(),
     onCancel: () => {},
   },
 } satisfies Meta<typeof ToolkitFormStory>;
@@ -218,6 +224,71 @@ export const Editing = {
   },
 } satisfies Story;
 
+const personalConfig: PersonalToolkitResponse = {
+  id: "personal-example",
+  toolkit_type: "mcp",
+  slug: "personal_research",
+  name: "Personal research",
+  description: "A personal service connection.",
+  config: { server_url: "https://mcp.example", auth_type: "oauth2" },
+  prompt: null,
+  enabled: true,
+  always_expose_tools: false,
+  has_credentials: true,
+  created_at: "2026-10-17T00:00:00Z",
+  updated_at: "2026-10-17T00:00:00Z",
+  owner: {
+    kind: "user",
+    user_id: "example-owner",
+    workspace_id: "workspace-id",
+  },
+  access_mode: "all",
+  selected_agent_ids: [],
+  readiness: "ready",
+};
+
+export const PersonalEditing = {
+  args: {
+    ...Editing.args,
+    scope: { owner: "user", handle: "workspace" },
+    formState: { type: "EDIT", config: personalConfig },
+    backPath: "/w/workspace/personal-tools",
+    onCancel: fn(),
+    onSubmitValues: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByText(
+        "Personal — only your personal Sessions with allowed Agents",
+      ),
+    ).toBeVisible();
+    await expect(canvas.getByRole("textbox", { name: "Name" })).toHaveValue(
+      "Personal research",
+    );
+    await userEvent.type(
+      canvas.getByRole("textbox", { name: "Name" }),
+      " draft",
+    );
+    await userEvent.click(canvas.getByRole("button", { name: "Cancel" }));
+    await expect(args.onCancel).toHaveBeenCalledTimes(1);
+    await expect(args.onSubmitValues).not.toHaveBeenCalled();
+  },
+} satisfies Story;
+
+export const PersonalCreate = {
+  args: {
+    ...GenericMcpRequiresName.args,
+    scope: { owner: "user", handle: "workspace" },
+    backPath: "/w/workspace/personal-tools",
+  },
+} satisfies Story;
+
+export const PersonalMobileEditing = {
+  ...PersonalEditing,
+  parameters: { testViewport: { width: 390, height: 844 } },
+} satisfies Story;
+
 export const Submitting = {
   args: { mutationState: { type: "SUBMITTING" } },
   play: async ({ canvasElement }) => {
@@ -330,7 +401,7 @@ export const MobileEmbeddedGithub = {
   ],
   args: {
     embedded: true,
-    agentId: "agent-1",
+    scope: { handle: "acme", agentId: "agent-1" },
     toolkitTypeLocked: true,
     currentToolSlug: "github",
     toolOptions: [{ value: "github", label: "GitHub" }],

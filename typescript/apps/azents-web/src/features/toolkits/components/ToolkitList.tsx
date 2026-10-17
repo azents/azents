@@ -4,7 +4,6 @@ import {
   Alert,
   Badge,
   Button,
-  Card,
   Container,
   Group,
   Loader,
@@ -23,6 +22,10 @@ import {
   IconUsers,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import {
+  ToolkitCard,
+  ToolkitCollection,
+} from "@/shared/toolkits/components/ToolkitCollection";
 import { ToolkitTypeIcon } from "@/shared/toolkits/components/ToolkitTypeIcon";
 import { GITHUB_FEATURE_GROUPS } from "@/shared/toolkits/github-wizard-state";
 import { projectToolkitDetails } from "@/shared/toolkits/toolkit-detail-projection";
@@ -216,59 +219,44 @@ export function ToolkitList(props: ToolkitListProps): ReactElement {
               </Button>
             </Stack>
           ) : (
-            <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
+            <ToolkitCollection>
               {props.listState.configs.map((toolkit) => (
-                <Card
+                <ToolkitCard
                   key={toolkit.id}
-                  component="article"
-                  aria-label={toolkit.name}
-                  withBorder
-                  radius="md"
-                  padding="lg"
-                  className={classes.card}
-                >
-                  <Stack gap="xs">
-                    <ToolkitTypeIcon toolkitType={toolkit.toolkit_type} />
-                    <Text size="xs" c="dimmed">
-                      {providerName(toolkit.toolkit_type)}
-                    </Text>
-                    <Text fw={600} className={classes.name}>
-                      {toolkit.name}
-                    </Text>
-                    {toolkit.description && (
-                      <Text size="sm" c="dimmed" className={classes.name}>
-                        {toolkit.description}
-                      </Text>
-                    )}
-                  </Stack>
-                  <ToolkitBadges toolkit={toolkit} />
-                  <Group justify="flex-end" gap="xs" className={classes.footer}>
-                    {toolkitNeedsReauthorization(toolkit) && (
+                  name={toolkit.name}
+                  toolkitType={toolkit.toolkit_type}
+                  providerName={providerName(toolkit.toolkit_type)}
+                  description={toolkit.description}
+                  badges={<ToolkitBadges toolkit={toolkit} />}
+                  actions={
+                    <>
+                      {toolkitNeedsReauthorization(toolkit) && (
+                        <Button
+                          variant="light"
+                          color="orange"
+                          className={classes.warningText}
+                          data-workspace-reauthorization
+                          size="xs"
+                          disabled={blocked}
+                          onClick={() => props.onEdit(toolkit.id)}
+                        >
+                          {m("reviewAuthorization")}
+                        </Button>
+                      )}
                       <Button
-                        variant="light"
-                        color="orange"
-                        className={classes.warningText}
-                        data-workspace-reauthorization
+                        variant="subtle"
                         size="xs"
+                        rightSection={<IconArrowRight size="1em" />}
                         disabled={blocked}
-                        onClick={() => props.onEdit(toolkit.id)}
+                        onClick={() => props.onDetails(toolkit.id)}
                       >
-                        {m("reviewAuthorization")}
+                        {m("details")}
                       </Button>
-                    )}
-                    <Button
-                      variant="subtle"
-                      size="xs"
-                      rightSection={<IconArrowRight size="1em" />}
-                      disabled={blocked}
-                      onClick={() => props.onDetails(toolkit.id)}
-                    >
-                      {m("details")}
-                    </Button>
-                  </Group>
-                </Card>
+                    </>
+                  }
+                />
               ))}
-            </SimpleGrid>
+            </ToolkitCollection>
           ))}
       </Stack>
       <Modal

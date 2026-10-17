@@ -92,7 +92,7 @@ function McpFormFixture({
   });
   return (
     <ToolkitForm
-      handle="acme"
+      scope={{ handle: "acme" }}
       embedded
       toolkitTypeLocked
       formState={saved ? { type: "EDIT", config: saved } : { type: "CREATE" }}
@@ -119,6 +119,9 @@ function McpFormFixture({
       onCredentialsChange={(value) => form.setFieldValue("credentials", value)}
       onConnectOauth={() => {}}
       onDisconnectOauth={() => {}}
+      oauthDisconnectConfirmation={false}
+      onAskDisconnectOauth={() => {}}
+      onDismissDisconnectOauth={() => {}}
       onCancel={onComplete}
       configurationFields={
         <McpConfigFields

@@ -14,7 +14,8 @@
     "empty": "エージェントがまだありません",
     "viewAllAgents": "すべてのエージェント ({count})",
     "slackApps": "外部チャンネル",
-    "integrations": "外部チャンネル"
+    "integrations": "外部チャンネル",
+    "personalTools": "個人ツール"
   },
   "settings": {
     "layout": {
@@ -1817,6 +1818,7 @@
         "notConnected": "GitHub の実行アカウントは接続されていません。",
         "sharedScope": "ワークスペース共有の Toolkit: この Toolkit を接続したエージェントと利用権限のある参加者は、自分のアカウントではなく、接続済みの GitHub アカウントの権限を使用します。",
         "agentScope": "エージェント専用の Toolkit: このエージェントと利用権限のある参加者は、自分のアカウントではなく、接続済みの GitHub アカウントの権限を使用します。",
+        "personalScope": "個人接続：許可した Agent とのあなたの個人 Session でのみ、保存された GitHub アカウントを使用します。",
         "statusError": "接続状態を読み込めませんでした。接続済みまたは接続解除済みと判断する前に、再試行してください。",
         "statusLoading": "GitHub アカウントの接続状態を読み込んでいます…",
         "retry": "再試行",
@@ -1922,6 +1924,7 @@
         "off": "オフ",
         "sharedScope": "ワークスペース共有：接続された Agent と利用権限のある参加者は、各自のアカウントではなく、ここで確認した GitHub アカウントまたは App で通常の作業と自動実行を行います。",
         "agentScope": "この Agent 専用：この Agent と利用権限のある参加者だけが、各自のアカウントではなく、ここで確認した GitHub アカウントまたは App で通常の作業と自動実行を行います。",
+        "personalScope": "個人接続：許可した Agent とのあなたの個人 Session でのみ、この GitHub アカウントまたは App を使用します。新しい接続は最初、アクセス可能なすべての Agent に許可されます。",
         "confirm": "GitHub 接続を保存",
         "saveError": "接続は保存されませんでした。設定を確認するか認証をリセットしてから、明示的に再度保存してください。",
         "uncertain": "保存結果を確認できませんでした。保存を繰り返さず、接続一覧で保存されたか確認してください。",
@@ -1931,6 +1934,7 @@
         "progressiveHint": "選択すると次の設定セクションが表示されます。",
         "ownershipHint": "保存した接続を利用できる範囲です。",
         "agentScopeShort": "この Agent 専用",
+        "personalScopeShort": "自分のアカウント",
         "sharedScopeShort": "ワークスペース共有",
         "setupProgress": "設定の進行状況",
         "identityHint": "GitHub で使うアカウントまたは App を選んでください。",

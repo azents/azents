@@ -6,6 +6,7 @@ import { isWindowMessageTarget } from "@/shared/lib/window-message-target";
 import {
   deserializeGitHubUserCreation,
   GITHUB_USER_CREATION_KEY,
+  gitHubCreationScope,
   parseGitHubCreationState,
 } from "@/shared/toolkits/github-user-creation-state";
 import { trpc } from "@/trpc/client";
@@ -14,6 +15,7 @@ import {
   GITHUB_USER_COMPLETION_EVENT,
   GITHUB_USER_CONTEXT_KEY,
   githubUserErrorReason,
+  gitHubUserScope,
   parseGitHubUserState,
 } from "../../../shared/toolkits/github-user-oauth-state";
 import type { GitHubUserContext } from "../../../shared/toolkits/github-user-oauth-state";
@@ -75,7 +77,7 @@ export function useGitHubUserOAuthCallbackContainer({
         });
         return;
       }
-      const scope = { handle: creation.handle, agentId: creation.agentId };
+      const scope = gitHubCreationScope(creation);
       const operation =
         providerError != null || code == null || state == null
           ? creationCancel
@@ -108,8 +110,7 @@ export function useGitHubUserOAuthCallbackContainer({
       return;
     }
     const apiContext = {
-      handle: context.handle,
-      agentId: context.agentId,
+      ...gitHubUserScope(context),
       toolkitId: context.toolkitId,
     };
     function notify(): void {

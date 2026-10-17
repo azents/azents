@@ -28,6 +28,7 @@
   "reviewTitle": "2. Review account and permissions",
   "agentOwnership": "This connection belongs only to this Agent. Runs use this saved account, not a participant's account.",
   "sharedOwnership": "Workspace-shared connection: authorized users and Agents may act using this saved account.",
+  "personalOwnership": "This connection belongs to your account. Only your personal Sessions with allowed Agents can use it.",
   "actualPermissions": "These are Google's returned permissions, not a claim that all requested tasks were granted.",
   "missingRenewal": "No renewable credential was returned. This candidate cannot be saved; start a new explicit authorization.",
   "includeTask": "Keep this task in the saved connection",

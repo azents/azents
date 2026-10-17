@@ -14,6 +14,10 @@ import {
 } from "@mantine/core";
 import { IconLink, IconTrash } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import {
+  ToolkitCard,
+  ToolkitCollection,
+} from "@/shared/toolkits/components/ToolkitCollection";
 import type { LegacyAgentToolkitSectionProps } from "../types";
 
 export function LegacyAgentToolkitSection({
@@ -37,26 +41,35 @@ export function LegacyAgentToolkitSection({
           {t("noToolkitsAttached")}
         </Text>
       )}
-      {agentToolkits.map((item) => (
-        <Group key={item.id} gap="sm">
-          <Badge variant="light" size="sm">
-            {item.toolkit_type}
-          </Badge>
-          <Text size="sm" style={{ flex: 1 }}>
-            {availableToolkits.find((toolkit) => toolkit.id === item.toolkit_id)
-              ?.name ?? item.toolkit_id}
-          </Text>
-          <ActionIcon
-            variant="subtle"
-            color="red"
-            size="sm"
-            aria-label={t("toolkitManagement.detach")}
-            onClick={() => onDetach(item.id)}
-          >
-            <IconTrash size={14} />
-          </ActionIcon>
-        </Group>
-      ))}
+      <ToolkitCollection>
+        {agentToolkits.map((item) => (
+          <ToolkitCard
+            key={item.id}
+            name={
+              availableToolkits.find(
+                (toolkit) => toolkit.id === item.toolkit_id,
+              )?.name ?? item.toolkit_id
+            }
+            toolkitType={item.toolkit_type}
+            badges={
+              <Badge variant="light" size="sm">
+                {item.toolkit_type}
+              </Badge>
+            }
+            actions={
+              <ActionIcon
+                variant="subtle"
+                color="red"
+                size="sm"
+                aria-label={t("toolkitManagement.detach")}
+                onClick={() => onDetach(item.id)}
+              >
+                <IconTrash size={14} />
+              </ActionIcon>
+            }
+          />
+        ))}
+      </ToolkitCollection>
       {!loading && !failed && selectOptions.length > 0 && (
         <Group gap="sm">
           <Select
