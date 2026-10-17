@@ -26,6 +26,54 @@ class Artifact:
     run_id: int
 
 
+@dataclass(frozen=True)
+class TestRunIdentity:
+    head_sha: str
+    run_id: str
+    attempt: str
+    name: str
+
+
+def decode_test_run(value: object) -> TestRunIdentity:
+    """Project the interpreted producer identity; retain additive wire compatibility."""
+    raw = object_value(value)
+    return TestRunIdentity(
+        head_sha=text(raw["head_sha"]),
+        run_id=text(raw["run_id"]),
+        attempt=text(raw["attempt"]),
+        name=text(raw["name"]),
+    )
+
+
+@dataclass(frozen=True)
+class CollectionManifest:
+    run_id: int
+    attempt: int
+    head_sha: str
+    identity_verified: bool
+    artifact_names: frozenset[str]
+    file_hashes: dict[str, str]
+
+
+def decode_collection(value: object) -> CollectionManifest:
+    """Decode provenance and byte-hash fields once before collection verification."""
+    raw = object_value(value)
+    verified = raw["artifact_identity_verified"]
+    if not isinstance(verified, bool):
+        raise ValueError("Collection identity verification must be a boolean")
+    return CollectionManifest(
+        run_id=integer(raw["workflow_run_id"]),
+        attempt=integer(raw["workflow_attempt"]),
+        head_sha=text(raw["head_sha"]),
+        identity_verified=verified,
+        artifact_names=frozenset(text(n) for n in sequence(raw["artifact_names"])),
+        file_hashes={
+            name: text(digest)
+            for name, digest in object_value(raw["file_hashes"]).items()
+        },
+    )
+
+
 def artifacts_for_run(raw: object, run: Run) -> tuple[Artifact, ...]:
     """Decode extensible API pages but reject expired, ambiguous or stale evidence."""
     ends = [j.completed for j in run.jobs if j.completed is not None]
@@ -89,22 +137,21 @@ def file_hashes(root: Path) -> dict[str, str]:
 
 def verify_collection(root: Path, run: Run) -> set[str]:
     """Verify stored provenance and bytes before any acceptance calculation."""
-    manifest = object_value(json.loads((root / "collection.json").read_text()))
+    manifest = decode_collection(json.loads((root / "collection.json").read_text()))
     if (
-        manifest["workflow_run_id"] != run.run_id
-        or manifest["workflow_attempt"] != run.attempt
-        or manifest["head_sha"] != run.head_sha
-        or manifest["artifact_identity_verified"] is not True
+        manifest.run_id != run.run_id
+        or manifest.attempt != run.attempt
+        or manifest.head_sha != run.head_sha
+        or not manifest.identity_verified
     ):
         raise ValueError("Collection identity mismatch")
     artifacts = artifacts_for_run(
         json.loads((root / "artifact-inventory.json").read_text()), run
     )
     expected = {a.name for a in artifacts}
-    if {text(n) for n in sequence(manifest["artifact_names"])} != expected:
+    if manifest.artifact_names != expected:
         raise ValueError("Collection inventory mismatch")
-    hashes = object_value(manifest["file_hashes"])
-    if hashes != file_hashes(root / "artifacts"):
+    if manifest.file_hashes != file_hashes(root / "artifacts"):
         raise ValueError("Collected artifact bytes changed")
     found = {p.name for p in (root / "artifacts").iterdir() if p.is_dir()}
     if found != expected:

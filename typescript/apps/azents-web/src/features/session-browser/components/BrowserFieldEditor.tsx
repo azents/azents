@@ -12,11 +12,11 @@ import {
   TextInput,
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
-import { useRef } from "react";
-import { useBrowserFieldEditorTransition } from "../containers/useBrowserFieldEditorTransition";
-import { useBrowserToolbarTouch } from "../containers/useBrowserToolbarTouch";
+import { createReactContainer } from "@/shared/lib/createReactContainer";
+import { useBrowserFieldEditorView } from "../containers/useBrowserFieldEditorView";
 import { BrowserKeyboardToolbar } from "./BrowserKeyboardToolbar";
 import type { BrowserEditorViewport } from "../containers/useBrowserEditorViewport";
+import type { BrowserFieldEditorViewProps } from "../containers/useBrowserFieldEditorView";
 import type { BrowserFieldAttributes } from "../types";
 import type { ReactElement } from "react";
 
@@ -47,16 +47,17 @@ export interface BrowserFieldEditorControls {
   onDirectPaste: () => void;
 }
 
-export function BrowserFieldEditor({
+export function BrowserFieldEditorView({
   controls,
-}: {
-  controls: BrowserFieldEditorControls;
-}): ReactElement {
+  motion,
+  textRef,
+  multilineRef,
+  cancelRef,
+  confirmRef,
+  pasteRef,
+  activatePaste,
+}: BrowserFieldEditorViewProps): ReactElement {
   const t = useTranslations("chat.browser");
-  const motion = useBrowserFieldEditorTransition(
-    controls.draft,
-    controls.retainClosingDraft,
-  );
   const draft = motion.draft;
   const nativeProps =
     draft === null
@@ -81,34 +82,6 @@ export function BrowserFieldEditor({
           required: draft.attributes.required,
         };
   const viewport = controls.viewport;
-  const textRef = useRef<HTMLInputElement>(null);
-  const multilineRef = useRef<HTMLTextAreaElement>(null);
-  const activatePaste = (): void => {
-    if (draft === null) {
-      return;
-    }
-    const input =
-      draft.kind === "multiline" ? multilineRef.current : textRef.current;
-    if (input === null) {
-      return;
-    }
-    controls.onPaste((text) => {
-      if (
-        !input.isConnected ||
-        document.activeElement !== input ||
-        typeof document.execCommand !== "function"
-      ) {
-        return null;
-      }
-      // Native insertion retains email selection where selectionStart is unavailable.
-      return document.execCommand("insertText", false, text)
-        ? input.value
-        : null;
-    });
-  };
-  const cancelRef = useBrowserToolbarTouch(controls.onCancel);
-  const confirmRef = useBrowserToolbarTouch(controls.onConfirm);
-  const pasteRef = useBrowserToolbarTouch(activatePaste);
   return (
     <>
       {controls.enabled &&
@@ -261,3 +234,9 @@ export function BrowserFieldEditor({
     </>
   );
 }
+
+export const BrowserFieldEditor = createReactContainer(
+  "BrowserFieldEditor",
+  useBrowserFieldEditorView,
+  BrowserFieldEditorView,
+);

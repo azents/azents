@@ -22,6 +22,7 @@ function fixture(cached: AgentFixture): {
   options: Array<Record<string, unknown>>;
   seeded: Promise<AgentFixture>;
   writes: AgentFixture[];
+  scrollStyles: Array<{ overflow: string; overscrollBehavior: string }>;
 } {
   const client = new QueryClient({
     defaultOptions: {
@@ -38,6 +39,10 @@ function fixture(cached: AgentFixture): {
   const options: Array<Record<string, unknown>> = [];
   const seeded = deferred<AgentFixture>();
   const writes: AgentFixture[] = [];
+  const scrollStyles = [
+    { overflow: "auto", overscrollBehavior: "contain" },
+    { overflow: "scroll", overscrollBehavior: "auto" },
+  ];
   const utils = {
     agent: {
       get: {
@@ -91,8 +96,20 @@ function fixture(cached: AgentFixture): {
       },
     },
     {},
+    {
+      documentElement: { style: scrollStyles[0] },
+      body: { style: scrollStyles[1] },
+    },
   );
-  return { hook, client, key, options, seeded: seeded.promise, writes };
+  return {
+    hook,
+    client,
+    key,
+    options,
+    seeded: seeded.promise,
+    writes,
+    scrollStyles,
+  };
 }
 function props(agent: AgentFixture): Record<string, unknown> {
   return {
@@ -103,6 +120,23 @@ function props(agent: AgentFixture): Record<string, unknown> {
     renderSupportingContent: () => null,
   };
 }
+
+void test("chat container owns and restores the document scroll lifecycle", () => {
+  const agent = { id: "scroll-agent", browser_enabled: false };
+  const { hook, client, scrollStyles } = fixture(agent);
+  hook.render(props(agent));
+  hook.flushEffects();
+  assert.deepEqual(scrollStyles, [
+    { overflow: "hidden", overscrollBehavior: "none" },
+    { overflow: "hidden", overscrollBehavior: "none" },
+  ]);
+  hook.unmount();
+  assert.deepEqual(scrollStyles, [
+    { overflow: "auto", overscrollBehavior: "contain" },
+    { overflow: "scroll", overscrollBehavior: "auto" },
+  ]);
+  client.clear();
+});
 
 void test("cached enabled Agent cannot override fresh disabled server props before or after hydration", async () => {
   const cached = { id: "agent", browser_enabled: true };

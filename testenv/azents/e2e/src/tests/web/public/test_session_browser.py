@@ -24,7 +24,7 @@ from azentspublicclient.models.subagent_tree_node_response import (
 )
 from azentspublicclient.models.subagent_tree_response import SubagentTreeResponse
 from azentspublicclient.models.ws_ticket_response import WsTicketResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.actions.action_builder import ActionBuilder
 from selenium.webdriver.common.by import By
@@ -55,9 +55,15 @@ class _DisplayedImage(BaseModel):
     height: int = Field(ge=1)
 
 
+class _BrowserEnabledObservation(BaseModel):
+    """Consume current capability evidence without inspecting response extensions."""
+
+    model_config = ConfigDict(extra="ignore", hide_input_in_errors=True)
+    browser_enabled: StrictBool
+
+
 _APP = '''
 import http.server
-import socketserver
 
 HTML = b"""<!doctype html><title>Synthetic Browser ready</title>
 <style>body{margin:0;background:white}button,input{position:absolute;left:20px;
@@ -108,7 +114,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
     def log_message(self, *args):
         pass
-with socketserver.TCPServer(('127.0.0.1', 8766), Handler) as server:
+# Chromium can hold an idle speculative connection while navigating on another.
+with http.server.ThreadingHTTPServer(('127.0.0.1', 8766), Handler) as server:
     server.serve_forever()
 '''
 
@@ -121,7 +128,10 @@ def _enable_browser(public_url: str, handle: str, agent_id: str, token: str) -> 
         timeout=10,
     )
     response.raise_for_status()
-    assert response.json()["browser_enabled"] is True
+    assert (
+        _BrowserEnabledObservation.model_validate(response.json()).browser_enabled
+        is True
+    )
 
 
 def _projection(
@@ -891,7 +901,12 @@ def test_session_browser_engine_native_input_dialog_and_reconnect(
         timeout=10,
     )
     disabled_response.raise_for_status()
-    assert disabled_response.json()["browser_enabled"] is False
+    assert (
+        _BrowserEnabledObservation.model_validate(
+            disabled_response.json()
+        ).browser_enabled
+        is False
+    )
     # The earlier revocation phase invalidated the Web session's cookies.
     _login_main_web(driver, base_url=azents_main_web_url, email=workspace.email)
     driver.get(

@@ -64,7 +64,7 @@ function clientToolMessage(
 function activityAt(
   items: ReturnType<typeof projectChatPresentationItems>,
   index: number,
-) {
+): import("./toolActivityPresentation.ts").ToolActivityGroup {
   const item = items[index];
   assert.ok(item);
   if (item.type !== "activity") {

@@ -51,6 +51,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserManualKeyboard.ts
   - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserFieldEditor.ts
   - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserFieldEditorTransition.ts
+  - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserFieldEditorView.ts
+  - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserKeyboardToolbar.ts
   - typescript/apps/azents-web/src/features/session-browser/containers/useBrowserFieldVisibility.ts
   - typescript/apps/azents-web/src/features/session-browser/components/BrowserFieldEditor.tsx
   - typescript/apps/azents-web/src/features/session-browser/components/BrowserKeyboardToolbar.tsx
@@ -60,7 +62,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/session-browser/recentTargets.ts
   - typescript/apps/azents-web/src/features/session-browser/components/SessionBrowserPanel.tsx
   - typescript/apps/azents-web/src/trpc/routers/browser.ts
-last_verified_at: 2026-10-16
+last_verified_at: 2026-10-17
 spec_version: 1
 ---
 

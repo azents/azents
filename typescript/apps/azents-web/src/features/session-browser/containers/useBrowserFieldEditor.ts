@@ -1,5 +1,6 @@
 "use client";
 
+import { useWindowEvent } from "@mantine/hooks";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useBrowserEditorViewport } from "./useBrowserEditorViewport";
 import type {
@@ -62,6 +63,7 @@ export function useBrowserFieldEditor(
       clear();
     }
   }, [valid, clear]);
+  useWindowEvent("pagehide", clear);
   useEffect(() => {
     const hidden = (): void => {
       if (document.hidden) {
@@ -69,10 +71,8 @@ export function useBrowserFieldEditor(
       }
     };
     document.addEventListener("visibilitychange", hidden);
-    window.addEventListener("pagehide", clear);
     return () => {
       document.removeEventListener("visibilitychange", hidden);
-      window.removeEventListener("pagehide", clear);
     };
   }, [clear]);
   const result = useCallback((result: BrowserFieldResult): void => {

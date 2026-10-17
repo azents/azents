@@ -8,9 +8,9 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from scripts.ci.evidence import verify_collection
+from scripts.ci.evidence import decode_test_run, verify_collection
 from scripts.ci.observability import parse_junit, parse_timings
-from scripts.ci.workflow_report import Run, decode_run, metrics, object_value
+from scripts.ci.workflow_report import Run, decode_run, metrics
 
 
 def analyze(roots: list[Path], cohort: str) -> dict[str, object]:
@@ -46,17 +46,19 @@ def analyze(roots: list[Path], cohort: str) -> dict[str, object]:
                     "-", 1
                 )[0]
                 test_run = (
-                    object_value(json.loads((artifact / "test-run.json").read_text()))
+                    decode_test_run(
+                        json.loads((artifact / "test-run.json").read_text())
+                    )
                     if (artifact / "test-run.json").is_file()
                     else None
                 )
                 if test_run is None:
                     evidence_complete = False
                 elif (
-                    test_run["head_sha"] != run.head_sha
-                    or test_run["run_id"] != str(run.run_id)
-                    or test_run["attempt"] != str(run.attempt)
-                    or test_run["name"] != identity
+                    test_run.head_sha != run.head_sha
+                    or test_run.run_id != str(run.run_id)
+                    or test_run.attempt != str(run.attempt)
+                    or test_run.name != identity
                 ):
                     raise ValueError("Pytest evidence workflow identity mismatch")
             elif artifact.name.startswith("e2e-observability-"):

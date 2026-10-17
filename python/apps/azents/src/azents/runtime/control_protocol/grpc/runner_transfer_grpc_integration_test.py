@@ -8,7 +8,7 @@ import asyncio
 import hashlib
 import inspect
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
 import grpc
@@ -1251,19 +1251,11 @@ async def test_browser_command_and_result_cross_real_runner_grpc(
         runner_authenticator=_Authenticator(),
         operation_block_ms=1,
     )
-    server = grpc.aio.server()
-    control_grpc.add_RuntimeRunnerControlServicer_to_server(runner, server)
-    port = server.add_insecure_port("127.0.0.1:0")
-    await server.start()
-    client = GrpcRunnerControlClient.from_endpoint(
-        f"127.0.0.1:{port}", runner_auth_token="token", tls=None, allow_insecure=True
-    )
     operations: asyncio.Queue[RunnerOperationEnvelope] = asyncio.Queue()
 
     async def receive(operation: RunnerOperationEnvelope) -> None:
         await operations.put(operation)
 
-    client.set_operation_handler(receive)
     authority = BrowserAuthority("session-1", "/workspace/session-1")
     target = BrowserTarget("task-1", "page-1", "page-incarnation", None)
     payload: dict[str, JsonValue]
@@ -1287,6 +1279,7 @@ async def test_browser_command_and_result_cross_real_runner_grpc(
             "ref": None,
             "observation_id": None,
             "text": None,
+            "encrypted_text": None,
             "url": None,
             "values": None,
             "checked": None,
@@ -1341,7 +1334,20 @@ async def test_browser_command_and_result_cross_real_runner_grpc(
             "dialog_pending",
         )
     )
-    try:
+    async with AsyncExitStack() as cleanup:
+        server = grpc.aio.server()
+        cleanup.push_async_callback(server.stop, None)
+        control_grpc.add_RuntimeRunnerControlServicer_to_server(runner, server)
+        port = server.add_insecure_port("127.0.0.1:0")
+        await server.start()
+        client = GrpcRunnerControlClient.from_endpoint(
+            f"127.0.0.1:{port}",
+            runner_auth_token="token",
+            tls=None,
+            allow_insecure=True,
+        )
+        cleanup.push_async_callback(client.close)
+        client.set_operation_handler(receive)
         accepted = await asyncio.wait_for(
             client.register_runner(
                 RunnerRegistration(
@@ -1406,6 +1412,26 @@ async def test_browser_command_and_result_cross_real_runner_grpc(
             assert type(capture["size"]) is int
             assert type(capture["width"]) is int
         assert runner.peers
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_browser_fixture_client_setup_failure_stops_started_server(
+    monkeypatch: pytest.MonkeyPatch,
+    cancel: bool,
+) -> None:
+    """A failed client constructor must not leak its already started gRPC server."""
+    server = grpc.aio.server()
+    monkeypatch.setattr(grpc.aio, "server", lambda: server)
+    expected = asyncio.CancelledError if cancel else RuntimeError
+
+    def fail_client(*args: object, **kwargs: object) -> GrpcRunnerControlClient:
+        del args, kwargs
+        raise expected("client setup failed")
+
+    monkeypatch.setattr(GrpcRunnerControlClient, "from_endpoint", fail_client)
+    try:
+        with pytest.raises(expected, match="client setup failed"):
+            await test_browser_command_and_result_cross_real_runner_grpc("browser.act")
+        assert not await server.wait_for_termination(timeout=0)
     finally:
-        await client.close()
         await server.stop(None)
