@@ -509,6 +509,42 @@ document.activeElement.dispatchEvent(new ClipboardEvent('paste', {
     wait.until(
         lambda _: address.get_attribute("value") == "http://127.0.0.1:8766/navigation"
     )
+    # Capture acceptance state at the native key event, not just after a timeout.
+    # Store booleans only: never copy addresses, field values, or target identities.
+    driver.execute_script("""
+const address = document.querySelector('input[aria-label="Browser address"]');
+const snapshot = () => {
+  const viewport = document.querySelector('[aria-label="Remote browser page"]');
+  let fiber = viewport &&
+    viewport[Object.keys(viewport).find(key => key.startsWith('__reactFiber$'))];
+  for (let depth = 0; fiber && depth < 100; depth++, fiber = fiber.return) {
+    const props = fiber.memoizedProps;
+    if (props?.state?.type === 'READY') {
+      const state = props.state;
+      return {ready: true, connected: state.connection === 'connected',
+        canInput: state.canInput, navigationEnabled: props.navigationEnabled,
+        selected: !!state.selected, image: !!state.image,
+        status: !!state.status, allowInput: state.status?.allow_input === true,
+        dialog: state.dialog !== null, conflict: !!state.conflict,
+        outcomeUnknown: !!state.outcomeUnknown, readOnly: address.readOnly,
+        reloadEnabled: !document.querySelector(
+          'button[aria-label="Reload page"]')?.disabled};
+    }
+  }
+  return {ready: false, readOnly: address.readOnly};
+};
+window.__browserNavigationDiagnostic = {before: snapshot()};
+address.addEventListener('keydown', event => {
+  if (event.key !== 'Enter') return;
+  window.__browserNavigationDiagnostic.enter = snapshot();
+  // Document bubbling runs after React's root listener has handled the event.
+  document.addEventListener('keydown', handled => {
+    if (handled !== event) return;
+    window.__browserNavigationDiagnostic.prevented = event.defaultPrevented;
+    window.__browserNavigationDiagnostic.after = snapshot();
+  }, {once: true});
+}, {once: true});
+""")
     address.send_keys(Keys.ENTER)
 
     def current_page() -> BrowserPageResponse:
@@ -516,12 +552,20 @@ document.activeElement.dispatchEvent(new ClipboardEvent('paste', {
         return projection.tasks[0].pages[0]
 
     def wait_destination(path: str) -> None:
-        wait_until(
-            lambda: current_page().url == f"http://127.0.0.1:8766{path}",
-            timeout=15,
-            interval=0.1,
-            message="The browser navigation control did not change the native page",
-        )
+        try:
+            wait_until(
+                lambda: current_page().url == f"http://127.0.0.1:8766{path}",
+                timeout=15,
+                interval=0.1,
+                message="The browser navigation control did not change the native page",
+            )
+        except TimeoutError as error:
+            diagnostic = driver.execute_script(
+                "return window.__browserNavigationDiagnostic;"
+            )
+            raise AssertionError(
+                f"Native navigation was not observed; value-free state: {diagnostic}"
+            ) from error
         wait.until(
             ec.element_to_be_clickable(
                 (By.CSS_SELECTOR, 'button[aria-label="Reload page"]:not(:disabled)')

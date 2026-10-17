@@ -168,12 +168,53 @@ def test_confidential_environment_input_through_skill_and_native_browser(
                 output[result.call_id.removeprefix(prefix)] = result
         return output
 
-    wait_until(
-        lambda: "verify" in results(PREFIX),
-        timeout=180,
-        interval=0.3,
-        message="Confidential Browser journey did not complete",
-    )
+    def wait_for_verification(prefix: str) -> None:
+        # Fixed stages and bounded statuses only; outputs can contain ciphertext.
+        stages = (
+            "skill",
+            "import",
+            "open",
+            "observe",
+            "oldfill",
+            "unchanged",
+            "encrypt",
+            "fill",
+            "account_encrypt",
+            "account_fill",
+            "wait",
+            "verify",
+        )
+        try:
+            wait_until(
+                lambda: "verify" in results(prefix),
+                timeout=180,
+                interval=0.3,
+                message="Confidential Browser journey did not complete",
+            )
+        except TimeoutError as error:
+            observed = results(prefix)
+            diagnostic = {
+                stage: (
+                    observed[stage].status
+                    if observed[stage].status in {"completed", "failed", "cancelled"}
+                    else "other"
+                )
+                for stage in stages
+                if stage in observed
+            }
+            diagnostic["encryption_poll_completed"] = str(
+                any(
+                    stage.startswith(("poll", "account_poll"))
+                    and result.status == "completed"
+                    for stage, result in observed.items()
+                )
+            )
+            raise AssertionError(
+                "Confidential Browser verification timed out; "
+                f"replacement={prefix == REPLACEMENT_PREFIX}; stages={diagnostic}"
+            ) from error
+
+    wait_for_verification(PREFIX)
     observed = results(PREFIX)
     assert {
         "skill",
@@ -261,12 +302,7 @@ def test_confidential_environment_input_through_skill_and_native_browser(
         timeout=10,
     )
     resumed.raise_for_status()
-    wait_until(
-        lambda: "verify" in results(REPLACEMENT_PREFIX),
-        timeout=180,
-        interval=0.3,
-        message="Confidential Browser key-loss recovery did not complete",
-    )
+    wait_for_verification(REPLACEMENT_PREFIX)
     replacement_results = results(REPLACEMENT_PREFIX)
     assert replacement_results["oldfill"].status == "failed"
     assert all(
