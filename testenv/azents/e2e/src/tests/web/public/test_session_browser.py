@@ -64,7 +64,6 @@ class _BrowserEnabledObservation(BaseModel):
 
 _APP = '''
 import http.server
-import socketserver
 
 HTML = b"""<!doctype html><title>Synthetic Browser ready</title>
 <style>body{margin:0;background:white}button,input{position:absolute;left:20px;
@@ -115,7 +114,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
     def log_message(self, *args):
         pass
-with socketserver.TCPServer(('127.0.0.1', 8766), Handler) as server:
+# Chromium can hold an idle speculative connection while navigating on another.
+with http.server.ThreadingHTTPServer(('127.0.0.1', 8766), Handler) as server:
     server.serve_forever()
 '''
 

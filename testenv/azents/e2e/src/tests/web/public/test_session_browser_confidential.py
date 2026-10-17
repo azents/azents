@@ -40,7 +40,6 @@ from tests.web.public.test_session_browser_files import _parts
 
 _APP = '''
 import http.server
-import socketserver
 
 HTML = b"""<!doctype html><title>Confidential input ready</title>
 <input id=account aria-label="Confidential account" oninput="verify()">
@@ -62,8 +61,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(HTML)
     def log_message(self,*args):
         pass
-socketserver.TCPServer.allow_reuse_address=True
-with socketserver.TCPServer(('127.0.0.1',8766),Handler) as server:
+# Do not let an idle browser connection block a later navigation or reconnect.
+with http.server.ThreadingHTTPServer(('127.0.0.1',8766),Handler) as server:
     server.serve_forever()
 '''
 
