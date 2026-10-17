@@ -98,6 +98,8 @@ class AioDockerApi(DockerApi):
         await docker.containers.create(
             config={
                 "Image": spec.image,
+                # Persistent native profiles retain host identity across replacement.
+                "Hostname": spec.name,
                 "User": spec.user,
                 "WorkingDir": spec.working_dir,
                 "Env": [f"{key}={value}" for key, value in spec.env.items()],

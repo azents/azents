@@ -82,7 +82,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
-last_verified_at: 2026-10-16
+last_verified_at: 2026-10-17
 spec_version: 45
 ---
 
@@ -616,6 +616,14 @@ non-acknowledged stopping observation and Control retries the same terminal dele
 Docker Provider v1 assumes one stable Docker host. For each Runtime it creates a host directory and
 bind-mounts it into the Runner container at its configured Runner home path. The host directory is
 the event persistence source.
+
+New Runner containers use their stable `azents-runtime-<runtime_id>` container name
+as the native hostname. Replacing the container for the same Runtime retains that
+hostname, allowing Chromium to handle its existing same-host process lock after
+an abrupt exit without deleting native profile data or bypassing profile locking.
+This does not change Runtime authentication or generation fencing. Reused older
+containers are not renamed, and existing stranded profile locks created under a
+different hostname are not automatically migrated or removed.
 
 The Provider protocol remains Docker Provider v1 while the selected infrastructure Profile may be
 schema v1 or v2. Both versions use direct Runner execution. The durable host Workspace directory
