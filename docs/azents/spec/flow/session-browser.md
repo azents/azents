@@ -277,6 +277,14 @@ Each concrete Session has a separate native persistent BrowserContext/profile un
 
 Native profile bytes remain under existing Runtime persistence; manager/Runner shutdown closes live contexts and invalidates handles without deleting those bytes. Normal Run completion is not profile cleanup. No backup, profile export/replay, retention sweeper or restoration of old live pages exists. Task/page close affects only the intended task resources, not all contexts or other Sessions.
 
+Before the current fenced Runner first launches a Session context, it removes only
+Chromium's transient `SingletonLock`, `SingletonSocket` and `SingletonCookie`
+directory entries from the profile. An abruptly removed container can leave these
+entries pointing to its former host and process. Unlinking the entries does not
+follow their targets or delete cookies, authentication or other native site state.
+The Session context lock and live context cache prevent this startup cleanup from
+running against an already open context in the manager.
+
 Task capacity is admitted before native context allocation, and page capacity before new page allocation. Failed registration closes the newly allocated page. Closing a task's final page retires its live identity and reclaims task capacity while retaining the Session context/profile.
 
 The Runner application declares a locked Playwright dependency. Image provisioning installs matching Chromium through that environment into the product browser path. System pip/Agent-installed Playwright is not used as product availability evidence. Engine launch preserves the trusted Runner proxy route when configured and does not add a direct-network alternative.
