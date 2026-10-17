@@ -2,6 +2,7 @@
 title: "Personal Tool Connections and Agent Access Design"
 created: 2026-10-17
 updated: 2026-10-17
+implemented: 2026-10-18
 tags: [toolkit, session, identity, security, frontend, architecture]
 document_role: primary
 document_type: design
