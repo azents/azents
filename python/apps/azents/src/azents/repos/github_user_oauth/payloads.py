@@ -10,8 +10,9 @@ from azents.core.github_user_oauth import (
     GitHubUserCandidate,
     GitHubUserConnection,
     GitHubUserRegistration,
-    GitHubUserRequester,
+    github_requester_for_owner,
 )
+from azents.core.toolkit_ownership import toolkit_owner_from_fields
 from azents.rdb.models.github_user_oauth import (
     RDBGitHubUserAttempt,
     RDBGitHubUserConnection,
@@ -87,12 +88,16 @@ def attempt_from(
     )
     return GitHubUserAttempt(
         id=row.id,
-        requester=GitHubUserRequester(
+        requester=github_requester_for_owner(
             user_id=row.user_id,
             session_id=row.session_id,
-            workspace_id=row.workspace_id,
-            agent_id=row.agent_id,
             toolkit_id=row.toolkit_id,
+            owner=toolkit_owner_from_fields(
+                row.owner_kind,
+                workspace_id=row.workspace_id,
+                agent_id=row.agent_id,
+                user_id=row.owner_user_id,
+            ),
         ),
         registration=setup.registration,
         redirect_uri=setup.redirect_uri,

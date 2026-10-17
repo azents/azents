@@ -5,7 +5,10 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from azents.core.github_user_creation import GitHubUserCreationSubject
+from azents.core.github_user_creation import (
+    GitHubCreationSubject,
+    GitHubPersonalCreationSubject,
+)
 from azents.core.github_user_oauth import GitHubUserErrorCode, GitHubUserOAuthError
 from azents.repos.github_user_oauth.operations import GitHubUserOAuthOperationRepository
 from azents.repos.toolkit_operations import ToolkitOperationsRepository
@@ -21,7 +24,7 @@ class GitHubSetupRepository:
 
     async def authorize_platform(
         self,
-        subject: GitHubUserCreationSubject,
+        subject: GitHubCreationSubject,
         authority: PlatformToolkitAuthority,
     ) -> None:
         """Finish scope and target admission before external SDK operations begin."""
@@ -31,9 +34,17 @@ class GitHubSetupRepository:
                 "Platform GitHub installation authority does not match this user.",
             )
         async with self.operations.session_manager() as session:
-            await self.operations.authorize_scope_in_session(
-                session, **dataclasses.asdict(subject)
-            )
+            if isinstance(subject, GitHubPersonalCreationSubject):
+                await self.operations.authorize_personal_scope_in_session(
+                    session,
+                    user_id=subject.user_id,
+                    session_id=subject.session_id,
+                    workspace_id=subject.workspace_id,
+                )
+            else:
+                await self.operations.authorize_scope_in_session(
+                    session, **dataclasses.asdict(subject)
+                )
             rejected = await self.toolkits.validate_platform_authority(
                 session, authority
             )

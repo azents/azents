@@ -26,7 +26,7 @@ class GitHubUserCandidateSummary(BaseModel):
     account_avatar_url: str | None
     app_id: str
     source: Literal["platform_user", "byoa_user"]
-    sharing_scope: Literal["workspace_shared", "agent_only"]
+    sharing_scope: Literal["workspace_shared", "agent_only", "personal"]
 
 
 class GitHubUserStatusOutput(BaseModel):

@@ -42,6 +42,7 @@ from azents.services.toolkit import ToolkitService
 from azents.services.toolkit.data import (
     AgentNotBelongToWorkspace,
     AgentToolkitOAuthConnectionInput,
+    ToolkitConfigurationInput,
     ToolkitCreateInput,
 )
 
@@ -126,6 +127,36 @@ def _agent_management_service(
         toolkit_registry=toolkit_registry,
         github_runtime=MagicMock(),
     )
+
+
+async def test_common_configuration_preparation_needs_no_workspace_or_db() -> None:
+    """Personal and shared management consume the same Provider validation."""
+    toolkit_repo = MagicMock()
+    toolkit_repo.create = AsyncMock()
+    service = _service(
+        toolkit_repo=toolkit_repo,
+        agent_toolkit_repo=MagicMock(),
+        agent_repo=MagicMock(),
+    )
+    service.toolkit_registry = {"mcp": McpToolkitProvider()}
+    create = ToolkitConfigurationInput(
+        toolkit_type="mcp",
+        name="Personal server",
+        slug="personal_server",
+        config={"server_url": "https://mcp.test", "auth_type": "none"},
+        enabled=False,
+        always_expose_tools=True,
+    )
+    result = await service.prepare_configuration(create, user_id="user-1")
+    assert isinstance(result, Success)
+    assert result.value.configuration.name == "Personal server"
+    assert result.value.configuration.slug == "personal_server"
+    assert result.value.configuration.config == create.config
+    assert not result.value.configuration.enabled
+    assert result.value.configuration.always_expose_tools
+    assert "workspace_id" not in result.value.configuration.model_dump()
+    assert result.value.platform_authority is None
+    toolkit_repo.create.assert_not_awaited()
 
 
 async def test_workspace_owner_can_manage_agent_without_explicit_admin() -> None:

@@ -15,6 +15,8 @@ from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
 from azents.core.enums import AgentLifecycleStatus, WorkspaceUserRole
 from azents.core.github_user_oauth import (
+    GitHubPersonalRequester,
+    GitHubToolkitRequester,
     GitHubUserAttempt,
     GitHubUserAttemptStatus,
     GitHubUserCandidate,
@@ -24,7 +26,6 @@ from azents.core.github_user_oauth import (
     GitHubUserErrorCode,
     GitHubUserOAuthError,
     GitHubUserRegistration,
-    GitHubUserRequester,
     GitHubUserRevocation,
     GitHubUserStartResult,
 )
@@ -57,7 +58,13 @@ from azents.repos.github_user_oauth.payloads import (
 from azents.repos.session import SessionRepository
 from azents.repos.system_setting.repository import SystemSettingRepository
 from azents.repos.toolkit import ToolkitRepository
-from azents.repos.toolkit.data import ToolkitConfig
+from azents.repos.toolkit.data import (
+    PersonalToolkitConfig,
+    ToolkitConfig,
+    ToolkitConfiguration,
+)
+from azents.repos.toolkit.personal import PersonalToolkitRepository
+from azents.repos.toolkit.personal_management import get_personal_toolkit_repository
 from azents.repos.toolkit_operations import get_encrypted_toolkit_repository
 from azents.repos.user import UserRepository
 from azents.repos.workspace import WorkspaceRepository
@@ -91,6 +98,39 @@ class GitHubUserOAuthOperationRepository:
     setting_payloads: Annotated[
         SystemSettingPayloadResolver, Depends(SystemSettingPayloadResolver)
     ]
+    personal_toolkits: Annotated[
+        PersonalToolkitRepository, Depends(get_personal_toolkit_repository)
+    ]
+
+    async def authorize_personal_scope_in_session(
+        self,
+        session: ReadSession,
+        *,
+        user_id: str,
+        session_id: str,
+        workspace_id: str,
+    ) -> None:
+        """Admit a current active account without Workspace manager requirements."""
+        status = await evaluate_active_subject(
+            session,
+            user_id=user_id,
+            session_id=session_id,
+            user_repository=self.user_repository,
+            session_repository=self.session_repository,
+        )
+        if status is not ActiveAccountSubjectStatus.ACTIVE:
+            raise GitHubUserOAuthError(
+                GitHubUserErrorCode.AUTHORITY, "Not authenticated."
+            )
+
+        workspace = await self.workspace_repository.get_by_id(session, workspace_id)
+        member = await self.workspace_user_repository.get_by_workspace_and_user(
+            session, workspace_id, user_id
+        )
+        if workspace is None or member is None:
+            raise GitHubUserOAuthError(
+                GitHubUserErrorCode.AUTHORITY, "Workspace membership required."
+            )
 
     async def authorize_scope_in_session(
         self,
@@ -161,9 +201,21 @@ class GitHubUserOAuthOperationRepository:
                 agent_id=agent_id,
             )
 
+    async def authorize_personal_scope(
+        self, *, user_id: str, session_id: str, workspace_id: str
+    ) -> None:
+        """Close current account admission before personal setup Provider work."""
+        async with self.session_manager() as session:
+            await self.authorize_personal_scope_in_session(
+                session,
+                user_id=user_id,
+                session_id=session_id,
+                workspace_id=workspace_id,
+            )
+
     async def _authorize(
-        self, session: WriteSession, requester: GitHubUserRequester, *, lock: bool
-    ) -> ToolkitConfig:
+        self, session: WriteSession, requester: GitHubToolkitRequester, *, lock: bool
+    ) -> ToolkitConfig | PersonalToolkitConfig:
         if lock:
             # Refresh a previously loaded ORM identity under this narrow write lock.
             await session.write_session.scalar(
@@ -172,6 +224,25 @@ class GitHubUserOAuthOperationRepository:
                 .with_for_update()
                 .execution_options(populate_existing=True)
             )
+        if isinstance(requester, GitHubPersonalRequester):
+            await self.authorize_personal_scope_in_session(
+                session,
+                user_id=requester.user_id,
+                session_id=requester.session_id,
+                workspace_id=requester.workspace_id,
+            )
+            personal = await self.personal_toolkits.get_personal(
+                session,
+                user_id=requester.owner.user_id,
+                workspace_id=requester.workspace_id,
+                toolkit_id=requester.toolkit_id,
+            )
+            if personal is None or personal.toolkit_type != "github":
+                raise GitHubUserOAuthError(
+                    GitHubUserErrorCode.NOT_FOUND,
+                    "GitHub Toolkit not found in this ownership context.",
+                )
+            return personal
         await self.authorize_scope_in_session(
             session,
             user_id=requester.user_id,
@@ -195,7 +266,7 @@ class GitHubUserOAuthOperationRepository:
     async def _registration(
         self,
         session: ReadSession,
-        toolkit: ToolkitConfig,
+        toolkit: ToolkitConfiguration,
         registration: GitHubUserRegistration,
     ) -> None:
         auth_type = (
@@ -243,7 +314,7 @@ class GitHubUserOAuthOperationRepository:
         )
 
     async def read_context(
-        self, *, requester: GitHubUserRequester
+        self, *, requester: GitHubToolkitRequester
     ) -> GitHubUserContext:
         """Finish current authorized preparation without database handles."""
         async with self.session_manager() as session:
@@ -269,7 +340,7 @@ class GitHubUserOAuthOperationRepository:
         return row
 
     def _bound(
-        self, row: RDBGitHubUserAttempt, requester: GitHubUserRequester
+        self, row: RDBGitHubUserAttempt, requester: GitHubToolkitRequester
     ) -> GitHubUserAttempt:
         attempt = attempt_from(row, self.cipher)
         if attempt.requester != requester:
@@ -300,7 +371,7 @@ class GitHubUserOAuthOperationRepository:
     async def start(
         self,
         *,
-        requester: GitHubUserRequester,
+        requester: GitHubToolkitRequester,
         registration: GitHubUserRegistration,
         redirect_uri: str,
         nonce: str,
@@ -340,6 +411,10 @@ class GitHubUserOAuthOperationRepository:
                 toolkit_id=toolkit.id,
                 user_id=requester.user_id,
                 session_id=requester.session_id,
+                owner_kind=requester.owner.kind,
+                owner_user_id=requester.user_id
+                if isinstance(requester, GitHubPersonalRequester)
+                else None,
                 workspace_id=requester.workspace_id,
                 agent_id=requester.agent_id,
                 encrypted_setup=self.cipher.encrypt(
@@ -365,7 +440,7 @@ class GitHubUserOAuthOperationRepository:
     async def claim_exchange(
         self,
         *,
-        requester: GitHubUserRequester,
+        requester: GitHubToolkitRequester,
         attempt_id: str,
         nonce: str,
         redirect_uri: str,
@@ -414,7 +489,7 @@ class GitHubUserOAuthOperationRepository:
             )
 
     async def read_review(
-        self, *, requester: GitHubUserRequester, attempt_id: str
+        self, *, requester: GitHubToolkitRequester, attempt_id: str
     ) -> GitHubUserAttempt:
         """Read a current verified candidate only in its originating context."""
         async with self.session_manager() as session:
@@ -439,7 +514,7 @@ class GitHubUserOAuthOperationRepository:
     async def store_review(
         self,
         *,
-        requester: GitHubUserRequester,
+        requester: GitHubToolkitRequester,
         attempt_id: str,
         candidate: GitHubUserCandidate,
         registration: GitHubUserRegistration,
@@ -472,7 +547,7 @@ class GitHubUserOAuthOperationRepository:
     async def confirm(
         self,
         *,
-        requester: GitHubUserRequester,
+        requester: GitHubToolkitRequester,
         attempt_id: str,
         registration: GitHubUserRegistration,
     ) -> GitHubUserConfirmResult:
@@ -544,7 +619,7 @@ class GitHubUserOAuthOperationRepository:
             )
 
     async def cancel(
-        self, *, requester: GitHubUserRequester, attempt_id: str
+        self, *, requester: GitHubToolkitRequester, attempt_id: str
     ) -> tuple[GitHubUserRevocation, ...]:
         """Remove the initiating setup without modifying a saved connection."""
         async with self.session_manager() as session:
@@ -564,7 +639,7 @@ class GitHubUserOAuthOperationRepository:
     async def disconnect(
         self,
         *,
-        requester: GitHubUserRequester,
+        requester: GitHubToolkitRequester,
         registration: GitHubUserRegistration | None,
     ) -> tuple[GitHubUserRevocation, ...]:
         """Remove execution/setup state irrespective of provider cleanup outcome."""
@@ -596,7 +671,7 @@ class GitHubUserOAuthOperationRepository:
         )
 
     async def mark_reconnect_required(
-        self, *, requester: GitHubUserRequester, connection_id: str, reason: str
+        self, *, requester: GitHubToolkitRequester, connection_id: str, reason: str
     ) -> None:
         """Late account failure can affect only the exact still-current connection."""
         async with self.session_manager() as session:

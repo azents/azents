@@ -9,8 +9,14 @@ from fastapi.testclient import TestClient
 
 from azents.api.public.toolkit.v1.github_user_test import _member
 from azents.api.public.toolkit.v1.google import router
-from azents.core.auth.deps import get_workspace_member
-from azents.core.google_oauth import GoogleOAuthError, GoogleSubject
+from azents.api.public.toolkit.v1.personal_google import router as personal_router
+from azents.core.auth.deps import CurrentUser, get_current_user, get_workspace_member
+from azents.core.google_oauth import (
+    GoogleOAuthError,
+    GooglePersonalSubject,
+    GoogleSubject,
+)
+from azents.core.toolkit_ownership import ToolkitOwnerKind, UserToolkitOwner
 from azents.services.google_oauth.data import GoogleConnectOutput
 from azents.services.google_oauth.service import GoogleOAuthService
 
@@ -18,9 +24,53 @@ from azents.services.google_oauth.service import GoogleOAuthService
 def _app(service: GoogleOAuthService) -> FastAPI:
     app = FastAPI()
     app.include_router(router)
+    app.include_router(personal_router)
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        user_id="manager", session_id="auth-session"
+    )
     app.dependency_overrides[get_workspace_member] = _member
     app.dependency_overrides[GoogleOAuthService] = lambda: service
     return app
+
+
+def test_personal_google_connect_has_workspace_scoped_user_owner() -> None:
+    service = create_autospec(GoogleOAuthService, instance=True)
+    service.connect.return_value = GoogleConnectOutput(
+        attempt_id="attempt",
+        authorization_url="https://accounts.google.com/authorize",
+        expires_at=datetime.datetime.now(datetime.UTC),
+    )
+    with TestClient(_app(service)) as client:
+        response = client.post(
+            "/workspaces/ws/personal/google/connect",
+            json={"tasks": ["calendar_read"], "timeout": 30.0},
+        )
+    assert response.status_code == 200
+    service.connect.assert_awaited_once()
+    subject = service.connect.call_args.args[0]
+    assert subject == GooglePersonalSubject(
+        "manager",
+        "auth-session",
+        UserToolkitOwner(
+            kind=ToolkitOwnerKind.USER, user_id="manager", workspace_id="workspace"
+        ),
+    )
+    assert subject.workspace_id == "workspace" and subject.agent_id is None
+    assert service.connect.call_args.kwargs == {"target_toolkit_id": None}
+    service.confirm.assert_not_awaited()
+
+
+def test_personal_google_callback_validation_remains_credential_safe() -> None:
+    service = create_autospec(GoogleOAuthService, instance=True)
+    with TestClient(_app(service)) as client:
+        response = client.post(
+            "/workspaces/ws/personal/google/exchange",
+            json={"code": "PERSONAL-CODE-SECRET", "state": ["PERSONAL-STATE-SECRET"]},
+        )
+    assert response.status_code == 422
+    assert "PERSONAL-CODE-SECRET" not in response.text
+    assert "PERSONAL-STATE-SECRET" not in response.text
+    service.exchange.assert_not_awaited()
 
 
 @pytest.mark.parametrize("agent_id", [None, "exact-agent"])

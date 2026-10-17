@@ -12,7 +12,7 @@ from azents.repos.mcp_oauth_connection.data import (
     MCPOAuthConnection,
     MCPOAuthConnectionSummary,
 )
-from azents.repos.toolkit.data import AgentToolkit, ToolkitConfig
+from azents.repos.toolkit.data import AgentToolkit, PersonalToolkitConfig, ToolkitConfig
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppAuthorizationState,
 )
@@ -29,8 +29,8 @@ ToolkitSlugInput = Annotated[
 ToolkitNameInput = Annotated[str, Field(max_length=255, description="Display name")]
 
 
-class ToolkitOutput(ToolkitConfig):
-    """Toolkit output model."""
+class ToolkitProviderState(BaseModel):
+    """Common redacted Provider readiness evidence for all ownership variants."""
 
     oauth_connection: MCPOAuthConnectionSummary | None = Field(
         default=None, description="MCP OAuth connection summary"
@@ -43,6 +43,10 @@ class ToolkitOutput(ToolkitConfig):
     github_user_connection: GitHubUserConnectionSummary | None = Field(
         default=None, description="Redacted GitHub user-account connection metadata"
     )
+
+
+class ToolkitOutput(ToolkitConfig, ToolkitProviderState):
+    """Existing Workspace/Agent output retaining non-null Workspace fields."""
 
     # The type checker cannot infer the Pydantic computed_field/property combination.
     @computed_field
@@ -72,6 +76,19 @@ class AgentToolkitListOutput(BaseModel):
 
 ToolkitOwnershipScope = Literal["workspace_shared", "agent_only"]
 ToolkitReadiness = Literal["ready", "authorization_required", "disabled"]
+
+
+class PersonalToolkitOutput(PersonalToolkitConfig, ToolkitProviderState):
+    """Detached personal configuration with the same Provider state projection."""
+
+    selected_agent_ids: tuple[str, ...]
+    readiness: ToolkitReadiness
+
+    @computed_field
+    @property
+    def has_credentials(self) -> bool:
+        """Report credential existence without exposing credential material."""
+        return self.credentials is not None
 
 
 class AgentToolkitManagementItemOutput(BaseModel):
@@ -117,10 +134,9 @@ class AgentToolkitOAuthConnectionInput:
     expires_at: datetime.datetime | None
 
 
-class ToolkitCreateInput(BaseModel):
-    """Toolkit create input model."""
+class ToolkitConfigurationInput(BaseModel):
+    """Owner-independent configurable fields accepted by every management path."""
 
-    workspace_id: str = Field(description="Workspace ID")
     toolkit_type: str = Field(description="Tool type")
     slug: ToolkitSlugInput | None = Field(
         default=None,
@@ -144,6 +160,12 @@ class ToolkitCreateInput(BaseModel):
     always_expose_tools: bool = Field(
         description="Whether every tool bypasses Tool Search and remains visible",
     )
+
+
+class ToolkitCreateInput(ToolkitConfigurationInput):
+    """Existing Workspace/Agent input retaining its required Workspace contract."""
+
+    workspace_id: str = Field(description="Workspace ID")
 
 
 class ToolkitUpdateInput(TypedDict, total=False):

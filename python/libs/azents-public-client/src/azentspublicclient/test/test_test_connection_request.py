@@ -37,7 +37,7 @@ class TestTestConnectionRequest(unittest.TestCase):
             return TestConnectionRequest(
                 toolkit_type = 'mcp',
                 config = azentspublicclient.models.config.Config(),
-                credentials = azentspublicclient.models.git.git(),
+                credentials = None,
                 toolkit_config_id = ''
             )
         else:

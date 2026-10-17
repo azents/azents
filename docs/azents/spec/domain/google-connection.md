@@ -12,6 +12,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/google_oauth/**
   - python/apps/azents/src/azents/rdb/models/google_oauth.py
   - python/apps/azents/src/azents/api/public/toolkit/v1/google.py
+  - python/apps/azents/src/azents/api/public/toolkit/v1/personal_google.py
   - python/apps/azents/src/azents/api/public/toolkit/v1/__init__.py
   - python/apps/azents/src/azents/api/admin/system_setting/v1/google.py
   - python/apps/azents/src/azents/engine/tools/google.py
@@ -33,7 +34,7 @@ code_paths:
   - typescript/apps/azents-admin-web/src/features/system-settings/containers/useGoogleApplicationCardContainer.ts
   - testenv/azents/e2e/src/tests/required/public/test_google_connection.py
   - testenv/azents/e2e/src/tests/web/public/test_google_connection.py
-last_verified_at: 2026-10-14
+last_verified_at: 2026-10-17
 spec_version: 1
 ---
 
@@ -115,6 +116,25 @@ relation/namespace and current grant/client/task evidence. Both private and Team
 runs use the stored connected account, never a channel participant's identity.
 
 ## OAuth Candidate and Publication
+
+Personal management is available through
+`/toolkit/v1/workspaces/{handle}/personal/google` and the Workspace-scoped personal
+saved-connection routes. Its User-owned subject requires the real Workspace and
+binds the current User and exact initiating Auth Session, with no owning Agent.
+Ordinary current membership is required; personal management does not require
+shared Toolkit-manager or AgentAdmin authority. Separate personal callback purpose
+and exact User/Workspace owner context prevent shared/Agent or other-Workspace
+callbacks from changing a personal attempt, including for the same User. The common staged
+connect, exchange, review, confirm, outcome, cancellation, reconnect, status and
+local disconnect lifecycle remains authoritative.
+
+Personal confirmation publishes the canonical Toolkit and Google grant
+atomically with default dynamic `all` access. Reconnect preserves the current
+personal access policy and unrelated metadata while applying the existing
+grant/client/attempt replacement checks. Personal User ownership is legal in
+the staged-attempt schema; existing Workspace/Agent attempt identities and
+encrypted payloads are preserved. This API boundary does not enable personal
+Session execution or provide a personal Web management surface.
 
 Connect stores an unpublished encrypted attempt with separate callback-state
 nonce, OIDC nonce, PKCE verifier, exact callback/client generation, selected tasks

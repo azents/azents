@@ -7,6 +7,12 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 
 from azents.core.enums import AgentLifecycleStatus, AgentType, WorkspaceUserRole
+from azents.core.personal_toolkit import (
+    PersonalToolkitAccessConflict,
+    PersonalToolkitAccessMutation,
+    PersonalToolkitAgentIneligible,
+    PersonalToolkitNotFound,
+)
 from azents.core.toolkit_ownership import (
     PersonalToolkitAccess,
     PersonalToolkitAccessMode,
@@ -26,37 +32,6 @@ from azents.repos.toolkit.data import (
     ToolkitCreation,
     ToolkitUpdate,
 )
-
-
-class PersonalToolkitNotFound(ValueError):
-    """The exact owner has no current personal Toolkit target."""
-
-
-class PersonalToolkitAccessConflict(ValueError):
-    """The saved policy mode differs from the editor's prepared assumption."""
-
-
-class PersonalToolkitAgentIneligible(ValueError):
-    """A mutation targets an Agent the owner cannot currently access."""
-
-
-@dataclasses.dataclass(frozen=True, slots=True)
-class PersonalToolkitAccessMutation:
-    """Explicit mode intent and membership deltas, never a filtered replacement."""
-
-    toolkit_id: str
-    mode: PersonalToolkitAccessMode | None
-    allow_agent_ids: frozenset[str]
-    restrict_agent_ids: frozenset[str]
-    expected_mode: PersonalToolkitAccessMode
-
-    def __post_init__(self) -> None:
-        if self.allow_agent_ids & self.restrict_agent_ids:
-            raise ValueError("An Agent cannot be both allowed and restricted")
-        if self.mode is PersonalToolkitAccessMode.ALL and (
-            self.allow_agent_ids or self.restrict_agent_ids
-        ):
-            raise ValueError("Allow all cannot be combined with membership deltas")
 
 
 def active_owner_predicate(user_id: str, workspace_id: str) -> sa.ColumnElement[bool]:

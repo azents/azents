@@ -11,7 +11,7 @@ import hashlib
 import json
 import os
 import secrets
-from typing import NamedTuple, TypeGuard
+from typing import Literal, NamedTuple, TypeGuard
 
 import httpx
 import httpx2
@@ -19,7 +19,9 @@ from authlib.integrations.httpx_client import AsyncOAuth2Client
 from authlib.oauth2.client import OAuth2Client
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+
+from azents.core.toolkit_ownership import UserToolkitOwner
 
 
 class OAuthTokenErrorResponse(BaseModel):
@@ -79,6 +81,31 @@ class ToolkitOAuthState(NamedTuple):
     user_id: str
     redirect_uri: str
     code_verifier: str
+
+
+class PersonalPlatformOAuthState(BaseModel):
+    """Personal installation acquisition context, distinct from shared manager state."""
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    type: Literal["personal_platform_github_oauth"]
+    owner: UserToolkitOwner
+    auth_session_id: str
+    effective_generation: str
+    nonce: str = Field(repr=False)
+
+
+class PersonalToolkitOAuthState(BaseModel):
+    """Encrypted owner/Auth Session/source binding for personal MCP authorization."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, hide_input_in_errors=True)
+    type: Literal["personal_toolkit_oauth"]
+    owner: UserToolkitOwner
+    toolkit_id: str
+    auth_session_id: str
+    source_revision: int = Field(ge=1)
+    redirect_uri: str
+    code_verifier: str = Field(repr=False)
+    nonce: str = Field(repr=False)
 
 
 def generate_pkce_pair() -> PkcePair:
@@ -404,6 +431,50 @@ def verify_oauth_state(state: str, secret_key: str) -> OAuthState | None:
         user_id=uid,
         code_verifier=cv if isinstance(cv, str) else None,
     )
+
+
+def create_personal_platform_oauth_state(
+    payload: PersonalPlatformOAuthState,
+    secret_key: str,
+) -> str:
+    """Encrypt initiating owner and registration for personal installation sync."""
+    return _encrypt_state(payload.model_dump(mode="json"), secret_key)
+
+
+def verify_personal_platform_oauth_state(
+    state: str,
+    secret_key: str,
+) -> PersonalPlatformOAuthState | None:
+    """Accept only the explicit personal Platform callback contract."""
+    data = _decrypt_state(state, secret_key)
+    if data is None:
+        return None
+    try:
+        return PersonalPlatformOAuthState.model_validate(data)
+    except ValidationError:
+        return None
+
+
+def create_personal_toolkit_oauth_state(
+    payload: PersonalToolkitOAuthState,
+    secret_key: str,
+) -> str:
+    """Encrypt an explicit personal target, preserving shared callback contracts."""
+    return _encrypt_state(payload.model_dump(mode="json"), secret_key)
+
+
+def verify_personal_toolkit_oauth_state(
+    state: str,
+    secret_key: str,
+) -> PersonalToolkitOAuthState | None:
+    """Decode only the closed personal payload, including its exact original owner."""
+    data = _decrypt_state(state, secret_key)
+    if data is None:
+        return None
+    try:
+        return PersonalToolkitOAuthState.model_validate(data)
+    except ValidationError:
+        return None
 
 
 def create_toolkit_oauth_state(

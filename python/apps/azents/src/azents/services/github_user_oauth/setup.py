@@ -21,7 +21,10 @@ from azents.core.github_setup import (
     GitHubSetupVerificationRequest,
 )
 from azents.core.github_user_auth import GitHubUserProviderError
-from azents.core.github_user_creation import GitHubUserCreationSubject
+from azents.core.github_user_creation import (
+    GitHubCreationSubject,
+    GitHubPersonalCreationSubject,
+)
 from azents.core.github_user_oauth import GitHubUserErrorCode, GitHubUserOAuthError
 from azents.core.mcp_transport import test_mcp_transport
 from azents.repos.github_user_oauth.setup import GitHubSetupRepository
@@ -39,8 +42,15 @@ class GitHubSetupService:
     oauth: Annotated[GitHubUserOAuthService, Depends()]
     repository: Annotated[GitHubSetupRepository, Depends()]
 
-    async def _authorize(self, subject: GitHubUserCreationSubject) -> None:
-        await self.oauth.repository.authorize_scope(**dataclasses.asdict(subject))
+    async def _authorize(self, subject: GitHubCreationSubject) -> None:
+        if isinstance(subject, GitHubPersonalCreationSubject):
+            await self.oauth.repository.authorize_personal_scope(
+                user_id=subject.user_id,
+                session_id=subject.session_id,
+                workspace_id=subject.workspace_id,
+            )
+        else:
+            await self.oauth.repository.authorize_scope(**dataclasses.asdict(subject))
 
     @staticmethod
     def _jwt(app_id: str, private_key: str) -> str:
@@ -59,7 +69,7 @@ class GitHubSetupService:
                 GitHubUserErrorCode.STALE, "Platform GitHub App changed. Restart setup."
             )
 
-    async def app(self, subject: GitHubUserCreationSubject) -> GitHubSetupAppOutput:
+    async def app(self, subject: GitHubCreationSubject) -> GitHubSetupAppOutput:
         await self._authorize(subject)
         platform = await self.oauth.platform_runtime.resolve()
         if all(
@@ -118,7 +128,7 @@ class GitHubSetupService:
 
     async def verify(
         self,
-        subject: GitHubUserCreationSubject,
+        subject: GitHubCreationSubject,
         request: GitHubSetupVerificationRequest,
     ) -> GitHubSetupVerificationOutput:
         await self._authorize(subject)

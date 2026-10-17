@@ -15,6 +15,7 @@ from azents.core.google_oauth import (
     GoogleCandidate,
     GoogleIdentity,
     GoogleOAuthError,
+    GooglePersonalSubject,
     GooglePublication,
     GoogleSavedConnection,
     GoogleSetup,
@@ -22,6 +23,7 @@ from azents.core.google_oauth import (
 )
 from azents.core.google_policy import GoogleTask
 from azents.core.google_system_setting import GoogleApplicationRegistration
+from azents.core.toolkit_ownership import ToolkitOwnerKind, UserToolkitOwner
 from azents.repos.google_oauth.management import GoogleOAuthRepository
 from azents.repos.google_oauth.management_test import _settings
 from azents.services.google_application.service import GoogleApplicationService
@@ -30,7 +32,11 @@ from azents.services.google_oauth.provider import (
     GoogleOAuthProvider,
     GoogleTokenResponse,
 )
-from azents.services.google_oauth.service import GoogleOAuthService, _CallbackState
+from azents.services.google_oauth.service import (
+    GoogleOAuthService,
+    _CallbackState,
+    _PersonalCallbackState,
+)
 
 
 class Harness(NamedTuple):
@@ -126,6 +132,74 @@ def _harness(
         attempt,
         state,
     )
+
+
+async def test_personal_callback_is_distinct_and_returns_same_grant_review() -> None:
+    h = _harness()
+    personal = GooglePersonalSubject(
+        h.subject.user_id,
+        h.subject.session_id,
+        UserToolkitOwner(
+            kind=ToolkitOwnerKind.USER,
+            user_id=h.subject.user_id,
+            workspace_id=h.subject.workspace_id,
+        ),
+    )
+    attempt = dataclasses.replace(h.attempt, subject=personal)
+    h.repo.claim.return_value = attempt
+    h.repo.stage.return_value = dataclasses.replace(
+        h.repo.stage.return_value, subject=personal
+    )
+    state = h.service.cipher.encrypt(
+        _PersonalCallbackState(
+            purpose="google_personal_connection",
+            attempt_id=attempt.id,
+            user_id=personal.user_id,
+            session_id=personal.session_id,
+            owner=personal.owner,
+            nonce="state",
+        ).model_dump_json()
+    )
+    review = await h.service.exchange(personal, code="CODE-SECRET", state=state)
+    assert review.ownership == "personal" and review.can_confirm
+    assert "ACCESS-SECRET" not in review.model_dump_json()
+    assert "RENEWAL-SECRET" not in review.model_dump_json()
+    with pytest.raises(GoogleOAuthError, match="invalid"):
+        await h.service.exchange(h.subject, code="CODE-SECRET", state=state)
+    with pytest.raises(GoogleOAuthError, match="invalid"):
+        await h.service.exchange(personal, code="CODE-SECRET", state=h.state)
+    h.provider.exchange.assert_awaited_once()
+
+
+async def test_personal_callback_rejects_foreign_auth_session_before_provider() -> None:
+    h = _harness()
+    personal = GooglePersonalSubject(
+        h.subject.user_id,
+        h.subject.session_id,
+        UserToolkitOwner(
+            kind=ToolkitOwnerKind.USER,
+            user_id=h.subject.user_id,
+            workspace_id=h.subject.workspace_id,
+        ),
+    )
+    state = h.service.cipher.encrypt(
+        _PersonalCallbackState(
+            purpose="google_personal_connection",
+            attempt_id=h.attempt.id,
+            user_id=personal.user_id,
+            session_id=personal.session_id,
+            owner=personal.owner,
+            nonce="state",
+        ).model_dump_json()
+    )
+    with pytest.raises(GoogleOAuthError, match="context"):
+        await h.service.exchange(
+            dataclasses.replace(personal, session_id="different-login"),
+            code="CODE-SECRET",
+            state=state,
+        )
+    h.provider.exchange.assert_not_awaited()
+    h.repo.claim.assert_not_awaited()
 
 
 @pytest.mark.asyncio

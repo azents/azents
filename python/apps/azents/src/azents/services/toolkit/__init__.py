@@ -37,7 +37,12 @@ from azents.core.toolkit_identifiers import (
 from azents.core.tools import McpToolkitConfig, ToolkitProvider, ToolkitType
 from azents.engine.tools.deps import get_toolkit_registry
 from azents.engine.tools.kubernetes_auth import KubernetesCredentials
-from azents.repos.toolkit.data import ToolkitConfig, ToolkitCreate, ToolkitUpdate
+from azents.repos.toolkit.data import (
+    ToolkitConfiguration,
+    ToolkitCreate,
+    ToolkitCreation,
+    ToolkitUpdate,
+)
 from azents.repos.toolkit_operations import ToolkitOperationsRepository
 from azents.repos.toolkit_operations.data import (
     AgentToolkitMismatch,
@@ -78,6 +83,8 @@ from .data import (
     InvalidIdentifier,
     InvalidToolkitType,
     NotBelongToWorkspace,
+    PersonalToolkitOutput,
+    ToolkitConfigurationInput,
     ToolkitCreateInput,
     ToolkitListOutput,
     ToolkitNotAvailable,
@@ -173,6 +180,24 @@ class _PreparedCredentials:
 
 
 @dataclasses.dataclass(frozen=True)
+class PreparedToolkitCreation:
+    """Common validated configuration and current Provider registration authority."""
+
+    configuration: ToolkitCreation = dataclasses.field(repr=False)
+    platform_authority: PlatformToolkitAuthority | None = dataclasses.field(repr=False)
+    platform: ResolvedPlatformGitHubApp | None = dataclasses.field(repr=False)
+
+
+@dataclasses.dataclass(frozen=True)
+class PreparedToolkitUpdate:
+    """Owner-independent normalized edit with transaction-time identity intent."""
+
+    update: ToolkitUpdate = dataclasses.field(repr=False)
+    slug_reset_canonical_name: str | None
+    platform_authority: PlatformToolkitAuthority | None = dataclasses.field(repr=False)
+
+
+@dataclasses.dataclass(frozen=True)
 class _ResolvedToolkitUpdate:
     """Normalized patch plus a transaction-time default-Slug request."""
 
@@ -212,7 +237,7 @@ class ToolkitService:
     github_user_oauth: Annotated[GitHubUserOAuthService, Depends()]
 
     @staticmethod
-    def _requires_user_creation(create: ToolkitCreateInput) -> bool:
+    def _requires_user_creation(create: ToolkitConfigurationInput) -> bool:
         auth = _decode_toolkit_auth(create.config, create.credentials)
         return create.toolkit_type == "github" and auth.user_creation
 
@@ -220,6 +245,18 @@ class ToolkitService:
         self, create: ToolkitCreateInput, *, owner_agent_id: str | None
     ) -> ToolkitCreate:
         """Validate desired GitHub settings without publishing a Toolkit."""
+        prepared = await self.prepare_user_configuration(create)
+        return ToolkitCreate(
+            workspace_id=create.workspace_id,
+            owner_agent_id=owner_agent_id,
+            **prepared.model_dump(),
+        )
+
+    async def prepare_user_configuration(
+        self,
+        create: ToolkitConfigurationInput,
+    ) -> ToolkitCreation:
+        """Retain common reviewed GitHub creation fields for every owner variant."""
         if not self._requires_user_creation(create):
             raise GitHubUserOAuthError(
                 GitHubUserErrorCode.INVALID,
@@ -250,9 +287,7 @@ class ToolkitService:
                 GitHubUserErrorCode.INVALID,
                 "GitHub App source does not match configuration.",
             )
-        return ToolkitCreate(
-            workspace_id=create.workspace_id,
-            owner_agent_id=owner_agent_id,
+        return ToolkitCreation(
             toolkit_type="github",
             slug=identifiers.slug,
             name=identifiers.name,
@@ -264,13 +299,13 @@ class ToolkitService:
             always_expose_tools=create.always_expose_tools,
         )
 
-    async def create(
-        self, create: ToolkitCreateInput, *, user_id: str
+    async def prepare_configuration(
+        self, create: ToolkitConfigurationInput, *, user_id: str
     ) -> Result[
-        ToolkitOutput,
+        PreparedToolkitCreation,
         InvalidToolkitType | InvalidConfig | InvalidIdentifier | InvalidCredentials,
     ]:
-        """Create a Workspace-shared Toolkit with validated configuration."""
+        """Prepare common Provider configuration outside any database scope."""
         if create.toolkit_type == "google":
             return Failure(
                 InvalidCredentials(
@@ -315,24 +350,42 @@ class ToolkitService:
             if prepared.credentials is not None
             else None
         )
+        return Success(
+            PreparedToolkitCreation(
+                configuration=ToolkitCreation(
+                    toolkit_type=create.toolkit_type,
+                    slug=identifiers.slug,
+                    name=identifiers.name,
+                    description=create.description,
+                    config=create.config,
+                    prompt=create.prompt,
+                    credentials=credentials_json,
+                    enabled=create.enabled,
+                    always_expose_tools=create.always_expose_tools,
+                ),
+                platform_authority=self._platform_authority(prepared, user_id=user_id),
+                platform=prepared.platform,
+            )
+        )
+
+    async def create(
+        self, create: ToolkitCreateInput, *, user_id: str
+    ) -> Result[
+        ToolkitOutput,
+        InvalidToolkitType | InvalidConfig | InvalidIdentifier | InvalidCredentials,
+    ]:
+        """Create a Workspace-shared Toolkit using common configuration validation."""
+        prepared_result = await self.prepare_configuration(create, user_id=user_id)
+        if isinstance(prepared_result, Failure):
+            return Failure(prepared_result.error)
+        prepared = prepared_result.value
         result = await self.operations_repository.create(
             ToolkitCreate(
                 workspace_id=create.workspace_id,
                 owner_agent_id=None,
-                toolkit_type=create.toolkit_type,
-                slug=identifiers.slug,
-                name=identifiers.name,
-                description=create.description,
-                config=create.config,
-                prompt=create.prompt,
-                credentials=credentials_json,
-                enabled=create.enabled,
-                always_expose_tools=create.always_expose_tools,
+                **prepared.configuration.model_dump(),
             ),
-            platform_authority=self._platform_authority(
-                prepared,
-                user_id=user_id,
-            ),
+            platform_authority=prepared.platform_authority,
         )
         match result:
             case Success(value):
@@ -387,6 +440,40 @@ class ToolkitService:
         if isinstance(existing_result, Failure):
             return Failure(self._map_toolkit_read_error(existing_result.error))
         existing = existing_result.value
+        prepared = await self.prepare_configuration_update(
+            existing, update, user_id=user_id
+        )
+        if isinstance(prepared, Failure):
+            return Failure(prepared.error)
+        result = await self.operations_repository.update(
+            toolkit_id,
+            prepared.value.update,
+            workspace_id=workspace_id,
+            expected_toolkit_type=existing.toolkit_type,
+            slug_reset_canonical_name=prepared.value.slug_reset_canonical_name,
+            platform_authority=prepared.value.platform_authority,
+        )
+        match result:
+            case Success(value):
+                output = ToolkitOutput.model_validate(value, from_attributes=True)
+                return Success(await self._attach_oauth_connection(output))
+            case Failure(error):
+                if isinstance(error, PlatformAuthorityRejected):
+                    return Failure(InvalidCredentials(error.detail))
+                return Failure(self._map_toolkit_read_error(error))
+            case _:
+                assert_never(result)
+
+    async def prepare_configuration_update(
+        self,
+        existing: ToolkitConfiguration,
+        update: ToolkitUpdateInput,
+        *,
+        user_id: str,
+    ) -> Result[
+        PreparedToolkitUpdate, InvalidConfig | InvalidIdentifier | InvalidCredentials
+    ]:
+        """Apply common field/auth/credential edits outside a database transaction."""
         identifier_update = self._resolve_update_identifiers(update, existing=existing)
         if isinstance(identifier_update, InvalidIdentifier):
             return Failure(identifier_update)
@@ -463,27 +550,16 @@ class ToolkitService:
             credentials=normalized_credentials,
             platform=platform,
         )
-        result = await self.operations_repository.update(
-            toolkit_id,
-            repo_update,
-            workspace_id=workspace_id,
-            expected_toolkit_type=existing.toolkit_type,
-            slug_reset_canonical_name=identifier_update.slug_reset_canonical_name,
-            platform_authority=self._platform_authority(
-                prepared_for_authority,
-                user_id=user_id,
-            ),
+        return Success(
+            PreparedToolkitUpdate(
+                update=repo_update,
+                slug_reset_canonical_name=identifier_update.slug_reset_canonical_name,
+                platform_authority=self._platform_authority(
+                    prepared_for_authority,
+                    user_id=user_id,
+                ),
+            )
         )
-        match result:
-            case Success(value):
-                output = ToolkitOutput.model_validate(value, from_attributes=True)
-                return Success(await self._attach_oauth_connection(output))
-            case Failure(error):
-                if isinstance(error, PlatformAuthorityRejected):
-                    return Failure(InvalidCredentials(error.detail))
-                return Failure(self._map_toolkit_read_error(error))
-            case _:
-                assert_never(result)
 
     async def delete_by_id(
         self, toolkit_id: str, *, workspace_id: str
@@ -651,7 +727,7 @@ class ToolkitService:
         return toolkit.model_copy(update={"oauth_connection": summary})
 
     async def _prepare_updated_credentials(
-        self, existing: ToolkitConfig, submitted: dict[str, object]
+        self, existing: ToolkitConfiguration, submitted: dict[str, object]
     ) -> _PreparedCredentials | InvalidCredentials:
         """Keep omitted write-only BYOA values only for the same App registration."""
         auth = _decode_toolkit_auth(None, submitted)
@@ -718,10 +794,10 @@ class ToolkitService:
         )
 
     @staticmethod
-    def _attach_platform_authorization(
-        toolkit: ToolkitOutput,
+    def _attach_platform_authorization[T: (ToolkitOutput, PersonalToolkitOutput)](
+        toolkit: T,
         platform: ResolvedPlatformGitHubApp | None,
-    ) -> ToolkitOutput:
+    ) -> T:
         """Attach redacted Platform reconnect state from a resolved snapshot."""
         if platform is None:
             return toolkit
@@ -736,7 +812,7 @@ class ToolkitService:
 
     @staticmethod
     def _platform_credentials(
-        toolkit: ToolkitOutput,
+        toolkit: ToolkitConfiguration,
     ) -> GitHubSecretsAppPlatform | GitHubSecretsAppPlatformUser | None:
         """Parse persisted Platform credentials for redacted projection."""
         if toolkit.toolkit_type != "github" or toolkit.credentials is None:
@@ -773,7 +849,7 @@ class ToolkitService:
     def _build_repo_update(
         update: ToolkitUpdateInput,
         *,
-        existing: ToolkitConfig,
+        existing: ToolkitConfiguration,
         normalized_credentials: dict[str, object] | None,
     ) -> ToolkitUpdate:
         """Convert the service patch to the encrypted repository patch shape."""
@@ -821,7 +897,7 @@ class ToolkitService:
 
     def _resolve_create_identifiers(
         self,
-        create: ToolkitCreateInput,
+        create: ToolkitConfigurationInput,
     ) -> ResolvedToolkitIdentifiers | InvalidIdentifier:
         """Materialize non-null create identifiers from Provider metadata."""
         provider = self.toolkit_registry[create.toolkit_type]
@@ -839,7 +915,7 @@ class ToolkitService:
         self,
         update: ToolkitUpdateInput,
         *,
-        existing: ToolkitConfig,
+        existing: ToolkitConfiguration,
     ) -> _ResolvedToolkitUpdate | InvalidIdentifier:
         """Normalize explicit patch identifiers while preserving omitted fields."""
         normalized: ToolkitUpdateInput = {**update}
@@ -1411,7 +1487,9 @@ class ToolkitService:
             case Failure(error):
                 return Failure(self._map_owned_mutation_error(error))
 
-    def _readiness(self, toolkit: ToolkitOutput) -> ToolkitReadiness:
+    def configuration_readiness(
+        self, toolkit: ToolkitOutput | PersonalToolkitOutput
+    ) -> ToolkitReadiness:
         """Return the known persisted readiness state for management UI."""
         if not toolkit.enabled:
             return "disabled"
@@ -1438,6 +1516,21 @@ class ToolkitService:
             ):
                 return "authorization_required"
         return "ready"
+
+    async def attach_personal_provider_state(
+        self, toolkit: PersonalToolkitOutput
+    ) -> PersonalToolkitOutput:
+        """Project current common Provider readiness without owner-specific options."""
+        if self._platform_credentials(toolkit) is not None:
+            platform = await self.github_runtime.resolve()
+            toolkit = self._attach_platform_authorization(toolkit, platform)
+        return toolkit.model_copy(
+            update={"readiness": self.configuration_readiness(toolkit)}
+        )
+
+    def _readiness(self, toolkit: ToolkitOutput) -> ToolkitReadiness:
+        """Keep the existing Agent management entry on the common readiness path."""
+        return self.configuration_readiness(toolkit)
 
     @staticmethod
     @overload

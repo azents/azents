@@ -38,7 +38,6 @@ class TestToolkitConfigListResponse(unittest.TestCase):
                 items = [
                     azentspublicclient.models.toolkit_config_response.ToolkitConfigResponse(
                         id = '', 
-                        workspace_id = '', 
                         toolkit_type = '', 
                         slug = '', 
                         name = '', 
@@ -68,7 +67,8 @@ class TestToolkitConfigListResponse(unittest.TestCase):
                             status = 'connected', 
                             failure_reason = '', ), 
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                        updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
+                        updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        workspace_id = '', )
                     ]
             )
         else:
@@ -76,7 +76,6 @@ class TestToolkitConfigListResponse(unittest.TestCase):
                 items = [
                     azentspublicclient.models.toolkit_config_response.ToolkitConfigResponse(
                         id = '', 
-                        workspace_id = '', 
                         toolkit_type = '', 
                         slug = '', 
                         name = '', 
@@ -106,7 +105,8 @@ class TestToolkitConfigListResponse(unittest.TestCase):
                             status = 'connected', 
                             failure_reason = '', ), 
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                        updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
+                        updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        workspace_id = '', )
                     ],
         )
         """

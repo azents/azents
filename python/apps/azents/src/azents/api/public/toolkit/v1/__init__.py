@@ -54,6 +54,10 @@ from .github_user import router as github_user_router
 from .github_user_creation import router as github_creation_router
 from .google import router as google_router
 from .oauth import router as oauth_router
+from .personal import router as personal_router
+from .personal_github import router as personal_github_router
+from .personal_google import router as personal_google_router
+from .personal_oauth import router as personal_oauth_router
 
 router = APIRouter()
 
@@ -752,6 +756,30 @@ async def list_toolkits(
 
 def mount(mounter: RouteMounter) -> None:
     """Mount Toolkit v1 routes."""
+    mounter(
+        personal_router,
+        prefix="/toolkit/v1",
+        tag="Personal Toolkit v1",
+        description="Owner-scoped personal Toolkit configuration and Agent access.",
+    )
+    mounter(
+        personal_oauth_router,
+        prefix="/toolkit/v1",
+        tag="Personal Toolkit OAuth v1",
+        description="Exact owner-bound MCP OAuth setup for personal connections.",
+    )
+    mounter(
+        personal_google_router,
+        prefix="/toolkit/v1",
+        tag="Personal Google Toolkit v1",
+        description="User-owned Google setup with common reviewed grant publication.",
+    )
+    mounter(
+        personal_github_router,
+        prefix="/toolkit/v1",
+        tag="Personal GitHub Toolkit v1",
+        description="Exact User-owned GitHub setup and current grant management.",
+    )
     mounter(
         router,
         prefix="/toolkit/v1",

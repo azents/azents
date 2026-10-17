@@ -19,6 +19,8 @@ code_paths:
   - python/apps/azents/src/azents/core/mcp_discovery.py
   - python/apps/azents/src/azents/core/oauth2.py
   - python/apps/azents/src/azents/api/public/toolkit/v1/oauth.py
+  - python/apps/azents/src/azents/api/public/toolkit/v1/personal_oauth.py
+  - python/apps/azents/src/azents/repos/toolkit/personal_management.py
   - python/apps/azents/src/azents/repos/mcp_oauth_connection/**
   - python/apps/azents/src/azents/rdb/models/toolkit.py
   - typescript/apps/azents-web/src/app/(app)/oauth/mcp/callback/**
@@ -27,7 +29,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/toolkits/**
   - typescript/apps/azents-web/src/shared/toolkits/**
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
-last_verified_at: 2026-10-09
+last_verified_at: 2026-10-17
 spec_version: 14
 ---
 
@@ -68,6 +70,28 @@ The flow supports OAuth authorization code + PKCE S256, RFC 8414 metadata discov
   refresh-token fields before SDK token-state normalization.
 
 ## Shared Setup Transaction Boundaries
+
+### Personal setup
+
+Personal MCP-backed connections use separate authenticated routes under
+`/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/oauth`: POST `connect`,
+POST `exchange`, and DELETE the OAuth connection at that base. Discovery,
+manual registration, DCR and PKCE preparation reuse common Provider helpers.
+The encrypted personal state binds explicit User ownership in the required real
+Workspace, exact initiating Auth Session, Toolkit ID, existing source revision,
+redirect URI and PKCE verifier. The personal return target carries the Workspace
+handle. Shared, Agent or other-Workspace state cannot be interpreted as this
+personal target, including for the same User.
+
+The final store repeats current account, ordinary Workspace membership and exact
+User/Workspace personal-owner admission without shared-manager or AgentAdmin requirements,
+and compares the captured source revision. Connect and exchange advance that
+revision under the Toolkit parent fence; source edits, disconnect and a previous
+exchange defeat a late callback or replay. External discovery, DCR and exchange
+remain outside transactions. Personal management does not activate personal
+runtime resolution or change existing shared/Agent callback semantics.
+
+### Workspace-shared setup
 
 Workspace-shared setup routes call a session-free service. Completed repository
 operations own the paired Toolkit/connection reads, full connection stores, and
