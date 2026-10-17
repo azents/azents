@@ -61,6 +61,7 @@ class PersonalExecutionSubject:
 
     root_session_id: str
     user_id: str
+    workspace_id: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -123,11 +124,15 @@ class PersonalToolkitRuntimeRepository:
             raise PersonalToolkitExecutionDenied(Reason.OWNER_UNAVAILABLE)
         # The complete eligibility query is narrowed to the canonical workload Agent.
         accessible = await session.read_session.scalar(
-            eligible_personal_agent_ids(active_user).where(RDBAgent.id == agent_id)
+            eligible_personal_agent_ids(active_user, workspace_id).where(
+                RDBAgent.id == agent_id
+            )
         )
         if accessible is None:
             raise PersonalToolkitExecutionDenied(Reason.AGENT_ACCESS_DENIED)
-        return PersonalExecutionSubject(canonical.root_session_id, active_user)
+        return PersonalExecutionSubject(
+            canonical.root_session_id, active_user, workspace_id
+        )
 
     async def admit_in_session(
         self,
@@ -137,7 +142,10 @@ class PersonalToolkitRuntimeRepository:
         """Serialize the exact parent and recheck live canonical authority."""
         try:
             row = await self.toolkits.lock_personal(
-                session, user_id=target.owner_user_id, toolkit_id=target.toolkit_id
+                session,
+                user_id=target.owner_user_id,
+                workspace_id=target.workspace_id,
+                toolkit_id=target.toolkit_id,
             )
         except PersonalToolkitNotFound:
             raise PersonalToolkitExecutionDenied(Reason.SOURCE_UNAVAILABLE) from None
@@ -149,6 +157,7 @@ class PersonalToolkitRuntimeRepository:
         )
         if (
             subject.user_id != target.owner_user_id
+            or subject.workspace_id != target.workspace_id
             or subject.root_session_id != target.root_session_id
         ):
             raise PersonalToolkitExecutionDenied(Reason.ROOT_UNAVAILABLE)
@@ -161,6 +170,7 @@ class PersonalToolkitRuntimeRepository:
                 sa.select(RDBPersonalToolkitAgent.toolkit_id).where(
                     RDBPersonalToolkitAgent.toolkit_id == row.id,
                     RDBPersonalToolkitAgent.owner_user_id == subject.user_id,
+                    RDBPersonalToolkitAgent.workspace_id == subject.workspace_id,
                     RDBPersonalToolkitAgent.agent_id == target.agent_id,
                 )
             )
@@ -169,7 +179,10 @@ class PersonalToolkitRuntimeRepository:
         if not await self._provider_ready(session, row, target.owner_user_id):
             raise PersonalToolkitExecutionDenied(Reason.PROVIDER_AUTHORIZATION_REQUIRED)
         toolkit = await self.toolkits.get_personal(
-            session, user_id=subject.user_id, toolkit_id=row.id
+            session,
+            user_id=subject.user_id,
+            workspace_id=subject.workspace_id,
+            toolkit_id=row.id,
         )
         if toolkit is None:
             raise PersonalToolkitExecutionDenied(Reason.SOURCE_UNAVAILABLE)
@@ -200,7 +213,9 @@ class PersonalToolkitRuntimeRepository:
                     await session.read_session.execute(
                         sa.select(RDBToolkitConfig.id, RDBToolkitConfig.revision)
                         .where(
-                            active_owner_predicate(subject.user_id),
+                            active_owner_predicate(
+                                subject.user_id, subject.workspace_id
+                            ),
                             RDBToolkitConfig.enabled.is_(True),
                         )
                         .order_by(RDBToolkitConfig.created_at, RDBToolkitConfig.id)
@@ -249,7 +264,10 @@ class PersonalToolkitRuntimeRepository:
                     "Platform Toolkit admission requires current settings"
                 )
             toolkit = await self.toolkits.get_personal(
-                session, user_id=user_id, toolkit_id=row.id
+                session,
+                user_id=user_id,
+                workspace_id=row.workspace_id,
+                toolkit_id=row.id,
             )
             if toolkit is None or toolkit.credentials is None:
                 return False

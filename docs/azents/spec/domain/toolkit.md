@@ -21,6 +21,8 @@ code_paths:
   - python/apps/azents/src/azents/core/session_resource_authority.py
   - python/apps/azents/src/azents/core/toolkit_errors.py
   - python/apps/azents/src/azents/core/toolkit_ownership.py
+  - python/apps/azents/src/azents/core/personal_toolkit_runtime.py
+  - python/apps/azents/src/azents/engine/tooling/personal_admission.py
   - python/apps/azents/src/azents/repos/engine_event_repositories.py
   - python/apps/azents/src/azents/repos/engine_resolve.py
   - python/apps/azents/src/azents/repos/engine_tool_repositories.py
@@ -132,7 +134,7 @@ spec_version: 150
 
 ## Overview
 
-Toolkit is the **tool bundle** that an azents agent mounts to interact with the outside world. One ToolkitConfig consists of (a) **tool type (`toolkit_type`)**, (b) provider-specific **config** (for example MCP server URL, GCP project ID, GitHub toolsets), and (c) encrypted **credentials**. A ToolkitConfig has an explicit Workspace, Agent, or User owner within a required real Workspace. Workspace-shared connections mount through `AgentToolkit`; Agent-owned connections use their canonical direct owner. User-owned connections have Workspace-scoped personal management APIs; personal execution and Web management are not activated by that management boundary.
+Toolkit is the **tool bundle** that an azents agent mounts to interact with the outside world. One ToolkitConfig consists of (a) **tool type (`toolkit_type`)**, (b) provider-specific **config** (for example MCP server URL, GCP project ID, GitHub toolsets), and (c) encrypted **credentials**. A ToolkitConfig has an explicit Workspace, Agent, or User owner within a required real Workspace. Workspace-shared connections mount through `AgentToolkit`; Agent-owned connections use their canonical direct owner. User-owned connections have Workspace-scoped personal management APIs and source-bound User-root execution. Personal Web management remains a separate delivery boundary.
 
 This domain covers four feature groups.
 
@@ -185,7 +187,35 @@ Agent cannot be stored even by a direct membership write. Explicit deltas preser
 mode preconditions reject stale edits, and multi-Toolkit batches commit atomically in parent-ID
 order. Workspace deletion removes its scoped personal parents under the existing deletion boundary.
 
-### Team Session execution boundary
+### Personal User-root execution
+
+Personal sources derive from the canonical root Conversation's active associated
+User and the executing Workspace/Agent, not a viewer, sender or request argument.
+The canonical Session lineage must agree with that workload. Same-User membership
+in B does not project A's personal parents into B. Team roots receive no personal
+sources. Descendants, recovery and continuations retain canonical root authority.
+
+Candidate enumeration, parent locks, policy selection and credential reads require
+exact User plus Workspace. The captured source binds execution owner generation,
+Workspace, Agent, root, User, Toolkit and existing source revision. Final catalog
+handler admission and later grant/snapshot publication repeat current parent,
+ordinary access, enabled/source revision, per-Toolkit policy and Provider readiness
+checks. Cached descriptions/transports do not grant access or permit a shared fallback.
+
+Shared/Agent ordering remains unchanged, followed by admitted personal sources.
+Namespaces use the existing durable Agent/Toolkit allocator and survive withdrawal;
+no namespace for A's personal parent is allocated to an Agent in B.
+
+MCP/Notion/Sentry, Google, GitHub, AWS, GCP and native Provider paths retain protected
+effect admission around authentication/discovery/refresh gaps. Google/GitHub/MCP
+current-grant CAS and post-discovery publication compose current personal admission
+inside their final database writes. Provider I/O stays outside those operations.
+Enabled Runtime credential export checks before acquisition and after its external
+gap; disabled export obtains no credentials and does not gate unrelated Runtime work.
+Already-admitted effects may finish, and exported remote tokens/processes may persist.
+Withdrawal stops later managed admissions, not remote effects or copied credentials.
+
+### Shared execution and state boundaries
 
 Ordinary Toolkit/Agent management authorization uses scoped reads without
 parent/admin read locks. Durable namespace claim is separate: shared slug change
@@ -317,9 +347,10 @@ inventory. Personal installation OAuth state binds User, Auth Session and Platfo
 generation and Workspace; synchronization repeats current authority before persistence. Shared
 and Agent setup contracts remain separate.
 
-These management APIs do not admit personal sources into User or Team Session
-execution, dispatch or Runtime export. Existing non-personal execution behavior
-is unchanged; personal-source admission belongs to the separate execution phase.
+Management admission is not execution authority. User Session discovery, dispatch
+and Runtime export independently derive the canonical User root and executing
+Workspace, then repeat current exact-source admission as described above. Team
+roots remain excluded; existing non-personal execution behavior is unchanged.
 
 ```mermaid
 erDiagram

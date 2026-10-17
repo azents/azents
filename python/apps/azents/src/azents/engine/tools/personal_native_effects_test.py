@@ -29,6 +29,7 @@ async def test_native_kubernetes_rechecks_credentials_and_cached_client_authorit
     h = runtime
     saved = await h.foundation.operations.create(
         user_id=h.foundation.user_id,
+        workspace_id=h.foundation.workspace_ids[0],
         create=creation().model_copy(update={"toolkit_type": "kubernetes"}),
     )
     root = await h.root(h.foundation.user_id, 0)

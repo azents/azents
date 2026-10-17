@@ -55,6 +55,7 @@ async def test_google_personal_current_admission_and_post_gap_refresh_publicatio
     f = h.foundation
     saved = await f.operations.create(
         user_id=f.user_id,
+        workspace_id=f.workspace_ids[0],
         create=creation().model_copy(
             update={
                 "toolkit_type": "google",
@@ -121,6 +122,7 @@ async def test_google_personal_current_admission_and_post_gap_refresh_publicatio
     async def withdraw() -> None:
         await f.operations.mutate_access(
             user_id=f.user_id,
+            workspace_id=f.workspace_ids[0],
             mutations=[
                 PersonalToolkitAccessMutation(
                     saved.id,

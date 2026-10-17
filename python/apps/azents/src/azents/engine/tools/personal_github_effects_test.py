@@ -74,6 +74,7 @@ async def test_personal_platform_token_authority_does_not_trust_prepared_invento
     )
     saved = await f.operations.create(
         user_id=f.user_id,
+        workspace_id=f.workspace_ids[0],
         create=creation().model_copy(
             update={
                 "toolkit_type": "github",

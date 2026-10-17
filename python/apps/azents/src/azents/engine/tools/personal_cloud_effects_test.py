@@ -37,6 +37,7 @@ async def test_cloud_background_and_cached_handlers_use_current_personal_source(
     h = runtime
     saved = await h.foundation.operations.create(
         user_id=h.foundation.user_id,
+        workspace_id=h.foundation.workspace_ids[0],
         create=creation().model_copy(update={"toolkit_type": family}),
     )
     root = await h.root(h.foundation.user_id, 0)

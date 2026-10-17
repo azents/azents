@@ -41,6 +41,7 @@ from azents.repos.toolkit.personal_test import creation
 async def restrict(h: Harness, root: Root, toolkit_id: str) -> None:
     await h.foundation.operations.mutate_access(
         user_id=h.foundation.user_id,
+        workspace_id=h.foundation.workspace_ids[0],
         mutations=[
             PersonalToolkitAccessMutation(
                 toolkit_id, None, frozenset(), frozenset([root.agent_id]), Mode.ALL
@@ -62,7 +63,9 @@ async def test_personal_mcp_background_and_cached_calls_recheck_current_source(
 ) -> None:
     h = runtime
     saved = await h.foundation.operations.create(
-        user_id=h.foundation.user_id, create=creation()
+        user_id=h.foundation.user_id,
+        workspace_id=h.foundation.workspace_ids[0],
+        create=creation(),
     )
     root = await h.root(h.foundation.user_id, 0)
     [source] = await h.sources(root)
@@ -150,6 +153,7 @@ async def test_personal_oauth_refresh_cannot_publish_after_current_allowance_wit
     f = h.foundation
     saved = await f.operations.create(
         user_id=f.user_id,
+        workspace_id=f.workspace_ids[0],
         create=creation().model_copy(
             update={
                 "config": {"server_url": "https://mcp.test", "auth_type": "oauth2"},

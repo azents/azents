@@ -33,6 +33,7 @@ async def test_personal_user_grant_follows_root_and_current_policy_without_fallb
     setup = await prepare(harness)
     configured = await harness.foundation.operations.update(
         user_id=harness.subject.user_id,
+        workspace_id=harness.subject.workspace_id,
         toolkit_id=setup.requester.toolkit_id,
         update={
             "credentials": json.dumps(

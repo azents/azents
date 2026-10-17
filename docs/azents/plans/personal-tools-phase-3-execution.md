@@ -7,6 +7,11 @@ tags: [toolkit, implementation, engine, runtime, security]
 
 # Phase Execution Plan
 
+> Historical revision 1 execution record. Its User-global candidate assumptions
+> and validation are superseded by approved Design revision 2 and the
+> [Workspace execution correction plan](personal-tools-workspace-execution-correction.md).
+> Prior evidence is not corrected same-User cross-Workspace acceptance.
+
 - Phase: 3/4, User-root execution and source identity.
 - Branch/base: `feat/personal-tools-execution-261017` ->
   `feat/personal-tools-management-261017` at `4110594de`; depends on

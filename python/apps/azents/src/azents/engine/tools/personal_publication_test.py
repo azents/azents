@@ -33,6 +33,7 @@ async def test_personal_snapshot_publication_rechecks_inside_parent_transaction(
     h = runtime
     saved = await h.foundation.operations.create(
         user_id=h.foundation.user_id,
+        workspace_id=h.foundation.workspace_ids[0],
         create=creation(),
     )
     root = await h.root(h.foundation.user_id, 0)

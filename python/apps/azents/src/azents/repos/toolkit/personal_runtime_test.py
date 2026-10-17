@@ -145,17 +145,12 @@ async def test_sources_follow_durable_user_root_not_agent_global_inventory(
 ) -> None:
     h = runtime
     f = h.foundation
-    async with f.writes() as session:
-        session.write_session.add(
-            RDBWorkspaceUser(
-                workspace_id=f.workspace_ids[0],
-                user_id=f.other_user_id,
-                name="Other",
-                role=WorkspaceUserRole.MEMBER,
-            )
-        )
-    mine = await f.operations.create(user_id=f.user_id, create=creation())
-    other = await f.operations.create(user_id=f.other_user_id, create=creation())
+    mine = await f.operations.create(
+        user_id=f.user_id, workspace_id=f.workspace_ids[0], create=creation()
+    )
+    other = await f.operations.create(
+        user_id=f.other_user_id, workspace_id=f.workspace_ids[0], create=creation()
+    )
     first = await h.root(f.user_id, 0)
     second = await h.root(f.other_user_id, 0)
     team = await h.root(None, 0)
@@ -189,12 +184,15 @@ async def test_current_restriction_and_reallow_reuse_namespace(
 ) -> None:
     h = runtime
     f = h.foundation
-    toolkit = await f.operations.create(user_id=f.user_id, create=creation())
+    toolkit = await f.operations.create(
+        user_id=f.user_id, workspace_id=f.workspace_ids[0], create=creation()
+    )
     root = await h.root(f.user_id, 0)
     [source] = await h.sources(root)
     await h.repository.admit(source.target)
     await f.operations.mutate_access(
         user_id=f.user_id,
+        workspace_id=f.workspace_ids[0],
         mutations=[
             PersonalToolkitAccessMutation(
                 toolkit.id,
@@ -210,6 +208,7 @@ async def test_current_restriction_and_reallow_reuse_namespace(
     assert await h.sources(root) == []
     await f.operations.mutate_access(
         user_id=f.user_id,
+        workspace_id=f.workspace_ids[0],
         mutations=[
             PersonalToolkitAccessMutation(
                 toolkit.id,
@@ -222,6 +221,71 @@ async def test_current_restriction_and_reallow_reuse_namespace(
     )
     [allowed] = await h.sources(root)
     assert allowed.namespace == source.namespace
+
+
+async def test_same_user_personal_sources_and_captured_targets_stay_in_workspace(
+    runtime: Harness,
+) -> None:
+    """Both memberships and identical aliases never bridge canonical parent scope."""
+    h = runtime
+    f = h.foundation
+    a = await f.operations.create(
+        user_id=f.user_id, workspace_id=f.workspace_ids[0], create=creation()
+    )
+    b = await f.operations.create(
+        user_id=f.user_id, workspace_id=f.workspace_ids[1], create=creation()
+    )
+    root_a = await h.root(f.user_id, 0)
+    root_b = await h.root(f.user_id, 2)
+    assert root_a.workspace_id != root_b.workspace_id
+    [source_a] = await h.sources(root_a)
+    [source_b] = await h.sources(root_b)
+    assert source_a.toolkit.id == a.id and source_b.toolkit.id == b.id
+    for target in [
+        dataclasses.replace(
+            source_a.target,
+            execution_owner=root_b.owner,
+            workspace_id=root_b.workspace_id,
+            agent_id=root_b.agent_id,
+            root_session_id=root_b.owner.session_id,
+        ),
+        dataclasses.replace(
+            source_b.target, toolkit_id=a.id, source_revision=a.revision
+        ),
+        dataclasses.replace(source_a.target, workspace_id=root_b.workspace_id),
+    ]:
+        with pytest.raises(PersonalToolkitExecutionDenied):
+            await h.repository.admit(target)
+    async with f.writes() as session:
+        assert (
+            await h.repository.namespaces.get_active(
+                session, agent_id=root_b.agent_id, toolkit_id=a.id
+            )
+            is None
+        )
+        await session.write_session.execute(
+            sa.delete(RDBWorkspaceUser).where(
+                RDBWorkspaceUser.user_id == f.user_id,
+                RDBWorkspaceUser.workspace_id == root_a.workspace_id,
+            )
+        )
+    assert await h.sources(root_a) == []
+    assert [item.toolkit.id for item in await h.sources(root_b)] == [b.id]
+    with pytest.raises(PersonalToolkitExecutionDenied):
+        await h.repository.admit(source_a.target)
+    async with f.writes() as session:
+        session.write_session.add(
+            RDBWorkspaceUser(
+                workspace_id=root_a.workspace_id,
+                user_id=f.user_id,
+                name="Restored member",
+                role=WorkspaceUserRole.MEMBER,
+            )
+        )
+    [restored] = await h.sources(root_a)
+    assert restored.namespace == source_a.namespace
+    assert restored.toolkit.id == a.id
+    assert [item.toolkit.id for item in await h.sources(root_b)] == [b.id]
 
 
 @pytest.mark.parametrize(
@@ -241,7 +305,9 @@ async def test_prepared_source_repeats_current_authority(
 ) -> None:
     h = runtime
     f = h.foundation
-    toolkit = await f.operations.create(user_id=f.user_id, create=creation())
+    toolkit = await f.operations.create(
+        user_id=f.user_id, workspace_id=f.workspace_ids[0], create=creation()
+    )
     root = await h.root(f.user_id, 0)
     [source] = await h.sources(root)
     target = source.target
@@ -259,16 +325,22 @@ async def test_prepared_source_repeats_current_authority(
             )
     elif change == "disabled_source":
         await f.operations.update(
-            user_id=f.user_id, toolkit_id=toolkit.id, update={"enabled": False}
+            user_id=f.user_id,
+            workspace_id=f.workspace_ids[0],
+            toolkit_id=toolkit.id,
+            update={"enabled": False},
         )
     elif change == "changed_source":
         await f.operations.update(
             user_id=f.user_id,
+            workspace_id=f.workspace_ids[0],
             toolkit_id=toolkit.id,
             update={"credentials": '{"token":"replacement"}'},
         )
     elif change == "deleted_source":
-        await f.operations.delete(user_id=f.user_id, toolkit_id=toolkit.id)
+        await f.operations.delete(
+            user_id=f.user_id, workspace_id=f.workspace_ids[0], toolkit_id=toolkit.id
+        )
     elif change == "owner_generation":
         target = dataclasses.replace(
             target,
@@ -291,7 +363,9 @@ async def test_provider_grant_absence_does_not_allocate_personal_namespace(
     draft = creation().model_copy(
         update={"toolkit_type": "google", "config": {"tasks": []}, "credentials": None}
     )
-    toolkit = await f.operations.create(user_id=f.user_id, create=draft)
+    toolkit = await f.operations.create(
+        user_id=f.user_id, workspace_id=f.workspace_ids[0], create=draft
+    )
     root = await h.root(f.user_id, 0)
     assert await h.sources(root) == []
     async with f.writes() as session:
@@ -323,7 +397,9 @@ async def test_personal_sources_preserve_canonical_archived_continuation_rules(
 ) -> None:
     h = runtime
     f = h.foundation
-    await f.operations.create(user_id=f.user_id, create=creation())
+    await f.operations.create(
+        user_id=f.user_id, workspace_id=f.workspace_ids[0], create=creation()
+    )
     root = await h.root(f.user_id, 0)
     [prepared] = await h.sources(root)
     async with f.writes() as session:

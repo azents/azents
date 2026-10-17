@@ -127,6 +127,7 @@ class EffectToolkit(Toolkit[SourceConfig]):
 async def restrict(h: Harness, root: Root, toolkit_id: str) -> None:
     await h.foundation.operations.mutate_access(
         user_id=h.foundation.user_id,
+        workspace_id=h.foundation.workspace_ids[0],
         mutations=[
             PersonalToolkitAccessMutation(
                 toolkit_id, None, frozenset(), frozenset([root.agent_id]), Mode.ALL
@@ -144,7 +145,9 @@ async def test_final_catalog_handler_guard_survives_wire_projection_and_withdraw
 ) -> None:
     h = runtime
     f = h.foundation
-    saved = await f.operations.create(user_id=f.user_id, create=creation())
+    saved = await f.operations.create(
+        user_id=f.user_id, workspace_id=f.workspace_ids[0], create=creation()
+    )
     root = await h.root(f.user_id, 0)
     [source] = await h.sources(root)
     guard = PersonalToolkitAdmission(h.repository, source.target)
@@ -231,7 +234,9 @@ async def test_runtime_export_repeats_admission_before_and_after_credential_gap(
 ) -> None:
     h = runtime
     saved = await h.foundation.operations.create(
-        user_id=h.foundation.user_id, create=creation()
+        user_id=h.foundation.user_id,
+        workspace_id=h.foundation.workspace_ids[0],
+        create=creation(),
     )
     root = await h.root(h.foundation.user_id, 0)
     [source] = await h.sources(root)
@@ -260,7 +265,9 @@ async def test_mixed_environment_retains_common_last_source_wins_merge(
 ) -> None:
     h = runtime
     await h.foundation.operations.create(
-        user_id=h.foundation.user_id, create=creation()
+        user_id=h.foundation.user_id,
+        workspace_id=h.foundation.workspace_ids[0],
+        create=creation(),
     )
     root = await h.root(h.foundation.user_id, 0)
     [source] = await h.sources(root)
@@ -283,6 +290,65 @@ async def test_mixed_environment_retains_common_last_source_wins_merge(
     assert "fixture-personal" not in caplog.text and "fixture-shared" not in caplog.text
 
 
+async def test_other_workspace_target_cannot_dispatch_or_export_personal_credentials(
+    runtime: Harness,
+) -> None:
+    """Same account and stale source metadata do not authorize another workload."""
+    h = runtime
+    saved = await h.foundation.operations.create(
+        user_id=h.foundation.user_id,
+        workspace_id=h.foundation.workspace_ids[0],
+        create=creation(),
+    )
+    root_a = await h.root(h.foundation.user_id, 0)
+    root_b = await h.root(h.foundation.user_id, 2)
+    [source] = await h.sources(root_a)
+    target = dataclasses.replace(
+        source.target,
+        execution_owner=root_b.owner,
+        workspace_id=root_b.workspace_id,
+        agent_id=root_b.agent_id,
+        root_session_id=root_b.owner.session_id,
+    )
+    personal = EffectToolkit(
+        PersonalToolkitAdmission(h.repository, target),
+        "fixture-cross-workspace-secret",
+        None,
+        None,
+    )
+    catalog = await build_tool_catalog(
+        toolkit_bindings=[
+            ToolkitBinding(
+                personal,
+                source.namespace,
+                source.toolkit.slug,
+                True,
+                "mcp",
+                saved.id,
+                str(saved.revision),
+                True,
+            )
+        ],
+        context=TurnContext(
+            workspace_id=root_b.workspace_id,
+            model="fixture",
+            run_id="fixture",
+            publish_event=AsyncMock(),
+        ),
+    )
+    result = await ToolCatalogClientToolInvoker(catalog).invoke(
+        PreparedClientToolInvocation(
+            "foreign-source", f"{source.namespace}__send", "{}", "json_function"
+        )
+    )
+    assert result.status == "failed" and not result.execution_succeeded
+    assert personal.calls == []
+    with pytest.raises(FunctionToolError) as denied:
+        await _collect_secret_env([personal], root_b.agent_id)
+    assert personal.exports == 0
+    assert "fixture-cross-workspace-secret" not in str(denied.value)
+
+
 @pytest.mark.parametrize("inject", [True, False])
 async def test_real_github_disabled_export_does_not_gate_unrelated_runtime(
     runtime: Harness,
@@ -294,6 +360,7 @@ async def test_real_github_disabled_export_does_not_gate_unrelated_runtime(
     )
     saved = await h.foundation.operations.create(
         user_id=h.foundation.user_id,
+        workspace_id=h.foundation.workspace_ids[0],
         create=creation().model_copy(
             update={
                 "toolkit_type": "github",
@@ -346,7 +413,9 @@ async def test_engine_resolves_personal_sources_only_from_exact_durable_root(
 ) -> None:
     h = runtime
     f = h.foundation
-    saved = await f.operations.create(user_id=f.user_id, create=creation())
+    saved = await f.operations.create(
+        user_id=f.user_id, workspace_id=f.workspace_ids[0], create=creation()
+    )
     root = await h.root(
         f.user_id
         if root_kind == "user"
