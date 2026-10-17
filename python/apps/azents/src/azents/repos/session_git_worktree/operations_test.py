@@ -69,7 +69,7 @@ from azents.services.session_git_worktree.service_test import (
 from azents.testing.committed_fixture_cleanup import committed_fixture_graph
 
 
-@pytest_asyncio.fixture
+@pytest_asyncio.fixture(scope="module", loop_scope="session")
 async def committed_fixture_metadata(
     rdb_engine: AsyncEngine, latest_db_schema: None
 ) -> sa.MetaData:

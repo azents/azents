@@ -3,13 +3,13 @@
 from unittest.mock import create_autospec
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from azents.api.public.toolkit.v1.data import ToolkitConfigCreateRequest
 from azents.api.public.toolkit.v1.github_setup import router as setup_router
 from azents.api.public.toolkit.v1.github_user_creation import router as creation_router
 from azents.api.public.toolkit.v1.github_user_test import _member
+from azents.api.public.toolkit.v1.route_test_support import focused_toolkit_app
 from azents.core.auth.deps import get_workspace_member
 from azents.core.github_setup import (
     GitHubPATSetupVerification,
@@ -58,8 +58,7 @@ def test_setup_verification_binds_exact_management_scope(agent_id: str | None) -
         installations=[],
         connectivity=GitHubSetupConnectivity(status="ready", message=None),
     )
-    app = FastAPI()
-    app.include_router(setup_router)
+    app = focused_toolkit_app((setup_router, "/github/setup-verification"))
     app.dependency_overrides[get_workspace_member] = _member
     app.dependency_overrides[GitHubSetupService] = lambda: service
     body = {
@@ -113,8 +112,7 @@ def test_verification_validation_never_echoes_secrets(
     agent_id: str | None, body: dict[str, object]
 ) -> None:
     service = create_autospec(GitHubSetupService, instance=True)
-    app = FastAPI()
-    app.include_router(setup_router)
+    app = focused_toolkit_app((setup_router, "/github/setup-verification"))
     app.dependency_overrides[get_workspace_member] = _member
     app.dependency_overrides[GitHubSetupService] = lambda: service
     with TestClient(app) as client:
@@ -131,8 +129,7 @@ def test_verification_validation_never_echoes_secrets(
 def test_confirm_requires_complete_final_settings(agent_id: str | None) -> None:
     service = create_autospec(GitHubUserCreationService, instance=True)
     service.confirm.return_value = GitHubUserCreatedOutput(toolkit_id="created")
-    app = FastAPI()
-    app.include_router(creation_router)
+    app = focused_toolkit_app((creation_router, "/github-user-creations/confirm"))
     app.dependency_overrides[get_workspace_member] = _member
     app.dependency_overrides[GitHubUserCreationService] = lambda: service
     path = _base(agent_id) + "/github-user-creations/confirm"
@@ -174,8 +171,7 @@ def test_final_settings_reject_authentication_and_ownership_injection(
     field: str,
 ) -> None:
     service = create_autospec(GitHubUserCreationService, instance=True)
-    app = FastAPI()
-    app.include_router(creation_router)
+    app = focused_toolkit_app((creation_router, "/github-user-creations/confirm"))
     app.dependency_overrides[get_workspace_member] = _member
     app.dependency_overrides[GitHubUserCreationService] = lambda: service
     body = {
@@ -194,8 +190,7 @@ def test_final_settings_reject_authentication_and_ownership_injection(
 @pytest.mark.parametrize("agent_id", [None, "exact-agent"])
 def test_runtime_on_requires_explicit_acknowledgment(agent_id: str | None) -> None:
     service = create_autospec(GitHubUserCreationService, instance=True)
-    app = FastAPI()
-    app.include_router(creation_router)
+    app = focused_toolkit_app((creation_router, "/github-user-creations/confirm"))
     app.dependency_overrides[get_workspace_member] = _member
     app.dependency_overrides[GitHubUserCreationService] = lambda: service
     with TestClient(app) as client:
@@ -216,9 +211,10 @@ def test_metadata_routes_bind_scope_and_exact_candidate(agent_id: str | None) ->
     creation = create_autospec(GitHubUserCreationService, instance=True)
     setup.app.return_value = GitHubSetupAppOutput(app=None)
     creation.app.return_value = GitHubSetupAppOutput(app=None)
-    app = FastAPI()
-    app.include_router(setup_router)
-    app.include_router(creation_router)
+    app = focused_toolkit_app(
+        (setup_router, "/github/setup-app"),
+        (creation_router, "/github-user-creations/{attempt_id}/app"),
+    )
     app.dependency_overrides[get_workspace_member] = _member
     app.dependency_overrides[GitHubSetupService] = lambda: setup
     app.dependency_overrides[GitHubUserCreationService] = lambda: creation
@@ -240,8 +236,7 @@ def test_metadata_routes_bind_scope_and_exact_candidate(agent_id: str | None) ->
 @pytest.mark.parametrize("missing", list(_settings()))
 def test_every_final_setting_is_required_even_when_nullable(missing: str) -> None:
     service = create_autospec(GitHubUserCreationService, instance=True)
-    app = FastAPI()
-    app.include_router(creation_router)
+    app = focused_toolkit_app((creation_router, "/github-user-creations/confirm"))
     app.dependency_overrides[get_workspace_member] = _member
     app.dependency_overrides[GitHubUserCreationService] = lambda: service
     settings = _settings()
