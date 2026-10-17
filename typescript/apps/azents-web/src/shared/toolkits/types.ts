@@ -8,11 +8,13 @@ import type {
   NotionFieldsView,
   SentryFieldsView,
 } from "./provider-config-views";
+import type { ToolkitOwnerScope } from "./toolkit-owner-scope";
 import type {
   GitHubSetupAvailability,
   GitHubUserCandidateSummary,
   GitHubUserConnectionSummary,
   GitHubUserInstallation,
+  PersonalToolkitResponse,
   ToolkitConfigResponse,
   ToolkitResponse,
 } from "@azents/public-client";
@@ -28,7 +30,7 @@ export type ToolkitConfigFormState =
   | { type: "LOADING" }
   | { type: "NOT_FOUND" }
   | { type: "CREATE" }
-  | { type: "EDIT"; config: ToolkitConfigResponse };
+  | { type: "EDIT"; config: ToolkitConfigResponse | PersonalToolkitResponse };
 
 /** Mutation state */
 export type MutationState =
@@ -123,16 +125,16 @@ export type GithubInstallationState =
   | { type: "ERROR"; installations: InstallationItem[] };
 
 /** Inputs supplied by the owning Toolkit form to provider fields. */
-export interface ToolkitConfigFieldsInput {
+export interface ToolkitConfigFieldsValues {
   config: Record<string, unknown>;
   onConfigChange: (config: Record<string, unknown>) => void;
   credentials: Record<string, unknown> | null;
   onCredentialsChange: (credentials: Record<string, unknown> | null) => void;
   hasCredentials: boolean;
-  handle: string;
-  agentId?: string;
   toolkitConfigId?: string;
 }
+export type ToolkitConfigFieldsInput = ToolkitConfigFieldsValues &
+  ToolkitOwnerScope;
 export interface ProviderConnectionTestResult {
   success: boolean;
   message: string;
@@ -172,9 +174,8 @@ export type NotionConfigFieldsProps = SimpleProviderFieldsProps & {
 export type SentryConfigFieldsProps = SimpleProviderFieldsProps & {
   view: SentryFieldsView;
 };
-export type McpConfigFieldsInput = Omit<ToolkitConfigFieldsInput, "handle"> & {
-  handle?: string;
-};
+export type McpConfigFieldsInput = ToolkitConfigFieldsValues &
+  ({ owner: "user"; handle: string } | { handle?: string; agentId?: string });
 export type McpConfigFieldsProps = McpConfigFieldsInput &
   ProviderConnectionTestControl;
 export type ClusterAuthType = "kubeconfig" | "token" | "eks" | "gke";

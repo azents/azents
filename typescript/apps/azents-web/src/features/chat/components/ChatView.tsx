@@ -42,6 +42,7 @@ const NEW_MESSAGE_CHIP_OFFSET = "calc(100% + var(--mantine-spacing-xl))";
 function ChatViewPresentation(output: ChatViewContainerOutput): ReactElement {
   const {
     t,
+    personalToolsHref,
     chatViewState,
     chatTimelineState,
     pendingInputBuffers,
@@ -478,6 +479,7 @@ function ChatViewPresentation(output: ChatViewContainerOutput): ReactElement {
           <Box px="md" py="sm">
             <Box maw={rem(920)} mx="auto">
               <ChatInputContainer
+                personalToolsHref={personalToolsHref}
                 agentId={activeAgent?.id ?? null}
                 sessionId={sessionId}
                 isMobile={isMobile}

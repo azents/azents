@@ -334,6 +334,7 @@ function ChatSessionContent({
           }}
         >
           <ChatView
+            personalToolsHref={`/w/${encodeURIComponent(handle)}/agents/${encodeURIComponent(agent.id)}/personal-tools?originSession=${encodeURIComponent(chatSession.sessionId)}`}
             chatViewState={chatSession.chatViewState}
             chatTimelineState={chatSession.chatTimelineState}
             messages={chatSession.messages}

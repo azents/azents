@@ -28,6 +28,7 @@
   "reviewTitle": "2. Examiner le compte et les droits",
   "agentOwnership": "Cette connexion appartient uniquement à cet Agent. Les exécutions utilisent ce compte enregistré, pas celui d’un participant.",
   "sharedOwnership": "Connexion partagée du Workspace : les utilisateurs et Agents autorisés peuvent agir avec ce compte enregistré.",
+  "personalOwnership": "Cette connexion appartient à votre compte. Seules vos Sessions personnelles avec les Agents autorisés peuvent l’utiliser.",
   "actualPermissions": "Il s’agit des droits réellement retournés par Google, pas d’une garantie que toutes les tâches demandées sont autorisées.",
   "missingRenewal": "Aucun identifiant renouvelable n’a été retourné. Ce candidat ne peut pas être enregistré ; démarrez une nouvelle autorisation explicite.",
   "includeTask": "Inclure cette tâche dans la connexion enregistrée",

@@ -64,7 +64,11 @@ are localized; exact permitted/unavailable tool identifiers are inspectable in
 separate details. Empty usable evidence, missing renewal or an expired attempt
 cannot enable publication. Security acknowledgement starts false on each review.
 
-The same setup component supports Workspace-shared and exact Agent ownership.
+The same setup component supports Workspace-shared, exact Agent and
+User-within-Workspace ownership. Personal creation/editing is reached through
+`/w/{handle}/personal-tools`; its strict scope, query keys, staged resume and
+callback return carry that Workspace handle. Another Workspace's resume cannot
+restore the personal draft even for the same User and Toolkit identifier.
 Saved Toolkit metadata updates omit Google provider configuration, preserving the
 task/timeout settings confirmed independently by reconnect. Task permission changes
 use ordinary staged reconnect and reviewed atomic replacement. Agent capabilities
@@ -133,7 +137,8 @@ atomically with default dynamic `all` access. Reconnect preserves the current
 personal access policy and unrelated metadata while applying the existing
 grant/client/attempt replacement checks. Personal User ownership is legal in
 the staged-attempt schema; existing Workspace/Agent attempt identities and
-encrypted payloads are preserved. Personal Web management remains a separate surface.
+encrypted payloads are preserved. Personal Web management reuses the common
+staged Wizard and saved metadata form in the Workspace's personal surface.
 
 Personal Session execution uses an exact source-bound adapter to the common current
 grant/client/task checks. Its canonical User-root association, active owner, ordinary Agent

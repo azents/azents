@@ -17,17 +17,29 @@ import {
   githubUserToolkitV1SharedReview,
   githubUserToolkitV1SharedSetupAvailability,
   githubUserToolkitV1SharedStatus,
+  personalGithubToolkitV1PersonalGithubAccess,
+  personalGithubToolkitV1PersonalGithubAvailability,
+  personalGithubToolkitV1PersonalGithubCancel,
+  personalGithubToolkitV1PersonalGithubConfirm,
+  personalGithubToolkitV1PersonalGithubConnect,
+  personalGithubToolkitV1PersonalGithubDisconnect,
+  personalGithubToolkitV1PersonalGithubExchange,
+  personalGithubToolkitV1PersonalGithubReview,
+  personalGithubToolkitV1PersonalGithubStatus,
 } from "@azents/public-client";
 import { z } from "zod/v4";
+import { toolkitScopedInput } from "@/shared/toolkits/toolkit-owner-scope";
 import { mapExpectedError } from "../api-error";
 import { publicProcedure, router } from "../init";
 
-const scope = z.object({
-  handle: z.string().min(1),
-  agentId: z.string().min(1).optional(),
-});
-const context = scope.extend({ toolkitId: z.string().min(1) });
-const attempt = context.extend({ attemptId: z.string().min(1).max(64) });
+const contextFields = { toolkitId: z.string().min(1) };
+const attemptFields = {
+  ...contextFields,
+  attemptId: z.string().min(1).max(64),
+};
+const scope = toolkitScopedInput({});
+const context = toolkitScopedInput(contextFields);
+const attempt = toolkitScopedInput(attemptFields);
 
 async function request<T>(operation: () => Promise<T>): Promise<T> {
   try {
@@ -47,6 +59,16 @@ async function request<T>(operation: () => Promise<T>): Promise<T> {
 /** Ownership-specific generated SDK adapters; context never comes from the provider. */
 export const githubUserRouter = router({
   availability: publicProcedure.input(scope).query(async ({ ctx, input }) => {
+    if ("owner" in input) {
+      const { data } = await request(() =>
+        personalGithubToolkitV1PersonalGithubAvailability({
+          client: ctx.apiClient,
+          path: { handle: input.handle },
+          throwOnError: true,
+        }),
+      );
+      return data;
+    }
     const { data } = await request(() =>
       input.agentId == null
         ? githubUserToolkitV1SharedSetupAvailability({
@@ -63,6 +85,16 @@ export const githubUserRouter = router({
     return data;
   }),
   connect: publicProcedure.input(context).mutation(async ({ ctx, input }) => {
+    if ("owner" in input) {
+      const { data } = await request(() =>
+        personalGithubToolkitV1PersonalGithubConnect({
+          client: ctx.apiClient,
+          path: { handle: input.handle, toolkit_id: input.toolkitId },
+          throwOnError: true,
+        }),
+      );
+      return data;
+    }
     const { data } = await request(() =>
       input.agentId == null
         ? githubUserToolkitV1SharedConnect({
@@ -84,13 +116,25 @@ export const githubUserRouter = router({
   }),
   exchange: publicProcedure
     .input(
-      context.extend({
+      toolkitScopedInput({
+        ...contextFields,
         code: z.string().min(1).max(4096),
         state: z.string().min(1).max(4096),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       const body = { code: input.code, state: input.state };
+      if ("owner" in input) {
+        const { data } = await request(() =>
+          personalGithubToolkitV1PersonalGithubExchange({
+            client: ctx.apiClient,
+            path: { handle: input.handle, toolkit_id: input.toolkitId },
+            body,
+            throwOnError: true,
+          }),
+        );
+        return data;
+      }
       const { data } = await request(() =>
         input.agentId == null
           ? githubUserToolkitV1SharedExchange({
@@ -113,6 +157,17 @@ export const githubUserRouter = router({
       return data;
     }),
   review: publicProcedure.input(attempt).query(async ({ ctx, input }) => {
+    if ("owner" in input) {
+      const { data } = await request(() =>
+        personalGithubToolkitV1PersonalGithubReview({
+          client: ctx.apiClient,
+          path: { handle: input.handle, toolkit_id: input.toolkitId },
+          query: { attempt_id: input.attemptId },
+          throwOnError: true,
+        }),
+      );
+      return data;
+    }
     const { data } = await request(() =>
       input.agentId == null
         ? githubUserToolkitV1SharedReview({
@@ -139,6 +194,17 @@ export const githubUserRouter = router({
   }),
   confirm: publicProcedure.input(attempt).mutation(async ({ ctx, input }) => {
     const body = { attempt_id: input.attemptId };
+    if ("owner" in input) {
+      const { data } = await request(() =>
+        personalGithubToolkitV1PersonalGithubConfirm({
+          client: ctx.apiClient,
+          path: { handle: input.handle, toolkit_id: input.toolkitId },
+          body,
+          throwOnError: true,
+        }),
+      );
+      return data;
+    }
     const { data } = await request(() =>
       input.agentId == null
         ? githubUserToolkitV1SharedConfirm({
@@ -162,6 +228,17 @@ export const githubUserRouter = router({
   }),
   cancel: publicProcedure.input(attempt).mutation(async ({ ctx, input }) => {
     const body = { attempt_id: input.attemptId };
+    if ("owner" in input) {
+      await request(() =>
+        personalGithubToolkitV1PersonalGithubCancel({
+          client: ctx.apiClient,
+          path: { handle: input.handle, toolkit_id: input.toolkitId },
+          body,
+          throwOnError: true,
+        }),
+      );
+      return null;
+    }
     await request(() =>
       input.agentId == null
         ? githubUserToolkitV1SharedCancel({
@@ -186,6 +263,16 @@ export const githubUserRouter = router({
   disconnect: publicProcedure
     .input(context)
     .mutation(async ({ ctx, input }) => {
+      if ("owner" in input) {
+        await request(() =>
+          personalGithubToolkitV1PersonalGithubDisconnect({
+            client: ctx.apiClient,
+            path: { handle: input.handle, toolkit_id: input.toolkitId },
+            throwOnError: true,
+          }),
+        );
+        return null;
+      }
       await request(() =>
         input.agentId == null
           ? githubUserToolkitV1SharedDisconnect({
@@ -206,6 +293,16 @@ export const githubUserRouter = router({
       return null;
     }),
   status: publicProcedure.input(context).query(async ({ ctx, input }) => {
+    if ("owner" in input) {
+      const { data } = await request(() =>
+        personalGithubToolkitV1PersonalGithubStatus({
+          client: ctx.apiClient,
+          path: { handle: input.handle, toolkit_id: input.toolkitId },
+          throwOnError: true,
+        }),
+      );
+      return data;
+    }
     const { data } = await request(() =>
       input.agentId == null
         ? githubUserToolkitV1SharedStatus({
@@ -226,8 +323,24 @@ export const githubUserRouter = router({
     return data;
   }),
   access: publicProcedure
-    .input(context.extend({ cursor: z.string().max(4096).nullable() }))
+    .input(
+      toolkitScopedInput({
+        ...contextFields,
+        cursor: z.string().max(4096).nullable(),
+      }),
+    )
     .query(async ({ ctx, input }) => {
+      if ("owner" in input) {
+        const { data } = await request(() =>
+          personalGithubToolkitV1PersonalGithubAccess({
+            client: ctx.apiClient,
+            path: { handle: input.handle, toolkit_id: input.toolkitId },
+            query: { cursor: input.cursor },
+            throwOnError: true,
+          }),
+        );
+        return data;
+      }
       const { data } = await request(() =>
         input.agentId == null
           ? githubUserToolkitV1SharedAccess({

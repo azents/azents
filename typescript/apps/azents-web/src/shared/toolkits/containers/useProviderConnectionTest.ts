@@ -1,5 +1,6 @@
 "use client";
 import { trpc } from "@/trpc/client";
+import { pickToolkitOwnerScope } from "../toolkit-owner-scope";
 import type {
   ProviderConnectionTestControl,
   ProviderConnectionTestState,
@@ -28,8 +29,7 @@ export function useProviderConnectionTest(
     testState,
     onTestConnection: () =>
       mutation.mutate({
-        handle: props.handle,
-        ...(props.agentId != null && { agentId: props.agentId }),
+        ...pickToolkitOwnerScope(props),
         toolkitType,
         toolkitConfigId: props.toolkitConfigId ?? null,
         config: props.config,

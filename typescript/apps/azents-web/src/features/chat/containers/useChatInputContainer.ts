@@ -62,6 +62,8 @@ function getScopedStorageKey(
 }
 
 export interface ChatInputProps {
+  /** Canonical Agent access destination supplied by the authenticated Session page. */
+  personalToolsHref?: string;
   /** current agent ID */
   agentId: string | null;
   /** current session ID */
@@ -220,6 +222,7 @@ interface DesktopProfileFocusTarget {
 export interface ChatInputContainer extends Pick<
   ChatInputProps,
   | "agentId"
+  | "personalToolsHref"
   | "sessionId"
   | "isMobile"
   | "selectableModelOptions"
@@ -549,6 +552,7 @@ function rankInputAction(
 }
 
 function useChatInputContainerImplementation({
+  personalToolsHref,
   agentId,
   sessionId,
   isMobile,
@@ -1550,6 +1554,7 @@ function useChatInputContainerImplementation({
 
   return {
     t,
+    personalToolsHref,
     agentId,
     sessionId,
     isMobile,

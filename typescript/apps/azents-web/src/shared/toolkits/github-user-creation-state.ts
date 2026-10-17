@@ -1,20 +1,42 @@
 import { z } from "zod/v4";
+import {
+  isToolkitManagementPath,
+  pickToolkitOwnerScope,
+  sameToolkitOwnerScope,
+  toolkitManagementPath,
+  toolkitScopedInput,
+} from "./toolkit-owner-scope.ts";
+import type {
+  PersonalToolkitOrigin,
+  ToolkitOwnerScope,
+} from "./toolkit-owner-scope.ts";
 
 export const GITHUB_USER_CREATION_KEY = "azents.github-user.creation";
-const schema = z
-  .object({
-    handle: z.string().min(1),
-    agentId: z.string().min(1).optional(),
-    attemptId: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/),
-    returnPath: z.string().startsWith("/w/"),
-    phase: z.enum(["AUTHORIZING", "REVIEW", "ERROR"]),
-  })
-  .strict();
+const schema = toolkitScopedInput({
+  attemptId: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/),
+  returnPath: z.string().startsWith("/"),
+  phase: z.enum(["AUTHORIZING", "REVIEW", "ERROR"]),
+});
 export type GitHubUserCreationContext = z.infer<typeof schema>;
-export function creationReturnPath(handle: string, agentId?: string): string {
-  return agentId == null
-    ? `/w/${handle}/toolkits/new`
-    : `/w/${handle}/agents/${agentId}/settings/capabilities#agent-toolkits`;
+export function creationReturnPath(
+  scope: ToolkitOwnerScope,
+  origin?: PersonalToolkitOrigin,
+): string {
+  return toolkitManagementPath(scope, null, origin);
+}
+export function gitHubCreationScope(
+  context: GitHubUserCreationContext,
+): ToolkitOwnerScope {
+  return pickToolkitOwnerScope(context);
+}
+export function gitHubCreationMatches(
+  context: GitHubUserCreationContext,
+  scope: ToolkitOwnerScope,
+): boolean {
+  return (
+    sameToolkitOwnerScope(context, scope) &&
+    isToolkitManagementPath(scope, null, context.returnPath)
+  );
 }
 export function deserializeGitHubUserCreation(
   value?: string,
@@ -24,14 +46,9 @@ export function deserializeGitHubUserCreation(
   }
   try {
     const result = schema.safeParse(JSON.parse(value));
-    if (
-      !result.success ||
-      result.data.returnPath !==
-        creationReturnPath(result.data.handle, result.data.agentId)
-    ) {
-      return null;
-    }
-    return result.data;
+    return result.success && gitHubCreationMatches(result.data, result.data)
+      ? result.data
+      : null;
   } catch {
     return null;
   }

@@ -114,6 +114,13 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/components/ManagedAgentToolkitSection.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentToolkitManagementContainer.ts
   - typescript/apps/azents-web/src/features/toolkits/**
+  - typescript/apps/azents-web/src/features/personal-tools/**
+  - typescript/apps/azents-web/src/features/agents/AgentPersonalToolsPage.tsx
+  - typescript/apps/azents-web/src/features/agents/components/AgentFocusedSidebar.tsx
+  - typescript/apps/azents-web/src/features/chat/components/ChatInput.tsx
+  - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
+  - typescript/apps/azents-web/src/features/chat/components/ChatSessionView.tsx
+  - typescript/apps/azents-web/src/features/workspace/components/WorkspaceSidebar.tsx
   - typescript/apps/azents-web/src/shared/toolkits/**
   - typescript/apps/azents-web/src/features/toolkit-setup/**
   - typescript/apps/azents-web/src/features/github-app-guide/**
@@ -121,6 +128,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/lib/redacted-credentials.ts
   - typescript/apps/azents-web/src/shared/lib/toolkit-identifiers.ts
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
+  - typescript/apps/azents-web/src/trpc/routers/personal-toolkit.ts
   - typescript/apps/azents-web/src/trpc/routers/github-user.ts
   - typescript/apps/azents-web/src/trpc/routers/github-user-creation.ts
   - typescript/apps/azents-web/src/trpc/routers/github-setup.ts
@@ -134,7 +142,7 @@ spec_version: 150
 
 ## Overview
 
-Toolkit is the **tool bundle** that an azents agent mounts to interact with the outside world. One ToolkitConfig consists of (a) **tool type (`toolkit_type`)**, (b) provider-specific **config** (for example MCP server URL, GCP project ID, GitHub toolsets), and (c) encrypted **credentials**. A ToolkitConfig has an explicit Workspace, Agent, or User owner within a required real Workspace. Workspace-shared connections mount through `AgentToolkit`; Agent-owned connections use their canonical direct owner. User-owned connections have Workspace-scoped personal management APIs and source-bound User-root execution. Personal Web management remains a separate delivery boundary.
+Toolkit is the **tool bundle** that an azents agent mounts to interact with the outside world. One ToolkitConfig consists of (a) **tool type (`toolkit_type`)**, (b) provider-specific **config** (for example MCP server URL, GCP project ID, GitHub toolsets), and (c) encrypted **credentials**. A ToolkitConfig has an explicit Workspace, Agent, or User owner within a required real Workspace. Workspace-shared connections mount through `AgentToolkit`; Agent-owned connections use their canonical direct owner. User-owned connections have Workspace-scoped personal management APIs, source-bound User-root execution and Workspace-local Web management.
 
 This domain covers four feature groups.
 
@@ -214,6 +222,53 @@ Enabled Runtime credential export checks before acquisition and after its extern
 gap; disabled export obtains no credentials and does not gate unrelated Runtime work.
 Already-admitted effects may finish, and exported remote tokens/processes may persist.
 Withdrawal stops later managed admissions, not remote effects or copied credentials.
+
+### Personal Web management and allowance
+
+The membership-gated Workspace shell provides `/w/{handle}/personal-tools` with new,
+edit and per-Toolkit access descendants. Account settings do not own a global
+connection list. The strict personal form/Provider scope contains `owner: user` and
+the required Workspace handle, without an owning Agent or caller-selected User ID.
+Generated API calls and query keys carry that handle. Route identity keys remount
+personal drafts between Workspaces and resources; acknowledged saves invalidate
+the matching Workspace list/detail and both access views.
+
+Workspace, Agent (including the ordinary-member attachment surface), and Personal
+Toolkit collections share the same card/grid presentation. Scope-specific adapters
+supply authorized data, status and actions; the shared presentation performs no API
+or credential operations. Existing setup forms and Provider Wizards remain common.
+
+Each connection independently exposes All/Selected and same-Workspace eligible
+Agents. Search matches Agent names only, without Workspace search or grouping.
+Agent choices reuse the existing AgentAvatar and profile description; the exact
+eligible identity set is enriched only from the ordinary-access Agent list in the
+same Workspace, without expanding eligibility.
+The full choice row is a keyboard-operable multi-select control with `aria-checked`.
+It follows the Chat model selector's selected-background and right-centered check
+treatment instead of rendering a separate native checkbox square.
+The UI submits expected mode and exact allow/restrict deltas, preserving hidden
+choices. The exact Agent route `/w/{handle}/agents/{agentId}/personal-tools` is the
+reverse editor for those same per-Toolkit policies, independent of AgentAdmin.
+An empty Agent view links to setup in that Workspace. Setup origins reauthorize
+the exact Agent and reject another Workspace. Both editors retain failed drafts
+and keep Save/Cancel outside the scrolling selection region.
+
+The Agent sidebar and composer add menu link to personal access separately from
+Agent configuration. The composer preserves attachment handling; mobile Session
+headers do not gain a persistent personal-tools button. An originating conversation
+return is followed only after ordinary access and Agent identity are reauthorized.
+Successful access saves and Cancel from a composer-origin page return to that
+authorized conversation; failed/uncertain saves retain the draft and do not navigate.
+Common Provider forms and Google/GitHub staged Wizards retain redacted credential
+edits, metadata-only Google saves and exact uncertain-outcome inspection.
+Google/GitHub resume identity and MCP callback targets include the Workspace;
+missing or mixed personal scope is rejected rather than inferred from old global
+state. Callback destinations stay within the same Workspace's management family.
+Canonical Provider resume paths preserve same-Workspace Agent/conversation origin
+identity and reauthorize both before showing a return. Duplicate origin parameters,
+foreign Workspaces and arbitrary redirect URLs are rejected. Personal disconnect
+uses a shared confirmation that explains the impact on all allowed Agents in the
+Workspace and the limit on already-exported credentials.
 
 ### Shared execution and state boundaries
 

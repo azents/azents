@@ -3,6 +3,8 @@ import { test } from "node:test";
 import {
   creationReturnPath,
   deserializeGitHubUserCreation,
+  gitHubCreationMatches,
+  gitHubCreationScope,
   parseGitHubCreationState,
 } from "../../shared/toolkits/github-user-creation-state.ts";
 
@@ -12,7 +14,7 @@ void test("only nonsecret exact creation context is persisted", () => {
     agentId: "agent",
     attemptId: "attempt",
     phase: "REVIEW",
-    returnPath: creationReturnPath("acme", "agent"),
+    returnPath: creationReturnPath({ handle: "acme", agentId: "agent" }),
   };
   assert.deepEqual(
     deserializeGitHubUserCreation(JSON.stringify(context)),
@@ -28,6 +30,39 @@ void test("only nonsecret exact creation context is persisted", () => {
   ]) {
     assert.equal(
       deserializeGitHubUserCreation(JSON.stringify({ ...context, ...extra })),
+      null,
+    );
+  }
+});
+void test("Personal GitHub creation resumes only its account target and exact return", () => {
+  const context = {
+    owner: "user",
+    handle: "workspace",
+    attemptId: "personal",
+    phase: "AUTHORIZING",
+    returnPath: creationReturnPath({ owner: "user", handle: "workspace" }),
+  };
+  const decoded = deserializeGitHubUserCreation(JSON.stringify(context));
+  assert.ok(decoded);
+  assert.deepEqual(gitHubCreationScope(decoded), {
+    owner: "user",
+    handle: "workspace",
+  });
+  assert.ok(
+    gitHubCreationMatches(decoded, { owner: "user", handle: "workspace" }),
+  );
+  assert.equal(gitHubCreationMatches(decoded, { handle: "team" }), false);
+  for (const invalid of [
+    { handle: "workload" },
+    { agentId: "agent" },
+    { userId: "foreign" },
+    { returnPath: "/w/team/toolkits/new" },
+    { returnPath: "/w/workspace/personal-tools/other/edit" },
+    { code: "fixture-code" },
+    { state: "fixture-state" },
+  ]) {
+    assert.equal(
+      deserializeGitHubUserCreation(JSON.stringify({ ...context, ...invalid })),
       null,
     );
   }

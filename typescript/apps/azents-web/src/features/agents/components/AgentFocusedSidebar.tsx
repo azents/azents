@@ -229,6 +229,7 @@ export function AgentFocusedSidebar({
   const tAppBar = useTranslations("appBar");
   const tCommon = useTranslations("common");
   const tWorkspaceSidebar = useTranslations("workspace.sidebar");
+  const tPersonalTools = useTranslations("account.personalTools");
   const pathname = usePathname();
   const workspacePath = `/w/${handle}`;
   const basePath = `${workspacePath}/agents/${agent.id}`;
@@ -634,6 +635,14 @@ export function AgentFocusedSidebar({
           </Group>
         </Stack>
 
+        <NavLink
+          component={Link}
+          href={`${basePath}/personal-tools`}
+          label={tPersonalTools("agentAccessTitle")}
+          leftSection={<IconUser size={rem(18)} />}
+          active={pathname === `${basePath}/personal-tools`}
+          onClick={onNavigate}
+        />
         <Divider />
 
         <Stack px="md" pt="sm" pb="xs" gap="xs">

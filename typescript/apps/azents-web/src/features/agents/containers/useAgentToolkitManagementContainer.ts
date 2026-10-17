@@ -10,6 +10,7 @@ import {
   creationReturnPath,
   deserializeGitHubUserCreation,
   GITHUB_USER_CREATION_KEY,
+  gitHubCreationMatches,
 } from "@/shared/toolkits/github-user-creation-state";
 import {
   consumeGitHubUserPopupHandoff,
@@ -19,6 +20,7 @@ import {
 import {
   deserializeGoogleResume,
   GOOGLE_RESUME_KEY,
+  googleResumeMatches,
   googleReturnPath,
 } from "@/shared/toolkits/google-resume";
 import { projectGitHubUserMode } from "@/shared/toolkits/provider-config-views";
@@ -132,9 +134,9 @@ export function useAgentToolkitManagementContainer({
     });
     if (
       google != null &&
-      google.handle === handle &&
-      google.agentId === agentId &&
-      google.returnPath === googleReturnPath(handle, agentId, google.toolkitId)
+      googleResumeMatches(google, { handle, agentId }, google.toolkitId) &&
+      google.returnPath ===
+        googleReturnPath({ handle, agentId }, google.toolkitId)
     ) {
       if (google.toolkitId == null) {
         setEditor({ type: "CREATE", toolkitType: "google" });
@@ -157,9 +159,8 @@ export function useAgentToolkitManagementContainer({
     });
     if (
       creation != null &&
-      creation.handle === handle &&
-      creation.agentId === agentId &&
-      creation.returnPath === creationReturnPath(handle, agentId)
+      gitHubCreationMatches(creation, { handle, agentId }) &&
+      creation.returnPath === creationReturnPath({ handle, agentId })
     ) {
       setEditor({ type: "CREATE", toolkitType: "github" });
       return;
@@ -170,6 +171,7 @@ export function useAgentToolkitManagementContainer({
     });
     if (
       saved?.reviewAttemptId != null &&
+      !("owner" in saved) &&
       saved.handle === handle &&
       (saved.agentId == null || saved.agentId === agentId) &&
       saved.returnPath ===

@@ -5,9 +5,9 @@ import { ProviderFieldStoryTransport } from "./provider-field-story-fixtures";
 import type { McpConfigFieldsProps } from "../types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
-interface StoryProps extends McpConfigFieldsProps {
+type StoryProps = Exclude<McpConfigFieldsProps, { owner: "user" }> & {
   onRequest: (input: unknown) => void;
-}
+};
 function FieldStory(props: StoryProps): React.ReactElement {
   return <McpConfigFields {...props} />;
 }

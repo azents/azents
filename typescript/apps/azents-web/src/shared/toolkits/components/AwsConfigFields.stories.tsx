@@ -6,9 +6,9 @@ import { ProviderFieldStoryTransport } from "./provider-field-story-fixtures";
 import type { CredentialProviderFieldsProps } from "../types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
-interface StoryProps extends CredentialProviderFieldsProps {
+type StoryProps = Exclude<CredentialProviderFieldsProps, { owner: "user" }> & {
   onRequest: (input: unknown) => void;
-}
+};
 function FieldStory(props: StoryProps): React.ReactElement {
   return (
     <AwsConfigFields

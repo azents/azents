@@ -128,7 +128,7 @@ export class HookHarness {
     modules: Record<string, unknown>,
     window: unknown,
     document?: unknown,
-  ): void {
+  ): unknown {
     const exports: Record<string, unknown> = {};
     const cjsModule = { exports };
     const source = ts.transpileModule(readFileSync(path, "utf8"), {
@@ -153,6 +153,7 @@ export class HookHarness {
     });
     new Script(source, { filename: path.pathname }).runInContext(this.sandbox);
     this.hook = cjsModule.exports[exportName];
+    return this.hook;
   }
   nativeDeferred(): NativeDeferred {
     if (this.sandbox == null) {

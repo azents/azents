@@ -46,16 +46,18 @@ function getMcpAuthType(value: unknown): McpAuthType {
 
 import type { McpConfigFieldsProps } from "../types";
 
-export function McpConfigFields({
-  config,
-  onConfigChange,
-  credentials,
-  onCredentialsChange,
-  hasCredentials,
-  handle,
-  testState,
-  onTestConnection,
-}: McpConfigFieldsProps): React.ReactElement {
+export function McpConfigFields(
+  props: McpConfigFieldsProps,
+): React.ReactElement {
+  const {
+    config,
+    onConfigChange,
+    credentials,
+    onCredentialsChange,
+    hasCredentials,
+    testState,
+    onTestConnection,
+  } = props;
   const t = useTranslations("workspace.toolkits.mcp");
 
   const testResult = testState.type === "RESULT" ? testState.result : null;
@@ -173,7 +175,7 @@ export function McpConfigFields({
       )}
 
       {/* Connection test */}
-      {serverUrl && handle && (
+      {serverUrl && ("owner" in props || props.handle) && (
         <Button
           variant="light"
           leftSection={<IconPlugConnected size={16} />}

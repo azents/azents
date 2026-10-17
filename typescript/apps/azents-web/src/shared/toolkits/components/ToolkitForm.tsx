@@ -38,7 +38,9 @@ import { KubernetesConfigFieldsContainer } from "../KubernetesConfigFieldsContai
 import { McpConfigFieldsContainer } from "../McpConfigFieldsContainer";
 import { NotionConfigFieldsContainer } from "../NotionConfigFieldsContainer";
 import { SentryConfigFieldsContainer } from "../SentryConfigFieldsContainer";
+import { toolkitManagementPath } from "../toolkit-owner-scope";
 import { ShellConfigFields } from "./ShellConfigFields";
+import { ToolkitDisconnectConfirmation } from "./ToolkitDisconnectConfirmation";
 import { ToolkitPreparationGuide } from "./ToolkitPreparationGuide";
 import { ToolkitSettingsReview } from "./ToolkitSettingsReview";
 import setupClasses from "./ToolkitSetup.module.css";
@@ -47,18 +49,22 @@ import { ToolkitTypeIcon } from "./ToolkitTypeIcon";
 import type { GitHubFormRegistration } from "../provider-config-views";
 import type { ToolkitFormValues } from "../schemas";
 import type { ToolkitConfigProjection } from "../toolkit-config-projection";
+import type {
+  PersonalToolkitOrigin,
+  ToolkitOwnerScope,
+} from "../toolkit-owner-scope";
 import type { MutationState, ToolkitConfigFormState } from "../types";
 import type { UseFormReturnType } from "@mantine/form";
 import type { FormEventHandler, ReactNode } from "react";
 
 export interface ToolkitFormProps {
+  navigationOrigin?: PersonalToolkitOrigin;
   githubRegistration: GitHubFormRegistration;
   onComplete?: () => void;
   onAbandonReady?: (abandon: (() => void) | null) => void;
   configProjection: ToolkitConfigProjection;
   configurationFields?: ReactNode;
-  handle: string;
-  agentId?: string;
+  scope: ToolkitOwnerScope;
   embedded: boolean;
   toolkitTypeLocked: boolean;
   formState: ToolkitConfigFormState;
@@ -83,6 +89,9 @@ export interface ToolkitFormProps {
   onCredentialsChange: (credentials: Record<string, unknown> | null) => void;
   onConnectOauth: () => void;
   onDisconnectOauth: () => void;
+  oauthDisconnectConfirmation: boolean;
+  onAskDisconnectOauth: () => void;
+  onDismissDisconnectOauth: () => void;
   onUserSetupPendingChange?: (pending: boolean) => void;
   onCancel: () => void;
 }
@@ -107,13 +116,13 @@ function oauthConnectionStatusTranslationKey(
 }
 
 export function ToolkitForm({
+  navigationOrigin,
   githubRegistration,
   onComplete,
   onAbandonReady,
   configProjection,
   configurationFields,
-  handle,
-  agentId,
+  scope,
   embedded,
   toolkitTypeLocked,
   formState,
@@ -135,11 +144,17 @@ export function ToolkitForm({
   onCredentialsChange,
   onConnectOauth,
   onDisconnectOauth,
+  oauthDisconnectConfirmation,
+  onAskDisconnectOauth,
+  onDismissDisconnectOauth,
   onUserSetupPendingChange,
   onCancel,
 }: ToolkitFormProps): React.ReactElement {
   const t = useTranslations("workspace.toolkits");
   const setup = useTranslations("toolkitSetup");
+  const scopeKey = JSON.stringify(scope);
+  const ownership =
+    "owner" in scope ? "user" : scope.agentId != null ? "agent" : "workspace";
   const handleSubmit: FormEventHandler<HTMLFormElement> = (event) => {
     event.stopPropagation();
     onSubmit(event);
@@ -168,8 +183,8 @@ export function ToolkitForm({
       <>
         {configurationFields ?? (
           <GitHubWizardContainer
-            handle={handle}
-            agentId={agentId}
+            {...scope}
+            navigationOrigin={navigationOrigin}
             embedded={embedded}
             initialDescription={form.getValues().description}
             onComplete={onComplete}
@@ -186,9 +201,9 @@ export function ToolkitForm({
       <>{configurationFields}</>
     ) : (
       <GoogleSetupContainer
-        key={`google:${handle}:${agentId ?? "shared"}:new`}
-        handle={handle}
-        agentId={agentId}
+        key={`google:${scopeKey}:new`}
+        {...scope}
+        navigationOrigin={navigationOrigin}
         embedded={embedded}
         initialDescription={form.getValues().description}
         onComplete={onComplete}
@@ -286,8 +301,7 @@ export function ToolkitForm({
                         formState.type === "EDIT" &&
                         formState.config.has_credentials === true
                       }
-                      handle={handle}
-                      {...(agentId != null && { agentId })}
+                      {...scope}
                       {...(formState.type === "EDIT" && {
                         toolkitConfigId: formState.config.id,
                       })}
@@ -310,8 +324,7 @@ export function ToolkitForm({
                           ? (formState.config.authorization_state ?? null)
                           : null
                       }
-                      handle={handle}
-                      {...(agentId != null && { agentId })}
+                      {...scope}
                       {...(formState.type === "EDIT" && {
                         toolkitConfigId: formState.config.id,
                       })}
@@ -325,14 +338,14 @@ export function ToolkitForm({
                         toolkit={formState.config}
                         onPendingChange={onUserSetupPendingChange}
                         context={{
-                          handle,
+                          ...scope,
                           toolkitId: formState.config.id,
-                          agentId,
                           returnView: "EDIT",
-                          returnPath:
-                            agentId == null
-                              ? `/w/${handle}/toolkits/${formState.config.id}/edit`
-                              : `/w/${handle}/agents/${agentId}/settings/capabilities#agent-toolkits`,
+                          returnPath: toolkitManagementPath(
+                            scope,
+                            formState.config.id,
+                            navigationOrigin,
+                          ),
                         }}
                         registrationDirty={githubRegistration.registrationDirty}
                       />
@@ -348,8 +361,7 @@ export function ToolkitForm({
                         formState.type === "EDIT" &&
                         formState.config.has_credentials === true
                       }
-                      handle={handle}
-                      {...(agentId != null && { agentId })}
+                      {...scope}
                       {...(formState.type === "EDIT" && {
                         toolkitConfigId: formState.config.id,
                       })}
@@ -366,8 +378,7 @@ export function ToolkitForm({
                         formState.type === "EDIT" &&
                         formState.config.has_credentials === true
                       }
-                      handle={handle}
-                      {...(agentId != null && { agentId })}
+                      {...scope}
                       {...(formState.type === "EDIT" && {
                         toolkitConfigId: formState.config.id,
                       })}
@@ -384,8 +395,7 @@ export function ToolkitForm({
                         formState.type === "EDIT" &&
                         formState.config.has_credentials === true
                       }
-                      handle={handle}
-                      {...(agentId != null && { agentId })}
+                      {...scope}
                       {...(formState.type === "EDIT" && {
                         toolkitConfigId: formState.config.id,
                       })}
@@ -402,8 +412,7 @@ export function ToolkitForm({
                         formState.type === "EDIT" &&
                         formState.config.has_credentials === true
                       }
-                      handle={handle}
-                      {...(agentId != null && { agentId })}
+                      {...scope}
                       {...(formState.type === "EDIT" && {
                         toolkitConfigId: formState.config.id,
                       })}
@@ -420,8 +429,7 @@ export function ToolkitForm({
                         formState.type === "EDIT" &&
                         formState.config.has_credentials === true
                       }
-                      handle={handle}
-                      {...(agentId != null && { agentId })}
+                      {...scope}
                       {...(formState.type === "EDIT" && {
                         toolkitConfigId: formState.config.id,
                       })}
@@ -431,9 +439,9 @@ export function ToolkitForm({
                   {currentToolSlug === "google" &&
                     formState.type === "EDIT" && (
                       <GoogleSetupContainer
-                        key={`google:${handle}:${agentId ?? "shared"}:${formState.config.id}`}
-                        handle={handle}
-                        agentId={agentId}
+                        key={`google:${scopeKey}:${formState.config.id}`}
+                        {...scope}
+                        navigationOrigin={navigationOrigin}
                         toolkitId={formState.config.id}
                         embedded
                         onPendingChange={onUserSetupPendingChange}
@@ -450,8 +458,7 @@ export function ToolkitForm({
                         formState.type === "EDIT" &&
                         formState.config.has_credentials === true
                       }
-                      handle={handle}
-                      {...(agentId != null && { agentId })}
+                      {...scope}
                       {...(formState.type === "EDIT" && {
                         toolkitConfigId: formState.config.id,
                       })}
@@ -468,8 +475,7 @@ export function ToolkitForm({
                         formState.type === "EDIT" &&
                         formState.config.has_credentials === true
                       }
-                      handle={handle}
-                      {...(agentId != null && { agentId })}
+                      {...scope}
                       {...(formState.type === "EDIT" && {
                         toolkitConfigId: formState.config.id,
                       })}
@@ -531,13 +537,29 @@ export function ToolkitForm({
                           type="button"
                           variant="subtle"
                           color="red"
-                          onClick={onDisconnectOauth}
+                          onClick={onAskDisconnectOauth}
                           loading={oauthConnectionPending.disconnect}
                         >
                           {t("oauthConnection.disconnect")}
                         </Button>
                       )}
                     </Group>
+                    {oauthDisconnectConfirmation && (
+                      <Alert
+                        color="red"
+                        title={t("oauthConnection.disconnect")}
+                      >
+                        <ToolkitDisconnectConfirmation
+                          personal={ownership === "user"}
+                          description=""
+                          confirmLabel={t("oauthConnection.disconnect")}
+                          cancelLabel={t("cancel")}
+                          pending={oauthConnectionPending.disconnect}
+                          onConfirm={onDisconnectOauth}
+                          onCancel={onDismissDisconnectOauth}
+                        />
+                      </Alert>
+                    )}
                   </Stack>
                 </Card>
               )}
@@ -586,7 +608,7 @@ export function ToolkitForm({
                   <TextInput
                     label={t("slugLabel")}
                     description={
-                      agentId == null
+                      ownership !== "agent"
                         ? t("slugDescription")
                         : t("agentSlugDescription")
                     }
@@ -623,10 +645,13 @@ export function ToolkitForm({
                     ?.label ?? currentToolSlug
                 }
                 name={form.getValues().name}
-                agentOwned={agentId != null}
+                ownership={ownership}
                 enabled={form.getValues().enabled}
                 alwaysExposeTools={form.getValues().alwaysExposeTools}
               />
+              {ownership === "user" && !isEdit && (
+                <Text size="sm">{setup("personalAllDefault")}</Text>
+              )}
               <Text size="sm">
                 {setup(
                   currentToolSlug === "shell" ? "localSaveHint" : "saveHint",

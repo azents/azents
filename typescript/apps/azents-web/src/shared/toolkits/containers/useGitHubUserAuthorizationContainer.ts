@@ -5,7 +5,7 @@ import {
   useSessionStorage,
   useWindowEvent,
 } from "@mantine/hooks";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
 import {
   decodeGitHubUserCompletion,
@@ -13,6 +13,7 @@ import {
   GITHUB_USER_CONTEXT_KEY,
   githubUserErrorReason,
   gitHubUserResumeMatches,
+  gitHubUserScope,
   mergeGitHubUserAccess,
 } from "../github-user-oauth-state";
 import type { GitHubUserAuthorizationProps } from "../components/GitHubUserAuthorization";
@@ -22,11 +23,14 @@ import type {
   GitHubUserOperationState,
   GitHubUserSetupState,
 } from "../types";
-import type { ToolkitConfigResponse } from "@azents/public-client";
+import type {
+  PersonalToolkitResponse,
+  ToolkitConfigResponse,
+} from "@azents/public-client";
 
 export interface GitHubUserAuthorizationContainerProps {
   context: GitHubUserContext;
-  toolkit: ToolkitConfigResponse;
+  toolkit: ToolkitConfigResponse | PersonalToolkitResponse;
   registrationDirty?: boolean;
   initialPopup?: Window | null;
   onInitialPopupAccepted?: (popup: Window) => void;
@@ -41,11 +45,13 @@ export function useGitHubUserAuthorizationContainer({
   onPendingChange,
 }: GitHubUserAuthorizationContainerProps): GitHubUserAuthorizationProps {
   const utils = trpc.useUtils();
-  const apiContext = {
-    handle: context.handle,
-    toolkitId: context.toolkitId,
-    agentId: context.agentId,
-  };
+  const apiContext = useMemo(
+    () => ({
+      ...gitHubUserScope(context),
+      toolkitId: context.toolkitId,
+    }),
+    [context],
+  );
   const status = trpc.toolkit.githubUser.status.useQuery(apiContext);
   const [, saveContext, clearContext] =
     useSessionStorage<GitHubUserContext | null>({
@@ -86,9 +92,7 @@ export function useGitHubUserAuthorizationContainer({
     setSetup({ type: "REVIEW_LOADING", attemptId: id });
     void utils.toolkit.githubUser.review
       .fetch({
-        handle: context.handle,
-        toolkitId: context.toolkitId,
-        agentId: context.agentId,
+        ...apiContext,
         attemptId: id,
       })
       .then((candidate) => {
@@ -105,10 +109,26 @@ export function useGitHubUserAuthorizationContainer({
           });
         }
       });
-  }, [context, utils.toolkit.githubUser.review]);
+  }, [apiContext, context, utils.toolkit.githubUser.review]);
   async function invalidate(): Promise<void> {
     accessRequest.current += 1;
     setAccess({ type: "IDLE" });
+    if ("owner" in context) {
+      await Promise.allSettled([
+        utils.toolkit.githubUser.status.invalidate(apiContext),
+        utils.toolkit.githubUser.review.invalidate(),
+        utils.toolkit.githubUser.access.invalidate(),
+        utils.personalToolkit.list.invalidate({ handle: context.handle }),
+        utils.personalToolkit.get.invalidate({
+          handle: context.handle,
+          toolkitId: context.toolkitId,
+        }),
+        utils.personalToolkit.accessForAgent.invalidate({
+          handle: context.handle,
+        }),
+      ]);
+      return;
+    }
     await Promise.allSettled([
       utils.toolkit.githubUser.status.invalidate(apiContext),
       utils.toolkit.githubUser.review.invalidate(),
@@ -335,7 +355,12 @@ export function useGitHubUserAuthorizationContainer({
     currentConnection: status.data
       ? status.data.connection
       : (toolkit.github_user_connection ?? null),
-    sharingScope: context.agentId == null ? "workspace_shared" : "agent_only",
+    sharingScope:
+      "owner" in context
+        ? "personal"
+        : context.agentId == null
+          ? "workspace_shared"
+          : "agent_only",
     onStart,
     onCancel: () => {
       void cancelAttempt();

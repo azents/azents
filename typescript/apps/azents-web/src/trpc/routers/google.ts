@@ -21,23 +21,36 @@ import {
   googleToolkitV1SharedGoogleReconnectConfirm,
   googleToolkitV1SharedGoogleReview,
   googleToolkitV1SharedGoogleStatus,
+  personalGoogleToolkitV1PersonalGoogleCancel,
+  personalGoogleToolkitV1PersonalGoogleConfirm,
+  personalGoogleToolkitV1PersonalGoogleConnect,
+  personalGoogleToolkitV1PersonalGoogleDisconnect,
+  personalGoogleToolkitV1PersonalGoogleExchange,
+  personalGoogleToolkitV1PersonalGoogleOutcome,
+  personalGoogleToolkitV1PersonalGooglePreparation,
+  personalGoogleToolkitV1PersonalGoogleReconnect,
+  personalGoogleToolkitV1PersonalGoogleReconnectConfirm,
+  personalGoogleToolkitV1PersonalGoogleReview,
+  personalGoogleToolkitV1PersonalGoogleStatus,
 } from "@azents/public-client";
 import { z } from "zod/v4";
 import {
   googleDesiredSchema,
   googleFinalSettingsSchema,
   googleReconnectSettingsSchema,
-  googleScopeSchema,
 } from "@/shared/toolkits/google-schemas";
+import { toolkitScopedInput } from "@/shared/toolkits/toolkit-owner-scope";
 import { mapExpectedError } from "../api-error";
 import { publicProcedure, router } from "../init";
 
-const attempt = googleScopeSchema.extend({
+const attemptFields = {
   attemptId: z.string().min(1).max(64),
-});
-const saved = googleScopeSchema.extend({
+};
+const savedFields = {
   toolkitId: z.string().min(1).max(64),
-});
+};
+const attempt = toolkitScopedInput(attemptFields);
+const saved = toolkitScopedInput(savedFields);
 async function request<T>(operation: () => Promise<T>): Promise<T> {
   try {
     return await operation();
@@ -54,8 +67,18 @@ async function request<T>(operation: () => Promise<T>): Promise<T> {
 
 export const googleRouter = router({
   preparation: publicProcedure
-    .input(googleScopeSchema)
+    .input(toolkitScopedInput({}))
     .query(async ({ ctx, input }) => {
+      if ("owner" in input) {
+        const { data } = await request(() =>
+          personalGoogleToolkitV1PersonalGooglePreparation({
+            client: ctx.apiClient,
+            path: { handle: input.handle },
+            throwOnError: true,
+          }),
+        );
+        return data;
+      }
       const { data } = await request(() =>
         input.agentId == null
           ? googleToolkitV1SharedGooglePreparation({
@@ -72,8 +95,19 @@ export const googleRouter = router({
       return data;
     }),
   connect: publicProcedure
-    .input(googleScopeSchema.extend({ desired: googleDesiredSchema }))
+    .input(toolkitScopedInput({ desired: googleDesiredSchema }))
     .mutation(async ({ ctx, input }) => {
+      if ("owner" in input) {
+        const { data } = await request(() =>
+          personalGoogleToolkitV1PersonalGoogleConnect({
+            client: ctx.apiClient,
+            path: { handle: input.handle },
+            body: input.desired,
+            throwOnError: true,
+          }),
+        );
+        return data;
+      }
       const { data } = await request(() =>
         input.agentId == null
           ? googleToolkitV1SharedGoogleConnect({
@@ -92,8 +126,19 @@ export const googleRouter = router({
       return data;
     }),
   reconnect: publicProcedure
-    .input(saved.extend({ desired: googleDesiredSchema }))
+    .input(toolkitScopedInput({ ...savedFields, desired: googleDesiredSchema }))
     .mutation(async ({ ctx, input }) => {
+      if ("owner" in input) {
+        const { data } = await request(() =>
+          personalGoogleToolkitV1PersonalGoogleReconnect({
+            client: ctx.apiClient,
+            path: { handle: input.handle, toolkit_id: input.toolkitId },
+            body: input.desired,
+            throwOnError: true,
+          }),
+        );
+        return data;
+      }
       const path = { handle: input.handle, toolkit_id: input.toolkitId };
       const { data } = await request(() =>
         input.agentId == null
@@ -114,13 +159,24 @@ export const googleRouter = router({
     }),
   exchange: publicProcedure
     .input(
-      googleScopeSchema.extend({
+      toolkitScopedInput({
         code: z.string().min(1).max(8192),
         state: z.string().min(1).max(16384),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       const body = { code: input.code, state: input.state };
+      if ("owner" in input) {
+        const { data } = await request(() =>
+          personalGoogleToolkitV1PersonalGoogleExchange({
+            client: ctx.apiClient,
+            path: { handle: input.handle },
+            body,
+            throwOnError: true,
+          }),
+        );
+        return data;
+      }
       const { data } = await request(() =>
         input.agentId == null
           ? googleToolkitV1SharedGoogleExchange({
@@ -139,6 +195,16 @@ export const googleRouter = router({
       return data;
     }),
   review: publicProcedure.input(attempt).query(async ({ ctx, input }) => {
+    if ("owner" in input) {
+      const { data } = await request(() =>
+        personalGoogleToolkitV1PersonalGoogleReview({
+          client: ctx.apiClient,
+          path: { handle: input.handle, attempt_id: input.attemptId },
+          throwOnError: true,
+        }),
+      );
+      return data;
+    }
     const path = { handle: input.handle, attempt_id: input.attemptId };
     const { data } = await request(() =>
       input.agentId == null
@@ -156,8 +222,24 @@ export const googleRouter = router({
     return data;
   }),
   confirm: publicProcedure
-    .input(attempt.extend({ settings: googleFinalSettingsSchema }))
+    .input(
+      toolkitScopedInput({
+        ...attemptFields,
+        settings: googleFinalSettingsSchema,
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
+      if ("owner" in input) {
+        const { data } = await request(() =>
+          personalGoogleToolkitV1PersonalGoogleConfirm({
+            client: ctx.apiClient,
+            path: { handle: input.handle, attempt_id: input.attemptId },
+            body: { settings: input.settings },
+            throwOnError: true,
+          }),
+        );
+        return data;
+      }
       const path = { handle: input.handle, attempt_id: input.attemptId };
       const body = { settings: input.settings };
       const { data } = await request(() =>
@@ -178,8 +260,24 @@ export const googleRouter = router({
       return data;
     }),
   reconnectConfirm: publicProcedure
-    .input(attempt.extend({ settings: googleReconnectSettingsSchema }))
+    .input(
+      toolkitScopedInput({
+        ...attemptFields,
+        settings: googleReconnectSettingsSchema,
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
+      if ("owner" in input) {
+        const { data } = await request(() =>
+          personalGoogleToolkitV1PersonalGoogleReconnectConfirm({
+            client: ctx.apiClient,
+            path: { handle: input.handle, attempt_id: input.attemptId },
+            body: { settings: input.settings },
+            throwOnError: true,
+          }),
+        );
+        return data;
+      }
       const path = { handle: input.handle, attempt_id: input.attemptId };
       const body = { settings: input.settings };
       const { data } = await request(() =>
@@ -200,6 +298,16 @@ export const googleRouter = router({
       return data;
     }),
   cancel: publicProcedure.input(attempt).mutation(async ({ ctx, input }) => {
+    if ("owner" in input) {
+      const { data } = await request(() =>
+        personalGoogleToolkitV1PersonalGoogleCancel({
+          client: ctx.apiClient,
+          path: { handle: input.handle, attempt_id: input.attemptId },
+          throwOnError: true,
+        }),
+      );
+      return data;
+    }
     const path = { handle: input.handle, attempt_id: input.attemptId };
     const { data } = await request(() =>
       input.agentId == null
@@ -217,6 +325,16 @@ export const googleRouter = router({
     return data;
   }),
   outcome: publicProcedure.input(attempt).query(async ({ ctx, input }) => {
+    if ("owner" in input) {
+      const { data } = await request(() =>
+        personalGoogleToolkitV1PersonalGoogleOutcome({
+          client: ctx.apiClient,
+          path: { handle: input.handle, attempt_id: input.attemptId },
+          throwOnError: true,
+        }),
+      );
+      return data;
+    }
     const path = { handle: input.handle, attempt_id: input.attemptId };
     const { data } = await request(() =>
       input.agentId == null
@@ -234,6 +352,16 @@ export const googleRouter = router({
     return data;
   }),
   status: publicProcedure.input(saved).query(async ({ ctx, input }) => {
+    if ("owner" in input) {
+      const { data } = await request(() =>
+        personalGoogleToolkitV1PersonalGoogleStatus({
+          client: ctx.apiClient,
+          path: { handle: input.handle, toolkit_id: input.toolkitId },
+          throwOnError: true,
+        }),
+      );
+      return data;
+    }
     const path = { handle: input.handle, toolkit_id: input.toolkitId };
     const { data } = await request(() =>
       input.agentId == null
@@ -251,6 +379,16 @@ export const googleRouter = router({
     return data;
   }),
   disconnect: publicProcedure.input(saved).mutation(async ({ ctx, input }) => {
+    if ("owner" in input) {
+      await request(() =>
+        personalGoogleToolkitV1PersonalGoogleDisconnect({
+          client: ctx.apiClient,
+          path: { handle: input.handle, toolkit_id: input.toolkitId },
+          throwOnError: true,
+        }),
+      );
+      return null;
+    }
     const path = { handle: input.handle, toolkit_id: input.toolkitId };
     await request(() =>
       input.agentId == null

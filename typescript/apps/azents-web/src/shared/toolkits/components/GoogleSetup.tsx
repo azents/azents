@@ -19,6 +19,7 @@ import {
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
 import { googleTaskSchema } from "../google-schemas";
+import { ToolkitDisconnectConfirmation } from "./ToolkitDisconnectConfirmation";
 import type { GoogleSetupProps } from "../google-types";
 import type { GoogleTaskAccess } from "@azents/public-client";
 
@@ -146,25 +147,20 @@ export function GoogleSetup(props: GoogleSetupProps): React.ReactElement {
               )}
             {props.disconnectConfirmation && (
               <Alert color="red" title={t("disconnectTitle")}>
-                <Text size="sm">{t("disconnectDescription")}</Text>
-                <Group mt="sm">
-                  <Button
-                    type="button"
-                    color="red"
-                    loading={props.disconnecting}
-                    onClick={props.onDisconnect}
-                  >
-                    {t("disconnect")}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="default"
-                    disabled={props.disconnecting}
-                    onClick={props.onDismissDisconnect}
-                  >
-                    {t("keepConnection")}
-                  </Button>
-                </Group>
+                <ToolkitDisconnectConfirmation
+                  personal={props.ownership === "user"}
+                  description={t("disconnectDescription")}
+                  detail={
+                    props.ownership === "user"
+                      ? t("disconnectDescription")
+                      : void 0
+                  }
+                  pending={props.disconnecting}
+                  confirmLabel={t("disconnect")}
+                  cancelLabel={t("keepConnection")}
+                  onConfirm={props.onDisconnect}
+                  onCancel={props.onDismissDisconnect}
+                />
               </Alert>
             )}
           </Stack>
@@ -269,7 +265,13 @@ export function GoogleSetup(props: GoogleSetupProps): React.ReactElement {
                 {review.identity.email ?? review.identity.subject}
               </Text>
               <Text size="sm" c="dimmed">
-                {props.agentOwned ? t("agentOwnership") : t("sharedOwnership")}
+                {t(
+                  props.ownership === "user"
+                    ? "personalOwnership"
+                    : props.ownership === "agent"
+                      ? "agentOwnership"
+                      : "sharedOwnership",
+                )}
               </Text>
               <Alert
                 color={review.grant_result === "full" ? "blue" : "yellow"}

@@ -65,7 +65,7 @@ import type { RefObject } from "react";
 export interface GitHubWizardProps {
   embedded: boolean;
   registrationGuideHref?: string;
-  sharingScope: "workspace_shared" | "agent_only";
+  sharingScope: "workspace_shared" | "agent_only" | "personal";
   identity: GitHubWizardIdentity | null;
   mode: GitHubWizardMode | null;
   availability: GitHubWizardAvailability;
@@ -267,6 +267,18 @@ export function GitHubWizard(props: GitHubWizardProps): React.ReactElement {
     props.publication.type === "SUCCESS" ||
     props.publication.type === "UNCERTAIN";
   const pending = props.publication.type === "PENDING";
+  const shortScopeLabel =
+    props.sharingScope === "personal"
+      ? "personalScopeShort"
+      : props.sharingScope === "agent_only"
+        ? "agentScopeShort"
+        : "sharedScopeShort";
+  const scopeLabel =
+    props.sharingScope === "personal"
+      ? "personalScope"
+      : props.sharingScope === "agent_only"
+        ? "agentScope"
+        : "sharedScope";
   const platformReadiness =
     props.availability.type === "READY"
       ? props.identity === "APP"
@@ -377,18 +389,14 @@ export function GitHubWizard(props: GitHubWizardProps): React.ReactElement {
           <Badge
             variant="light"
             leftSection={
-              props.sharingScope === "agent_only" ? (
+              props.sharingScope !== "workspace_shared" ? (
                 <IconLock size="1em" />
               ) : (
                 <IconUsers size="1em" />
               )
             }
           >
-            {t(
-              props.sharingScope === "agent_only"
-                ? "agentScopeShort"
-                : "sharedScopeShort",
-            )}
+            {t(shortScopeLabel)}
           </Badge>
           <Text size="sm" c="dimmed">
             {t("ownershipHint")}
@@ -914,13 +922,7 @@ export function GitHubWizard(props: GitHubWizardProps): React.ReactElement {
                       )}
                     </dd>
                     <dt>{t("scopeSummary")}</dt>
-                    <dd>
-                      {t(
-                        props.sharingScope === "agent_only"
-                          ? "agentScopeShort"
-                          : "sharedScopeShort",
-                      )}
-                    </dd>
+                    <dd>{t(shortScopeLabel)}</dd>
                     <dt>{t("selectedFeaturesSummary")}</dt>
                     <dd>
                       {props.settings.toolsets.map((group) => (
@@ -1016,13 +1018,7 @@ export function GitHubWizard(props: GitHubWizardProps): React.ReactElement {
                       </Accordion.Panel>
                     </Accordion.Item>
                   </Accordion>
-                  <Alert variant="light">
-                    {t(
-                      props.sharingScope === "agent_only"
-                        ? "agentScope"
-                        : "sharedScope",
-                    )}
-                  </Alert>
+                  <Alert variant="light">{t(scopeLabel)}</Alert>
                   <Group justify="flex-end">
                     <Button
                       onClick={props.onPublish}

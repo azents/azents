@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   deserializeGoogleResume,
   GOOGLE_RESUME_KEY,
+  googleResumeScope,
   googleStateDigest,
   sameGoogleResumeAttempt,
 } from "@/shared/toolkits/google-resume";
@@ -90,7 +91,7 @@ export function useGoogleCallbackContainer({
         return;
       }
       startedAttempt.current = context.attemptId;
-      const scope = { handle: context.handle, agentId: context.agentId };
+      const scope = googleResumeScope(context);
       if (providerError != null || code == null) {
         try {
           const cancelled = await cancel({

@@ -1,36 +1,44 @@
 import { z } from "zod/v4";
-import { googleScopeSchema } from "./google-schemas.ts";
+import {
+  isToolkitManagementPath,
+  sameToolkitOwnerScope,
+  toolkitManagementPath,
+  toolkitScopedInput,
+} from "./toolkit-owner-scope.ts";
+import type {
+  PersonalToolkitOrigin,
+  ToolkitOwnerScope,
+} from "./toolkit-owner-scope.ts";
 
 export const GOOGLE_RESUME_KEY = "azents.google.connection";
-const resumeSchema = googleScopeSchema
-  .extend({
-    toolkitId: z.string().min(1).optional(),
-    attemptId: z.string().min(1).max(64),
-    expiresAt: z.string().datetime({ offset: true }),
-    stateDigest: z.string().regex(/^[a-f0-9]{64}$/),
-    phase: z.enum([
-      "AUTHORIZING",
-      "REVIEW",
-      "VERIFYING",
-      "FAILED",
-      "PUBLISHING",
-      "UNKNOWN",
-    ]),
-    returnPath: z.string().startsWith("/w/"),
-  })
-  .strict();
+const resumeSchema = toolkitScopedInput({
+  toolkitId: z.string().min(1).optional(),
+  attemptId: z.string().min(1).max(64),
+  expiresAt: z.string().datetime({ offset: true }),
+  stateDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  phase: z.enum([
+    "AUTHORIZING",
+    "REVIEW",
+    "VERIFYING",
+    "FAILED",
+    "PUBLISHING",
+    "UNKNOWN",
+  ]),
+  returnPath: z.string().startsWith("/"),
+});
 export type GoogleResume = z.infer<typeof resumeSchema>;
+
+export function googleResumeScope(context: GoogleResume): ToolkitOwnerScope {
+  return "owner" in context
+    ? { owner: context.owner, handle: context.handle }
+    : { handle: context.handle, agentId: context.agentId };
+}
 export function googleReturnPath(
-  handle: string,
-  agentId?: string,
+  scope: ToolkitOwnerScope,
   toolkitId?: string,
+  origin?: PersonalToolkitOrigin,
 ): string {
-  if (agentId != null) {
-    return `/w/${handle}/agents/${agentId}/settings/capabilities#agent-toolkits`;
-  }
-  return toolkitId == null
-    ? `/w/${handle}/toolkits/new`
-    : `/w/${handle}/toolkits/${toolkitId}/edit`;
+  return toolkitManagementPath(scope, toolkitId ?? null, origin);
 }
 export function decodeGoogleResume(value: unknown): GoogleResume | null {
   const parsed = resumeSchema.safeParse(value);
@@ -38,8 +46,11 @@ export function decodeGoogleResume(value: unknown): GoogleResume | null {
     return null;
   }
   const data = parsed.data;
-  return data.returnPath ===
-    googleReturnPath(data.handle, data.agentId, data.toolkitId)
+  return isToolkitManagementPath(
+    googleResumeScope(data),
+    data.toolkitId ?? null,
+    data.returnPath,
+  )
     ? data
     : null;
 }
@@ -55,13 +66,11 @@ export function deserializeGoogleResume(value?: string): GoogleResume | null {
 }
 export function googleResumeMatches(
   context: GoogleResume,
-  handle: string,
-  agentId?: string,
+  scope: ToolkitOwnerScope,
   toolkitId?: string,
 ): boolean {
   return (
-    context.handle === handle &&
-    context.agentId === agentId &&
+    sameToolkitOwnerScope(googleResumeScope(context), scope) &&
     context.toolkitId === toolkitId
   );
 }
@@ -73,8 +82,7 @@ export function sameGoogleResumeAttempt(
     current != null &&
     googleResumeMatches(
       current,
-      expected.handle,
-      expected.agentId,
+      googleResumeScope(expected),
       expected.toolkitId,
     ) &&
     current.attemptId === expected.attemptId &&

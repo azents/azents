@@ -111,6 +111,22 @@ export const AgentOnlyConfirmation = {
     },
   },
 } satisfies Story;
+export const PersonalConfirmation = {
+  args: {
+    sharingScope: "personal",
+    setup: {
+      type: "REVIEW",
+      candidate: { ...candidate, sharing_scope: "personal" },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByText(
+        "Personal connection: only your personal Sessions with allowed Agents use this saved GitHub account.",
+      ),
+    ).toBeVisible();
+  },
+} satisfies Story;
 export const Confirming = {
   args: { setup: { type: "CONFIRMING", candidate } },
   play: async ({ canvasElement }) => {

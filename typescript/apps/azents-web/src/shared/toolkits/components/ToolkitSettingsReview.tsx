@@ -7,13 +7,13 @@ import type { ReactElement } from "react";
 export function ToolkitSettingsReview({
   provider,
   name,
-  agentOwned,
+  ownership,
   enabled,
   alwaysExposeTools,
 }: {
   provider: string;
   name: string;
-  agentOwned: boolean;
+  ownership: "workspace" | "agent" | "user";
   enabled: boolean;
   alwaysExposeTools: boolean;
 }): ReactElement {
@@ -29,7 +29,15 @@ export function ToolkitSettingsReview({
         <dt>{t("name")}</dt>
         <dd>{name.trim() || provider}</dd>
         <dt>{t("scope")}</dt>
-        <dd>{t(agentOwned ? "agentScope" : "workspaceScope")}</dd>
+        <dd>
+          {t(
+            ownership === "user"
+              ? "personalScope"
+              : ownership === "agent"
+                ? "agentScope"
+                : "workspaceScope",
+          )}
+        </dd>
         <dt>{t("availability")}</dt>
         <dd>{t(enabled ? "enabled" : "disabled")}</dd>
         <dt>{t("discovery")}</dt>

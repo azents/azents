@@ -19,7 +19,7 @@ export interface GitHubUserConnectionDetailsProps {
   status: GitHubUserStatusState;
   access: GitHubUserAccessState;
   operation: GitHubUserOperationState;
-  sharingScope: "workspace_shared" | "agent_only";
+  sharingScope: "workspace_shared" | "agent_only" | "personal";
   onRetryStatus: () => void;
   onRequestDisconnect: () => void;
   onRecheckAccess: () => void;
@@ -87,9 +87,11 @@ export function GitHubUserConnectionDetails(
       )}
       <Text size="sm">
         {t(
-          props.sharingScope === "workspace_shared"
-            ? "sharedScope"
-            : "agentScope",
+          props.sharingScope === "personal"
+            ? "personalScope"
+            : props.sharingScope === "workspace_shared"
+              ? "sharedScope"
+              : "agentScope",
         )}
       </Text>
       {props.operation.type === "ERROR" && (

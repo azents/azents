@@ -14,6 +14,7 @@ interface AgentSettingsLayoutProps {
   backTarget: "agent" | "settings";
   children: React.ReactNode;
   backMaxWidth?: string;
+  originSessionId?: string;
 }
 
 export function AgentSettingsLayout({
@@ -22,8 +23,10 @@ export function AgentSettingsLayout({
   backTarget,
   children,
   backMaxWidth = rem(960),
+  originSessionId,
 }: AgentSettingsLayoutProps): React.ReactElement {
   const t = useTranslations("workspace.agents.settingsLayout");
+  const tChat = useTranslations("workspace.agents.detail");
   const settingsHref = `/w/${handle}/agents/${agent.id}/settings`;
   const backHref =
     backTarget === "agent" ? `/w/${handle}/agents/${agent.id}` : settingsHref;
@@ -33,8 +36,12 @@ export function AgentSettingsLayout({
   return (
     <SettingsPageLayout
       header={<AgentSettingsHeader agent={agent} />}
-      backHref={backHref}
-      backLabel={backLabel}
+      backHref={
+        originSessionId == null
+          ? backHref
+          : `/w/${encodeURIComponent(handle)}/agents/${encodeURIComponent(agent.id)}/sessions/${encodeURIComponent(originSessionId)}`
+      }
+      backLabel={originSessionId == null ? backLabel : tChat("tabs.chat")}
       backMaxWidth={backMaxWidth}
     >
       {children}

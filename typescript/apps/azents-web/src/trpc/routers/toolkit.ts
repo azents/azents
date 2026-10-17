@@ -8,6 +8,10 @@
  * - listAgentToolkits / attachToAgent / detachFromAgent: manage Agent attachments
  */
 import {
+  personalGithubToolkitV1PersonalGithubInstallationOauthUrl,
+  personalGithubToolkitV1PersonalGithubInstallUrl,
+  personalGithubToolkitV1PersonalGithubSyncInstallations,
+  personalToolkitOauthV1TestPersonalConnection,
   toolkitOauthV1ConnectAgentOauth,
   toolkitOauthV1ConnectOauth,
   toolkitOauthV1DisconnectAgentOauthConnection,
@@ -41,6 +45,7 @@ import {
 import { z } from "zod/v4";
 import { normalizeCredentialEdits } from "@/shared/lib/redacted-credentials";
 import { normalizeExplicitToolkitSlug } from "@/shared/lib/toolkit-identifiers";
+import { toolkitScopedInput } from "@/shared/toolkits/toolkit-owner-scope";
 import { mapExpectedError } from "../api-error";
 import { publicProcedure, router } from "../init";
 import { githubSetupRouter } from "./github-setup";
@@ -381,16 +386,18 @@ export const toolkitRouter = router({
    * and return its installation URL.
    */
   getGithubInstallUrl: publicProcedure
-    .input(
-      z
-        .object({
-          handle: z.string().min(1),
-          agentId: z.string().min(1).optional(),
-        })
-        .strict(),
-    )
+    .input(toolkitScopedInput({}))
     .query(async ({ ctx, input }) => {
       try {
+        if ("owner" in input) {
+          const { data } =
+            await personalGithubToolkitV1PersonalGithubInstallUrl({
+              client: ctx.apiClient,
+              path: { handle: input.handle },
+              throwOnError: true,
+            });
+          return data;
+        }
         const { data } =
           input.agentId == null
             ? await toolkitOauthV1GetGithubPlatformInstallUrl({
@@ -420,16 +427,18 @@ export const toolkitRouter = router({
    * Lets the user sign in to GitHub before fetching their installation list.
    */
   getGithubOauthUrl: publicProcedure
-    .input(
-      z
-        .object({
-          handle: z.string().min(1),
-          agentId: z.string().min(1).optional(),
-        })
-        .strict(),
-    )
+    .input(toolkitScopedInput({}))
     .query(async ({ ctx, input }) => {
       try {
+        if ("owner" in input) {
+          const { data } =
+            await personalGithubToolkitV1PersonalGithubInstallationOauthUrl({
+              client: ctx.apiClient,
+              path: { handle: input.handle },
+              throwOnError: true,
+            });
+          return data;
+        }
         const { data } =
           input.agentId == null
             ? await toolkitOauthV1GetGithubPlatformOauthUrl({
@@ -459,17 +468,23 @@ export const toolkitRouter = router({
    */
   getGithubInstallations: publicProcedure
     .input(
-      z
-        .object({
-          handle: z.string().min(1),
-          agentId: z.string().min(1).optional(),
-          code: z.string().min(1),
-          state: z.string().min(1),
-        })
-        .strict(),
+      toolkitScopedInput({
+        code: z.string().min(1),
+        state: z.string().min(1),
+      }),
     )
     .mutation(async ({ ctx, input }) => {
       try {
+        if ("owner" in input) {
+          const { data } =
+            await personalGithubToolkitV1PersonalGithubSyncInstallations({
+              client: ctx.apiClient,
+              path: { handle: input.handle },
+              body: { code: input.code, state: input.state },
+              throwOnError: true,
+            });
+          return data;
+        }
         const { data } =
           input.agentId == null
             ? await toolkitOauthV1GetGithubPlatformInstallations({
@@ -607,16 +622,12 @@ export const toolkitRouter = router({
    */
   testConnection: publicProcedure
     .input(
-      z
-        .object({
-          handle: z.string().min(1),
-          agentId: z.string().min(1).optional(),
-          toolkitType: z.string().default("mcp"),
-          toolkitConfigId: z.string().nullable(),
-          config: z.record(z.string(), z.unknown()),
-          credentials: z.record(z.string(), z.unknown()).nullable(),
-        })
-        .strict(),
+      toolkitScopedInput({
+        toolkitType: z.string().default("mcp"),
+        toolkitConfigId: z.string().nullable(),
+        config: z.record(z.string(), z.unknown()),
+        credentials: z.record(z.string(), z.unknown()).nullable(),
+      }),
     )
     .mutation(async ({ ctx, input }) => {
       try {
@@ -626,6 +637,15 @@ export const toolkitRouter = router({
           credentials: normalizeCredentialEdits(input.credentials),
           toolkit_config_id: input.toolkitConfigId,
         };
+        if ("owner" in input) {
+          const { data } = await personalToolkitOauthV1TestPersonalConnection({
+            client: ctx.apiClient,
+            path: { handle: input.handle },
+            body,
+            throwOnError: true,
+          });
+          return data;
+        }
         const { data } =
           input.agentId == null
             ? await toolkitOauthV1TestConnectionUnsaved({

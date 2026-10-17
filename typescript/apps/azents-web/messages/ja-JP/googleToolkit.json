@@ -28,6 +28,7 @@
   "reviewTitle": "2. アカウントと権限を確認",
   "agentOwnership": "この接続はこの Agent のみが所有します。実行には参加者のアカウントではなく、保存されたアカウントが使われます。",
   "sharedOwnership": "Workspace の共有接続です。権限のあるユーザーや Agent が、このアカウントで作業できます。",
+  "personalOwnership": "この接続はあなたのアカウントが所有します。許可した Agent との個人 Session でのみ使用できます。",
   "actualPermissions": "Google が実際に返した権限です。要求したすべての作業が許可されたことを意味しません。",
   "missingRenewal": "更新可能な認証情報が返されませんでした。この候補は保存できません。新しい同意手続きを明示的に開始してください。",
   "includeTask": "保存する接続にこの作業を含める",

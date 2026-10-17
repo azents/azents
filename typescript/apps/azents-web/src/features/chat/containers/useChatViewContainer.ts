@@ -293,6 +293,7 @@ function getTimelineItemIds(
 }
 
 export interface ChatViewProps {
+  personalToolsHref?: string;
   chatViewState: ChatViewState;
   chatTimelineState: ChatTimelineState;
   messages: ChatMessage[];
@@ -426,6 +427,7 @@ export type ChatViewContainerOutput = RequiredChatViewProps & {
 };
 
 export function useChatViewContainer({
+  personalToolsHref,
   chatViewState,
   chatTimelineState,
   messages,
@@ -1166,6 +1168,7 @@ export function useChatViewContainer({
   }, [schedulePinToBottom]);
 
   return {
+    personalToolsHref,
     chatViewState,
     chatTimelineState,
     messages,

@@ -43,7 +43,7 @@ export interface GoogleSetupProps {
   acknowledged: boolean;
   publishingAllowed: boolean;
   reconnect: boolean;
-  agentOwned: boolean;
+  ownership: "user" | "workspace" | "agent";
   cancelling: boolean;
   disconnecting: boolean;
   disconnectConfirmation: boolean;

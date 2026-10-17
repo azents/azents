@@ -18,6 +18,10 @@ import {
 import { IconArrowLeft, IconLock, IconPlus } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
+import {
+  ToolkitCard,
+  ToolkitCollection,
+} from "@/shared/toolkits/components/ToolkitCollection";
 import { ToolkitTypeIcon } from "@/shared/toolkits/components/ToolkitTypeIcon";
 import { GitHubUserAuthorizationContainer } from "@/shared/toolkits/GitHubUserAuthorizationContainer";
 import { projectGitHubUserMode } from "@/shared/toolkits/provider-config-views";
@@ -145,23 +149,13 @@ export function ManagedToolkitCard(
 ): React.ReactElement {
   const t = useTranslations("workspace.agents.toolkitManagement");
   return (
-    <Card withBorder radius="md" p="md">
-      <Stack gap="sm">
-        <ToolkitIdentity item={props.item} />
-        <ToolkitBadges item={props.item} />
-        {props.item.toolkit.description && (
-          <Text size="sm" c="dimmed" lineClamp={1}>
-            {props.item.toolkit.description}
-          </Text>
-        )}
-        <Group
-          justify="flex-end"
-          mt="xs"
-          pt="xs"
-          style={{
-            borderTop: `${rem(1)} solid var(--mantine-color-default-border)`,
-          }}
-        >
+    <ToolkitCard
+      name={props.item.toolkit.name}
+      toolkitType={props.item.toolkit.toolkit_type}
+      description={props.item.toolkit.description}
+      badges={<ToolkitBadges item={props.item} />}
+      actions={
+        <>
           <Button
             variant="subtle"
             size="xs"
@@ -171,9 +165,9 @@ export function ManagedToolkitCard(
             {t("catalog.details")}
           </Button>
           <AuthorizationAction {...props} />
-        </Group>
-      </Stack>
-    </Card>
+        </>
+      }
+    />
   );
 }
 
@@ -435,14 +429,14 @@ export function ManagedAgentToolkitSectionView(
             {t("noToolkitsAttached")}
           </Text>
         ) : (
-          <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
+          <ToolkitCollection>
             {state.items.map((item) => (
               <ManagedToolkitCard
                 key={`${item.ownership_scope}:${item.toolkit.id}`}
                 {...cardProps(item)}
               />
             ))}
-          </SimpleGrid>
+          </ToolkitCollection>
         ))}
       <Modal
         opened={editor.type !== "CLOSED" && props.deleteTarget == null}

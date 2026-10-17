@@ -140,8 +140,7 @@ def _open_toolkit_details(driver: WebDriver, name: str) -> None:
         ec.presence_of_element_located(
             (
                 By.XPATH,
-                f"//*[normalize-space()={name!r}]"
-                "/ancestor::div[contains(@class, 'mantine-Card-root')][1]",
+                f"//article[@aria-label={name!r}]",
             )
         )
     )
@@ -318,8 +317,7 @@ def test_agent_owned_toolkit_owner_management_and_member_legacy_view(
         ec.visibility_of_element_located(
             (
                 By.XPATH,
-                "//div[contains(@class, 'mantine-Card-root')]"
-                f"//*[normalize-space()={shared_name!r}]",
+                f"//article//*[normalize-space()={shared_name!r}]",
             )
         )
     )

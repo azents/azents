@@ -14,7 +14,8 @@
     "empty": "No agents yet",
     "viewAllAgents": "View all agents ({count})",
     "slackApps": "External channels",
-    "integrations": "External channels"
+    "integrations": "External channels",
+    "personalTools": "Personal tools"
   },
   "settings": {
     "layout": {
@@ -1817,6 +1818,7 @@
         "notConnected": "No GitHub execution account is connected.",
         "sharedScope": "Workspace-shared Toolkit: attached Agents and their authorized participants use this connected GitHub account's authority, not their own accounts.",
         "agentScope": "Agent-only Toolkit: this Agent and its authorized participants use the connected GitHub account's authority, not their own accounts.",
+        "personalScope": "Personal connection: only your personal Sessions with allowed Agents use this saved GitHub account.",
         "statusError": "Connection status could not be loaded. Retry before assuming the account is connected or disconnected.",
         "statusLoading": "Loading GitHub account status…",
         "retry": "Retry",
@@ -1922,6 +1924,7 @@
         "off": "Off",
         "sharedScope": "Workspace shared: attached Agents and their authorized participants use this verified GitHub account or App for ordinary and automatic work, not their own accounts.",
         "agentScope": "This Agent only: this Agent and its authorized participants use this verified GitHub account or App for ordinary and automatic work, not their own accounts.",
+        "personalScope": "Personal connection: only your personal Sessions with allowed Agents use this GitHub account or App. New connections initially allow all Agents you can access.",
         "confirm": "Save GitHub connection",
         "saveError": "The connection was not saved. Review the settings or reset authorization, then explicitly save again.",
         "uncertain": "The save outcome could not be confirmed. Do not repeat the save. Check the connection list to see whether it was saved.",
@@ -1931,6 +1934,7 @@
         "progressiveHint": "Choose an option to reveal the next setup section.",
         "ownershipHint": "The saved connection is available within this scope.",
         "agentScopeShort": "This Agent only",
+        "personalScopeShort": "My account",
         "sharedScopeShort": "Workspace shared",
         "setupProgress": "Setup progress",
         "identityHint": "Choose the account or App to use for GitHub work.",
