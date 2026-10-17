@@ -127,6 +127,7 @@ class GitHubUserCreationRepository:
             await self.operations.authorize_personal_scope(
                 user_id=subject.user_id,
                 session_id=subject.session_id,
+                workspace_id=subject.workspace_id,
             )
         else:
             await self.operations.authorize_scope(**dataclasses.asdict(subject))
@@ -139,6 +140,7 @@ class GitHubUserCreationRepository:
                 session,
                 user_id=subject.user_id,
                 session_id=subject.session_id,
+                workspace_id=subject.workspace_id,
             )
         else:
             await self.operations.authorize_scope_in_session(
@@ -386,6 +388,7 @@ class GitHubUserCreationRepository:
                 toolkit = await self.operations.personal_toolkits.create_personal(
                     session,
                     user_id=subject.owner.user_id,
+                    workspace_id=subject.workspace_id,
                     create=desired,
                 )
             else:

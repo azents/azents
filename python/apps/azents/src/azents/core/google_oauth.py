@@ -68,7 +68,7 @@ class GoogleSubject:
 
 @dataclasses.dataclass(frozen=True)
 class GooglePersonalSubject:
-    """Exact active account and explicit User-global setup target."""
+    """Exact active account and explicit Workspace-scoped personal setup target."""
 
     user_id: str
     session_id: str
@@ -79,9 +79,9 @@ class GooglePersonalSubject:
             raise GoogleOAuthError("forbidden", "Google setup owner does not match.")
 
     @property
-    def workspace_id(self) -> None:
-        """Personal ownership never creates an owning Workspace."""
-        return None
+    def workspace_id(self) -> str:
+        """Return the real Workspace of this personal connection."""
+        return self.owner.workspace_id
 
     @property
     def agent_id(self) -> None:

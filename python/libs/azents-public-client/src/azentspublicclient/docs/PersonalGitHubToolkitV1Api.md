@@ -4,30 +4,30 @@ All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
-[**personal_github_toolkit_v1_personal_github_access**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_access) | **GET** /toolkit/v1/personal-toolkit-configs/{toolkit_id}/github-user/access | Personal Github Access
-[**personal_github_toolkit_v1_personal_github_availability**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_availability) | **GET** /toolkit/v1/personal/github/setup-availability | Personal Github Availability
-[**personal_github_toolkit_v1_personal_github_cancel**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_cancel) | **DELETE** /toolkit/v1/personal-toolkit-configs/{toolkit_id}/github-user/attempt | Personal Github Cancel
-[**personal_github_toolkit_v1_personal_github_confirm**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_confirm) | **POST** /toolkit/v1/personal-toolkit-configs/{toolkit_id}/github-user/confirm | Personal Github Confirm
-[**personal_github_toolkit_v1_personal_github_connect**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_connect) | **POST** /toolkit/v1/personal-toolkit-configs/{toolkit_id}/github-user/connect | Personal Github Connect
-[**personal_github_toolkit_v1_personal_github_creation_app**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_creation_app) | **GET** /toolkit/v1/personal/github-user-creations/{attempt_id}/app | Personal Github Creation App
-[**personal_github_toolkit_v1_personal_github_creation_cancel**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_creation_cancel) | **DELETE** /toolkit/v1/personal/github-user-creations/{attempt_id} | Personal Github Creation Cancel
-[**personal_github_toolkit_v1_personal_github_creation_confirm**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_creation_confirm) | **POST** /toolkit/v1/personal/github-user-creations/confirm | Personal Github Creation Confirm
-[**personal_github_toolkit_v1_personal_github_creation_connect**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_creation_connect) | **POST** /toolkit/v1/personal/github-user-creations/connect | Personal Github Creation Connect
-[**personal_github_toolkit_v1_personal_github_creation_exchange**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_creation_exchange) | **POST** /toolkit/v1/personal/github-user-creations/exchange | Personal Github Creation Exchange
-[**personal_github_toolkit_v1_personal_github_creation_review**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_creation_review) | **GET** /toolkit/v1/personal/github-user-creations/{attempt_id} | Personal Github Creation Review
-[**personal_github_toolkit_v1_personal_github_disconnect**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_disconnect) | **DELETE** /toolkit/v1/personal-toolkit-configs/{toolkit_id}/github-user/connection | Personal Github Disconnect
-[**personal_github_toolkit_v1_personal_github_exchange**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_exchange) | **POST** /toolkit/v1/personal-toolkit-configs/{toolkit_id}/github-user/exchange | Personal Github Exchange
-[**personal_github_toolkit_v1_personal_github_install_url**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_install_url) | **GET** /toolkit/v1/personal/github/platform-install-url | Personal Github Install Url
-[**personal_github_toolkit_v1_personal_github_installation_oauth_url**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_installation_oauth_url) | **GET** /toolkit/v1/personal/github/platform-oauth-url | Personal Github Installation Oauth Url
-[**personal_github_toolkit_v1_personal_github_review**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_review) | **GET** /toolkit/v1/personal-toolkit-configs/{toolkit_id}/github-user/review | Personal Github Review
-[**personal_github_toolkit_v1_personal_github_setup_app**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_setup_app) | **GET** /toolkit/v1/personal/github/setup-app | Personal Github Setup App
-[**personal_github_toolkit_v1_personal_github_setup_verify**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_setup_verify) | **POST** /toolkit/v1/personal/github/setup-verification | Personal Github Setup Verify
-[**personal_github_toolkit_v1_personal_github_status**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_status) | **GET** /toolkit/v1/personal-toolkit-configs/{toolkit_id}/github-user/connection | Personal Github Status
-[**personal_github_toolkit_v1_personal_github_sync_installations**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_sync_installations) | **POST** /toolkit/v1/personal/github/platform-installations | Personal Github Sync Installations
+[**personal_github_toolkit_v1_personal_github_access**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_access) | **GET** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/github-user/access | Personal Github Access
+[**personal_github_toolkit_v1_personal_github_availability**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_availability) | **GET** /toolkit/v1/workspaces/{handle}/personal/github/setup-availability | Personal Github Availability
+[**personal_github_toolkit_v1_personal_github_cancel**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_cancel) | **DELETE** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/github-user/attempt | Personal Github Cancel
+[**personal_github_toolkit_v1_personal_github_confirm**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_confirm) | **POST** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/github-user/confirm | Personal Github Confirm
+[**personal_github_toolkit_v1_personal_github_connect**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_connect) | **POST** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/github-user/connect | Personal Github Connect
+[**personal_github_toolkit_v1_personal_github_creation_app**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_creation_app) | **GET** /toolkit/v1/workspaces/{handle}/personal/github-user-creations/{attempt_id}/app | Personal Github Creation App
+[**personal_github_toolkit_v1_personal_github_creation_cancel**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_creation_cancel) | **DELETE** /toolkit/v1/workspaces/{handle}/personal/github-user-creations/{attempt_id} | Personal Github Creation Cancel
+[**personal_github_toolkit_v1_personal_github_creation_confirm**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_creation_confirm) | **POST** /toolkit/v1/workspaces/{handle}/personal/github-user-creations/confirm | Personal Github Creation Confirm
+[**personal_github_toolkit_v1_personal_github_creation_connect**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_creation_connect) | **POST** /toolkit/v1/workspaces/{handle}/personal/github-user-creations/connect | Personal Github Creation Connect
+[**personal_github_toolkit_v1_personal_github_creation_exchange**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_creation_exchange) | **POST** /toolkit/v1/workspaces/{handle}/personal/github-user-creations/exchange | Personal Github Creation Exchange
+[**personal_github_toolkit_v1_personal_github_creation_review**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_creation_review) | **GET** /toolkit/v1/workspaces/{handle}/personal/github-user-creations/{attempt_id} | Personal Github Creation Review
+[**personal_github_toolkit_v1_personal_github_disconnect**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_disconnect) | **DELETE** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/github-user/connection | Personal Github Disconnect
+[**personal_github_toolkit_v1_personal_github_exchange**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_exchange) | **POST** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/github-user/exchange | Personal Github Exchange
+[**personal_github_toolkit_v1_personal_github_install_url**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_install_url) | **GET** /toolkit/v1/workspaces/{handle}/personal/github/platform-install-url | Personal Github Install Url
+[**personal_github_toolkit_v1_personal_github_installation_oauth_url**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_installation_oauth_url) | **GET** /toolkit/v1/workspaces/{handle}/personal/github/platform-oauth-url | Personal Github Installation Oauth Url
+[**personal_github_toolkit_v1_personal_github_review**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_review) | **GET** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/github-user/review | Personal Github Review
+[**personal_github_toolkit_v1_personal_github_setup_app**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_setup_app) | **GET** /toolkit/v1/workspaces/{handle}/personal/github/setup-app | Personal Github Setup App
+[**personal_github_toolkit_v1_personal_github_setup_verify**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_setup_verify) | **POST** /toolkit/v1/workspaces/{handle}/personal/github/setup-verification | Personal Github Setup Verify
+[**personal_github_toolkit_v1_personal_github_status**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_status) | **GET** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/github-user/connection | Personal Github Status
+[**personal_github_toolkit_v1_personal_github_sync_installations**](PersonalGitHubToolkitV1Api.md#personal_github_toolkit_v1_personal_github_sync_installations) | **POST** /toolkit/v1/workspaces/{handle}/personal/github/platform-installations | Personal Github Sync Installations
 
 
 # **personal_github_toolkit_v1_personal_github_access**
-> GitHubUserAccessPage personal_github_toolkit_v1_personal_github_access(toolkit_id, cursor=cursor)
+> GitHubUserAccessPage personal_github_toolkit_v1_personal_github_access(toolkit_id, handle, cursor=cursor)
 
 Personal Github Access
 
@@ -64,11 +64,12 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGitHubToolkitV1Api(api_client)
     toolkit_id = 'toolkit_id_example' # str | 
+    handle = 'handle_example' # str | 
     cursor = 'cursor_example' # str |  (optional)
 
     try:
         # Personal Github Access
-        api_response = api_instance.personal_github_toolkit_v1_personal_github_access(toolkit_id, cursor=cursor)
+        api_response = api_instance.personal_github_toolkit_v1_personal_github_access(toolkit_id, handle, cursor=cursor)
         print("The response of PersonalGitHubToolkitV1Api->personal_github_toolkit_v1_personal_github_access:\n")
         pprint(api_response)
     except Exception as e:
@@ -83,6 +84,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **toolkit_id** | **str**|  | 
+ **handle** | **str**|  | 
  **cursor** | **str**|  | [optional] 
 
 ### Return type
@@ -108,7 +110,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_github_toolkit_v1_personal_github_availability**
-> GitHubSetupAvailability personal_github_toolkit_v1_personal_github_availability()
+> GitHubSetupAvailability personal_github_toolkit_v1_personal_github_availability(handle)
 
 Personal Github Availability
 
@@ -144,10 +146,11 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGitHubToolkitV1Api(api_client)
+    handle = 'handle_example' # str | 
 
     try:
         # Personal Github Availability
-        api_response = api_instance.personal_github_toolkit_v1_personal_github_availability()
+        api_response = api_instance.personal_github_toolkit_v1_personal_github_availability(handle)
         print("The response of PersonalGitHubToolkitV1Api->personal_github_toolkit_v1_personal_github_availability:\n")
         pprint(api_response)
     except Exception as e:
@@ -158,7 +161,10 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 ### Parameters
 
-This endpoint does not need any parameter.
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -178,11 +184,12 @@ This endpoint does not need any parameter.
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_github_toolkit_v1_personal_github_cancel**
-> personal_github_toolkit_v1_personal_github_cancel(toolkit_id, git_hub_user_attempt_request)
+> personal_github_toolkit_v1_personal_github_cancel(toolkit_id, handle, git_hub_user_attempt_request)
 
 Personal Github Cancel
 
@@ -219,11 +226,12 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGitHubToolkitV1Api(api_client)
     toolkit_id = 'toolkit_id_example' # str | 
+    handle = 'handle_example' # str | 
     git_hub_user_attempt_request = azentspublicclient.GitHubUserAttemptRequest() # GitHubUserAttemptRequest | 
 
     try:
         # Personal Github Cancel
-        api_instance.personal_github_toolkit_v1_personal_github_cancel(toolkit_id, git_hub_user_attempt_request)
+        api_instance.personal_github_toolkit_v1_personal_github_cancel(toolkit_id, handle, git_hub_user_attempt_request)
     except Exception as e:
         print("Exception when calling PersonalGitHubToolkitV1Api->personal_github_toolkit_v1_personal_github_cancel: %s\n" % e)
 ```
@@ -236,6 +244,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **toolkit_id** | **str**|  | 
+ **handle** | **str**|  | 
  **git_hub_user_attempt_request** | [**GitHubUserAttemptRequest**](GitHubUserAttemptRequest.md)|  | 
 
 ### Return type
@@ -261,7 +270,7 @@ void (empty response body)
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_github_toolkit_v1_personal_github_confirm**
-> GitHubUserConnectionSummary personal_github_toolkit_v1_personal_github_confirm(toolkit_id, git_hub_user_attempt_request)
+> GitHubUserConnectionSummary personal_github_toolkit_v1_personal_github_confirm(toolkit_id, handle, git_hub_user_attempt_request)
 
 Personal Github Confirm
 
@@ -299,11 +308,12 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGitHubToolkitV1Api(api_client)
     toolkit_id = 'toolkit_id_example' # str | 
+    handle = 'handle_example' # str | 
     git_hub_user_attempt_request = azentspublicclient.GitHubUserAttemptRequest() # GitHubUserAttemptRequest | 
 
     try:
         # Personal Github Confirm
-        api_response = api_instance.personal_github_toolkit_v1_personal_github_confirm(toolkit_id, git_hub_user_attempt_request)
+        api_response = api_instance.personal_github_toolkit_v1_personal_github_confirm(toolkit_id, handle, git_hub_user_attempt_request)
         print("The response of PersonalGitHubToolkitV1Api->personal_github_toolkit_v1_personal_github_confirm:\n")
         pprint(api_response)
     except Exception as e:
@@ -318,6 +328,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **toolkit_id** | **str**|  | 
+ **handle** | **str**|  | 
  **git_hub_user_attempt_request** | [**GitHubUserAttemptRequest**](GitHubUserAttemptRequest.md)|  | 
 
 ### Return type
@@ -343,7 +354,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_github_toolkit_v1_personal_github_connect**
-> GitHubUserConnectOutput personal_github_toolkit_v1_personal_github_connect(toolkit_id)
+> GitHubUserConnectOutput personal_github_toolkit_v1_personal_github_connect(toolkit_id, handle)
 
 Personal Github Connect
 
@@ -380,10 +391,11 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGitHubToolkitV1Api(api_client)
     toolkit_id = 'toolkit_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Personal Github Connect
-        api_response = api_instance.personal_github_toolkit_v1_personal_github_connect(toolkit_id)
+        api_response = api_instance.personal_github_toolkit_v1_personal_github_connect(toolkit_id, handle)
         print("The response of PersonalGitHubToolkitV1Api->personal_github_toolkit_v1_personal_github_connect:\n")
         pprint(api_response)
     except Exception as e:
@@ -398,6 +410,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **toolkit_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -422,7 +435,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_github_toolkit_v1_personal_github_creation_app**
-> GitHubSetupAppOutput personal_github_toolkit_v1_personal_github_creation_app(attempt_id)
+> GitHubSetupAppOutput personal_github_toolkit_v1_personal_github_creation_app(attempt_id, handle)
 
 Personal Github Creation App
 
@@ -459,10 +472,11 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGitHubToolkitV1Api(api_client)
     attempt_id = 'attempt_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Personal Github Creation App
-        api_response = api_instance.personal_github_toolkit_v1_personal_github_creation_app(attempt_id)
+        api_response = api_instance.personal_github_toolkit_v1_personal_github_creation_app(attempt_id, handle)
         print("The response of PersonalGitHubToolkitV1Api->personal_github_toolkit_v1_personal_github_creation_app:\n")
         pprint(api_response)
     except Exception as e:
@@ -477,6 +491,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **attempt_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -501,7 +516,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_github_toolkit_v1_personal_github_creation_cancel**
-> personal_github_toolkit_v1_personal_github_creation_cancel(attempt_id)
+> personal_github_toolkit_v1_personal_github_creation_cancel(attempt_id, handle)
 
 Personal Github Creation Cancel
 
@@ -537,10 +552,11 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGitHubToolkitV1Api(api_client)
     attempt_id = 'attempt_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Personal Github Creation Cancel
-        api_instance.personal_github_toolkit_v1_personal_github_creation_cancel(attempt_id)
+        api_instance.personal_github_toolkit_v1_personal_github_creation_cancel(attempt_id, handle)
     except Exception as e:
         print("Exception when calling PersonalGitHubToolkitV1Api->personal_github_toolkit_v1_personal_github_creation_cancel: %s\n" % e)
 ```
@@ -553,6 +569,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **attempt_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -577,7 +594,7 @@ void (empty response body)
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_github_toolkit_v1_personal_github_creation_confirm**
-> GitHubUserCreatedOutput personal_github_toolkit_v1_personal_github_creation_confirm(git_hub_user_creation_confirm_request)
+> GitHubUserCreatedOutput personal_github_toolkit_v1_personal_github_creation_confirm(handle, git_hub_user_creation_confirm_request)
 
 Personal Github Creation Confirm
 
@@ -614,11 +631,12 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGitHubToolkitV1Api(api_client)
+    handle = 'handle_example' # str | 
     git_hub_user_creation_confirm_request = azentspublicclient.GitHubUserCreationConfirmRequest() # GitHubUserCreationConfirmRequest | 
 
     try:
         # Personal Github Creation Confirm
-        api_response = api_instance.personal_github_toolkit_v1_personal_github_creation_confirm(git_hub_user_creation_confirm_request)
+        api_response = api_instance.personal_github_toolkit_v1_personal_github_creation_confirm(handle, git_hub_user_creation_confirm_request)
         print("The response of PersonalGitHubToolkitV1Api->personal_github_toolkit_v1_personal_github_creation_confirm:\n")
         pprint(api_response)
     except Exception as e:
@@ -632,6 +650,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
  **git_hub_user_creation_confirm_request** | [**GitHubUserCreationConfirmRequest**](GitHubUserCreationConfirmRequest.md)|  | 
 
 ### Return type
@@ -657,7 +676,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_github_toolkit_v1_personal_github_creation_connect**
-> GitHubUserConnectOutput personal_github_toolkit_v1_personal_github_creation_connect(personal_toolkit_create_request)
+> GitHubUserConnectOutput personal_github_toolkit_v1_personal_github_creation_connect(handle, personal_toolkit_create_request)
 
 Personal Github Creation Connect
 
@@ -694,11 +713,12 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGitHubToolkitV1Api(api_client)
+    handle = 'handle_example' # str | 
     personal_toolkit_create_request = azentspublicclient.PersonalToolkitCreateRequest() # PersonalToolkitCreateRequest | 
 
     try:
         # Personal Github Creation Connect
-        api_response = api_instance.personal_github_toolkit_v1_personal_github_creation_connect(personal_toolkit_create_request)
+        api_response = api_instance.personal_github_toolkit_v1_personal_github_creation_connect(handle, personal_toolkit_create_request)
         print("The response of PersonalGitHubToolkitV1Api->personal_github_toolkit_v1_personal_github_creation_connect:\n")
         pprint(api_response)
     except Exception as e:
@@ -712,6 +732,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
  **personal_toolkit_create_request** | [**PersonalToolkitCreateRequest**](PersonalToolkitCreateRequest.md)|  | 
 
 ### Return type
@@ -737,7 +758,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_github_toolkit_v1_personal_github_creation_exchange**
-> GitHubUserCreationReview personal_github_toolkit_v1_personal_github_creation_exchange(git_hub_user_exchange_request)
+> GitHubUserCreationReview personal_github_toolkit_v1_personal_github_creation_exchange(handle, git_hub_user_exchange_request)
 
 Personal Github Creation Exchange
 
@@ -774,11 +795,12 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGitHubToolkitV1Api(api_client)
+    handle = 'handle_example' # str | 
     git_hub_user_exchange_request = azentspublicclient.GitHubUserExchangeRequest() # GitHubUserExchangeRequest | 
 
     try:
         # Personal Github Creation Exchange
-        api_response = api_instance.personal_github_toolkit_v1_personal_github_creation_exchange(git_hub_user_exchange_request)
+        api_response = api_instance.personal_github_toolkit_v1_personal_github_creation_exchange(handle, git_hub_user_exchange_request)
         print("The response of PersonalGitHubToolkitV1Api->personal_github_toolkit_v1_personal_github_creation_exchange:\n")
         pprint(api_response)
     except Exception as e:
@@ -792,6 +814,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
  **git_hub_user_exchange_request** | [**GitHubUserExchangeRequest**](GitHubUserExchangeRequest.md)|  | 
 
 ### Return type
@@ -817,7 +840,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_github_toolkit_v1_personal_github_creation_review**
-> GitHubUserCreationReview personal_github_toolkit_v1_personal_github_creation_review(attempt_id)
+> GitHubUserCreationReview personal_github_toolkit_v1_personal_github_creation_review(attempt_id, handle)
 
 Personal Github Creation Review
 
@@ -854,10 +877,11 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGitHubToolkitV1Api(api_client)
     attempt_id = 'attempt_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Personal Github Creation Review
-        api_response = api_instance.personal_github_toolkit_v1_personal_github_creation_review(attempt_id)
+        api_response = api_instance.personal_github_toolkit_v1_personal_github_creation_review(attempt_id, handle)
         print("The response of PersonalGitHubToolkitV1Api->personal_github_toolkit_v1_personal_github_creation_review:\n")
         pprint(api_response)
     except Exception as e:
@@ -872,6 +896,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **attempt_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -896,7 +921,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_github_toolkit_v1_personal_github_disconnect**
-> personal_github_toolkit_v1_personal_github_disconnect(toolkit_id)
+> personal_github_toolkit_v1_personal_github_disconnect(toolkit_id, handle)
 
 Personal Github Disconnect
 
@@ -932,10 +957,11 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGitHubToolkitV1Api(api_client)
     toolkit_id = 'toolkit_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Personal Github Disconnect
-        api_instance.personal_github_toolkit_v1_personal_github_disconnect(toolkit_id)
+        api_instance.personal_github_toolkit_v1_personal_github_disconnect(toolkit_id, handle)
     except Exception as e:
         print("Exception when calling PersonalGitHubToolkitV1Api->personal_github_toolkit_v1_personal_github_disconnect: %s\n" % e)
 ```
@@ -948,6 +974,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **toolkit_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -972,7 +999,7 @@ void (empty response body)
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_github_toolkit_v1_personal_github_exchange**
-> GitHubUserCandidateSummary personal_github_toolkit_v1_personal_github_exchange(toolkit_id, git_hub_user_exchange_request)
+> GitHubUserCandidateSummary personal_github_toolkit_v1_personal_github_exchange(toolkit_id, handle, git_hub_user_exchange_request)
 
 Personal Github Exchange
 
@@ -1010,11 +1037,12 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGitHubToolkitV1Api(api_client)
     toolkit_id = 'toolkit_id_example' # str | 
+    handle = 'handle_example' # str | 
     git_hub_user_exchange_request = azentspublicclient.GitHubUserExchangeRequest() # GitHubUserExchangeRequest | 
 
     try:
         # Personal Github Exchange
-        api_response = api_instance.personal_github_toolkit_v1_personal_github_exchange(toolkit_id, git_hub_user_exchange_request)
+        api_response = api_instance.personal_github_toolkit_v1_personal_github_exchange(toolkit_id, handle, git_hub_user_exchange_request)
         print("The response of PersonalGitHubToolkitV1Api->personal_github_toolkit_v1_personal_github_exchange:\n")
         pprint(api_response)
     except Exception as e:
@@ -1029,6 +1057,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **toolkit_id** | **str**|  | 
+ **handle** | **str**|  | 
  **git_hub_user_exchange_request** | [**GitHubUserExchangeRequest**](GitHubUserExchangeRequest.md)|  | 
 
 ### Return type
@@ -1054,7 +1083,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_github_toolkit_v1_personal_github_install_url**
-> GitHubPlatformInstallUrlResponse personal_github_toolkit_v1_personal_github_install_url()
+> GitHubPlatformInstallUrlResponse personal_github_toolkit_v1_personal_github_install_url(handle)
 
 Personal Github Install Url
 
@@ -1090,10 +1119,11 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGitHubToolkitV1Api(api_client)
+    handle = 'handle_example' # str | 
 
     try:
         # Personal Github Install Url
-        api_response = api_instance.personal_github_toolkit_v1_personal_github_install_url()
+        api_response = api_instance.personal_github_toolkit_v1_personal_github_install_url(handle)
         print("The response of PersonalGitHubToolkitV1Api->personal_github_toolkit_v1_personal_github_install_url:\n")
         pprint(api_response)
     except Exception as e:
@@ -1104,7 +1134,10 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 ### Parameters
 
-This endpoint does not need any parameter.
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -1124,11 +1157,12 @@ This endpoint does not need any parameter.
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_github_toolkit_v1_personal_github_installation_oauth_url**
-> GitHubPlatformOAuthUrlResponse personal_github_toolkit_v1_personal_github_installation_oauth_url()
+> GitHubPlatformOAuthUrlResponse personal_github_toolkit_v1_personal_github_installation_oauth_url(handle)
 
 Personal Github Installation Oauth Url
 
@@ -1164,10 +1198,11 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGitHubToolkitV1Api(api_client)
+    handle = 'handle_example' # str | 
 
     try:
         # Personal Github Installation Oauth Url
-        api_response = api_instance.personal_github_toolkit_v1_personal_github_installation_oauth_url()
+        api_response = api_instance.personal_github_toolkit_v1_personal_github_installation_oauth_url(handle)
         print("The response of PersonalGitHubToolkitV1Api->personal_github_toolkit_v1_personal_github_installation_oauth_url:\n")
         pprint(api_response)
     except Exception as e:
@@ -1178,7 +1213,10 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 ### Parameters
 
-This endpoint does not need any parameter.
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -1198,11 +1236,12 @@ This endpoint does not need any parameter.
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_github_toolkit_v1_personal_github_review**
-> GitHubUserCandidateSummary personal_github_toolkit_v1_personal_github_review(toolkit_id, attempt_id)
+> GitHubUserCandidateSummary personal_github_toolkit_v1_personal_github_review(toolkit_id, handle, attempt_id)
 
 Personal Github Review
 
@@ -1239,11 +1278,12 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGitHubToolkitV1Api(api_client)
     toolkit_id = 'toolkit_id_example' # str | 
+    handle = 'handle_example' # str | 
     attempt_id = 'attempt_id_example' # str | 
 
     try:
         # Personal Github Review
-        api_response = api_instance.personal_github_toolkit_v1_personal_github_review(toolkit_id, attempt_id)
+        api_response = api_instance.personal_github_toolkit_v1_personal_github_review(toolkit_id, handle, attempt_id)
         print("The response of PersonalGitHubToolkitV1Api->personal_github_toolkit_v1_personal_github_review:\n")
         pprint(api_response)
     except Exception as e:
@@ -1258,6 +1298,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **toolkit_id** | **str**|  | 
+ **handle** | **str**|  | 
  **attempt_id** | **str**|  | 
 
 ### Return type
@@ -1283,7 +1324,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_github_toolkit_v1_personal_github_setup_app**
-> GitHubSetupAppOutput personal_github_toolkit_v1_personal_github_setup_app()
+> GitHubSetupAppOutput personal_github_toolkit_v1_personal_github_setup_app(handle)
 
 Personal Github Setup App
 
@@ -1319,10 +1360,11 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGitHubToolkitV1Api(api_client)
+    handle = 'handle_example' # str | 
 
     try:
         # Personal Github Setup App
-        api_response = api_instance.personal_github_toolkit_v1_personal_github_setup_app()
+        api_response = api_instance.personal_github_toolkit_v1_personal_github_setup_app(handle)
         print("The response of PersonalGitHubToolkitV1Api->personal_github_toolkit_v1_personal_github_setup_app:\n")
         pprint(api_response)
     except Exception as e:
@@ -1333,7 +1375,10 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 ### Parameters
 
-This endpoint does not need any parameter.
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -1353,11 +1398,12 @@ This endpoint does not need any parameter.
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_github_toolkit_v1_personal_github_setup_verify**
-> GitHubSetupVerificationOutput personal_github_toolkit_v1_personal_github_setup_verify(body)
+> GitHubSetupVerificationOutput personal_github_toolkit_v1_personal_github_setup_verify(handle, body)
 
 Personal Github Setup Verify
 
@@ -1394,11 +1440,12 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGitHubToolkitV1Api(api_client)
+    handle = 'handle_example' # str | 
     body = azentspublicclient.Body() # Body | 
 
     try:
         # Personal Github Setup Verify
-        api_response = api_instance.personal_github_toolkit_v1_personal_github_setup_verify(body)
+        api_response = api_instance.personal_github_toolkit_v1_personal_github_setup_verify(handle, body)
         print("The response of PersonalGitHubToolkitV1Api->personal_github_toolkit_v1_personal_github_setup_verify:\n")
         pprint(api_response)
     except Exception as e:
@@ -1412,6 +1459,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
  **body** | [**Body**](Body.md)|  | 
 
 ### Return type
@@ -1437,7 +1485,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_github_toolkit_v1_personal_github_status**
-> GitHubUserStatusOutput personal_github_toolkit_v1_personal_github_status(toolkit_id)
+> GitHubUserStatusOutput personal_github_toolkit_v1_personal_github_status(toolkit_id, handle)
 
 Personal Github Status
 
@@ -1474,10 +1522,11 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGitHubToolkitV1Api(api_client)
     toolkit_id = 'toolkit_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Personal Github Status
-        api_response = api_instance.personal_github_toolkit_v1_personal_github_status(toolkit_id)
+        api_response = api_instance.personal_github_toolkit_v1_personal_github_status(toolkit_id, handle)
         print("The response of PersonalGitHubToolkitV1Api->personal_github_toolkit_v1_personal_github_status:\n")
         pprint(api_response)
     except Exception as e:
@@ -1492,6 +1541,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **toolkit_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -1516,7 +1566,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_github_toolkit_v1_personal_github_sync_installations**
-> GitHubPlatformInstallationsResponse personal_github_toolkit_v1_personal_github_sync_installations(personal_o_auth_exchange_request)
+> GitHubPlatformInstallationsResponse personal_github_toolkit_v1_personal_github_sync_installations(handle, personal_o_auth_exchange_request)
 
 Personal Github Sync Installations
 
@@ -1553,11 +1603,12 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGitHubToolkitV1Api(api_client)
+    handle = 'handle_example' # str | 
     personal_o_auth_exchange_request = azentspublicclient.PersonalOAuthExchangeRequest() # PersonalOAuthExchangeRequest | 
 
     try:
         # Personal Github Sync Installations
-        api_response = api_instance.personal_github_toolkit_v1_personal_github_sync_installations(personal_o_auth_exchange_request)
+        api_response = api_instance.personal_github_toolkit_v1_personal_github_sync_installations(handle, personal_o_auth_exchange_request)
         print("The response of PersonalGitHubToolkitV1Api->personal_github_toolkit_v1_personal_github_sync_installations:\n")
         pprint(api_response)
     except Exception as e:
@@ -1571,6 +1622,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
  **personal_o_auth_exchange_request** | [**PersonalOAuthExchangeRequest**](PersonalOAuthExchangeRequest.md)|  | 
 
 ### Return type

@@ -148,6 +148,12 @@ def test_personal_provider_attempt_blocks_destructive_downgrade(
     alembic_runner.migrate_up_to(_REVISION)
     with alembic_engine.begin() as connection:
         connection.execute(
+            sa.text(
+                "INSERT INTO workspaces (id, name, handle) "
+                "VALUES ('provider-workspace', 'Provider', 'provider-personal')"
+            )
+        )
+        connection.execute(
             sa.text("""
             INSERT INTO users (id, primary_email_id)
             VALUES ('provider-user', 'provider-email')
@@ -162,10 +168,11 @@ def test_personal_provider_attempt_blocks_destructive_downgrade(
         connection.execute(
             sa.text("""
             INSERT INTO google_oauth_attempts (
-                id, user_id, session_id, owner_kind, owner_user_id,
+                id, workspace_id, user_id, session_id, owner_kind, owner_user_id,
                 status, expires_at, encrypted_setup
             ) VALUES (
-                'provider-personal', 'provider-user', 'login', 'user', 'provider-user',
+                'provider-personal', 'provider-workspace', 'provider-user', 'login',
+                'user', 'provider-user',
                 'pending', now() + interval '10 minutes', 'opaque-personal-setup'
             )
         """)

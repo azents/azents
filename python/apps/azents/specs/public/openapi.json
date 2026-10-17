@@ -14977,7 +14977,7 @@
         }
       }
     },
-    "/toolkit/v1/personal-toolkit-configs": {
+    "/toolkit/v1/workspaces/{handle}/personal-toolkit-configs": {
       "get": {
         "tags": [
           "Personal Toolkit v1"
@@ -14985,6 +14985,22 @@
         "summary": "List Personal Toolkits",
         "description": "List only the authenticated active account's personal connections.",
         "operationId": "personal_toolkit_v1_list_personal_toolkits",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -14995,13 +15011,18 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
+        }
       },
       "post": {
         "tags": [
@@ -15010,15 +15031,31 @@
         "summary": "Create Personal Toolkit",
         "description": "Create with common Provider validation and default dynamic All access.",
         "operationId": "personal_toolkit_v1_create_personal_toolkit",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/PersonalToolkitCreateRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -15041,15 +15078,10 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
+        }
       }
     },
-    "/toolkit/v1/personal-toolkit-configs/{toolkit_id}": {
+    "/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}": {
       "get": {
         "tags": [
           "Personal Toolkit v1"
@@ -15070,6 +15102,15 @@
             "schema": {
               "type": "string",
               "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
             }
           }
         ],
@@ -15116,6 +15157,15 @@
             "schema": {
               "type": "string",
               "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
             }
           }
         ],
@@ -15173,6 +15223,15 @@
               "type": "string",
               "title": "Toolkit Id"
             }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
           }
         ],
         "responses": {
@@ -15192,7 +15251,7 @@
         }
       }
     },
-    "/toolkit/v1/personal-toolkit-agents": {
+    "/toolkit/v1/workspaces/{handle}/personal-toolkit-agents": {
       "get": {
         "tags": [
           "Personal Toolkit v1"
@@ -15200,6 +15259,22 @@
         "summary": "List Personal Toolkit Agents",
         "description": "Return all ordinarily accessible Agents, not a filtered replacement baseline.",
         "operationId": "personal_toolkit_v1_list_personal_toolkit_agents",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -15210,16 +15285,21 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
+        }
       }
     },
-    "/toolkit/v1/personal-toolkit-configs/{toolkit_id}/agent-access": {
+    "/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/agent-access": {
       "patch": {
         "tags": [
           "Personal Toolkit v1"
@@ -15240,6 +15320,15 @@
             "schema": {
               "type": "string",
               "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
             }
           }
         ],
@@ -15277,7 +15366,7 @@
         }
       }
     },
-    "/toolkit/v1/agents/{agent_id}/personal-toolkit-access": {
+    "/toolkit/v1/workspaces/{handle}/agents/{agent_id}/personal-toolkit-access": {
       "get": {
         "tags": [
           "Personal Toolkit v1"
@@ -15298,6 +15387,15 @@
             "schema": {
               "type": "string",
               "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
             }
           }
         ],
@@ -15345,6 +15443,15 @@
               "type": "string",
               "title": "Agent Id"
             }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
           }
         ],
         "requestBody": {
@@ -15381,7 +15488,7 @@
         }
       }
     },
-    "/toolkit/v1/personal-toolkit-configs/test-connection": {
+    "/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/test-connection": {
       "post": {
         "tags": [
           "Personal Toolkit OAuth v1"
@@ -15389,15 +15496,31 @@
         "summary": "Test Personal Connection",
         "description": "Test common unsaved fields or an exact-owner saved credential merge.",
         "operationId": "personal_toolkit_oauth_v1_test_personal_connection",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/PersonalConnectionTestRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -15420,15 +15543,10 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
+        }
       }
     },
-    "/toolkit/v1/personal-toolkit-configs/{toolkit_id}/test-connection": {
+    "/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/test-connection": {
       "post": {
         "tags": [
           "Personal Toolkit OAuth v1"
@@ -15449,6 +15567,15 @@
             "schema": {
               "type": "string",
               "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
             }
           }
         ],
@@ -15476,7 +15603,7 @@
         }
       }
     },
-    "/toolkit/v1/personal-toolkit-configs/{toolkit_id}/oauth/connect": {
+    "/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/oauth/connect": {
       "post": {
         "tags": [
           "Personal Toolkit OAuth v1"
@@ -15497,6 +15624,15 @@
             "schema": {
               "type": "string",
               "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
             }
           }
         ],
@@ -15524,7 +15660,7 @@
         }
       }
     },
-    "/toolkit/v1/personal-toolkit-configs/{toolkit_id}/oauth/exchange": {
+    "/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/oauth/exchange": {
       "post": {
         "tags": [
           "Personal Toolkit OAuth v1"
@@ -15545,6 +15681,15 @@
             "schema": {
               "type": "string",
               "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
             }
           }
         ],
@@ -15575,7 +15720,7 @@
         }
       }
     },
-    "/toolkit/v1/personal-toolkit-configs/{toolkit_id}/oauth": {
+    "/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/oauth": {
       "delete": {
         "tags": [
           "Personal Toolkit OAuth v1"
@@ -15597,6 +15742,15 @@
               "type": "string",
               "title": "Toolkit Id"
             }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
           }
         ],
         "responses": {
@@ -15616,7 +15770,7 @@
         }
       }
     },
-    "/toolkit/v1/personal/google/preparation": {
+    "/toolkit/v1/workspaces/{handle}/personal/google/preparation": {
       "get": {
         "tags": [
           "Personal Google Toolkit v1"
@@ -15624,6 +15778,22 @@
         "summary": "Personal Google Preparation",
         "description": "Expose common operator registration readiness to the exact active account.",
         "operationId": "personal_google_toolkit_v1_personal_google_preparation",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -15631,43 +15801,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GooglePreparation"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/toolkit/v1/personal/google/connect": {
-      "post": {
-        "tags": [
-          "Personal Google Toolkit v1"
-        ],
-        "summary": "Personal Google Connect",
-        "description": "Stage a personal setup without publishing a Toolkit or credential.",
-        "operationId": "personal_google_toolkit_v1_personal_google_connect",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GoogleConnectInput"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GoogleConnectOutput"
                 }
               }
             }
@@ -15682,22 +15815,17 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
+        }
       }
     },
-    "/toolkit/v1/personal-toolkit-configs/{toolkit_id}/google/reconnect": {
+    "/toolkit/v1/workspaces/{handle}/personal/google/connect": {
       "post": {
         "tags": [
           "Personal Google Toolkit v1"
         ],
-        "summary": "Personal Google Reconnect",
-        "description": "Reconnect the exact User-owned target with common reviewed identity flow.",
-        "operationId": "personal_google_toolkit_v1_personal_google_reconnect",
+        "summary": "Personal Google Connect",
+        "description": "Stage a personal setup without publishing a Toolkit or credential.",
+        "operationId": "personal_google_toolkit_v1_personal_google_connect",
         "security": [
           {
             "HTTPBearer": []
@@ -15705,12 +15833,12 @@
         ],
         "parameters": [
           {
-            "name": "toolkit_id",
+            "name": "handle",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Toolkit Id"
+              "title": "Handle"
             }
           }
         ],
@@ -15748,7 +15876,74 @@
         }
       }
     },
-    "/toolkit/v1/personal/google/exchange": {
+    "/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/google/reconnect": {
+      "post": {
+        "tags": [
+          "Personal Google Toolkit v1"
+        ],
+        "summary": "Personal Google Reconnect",
+        "description": "Reconnect the exact User-owned target with common reviewed identity flow.",
+        "operationId": "personal_google_toolkit_v1_personal_google_reconnect",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "toolkit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleConnectInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoogleConnectOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/toolkit/v1/workspaces/{handle}/personal/google/exchange": {
       "post": {
         "tags": [
           "Personal Google Toolkit v1"
@@ -15756,15 +15951,31 @@
         "summary": "Personal Google Exchange",
         "description": "Verify exact personal callback state before exchanging or staging credentials.",
         "operationId": "personal_google_toolkit_v1_personal_google_exchange",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/GoogleExchangeRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -15787,15 +15998,10 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
+        }
       }
     },
-    "/toolkit/v1/personal/google/attempts/{attempt_id}": {
+    "/toolkit/v1/workspaces/{handle}/personal/google/attempts/{attempt_id}": {
       "get": {
         "tags": [
           "Personal Google Toolkit v1"
@@ -15816,6 +16022,15 @@
             "schema": {
               "type": "string",
               "title": "Attempt Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
             }
           }
         ],
@@ -15863,6 +16078,15 @@
               "type": "string",
               "title": "Attempt Id"
             }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
           }
         ],
         "responses": {
@@ -15889,7 +16113,7 @@
         }
       }
     },
-    "/toolkit/v1/personal/google/attempts/{attempt_id}/confirm": {
+    "/toolkit/v1/workspaces/{handle}/personal/google/attempts/{attempt_id}/confirm": {
       "post": {
         "tags": [
           "Personal Google Toolkit v1"
@@ -15910,6 +16134,15 @@
             "schema": {
               "type": "string",
               "title": "Attempt Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
             }
           }
         ],
@@ -15947,7 +16180,7 @@
         }
       }
     },
-    "/toolkit/v1/personal/google/attempts/{attempt_id}/reconnect-confirm": {
+    "/toolkit/v1/workspaces/{handle}/personal/google/attempts/{attempt_id}/reconnect-confirm": {
       "post": {
         "tags": [
           "Personal Google Toolkit v1"
@@ -15968,6 +16201,15 @@
             "schema": {
               "type": "string",
               "title": "Attempt Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
             }
           }
         ],
@@ -16005,7 +16247,7 @@
         }
       }
     },
-    "/toolkit/v1/personal/google/attempts/{attempt_id}/outcome": {
+    "/toolkit/v1/workspaces/{handle}/personal/google/attempts/{attempt_id}/outcome": {
       "get": {
         "tags": [
           "Personal Google Toolkit v1"
@@ -16026,6 +16268,15 @@
             "schema": {
               "type": "string",
               "title": "Attempt Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
             }
           }
         ],
@@ -16053,7 +16304,7 @@
         }
       }
     },
-    "/toolkit/v1/personal-toolkit-configs/{toolkit_id}/google/connection": {
+    "/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/google/connection": {
       "get": {
         "tags": [
           "Personal Google Toolkit v1"
@@ -16074,6 +16325,15 @@
             "schema": {
               "type": "string",
               "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
             }
           }
         ],
@@ -16121,6 +16381,15 @@
               "type": "string",
               "title": "Toolkit Id"
             }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
           }
         ],
         "responses": {
@@ -16145,7 +16414,7 @@
         }
       }
     },
-    "/toolkit/v1/personal/github/platform-install-url": {
+    "/toolkit/v1/workspaces/{handle}/personal/github/platform-install-url": {
       "get": {
         "tags": [
           "Personal GitHub Toolkit v1"
@@ -16153,6 +16422,22 @@
         "summary": "Personal Github Install Url",
         "description": "Open the same Platform App installation page after exact account admission.",
         "operationId": "personal_github_toolkit_v1_personal_github_install_url",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -16163,16 +16448,21 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
+        }
       }
     },
-    "/toolkit/v1/personal/github/platform-oauth-url": {
+    "/toolkit/v1/workspaces/{handle}/personal/github/platform-oauth-url": {
       "get": {
         "tags": [
           "Personal GitHub Toolkit v1"
@@ -16180,6 +16470,22 @@
         "summary": "Personal Github Installation Oauth Url",
         "description": "Start owner/Auth Session-bound Platform installation acquisition.",
         "operationId": "personal_github_toolkit_v1_personal_github_installation_oauth_url",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -16190,16 +16496,21 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
+        }
       }
     },
-    "/toolkit/v1/personal/github/platform-installations": {
+    "/toolkit/v1/workspaces/{handle}/personal/github/platform-installations": {
       "post": {
         "tags": [
           "Personal GitHub Toolkit v1"
@@ -16207,15 +16518,31 @@
         "summary": "Personal Github Sync Installations",
         "description": "Publish the current owner's installation inventory, with no Toolkit creation.",
         "operationId": "personal_github_toolkit_v1_personal_github_sync_installations",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/PersonalOAuthExchangeRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -16238,15 +16565,10 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
+        }
       }
     },
-    "/toolkit/v1/personal/github/setup-app": {
+    "/toolkit/v1/workspaces/{handle}/personal/github/setup-app": {
       "get": {
         "tags": [
           "Personal GitHub Toolkit v1"
@@ -16254,6 +16576,22 @@
         "summary": "Personal Github Setup App",
         "description": "Observe the current Platform App after current-account personal admission.",
         "operationId": "personal_github_toolkit_v1_personal_github_setup_app",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -16264,16 +16602,21 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
+        }
       }
     },
-    "/toolkit/v1/personal/github/setup-verification": {
+    "/toolkit/v1/workspaces/{handle}/personal/github/setup-verification": {
       "post": {
         "tags": [
           "Personal GitHub Toolkit v1"
@@ -16281,7 +16624,24 @@
         "summary": "Personal Github Setup Verify",
         "description": "Verify ordinary PAT/provided-App/Platform-App modes without publication.",
         "operationId": "personal_github_toolkit_v1_personal_github_setup_verify",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -16296,7 +16656,6 @@
                     "$ref": "#/components/schemas/GitHubPlatformSetupVerification"
                   }
                 ],
-                "title": "Body",
                 "discriminator": {
                   "propertyName": "github_auth_type",
                   "mapping": {
@@ -16304,11 +16663,11 @@
                     "github_app": "#/components/schemas/GitHubAppSetupVerification",
                     "github_app_platform": "#/components/schemas/GitHubPlatformSetupVerification"
                   }
-                }
+                },
+                "title": "Body"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -16331,15 +16690,10 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
+        }
       }
     },
-    "/toolkit/v1/personal/github-user-creations/connect": {
+    "/toolkit/v1/workspaces/{handle}/personal/github-user-creations/connect": {
       "post": {
         "tags": [
           "Personal GitHub Toolkit v1"
@@ -16347,15 +16701,31 @@
         "summary": "Personal Github Creation Connect",
         "description": "Authorize common GitHub settings before creating a personal Toolkit.",
         "operationId": "personal_github_toolkit_v1_personal_github_creation_connect",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/PersonalToolkitCreateRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -16378,15 +16748,10 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
+        }
       }
     },
-    "/toolkit/v1/personal/github-user-creations/exchange": {
+    "/toolkit/v1/workspaces/{handle}/personal/github-user-creations/exchange": {
       "post": {
         "tags": [
           "Personal GitHub Toolkit v1"
@@ -16394,15 +16759,31 @@
         "summary": "Personal Github Creation Exchange",
         "description": "Stage verified account identity under exact personal setup authority.",
         "operationId": "personal_github_toolkit_v1_personal_github_creation_exchange",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/GitHubUserExchangeRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -16425,15 +16806,10 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
+        }
       }
     },
-    "/toolkit/v1/personal/github-user-creations/{attempt_id}": {
+    "/toolkit/v1/workspaces/{handle}/personal/github-user-creations/{attempt_id}": {
       "get": {
         "tags": [
           "Personal GitHub Toolkit v1"
@@ -16454,6 +16830,15 @@
             "schema": {
               "type": "string",
               "title": "Attempt Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
             }
           }
         ],
@@ -16501,6 +16886,15 @@
               "type": "string",
               "title": "Attempt Id"
             }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
           }
         ],
         "responses": {
@@ -16520,7 +16914,7 @@
         }
       }
     },
-    "/toolkit/v1/personal/github-user-creations/{attempt_id}/app": {
+    "/toolkit/v1/workspaces/{handle}/personal/github-user-creations/{attempt_id}/app": {
       "get": {
         "tags": [
           "Personal GitHub Toolkit v1"
@@ -16541,6 +16935,15 @@
             "schema": {
               "type": "string",
               "title": "Attempt Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
             }
           }
         ],
@@ -16568,7 +16971,7 @@
         }
       }
     },
-    "/toolkit/v1/personal/github-user-creations/confirm": {
+    "/toolkit/v1/workspaces/{handle}/personal/github-user-creations/confirm": {
       "post": {
         "tags": [
           "Personal GitHub Toolkit v1"
@@ -16576,15 +16979,31 @@
         "summary": "Personal Github Creation Confirm",
         "description": "Publish canonical personal ownership after reviewed confirmation.",
         "operationId": "personal_github_toolkit_v1_personal_github_creation_confirm",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/GitHubUserCreationConfirmRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -16607,15 +17026,10 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
+        }
       }
     },
-    "/toolkit/v1/personal/github/setup-availability": {
+    "/toolkit/v1/workspaces/{handle}/personal/github/setup-availability": {
       "get": {
         "tags": [
           "Personal GitHub Toolkit v1"
@@ -16623,6 +17037,22 @@
         "summary": "Personal Github Availability",
         "description": "Use the common auth-mode readiness without requiring a Workspace membership.",
         "operationId": "personal_github_toolkit_v1_personal_github_availability",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -16633,16 +17063,21 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
+        }
       }
     },
-    "/toolkit/v1/personal-toolkit-configs/{toolkit_id}/github-user/connect": {
+    "/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/github-user/connect": {
       "post": {
         "tags": [
           "Personal GitHub Toolkit v1"
@@ -16663,6 +17098,15 @@
             "schema": {
               "type": "string",
               "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
             }
           }
         ],
@@ -16690,7 +17134,7 @@
         }
       }
     },
-    "/toolkit/v1/personal-toolkit-configs/{toolkit_id}/github-user/exchange": {
+    "/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/github-user/exchange": {
       "post": {
         "tags": [
           "Personal GitHub Toolkit v1"
@@ -16711,6 +17155,15 @@
             "schema": {
               "type": "string",
               "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
             }
           }
         ],
@@ -16748,7 +17201,7 @@
         }
       }
     },
-    "/toolkit/v1/personal-toolkit-configs/{toolkit_id}/github-user/review": {
+    "/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/github-user/review": {
       "get": {
         "tags": [
           "Personal GitHub Toolkit v1"
@@ -16769,6 +17222,15 @@
             "schema": {
               "type": "string",
               "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
             }
           },
           {
@@ -16805,7 +17267,7 @@
         }
       }
     },
-    "/toolkit/v1/personal-toolkit-configs/{toolkit_id}/github-user/confirm": {
+    "/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/github-user/confirm": {
       "post": {
         "tags": [
           "Personal GitHub Toolkit v1"
@@ -16826,6 +17288,15 @@
             "schema": {
               "type": "string",
               "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
             }
           }
         ],
@@ -16863,7 +17334,7 @@
         }
       }
     },
-    "/toolkit/v1/personal-toolkit-configs/{toolkit_id}/github-user/attempt": {
+    "/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/github-user/attempt": {
       "delete": {
         "tags": [
           "Personal GitHub Toolkit v1"
@@ -16884,6 +17355,15 @@
             "schema": {
               "type": "string",
               "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
             }
           }
         ],
@@ -16914,7 +17394,7 @@
         }
       }
     },
-    "/toolkit/v1/personal-toolkit-configs/{toolkit_id}/github-user/connection": {
+    "/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/github-user/connection": {
       "get": {
         "tags": [
           "Personal GitHub Toolkit v1"
@@ -16935,6 +17415,15 @@
             "schema": {
               "type": "string",
               "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
             }
           }
         ],
@@ -16982,6 +17471,15 @@
               "type": "string",
               "title": "Toolkit Id"
             }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
           }
         ],
         "responses": {
@@ -17001,7 +17499,7 @@
         }
       }
     },
-    "/toolkit/v1/personal-toolkit-configs/{toolkit_id}/github-user/access": {
+    "/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/github-user/access": {
       "get": {
         "tags": [
           "Personal GitHub Toolkit v1"
@@ -17022,6 +17520,15 @@
             "schema": {
               "type": "string",
               "title": "Toolkit Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
             }
           },
           {
@@ -44806,16 +45313,21 @@
           "user_id": {
             "type": "string",
             "title": "User Id"
+          },
+          "workspace_id": {
+            "type": "string",
+            "title": "Workspace Id"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
           "kind",
-          "user_id"
+          "user_id",
+          "workspace_id"
         ],
         "title": "UserToolkitOwner",
-        "description": "A User-global connection without an owning Workspace."
+        "description": "A personal connection owned by one User within one real Workspace."
       },
       "ValidationError": {
         "properties": {

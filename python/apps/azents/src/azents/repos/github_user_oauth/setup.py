@@ -39,6 +39,7 @@ class GitHubSetupRepository:
                     session,
                     user_id=subject.user_id,
                     session_id=subject.session_id,
+                    workspace_id=subject.workspace_id,
                 )
             else:
                 await self.operations.authorize_scope_in_session(

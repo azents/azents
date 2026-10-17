@@ -51,6 +51,7 @@ class PersonalGoogleToolkitV1Api:
     def personal_google_toolkit_v1_personal_google_cancel(
         self,
         attempt_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -70,6 +71,8 @@ class PersonalGoogleToolkitV1Api:
 
         :param attempt_id: (required)
         :type attempt_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -94,6 +97,7 @@ class PersonalGoogleToolkitV1Api:
 
         _param = self._personal_google_toolkit_v1_personal_google_cancel_serialize(
             attempt_id=attempt_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -119,6 +123,7 @@ class PersonalGoogleToolkitV1Api:
     def personal_google_toolkit_v1_personal_google_cancel_with_http_info(
         self,
         attempt_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -138,6 +143,8 @@ class PersonalGoogleToolkitV1Api:
 
         :param attempt_id: (required)
         :type attempt_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -162,6 +169,7 @@ class PersonalGoogleToolkitV1Api:
 
         _param = self._personal_google_toolkit_v1_personal_google_cancel_serialize(
             attempt_id=attempt_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -187,6 +195,7 @@ class PersonalGoogleToolkitV1Api:
     def personal_google_toolkit_v1_personal_google_cancel_without_preload_content(
         self,
         attempt_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -206,6 +215,8 @@ class PersonalGoogleToolkitV1Api:
 
         :param attempt_id: (required)
         :type attempt_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -230,6 +241,7 @@ class PersonalGoogleToolkitV1Api:
 
         _param = self._personal_google_toolkit_v1_personal_google_cancel_serialize(
             attempt_id=attempt_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -250,6 +262,7 @@ class PersonalGoogleToolkitV1Api:
     def _personal_google_toolkit_v1_personal_google_cancel_serialize(
         self,
         attempt_id,
+        handle,
         _request_auth,
         _content_type,
         _headers,
@@ -273,6 +286,8 @@ class PersonalGoogleToolkitV1Api:
         # process the path parameters
         if attempt_id is not None:
             _path_params['attempt_id'] = attempt_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -295,7 +310,7 @@ class PersonalGoogleToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='DELETE',
-            resource_path='/toolkit/v1/personal/google/attempts/{attempt_id}',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal/google/attempts/{attempt_id}',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -315,6 +330,7 @@ class PersonalGoogleToolkitV1Api:
     def personal_google_toolkit_v1_personal_google_confirm(
         self,
         attempt_id: StrictStr,
+        handle: StrictStr,
         google_confirm_request: GoogleConfirmRequest,
         _request_timeout: Union[
             None,
@@ -335,6 +351,8 @@ class PersonalGoogleToolkitV1Api:
 
         :param attempt_id: (required)
         :type attempt_id: str
+        :param handle: (required)
+        :type handle: str
         :param google_confirm_request: (required)
         :type google_confirm_request: GoogleConfirmRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -361,6 +379,7 @@ class PersonalGoogleToolkitV1Api:
 
         _param = self._personal_google_toolkit_v1_personal_google_confirm_serialize(
             attempt_id=attempt_id,
+            handle=handle,
             google_confirm_request=google_confirm_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -387,6 +406,7 @@ class PersonalGoogleToolkitV1Api:
     def personal_google_toolkit_v1_personal_google_confirm_with_http_info(
         self,
         attempt_id: StrictStr,
+        handle: StrictStr,
         google_confirm_request: GoogleConfirmRequest,
         _request_timeout: Union[
             None,
@@ -407,6 +427,8 @@ class PersonalGoogleToolkitV1Api:
 
         :param attempt_id: (required)
         :type attempt_id: str
+        :param handle: (required)
+        :type handle: str
         :param google_confirm_request: (required)
         :type google_confirm_request: GoogleConfirmRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -433,6 +455,7 @@ class PersonalGoogleToolkitV1Api:
 
         _param = self._personal_google_toolkit_v1_personal_google_confirm_serialize(
             attempt_id=attempt_id,
+            handle=handle,
             google_confirm_request=google_confirm_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -459,6 +482,7 @@ class PersonalGoogleToolkitV1Api:
     def personal_google_toolkit_v1_personal_google_confirm_without_preload_content(
         self,
         attempt_id: StrictStr,
+        handle: StrictStr,
         google_confirm_request: GoogleConfirmRequest,
         _request_timeout: Union[
             None,
@@ -479,6 +503,8 @@ class PersonalGoogleToolkitV1Api:
 
         :param attempt_id: (required)
         :type attempt_id: str
+        :param handle: (required)
+        :type handle: str
         :param google_confirm_request: (required)
         :type google_confirm_request: GoogleConfirmRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -505,6 +531,7 @@ class PersonalGoogleToolkitV1Api:
 
         _param = self._personal_google_toolkit_v1_personal_google_confirm_serialize(
             attempt_id=attempt_id,
+            handle=handle,
             google_confirm_request=google_confirm_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -526,6 +553,7 @@ class PersonalGoogleToolkitV1Api:
     def _personal_google_toolkit_v1_personal_google_confirm_serialize(
         self,
         attempt_id,
+        handle,
         google_confirm_request,
         _request_auth,
         _content_type,
@@ -550,6 +578,8 @@ class PersonalGoogleToolkitV1Api:
         # process the path parameters
         if attempt_id is not None:
             _path_params['attempt_id'] = attempt_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -587,7 +617,7 @@ class PersonalGoogleToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='POST',
-            resource_path='/toolkit/v1/personal/google/attempts/{attempt_id}/confirm',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal/google/attempts/{attempt_id}/confirm',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -606,6 +636,7 @@ class PersonalGoogleToolkitV1Api:
     @validate_call
     def personal_google_toolkit_v1_personal_google_connect(
         self,
+        handle: StrictStr,
         google_connect_input: GoogleConnectInput,
         _request_timeout: Union[
             None,
@@ -624,6 +655,8 @@ class PersonalGoogleToolkitV1Api:
 
         Stage a personal setup without publishing a Toolkit or credential.
 
+        :param handle: (required)
+        :type handle: str
         :param google_connect_input: (required)
         :type google_connect_input: GoogleConnectInput
         :param _request_timeout: timeout setting for this request. If one
@@ -649,6 +682,7 @@ class PersonalGoogleToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_google_toolkit_v1_personal_google_connect_serialize(
+            handle=handle,
             google_connect_input=google_connect_input,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -674,6 +708,7 @@ class PersonalGoogleToolkitV1Api:
     @validate_call
     def personal_google_toolkit_v1_personal_google_connect_with_http_info(
         self,
+        handle: StrictStr,
         google_connect_input: GoogleConnectInput,
         _request_timeout: Union[
             None,
@@ -692,6 +727,8 @@ class PersonalGoogleToolkitV1Api:
 
         Stage a personal setup without publishing a Toolkit or credential.
 
+        :param handle: (required)
+        :type handle: str
         :param google_connect_input: (required)
         :type google_connect_input: GoogleConnectInput
         :param _request_timeout: timeout setting for this request. If one
@@ -717,6 +754,7 @@ class PersonalGoogleToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_google_toolkit_v1_personal_google_connect_serialize(
+            handle=handle,
             google_connect_input=google_connect_input,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -742,6 +780,7 @@ class PersonalGoogleToolkitV1Api:
     @validate_call
     def personal_google_toolkit_v1_personal_google_connect_without_preload_content(
         self,
+        handle: StrictStr,
         google_connect_input: GoogleConnectInput,
         _request_timeout: Union[
             None,
@@ -760,6 +799,8 @@ class PersonalGoogleToolkitV1Api:
 
         Stage a personal setup without publishing a Toolkit or credential.
 
+        :param handle: (required)
+        :type handle: str
         :param google_connect_input: (required)
         :type google_connect_input: GoogleConnectInput
         :param _request_timeout: timeout setting for this request. If one
@@ -785,6 +826,7 @@ class PersonalGoogleToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_google_toolkit_v1_personal_google_connect_serialize(
+            handle=handle,
             google_connect_input=google_connect_input,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -805,6 +847,7 @@ class PersonalGoogleToolkitV1Api:
 
     def _personal_google_toolkit_v1_personal_google_connect_serialize(
         self,
+        handle,
         google_connect_input,
         _request_auth,
         _content_type,
@@ -827,6 +870,8 @@ class PersonalGoogleToolkitV1Api:
         _body_params: Optional[bytes] = None
 
         # process the path parameters
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -864,7 +909,7 @@ class PersonalGoogleToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='POST',
-            resource_path='/toolkit/v1/personal/google/connect',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal/google/connect',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -884,6 +929,7 @@ class PersonalGoogleToolkitV1Api:
     def personal_google_toolkit_v1_personal_google_disconnect(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -903,6 +949,8 @@ class PersonalGoogleToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -927,6 +975,7 @@ class PersonalGoogleToolkitV1Api:
 
         _param = self._personal_google_toolkit_v1_personal_google_disconnect_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -952,6 +1001,7 @@ class PersonalGoogleToolkitV1Api:
     def personal_google_toolkit_v1_personal_google_disconnect_with_http_info(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -971,6 +1021,8 @@ class PersonalGoogleToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -995,6 +1047,7 @@ class PersonalGoogleToolkitV1Api:
 
         _param = self._personal_google_toolkit_v1_personal_google_disconnect_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1020,6 +1073,7 @@ class PersonalGoogleToolkitV1Api:
     def personal_google_toolkit_v1_personal_google_disconnect_without_preload_content(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1039,6 +1093,8 @@ class PersonalGoogleToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1063,6 +1119,7 @@ class PersonalGoogleToolkitV1Api:
 
         _param = self._personal_google_toolkit_v1_personal_google_disconnect_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1083,6 +1140,7 @@ class PersonalGoogleToolkitV1Api:
     def _personal_google_toolkit_v1_personal_google_disconnect_serialize(
         self,
         toolkit_id,
+        handle,
         _request_auth,
         _content_type,
         _headers,
@@ -1106,6 +1164,8 @@ class PersonalGoogleToolkitV1Api:
         # process the path parameters
         if toolkit_id is not None:
             _path_params['toolkit_id'] = toolkit_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -1128,7 +1188,7 @@ class PersonalGoogleToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='DELETE',
-            resource_path='/toolkit/v1/personal-toolkit-configs/{toolkit_id}/google/connection',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/google/connection',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -1147,6 +1207,7 @@ class PersonalGoogleToolkitV1Api:
     @validate_call
     def personal_google_toolkit_v1_personal_google_exchange(
         self,
+        handle: StrictStr,
         google_exchange_request: GoogleExchangeRequest,
         _request_timeout: Union[
             None,
@@ -1165,6 +1226,8 @@ class PersonalGoogleToolkitV1Api:
 
         Verify exact personal callback state before exchanging or staging credentials.
 
+        :param handle: (required)
+        :type handle: str
         :param google_exchange_request: (required)
         :type google_exchange_request: GoogleExchangeRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -1190,6 +1253,7 @@ class PersonalGoogleToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_google_toolkit_v1_personal_google_exchange_serialize(
+            handle=handle,
             google_exchange_request=google_exchange_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -1215,6 +1279,7 @@ class PersonalGoogleToolkitV1Api:
     @validate_call
     def personal_google_toolkit_v1_personal_google_exchange_with_http_info(
         self,
+        handle: StrictStr,
         google_exchange_request: GoogleExchangeRequest,
         _request_timeout: Union[
             None,
@@ -1233,6 +1298,8 @@ class PersonalGoogleToolkitV1Api:
 
         Verify exact personal callback state before exchanging or staging credentials.
 
+        :param handle: (required)
+        :type handle: str
         :param google_exchange_request: (required)
         :type google_exchange_request: GoogleExchangeRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -1258,6 +1325,7 @@ class PersonalGoogleToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_google_toolkit_v1_personal_google_exchange_serialize(
+            handle=handle,
             google_exchange_request=google_exchange_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -1283,6 +1351,7 @@ class PersonalGoogleToolkitV1Api:
     @validate_call
     def personal_google_toolkit_v1_personal_google_exchange_without_preload_content(
         self,
+        handle: StrictStr,
         google_exchange_request: GoogleExchangeRequest,
         _request_timeout: Union[
             None,
@@ -1301,6 +1370,8 @@ class PersonalGoogleToolkitV1Api:
 
         Verify exact personal callback state before exchanging or staging credentials.
 
+        :param handle: (required)
+        :type handle: str
         :param google_exchange_request: (required)
         :type google_exchange_request: GoogleExchangeRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -1326,6 +1397,7 @@ class PersonalGoogleToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_google_toolkit_v1_personal_google_exchange_serialize(
+            handle=handle,
             google_exchange_request=google_exchange_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -1346,6 +1418,7 @@ class PersonalGoogleToolkitV1Api:
 
     def _personal_google_toolkit_v1_personal_google_exchange_serialize(
         self,
+        handle,
         google_exchange_request,
         _request_auth,
         _content_type,
@@ -1368,6 +1441,8 @@ class PersonalGoogleToolkitV1Api:
         _body_params: Optional[bytes] = None
 
         # process the path parameters
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -1405,7 +1480,7 @@ class PersonalGoogleToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='POST',
-            resource_path='/toolkit/v1/personal/google/exchange',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal/google/exchange',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -1425,6 +1500,7 @@ class PersonalGoogleToolkitV1Api:
     def personal_google_toolkit_v1_personal_google_outcome(
         self,
         attempt_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1444,6 +1520,8 @@ class PersonalGoogleToolkitV1Api:
 
         :param attempt_id: (required)
         :type attempt_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1468,6 +1546,7 @@ class PersonalGoogleToolkitV1Api:
 
         _param = self._personal_google_toolkit_v1_personal_google_outcome_serialize(
             attempt_id=attempt_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1493,6 +1572,7 @@ class PersonalGoogleToolkitV1Api:
     def personal_google_toolkit_v1_personal_google_outcome_with_http_info(
         self,
         attempt_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1512,6 +1592,8 @@ class PersonalGoogleToolkitV1Api:
 
         :param attempt_id: (required)
         :type attempt_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1536,6 +1618,7 @@ class PersonalGoogleToolkitV1Api:
 
         _param = self._personal_google_toolkit_v1_personal_google_outcome_serialize(
             attempt_id=attempt_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1561,6 +1644,7 @@ class PersonalGoogleToolkitV1Api:
     def personal_google_toolkit_v1_personal_google_outcome_without_preload_content(
         self,
         attempt_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1580,6 +1664,8 @@ class PersonalGoogleToolkitV1Api:
 
         :param attempt_id: (required)
         :type attempt_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1604,6 +1690,7 @@ class PersonalGoogleToolkitV1Api:
 
         _param = self._personal_google_toolkit_v1_personal_google_outcome_serialize(
             attempt_id=attempt_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1624,6 +1711,7 @@ class PersonalGoogleToolkitV1Api:
     def _personal_google_toolkit_v1_personal_google_outcome_serialize(
         self,
         attempt_id,
+        handle,
         _request_auth,
         _content_type,
         _headers,
@@ -1647,6 +1735,8 @@ class PersonalGoogleToolkitV1Api:
         # process the path parameters
         if attempt_id is not None:
             _path_params['attempt_id'] = attempt_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -1669,7 +1759,7 @@ class PersonalGoogleToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='GET',
-            resource_path='/toolkit/v1/personal/google/attempts/{attempt_id}/outcome',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal/google/attempts/{attempt_id}/outcome',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -1688,6 +1778,7 @@ class PersonalGoogleToolkitV1Api:
     @validate_call
     def personal_google_toolkit_v1_personal_google_preparation(
         self,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1705,6 +1796,8 @@ class PersonalGoogleToolkitV1Api:
 
         Expose common operator registration readiness to the exact active account.
 
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1728,6 +1821,7 @@ class PersonalGoogleToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_google_toolkit_v1_personal_google_preparation_serialize(
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1736,6 +1830,7 @@ class PersonalGoogleToolkitV1Api:
 
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "GooglePreparation",
+            '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
             *_param,
@@ -1751,6 +1846,7 @@ class PersonalGoogleToolkitV1Api:
     @validate_call
     def personal_google_toolkit_v1_personal_google_preparation_with_http_info(
         self,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1768,6 +1864,8 @@ class PersonalGoogleToolkitV1Api:
 
         Expose common operator registration readiness to the exact active account.
 
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1791,6 +1889,7 @@ class PersonalGoogleToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_google_toolkit_v1_personal_google_preparation_serialize(
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1799,6 +1898,7 @@ class PersonalGoogleToolkitV1Api:
 
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "GooglePreparation",
+            '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
             *_param,
@@ -1814,6 +1914,7 @@ class PersonalGoogleToolkitV1Api:
     @validate_call
     def personal_google_toolkit_v1_personal_google_preparation_without_preload_content(
         self,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1831,6 +1932,8 @@ class PersonalGoogleToolkitV1Api:
 
         Expose common operator registration readiness to the exact active account.
 
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1854,6 +1957,7 @@ class PersonalGoogleToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_google_toolkit_v1_personal_google_preparation_serialize(
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1862,6 +1966,7 @@ class PersonalGoogleToolkitV1Api:
 
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "GooglePreparation",
+            '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
             *_param,
@@ -1872,6 +1977,7 @@ class PersonalGoogleToolkitV1Api:
 
     def _personal_google_toolkit_v1_personal_google_preparation_serialize(
         self,
+        handle,
         _request_auth,
         _content_type,
         _headers,
@@ -1893,6 +1999,8 @@ class PersonalGoogleToolkitV1Api:
         _body_params: Optional[bytes] = None
 
         # process the path parameters
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -1915,7 +2023,7 @@ class PersonalGoogleToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='GET',
-            resource_path='/toolkit/v1/personal/google/preparation',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal/google/preparation',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -1935,6 +2043,7 @@ class PersonalGoogleToolkitV1Api:
     def personal_google_toolkit_v1_personal_google_reconnect(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         google_connect_input: GoogleConnectInput,
         _request_timeout: Union[
             None,
@@ -1955,6 +2064,8 @@ class PersonalGoogleToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param google_connect_input: (required)
         :type google_connect_input: GoogleConnectInput
         :param _request_timeout: timeout setting for this request. If one
@@ -1981,6 +2092,7 @@ class PersonalGoogleToolkitV1Api:
 
         _param = self._personal_google_toolkit_v1_personal_google_reconnect_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             google_connect_input=google_connect_input,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -2007,6 +2119,7 @@ class PersonalGoogleToolkitV1Api:
     def personal_google_toolkit_v1_personal_google_reconnect_with_http_info(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         google_connect_input: GoogleConnectInput,
         _request_timeout: Union[
             None,
@@ -2027,6 +2140,8 @@ class PersonalGoogleToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param google_connect_input: (required)
         :type google_connect_input: GoogleConnectInput
         :param _request_timeout: timeout setting for this request. If one
@@ -2053,6 +2168,7 @@ class PersonalGoogleToolkitV1Api:
 
         _param = self._personal_google_toolkit_v1_personal_google_reconnect_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             google_connect_input=google_connect_input,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -2079,6 +2195,7 @@ class PersonalGoogleToolkitV1Api:
     def personal_google_toolkit_v1_personal_google_reconnect_without_preload_content(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         google_connect_input: GoogleConnectInput,
         _request_timeout: Union[
             None,
@@ -2099,6 +2216,8 @@ class PersonalGoogleToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param google_connect_input: (required)
         :type google_connect_input: GoogleConnectInput
         :param _request_timeout: timeout setting for this request. If one
@@ -2125,6 +2244,7 @@ class PersonalGoogleToolkitV1Api:
 
         _param = self._personal_google_toolkit_v1_personal_google_reconnect_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             google_connect_input=google_connect_input,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -2146,6 +2266,7 @@ class PersonalGoogleToolkitV1Api:
     def _personal_google_toolkit_v1_personal_google_reconnect_serialize(
         self,
         toolkit_id,
+        handle,
         google_connect_input,
         _request_auth,
         _content_type,
@@ -2170,6 +2291,8 @@ class PersonalGoogleToolkitV1Api:
         # process the path parameters
         if toolkit_id is not None:
             _path_params['toolkit_id'] = toolkit_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -2207,7 +2330,7 @@ class PersonalGoogleToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='POST',
-            resource_path='/toolkit/v1/personal-toolkit-configs/{toolkit_id}/google/reconnect',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/google/reconnect',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -2227,6 +2350,7 @@ class PersonalGoogleToolkitV1Api:
     def personal_google_toolkit_v1_personal_google_reconnect_confirm(
         self,
         attempt_id: StrictStr,
+        handle: StrictStr,
         google_reconnect_confirm_request: GoogleReconnectConfirmRequest,
         _request_timeout: Union[
             None,
@@ -2247,6 +2371,8 @@ class PersonalGoogleToolkitV1Api:
 
         :param attempt_id: (required)
         :type attempt_id: str
+        :param handle: (required)
+        :type handle: str
         :param google_reconnect_confirm_request: (required)
         :type google_reconnect_confirm_request: GoogleReconnectConfirmRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -2273,6 +2399,7 @@ class PersonalGoogleToolkitV1Api:
 
         _param = self._personal_google_toolkit_v1_personal_google_reconnect_confirm_serialize(
             attempt_id=attempt_id,
+            handle=handle,
             google_reconnect_confirm_request=google_reconnect_confirm_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -2299,6 +2426,7 @@ class PersonalGoogleToolkitV1Api:
     def personal_google_toolkit_v1_personal_google_reconnect_confirm_with_http_info(
         self,
         attempt_id: StrictStr,
+        handle: StrictStr,
         google_reconnect_confirm_request: GoogleReconnectConfirmRequest,
         _request_timeout: Union[
             None,
@@ -2319,6 +2447,8 @@ class PersonalGoogleToolkitV1Api:
 
         :param attempt_id: (required)
         :type attempt_id: str
+        :param handle: (required)
+        :type handle: str
         :param google_reconnect_confirm_request: (required)
         :type google_reconnect_confirm_request: GoogleReconnectConfirmRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -2345,6 +2475,7 @@ class PersonalGoogleToolkitV1Api:
 
         _param = self._personal_google_toolkit_v1_personal_google_reconnect_confirm_serialize(
             attempt_id=attempt_id,
+            handle=handle,
             google_reconnect_confirm_request=google_reconnect_confirm_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -2371,6 +2502,7 @@ class PersonalGoogleToolkitV1Api:
     def personal_google_toolkit_v1_personal_google_reconnect_confirm_without_preload_content(
         self,
         attempt_id: StrictStr,
+        handle: StrictStr,
         google_reconnect_confirm_request: GoogleReconnectConfirmRequest,
         _request_timeout: Union[
             None,
@@ -2391,6 +2523,8 @@ class PersonalGoogleToolkitV1Api:
 
         :param attempt_id: (required)
         :type attempt_id: str
+        :param handle: (required)
+        :type handle: str
         :param google_reconnect_confirm_request: (required)
         :type google_reconnect_confirm_request: GoogleReconnectConfirmRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -2417,6 +2551,7 @@ class PersonalGoogleToolkitV1Api:
 
         _param = self._personal_google_toolkit_v1_personal_google_reconnect_confirm_serialize(
             attempt_id=attempt_id,
+            handle=handle,
             google_reconnect_confirm_request=google_reconnect_confirm_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -2438,6 +2573,7 @@ class PersonalGoogleToolkitV1Api:
     def _personal_google_toolkit_v1_personal_google_reconnect_confirm_serialize(
         self,
         attempt_id,
+        handle,
         google_reconnect_confirm_request,
         _request_auth,
         _content_type,
@@ -2462,6 +2598,8 @@ class PersonalGoogleToolkitV1Api:
         # process the path parameters
         if attempt_id is not None:
             _path_params['attempt_id'] = attempt_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -2499,7 +2637,7 @@ class PersonalGoogleToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='POST',
-            resource_path='/toolkit/v1/personal/google/attempts/{attempt_id}/reconnect-confirm',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal/google/attempts/{attempt_id}/reconnect-confirm',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -2519,6 +2657,7 @@ class PersonalGoogleToolkitV1Api:
     def personal_google_toolkit_v1_personal_google_review(
         self,
         attempt_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -2538,6 +2677,8 @@ class PersonalGoogleToolkitV1Api:
 
         :param attempt_id: (required)
         :type attempt_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -2562,6 +2703,7 @@ class PersonalGoogleToolkitV1Api:
 
         _param = self._personal_google_toolkit_v1_personal_google_review_serialize(
             attempt_id=attempt_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -2587,6 +2729,7 @@ class PersonalGoogleToolkitV1Api:
     def personal_google_toolkit_v1_personal_google_review_with_http_info(
         self,
         attempt_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -2606,6 +2749,8 @@ class PersonalGoogleToolkitV1Api:
 
         :param attempt_id: (required)
         :type attempt_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -2630,6 +2775,7 @@ class PersonalGoogleToolkitV1Api:
 
         _param = self._personal_google_toolkit_v1_personal_google_review_serialize(
             attempt_id=attempt_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -2655,6 +2801,7 @@ class PersonalGoogleToolkitV1Api:
     def personal_google_toolkit_v1_personal_google_review_without_preload_content(
         self,
         attempt_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -2674,6 +2821,8 @@ class PersonalGoogleToolkitV1Api:
 
         :param attempt_id: (required)
         :type attempt_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -2698,6 +2847,7 @@ class PersonalGoogleToolkitV1Api:
 
         _param = self._personal_google_toolkit_v1_personal_google_review_serialize(
             attempt_id=attempt_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -2718,6 +2868,7 @@ class PersonalGoogleToolkitV1Api:
     def _personal_google_toolkit_v1_personal_google_review_serialize(
         self,
         attempt_id,
+        handle,
         _request_auth,
         _content_type,
         _headers,
@@ -2741,6 +2892,8 @@ class PersonalGoogleToolkitV1Api:
         # process the path parameters
         if attempt_id is not None:
             _path_params['attempt_id'] = attempt_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -2763,7 +2916,7 @@ class PersonalGoogleToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='GET',
-            resource_path='/toolkit/v1/personal/google/attempts/{attempt_id}',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal/google/attempts/{attempt_id}',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -2783,6 +2936,7 @@ class PersonalGoogleToolkitV1Api:
     def personal_google_toolkit_v1_personal_google_status(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -2802,6 +2956,8 @@ class PersonalGoogleToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -2826,6 +2982,7 @@ class PersonalGoogleToolkitV1Api:
 
         _param = self._personal_google_toolkit_v1_personal_google_status_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -2851,6 +3008,7 @@ class PersonalGoogleToolkitV1Api:
     def personal_google_toolkit_v1_personal_google_status_with_http_info(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -2870,6 +3028,8 @@ class PersonalGoogleToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -2894,6 +3054,7 @@ class PersonalGoogleToolkitV1Api:
 
         _param = self._personal_google_toolkit_v1_personal_google_status_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -2919,6 +3080,7 @@ class PersonalGoogleToolkitV1Api:
     def personal_google_toolkit_v1_personal_google_status_without_preload_content(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -2938,6 +3100,8 @@ class PersonalGoogleToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -2962,6 +3126,7 @@ class PersonalGoogleToolkitV1Api:
 
         _param = self._personal_google_toolkit_v1_personal_google_status_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -2982,6 +3147,7 @@ class PersonalGoogleToolkitV1Api:
     def _personal_google_toolkit_v1_personal_google_status_serialize(
         self,
         toolkit_id,
+        handle,
         _request_auth,
         _content_type,
         _headers,
@@ -3005,6 +3171,8 @@ class PersonalGoogleToolkitV1Api:
         # process the path parameters
         if toolkit_id is not None:
             _path_params['toolkit_id'] = toolkit_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -3027,7 +3195,7 @@ class PersonalGoogleToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='GET',
-            resource_path='/toolkit/v1/personal-toolkit-configs/{toolkit_id}/google/connection',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/google/connection',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,

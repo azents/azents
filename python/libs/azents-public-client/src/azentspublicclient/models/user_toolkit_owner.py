@@ -24,11 +24,12 @@ from typing_extensions import Self
 
 class UserToolkitOwner(BaseModel):
     """
-    A User-global connection without an owning Workspace.
+    A personal connection owned by one User within one real Workspace.
     """ # noqa: E501
     kind: StrictStr
     user_id: StrictStr
-    __properties: ClassVar[List[str]] = ["kind", "user_id"]
+    workspace_id: StrictStr
+    __properties: ClassVar[List[str]] = ["kind", "user_id", "workspace_id"]
 
     @field_validator('kind')
     def kind_validate_enum(cls, value):
@@ -91,7 +92,8 @@ class UserToolkitOwner(BaseModel):
         _obj = cls.model_validate({
             _key: _value for _key, _value in {
             "kind": obj.get("kind"),
-            "user_id": obj.get("user_id")
+            "user_id": obj.get("user_id"),
+            "workspace_id": obj.get("workspace_id")
             }.items() if _key in obj
         })
         return _obj

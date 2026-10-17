@@ -42,6 +42,7 @@ class PersonalToolkitManager:
 
     user_id: str
     session_id: str
+    workspace_id: str
 
 
 class PersonalToolkitAuthorityDenied(ValueError):

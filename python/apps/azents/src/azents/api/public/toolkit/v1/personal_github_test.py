@@ -8,7 +8,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from azents.api.public.toolkit.v1.personal_github import router
-from azents.core.auth.deps import CurrentUser, get_current_user
+from azents.core.auth.deps import WorkspaceMember, get_workspace_member
+from azents.core.enums import WorkspaceUserRole
 from azents.core.github_user_creation import GitHubPersonalCreationSubject
 from azents.core.github_user_oauth import GitHubPersonalRequester
 from azents.core.personal_toolkit import (
@@ -29,8 +30,13 @@ from azents.services.toolkit_oauth.data import GitHubInstallationProjection
 def app(oauth: Mock, creation: Mock, setup: Mock) -> FastAPI:
     result = FastAPI()
     result.include_router(router)
-    result.dependency_overrides[get_current_user] = lambda: CurrentUser(
-        user_id="owner", session_id="login"
+    result.dependency_overrides[get_workspace_member] = lambda: WorkspaceMember(
+        user_id="owner",
+        session_id="login",
+        workspace_id="workspace",
+        workspace_user_id="member",
+        role=WorkspaceUserRole.MEMBER,
+        permissions=set(),
     )
     result.dependency_overrides[GitHubUserOAuthService] = lambda: oauth
     result.dependency_overrides[GitHubUserCreationService] = lambda: creation
@@ -60,19 +66,19 @@ def connect_output() -> GitHubUserConnectOutput:
     )
 
 
-def test_personal_saved_connect_binds_exact_current_owner_without_workspace() -> None:
+def test_personal_saved_connect_binds_exact_current_owner_within_workspace() -> None:
     oauth, creation, setup = services()
     oauth.connect.return_value = connect_output()
     with TestClient(app(oauth, creation, setup)) as client:
         response = client.post(
-            "/personal-toolkit-configs/exact-toolkit/github-user/connect"
+            "/workspaces/workspace/personal-toolkit-configs/exact-toolkit/github-user/connect"
         )
     assert response.status_code == 200
     requester = oauth.connect.call_args.args[0]
     assert isinstance(requester, GitHubPersonalRequester)
     assert requester.user_id == "owner" and requester.owner.user_id == "owner"
     assert requester.session_id == "login" and requester.toolkit_id == "exact-toolkit"
-    assert requester.workspace_id is None and requester.agent_id is None
+    assert requester.workspace_id == "workspace" and requester.agent_id is None
     creation.connect.assert_not_awaited()
 
 
@@ -89,16 +95,18 @@ def test_personal_creation_uses_common_fields_without_publishing() -> None:
         "always_expose_tools": True,
     }
     with TestClient(app(oauth, creation, setup)) as client:
-        response = client.post("/personal/github-user-creations/connect", json=body)
+        response = client.post(
+            "/workspaces/workspace/personal/github-user-creations/connect", json=body
+        )
         forged = client.post(
-            "/personal/github-user-creations/connect",
+            "/workspaces/workspace/personal/github-user-creations/connect",
             json={**body, "workspace_id": "hidden-workspace"},
         )
     assert response.status_code == 200 and forged.status_code == 422
     subject, configuration = creation.connect.call_args.args
     assert isinstance(subject, GitHubPersonalCreationSubject)
     assert subject.user_id == "owner" and subject.session_id == "login"
-    assert subject.owner.user_id == "owner" and subject.workspace_id is None
+    assert subject.owner.user_id == "owner" and subject.workspace_id == "workspace"
     assert configuration.config["inject_runtime_environment"] is True
     assert configuration.always_expose_tools
     assert "workspace_id" not in configuration.model_dump()
@@ -110,8 +118,8 @@ def test_personal_callback_validation_excludes_codes_and_state() -> None:
     oauth, creation, setup = services()
     with TestClient(app(oauth, creation, setup)) as client:
         for path in [
-            "/personal/github-user-creations/exchange",
-            "/personal-toolkit-configs/exact-toolkit/github-user/exchange",
+            "/workspaces/workspace/personal/github-user-creations/exchange",
+            "/workspaces/workspace/personal-toolkit-configs/exact-toolkit/github-user/exchange",
         ]:
             response = client.post(
                 path,
@@ -149,10 +157,12 @@ def test_personal_platform_routes_project_exact_account_and_common_inventory() -
         ),
     )
     with TestClient(application) as client:
-        install = client.get("/personal/github/platform-install-url")
-        start = client.get("/personal/github/platform-oauth-url")
+        install = client.get(
+            "/workspaces/workspace/personal/github/platform-install-url"
+        )
+        start = client.get("/workspaces/workspace/personal/github/platform-oauth-url")
         synced = client.post(
-            "/personal/github/platform-installations",
+            "/workspaces/workspace/personal/github/platform-installations",
             json={"code": "fixture-code", "state": "fixture-state"},
         )
     assert install.status_code == start.status_code == synced.status_code == 200
@@ -168,7 +178,7 @@ def test_personal_platform_routes_project_exact_account_and_common_inventory() -
             }
         ]
     }
-    subject = PersonalToolkitManager("owner", "login")
+    subject = PersonalToolkitManager("owner", "login", "workspace")
     installations.install_url.assert_awaited_once_with(subject)
     installations.oauth_url.assert_awaited_once_with(subject)
     installations.sync.assert_awaited_once_with(
@@ -196,14 +206,14 @@ def test_personal_platform_denials_and_validation_are_safe(
     installations.sync.side_effect = error
     with TestClient(application) as client:
         invalid = client.post(
-            "/personal/github/platform-installations",
+            "/workspaces/workspace/personal/github/platform-installations",
             json={"code": "PRIVATE-CODE", "state": ["PRIVATE-STATE"]},
         )
         assert invalid.status_code == 422
         assert "PRIVATE-" not in invalid.text
         installations.sync.assert_not_awaited()
         denied = client.post(
-            "/personal/github/platform-installations",
+            "/workspaces/workspace/personal/github/platform-installations",
             json={"code": "PRIVATE-CODE", "state": "PRIVATE-STATE"},
         )
     assert denied.status_code == status

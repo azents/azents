@@ -7,6 +7,12 @@ tags: [toolkit, implementation, api, authentication]
 
 # Phase Execution Plan
 
+> Historical revision 1 execution record. Its ownership scope and validation
+> checkpoint are superseded by approved Design revision 2 and the
+> [Workspace management correction plan](personal-tools-workspace-management-correction.md).
+> The current phase requires User + real Workspace admission and Workspace-bound
+> Provider targets; the earlier record below is not corrected-scope acceptance.
+
 - Phase: 2/4, personal management and Provider authentication.
 - Branch/base: `feat/personal-tools-management-261017` ->
   `design/personal-tool-access-261017` at e5add532e; depends on phase 1 PR #2316.

@@ -88,9 +88,9 @@ class GitHubPersonalRequester:
             )
 
     @property
-    def workspace_id(self) -> None:
-        """User-global setup has no owning Workspace."""
-        return None
+    def workspace_id(self) -> str:
+        """Return the real Workspace of this personal connection."""
+        return self.owner.workspace_id
 
     @property
     def agent_id(self) -> None:

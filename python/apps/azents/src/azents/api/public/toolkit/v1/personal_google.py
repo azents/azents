@@ -1,10 +1,10 @@
-"""User-global Google setup retaining the common reviewed publication lifecycle."""
+"""Workspace-scoped personal Google setup with reviewed publication."""
 
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response
 
-from azents.core.auth.deps import CurrentUser, get_current_user
+from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.google_oauth import GooglePersonalSubject
 from azents.core.google_system_setting import GooglePreparation
 from azents.core.toolkit_ownership import ToolkitOwnerKind, UserToolkitOwner
@@ -26,16 +26,20 @@ from .google import (
     _errors,
 )
 
-router = APIRouter(route_class=GoogleRoute)
-Account = Annotated[CurrentUser, Depends(get_current_user)]
+router = APIRouter(prefix="/workspaces/{handle}", route_class=GoogleRoute)
+Account = Annotated[WorkspaceMember, Depends(get_workspace_member)]
 Service = Annotated[GoogleOAuthService, Depends(GoogleOAuthService)]
 
 
-def _subject(account: CurrentUser) -> GooglePersonalSubject:
+def _subject(account: WorkspaceMember) -> GooglePersonalSubject:
     return GooglePersonalSubject(
         user_id=account.user_id,
         session_id=account.session_id,
-        owner=UserToolkitOwner(kind=ToolkitOwnerKind.USER, user_id=account.user_id),
+        owner=UserToolkitOwner(
+            kind=ToolkitOwnerKind.USER,
+            user_id=account.user_id,
+            workspace_id=account.workspace_id,
+        ),
     )
 
 

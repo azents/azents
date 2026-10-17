@@ -47,6 +47,7 @@ class GitHubSetupService:
             await self.oauth.repository.authorize_personal_scope(
                 user_id=subject.user_id,
                 session_id=subject.session_id,
+                workspace_id=subject.workspace_id,
             )
         else:
             await self.oauth.repository.authorize_scope(**dataclasses.asdict(subject))

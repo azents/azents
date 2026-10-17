@@ -68,8 +68,10 @@ class RDBGoogleAttempt(RDBModel):
     )
     user_id: Mapped[str] = mapped_column(sa.String(32))
     session_id: Mapped[str] = mapped_column(sa.String(32))
-    workspace_id: Mapped[str | None] = mapped_column(
-        sa.String(32), sa.ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True
+    workspace_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
     )
     owner_kind: Mapped[ToolkitOwnerKind] = mapped_column(
         toolkit_owner_kind_enum, nullable=False
@@ -118,7 +120,7 @@ class RDBGoogleAttempt(RDBModel):
         "AND agent_id IS NULL AND owner_user_id IS NULL) OR "
         "(owner_kind = 'agent' AND workspace_id IS NOT NULL "
         "AND agent_id IS NOT NULL AND owner_user_id IS NULL) OR "
-        "(owner_kind = 'user' AND workspace_id IS NULL AND agent_id IS NULL "
+        "(owner_kind = 'user' AND workspace_id IS NOT NULL AND agent_id IS NULL "
         "AND owner_user_id IS NOT NULL AND owner_user_id = user_id)",
         name="ck_google_oauth_attempts_owner_shape",
     )

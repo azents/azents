@@ -7,7 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from azents.core.auth.deps import CurrentUser, get_current_user
+from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.personal_toolkit import PersonalToolkitManager
 from azents.services.toolkit_oauth.data import (
     ToolkitConnectionTestInput,
@@ -24,8 +24,10 @@ from .oauth import (
 from .personal import _errors
 from .toolkit_validation import ToolkitSensitiveInputRoute
 
-router = APIRouter(route_class=ToolkitSensitiveInputRoute)
-Account = Annotated[CurrentUser, Depends(get_current_user)]
+router = APIRouter(
+    prefix="/workspaces/{handle}", route_class=ToolkitSensitiveInputRoute
+)
+Account = Annotated[WorkspaceMember, Depends(get_workspace_member)]
 Service = Annotated[PersonalToolkitOAuthService, Depends(PersonalToolkitOAuthService)]
 
 
@@ -44,7 +46,9 @@ async def test_personal_connection(
     """Test common unsaved fields or an exact-owner saved credential merge."""
     with _oauth_errors():
         result = await service.test_unsaved(
-            PersonalToolkitManager(account.user_id, account.session_id),
+            PersonalToolkitManager(
+                account.user_id, account.session_id, account.workspace_id
+            ),
             ToolkitConnectionTestInput(
                 toolkit_type=body.toolkit_type,
                 config=body.config,
@@ -64,7 +68,9 @@ async def test_saved_personal_connection(
     """Test this account's saved connection through its normal Provider."""
     with _oauth_errors():
         result = await service.test_saved(
-            PersonalToolkitManager(account.user_id, account.session_id),
+            PersonalToolkitManager(
+                account.user_id, account.session_id, account.workspace_id
+            ),
             toolkit_id,
         )
     return TestConnectionResponse.model_validate(result, from_attributes=True)
@@ -94,7 +100,10 @@ async def connect_personal_oauth(
     """Connect the exact active owner's canonical MCP-backed connection."""
     with _oauth_errors():
         url = await service.connect(
-            PersonalToolkitManager(account.user_id, account.session_id), toolkit_id
+            PersonalToolkitManager(
+                account.user_id, account.session_id, account.workspace_id
+            ),
+            toolkit_id,
         )
     return OAuthAuthorizeResponse(authorization_url=url)
 
@@ -112,7 +121,9 @@ async def exchange_personal_oauth(
     """Publish only after owner/Auth Session/source callback binding is verified."""
     with _oauth_errors():
         await service.exchange(
-            PersonalToolkitManager(account.user_id, account.session_id),
+            PersonalToolkitManager(
+                account.user_id, account.session_id, account.workspace_id
+            ),
             toolkit_id,
             code=request_body.code,
             state=request_body.state,
@@ -130,6 +141,9 @@ async def disconnect_personal_oauth(
     """Delete only the current owner's local MCP credentials and pending admission."""
     with _oauth_errors():
         await service.disconnect(
-            PersonalToolkitManager(account.user_id, account.session_id), toolkit_id
+            PersonalToolkitManager(
+                account.user_id, account.session_id, account.workspace_id
+            ),
+            toolkit_id,
         )
     return Response(status_code=status.HTTP_204_NO_CONTENT)

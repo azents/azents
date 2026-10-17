@@ -132,7 +132,7 @@ spec_version: 150
 
 ## Overview
 
-Toolkit is the **tool bundle** that an azents agent mounts to interact with the outside world. One ToolkitConfig consists of (a) **tool type (`toolkit_type`)**, (b) provider-specific **config** (for example MCP server URL, GCP project ID, GitHub toolsets), and (c) encrypted **credentials**. A ToolkitConfig has an explicit Workspace, Agent, or User owner. Workspace-shared connections mount through `AgentToolkit`; Agent-owned connections use their canonical direct owner. User-owned connections have account-global management APIs; personal execution and Web management are not activated by that management boundary.
+Toolkit is the **tool bundle** that an azents agent mounts to interact with the outside world. One ToolkitConfig consists of (a) **tool type (`toolkit_type`)**, (b) provider-specific **config** (for example MCP server URL, GCP project ID, GitHub toolsets), and (c) encrypted **credentials**. A ToolkitConfig has an explicit Workspace, Agent, or User owner within a required real Workspace. Workspace-shared connections mount through `AgentToolkit`; Agent-owned connections use their canonical direct owner. User-owned connections have Workspace-scoped personal management APIs; personal execution and Web management are not activated by that management boundary.
 
 This domain covers four feature groups.
 
@@ -277,11 +277,13 @@ Workspace and no owning Agent. Shared projections require explicit Workspace
 ownership; null Agent ownership alone does not classify a connection as shared.
 
 The authenticated account manages its own personal connections under
-`/toolkit/v1/personal-toolkit-configs`. Current active User and exact Auth Session
-are checked by completed repository operations, independently of Workspace roles.
+`/toolkit/v1/workspaces/{handle}/personal-toolkit-configs`. Current active User,
+exact Auth Session and ordinary Workspace membership are checked by completed
+repository operations. Shared Toolkit-manager and AgentAdmin privileges are not
+required for the User's own connections.
 Owner identity is derived from authentication rather than request JSON. Responses
 expose safe common fields and ownership/access summaries, not credentials, source
-revisions or a fabricated Workspace.
+revisions. The owner DTO includes the real Workspace identity.
 
 Personal creation and updates reuse the common Provider catalog, configuration
 validation, credential merge, readiness, and Runtime-injection settings. Google
@@ -303,14 +305,16 @@ from `agent_toolkits`, and does not automatically add newly eligible Agents.
 Ordinary Agent access remains necessary. Both the connection editor and exact-Agent
 editor use expected-mode plus allow/restrict deltas; the Agent editor cannot reset
 the connection-wide mode or edit another Agent. Multi-connection Agent saves are
-atomic. Eligible-Agent reads span all currently accessible Workspaces.
+atomic. Eligible-Agent reads and first-restriction snapshots include only currently
+accessible Agents in the personal Toolkit's Workspace. Same-User membership in
+another Workspace does not authorize any parent, grant, attempt or policy lookup.
 
 Provider calls occur outside database transactions. Prepared personal writes
 repeat current account and Provider authority after external work; source-changing
 edits compare the existing Toolkit revision. Platform GitHub setup uses the
 existing User-global installation inventory, not a personal Workspace or alternate
 inventory. Personal installation OAuth state binds User, Auth Session and Platform
-generation; synchronization repeats current authority before persistence. Shared
+generation and Workspace; synchronization repeats current authority before persistence. Shared
 and Agent setup contracts remain separate.
 
 These management APIs do not admit personal sources into User or Team Session
@@ -332,7 +336,7 @@ erDiagram
 
 ### Entities
 
-- **ToolkitConfig** — a tool + setting bundle with an explicit canonical owner. Workspace-owned rows can be mounted by multiple Agents through `AgentToolkit`; Agent-owned rows have a canonical `owner_agent_id` and no shared attachment projection. User-owned rows have account-global personal management and no Workspace owner. `slug` is a non-empty, non-unique stored base alias; duplicate Slugs are allowed. `revision` starts at `1` and increments whenever persisted ToolkitConfig state changes. ([`rdb/models/toolkit.py`](../../../../python/apps/azents/src/azents/rdb/models/toolkit.py))
+- **ToolkitConfig** — a tool + setting bundle with an explicit canonical owner in a required Workspace. Workspace-owned rows can be mounted by multiple Agents through `AgentToolkit`; Agent-owned rows have a canonical `owner_agent_id` and no shared attachment projection. User-owned rows have personal management scoped by both owner User and Workspace. `slug` is a non-empty, non-unique stored base alias; duplicate Slugs are allowed. `revision` starts at `1` and increments whenever persisted ToolkitConfig state changes. ([`rdb/models/toolkit.py`](../../../../python/apps/azents/src/azents/rdb/models/toolkit.py))
 - **AgentToolkit** — shared Workspace ToolkitConfig ↔ Agent attachment. `(agent_id, toolkit_id)` is UNIQUE. It is not created for Agent-owned ToolkitConfigs.
 - **ToolkitNamespaceReservation** — durable namespace authority for one Agent and ToolkitConfig. Active rows have a non-null `toolkit_id`; retired rows keep `toolkit_id = NULL` so a prior executable namespace is never reassigned within the Agent. The row stores the base Slug, monotonic ordinal, and final namespace. `(agent_id, namespace)`, active `(agent_id, toolkit_id)`, and `(agent_id, base_slug, ordinal)` are unique.
 - **ToolkitNamespaceSequence** — one durable monotonic counter per `(agent_id, base_slug)`. It survives Toolkit deletion and reservation retirement until the Agent is deleted.

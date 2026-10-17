@@ -156,6 +156,12 @@ class GoogleOAuthRepository:
                 raise GoogleOAuthError(
                     "forbidden", "Google setup owner does not match."
                 )
+            workspace = await self.workspaces.get_by_id(session, subject.workspace_id)
+            member = await self.members.get_by_workspace_and_user(
+                session, subject.workspace_id, subject.user_id
+            )
+            if workspace is None or member is None:
+                raise GoogleOAuthError("not_found", "Google setup context not found.")
             return
         if lock:
             # Parent lifecycle locks precede candidate/Toolkit locks, including
@@ -669,6 +675,7 @@ class GoogleOAuthRepository:
                         toolkit = await self.personal_toolkits.create_personal(
                             session,
                             user_id=subject.owner.user_id,
+                            workspace_id=subject.workspace_id,
                             create=creation,
                         )
                     else:

@@ -48,6 +48,7 @@ class PersonalToolkitV1Api:
     @validate_call
     def personal_toolkit_v1_create_personal_toolkit(
         self,
+        handle: StrictStr,
         personal_toolkit_create_request: PersonalToolkitCreateRequest,
         _request_timeout: Union[
             None,
@@ -66,6 +67,8 @@ class PersonalToolkitV1Api:
 
         Create with common Provider validation and default dynamic All access.
 
+        :param handle: (required)
+        :type handle: str
         :param personal_toolkit_create_request: (required)
         :type personal_toolkit_create_request: PersonalToolkitCreateRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -91,6 +94,7 @@ class PersonalToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_toolkit_v1_create_personal_toolkit_serialize(
+            handle=handle,
             personal_toolkit_create_request=personal_toolkit_create_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -116,6 +120,7 @@ class PersonalToolkitV1Api:
     @validate_call
     def personal_toolkit_v1_create_personal_toolkit_with_http_info(
         self,
+        handle: StrictStr,
         personal_toolkit_create_request: PersonalToolkitCreateRequest,
         _request_timeout: Union[
             None,
@@ -134,6 +139,8 @@ class PersonalToolkitV1Api:
 
         Create with common Provider validation and default dynamic All access.
 
+        :param handle: (required)
+        :type handle: str
         :param personal_toolkit_create_request: (required)
         :type personal_toolkit_create_request: PersonalToolkitCreateRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -159,6 +166,7 @@ class PersonalToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_toolkit_v1_create_personal_toolkit_serialize(
+            handle=handle,
             personal_toolkit_create_request=personal_toolkit_create_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -184,6 +192,7 @@ class PersonalToolkitV1Api:
     @validate_call
     def personal_toolkit_v1_create_personal_toolkit_without_preload_content(
         self,
+        handle: StrictStr,
         personal_toolkit_create_request: PersonalToolkitCreateRequest,
         _request_timeout: Union[
             None,
@@ -202,6 +211,8 @@ class PersonalToolkitV1Api:
 
         Create with common Provider validation and default dynamic All access.
 
+        :param handle: (required)
+        :type handle: str
         :param personal_toolkit_create_request: (required)
         :type personal_toolkit_create_request: PersonalToolkitCreateRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -227,6 +238,7 @@ class PersonalToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_toolkit_v1_create_personal_toolkit_serialize(
+            handle=handle,
             personal_toolkit_create_request=personal_toolkit_create_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -247,6 +259,7 @@ class PersonalToolkitV1Api:
 
     def _personal_toolkit_v1_create_personal_toolkit_serialize(
         self,
+        handle,
         personal_toolkit_create_request,
         _request_auth,
         _content_type,
@@ -269,6 +282,8 @@ class PersonalToolkitV1Api:
         _body_params: Optional[bytes] = None
 
         # process the path parameters
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -306,7 +321,7 @@ class PersonalToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='POST',
-            resource_path='/toolkit/v1/personal-toolkit-configs',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal-toolkit-configs',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -326,6 +341,7 @@ class PersonalToolkitV1Api:
     def personal_toolkit_v1_delete_personal_toolkit(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -345,6 +361,8 @@ class PersonalToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -369,6 +387,7 @@ class PersonalToolkitV1Api:
 
         _param = self._personal_toolkit_v1_delete_personal_toolkit_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -394,6 +413,7 @@ class PersonalToolkitV1Api:
     def personal_toolkit_v1_delete_personal_toolkit_with_http_info(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -413,6 +433,8 @@ class PersonalToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -437,6 +459,7 @@ class PersonalToolkitV1Api:
 
         _param = self._personal_toolkit_v1_delete_personal_toolkit_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -462,6 +485,7 @@ class PersonalToolkitV1Api:
     def personal_toolkit_v1_delete_personal_toolkit_without_preload_content(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -481,6 +505,8 @@ class PersonalToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -505,6 +531,7 @@ class PersonalToolkitV1Api:
 
         _param = self._personal_toolkit_v1_delete_personal_toolkit_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -525,6 +552,7 @@ class PersonalToolkitV1Api:
     def _personal_toolkit_v1_delete_personal_toolkit_serialize(
         self,
         toolkit_id,
+        handle,
         _request_auth,
         _content_type,
         _headers,
@@ -548,6 +576,8 @@ class PersonalToolkitV1Api:
         # process the path parameters
         if toolkit_id is not None:
             _path_params['toolkit_id'] = toolkit_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -570,7 +600,7 @@ class PersonalToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='DELETE',
-            resource_path='/toolkit/v1/personal-toolkit-configs/{toolkit_id}',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -590,6 +620,7 @@ class PersonalToolkitV1Api:
     def personal_toolkit_v1_get_agent_personal_toolkit_access(
         self,
         agent_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -609,6 +640,8 @@ class PersonalToolkitV1Api:
 
         :param agent_id: (required)
         :type agent_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -633,6 +666,7 @@ class PersonalToolkitV1Api:
 
         _param = self._personal_toolkit_v1_get_agent_personal_toolkit_access_serialize(
             agent_id=agent_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -658,6 +692,7 @@ class PersonalToolkitV1Api:
     def personal_toolkit_v1_get_agent_personal_toolkit_access_with_http_info(
         self,
         agent_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -677,6 +712,8 @@ class PersonalToolkitV1Api:
 
         :param agent_id: (required)
         :type agent_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -701,6 +738,7 @@ class PersonalToolkitV1Api:
 
         _param = self._personal_toolkit_v1_get_agent_personal_toolkit_access_serialize(
             agent_id=agent_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -726,6 +764,7 @@ class PersonalToolkitV1Api:
     def personal_toolkit_v1_get_agent_personal_toolkit_access_without_preload_content(
         self,
         agent_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -745,6 +784,8 @@ class PersonalToolkitV1Api:
 
         :param agent_id: (required)
         :type agent_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -769,6 +810,7 @@ class PersonalToolkitV1Api:
 
         _param = self._personal_toolkit_v1_get_agent_personal_toolkit_access_serialize(
             agent_id=agent_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -789,6 +831,7 @@ class PersonalToolkitV1Api:
     def _personal_toolkit_v1_get_agent_personal_toolkit_access_serialize(
         self,
         agent_id,
+        handle,
         _request_auth,
         _content_type,
         _headers,
@@ -812,6 +855,8 @@ class PersonalToolkitV1Api:
         # process the path parameters
         if agent_id is not None:
             _path_params['agent_id'] = agent_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -834,7 +879,7 @@ class PersonalToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='GET',
-            resource_path='/toolkit/v1/agents/{agent_id}/personal-toolkit-access',
+            resource_path='/toolkit/v1/workspaces/{handle}/agents/{agent_id}/personal-toolkit-access',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -854,6 +899,7 @@ class PersonalToolkitV1Api:
     def personal_toolkit_v1_get_personal_toolkit(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -873,6 +919,8 @@ class PersonalToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -897,6 +945,7 @@ class PersonalToolkitV1Api:
 
         _param = self._personal_toolkit_v1_get_personal_toolkit_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -922,6 +971,7 @@ class PersonalToolkitV1Api:
     def personal_toolkit_v1_get_personal_toolkit_with_http_info(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -941,6 +991,8 @@ class PersonalToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -965,6 +1017,7 @@ class PersonalToolkitV1Api:
 
         _param = self._personal_toolkit_v1_get_personal_toolkit_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -990,6 +1043,7 @@ class PersonalToolkitV1Api:
     def personal_toolkit_v1_get_personal_toolkit_without_preload_content(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1009,6 +1063,8 @@ class PersonalToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1033,6 +1089,7 @@ class PersonalToolkitV1Api:
 
         _param = self._personal_toolkit_v1_get_personal_toolkit_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1053,6 +1110,7 @@ class PersonalToolkitV1Api:
     def _personal_toolkit_v1_get_personal_toolkit_serialize(
         self,
         toolkit_id,
+        handle,
         _request_auth,
         _content_type,
         _headers,
@@ -1076,6 +1134,8 @@ class PersonalToolkitV1Api:
         # process the path parameters
         if toolkit_id is not None:
             _path_params['toolkit_id'] = toolkit_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -1098,7 +1158,7 @@ class PersonalToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='GET',
-            resource_path='/toolkit/v1/personal-toolkit-configs/{toolkit_id}',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -1117,6 +1177,7 @@ class PersonalToolkitV1Api:
     @validate_call
     def personal_toolkit_v1_list_personal_toolkit_agents(
         self,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1134,6 +1195,8 @@ class PersonalToolkitV1Api:
 
         Return all ordinarily accessible Agents, not a filtered replacement baseline.
 
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1157,6 +1220,7 @@ class PersonalToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_toolkit_v1_list_personal_toolkit_agents_serialize(
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1165,6 +1229,7 @@ class PersonalToolkitV1Api:
 
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "PersonalToolkitEligibleAgentListResponse",
+            '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
             *_param,
@@ -1180,6 +1245,7 @@ class PersonalToolkitV1Api:
     @validate_call
     def personal_toolkit_v1_list_personal_toolkit_agents_with_http_info(
         self,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1197,6 +1263,8 @@ class PersonalToolkitV1Api:
 
         Return all ordinarily accessible Agents, not a filtered replacement baseline.
 
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1220,6 +1288,7 @@ class PersonalToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_toolkit_v1_list_personal_toolkit_agents_serialize(
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1228,6 +1297,7 @@ class PersonalToolkitV1Api:
 
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "PersonalToolkitEligibleAgentListResponse",
+            '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
             *_param,
@@ -1243,6 +1313,7 @@ class PersonalToolkitV1Api:
     @validate_call
     def personal_toolkit_v1_list_personal_toolkit_agents_without_preload_content(
         self,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1260,6 +1331,8 @@ class PersonalToolkitV1Api:
 
         Return all ordinarily accessible Agents, not a filtered replacement baseline.
 
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1283,6 +1356,7 @@ class PersonalToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_toolkit_v1_list_personal_toolkit_agents_serialize(
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1291,6 +1365,7 @@ class PersonalToolkitV1Api:
 
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "PersonalToolkitEligibleAgentListResponse",
+            '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
             *_param,
@@ -1301,6 +1376,7 @@ class PersonalToolkitV1Api:
 
     def _personal_toolkit_v1_list_personal_toolkit_agents_serialize(
         self,
+        handle,
         _request_auth,
         _content_type,
         _headers,
@@ -1322,6 +1398,8 @@ class PersonalToolkitV1Api:
         _body_params: Optional[bytes] = None
 
         # process the path parameters
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -1344,7 +1422,7 @@ class PersonalToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='GET',
-            resource_path='/toolkit/v1/personal-toolkit-agents',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal-toolkit-agents',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -1363,6 +1441,7 @@ class PersonalToolkitV1Api:
     @validate_call
     def personal_toolkit_v1_list_personal_toolkits(
         self,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1380,6 +1459,8 @@ class PersonalToolkitV1Api:
 
         List only the authenticated active account's personal connections.
 
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1403,6 +1484,7 @@ class PersonalToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_toolkit_v1_list_personal_toolkits_serialize(
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1411,6 +1493,7 @@ class PersonalToolkitV1Api:
 
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "PersonalToolkitListResponse",
+            '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
             *_param,
@@ -1426,6 +1509,7 @@ class PersonalToolkitV1Api:
     @validate_call
     def personal_toolkit_v1_list_personal_toolkits_with_http_info(
         self,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1443,6 +1527,8 @@ class PersonalToolkitV1Api:
 
         List only the authenticated active account's personal connections.
 
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1466,6 +1552,7 @@ class PersonalToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_toolkit_v1_list_personal_toolkits_serialize(
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1474,6 +1561,7 @@ class PersonalToolkitV1Api:
 
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "PersonalToolkitListResponse",
+            '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
             *_param,
@@ -1489,6 +1577,7 @@ class PersonalToolkitV1Api:
     @validate_call
     def personal_toolkit_v1_list_personal_toolkits_without_preload_content(
         self,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1506,6 +1595,8 @@ class PersonalToolkitV1Api:
 
         List only the authenticated active account's personal connections.
 
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1529,6 +1620,7 @@ class PersonalToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_toolkit_v1_list_personal_toolkits_serialize(
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1537,6 +1629,7 @@ class PersonalToolkitV1Api:
 
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "PersonalToolkitListResponse",
+            '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
             *_param,
@@ -1547,6 +1640,7 @@ class PersonalToolkitV1Api:
 
     def _personal_toolkit_v1_list_personal_toolkits_serialize(
         self,
+        handle,
         _request_auth,
         _content_type,
         _headers,
@@ -1568,6 +1662,8 @@ class PersonalToolkitV1Api:
         _body_params: Optional[bytes] = None
 
         # process the path parameters
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -1590,7 +1686,7 @@ class PersonalToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='GET',
-            resource_path='/toolkit/v1/personal-toolkit-configs',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal-toolkit-configs',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -1610,6 +1706,7 @@ class PersonalToolkitV1Api:
     def personal_toolkit_v1_save_agent_personal_toolkit_access(
         self,
         agent_id: StrictStr,
+        handle: StrictStr,
         personal_toolkit_agent_batch_request: PersonalToolkitAgentBatchRequest,
         _request_timeout: Union[
             None,
@@ -1630,6 +1727,8 @@ class PersonalToolkitV1Api:
 
         :param agent_id: (required)
         :type agent_id: str
+        :param handle: (required)
+        :type handle: str
         :param personal_toolkit_agent_batch_request: (required)
         :type personal_toolkit_agent_batch_request: PersonalToolkitAgentBatchRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -1656,6 +1755,7 @@ class PersonalToolkitV1Api:
 
         _param = self._personal_toolkit_v1_save_agent_personal_toolkit_access_serialize(
             agent_id=agent_id,
+            handle=handle,
             personal_toolkit_agent_batch_request=personal_toolkit_agent_batch_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -1682,6 +1782,7 @@ class PersonalToolkitV1Api:
     def personal_toolkit_v1_save_agent_personal_toolkit_access_with_http_info(
         self,
         agent_id: StrictStr,
+        handle: StrictStr,
         personal_toolkit_agent_batch_request: PersonalToolkitAgentBatchRequest,
         _request_timeout: Union[
             None,
@@ -1702,6 +1803,8 @@ class PersonalToolkitV1Api:
 
         :param agent_id: (required)
         :type agent_id: str
+        :param handle: (required)
+        :type handle: str
         :param personal_toolkit_agent_batch_request: (required)
         :type personal_toolkit_agent_batch_request: PersonalToolkitAgentBatchRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -1728,6 +1831,7 @@ class PersonalToolkitV1Api:
 
         _param = self._personal_toolkit_v1_save_agent_personal_toolkit_access_serialize(
             agent_id=agent_id,
+            handle=handle,
             personal_toolkit_agent_batch_request=personal_toolkit_agent_batch_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -1754,6 +1858,7 @@ class PersonalToolkitV1Api:
     def personal_toolkit_v1_save_agent_personal_toolkit_access_without_preload_content(
         self,
         agent_id: StrictStr,
+        handle: StrictStr,
         personal_toolkit_agent_batch_request: PersonalToolkitAgentBatchRequest,
         _request_timeout: Union[
             None,
@@ -1774,6 +1879,8 @@ class PersonalToolkitV1Api:
 
         :param agent_id: (required)
         :type agent_id: str
+        :param handle: (required)
+        :type handle: str
         :param personal_toolkit_agent_batch_request: (required)
         :type personal_toolkit_agent_batch_request: PersonalToolkitAgentBatchRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -1800,6 +1907,7 @@ class PersonalToolkitV1Api:
 
         _param = self._personal_toolkit_v1_save_agent_personal_toolkit_access_serialize(
             agent_id=agent_id,
+            handle=handle,
             personal_toolkit_agent_batch_request=personal_toolkit_agent_batch_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -1821,6 +1929,7 @@ class PersonalToolkitV1Api:
     def _personal_toolkit_v1_save_agent_personal_toolkit_access_serialize(
         self,
         agent_id,
+        handle,
         personal_toolkit_agent_batch_request,
         _request_auth,
         _content_type,
@@ -1845,6 +1954,8 @@ class PersonalToolkitV1Api:
         # process the path parameters
         if agent_id is not None:
             _path_params['agent_id'] = agent_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -1882,7 +1993,7 @@ class PersonalToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='PATCH',
-            resource_path='/toolkit/v1/agents/{agent_id}/personal-toolkit-access',
+            resource_path='/toolkit/v1/workspaces/{handle}/agents/{agent_id}/personal-toolkit-access',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -1902,6 +2013,7 @@ class PersonalToolkitV1Api:
     def personal_toolkit_v1_save_personal_toolkit_access(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         personal_toolkit_access_request: PersonalToolkitAccessRequest,
         _request_timeout: Union[
             None,
@@ -1922,6 +2034,8 @@ class PersonalToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param personal_toolkit_access_request: (required)
         :type personal_toolkit_access_request: PersonalToolkitAccessRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -1948,6 +2062,7 @@ class PersonalToolkitV1Api:
 
         _param = self._personal_toolkit_v1_save_personal_toolkit_access_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             personal_toolkit_access_request=personal_toolkit_access_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -1974,6 +2089,7 @@ class PersonalToolkitV1Api:
     def personal_toolkit_v1_save_personal_toolkit_access_with_http_info(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         personal_toolkit_access_request: PersonalToolkitAccessRequest,
         _request_timeout: Union[
             None,
@@ -1994,6 +2110,8 @@ class PersonalToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param personal_toolkit_access_request: (required)
         :type personal_toolkit_access_request: PersonalToolkitAccessRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -2020,6 +2138,7 @@ class PersonalToolkitV1Api:
 
         _param = self._personal_toolkit_v1_save_personal_toolkit_access_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             personal_toolkit_access_request=personal_toolkit_access_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -2046,6 +2165,7 @@ class PersonalToolkitV1Api:
     def personal_toolkit_v1_save_personal_toolkit_access_without_preload_content(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         personal_toolkit_access_request: PersonalToolkitAccessRequest,
         _request_timeout: Union[
             None,
@@ -2066,6 +2186,8 @@ class PersonalToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param personal_toolkit_access_request: (required)
         :type personal_toolkit_access_request: PersonalToolkitAccessRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -2092,6 +2214,7 @@ class PersonalToolkitV1Api:
 
         _param = self._personal_toolkit_v1_save_personal_toolkit_access_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             personal_toolkit_access_request=personal_toolkit_access_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -2113,6 +2236,7 @@ class PersonalToolkitV1Api:
     def _personal_toolkit_v1_save_personal_toolkit_access_serialize(
         self,
         toolkit_id,
+        handle,
         personal_toolkit_access_request,
         _request_auth,
         _content_type,
@@ -2137,6 +2261,8 @@ class PersonalToolkitV1Api:
         # process the path parameters
         if toolkit_id is not None:
             _path_params['toolkit_id'] = toolkit_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -2174,7 +2300,7 @@ class PersonalToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='PATCH',
-            resource_path='/toolkit/v1/personal-toolkit-configs/{toolkit_id}/agent-access',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/agent-access',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -2194,6 +2320,7 @@ class PersonalToolkitV1Api:
     def personal_toolkit_v1_update_personal_toolkit(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         toolkit_config_update_request: ToolkitConfigUpdateRequest,
         _request_timeout: Union[
             None,
@@ -2214,6 +2341,8 @@ class PersonalToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param toolkit_config_update_request: (required)
         :type toolkit_config_update_request: ToolkitConfigUpdateRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -2240,6 +2369,7 @@ class PersonalToolkitV1Api:
 
         _param = self._personal_toolkit_v1_update_personal_toolkit_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             toolkit_config_update_request=toolkit_config_update_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -2266,6 +2396,7 @@ class PersonalToolkitV1Api:
     def personal_toolkit_v1_update_personal_toolkit_with_http_info(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         toolkit_config_update_request: ToolkitConfigUpdateRequest,
         _request_timeout: Union[
             None,
@@ -2286,6 +2417,8 @@ class PersonalToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param toolkit_config_update_request: (required)
         :type toolkit_config_update_request: ToolkitConfigUpdateRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -2312,6 +2445,7 @@ class PersonalToolkitV1Api:
 
         _param = self._personal_toolkit_v1_update_personal_toolkit_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             toolkit_config_update_request=toolkit_config_update_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -2338,6 +2472,7 @@ class PersonalToolkitV1Api:
     def personal_toolkit_v1_update_personal_toolkit_without_preload_content(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         toolkit_config_update_request: ToolkitConfigUpdateRequest,
         _request_timeout: Union[
             None,
@@ -2358,6 +2493,8 @@ class PersonalToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param toolkit_config_update_request: (required)
         :type toolkit_config_update_request: ToolkitConfigUpdateRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -2384,6 +2521,7 @@ class PersonalToolkitV1Api:
 
         _param = self._personal_toolkit_v1_update_personal_toolkit_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             toolkit_config_update_request=toolkit_config_update_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -2405,6 +2543,7 @@ class PersonalToolkitV1Api:
     def _personal_toolkit_v1_update_personal_toolkit_serialize(
         self,
         toolkit_id,
+        handle,
         toolkit_config_update_request,
         _request_auth,
         _content_type,
@@ -2429,6 +2568,8 @@ class PersonalToolkitV1Api:
         # process the path parameters
         if toolkit_id is not None:
             _path_params['toolkit_id'] = toolkit_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -2466,7 +2607,7 @@ class PersonalToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='PATCH',
-            resource_path='/toolkit/v1/personal-toolkit-configs/{toolkit_id}',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,

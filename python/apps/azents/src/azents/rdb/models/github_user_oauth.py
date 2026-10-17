@@ -76,7 +76,7 @@ class RDBGitHubUserAttempt(RDBModel):
     )
     user_id: Mapped[str] = mapped_column(sa.String(32))
     session_id: Mapped[str] = mapped_column(sa.String(32))
-    workspace_id: Mapped[str | None] = mapped_column(sa.String(32), nullable=True)
+    workspace_id: Mapped[str] = mapped_column(sa.String(32), nullable=False)
     owner_kind: Mapped[ToolkitOwnerKind] = mapped_column(toolkit_owner_kind_enum)
     owner_user_id: Mapped[str | None] = mapped_column(sa.String(32), nullable=True)
     agent_id: Mapped[str | None] = mapped_column(sa.String(32), nullable=True)
@@ -99,8 +99,12 @@ class RDBGitHubUserAttempt(RDBModel):
         unique=True,
     )
     FK_PERSONAL_PARENT = sa.ForeignKeyConstraint(
-        ["toolkit_id", "owner_user_id"],
-        ["toolkit_configs.id", "toolkit_configs.owner_user_id"],
+        ["toolkit_id", "owner_user_id", "workspace_id"],
+        [
+            "toolkit_configs.id",
+            "toolkit_configs.owner_user_id",
+            "toolkit_configs.workspace_id",
+        ],
         ondelete="CASCADE",
         name="fk_github_user_attempts_personal_owner",
     )
@@ -109,7 +113,7 @@ class RDBGitHubUserAttempt(RDBModel):
         "AND agent_id IS NULL AND owner_user_id IS NULL) OR "
         "(owner_kind = 'agent' AND workspace_id IS NOT NULL "
         "AND agent_id IS NOT NULL AND owner_user_id IS NULL) OR "
-        "(owner_kind = 'user' AND workspace_id IS NULL AND agent_id IS NULL "
+        "(owner_kind = 'user' AND workspace_id IS NOT NULL AND agent_id IS NULL "
         "AND owner_user_id IS NOT NULL AND owner_user_id = user_id)",
         name="ck_github_user_oauth_attempts_owner_shape",
     )
@@ -125,8 +129,10 @@ class RDBGitHubUserCreation(RDBModel):
     )
     user_id: Mapped[str] = mapped_column(sa.String(32))
     session_id: Mapped[str] = mapped_column(sa.String(32))
-    workspace_id: Mapped[str | None] = mapped_column(
-        sa.String(32), sa.ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True
+    workspace_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
     )
     owner_kind: Mapped[ToolkitOwnerKind] = mapped_column(toolkit_owner_kind_enum)
     owner_user_id: Mapped[str | None] = mapped_column(
@@ -150,6 +156,8 @@ class RDBGitHubUserCreation(RDBModel):
         "session_id",
         "workspace_id",
         "agent_id",
+        "owner_kind",
+        "owner_user_id",
         unique=True,
         postgresql_nulls_not_distinct=True,
     )
@@ -162,7 +170,7 @@ class RDBGitHubUserCreation(RDBModel):
         "AND agent_id IS NULL AND owner_user_id IS NULL) OR "
         "(owner_kind = 'agent' AND workspace_id IS NOT NULL "
         "AND agent_id IS NOT NULL AND owner_user_id IS NULL) OR "
-        "(owner_kind = 'user' AND workspace_id IS NULL AND agent_id IS NULL "
+        "(owner_kind = 'user' AND workspace_id IS NOT NULL AND agent_id IS NULL "
         "AND owner_user_id IS NOT NULL AND owner_user_id = user_id)",
         name="ck_github_user_oauth_creations_owner_shape",
     )

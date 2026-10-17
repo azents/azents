@@ -19,6 +19,8 @@ code_paths:
   - python/apps/azents/src/azents/core/mcp_discovery.py
   - python/apps/azents/src/azents/core/oauth2.py
   - python/apps/azents/src/azents/api/public/toolkit/v1/oauth.py
+  - python/apps/azents/src/azents/api/public/toolkit/v1/personal_oauth.py
+  - python/apps/azents/src/azents/repos/toolkit/personal_management.py
   - python/apps/azents/src/azents/repos/mcp_oauth_connection/**
   - python/apps/azents/src/azents/rdb/models/toolkit.py
   - typescript/apps/azents-web/src/app/(app)/oauth/mcp/callback/**
@@ -72,14 +74,17 @@ The flow supports OAuth authorization code + PKCE S256, RFC 8414 metadata discov
 ### Personal setup
 
 Personal MCP-backed connections use separate authenticated routes under
-`/toolkit/v1/personal-toolkit-configs/{toolkit_id}/oauth`: POST `connect`,
+`/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/oauth`: POST `connect`,
 POST `exchange`, and DELETE the OAuth connection at that base. Discovery,
 manual registration, DCR and PKCE preparation reuse common Provider helpers.
-The encrypted personal state binds explicit User ownership, exact initiating
-Auth Session, Toolkit ID, existing source revision, redirect URI and PKCE
-verifier. Shared or Agent state cannot be interpreted as personal state.
+The encrypted personal state binds explicit User ownership in the required real
+Workspace, exact initiating Auth Session, Toolkit ID, existing source revision,
+redirect URI and PKCE verifier. The personal return target carries the Workspace
+handle. Shared, Agent or other-Workspace state cannot be interpreted as this
+personal target, including for the same User.
 
-The final store repeats current account and canonical personal-owner admission
+The final store repeats current account, ordinary Workspace membership and exact
+User/Workspace personal-owner admission without shared-manager or AgentAdmin requirements,
 and compares the captured source revision. Connect and exchange advance that
 revision under the Toolkit parent fence; source edits, disconnect and a previous
 exchange defeat a late callback or replay. External discovery, DCR and exchange

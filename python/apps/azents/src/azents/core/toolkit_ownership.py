@@ -76,9 +76,11 @@ def toolkit_owner_from_fields(
                 kind=kind, workspace_id=workspace_id, agent_id=agent_id
             )
         case ToolkitOwnerKind.USER:
-            if workspace_id is not None or agent_id is not None or user_id is None:
+            if workspace_id is None or agent_id is not None or user_id is None:
                 raise ValueError("Invalid User Toolkit owner shape")
-            return UserToolkitOwner(kind=kind, user_id=user_id)
+            return UserToolkitOwner(
+                kind=kind, user_id=user_id, workspace_id=workspace_id
+            )
         case _:
             assert_never(kind)
 

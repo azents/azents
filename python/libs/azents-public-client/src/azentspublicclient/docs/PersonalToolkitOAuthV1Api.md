@@ -4,15 +4,15 @@ All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
-[**personal_toolkit_oauth_v1_connect_personal_oauth**](PersonalToolkitOAuthV1Api.md#personal_toolkit_oauth_v1_connect_personal_oauth) | **POST** /toolkit/v1/personal-toolkit-configs/{toolkit_id}/oauth/connect | Connect Personal Oauth
-[**personal_toolkit_oauth_v1_disconnect_personal_oauth**](PersonalToolkitOAuthV1Api.md#personal_toolkit_oauth_v1_disconnect_personal_oauth) | **DELETE** /toolkit/v1/personal-toolkit-configs/{toolkit_id}/oauth | Disconnect Personal Oauth
-[**personal_toolkit_oauth_v1_exchange_personal_oauth**](PersonalToolkitOAuthV1Api.md#personal_toolkit_oauth_v1_exchange_personal_oauth) | **POST** /toolkit/v1/personal-toolkit-configs/{toolkit_id}/oauth/exchange | Exchange Personal Oauth
-[**personal_toolkit_oauth_v1_test_personal_connection**](PersonalToolkitOAuthV1Api.md#personal_toolkit_oauth_v1_test_personal_connection) | **POST** /toolkit/v1/personal-toolkit-configs/test-connection | Test Personal Connection
-[**personal_toolkit_oauth_v1_test_saved_personal_connection**](PersonalToolkitOAuthV1Api.md#personal_toolkit_oauth_v1_test_saved_personal_connection) | **POST** /toolkit/v1/personal-toolkit-configs/{toolkit_id}/test-connection | Test Saved Personal Connection
+[**personal_toolkit_oauth_v1_connect_personal_oauth**](PersonalToolkitOAuthV1Api.md#personal_toolkit_oauth_v1_connect_personal_oauth) | **POST** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/oauth/connect | Connect Personal Oauth
+[**personal_toolkit_oauth_v1_disconnect_personal_oauth**](PersonalToolkitOAuthV1Api.md#personal_toolkit_oauth_v1_disconnect_personal_oauth) | **DELETE** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/oauth | Disconnect Personal Oauth
+[**personal_toolkit_oauth_v1_exchange_personal_oauth**](PersonalToolkitOAuthV1Api.md#personal_toolkit_oauth_v1_exchange_personal_oauth) | **POST** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/oauth/exchange | Exchange Personal Oauth
+[**personal_toolkit_oauth_v1_test_personal_connection**](PersonalToolkitOAuthV1Api.md#personal_toolkit_oauth_v1_test_personal_connection) | **POST** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/test-connection | Test Personal Connection
+[**personal_toolkit_oauth_v1_test_saved_personal_connection**](PersonalToolkitOAuthV1Api.md#personal_toolkit_oauth_v1_test_saved_personal_connection) | **POST** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/test-connection | Test Saved Personal Connection
 
 
 # **personal_toolkit_oauth_v1_connect_personal_oauth**
-> OAuthAuthorizeResponse personal_toolkit_oauth_v1_connect_personal_oauth(toolkit_id)
+> OAuthAuthorizeResponse personal_toolkit_oauth_v1_connect_personal_oauth(toolkit_id, handle)
 
 Connect Personal Oauth
 
@@ -49,10 +49,11 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalToolkitOAuthV1Api(api_client)
     toolkit_id = 'toolkit_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Connect Personal Oauth
-        api_response = api_instance.personal_toolkit_oauth_v1_connect_personal_oauth(toolkit_id)
+        api_response = api_instance.personal_toolkit_oauth_v1_connect_personal_oauth(toolkit_id, handle)
         print("The response of PersonalToolkitOAuthV1Api->personal_toolkit_oauth_v1_connect_personal_oauth:\n")
         pprint(api_response)
     except Exception as e:
@@ -67,6 +68,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **toolkit_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -91,7 +93,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_toolkit_oauth_v1_disconnect_personal_oauth**
-> personal_toolkit_oauth_v1_disconnect_personal_oauth(toolkit_id)
+> personal_toolkit_oauth_v1_disconnect_personal_oauth(toolkit_id, handle)
 
 Disconnect Personal Oauth
 
@@ -127,10 +129,11 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalToolkitOAuthV1Api(api_client)
     toolkit_id = 'toolkit_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Disconnect Personal Oauth
-        api_instance.personal_toolkit_oauth_v1_disconnect_personal_oauth(toolkit_id)
+        api_instance.personal_toolkit_oauth_v1_disconnect_personal_oauth(toolkit_id, handle)
     except Exception as e:
         print("Exception when calling PersonalToolkitOAuthV1Api->personal_toolkit_oauth_v1_disconnect_personal_oauth: %s\n" % e)
 ```
@@ -143,6 +146,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **toolkit_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -167,7 +171,7 @@ void (empty response body)
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_toolkit_oauth_v1_exchange_personal_oauth**
-> personal_toolkit_oauth_v1_exchange_personal_oauth(toolkit_id, personal_o_auth_exchange_request)
+> personal_toolkit_oauth_v1_exchange_personal_oauth(toolkit_id, handle, personal_o_auth_exchange_request)
 
 Exchange Personal Oauth
 
@@ -204,11 +208,12 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalToolkitOAuthV1Api(api_client)
     toolkit_id = 'toolkit_id_example' # str | 
+    handle = 'handle_example' # str | 
     personal_o_auth_exchange_request = azentspublicclient.PersonalOAuthExchangeRequest() # PersonalOAuthExchangeRequest | 
 
     try:
         # Exchange Personal Oauth
-        api_instance.personal_toolkit_oauth_v1_exchange_personal_oauth(toolkit_id, personal_o_auth_exchange_request)
+        api_instance.personal_toolkit_oauth_v1_exchange_personal_oauth(toolkit_id, handle, personal_o_auth_exchange_request)
     except Exception as e:
         print("Exception when calling PersonalToolkitOAuthV1Api->personal_toolkit_oauth_v1_exchange_personal_oauth: %s\n" % e)
 ```
@@ -221,6 +226,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **toolkit_id** | **str**|  | 
+ **handle** | **str**|  | 
  **personal_o_auth_exchange_request** | [**PersonalOAuthExchangeRequest**](PersonalOAuthExchangeRequest.md)|  | 
 
 ### Return type
@@ -246,7 +252,7 @@ void (empty response body)
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_toolkit_oauth_v1_test_personal_connection**
-> TestConnectionResponse personal_toolkit_oauth_v1_test_personal_connection(personal_connection_test_request)
+> TestConnectionResponse personal_toolkit_oauth_v1_test_personal_connection(handle, personal_connection_test_request)
 
 Test Personal Connection
 
@@ -283,11 +289,12 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalToolkitOAuthV1Api(api_client)
+    handle = 'handle_example' # str | 
     personal_connection_test_request = azentspublicclient.PersonalConnectionTestRequest() # PersonalConnectionTestRequest | 
 
     try:
         # Test Personal Connection
-        api_response = api_instance.personal_toolkit_oauth_v1_test_personal_connection(personal_connection_test_request)
+        api_response = api_instance.personal_toolkit_oauth_v1_test_personal_connection(handle, personal_connection_test_request)
         print("The response of PersonalToolkitOAuthV1Api->personal_toolkit_oauth_v1_test_personal_connection:\n")
         pprint(api_response)
     except Exception as e:
@@ -301,6 +308,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
  **personal_connection_test_request** | [**PersonalConnectionTestRequest**](PersonalConnectionTestRequest.md)|  | 
 
 ### Return type
@@ -326,7 +334,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_toolkit_oauth_v1_test_saved_personal_connection**
-> TestConnectionResponse personal_toolkit_oauth_v1_test_saved_personal_connection(toolkit_id)
+> TestConnectionResponse personal_toolkit_oauth_v1_test_saved_personal_connection(toolkit_id, handle)
 
 Test Saved Personal Connection
 
@@ -363,10 +371,11 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalToolkitOAuthV1Api(api_client)
     toolkit_id = 'toolkit_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Test Saved Personal Connection
-        api_response = api_instance.personal_toolkit_oauth_v1_test_saved_personal_connection(toolkit_id)
+        api_response = api_instance.personal_toolkit_oauth_v1_test_saved_personal_connection(toolkit_id, handle)
         print("The response of PersonalToolkitOAuthV1Api->personal_toolkit_oauth_v1_test_saved_personal_connection:\n")
         pprint(api_response)
     except Exception as e:
@@ -381,6 +390,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **toolkit_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 

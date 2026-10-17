@@ -126,11 +126,13 @@ class GitHubUserOAuthService:
         *,
         user_id: str,
         session_id: str,
+        workspace_id: str,
     ) -> GitHubSetupAvailability:
         """Project common registration options after personal account admission."""
         await self.repository.authorize_personal_scope(
             user_id=user_id,
             session_id=session_id,
+            workspace_id=workspace_id,
         )
         return await self._availability()
 

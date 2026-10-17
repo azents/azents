@@ -68,8 +68,8 @@ class GitHubPersonalCreationSubject:
             )
 
     @property
-    def workspace_id(self) -> None:
-        return None
+    def workspace_id(self) -> str:
+        return self.owner.workspace_id
 
     @property
     def agent_id(self) -> None:

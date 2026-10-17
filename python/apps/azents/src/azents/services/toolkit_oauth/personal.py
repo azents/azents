@@ -4,6 +4,7 @@ import dataclasses
 import json
 import secrets
 from typing import Annotated, Any
+from urllib.parse import urlencode
 
 from fastapi import Depends
 
@@ -164,8 +165,12 @@ class PersonalToolkitOAuthService:
     async def connect(self, subject: PersonalToolkitManager, toolkit_id: str) -> str:
         """Prepare common MCP authentication without an owning Workspace surrogate."""
         current = await self.repository.read_oauth_context(subject, toolkit_id)
+        handle = await self.repository.workspace_handle(subject)
+        callback_target = urlencode(
+            {"personal_toolkit_config_id": toolkit_id, "handle": handle}
+        )
         redirect_uri = (
-            f"{self.config.web_url}/oauth/mcp/callback?personal_toolkit_config_id={toolkit_id}"
+            f"{self.config.web_url}/oauth/mcp/callback?{callback_target}"
             if self.config.web_url
             else ""
         )
@@ -222,6 +227,7 @@ class PersonalToolkitOAuthService:
         if verified is None or (
             verified.toolkit_id != toolkit_id
             or verified.owner.user_id != subject.user_id
+            or verified.owner.workspace_id != subject.workspace_id
             or verified.auth_session_id != subject.session_id
         ):
             raise ToolkitOAuthError(

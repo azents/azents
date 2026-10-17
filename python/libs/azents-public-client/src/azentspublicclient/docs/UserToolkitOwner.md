@@ -1,6 +1,6 @@
 # UserToolkitOwner
 
-A User-global connection without an owning Workspace.
+A personal connection owned by one User within one real Workspace.
 
 ## Properties
 
@@ -8,6 +8,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **kind** | **str** |  | 
 **user_id** | **str** |  | 
+**workspace_id** | **str** |  | 
 
 ## Example
 

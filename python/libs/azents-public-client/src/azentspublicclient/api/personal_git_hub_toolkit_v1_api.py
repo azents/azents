@@ -61,6 +61,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_access(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         cursor: Optional[Annotated[str, Field(strict=True, max_length=4096)]] = None,
         _request_timeout: Union[
             None,
@@ -81,6 +82,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param cursor:
         :type cursor: str
         :param _request_timeout: timeout setting for this request. If one
@@ -107,6 +110,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_access_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             cursor=cursor,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -133,6 +137,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_access_with_http_info(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         cursor: Optional[Annotated[str, Field(strict=True, max_length=4096)]] = None,
         _request_timeout: Union[
             None,
@@ -153,6 +158,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param cursor:
         :type cursor: str
         :param _request_timeout: timeout setting for this request. If one
@@ -179,6 +186,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_access_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             cursor=cursor,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -205,6 +213,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_access_without_preload_content(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         cursor: Optional[Annotated[str, Field(strict=True, max_length=4096)]] = None,
         _request_timeout: Union[
             None,
@@ -225,6 +234,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param cursor:
         :type cursor: str
         :param _request_timeout: timeout setting for this request. If one
@@ -251,6 +262,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_access_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             cursor=cursor,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -272,6 +284,7 @@ class PersonalGitHubToolkitV1Api:
     def _personal_github_toolkit_v1_personal_github_access_serialize(
         self,
         toolkit_id,
+        handle,
         cursor,
         _request_auth,
         _content_type,
@@ -296,6 +309,8 @@ class PersonalGitHubToolkitV1Api:
         # process the path parameters
         if toolkit_id is not None:
             _path_params['toolkit_id'] = toolkit_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         if cursor is not None:
             
@@ -322,7 +337,7 @@ class PersonalGitHubToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='GET',
-            resource_path='/toolkit/v1/personal-toolkit-configs/{toolkit_id}/github-user/access',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/github-user/access',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -341,6 +356,7 @@ class PersonalGitHubToolkitV1Api:
     @validate_call
     def personal_github_toolkit_v1_personal_github_availability(
         self,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -358,6 +374,8 @@ class PersonalGitHubToolkitV1Api:
 
         Use the common auth-mode readiness without requiring a Workspace membership.
 
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -381,6 +399,7 @@ class PersonalGitHubToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_github_toolkit_v1_personal_github_availability_serialize(
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -389,6 +408,7 @@ class PersonalGitHubToolkitV1Api:
 
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "GitHubSetupAvailability",
+            '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
             *_param,
@@ -404,6 +424,7 @@ class PersonalGitHubToolkitV1Api:
     @validate_call
     def personal_github_toolkit_v1_personal_github_availability_with_http_info(
         self,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -421,6 +442,8 @@ class PersonalGitHubToolkitV1Api:
 
         Use the common auth-mode readiness without requiring a Workspace membership.
 
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -444,6 +467,7 @@ class PersonalGitHubToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_github_toolkit_v1_personal_github_availability_serialize(
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -452,6 +476,7 @@ class PersonalGitHubToolkitV1Api:
 
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "GitHubSetupAvailability",
+            '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
             *_param,
@@ -467,6 +492,7 @@ class PersonalGitHubToolkitV1Api:
     @validate_call
     def personal_github_toolkit_v1_personal_github_availability_without_preload_content(
         self,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -484,6 +510,8 @@ class PersonalGitHubToolkitV1Api:
 
         Use the common auth-mode readiness without requiring a Workspace membership.
 
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -507,6 +535,7 @@ class PersonalGitHubToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_github_toolkit_v1_personal_github_availability_serialize(
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -515,6 +544,7 @@ class PersonalGitHubToolkitV1Api:
 
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "GitHubSetupAvailability",
+            '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
             *_param,
@@ -525,6 +555,7 @@ class PersonalGitHubToolkitV1Api:
 
     def _personal_github_toolkit_v1_personal_github_availability_serialize(
         self,
+        handle,
         _request_auth,
         _content_type,
         _headers,
@@ -546,6 +577,8 @@ class PersonalGitHubToolkitV1Api:
         _body_params: Optional[bytes] = None
 
         # process the path parameters
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -568,7 +601,7 @@ class PersonalGitHubToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='GET',
-            resource_path='/toolkit/v1/personal/github/setup-availability',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal/github/setup-availability',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -588,6 +621,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_cancel(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         git_hub_user_attempt_request: GitHubUserAttemptRequest,
         _request_timeout: Union[
             None,
@@ -608,6 +642,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param git_hub_user_attempt_request: (required)
         :type git_hub_user_attempt_request: GitHubUserAttemptRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -634,6 +670,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_cancel_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             git_hub_user_attempt_request=git_hub_user_attempt_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -660,6 +697,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_cancel_with_http_info(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         git_hub_user_attempt_request: GitHubUserAttemptRequest,
         _request_timeout: Union[
             None,
@@ -680,6 +718,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param git_hub_user_attempt_request: (required)
         :type git_hub_user_attempt_request: GitHubUserAttemptRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -706,6 +746,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_cancel_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             git_hub_user_attempt_request=git_hub_user_attempt_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -732,6 +773,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_cancel_without_preload_content(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         git_hub_user_attempt_request: GitHubUserAttemptRequest,
         _request_timeout: Union[
             None,
@@ -752,6 +794,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param git_hub_user_attempt_request: (required)
         :type git_hub_user_attempt_request: GitHubUserAttemptRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -778,6 +822,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_cancel_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             git_hub_user_attempt_request=git_hub_user_attempt_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -799,6 +844,7 @@ class PersonalGitHubToolkitV1Api:
     def _personal_github_toolkit_v1_personal_github_cancel_serialize(
         self,
         toolkit_id,
+        handle,
         git_hub_user_attempt_request,
         _request_auth,
         _content_type,
@@ -823,6 +869,8 @@ class PersonalGitHubToolkitV1Api:
         # process the path parameters
         if toolkit_id is not None:
             _path_params['toolkit_id'] = toolkit_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -860,7 +908,7 @@ class PersonalGitHubToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='DELETE',
-            resource_path='/toolkit/v1/personal-toolkit-configs/{toolkit_id}/github-user/attempt',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/github-user/attempt',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -880,6 +928,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_confirm(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         git_hub_user_attempt_request: GitHubUserAttemptRequest,
         _request_timeout: Union[
             None,
@@ -900,6 +949,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param git_hub_user_attempt_request: (required)
         :type git_hub_user_attempt_request: GitHubUserAttemptRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -926,6 +977,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_confirm_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             git_hub_user_attempt_request=git_hub_user_attempt_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -952,6 +1004,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_confirm_with_http_info(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         git_hub_user_attempt_request: GitHubUserAttemptRequest,
         _request_timeout: Union[
             None,
@@ -972,6 +1025,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param git_hub_user_attempt_request: (required)
         :type git_hub_user_attempt_request: GitHubUserAttemptRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -998,6 +1053,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_confirm_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             git_hub_user_attempt_request=git_hub_user_attempt_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -1024,6 +1080,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_confirm_without_preload_content(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         git_hub_user_attempt_request: GitHubUserAttemptRequest,
         _request_timeout: Union[
             None,
@@ -1044,6 +1101,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param git_hub_user_attempt_request: (required)
         :type git_hub_user_attempt_request: GitHubUserAttemptRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -1070,6 +1129,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_confirm_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             git_hub_user_attempt_request=git_hub_user_attempt_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -1091,6 +1151,7 @@ class PersonalGitHubToolkitV1Api:
     def _personal_github_toolkit_v1_personal_github_confirm_serialize(
         self,
         toolkit_id,
+        handle,
         git_hub_user_attempt_request,
         _request_auth,
         _content_type,
@@ -1115,6 +1176,8 @@ class PersonalGitHubToolkitV1Api:
         # process the path parameters
         if toolkit_id is not None:
             _path_params['toolkit_id'] = toolkit_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -1152,7 +1215,7 @@ class PersonalGitHubToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='POST',
-            resource_path='/toolkit/v1/personal-toolkit-configs/{toolkit_id}/github-user/confirm',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/github-user/confirm',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -1172,6 +1235,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_connect(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1191,6 +1255,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1215,6 +1281,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_connect_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1240,6 +1307,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_connect_with_http_info(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1259,6 +1327,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1283,6 +1353,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_connect_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1308,6 +1379,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_connect_without_preload_content(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1327,6 +1399,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1351,6 +1425,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_connect_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1371,6 +1446,7 @@ class PersonalGitHubToolkitV1Api:
     def _personal_github_toolkit_v1_personal_github_connect_serialize(
         self,
         toolkit_id,
+        handle,
         _request_auth,
         _content_type,
         _headers,
@@ -1394,6 +1470,8 @@ class PersonalGitHubToolkitV1Api:
         # process the path parameters
         if toolkit_id is not None:
             _path_params['toolkit_id'] = toolkit_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -1416,7 +1494,7 @@ class PersonalGitHubToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='POST',
-            resource_path='/toolkit/v1/personal-toolkit-configs/{toolkit_id}/github-user/connect',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/github-user/connect',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -1436,6 +1514,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_creation_app(
         self,
         attempt_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1455,6 +1534,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param attempt_id: (required)
         :type attempt_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1479,6 +1560,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_creation_app_serialize(
             attempt_id=attempt_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1504,6 +1586,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_creation_app_with_http_info(
         self,
         attempt_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1523,6 +1606,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param attempt_id: (required)
         :type attempt_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1547,6 +1632,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_creation_app_serialize(
             attempt_id=attempt_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1572,6 +1658,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_creation_app_without_preload_content(
         self,
         attempt_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1591,6 +1678,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param attempt_id: (required)
         :type attempt_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1615,6 +1704,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_creation_app_serialize(
             attempt_id=attempt_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1635,6 +1725,7 @@ class PersonalGitHubToolkitV1Api:
     def _personal_github_toolkit_v1_personal_github_creation_app_serialize(
         self,
         attempt_id,
+        handle,
         _request_auth,
         _content_type,
         _headers,
@@ -1658,6 +1749,8 @@ class PersonalGitHubToolkitV1Api:
         # process the path parameters
         if attempt_id is not None:
             _path_params['attempt_id'] = attempt_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -1680,7 +1773,7 @@ class PersonalGitHubToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='GET',
-            resource_path='/toolkit/v1/personal/github-user-creations/{attempt_id}/app',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal/github-user-creations/{attempt_id}/app',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -1700,6 +1793,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_creation_cancel(
         self,
         attempt_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1719,6 +1813,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param attempt_id: (required)
         :type attempt_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1743,6 +1839,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_creation_cancel_serialize(
             attempt_id=attempt_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1768,6 +1865,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_creation_cancel_with_http_info(
         self,
         attempt_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1787,6 +1885,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param attempt_id: (required)
         :type attempt_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1811,6 +1911,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_creation_cancel_serialize(
             attempt_id=attempt_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1836,6 +1937,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_creation_cancel_without_preload_content(
         self,
         attempt_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1855,6 +1957,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param attempt_id: (required)
         :type attempt_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1879,6 +1983,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_creation_cancel_serialize(
             attempt_id=attempt_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1899,6 +2004,7 @@ class PersonalGitHubToolkitV1Api:
     def _personal_github_toolkit_v1_personal_github_creation_cancel_serialize(
         self,
         attempt_id,
+        handle,
         _request_auth,
         _content_type,
         _headers,
@@ -1922,6 +2028,8 @@ class PersonalGitHubToolkitV1Api:
         # process the path parameters
         if attempt_id is not None:
             _path_params['attempt_id'] = attempt_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -1944,7 +2052,7 @@ class PersonalGitHubToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='DELETE',
-            resource_path='/toolkit/v1/personal/github-user-creations/{attempt_id}',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal/github-user-creations/{attempt_id}',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -1963,6 +2071,7 @@ class PersonalGitHubToolkitV1Api:
     @validate_call
     def personal_github_toolkit_v1_personal_github_creation_confirm(
         self,
+        handle: StrictStr,
         git_hub_user_creation_confirm_request: GitHubUserCreationConfirmRequest,
         _request_timeout: Union[
             None,
@@ -1981,6 +2090,8 @@ class PersonalGitHubToolkitV1Api:
 
         Publish canonical personal ownership after reviewed confirmation.
 
+        :param handle: (required)
+        :type handle: str
         :param git_hub_user_creation_confirm_request: (required)
         :type git_hub_user_creation_confirm_request: GitHubUserCreationConfirmRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -2006,6 +2117,7 @@ class PersonalGitHubToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_github_toolkit_v1_personal_github_creation_confirm_serialize(
+            handle=handle,
             git_hub_user_creation_confirm_request=git_hub_user_creation_confirm_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -2031,6 +2143,7 @@ class PersonalGitHubToolkitV1Api:
     @validate_call
     def personal_github_toolkit_v1_personal_github_creation_confirm_with_http_info(
         self,
+        handle: StrictStr,
         git_hub_user_creation_confirm_request: GitHubUserCreationConfirmRequest,
         _request_timeout: Union[
             None,
@@ -2049,6 +2162,8 @@ class PersonalGitHubToolkitV1Api:
 
         Publish canonical personal ownership after reviewed confirmation.
 
+        :param handle: (required)
+        :type handle: str
         :param git_hub_user_creation_confirm_request: (required)
         :type git_hub_user_creation_confirm_request: GitHubUserCreationConfirmRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -2074,6 +2189,7 @@ class PersonalGitHubToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_github_toolkit_v1_personal_github_creation_confirm_serialize(
+            handle=handle,
             git_hub_user_creation_confirm_request=git_hub_user_creation_confirm_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -2099,6 +2215,7 @@ class PersonalGitHubToolkitV1Api:
     @validate_call
     def personal_github_toolkit_v1_personal_github_creation_confirm_without_preload_content(
         self,
+        handle: StrictStr,
         git_hub_user_creation_confirm_request: GitHubUserCreationConfirmRequest,
         _request_timeout: Union[
             None,
@@ -2117,6 +2234,8 @@ class PersonalGitHubToolkitV1Api:
 
         Publish canonical personal ownership after reviewed confirmation.
 
+        :param handle: (required)
+        :type handle: str
         :param git_hub_user_creation_confirm_request: (required)
         :type git_hub_user_creation_confirm_request: GitHubUserCreationConfirmRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -2142,6 +2261,7 @@ class PersonalGitHubToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_github_toolkit_v1_personal_github_creation_confirm_serialize(
+            handle=handle,
             git_hub_user_creation_confirm_request=git_hub_user_creation_confirm_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -2162,6 +2282,7 @@ class PersonalGitHubToolkitV1Api:
 
     def _personal_github_toolkit_v1_personal_github_creation_confirm_serialize(
         self,
+        handle,
         git_hub_user_creation_confirm_request,
         _request_auth,
         _content_type,
@@ -2184,6 +2305,8 @@ class PersonalGitHubToolkitV1Api:
         _body_params: Optional[bytes] = None
 
         # process the path parameters
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -2221,7 +2344,7 @@ class PersonalGitHubToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='POST',
-            resource_path='/toolkit/v1/personal/github-user-creations/confirm',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal/github-user-creations/confirm',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -2240,6 +2363,7 @@ class PersonalGitHubToolkitV1Api:
     @validate_call
     def personal_github_toolkit_v1_personal_github_creation_connect(
         self,
+        handle: StrictStr,
         personal_toolkit_create_request: PersonalToolkitCreateRequest,
         _request_timeout: Union[
             None,
@@ -2258,6 +2382,8 @@ class PersonalGitHubToolkitV1Api:
 
         Authorize common GitHub settings before creating a personal Toolkit.
 
+        :param handle: (required)
+        :type handle: str
         :param personal_toolkit_create_request: (required)
         :type personal_toolkit_create_request: PersonalToolkitCreateRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -2283,6 +2409,7 @@ class PersonalGitHubToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_github_toolkit_v1_personal_github_creation_connect_serialize(
+            handle=handle,
             personal_toolkit_create_request=personal_toolkit_create_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -2308,6 +2435,7 @@ class PersonalGitHubToolkitV1Api:
     @validate_call
     def personal_github_toolkit_v1_personal_github_creation_connect_with_http_info(
         self,
+        handle: StrictStr,
         personal_toolkit_create_request: PersonalToolkitCreateRequest,
         _request_timeout: Union[
             None,
@@ -2326,6 +2454,8 @@ class PersonalGitHubToolkitV1Api:
 
         Authorize common GitHub settings before creating a personal Toolkit.
 
+        :param handle: (required)
+        :type handle: str
         :param personal_toolkit_create_request: (required)
         :type personal_toolkit_create_request: PersonalToolkitCreateRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -2351,6 +2481,7 @@ class PersonalGitHubToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_github_toolkit_v1_personal_github_creation_connect_serialize(
+            handle=handle,
             personal_toolkit_create_request=personal_toolkit_create_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -2376,6 +2507,7 @@ class PersonalGitHubToolkitV1Api:
     @validate_call
     def personal_github_toolkit_v1_personal_github_creation_connect_without_preload_content(
         self,
+        handle: StrictStr,
         personal_toolkit_create_request: PersonalToolkitCreateRequest,
         _request_timeout: Union[
             None,
@@ -2394,6 +2526,8 @@ class PersonalGitHubToolkitV1Api:
 
         Authorize common GitHub settings before creating a personal Toolkit.
 
+        :param handle: (required)
+        :type handle: str
         :param personal_toolkit_create_request: (required)
         :type personal_toolkit_create_request: PersonalToolkitCreateRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -2419,6 +2553,7 @@ class PersonalGitHubToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_github_toolkit_v1_personal_github_creation_connect_serialize(
+            handle=handle,
             personal_toolkit_create_request=personal_toolkit_create_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -2439,6 +2574,7 @@ class PersonalGitHubToolkitV1Api:
 
     def _personal_github_toolkit_v1_personal_github_creation_connect_serialize(
         self,
+        handle,
         personal_toolkit_create_request,
         _request_auth,
         _content_type,
@@ -2461,6 +2597,8 @@ class PersonalGitHubToolkitV1Api:
         _body_params: Optional[bytes] = None
 
         # process the path parameters
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -2498,7 +2636,7 @@ class PersonalGitHubToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='POST',
-            resource_path='/toolkit/v1/personal/github-user-creations/connect',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal/github-user-creations/connect',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -2517,6 +2655,7 @@ class PersonalGitHubToolkitV1Api:
     @validate_call
     def personal_github_toolkit_v1_personal_github_creation_exchange(
         self,
+        handle: StrictStr,
         git_hub_user_exchange_request: GitHubUserExchangeRequest,
         _request_timeout: Union[
             None,
@@ -2535,6 +2674,8 @@ class PersonalGitHubToolkitV1Api:
 
         Stage verified account identity under exact personal setup authority.
 
+        :param handle: (required)
+        :type handle: str
         :param git_hub_user_exchange_request: (required)
         :type git_hub_user_exchange_request: GitHubUserExchangeRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -2560,6 +2701,7 @@ class PersonalGitHubToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_github_toolkit_v1_personal_github_creation_exchange_serialize(
+            handle=handle,
             git_hub_user_exchange_request=git_hub_user_exchange_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -2585,6 +2727,7 @@ class PersonalGitHubToolkitV1Api:
     @validate_call
     def personal_github_toolkit_v1_personal_github_creation_exchange_with_http_info(
         self,
+        handle: StrictStr,
         git_hub_user_exchange_request: GitHubUserExchangeRequest,
         _request_timeout: Union[
             None,
@@ -2603,6 +2746,8 @@ class PersonalGitHubToolkitV1Api:
 
         Stage verified account identity under exact personal setup authority.
 
+        :param handle: (required)
+        :type handle: str
         :param git_hub_user_exchange_request: (required)
         :type git_hub_user_exchange_request: GitHubUserExchangeRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -2628,6 +2773,7 @@ class PersonalGitHubToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_github_toolkit_v1_personal_github_creation_exchange_serialize(
+            handle=handle,
             git_hub_user_exchange_request=git_hub_user_exchange_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -2653,6 +2799,7 @@ class PersonalGitHubToolkitV1Api:
     @validate_call
     def personal_github_toolkit_v1_personal_github_creation_exchange_without_preload_content(
         self,
+        handle: StrictStr,
         git_hub_user_exchange_request: GitHubUserExchangeRequest,
         _request_timeout: Union[
             None,
@@ -2671,6 +2818,8 @@ class PersonalGitHubToolkitV1Api:
 
         Stage verified account identity under exact personal setup authority.
 
+        :param handle: (required)
+        :type handle: str
         :param git_hub_user_exchange_request: (required)
         :type git_hub_user_exchange_request: GitHubUserExchangeRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -2696,6 +2845,7 @@ class PersonalGitHubToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_github_toolkit_v1_personal_github_creation_exchange_serialize(
+            handle=handle,
             git_hub_user_exchange_request=git_hub_user_exchange_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -2716,6 +2866,7 @@ class PersonalGitHubToolkitV1Api:
 
     def _personal_github_toolkit_v1_personal_github_creation_exchange_serialize(
         self,
+        handle,
         git_hub_user_exchange_request,
         _request_auth,
         _content_type,
@@ -2738,6 +2889,8 @@ class PersonalGitHubToolkitV1Api:
         _body_params: Optional[bytes] = None
 
         # process the path parameters
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -2775,7 +2928,7 @@ class PersonalGitHubToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='POST',
-            resource_path='/toolkit/v1/personal/github-user-creations/exchange',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal/github-user-creations/exchange',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -2795,6 +2948,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_creation_review(
         self,
         attempt_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -2814,6 +2968,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param attempt_id: (required)
         :type attempt_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -2838,6 +2994,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_creation_review_serialize(
             attempt_id=attempt_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -2863,6 +3020,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_creation_review_with_http_info(
         self,
         attempt_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -2882,6 +3040,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param attempt_id: (required)
         :type attempt_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -2906,6 +3066,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_creation_review_serialize(
             attempt_id=attempt_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -2931,6 +3092,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_creation_review_without_preload_content(
         self,
         attempt_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -2950,6 +3112,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param attempt_id: (required)
         :type attempt_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -2974,6 +3138,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_creation_review_serialize(
             attempt_id=attempt_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -2994,6 +3159,7 @@ class PersonalGitHubToolkitV1Api:
     def _personal_github_toolkit_v1_personal_github_creation_review_serialize(
         self,
         attempt_id,
+        handle,
         _request_auth,
         _content_type,
         _headers,
@@ -3017,6 +3183,8 @@ class PersonalGitHubToolkitV1Api:
         # process the path parameters
         if attempt_id is not None:
             _path_params['attempt_id'] = attempt_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -3039,7 +3207,7 @@ class PersonalGitHubToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='GET',
-            resource_path='/toolkit/v1/personal/github-user-creations/{attempt_id}',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal/github-user-creations/{attempt_id}',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -3059,6 +3227,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_disconnect(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -3078,6 +3247,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -3102,6 +3273,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_disconnect_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -3127,6 +3299,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_disconnect_with_http_info(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -3146,6 +3319,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -3170,6 +3345,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_disconnect_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -3195,6 +3371,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_disconnect_without_preload_content(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -3214,6 +3391,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -3238,6 +3417,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_disconnect_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -3258,6 +3438,7 @@ class PersonalGitHubToolkitV1Api:
     def _personal_github_toolkit_v1_personal_github_disconnect_serialize(
         self,
         toolkit_id,
+        handle,
         _request_auth,
         _content_type,
         _headers,
@@ -3281,6 +3462,8 @@ class PersonalGitHubToolkitV1Api:
         # process the path parameters
         if toolkit_id is not None:
             _path_params['toolkit_id'] = toolkit_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -3303,7 +3486,7 @@ class PersonalGitHubToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='DELETE',
-            resource_path='/toolkit/v1/personal-toolkit-configs/{toolkit_id}/github-user/connection',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/github-user/connection',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -3323,6 +3506,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_exchange(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         git_hub_user_exchange_request: GitHubUserExchangeRequest,
         _request_timeout: Union[
             None,
@@ -3343,6 +3527,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param git_hub_user_exchange_request: (required)
         :type git_hub_user_exchange_request: GitHubUserExchangeRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -3369,6 +3555,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_exchange_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             git_hub_user_exchange_request=git_hub_user_exchange_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -3395,6 +3582,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_exchange_with_http_info(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         git_hub_user_exchange_request: GitHubUserExchangeRequest,
         _request_timeout: Union[
             None,
@@ -3415,6 +3603,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param git_hub_user_exchange_request: (required)
         :type git_hub_user_exchange_request: GitHubUserExchangeRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -3441,6 +3631,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_exchange_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             git_hub_user_exchange_request=git_hub_user_exchange_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -3467,6 +3658,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_exchange_without_preload_content(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         git_hub_user_exchange_request: GitHubUserExchangeRequest,
         _request_timeout: Union[
             None,
@@ -3487,6 +3679,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param git_hub_user_exchange_request: (required)
         :type git_hub_user_exchange_request: GitHubUserExchangeRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -3513,6 +3707,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_exchange_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             git_hub_user_exchange_request=git_hub_user_exchange_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -3534,6 +3729,7 @@ class PersonalGitHubToolkitV1Api:
     def _personal_github_toolkit_v1_personal_github_exchange_serialize(
         self,
         toolkit_id,
+        handle,
         git_hub_user_exchange_request,
         _request_auth,
         _content_type,
@@ -3558,6 +3754,8 @@ class PersonalGitHubToolkitV1Api:
         # process the path parameters
         if toolkit_id is not None:
             _path_params['toolkit_id'] = toolkit_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -3595,7 +3793,7 @@ class PersonalGitHubToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='POST',
-            resource_path='/toolkit/v1/personal-toolkit-configs/{toolkit_id}/github-user/exchange',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/github-user/exchange',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -3614,6 +3812,7 @@ class PersonalGitHubToolkitV1Api:
     @validate_call
     def personal_github_toolkit_v1_personal_github_install_url(
         self,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -3631,6 +3830,8 @@ class PersonalGitHubToolkitV1Api:
 
         Open the same Platform App installation page after exact account admission.
 
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -3654,6 +3855,7 @@ class PersonalGitHubToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_github_toolkit_v1_personal_github_install_url_serialize(
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -3662,6 +3864,7 @@ class PersonalGitHubToolkitV1Api:
 
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "GitHubPlatformInstallUrlResponse",
+            '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
             *_param,
@@ -3677,6 +3880,7 @@ class PersonalGitHubToolkitV1Api:
     @validate_call
     def personal_github_toolkit_v1_personal_github_install_url_with_http_info(
         self,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -3694,6 +3898,8 @@ class PersonalGitHubToolkitV1Api:
 
         Open the same Platform App installation page after exact account admission.
 
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -3717,6 +3923,7 @@ class PersonalGitHubToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_github_toolkit_v1_personal_github_install_url_serialize(
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -3725,6 +3932,7 @@ class PersonalGitHubToolkitV1Api:
 
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "GitHubPlatformInstallUrlResponse",
+            '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
             *_param,
@@ -3740,6 +3948,7 @@ class PersonalGitHubToolkitV1Api:
     @validate_call
     def personal_github_toolkit_v1_personal_github_install_url_without_preload_content(
         self,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -3757,6 +3966,8 @@ class PersonalGitHubToolkitV1Api:
 
         Open the same Platform App installation page after exact account admission.
 
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -3780,6 +3991,7 @@ class PersonalGitHubToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_github_toolkit_v1_personal_github_install_url_serialize(
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -3788,6 +4000,7 @@ class PersonalGitHubToolkitV1Api:
 
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "GitHubPlatformInstallUrlResponse",
+            '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
             *_param,
@@ -3798,6 +4011,7 @@ class PersonalGitHubToolkitV1Api:
 
     def _personal_github_toolkit_v1_personal_github_install_url_serialize(
         self,
+        handle,
         _request_auth,
         _content_type,
         _headers,
@@ -3819,6 +4033,8 @@ class PersonalGitHubToolkitV1Api:
         _body_params: Optional[bytes] = None
 
         # process the path parameters
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -3841,7 +4057,7 @@ class PersonalGitHubToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='GET',
-            resource_path='/toolkit/v1/personal/github/platform-install-url',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal/github/platform-install-url',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -3860,6 +4076,7 @@ class PersonalGitHubToolkitV1Api:
     @validate_call
     def personal_github_toolkit_v1_personal_github_installation_oauth_url(
         self,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -3877,6 +4094,8 @@ class PersonalGitHubToolkitV1Api:
 
         Start owner/Auth Session-bound Platform installation acquisition.
 
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -3900,6 +4119,7 @@ class PersonalGitHubToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_github_toolkit_v1_personal_github_installation_oauth_url_serialize(
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -3908,6 +4128,7 @@ class PersonalGitHubToolkitV1Api:
 
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "GitHubPlatformOAuthUrlResponse",
+            '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
             *_param,
@@ -3923,6 +4144,7 @@ class PersonalGitHubToolkitV1Api:
     @validate_call
     def personal_github_toolkit_v1_personal_github_installation_oauth_url_with_http_info(
         self,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -3940,6 +4162,8 @@ class PersonalGitHubToolkitV1Api:
 
         Start owner/Auth Session-bound Platform installation acquisition.
 
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -3963,6 +4187,7 @@ class PersonalGitHubToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_github_toolkit_v1_personal_github_installation_oauth_url_serialize(
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -3971,6 +4196,7 @@ class PersonalGitHubToolkitV1Api:
 
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "GitHubPlatformOAuthUrlResponse",
+            '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
             *_param,
@@ -3986,6 +4212,7 @@ class PersonalGitHubToolkitV1Api:
     @validate_call
     def personal_github_toolkit_v1_personal_github_installation_oauth_url_without_preload_content(
         self,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -4003,6 +4230,8 @@ class PersonalGitHubToolkitV1Api:
 
         Start owner/Auth Session-bound Platform installation acquisition.
 
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -4026,6 +4255,7 @@ class PersonalGitHubToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_github_toolkit_v1_personal_github_installation_oauth_url_serialize(
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -4034,6 +4264,7 @@ class PersonalGitHubToolkitV1Api:
 
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "GitHubPlatformOAuthUrlResponse",
+            '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
             *_param,
@@ -4044,6 +4275,7 @@ class PersonalGitHubToolkitV1Api:
 
     def _personal_github_toolkit_v1_personal_github_installation_oauth_url_serialize(
         self,
+        handle,
         _request_auth,
         _content_type,
         _headers,
@@ -4065,6 +4297,8 @@ class PersonalGitHubToolkitV1Api:
         _body_params: Optional[bytes] = None
 
         # process the path parameters
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -4087,7 +4321,7 @@ class PersonalGitHubToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='GET',
-            resource_path='/toolkit/v1/personal/github/platform-oauth-url',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal/github/platform-oauth-url',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -4107,6 +4341,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_review(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         attempt_id: StrictStr,
         _request_timeout: Union[
             None,
@@ -4127,6 +4362,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param attempt_id: (required)
         :type attempt_id: str
         :param _request_timeout: timeout setting for this request. If one
@@ -4153,6 +4390,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_review_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             attempt_id=attempt_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -4179,6 +4417,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_review_with_http_info(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         attempt_id: StrictStr,
         _request_timeout: Union[
             None,
@@ -4199,6 +4438,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param attempt_id: (required)
         :type attempt_id: str
         :param _request_timeout: timeout setting for this request. If one
@@ -4225,6 +4466,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_review_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             attempt_id=attempt_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -4251,6 +4493,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_review_without_preload_content(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         attempt_id: StrictStr,
         _request_timeout: Union[
             None,
@@ -4271,6 +4514,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param attempt_id: (required)
         :type attempt_id: str
         :param _request_timeout: timeout setting for this request. If one
@@ -4297,6 +4542,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_review_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             attempt_id=attempt_id,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -4318,6 +4564,7 @@ class PersonalGitHubToolkitV1Api:
     def _personal_github_toolkit_v1_personal_github_review_serialize(
         self,
         toolkit_id,
+        handle,
         attempt_id,
         _request_auth,
         _content_type,
@@ -4342,6 +4589,8 @@ class PersonalGitHubToolkitV1Api:
         # process the path parameters
         if toolkit_id is not None:
             _path_params['toolkit_id'] = toolkit_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         if attempt_id is not None:
             
@@ -4368,7 +4617,7 @@ class PersonalGitHubToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='GET',
-            resource_path='/toolkit/v1/personal-toolkit-configs/{toolkit_id}/github-user/review',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/github-user/review',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -4387,6 +4636,7 @@ class PersonalGitHubToolkitV1Api:
     @validate_call
     def personal_github_toolkit_v1_personal_github_setup_app(
         self,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -4404,6 +4654,8 @@ class PersonalGitHubToolkitV1Api:
 
         Observe the current Platform App after current-account personal admission.
 
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -4427,6 +4679,7 @@ class PersonalGitHubToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_github_toolkit_v1_personal_github_setup_app_serialize(
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -4435,6 +4688,7 @@ class PersonalGitHubToolkitV1Api:
 
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "GitHubSetupAppOutput",
+            '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
             *_param,
@@ -4450,6 +4704,7 @@ class PersonalGitHubToolkitV1Api:
     @validate_call
     def personal_github_toolkit_v1_personal_github_setup_app_with_http_info(
         self,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -4467,6 +4722,8 @@ class PersonalGitHubToolkitV1Api:
 
         Observe the current Platform App after current-account personal admission.
 
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -4490,6 +4747,7 @@ class PersonalGitHubToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_github_toolkit_v1_personal_github_setup_app_serialize(
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -4498,6 +4756,7 @@ class PersonalGitHubToolkitV1Api:
 
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "GitHubSetupAppOutput",
+            '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
             *_param,
@@ -4513,6 +4772,7 @@ class PersonalGitHubToolkitV1Api:
     @validate_call
     def personal_github_toolkit_v1_personal_github_setup_app_without_preload_content(
         self,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -4530,6 +4790,8 @@ class PersonalGitHubToolkitV1Api:
 
         Observe the current Platform App after current-account personal admission.
 
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -4553,6 +4815,7 @@ class PersonalGitHubToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_github_toolkit_v1_personal_github_setup_app_serialize(
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -4561,6 +4824,7 @@ class PersonalGitHubToolkitV1Api:
 
         _response_types_map: Dict[str, Optional[str]] = {
             '200': "GitHubSetupAppOutput",
+            '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
             *_param,
@@ -4571,6 +4835,7 @@ class PersonalGitHubToolkitV1Api:
 
     def _personal_github_toolkit_v1_personal_github_setup_app_serialize(
         self,
+        handle,
         _request_auth,
         _content_type,
         _headers,
@@ -4592,6 +4857,8 @@ class PersonalGitHubToolkitV1Api:
         _body_params: Optional[bytes] = None
 
         # process the path parameters
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -4614,7 +4881,7 @@ class PersonalGitHubToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='GET',
-            resource_path='/toolkit/v1/personal/github/setup-app',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal/github/setup-app',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -4633,6 +4900,7 @@ class PersonalGitHubToolkitV1Api:
     @validate_call
     def personal_github_toolkit_v1_personal_github_setup_verify(
         self,
+        handle: StrictStr,
         body: Body,
         _request_timeout: Union[
             None,
@@ -4651,6 +4919,8 @@ class PersonalGitHubToolkitV1Api:
 
         Verify ordinary PAT/provided-App/Platform-App modes without publication.
 
+        :param handle: (required)
+        :type handle: str
         :param body: (required)
         :type body: Body
         :param _request_timeout: timeout setting for this request. If one
@@ -4676,6 +4946,7 @@ class PersonalGitHubToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_github_toolkit_v1_personal_github_setup_verify_serialize(
+            handle=handle,
             body=body,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -4701,6 +4972,7 @@ class PersonalGitHubToolkitV1Api:
     @validate_call
     def personal_github_toolkit_v1_personal_github_setup_verify_with_http_info(
         self,
+        handle: StrictStr,
         body: Body,
         _request_timeout: Union[
             None,
@@ -4719,6 +4991,8 @@ class PersonalGitHubToolkitV1Api:
 
         Verify ordinary PAT/provided-App/Platform-App modes without publication.
 
+        :param handle: (required)
+        :type handle: str
         :param body: (required)
         :type body: Body
         :param _request_timeout: timeout setting for this request. If one
@@ -4744,6 +5018,7 @@ class PersonalGitHubToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_github_toolkit_v1_personal_github_setup_verify_serialize(
+            handle=handle,
             body=body,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -4769,6 +5044,7 @@ class PersonalGitHubToolkitV1Api:
     @validate_call
     def personal_github_toolkit_v1_personal_github_setup_verify_without_preload_content(
         self,
+        handle: StrictStr,
         body: Body,
         _request_timeout: Union[
             None,
@@ -4787,6 +5063,8 @@ class PersonalGitHubToolkitV1Api:
 
         Verify ordinary PAT/provided-App/Platform-App modes without publication.
 
+        :param handle: (required)
+        :type handle: str
         :param body: (required)
         :type body: Body
         :param _request_timeout: timeout setting for this request. If one
@@ -4812,6 +5090,7 @@ class PersonalGitHubToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_github_toolkit_v1_personal_github_setup_verify_serialize(
+            handle=handle,
             body=body,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -4832,6 +5111,7 @@ class PersonalGitHubToolkitV1Api:
 
     def _personal_github_toolkit_v1_personal_github_setup_verify_serialize(
         self,
+        handle,
         body,
         _request_auth,
         _content_type,
@@ -4854,6 +5134,8 @@ class PersonalGitHubToolkitV1Api:
         _body_params: Optional[bytes] = None
 
         # process the path parameters
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -4891,7 +5173,7 @@ class PersonalGitHubToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='POST',
-            resource_path='/toolkit/v1/personal/github/setup-verification',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal/github/setup-verification',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -4911,6 +5193,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_status(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -4930,6 +5213,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -4954,6 +5239,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_status_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -4979,6 +5265,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_status_with_http_info(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -4998,6 +5285,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -5022,6 +5311,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_status_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -5047,6 +5337,7 @@ class PersonalGitHubToolkitV1Api:
     def personal_github_toolkit_v1_personal_github_status_without_preload_content(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -5066,6 +5357,8 @@ class PersonalGitHubToolkitV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -5090,6 +5383,7 @@ class PersonalGitHubToolkitV1Api:
 
         _param = self._personal_github_toolkit_v1_personal_github_status_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -5110,6 +5404,7 @@ class PersonalGitHubToolkitV1Api:
     def _personal_github_toolkit_v1_personal_github_status_serialize(
         self,
         toolkit_id,
+        handle,
         _request_auth,
         _content_type,
         _headers,
@@ -5133,6 +5428,8 @@ class PersonalGitHubToolkitV1Api:
         # process the path parameters
         if toolkit_id is not None:
             _path_params['toolkit_id'] = toolkit_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -5155,7 +5452,7 @@ class PersonalGitHubToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='GET',
-            resource_path='/toolkit/v1/personal-toolkit-configs/{toolkit_id}/github-user/connection',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/github-user/connection',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -5174,6 +5471,7 @@ class PersonalGitHubToolkitV1Api:
     @validate_call
     def personal_github_toolkit_v1_personal_github_sync_installations(
         self,
+        handle: StrictStr,
         personal_o_auth_exchange_request: PersonalOAuthExchangeRequest,
         _request_timeout: Union[
             None,
@@ -5192,6 +5490,8 @@ class PersonalGitHubToolkitV1Api:
 
         Publish the current owner's installation inventory, with no Toolkit creation.
 
+        :param handle: (required)
+        :type handle: str
         :param personal_o_auth_exchange_request: (required)
         :type personal_o_auth_exchange_request: PersonalOAuthExchangeRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -5217,6 +5517,7 @@ class PersonalGitHubToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_github_toolkit_v1_personal_github_sync_installations_serialize(
+            handle=handle,
             personal_o_auth_exchange_request=personal_o_auth_exchange_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -5242,6 +5543,7 @@ class PersonalGitHubToolkitV1Api:
     @validate_call
     def personal_github_toolkit_v1_personal_github_sync_installations_with_http_info(
         self,
+        handle: StrictStr,
         personal_o_auth_exchange_request: PersonalOAuthExchangeRequest,
         _request_timeout: Union[
             None,
@@ -5260,6 +5562,8 @@ class PersonalGitHubToolkitV1Api:
 
         Publish the current owner's installation inventory, with no Toolkit creation.
 
+        :param handle: (required)
+        :type handle: str
         :param personal_o_auth_exchange_request: (required)
         :type personal_o_auth_exchange_request: PersonalOAuthExchangeRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -5285,6 +5589,7 @@ class PersonalGitHubToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_github_toolkit_v1_personal_github_sync_installations_serialize(
+            handle=handle,
             personal_o_auth_exchange_request=personal_o_auth_exchange_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -5310,6 +5615,7 @@ class PersonalGitHubToolkitV1Api:
     @validate_call
     def personal_github_toolkit_v1_personal_github_sync_installations_without_preload_content(
         self,
+        handle: StrictStr,
         personal_o_auth_exchange_request: PersonalOAuthExchangeRequest,
         _request_timeout: Union[
             None,
@@ -5328,6 +5634,8 @@ class PersonalGitHubToolkitV1Api:
 
         Publish the current owner's installation inventory, with no Toolkit creation.
 
+        :param handle: (required)
+        :type handle: str
         :param personal_o_auth_exchange_request: (required)
         :type personal_o_auth_exchange_request: PersonalOAuthExchangeRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -5353,6 +5661,7 @@ class PersonalGitHubToolkitV1Api:
         """ # noqa: E501
 
         _param = self._personal_github_toolkit_v1_personal_github_sync_installations_serialize(
+            handle=handle,
             personal_o_auth_exchange_request=personal_o_auth_exchange_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -5373,6 +5682,7 @@ class PersonalGitHubToolkitV1Api:
 
     def _personal_github_toolkit_v1_personal_github_sync_installations_serialize(
         self,
+        handle,
         personal_o_auth_exchange_request,
         _request_auth,
         _content_type,
@@ -5395,6 +5705,8 @@ class PersonalGitHubToolkitV1Api:
         _body_params: Optional[bytes] = None
 
         # process the path parameters
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -5432,7 +5744,7 @@ class PersonalGitHubToolkitV1Api:
 
         return self.api_client.param_serialize(
             method='POST',
-            resource_path='/toolkit/v1/personal/github/platform-installations',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal/github/platform-installations',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,

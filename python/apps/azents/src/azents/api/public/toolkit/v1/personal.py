@@ -7,7 +7,7 @@ from typing import Annotated, Self, assert_never
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from azents.core.auth.deps import CurrentUser, get_current_user
+from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.personal_toolkit import (
     PersonalToolkitAccessConflict,
     PersonalToolkitAccessMutation,
@@ -39,8 +39,10 @@ from .github_user import _management_errors as github_user_management_errors
 from .google import _errors as google_management_errors
 from .toolkit_validation import ToolkitSensitiveInputRoute
 
-router = APIRouter(route_class=ToolkitSensitiveInputRoute)
-Account = Annotated[CurrentUser, Depends(get_current_user)]
+router = APIRouter(
+    prefix="/workspaces/{handle}", route_class=ToolkitSensitiveInputRoute
+)
+Account = Annotated[WorkspaceMember, Depends(get_workspace_member)]
 Service = Annotated[PersonalToolkitService, Depends(PersonalToolkitService)]
 
 
@@ -146,9 +148,11 @@ class PersonalToolkitEligibleAgentListResponse(BaseModel):
     items: list[PersonalToolkitEligibleAgentResponse]
 
 
-def _subject(account: CurrentUser) -> PersonalToolkitManager:
+def _subject(account: WorkspaceMember) -> PersonalToolkitManager:
     return PersonalToolkitManager(
-        user_id=account.user_id, session_id=account.session_id
+        user_id=account.user_id,
+        session_id=account.session_id,
+        workspace_id=account.workspace_id,
     )
 
 

@@ -33,7 +33,7 @@ def _app(service: GoogleOAuthService) -> FastAPI:
     return app
 
 
-def test_personal_google_connect_has_explicit_user_owner_without_workspace() -> None:
+def test_personal_google_connect_has_workspace_scoped_user_owner() -> None:
     service = create_autospec(GoogleOAuthService, instance=True)
     service.connect.return_value = GoogleConnectOutput(
         attempt_id="attempt",
@@ -42,7 +42,7 @@ def test_personal_google_connect_has_explicit_user_owner_without_workspace() -> 
     )
     with TestClient(_app(service)) as client:
         response = client.post(
-            "/personal/google/connect",
+            "/workspaces/ws/personal/google/connect",
             json={"tasks": ["calendar_read"], "timeout": 30.0},
         )
     assert response.status_code == 200
@@ -51,9 +51,11 @@ def test_personal_google_connect_has_explicit_user_owner_without_workspace() -> 
     assert subject == GooglePersonalSubject(
         "manager",
         "auth-session",
-        UserToolkitOwner(kind=ToolkitOwnerKind.USER, user_id="manager"),
+        UserToolkitOwner(
+            kind=ToolkitOwnerKind.USER, user_id="manager", workspace_id="workspace"
+        ),
     )
-    assert subject.workspace_id is None and subject.agent_id is None
+    assert subject.workspace_id == "workspace" and subject.agent_id is None
     assert service.connect.call_args.kwargs == {"target_toolkit_id": None}
     service.confirm.assert_not_awaited()
 
@@ -62,7 +64,7 @@ def test_personal_google_callback_validation_remains_credential_safe() -> None:
     service = create_autospec(GoogleOAuthService, instance=True)
     with TestClient(_app(service)) as client:
         response = client.post(
-            "/personal/google/exchange",
+            "/workspaces/ws/personal/google/exchange",
             json={"code": "PERSONAL-CODE-SECRET", "state": ["PERSONAL-STATE-SECRET"]},
         )
     assert response.status_code == 422

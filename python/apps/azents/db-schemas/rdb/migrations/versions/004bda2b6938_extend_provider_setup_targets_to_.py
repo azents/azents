@@ -54,7 +54,6 @@ def upgrade() -> None:
         raise RuntimeError(
             "Inconsistent Provider setup ownership requires explicit repair"
         )
-    op.alter_column("google_oauth_attempts", "workspace_id", nullable=True)
     owner_kind = postgresql.ENUM(
         "workspace", "agent", "user", name="toolkit_owner_kind", create_type=False
     )
@@ -93,10 +92,9 @@ def upgrade() -> None:
         "AND agent_id IS NULL AND owner_user_id IS NULL) OR "
         "(owner_kind = 'agent' AND workspace_id IS NOT NULL "
         "AND agent_id IS NOT NULL AND owner_user_id IS NULL) OR "
-        "(owner_kind = 'user' AND workspace_id IS NULL AND agent_id IS NULL "
+        "(owner_kind = 'user' AND workspace_id IS NOT NULL AND agent_id IS NULL "
         "AND owner_user_id IS NOT NULL AND owner_user_id = user_id)",
     )
-    op.alter_column("github_user_oauth_attempts", "workspace_id", nullable=True)
     op.add_column(
         "github_user_oauth_attempts", sa.Column("owner_kind", owner_kind, nullable=True)
     )
@@ -116,8 +114,8 @@ def upgrade() -> None:
         "fk_github_user_attempts_personal_owner",
         "github_user_oauth_attempts",
         "toolkit_configs",
-        ["toolkit_id", "owner_user_id"],
-        ["id", "owner_user_id"],
+        ["toolkit_id", "owner_user_id", "workspace_id"],
+        ["id", "owner_user_id", "workspace_id"],
         ondelete="CASCADE",
     )
     op.create_check_constraint(
@@ -127,11 +125,10 @@ def upgrade() -> None:
         "AND agent_id IS NULL AND owner_user_id IS NULL) OR "
         "(owner_kind = 'agent' AND workspace_id IS NOT NULL "
         "AND agent_id IS NOT NULL AND owner_user_id IS NULL) OR "
-        "(owner_kind = 'user' AND workspace_id IS NULL AND agent_id IS NULL "
+        "(owner_kind = 'user' AND workspace_id IS NOT NULL AND agent_id IS NULL "
         "AND owner_user_id IS NOT NULL AND owner_user_id = user_id)",
     )
 
-    op.alter_column("github_user_oauth_creations", "workspace_id", nullable=True)
     op.add_column(
         "github_user_oauth_creations",
         sa.Column("owner_kind", owner_kind, nullable=True),
@@ -148,6 +145,17 @@ def upgrade() -> None:
         )
     )
     op.alter_column("github_user_oauth_creations", "owner_kind", nullable=False)
+    op.drop_index(
+        "uq_github_user_oauth_creations_subject",
+        table_name="github_user_oauth_creations",
+    )
+    op.create_index(
+        "uq_github_user_oauth_creations_subject",
+        "github_user_oauth_creations",
+        ["session_id", "workspace_id", "agent_id", "owner_kind", "owner_user_id"],
+        unique=True,
+        postgresql_nulls_not_distinct=True,
+    )
     op.create_foreign_key(
         "fk_github_user_creations_owner_user",
         "github_user_oauth_creations",
@@ -168,7 +176,7 @@ def upgrade() -> None:
         "AND agent_id IS NULL AND owner_user_id IS NULL) OR "
         "(owner_kind = 'agent' AND workspace_id IS NOT NULL "
         "AND agent_id IS NOT NULL AND owner_user_id IS NULL) OR "
-        "(owner_kind = 'user' AND workspace_id IS NULL AND agent_id IS NULL "
+        "(owner_kind = 'user' AND workspace_id IS NOT NULL AND agent_id IS NULL "
         "AND owner_user_id IS NOT NULL AND owner_user_id = user_id)",
     )
 
@@ -202,8 +210,19 @@ def downgrade() -> None:
         "github_user_oauth_creations",
         type_="foreignkey",
     )
+    op.drop_index(
+        "uq_github_user_oauth_creations_subject",
+        table_name="github_user_oauth_creations",
+    )
     op.drop_column("github_user_oauth_creations", "owner_user_id")
     op.drop_column("github_user_oauth_creations", "owner_kind")
+    op.create_index(
+        "uq_github_user_oauth_creations_subject",
+        "github_user_oauth_creations",
+        ["session_id", "workspace_id", "agent_id"],
+        unique=True,
+        postgresql_nulls_not_distinct=True,
+    )
     op.alter_column("github_user_oauth_creations", "workspace_id", nullable=False)
     op.drop_constraint(
         "ck_github_user_oauth_attempts_owner_shape",

@@ -4,19 +4,19 @@ All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
-[**personal_toolkit_v1_create_personal_toolkit**](PersonalToolkitV1Api.md#personal_toolkit_v1_create_personal_toolkit) | **POST** /toolkit/v1/personal-toolkit-configs | Create Personal Toolkit
-[**personal_toolkit_v1_delete_personal_toolkit**](PersonalToolkitV1Api.md#personal_toolkit_v1_delete_personal_toolkit) | **DELETE** /toolkit/v1/personal-toolkit-configs/{toolkit_id} | Delete Personal Toolkit
-[**personal_toolkit_v1_get_agent_personal_toolkit_access**](PersonalToolkitV1Api.md#personal_toolkit_v1_get_agent_personal_toolkit_access) | **GET** /toolkit/v1/agents/{agent_id}/personal-toolkit-access | Get Agent Personal Toolkit Access
-[**personal_toolkit_v1_get_personal_toolkit**](PersonalToolkitV1Api.md#personal_toolkit_v1_get_personal_toolkit) | **GET** /toolkit/v1/personal-toolkit-configs/{toolkit_id} | Get Personal Toolkit
-[**personal_toolkit_v1_list_personal_toolkit_agents**](PersonalToolkitV1Api.md#personal_toolkit_v1_list_personal_toolkit_agents) | **GET** /toolkit/v1/personal-toolkit-agents | List Personal Toolkit Agents
-[**personal_toolkit_v1_list_personal_toolkits**](PersonalToolkitV1Api.md#personal_toolkit_v1_list_personal_toolkits) | **GET** /toolkit/v1/personal-toolkit-configs | List Personal Toolkits
-[**personal_toolkit_v1_save_agent_personal_toolkit_access**](PersonalToolkitV1Api.md#personal_toolkit_v1_save_agent_personal_toolkit_access) | **PATCH** /toolkit/v1/agents/{agent_id}/personal-toolkit-access | Save Agent Personal Toolkit Access
-[**personal_toolkit_v1_save_personal_toolkit_access**](PersonalToolkitV1Api.md#personal_toolkit_v1_save_personal_toolkit_access) | **PATCH** /toolkit/v1/personal-toolkit-configs/{toolkit_id}/agent-access | Save Personal Toolkit Access
-[**personal_toolkit_v1_update_personal_toolkit**](PersonalToolkitV1Api.md#personal_toolkit_v1_update_personal_toolkit) | **PATCH** /toolkit/v1/personal-toolkit-configs/{toolkit_id} | Update Personal Toolkit
+[**personal_toolkit_v1_create_personal_toolkit**](PersonalToolkitV1Api.md#personal_toolkit_v1_create_personal_toolkit) | **POST** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs | Create Personal Toolkit
+[**personal_toolkit_v1_delete_personal_toolkit**](PersonalToolkitV1Api.md#personal_toolkit_v1_delete_personal_toolkit) | **DELETE** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id} | Delete Personal Toolkit
+[**personal_toolkit_v1_get_agent_personal_toolkit_access**](PersonalToolkitV1Api.md#personal_toolkit_v1_get_agent_personal_toolkit_access) | **GET** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/personal-toolkit-access | Get Agent Personal Toolkit Access
+[**personal_toolkit_v1_get_personal_toolkit**](PersonalToolkitV1Api.md#personal_toolkit_v1_get_personal_toolkit) | **GET** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id} | Get Personal Toolkit
+[**personal_toolkit_v1_list_personal_toolkit_agents**](PersonalToolkitV1Api.md#personal_toolkit_v1_list_personal_toolkit_agents) | **GET** /toolkit/v1/workspaces/{handle}/personal-toolkit-agents | List Personal Toolkit Agents
+[**personal_toolkit_v1_list_personal_toolkits**](PersonalToolkitV1Api.md#personal_toolkit_v1_list_personal_toolkits) | **GET** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs | List Personal Toolkits
+[**personal_toolkit_v1_save_agent_personal_toolkit_access**](PersonalToolkitV1Api.md#personal_toolkit_v1_save_agent_personal_toolkit_access) | **PATCH** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/personal-toolkit-access | Save Agent Personal Toolkit Access
+[**personal_toolkit_v1_save_personal_toolkit_access**](PersonalToolkitV1Api.md#personal_toolkit_v1_save_personal_toolkit_access) | **PATCH** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/agent-access | Save Personal Toolkit Access
+[**personal_toolkit_v1_update_personal_toolkit**](PersonalToolkitV1Api.md#personal_toolkit_v1_update_personal_toolkit) | **PATCH** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id} | Update Personal Toolkit
 
 
 # **personal_toolkit_v1_create_personal_toolkit**
-> PersonalToolkitResponse personal_toolkit_v1_create_personal_toolkit(personal_toolkit_create_request)
+> PersonalToolkitResponse personal_toolkit_v1_create_personal_toolkit(handle, personal_toolkit_create_request)
 
 Create Personal Toolkit
 
@@ -53,11 +53,12 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalToolkitV1Api(api_client)
+    handle = 'handle_example' # str | 
     personal_toolkit_create_request = azentspublicclient.PersonalToolkitCreateRequest() # PersonalToolkitCreateRequest | 
 
     try:
         # Create Personal Toolkit
-        api_response = api_instance.personal_toolkit_v1_create_personal_toolkit(personal_toolkit_create_request)
+        api_response = api_instance.personal_toolkit_v1_create_personal_toolkit(handle, personal_toolkit_create_request)
         print("The response of PersonalToolkitV1Api->personal_toolkit_v1_create_personal_toolkit:\n")
         pprint(api_response)
     except Exception as e:
@@ -71,6 +72,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
  **personal_toolkit_create_request** | [**PersonalToolkitCreateRequest**](PersonalToolkitCreateRequest.md)|  | 
 
 ### Return type
@@ -96,7 +98,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_toolkit_v1_delete_personal_toolkit**
-> personal_toolkit_v1_delete_personal_toolkit(toolkit_id)
+> personal_toolkit_v1_delete_personal_toolkit(toolkit_id, handle)
 
 Delete Personal Toolkit
 
@@ -132,10 +134,11 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalToolkitV1Api(api_client)
     toolkit_id = 'toolkit_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Delete Personal Toolkit
-        api_instance.personal_toolkit_v1_delete_personal_toolkit(toolkit_id)
+        api_instance.personal_toolkit_v1_delete_personal_toolkit(toolkit_id, handle)
     except Exception as e:
         print("Exception when calling PersonalToolkitV1Api->personal_toolkit_v1_delete_personal_toolkit: %s\n" % e)
 ```
@@ -148,6 +151,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **toolkit_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -172,7 +176,7 @@ void (empty response body)
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_toolkit_v1_get_agent_personal_toolkit_access**
-> PersonalToolkitListResponse personal_toolkit_v1_get_agent_personal_toolkit_access(agent_id)
+> PersonalToolkitListResponse personal_toolkit_v1_get_agent_personal_toolkit_access(agent_id, handle)
 
 Get Agent Personal Toolkit Access
 
@@ -209,10 +213,11 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalToolkitV1Api(api_client)
     agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Get Agent Personal Toolkit Access
-        api_response = api_instance.personal_toolkit_v1_get_agent_personal_toolkit_access(agent_id)
+        api_response = api_instance.personal_toolkit_v1_get_agent_personal_toolkit_access(agent_id, handle)
         print("The response of PersonalToolkitV1Api->personal_toolkit_v1_get_agent_personal_toolkit_access:\n")
         pprint(api_response)
     except Exception as e:
@@ -227,6 +232,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -251,7 +257,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_toolkit_v1_get_personal_toolkit**
-> PersonalToolkitResponse personal_toolkit_v1_get_personal_toolkit(toolkit_id)
+> PersonalToolkitResponse personal_toolkit_v1_get_personal_toolkit(toolkit_id, handle)
 
 Get Personal Toolkit
 
@@ -288,10 +294,11 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalToolkitV1Api(api_client)
     toolkit_id = 'toolkit_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Get Personal Toolkit
-        api_response = api_instance.personal_toolkit_v1_get_personal_toolkit(toolkit_id)
+        api_response = api_instance.personal_toolkit_v1_get_personal_toolkit(toolkit_id, handle)
         print("The response of PersonalToolkitV1Api->personal_toolkit_v1_get_personal_toolkit:\n")
         pprint(api_response)
     except Exception as e:
@@ -306,6 +313,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **toolkit_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -330,7 +338,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_toolkit_v1_list_personal_toolkit_agents**
-> PersonalToolkitEligibleAgentListResponse personal_toolkit_v1_list_personal_toolkit_agents()
+> PersonalToolkitEligibleAgentListResponse personal_toolkit_v1_list_personal_toolkit_agents(handle)
 
 List Personal Toolkit Agents
 
@@ -366,10 +374,11 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalToolkitV1Api(api_client)
+    handle = 'handle_example' # str | 
 
     try:
         # List Personal Toolkit Agents
-        api_response = api_instance.personal_toolkit_v1_list_personal_toolkit_agents()
+        api_response = api_instance.personal_toolkit_v1_list_personal_toolkit_agents(handle)
         print("The response of PersonalToolkitV1Api->personal_toolkit_v1_list_personal_toolkit_agents:\n")
         pprint(api_response)
     except Exception as e:
@@ -380,7 +389,10 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 ### Parameters
 
-This endpoint does not need any parameter.
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -400,11 +412,12 @@ This endpoint does not need any parameter.
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_toolkit_v1_list_personal_toolkits**
-> PersonalToolkitListResponse personal_toolkit_v1_list_personal_toolkits()
+> PersonalToolkitListResponse personal_toolkit_v1_list_personal_toolkits(handle)
 
 List Personal Toolkits
 
@@ -440,10 +453,11 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalToolkitV1Api(api_client)
+    handle = 'handle_example' # str | 
 
     try:
         # List Personal Toolkits
-        api_response = api_instance.personal_toolkit_v1_list_personal_toolkits()
+        api_response = api_instance.personal_toolkit_v1_list_personal_toolkits(handle)
         print("The response of PersonalToolkitV1Api->personal_toolkit_v1_list_personal_toolkits:\n")
         pprint(api_response)
     except Exception as e:
@@ -454,7 +468,10 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 ### Parameters
 
-This endpoint does not need any parameter.
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -474,11 +491,12 @@ This endpoint does not need any parameter.
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_toolkit_v1_save_agent_personal_toolkit_access**
-> PersonalToolkitBatchResponse personal_toolkit_v1_save_agent_personal_toolkit_access(agent_id, personal_toolkit_agent_batch_request)
+> PersonalToolkitBatchResponse personal_toolkit_v1_save_agent_personal_toolkit_access(agent_id, handle, personal_toolkit_agent_batch_request)
 
 Save Agent Personal Toolkit Access
 
@@ -516,11 +534,12 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalToolkitV1Api(api_client)
     agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
     personal_toolkit_agent_batch_request = azentspublicclient.PersonalToolkitAgentBatchRequest() # PersonalToolkitAgentBatchRequest | 
 
     try:
         # Save Agent Personal Toolkit Access
-        api_response = api_instance.personal_toolkit_v1_save_agent_personal_toolkit_access(agent_id, personal_toolkit_agent_batch_request)
+        api_response = api_instance.personal_toolkit_v1_save_agent_personal_toolkit_access(agent_id, handle, personal_toolkit_agent_batch_request)
         print("The response of PersonalToolkitV1Api->personal_toolkit_v1_save_agent_personal_toolkit_access:\n")
         pprint(api_response)
     except Exception as e:
@@ -535,6 +554,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
  **personal_toolkit_agent_batch_request** | [**PersonalToolkitAgentBatchRequest**](PersonalToolkitAgentBatchRequest.md)|  | 
 
 ### Return type
@@ -560,7 +580,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_toolkit_v1_save_personal_toolkit_access**
-> PersonalToolkitAccessResponse personal_toolkit_v1_save_personal_toolkit_access(toolkit_id, personal_toolkit_access_request)
+> PersonalToolkitAccessResponse personal_toolkit_v1_save_personal_toolkit_access(toolkit_id, handle, personal_toolkit_access_request)
 
 Save Personal Toolkit Access
 
@@ -598,11 +618,12 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalToolkitV1Api(api_client)
     toolkit_id = 'toolkit_id_example' # str | 
+    handle = 'handle_example' # str | 
     personal_toolkit_access_request = azentspublicclient.PersonalToolkitAccessRequest() # PersonalToolkitAccessRequest | 
 
     try:
         # Save Personal Toolkit Access
-        api_response = api_instance.personal_toolkit_v1_save_personal_toolkit_access(toolkit_id, personal_toolkit_access_request)
+        api_response = api_instance.personal_toolkit_v1_save_personal_toolkit_access(toolkit_id, handle, personal_toolkit_access_request)
         print("The response of PersonalToolkitV1Api->personal_toolkit_v1_save_personal_toolkit_access:\n")
         pprint(api_response)
     except Exception as e:
@@ -617,6 +638,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **toolkit_id** | **str**|  | 
+ **handle** | **str**|  | 
  **personal_toolkit_access_request** | [**PersonalToolkitAccessRequest**](PersonalToolkitAccessRequest.md)|  | 
 
 ### Return type
@@ -642,7 +664,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_toolkit_v1_update_personal_toolkit**
-> PersonalToolkitResponse personal_toolkit_v1_update_personal_toolkit(toolkit_id, toolkit_config_update_request)
+> PersonalToolkitResponse personal_toolkit_v1_update_personal_toolkit(toolkit_id, handle, toolkit_config_update_request)
 
 Update Personal Toolkit
 
@@ -680,11 +702,12 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalToolkitV1Api(api_client)
     toolkit_id = 'toolkit_id_example' # str | 
+    handle = 'handle_example' # str | 
     toolkit_config_update_request = azentspublicclient.ToolkitConfigUpdateRequest() # ToolkitConfigUpdateRequest | 
 
     try:
         # Update Personal Toolkit
-        api_response = api_instance.personal_toolkit_v1_update_personal_toolkit(toolkit_id, toolkit_config_update_request)
+        api_response = api_instance.personal_toolkit_v1_update_personal_toolkit(toolkit_id, handle, toolkit_config_update_request)
         print("The response of PersonalToolkitV1Api->personal_toolkit_v1_update_personal_toolkit:\n")
         pprint(api_response)
     except Exception as e:
@@ -699,6 +722,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **toolkit_id** | **str**|  | 
+ **handle** | **str**|  | 
  **toolkit_config_update_request** | [**ToolkitConfigUpdateRequest**](ToolkitConfigUpdateRequest.md)|  | 
 
 ### Return type

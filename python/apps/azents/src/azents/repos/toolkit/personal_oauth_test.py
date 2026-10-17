@@ -102,6 +102,7 @@ async def test_personal_connection_test_rechecks_after_platform_preparation(
         del args
         await o.management.foundation.operations.update(
             user_id=o.management.subject.user_id,
+            workspace_id=o.management.subject.workspace_id,
             toolkit_id=o.toolkit_id,
             update={"name": "Concurrent"},
         )
@@ -185,7 +186,7 @@ async def test_connect_exchange_owner_bound_and_replay_denied(
     assert params["client_id"] == ["fixture-client"]
     assert params["code_challenge_method"] == ["S256"]
     assert params["resource"] == ["https://mcp.test"]
-    assert "handle=" not in params["redirect_uri"][0]
+    assert "handle=" in params["redirect_uri"][0]
     state = state_from(url)
     payload = verify_personal_toolkit_oauth_state(state, "fixture-state-key")
     assert payload is not None and payload.owner.user_id == subject.user_id
@@ -216,7 +217,9 @@ async def test_connect_exchange_owner_bound_and_replay_denied(
     )
 
 
-@pytest.mark.parametrize("wrong", ["owner", "session", "target", "shared_state"])
+@pytest.mark.parametrize(
+    "wrong", ["owner", "workspace", "session", "target", "shared_state"]
+)
 async def test_callback_cannot_swap_owner_session_or_target(
     oauth: OAuthHarness, wrong: str
 ) -> None:
@@ -228,6 +231,10 @@ async def test_callback_cannot_swap_owner_session_or_target(
     toolkit_id = o.toolkit_id
     if wrong == "owner":
         subject = o.management.other
+    elif wrong == "workspace":
+        subject = dataclasses.replace(
+            subject, workspace_id=o.management.foundation.workspace_ids[1]
+        )
     elif wrong == "session":
         subject = dataclasses.replace(subject, session_id=o.management.other.session_id)
     elif wrong == "target":
@@ -256,6 +263,7 @@ async def test_source_changed_during_discovery_prevents_setup_publication(
         del args, kwargs
         await o.management.foundation.operations.update(
             user_id=o.management.subject.user_id,
+            workspace_id=o.management.subject.workspace_id,
             toolkit_id=o.toolkit_id,
             update={"name": "Concurrent"},
         )

@@ -44,6 +44,7 @@ class PersonalToolkitOAuthV1Api:
     def personal_toolkit_oauth_v1_connect_personal_oauth(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -63,6 +64,8 @@ class PersonalToolkitOAuthV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -87,6 +90,7 @@ class PersonalToolkitOAuthV1Api:
 
         _param = self._personal_toolkit_oauth_v1_connect_personal_oauth_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -112,6 +116,7 @@ class PersonalToolkitOAuthV1Api:
     def personal_toolkit_oauth_v1_connect_personal_oauth_with_http_info(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -131,6 +136,8 @@ class PersonalToolkitOAuthV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -155,6 +162,7 @@ class PersonalToolkitOAuthV1Api:
 
         _param = self._personal_toolkit_oauth_v1_connect_personal_oauth_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -180,6 +188,7 @@ class PersonalToolkitOAuthV1Api:
     def personal_toolkit_oauth_v1_connect_personal_oauth_without_preload_content(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -199,6 +208,8 @@ class PersonalToolkitOAuthV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -223,6 +234,7 @@ class PersonalToolkitOAuthV1Api:
 
         _param = self._personal_toolkit_oauth_v1_connect_personal_oauth_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -243,6 +255,7 @@ class PersonalToolkitOAuthV1Api:
     def _personal_toolkit_oauth_v1_connect_personal_oauth_serialize(
         self,
         toolkit_id,
+        handle,
         _request_auth,
         _content_type,
         _headers,
@@ -266,6 +279,8 @@ class PersonalToolkitOAuthV1Api:
         # process the path parameters
         if toolkit_id is not None:
             _path_params['toolkit_id'] = toolkit_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -288,7 +303,7 @@ class PersonalToolkitOAuthV1Api:
 
         return self.api_client.param_serialize(
             method='POST',
-            resource_path='/toolkit/v1/personal-toolkit-configs/{toolkit_id}/oauth/connect',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/oauth/connect',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -308,6 +323,7 @@ class PersonalToolkitOAuthV1Api:
     def personal_toolkit_oauth_v1_disconnect_personal_oauth(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -327,6 +343,8 @@ class PersonalToolkitOAuthV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -351,6 +369,7 @@ class PersonalToolkitOAuthV1Api:
 
         _param = self._personal_toolkit_oauth_v1_disconnect_personal_oauth_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -376,6 +395,7 @@ class PersonalToolkitOAuthV1Api:
     def personal_toolkit_oauth_v1_disconnect_personal_oauth_with_http_info(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -395,6 +415,8 @@ class PersonalToolkitOAuthV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -419,6 +441,7 @@ class PersonalToolkitOAuthV1Api:
 
         _param = self._personal_toolkit_oauth_v1_disconnect_personal_oauth_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -444,6 +467,7 @@ class PersonalToolkitOAuthV1Api:
     def personal_toolkit_oauth_v1_disconnect_personal_oauth_without_preload_content(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -463,6 +487,8 @@ class PersonalToolkitOAuthV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -487,6 +513,7 @@ class PersonalToolkitOAuthV1Api:
 
         _param = self._personal_toolkit_oauth_v1_disconnect_personal_oauth_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -507,6 +534,7 @@ class PersonalToolkitOAuthV1Api:
     def _personal_toolkit_oauth_v1_disconnect_personal_oauth_serialize(
         self,
         toolkit_id,
+        handle,
         _request_auth,
         _content_type,
         _headers,
@@ -530,6 +558,8 @@ class PersonalToolkitOAuthV1Api:
         # process the path parameters
         if toolkit_id is not None:
             _path_params['toolkit_id'] = toolkit_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -552,7 +582,7 @@ class PersonalToolkitOAuthV1Api:
 
         return self.api_client.param_serialize(
             method='DELETE',
-            resource_path='/toolkit/v1/personal-toolkit-configs/{toolkit_id}/oauth',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/oauth',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -572,6 +602,7 @@ class PersonalToolkitOAuthV1Api:
     def personal_toolkit_oauth_v1_exchange_personal_oauth(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         personal_o_auth_exchange_request: PersonalOAuthExchangeRequest,
         _request_timeout: Union[
             None,
@@ -592,6 +623,8 @@ class PersonalToolkitOAuthV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param personal_o_auth_exchange_request: (required)
         :type personal_o_auth_exchange_request: PersonalOAuthExchangeRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -618,6 +651,7 @@ class PersonalToolkitOAuthV1Api:
 
         _param = self._personal_toolkit_oauth_v1_exchange_personal_oauth_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             personal_o_auth_exchange_request=personal_o_auth_exchange_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -644,6 +678,7 @@ class PersonalToolkitOAuthV1Api:
     def personal_toolkit_oauth_v1_exchange_personal_oauth_with_http_info(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         personal_o_auth_exchange_request: PersonalOAuthExchangeRequest,
         _request_timeout: Union[
             None,
@@ -664,6 +699,8 @@ class PersonalToolkitOAuthV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param personal_o_auth_exchange_request: (required)
         :type personal_o_auth_exchange_request: PersonalOAuthExchangeRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -690,6 +727,7 @@ class PersonalToolkitOAuthV1Api:
 
         _param = self._personal_toolkit_oauth_v1_exchange_personal_oauth_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             personal_o_auth_exchange_request=personal_o_auth_exchange_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -716,6 +754,7 @@ class PersonalToolkitOAuthV1Api:
     def personal_toolkit_oauth_v1_exchange_personal_oauth_without_preload_content(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         personal_o_auth_exchange_request: PersonalOAuthExchangeRequest,
         _request_timeout: Union[
             None,
@@ -736,6 +775,8 @@ class PersonalToolkitOAuthV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param personal_o_auth_exchange_request: (required)
         :type personal_o_auth_exchange_request: PersonalOAuthExchangeRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -762,6 +803,7 @@ class PersonalToolkitOAuthV1Api:
 
         _param = self._personal_toolkit_oauth_v1_exchange_personal_oauth_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             personal_o_auth_exchange_request=personal_o_auth_exchange_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -783,6 +825,7 @@ class PersonalToolkitOAuthV1Api:
     def _personal_toolkit_oauth_v1_exchange_personal_oauth_serialize(
         self,
         toolkit_id,
+        handle,
         personal_o_auth_exchange_request,
         _request_auth,
         _content_type,
@@ -807,6 +850,8 @@ class PersonalToolkitOAuthV1Api:
         # process the path parameters
         if toolkit_id is not None:
             _path_params['toolkit_id'] = toolkit_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -844,7 +889,7 @@ class PersonalToolkitOAuthV1Api:
 
         return self.api_client.param_serialize(
             method='POST',
-            resource_path='/toolkit/v1/personal-toolkit-configs/{toolkit_id}/oauth/exchange',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/oauth/exchange',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -863,6 +908,7 @@ class PersonalToolkitOAuthV1Api:
     @validate_call
     def personal_toolkit_oauth_v1_test_personal_connection(
         self,
+        handle: StrictStr,
         personal_connection_test_request: PersonalConnectionTestRequest,
         _request_timeout: Union[
             None,
@@ -881,6 +927,8 @@ class PersonalToolkitOAuthV1Api:
 
         Test common unsaved fields or an exact-owner saved credential merge.
 
+        :param handle: (required)
+        :type handle: str
         :param personal_connection_test_request: (required)
         :type personal_connection_test_request: PersonalConnectionTestRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -906,6 +954,7 @@ class PersonalToolkitOAuthV1Api:
         """ # noqa: E501
 
         _param = self._personal_toolkit_oauth_v1_test_personal_connection_serialize(
+            handle=handle,
             personal_connection_test_request=personal_connection_test_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -931,6 +980,7 @@ class PersonalToolkitOAuthV1Api:
     @validate_call
     def personal_toolkit_oauth_v1_test_personal_connection_with_http_info(
         self,
+        handle: StrictStr,
         personal_connection_test_request: PersonalConnectionTestRequest,
         _request_timeout: Union[
             None,
@@ -949,6 +999,8 @@ class PersonalToolkitOAuthV1Api:
 
         Test common unsaved fields or an exact-owner saved credential merge.
 
+        :param handle: (required)
+        :type handle: str
         :param personal_connection_test_request: (required)
         :type personal_connection_test_request: PersonalConnectionTestRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -974,6 +1026,7 @@ class PersonalToolkitOAuthV1Api:
         """ # noqa: E501
 
         _param = self._personal_toolkit_oauth_v1_test_personal_connection_serialize(
+            handle=handle,
             personal_connection_test_request=personal_connection_test_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -999,6 +1052,7 @@ class PersonalToolkitOAuthV1Api:
     @validate_call
     def personal_toolkit_oauth_v1_test_personal_connection_without_preload_content(
         self,
+        handle: StrictStr,
         personal_connection_test_request: PersonalConnectionTestRequest,
         _request_timeout: Union[
             None,
@@ -1017,6 +1071,8 @@ class PersonalToolkitOAuthV1Api:
 
         Test common unsaved fields or an exact-owner saved credential merge.
 
+        :param handle: (required)
+        :type handle: str
         :param personal_connection_test_request: (required)
         :type personal_connection_test_request: PersonalConnectionTestRequest
         :param _request_timeout: timeout setting for this request. If one
@@ -1042,6 +1098,7 @@ class PersonalToolkitOAuthV1Api:
         """ # noqa: E501
 
         _param = self._personal_toolkit_oauth_v1_test_personal_connection_serialize(
+            handle=handle,
             personal_connection_test_request=personal_connection_test_request,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -1062,6 +1119,7 @@ class PersonalToolkitOAuthV1Api:
 
     def _personal_toolkit_oauth_v1_test_personal_connection_serialize(
         self,
+        handle,
         personal_connection_test_request,
         _request_auth,
         _content_type,
@@ -1084,6 +1142,8 @@ class PersonalToolkitOAuthV1Api:
         _body_params: Optional[bytes] = None
 
         # process the path parameters
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -1121,7 +1181,7 @@ class PersonalToolkitOAuthV1Api:
 
         return self.api_client.param_serialize(
             method='POST',
-            resource_path='/toolkit/v1/personal-toolkit-configs/test-connection',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/test-connection',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -1141,6 +1201,7 @@ class PersonalToolkitOAuthV1Api:
     def personal_toolkit_oauth_v1_test_saved_personal_connection(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1160,6 +1221,8 @@ class PersonalToolkitOAuthV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1184,6 +1247,7 @@ class PersonalToolkitOAuthV1Api:
 
         _param = self._personal_toolkit_oauth_v1_test_saved_personal_connection_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1209,6 +1273,7 @@ class PersonalToolkitOAuthV1Api:
     def personal_toolkit_oauth_v1_test_saved_personal_connection_with_http_info(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1228,6 +1293,8 @@ class PersonalToolkitOAuthV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1252,6 +1319,7 @@ class PersonalToolkitOAuthV1Api:
 
         _param = self._personal_toolkit_oauth_v1_test_saved_personal_connection_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1277,6 +1345,7 @@ class PersonalToolkitOAuthV1Api:
     def personal_toolkit_oauth_v1_test_saved_personal_connection_without_preload_content(
         self,
         toolkit_id: StrictStr,
+        handle: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1296,6 +1365,8 @@ class PersonalToolkitOAuthV1Api:
 
         :param toolkit_id: (required)
         :type toolkit_id: str
+        :param handle: (required)
+        :type handle: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1320,6 +1391,7 @@ class PersonalToolkitOAuthV1Api:
 
         _param = self._personal_toolkit_oauth_v1_test_saved_personal_connection_serialize(
             toolkit_id=toolkit_id,
+            handle=handle,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1340,6 +1412,7 @@ class PersonalToolkitOAuthV1Api:
     def _personal_toolkit_oauth_v1_test_saved_personal_connection_serialize(
         self,
         toolkit_id,
+        handle,
         _request_auth,
         _content_type,
         _headers,
@@ -1363,6 +1436,8 @@ class PersonalToolkitOAuthV1Api:
         # process the path parameters
         if toolkit_id is not None:
             _path_params['toolkit_id'] = toolkit_id
+        if handle is not None:
+            _path_params['handle'] = handle
         # process the query parameters
         # process the header parameters
         # process the form parameters
@@ -1385,7 +1460,7 @@ class PersonalToolkitOAuthV1Api:
 
         return self.api_client.param_serialize(
             method='POST',
-            resource_path='/toolkit/v1/personal-toolkit-configs/{toolkit_id}/test-connection',
+            resource_path='/toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/test-connection',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,

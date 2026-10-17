@@ -108,6 +108,7 @@ class GitHubUserOAuthOperationRepository:
         *,
         user_id: str,
         session_id: str,
+        workspace_id: str,
     ) -> None:
         """Admit a current active account without Workspace manager requirements."""
         status = await evaluate_active_subject(
@@ -120,6 +121,15 @@ class GitHubUserOAuthOperationRepository:
         if status is not ActiveAccountSubjectStatus.ACTIVE:
             raise GitHubUserOAuthError(
                 GitHubUserErrorCode.AUTHORITY, "Not authenticated."
+            )
+
+        workspace = await self.workspace_repository.get_by_id(session, workspace_id)
+        member = await self.workspace_user_repository.get_by_workspace_and_user(
+            session, workspace_id, user_id
+        )
+        if workspace is None or member is None:
+            raise GitHubUserOAuthError(
+                GitHubUserErrorCode.AUTHORITY, "Workspace membership required."
             )
 
     async def authorize_scope_in_session(
@@ -191,11 +201,16 @@ class GitHubUserOAuthOperationRepository:
                 agent_id=agent_id,
             )
 
-    async def authorize_personal_scope(self, *, user_id: str, session_id: str) -> None:
+    async def authorize_personal_scope(
+        self, *, user_id: str, session_id: str, workspace_id: str
+    ) -> None:
         """Close current account admission before personal setup Provider work."""
         async with self.session_manager() as session:
             await self.authorize_personal_scope_in_session(
-                session, user_id=user_id, session_id=session_id
+                session,
+                user_id=user_id,
+                session_id=session_id,
+                workspace_id=workspace_id,
             )
 
     async def _authorize(
@@ -214,10 +229,12 @@ class GitHubUserOAuthOperationRepository:
                 session,
                 user_id=requester.user_id,
                 session_id=requester.session_id,
+                workspace_id=requester.workspace_id,
             )
             personal = await self.personal_toolkits.get_personal(
                 session,
                 user_id=requester.owner.user_id,
+                workspace_id=requester.workspace_id,
                 toolkit_id=requester.toolkit_id,
             )
             if personal is None or personal.toolkit_type != "github":

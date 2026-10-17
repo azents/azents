@@ -117,11 +117,14 @@ runs use the stored connected account, never a channel participant's identity.
 
 ## OAuth Candidate and Publication
 
-Personal management is available through `/toolkit/v1/personal/google` and
-the personal saved-connection routes. It uses an explicit User-owned subject
-bound to the current User and exact initiating Auth Session, with no Workspace
-or Agent target. Separate personal callback purpose and owner context prevent
-shared/Agent callbacks from changing a personal attempt. The common staged
+Personal management is available through
+`/toolkit/v1/workspaces/{handle}/personal/google` and the Workspace-scoped personal
+saved-connection routes. Its User-owned subject requires the real Workspace and
+binds the current User and exact initiating Auth Session, with no owning Agent.
+Ordinary current membership is required; personal management does not require
+shared Toolkit-manager or AgentAdmin authority. Separate personal callback purpose
+and exact User/Workspace owner context prevent shared/Agent or other-Workspace
+callbacks from changing a personal attempt, including for the same User. The common staged
 connect, exchange, review, confirm, outcome, cancellation, reconnect, status and
 local disconnect lifecycle remains authoritative.
 

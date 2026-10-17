@@ -139,7 +139,11 @@ async def test_personal_callback_is_distinct_and_returns_same_grant_review() -> 
     personal = GooglePersonalSubject(
         h.subject.user_id,
         h.subject.session_id,
-        UserToolkitOwner(kind=ToolkitOwnerKind.USER, user_id=h.subject.user_id),
+        UserToolkitOwner(
+            kind=ToolkitOwnerKind.USER,
+            user_id=h.subject.user_id,
+            workspace_id=h.subject.workspace_id,
+        ),
     )
     attempt = dataclasses.replace(h.attempt, subject=personal)
     h.repo.claim.return_value = attempt
@@ -172,7 +176,11 @@ async def test_personal_callback_rejects_foreign_auth_session_before_provider() 
     personal = GooglePersonalSubject(
         h.subject.user_id,
         h.subject.session_id,
-        UserToolkitOwner(kind=ToolkitOwnerKind.USER, user_id=h.subject.user_id),
+        UserToolkitOwner(
+            kind=ToolkitOwnerKind.USER,
+            user_id=h.subject.user_id,
+            workspace_id=h.subject.workspace_id,
+        ),
     )
     state = h.service.cipher.encrypt(
         _PersonalCallbackState(

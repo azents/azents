@@ -144,7 +144,9 @@ async def test_personal_github_review_confirm_replace_disconnect(
         and replaced.revocations[0].access_token == "fixture-first-token"
     )
     toolkit = await h.management.foundation.operations.get(
-        user_id=h.requester.user_id, toolkit_id=h.requester.toolkit_id
+        user_id=h.requester.user_id,
+        workspace_id=h.requester.workspace_id,
+        toolkit_id=h.requester.toolkit_id,
     )
     assert toolkit is not None and toolkit.access_mode is PersonalToolkitAccessMode.ALL
     assert (
@@ -174,6 +176,12 @@ async def test_personal_github_cannot_rebind_shared_owner_or_other_user(
     )
     for requester in [
         wrong_shared,
+        dataclasses.replace(
+            h.requester,
+            owner=h.requester.owner.model_copy(
+                update={"workspace_id": h.management.foundation.workspace_ids[1]}
+            ),
+        ),
         dataclasses.replace(
             h.requester,
             user_id=h.management.other.user_id,

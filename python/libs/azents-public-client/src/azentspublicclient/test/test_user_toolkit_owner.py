@@ -36,12 +36,14 @@ class TestUserToolkitOwner(unittest.TestCase):
         if include_optional:
             return UserToolkitOwner(
                 kind = 'user',
-                user_id = ''
+                user_id = '',
+                workspace_id = ''
             )
         else:
             return UserToolkitOwner(
                 kind = 'user',
                 user_id = '',
+                workspace_id = '',
         )
         """
 

@@ -59,7 +59,9 @@ class PersonalGitHubInstallationsService:
             PersonalPlatformOAuthState(
                 type="personal_platform_github_oauth",
                 owner=UserToolkitOwner(
-                    kind=ToolkitOwnerKind.USER, user_id=subject.user_id
+                    kind=ToolkitOwnerKind.USER,
+                    user_id=subject.user_id,
+                    workspace_id=subject.workspace_id,
                 ),
                 auth_session_id=subject.session_id,
                 effective_generation=platform.effective_generation,
@@ -94,6 +96,7 @@ class PersonalGitHubInstallationsService:
         if (
             verified is None
             or verified.owner.user_id != subject.user_id
+            or verified.owner.workspace_id != subject.workspace_id
             or verified.auth_session_id != subject.session_id
         ):
             raise ToolkitOAuthError(

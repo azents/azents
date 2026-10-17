@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response
 
-from azents.core.auth.deps import CurrentUser, get_current_user
+from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.github_setup import (
     GitHubSetupAppOutput,
     GitHubSetupVerificationOutput,
@@ -51,8 +51,8 @@ from .oauth import (
 from .personal import PersonalToolkitCreateRequest
 from .personal_oauth import PersonalOAuthExchangeRequest, _oauth_errors
 
-router = APIRouter(route_class=GitHubUserRoute)
-Account = Annotated[CurrentUser, Depends(get_current_user)]
+router = APIRouter(prefix="/workspaces/{handle}", route_class=GitHubUserRoute)
+Account = Annotated[WorkspaceMember, Depends(get_workspace_member)]
 Service = Annotated[GitHubUserOAuthService, Depends(GitHubUserOAuthService)]
 Creation = Annotated[GitHubUserCreationService, Depends(GitHubUserCreationService)]
 Setup = Annotated[GitHubSetupService, Depends(GitHubSetupService)]
@@ -69,7 +69,9 @@ async def personal_github_install_url(
     """Open the same Platform App installation page after exact account admission."""
     with _oauth_errors():
         value = await service.install_url(
-            PersonalToolkitManager(account.user_id, account.session_id)
+            PersonalToolkitManager(
+                account.user_id, account.session_id, account.workspace_id
+            )
         )
     return GitHubPlatformInstallUrlResponse(install_url=value)
 
@@ -82,7 +84,9 @@ async def personal_github_installation_oauth_url(
     """Start owner/Auth Session-bound Platform installation acquisition."""
     with _oauth_errors():
         value = await service.oauth_url(
-            PersonalToolkitManager(account.user_id, account.session_id)
+            PersonalToolkitManager(
+                account.user_id, account.session_id, account.workspace_id
+            )
         )
     return GitHubPlatformOAuthUrlResponse(oauth_url=value)
 
@@ -96,7 +100,9 @@ async def personal_github_sync_installations(
     """Publish the current owner's installation inventory, with no Toolkit creation."""
     with _oauth_errors():
         values = await service.sync(
-            PersonalToolkitManager(account.user_id, account.session_id),
+            PersonalToolkitManager(
+                account.user_id, account.session_id, account.workspace_id
+            ),
             code=body.code,
             state=body.state,
         )
@@ -113,11 +119,15 @@ async def personal_github_sync_installations(
     )
 
 
-def _creation_subject(account: CurrentUser) -> GitHubPersonalCreationSubject:
+def _creation_subject(account: WorkspaceMember) -> GitHubPersonalCreationSubject:
     return GitHubPersonalCreationSubject(
         user_id=account.user_id,
         session_id=account.session_id,
-        owner=UserToolkitOwner(kind=ToolkitOwnerKind.USER, user_id=account.user_id),
+        owner=UserToolkitOwner(
+            kind=ToolkitOwnerKind.USER,
+            user_id=account.user_id,
+            workspace_id=account.workspace_id,
+        ),
     )
 
 
@@ -216,12 +226,16 @@ async def personal_github_creation_cancel(
     return Response(status_code=204)
 
 
-def _requester(account: CurrentUser, toolkit_id: str) -> GitHubPersonalRequester:
+def _requester(account: WorkspaceMember, toolkit_id: str) -> GitHubPersonalRequester:
     return GitHubPersonalRequester(
         user_id=account.user_id,
         session_id=account.session_id,
         toolkit_id=toolkit_id,
-        owner=UserToolkitOwner(kind=ToolkitOwnerKind.USER, user_id=account.user_id),
+        owner=UserToolkitOwner(
+            kind=ToolkitOwnerKind.USER,
+            user_id=account.user_id,
+            workspace_id=account.workspace_id,
+        ),
     )
 
 
@@ -232,7 +246,9 @@ async def personal_github_availability(
     """Use the common auth-mode readiness without requiring a Workspace membership."""
     with _management_errors():
         return await service.personal_availability(
-            user_id=account.user_id, session_id=account.session_id
+            user_id=account.user_id,
+            session_id=account.session_id,
+            workspace_id=account.workspace_id,
         )
 
 

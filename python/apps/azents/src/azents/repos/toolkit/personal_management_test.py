@@ -77,7 +77,10 @@ async def harness(fixture: Fixture) -> AsyncIterator[Harness]:
         ]
         session.write_session.add_all(rows)
         await session.write_session.flush()
-        subjects = [PersonalToolkitManager(row.user_id, row.id) for row in rows]
+        subjects = [
+            PersonalToolkitManager(row.user_id, row.id, f.workspace_ids[0])
+            for row in rows
+        ]
     assert f.repository.cipher is not None
     oauth = MCPOAuthConnectionRepository(f.repository.cipher)
     shared = ToolkitOperationsRepository(
@@ -137,7 +140,7 @@ def config() -> ToolkitConfigurationInput:
 async def test_personal_crud_requires_only_owner_not_workspace_role(
     harness: Harness,
 ) -> None:
-    """A Member can manage User-global connections across ordinary Agent contexts."""
+    """A Member manages personal connections within the admitted Workspace."""
     h = harness
     result = await h.service.create(h.subject, config())
     assert isinstance(result, Success)
@@ -181,8 +184,8 @@ async def test_policy_editors_share_authority_without_agent_admin(
         await h.repository.create(h.subject, creation(), platform_authority=None)
     ).toolkit
     eligible = await h.service.eligible_agents(h.subject)
-    assert {entry.agent_id for entry in eligible} == set(h.foundation.agent_ids[:3])
-    assert len({entry.workspace_id for entry in eligible}) == 2
+    assert {entry.agent_id for entry in eligible} == set(h.foundation.agent_ids[:2])
+    assert {entry.workspace_id for entry in eligible} == {h.subject.workspace_id}
     choices = await h.service.agent_connections(h.subject, h.foundation.agent_ids[0])
     assert [entry.id for entry in choices] == [toolkit.id]
     mutation = PersonalToolkitAccessMutation(
@@ -192,7 +195,7 @@ async def test_policy_editors_share_authority_without_agent_admin(
         h.subject, [mutation], agent_id=h.foundation.agent_ids[0]
     )
     assert saved.mode is Mode.SELECTED and set(saved.selected_agent_ids) == set(
-        h.foundation.agent_ids[1:3]
+        h.foundation.agent_ids[1:2]
     )
     with pytest.raises(PersonalToolkitAccessConflict):
         await h.service.mutate_access(h.subject, [mutation], agent_id=None)
@@ -202,8 +205,7 @@ async def test_policy_editors_share_authority_without_agent_admin(
             [dataclasses.replace(mutation, expected_mode=Mode.SELECTED)],
             agent_id=h.foundation.agent_ids[1],
         )
-    with pytest.raises(PersonalToolkitAgentIneligible):
-        await h.service.agent_connections(h.other, h.foundation.agent_ids[0])
+    assert await h.service.agent_connections(h.other, h.foundation.agent_ids[0]) == []
     current = await h.service.get(h.subject, toolkit.id)
     assert (
         current.access_mode is Mode.SELECTED
@@ -225,9 +227,13 @@ async def test_exact_current_account_rechecked_in_completed_operations(
     subject = h.subject
     async with h.foundation.writes() as session:
         if invalid == "foreign_session":
-            subject = PersonalToolkitManager(h.subject.user_id, h.other.session_id)
+            subject = PersonalToolkitManager(
+                h.subject.user_id, h.other.session_id, h.subject.workspace_id
+            )
         elif invalid == "missing_session":
-            subject = PersonalToolkitManager(h.subject.user_id, uuid4().hex)
+            subject = PersonalToolkitManager(
+                h.subject.user_id, uuid4().hex, h.subject.workspace_id
+            )
         elif invalid == "disabled":
             await session.write_session.execute(
                 sa.update(RDBUser)
@@ -276,7 +282,12 @@ async def test_auth_revoked_during_external_preparation_prevents_creation(
     monkeypatch.setattr(h.common, "_validate_provider_credentials", revoke)
     with pytest.raises(PersonalToolkitAuthorityDenied):
         await h.service.create(h.subject, config())
-    assert await h.foundation.operations.list_personal(user_id=h.subject.user_id) == []
+    assert (
+        await h.foundation.operations.list_personal(
+            user_id=h.subject.user_id, workspace_id=h.subject.workspace_id
+        )
+        == []
+    )
 
 
 async def test_prepared_edit_rejects_concurrent_source_change(harness: Harness) -> None:
@@ -285,6 +296,7 @@ async def test_prepared_edit_rejects_concurrent_source_change(harness: Harness) 
     snapshot = await h.repository.create(h.subject, creation(), platform_authority=None)
     await h.foundation.operations.update(
         user_id=h.subject.user_id,
+        workspace_id=h.subject.workspace_id,
         toolkit_id=snapshot.toolkit.id,
         update={"name": "Concurrent"},
     )
@@ -323,20 +335,58 @@ async def test_platform_registration_revalidated_in_personal_write(
     assert await h.service.list(h.subject) == []
 
 
-async def test_workspace_membership_not_required_for_personal_crud(
+async def test_workspace_membership_required_for_personal_crud(
     harness: Harness,
 ) -> None:
-    """Ownership stays User-global after Workspace memberships disappear."""
+    """Current ordinary Workspace admission is required across personal management."""
     h = harness
+    existing = await h.service.create(h.subject, config())
+    assert isinstance(existing, Success)
     async with h.foundation.writes() as session:
         await session.write_session.execute(
             sa.delete(RDBWorkspaceUser).where(
                 RDBWorkspaceUser.user_id == h.subject.user_id
             )
         )
-    result = await h.service.create(h.subject, config())
-    assert isinstance(result, Success)
-    assert await h.service.eligible_agents(h.subject) == []
-    assert len(await h.service.list(h.subject)) == 1
-    with pytest.raises(PersonalToolkitAgentIneligible):
-        await h.service.agent_connections(h.subject, h.foundation.agent_ids[0])
+    for operation in [
+        lambda: h.service.create(h.subject, config()),
+        lambda: h.service.list(h.subject),
+        lambda: h.service.eligible_agents(h.subject),
+        lambda: h.service.get(h.subject, existing.value.id),
+    ]:
+        with pytest.raises(PersonalToolkitAuthorityDenied):
+            await operation()
+
+
+async def test_same_user_cannot_manage_a_personal_toolkit_from_another_workspace(
+    harness: Harness,
+) -> None:
+    """Ordinary membership in both Workspaces never bridges personal parents."""
+    h = harness
+    source = (
+        await h.repository.create(h.subject, creation(), platform_authority=None)
+    ).toolkit
+    other_scope = dataclasses.replace(
+        h.subject, workspace_id=h.foundation.workspace_ids[1]
+    )
+    assert await h.service.list(other_scope) == []
+    for operation in [
+        lambda: h.service.get(other_scope, source.id),
+        lambda: h.service.delete(other_scope, source.id),
+        lambda: h.service.mutate_access(
+            other_scope,
+            [
+                PersonalToolkitAccessMutation(
+                    source.id,
+                    Mode.SELECTED,
+                    frozenset(),
+                    frozenset(),
+                    Mode.ALL,
+                )
+            ],
+            agent_id=None,
+        ),
+    ]:
+        with pytest.raises(PersonalToolkitNotFound):
+            await operation()
+    assert (await h.service.get(h.subject, source.id)).access_mode is Mode.ALL

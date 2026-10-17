@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 import sqlalchemy as sa
 
+from azents.core.enums import WorkspaceUserRole
 from azents.core.google_oauth import (
     GoogleAttempt,
     GoogleOAuthError,
@@ -22,6 +23,8 @@ from azents.core.toolkit_ownership import (
 )
 from azents.rdb.models.google_oauth import RDBGoogleAttempt, RDBGoogleConnection
 from azents.rdb.models.toolkit import RDBToolkitConfig
+from azents.rdb.models.workspace import RDBWorkspace
+from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.google_oauth.management_test import (
@@ -41,6 +44,56 @@ class PersonalHarness:
     subject: GooglePersonalSubject
 
 
+async def test_same_user_google_attempt_and_saved_grant_cannot_cross_workspaces(
+    rdb_session_manager: SessionManager[WriteSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Membership in B does not authorize A's callback, publication or outcome."""
+    h = await personal_harness(rdb_session_manager, monkeypatch)
+    async with rdb_session_manager() as session:
+        workspace = RDBWorkspace(name="Other", handle=f"other-{uuid4().hex}")
+        session.write_session.add(workspace)
+        await session.write_session.flush()
+        other_workspace = workspace.id
+        session.write_session.add(
+            RDBWorkspaceUser(
+                workspace_id=other_workspace,
+                user_id=h.subject.user_id,
+                name="Member",
+                role=WorkspaceUserRole.MEMBER,
+            )
+        )
+    other = dataclasses.replace(
+        h.subject,
+        owner=h.subject.owner.model_copy(update={"workspace_id": other_workspace}),
+    )
+    attempt = await review(h, None)
+    for operation in [
+        lambda: h.shared.repo.load(other, attempt.id),
+        lambda: h.shared.repo.confirm(
+            other,
+            attempt_id=attempt.id,
+            registration=h.shared.registration,
+            settings=_settings(),
+        ),
+    ]:
+        with pytest.raises(GoogleOAuthError, match="not found"):
+            await operation()
+    published = await h.shared.repo.confirm(
+        h.subject,
+        attempt_id=attempt.id,
+        registration=h.shared.registration,
+        settings=_settings(),
+    )
+    for operation in [
+        lambda: h.shared.repo.saved(other, published.toolkit_id),
+        lambda: h.shared.repo.outcome(other, attempt.id),
+        lambda: h.shared.repo.disconnect(other, published.toolkit_id),
+    ]:
+        with pytest.raises(GoogleOAuthError, match="not found"):
+            await operation()
+    assert (await h.shared.repo.saved(h.subject, published.toolkit_id)).connection
+
+
 async def personal_harness(
     manager: SessionManager[WriteSession], monkeypatch: pytest.MonkeyPatch
 ) -> PersonalHarness:
@@ -49,6 +102,14 @@ async def personal_harness(
     async with manager() as session:
         user = await UserRepository().create(
             session, UserCreate(email=f"google-{uuid4().hex}@example.test")
+        )
+        session.write_session.add(
+            RDBWorkspaceUser(
+                workspace_id=shared.subject.workspace_id,
+                user_id=user.id,
+                name="Personal member",
+                role=WorkspaceUserRole.MEMBER,
+            )
         )
     monkeypatch.setattr(
         shared.repo.sessions,
@@ -64,7 +125,11 @@ async def personal_harness(
         GooglePersonalSubject(
             user.id,
             shared.subject.session_id,
-            UserToolkitOwner(kind=ToolkitOwnerKind.USER, user_id=user.id),
+            UserToolkitOwner(
+                kind=ToolkitOwnerKind.USER,
+                user_id=user.id,
+                workspace_id=shared.subject.workspace_id,
+            ),
         ),
     )
 
@@ -91,7 +156,7 @@ async def review(h: PersonalHarness, target: str | None) -> GoogleAttempt:
     )
 
 
-async def test_personal_confirm_creates_user_global_default_all_and_exact_outcome(
+async def test_personal_confirm_creates_workspace_scoped_default_all_and_exact_outcome(
     rdb_session_manager: SessionManager[WriteSession], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Confirmation publishes personal targets excluded from Workspace readers."""
@@ -102,7 +167,11 @@ async def test_personal_confirm_creates_user_global_default_all_and_exact_outcom
             await session.read_session.scalar(sa.select(RDBGoogleConnection.id)) is None
         )
         row = await session.read_session.get(RDBGoogleAttempt, attempt.id)
-        assert row is not None and row.workspace_id is None and row.agent_id is None
+        assert (
+            row is not None
+            and row.workspace_id == h.subject.workspace_id
+            and row.agent_id is None
+        )
         assert (
             row.owner_kind is ToolkitOwnerKind.USER
             and row.owner_user_id == h.subject.user_id
@@ -119,7 +188,10 @@ async def test_personal_confirm_creates_user_global_default_all_and_exact_outcom
     assert first == second and first.current
     async with rdb_session_manager() as session:
         toolkit = await h.shared.repo.personal_toolkits.get_personal(
-            session, user_id=h.subject.user_id, toolkit_id=first.toolkit_id
+            session,
+            user_id=h.subject.user_id,
+            workspace_id=h.subject.workspace_id,
+            toolkit_id=first.toolkit_id,
         )
         assert toolkit is not None and toolkit.owner == h.subject.owner
         assert toolkit.access_mode is PersonalToolkitAccessMode.ALL
@@ -160,6 +232,7 @@ async def test_personal_reconnect_preserves_allowance_and_current_settings(
         await h.shared.repo.personal_toolkits.mutate_access(
             session,
             user_id=h.subject.user_id,
+            workspace_id=h.subject.workspace_id,
             mutation=PersonalToolkitAccessMutation(
                 first.toolkit_id,
                 PersonalToolkitAccessMode.SELECTED,
@@ -173,6 +246,7 @@ async def test_personal_reconnect_preserves_allowance_and_current_settings(
         await h.shared.repo.personal_toolkits.update_personal(
             session,
             user_id=h.subject.user_id,
+            workspace_id=h.subject.workspace_id,
             toolkit_id=first.toolkit_id,
             update={
                 "name": "Concurrent personal rename",
@@ -195,7 +269,10 @@ async def test_personal_reconnect_preserves_allowance_and_current_settings(
     )
     async with rdb_session_manager() as session:
         current = await h.shared.repo.personal_toolkits.get_personal(
-            session, user_id=h.subject.user_id, toolkit_id=first.toolkit_id
+            session,
+            user_id=h.subject.user_id,
+            workspace_id=h.subject.workspace_id,
+            toolkit_id=first.toolkit_id,
         )
         assert (
             current is not None

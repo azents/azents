@@ -9,8 +9,10 @@ from fastapi import FastAPI
 
 from azents.api.public.toolkit.v1.personal import router as personal_router
 from azents.api.public.toolkit.v1.personal_github import router as github_router
-from azents.core.auth.deps import CurrentUser, get_current_user
+from azents.core.auth.deps import WorkspaceMember, get_workspace_member
+from azents.core.enums import WorkspaceUserRole
 from azents.core.github_user_auth import GitHubUserAccessPage
+from azents.core.personal_toolkit import PersonalToolkitManager
 from azents.repos.github_user_oauth.personal_test import prepare, review
 from azents.repos.toolkit.personal_management_test import Harness
 from azents.repos.toolkit.personal_management_test import (
@@ -27,6 +29,18 @@ from azents.services.github_user_oauth.service_test import _harness
 from azents.services.toolkit.personal import PersonalToolkitService
 
 
+def member(subject: PersonalToolkitManager) -> WorkspaceMember:
+    """Capture the admitted Workspace without shared-management authority."""
+    return WorkspaceMember(
+        user_id=subject.user_id,
+        session_id=subject.session_id,
+        workspace_id=subject.workspace_id,
+        workspace_user_id="fixture-member",
+        role=WorkspaceUserRole.MEMBER,
+        permissions=set(),
+    )
+
+
 @pytest.mark.parametrize("active", [True, False])
 async def test_personal_registration_change_conflict_is_409_and_preserves_grant(
     harness: Harness, active: bool
@@ -40,15 +54,15 @@ async def test_personal_registration_change_conflict_is_409_and_preserves_grant(
     before = await h.operations.read_context(requester=h.requester)
     app = FastAPI()
     app.include_router(personal_router)
-    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
-        h.requester.user_id, h.requester.session_id
+    app.dependency_overrides[get_workspace_member] = lambda: member(
+        h.management.subject
     )
     app.dependency_overrides[PersonalToolkitService] = lambda: h.management.service
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
         result = await client.patch(
-            f"/personal-toolkit-configs/{h.requester.toolkit_id}",
+            f"/workspaces/ws/personal-toolkit-configs/{h.requester.toolkit_id}",
             json={
                 "config": {"github_auth_type": "pat"},
                 "credentials": {"type": "pat", "token": "fixture-pat"},
@@ -92,10 +106,13 @@ async def test_personal_access_observation_binds_owner_and_continuation_before_p
     app = FastAPI()
     app.include_router(github_router)
     app.dependency_overrides[GitHubUserOAuthService] = lambda: service
-    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
-        h.requester.user_id, h.requester.session_id
+    app.dependency_overrides[get_workspace_member] = lambda: member(
+        h.management.subject
     )
-    path = f"/personal-toolkit-configs/{h.requester.toolkit_id}/github-user/access"
+    path = (
+        f"/workspaces/ws/personal-toolkit-configs/{h.requester.toolkit_id}"
+        "/github-user/access"
+    )
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
@@ -113,8 +130,17 @@ async def test_personal_access_observation_binds_owner_and_continuation_before_p
         assert common.provider.access.await_count == 2
         invalid = await client.get(path, params={"cursor": "x" * 4097})
         assert invalid.status_code == 422
-        app.dependency_overrides[get_current_user] = lambda: CurrentUser(
-            h.management.other.user_id, h.management.other.session_id
+        app.dependency_overrides[get_workspace_member] = lambda: member(
+            dataclasses.replace(
+                h.management.subject,
+                workspace_id=h.management.foundation.workspace_ids[1],
+            )
+        )
+        cross_workspace = await client.get(path)
+        assert cross_workspace.status_code == 404
+        assert common.provider.access.await_count == 2
+        app.dependency_overrides[get_workspace_member] = lambda: member(
+            h.management.other
         )
         foreign = await client.get(path)
         assert foreign.status_code in (403, 404)

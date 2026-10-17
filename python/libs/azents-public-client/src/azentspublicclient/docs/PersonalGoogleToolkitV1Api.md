@@ -4,21 +4,21 @@ All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
-[**personal_google_toolkit_v1_personal_google_cancel**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_cancel) | **DELETE** /toolkit/v1/personal/google/attempts/{attempt_id} | Personal Google Cancel
-[**personal_google_toolkit_v1_personal_google_confirm**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_confirm) | **POST** /toolkit/v1/personal/google/attempts/{attempt_id}/confirm | Personal Google Confirm
-[**personal_google_toolkit_v1_personal_google_connect**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_connect) | **POST** /toolkit/v1/personal/google/connect | Personal Google Connect
-[**personal_google_toolkit_v1_personal_google_disconnect**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_disconnect) | **DELETE** /toolkit/v1/personal-toolkit-configs/{toolkit_id}/google/connection | Personal Google Disconnect
-[**personal_google_toolkit_v1_personal_google_exchange**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_exchange) | **POST** /toolkit/v1/personal/google/exchange | Personal Google Exchange
-[**personal_google_toolkit_v1_personal_google_outcome**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_outcome) | **GET** /toolkit/v1/personal/google/attempts/{attempt_id}/outcome | Personal Google Outcome
-[**personal_google_toolkit_v1_personal_google_preparation**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_preparation) | **GET** /toolkit/v1/personal/google/preparation | Personal Google Preparation
-[**personal_google_toolkit_v1_personal_google_reconnect**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_reconnect) | **POST** /toolkit/v1/personal-toolkit-configs/{toolkit_id}/google/reconnect | Personal Google Reconnect
-[**personal_google_toolkit_v1_personal_google_reconnect_confirm**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_reconnect_confirm) | **POST** /toolkit/v1/personal/google/attempts/{attempt_id}/reconnect-confirm | Personal Google Reconnect Confirm
-[**personal_google_toolkit_v1_personal_google_review**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_review) | **GET** /toolkit/v1/personal/google/attempts/{attempt_id} | Personal Google Review
-[**personal_google_toolkit_v1_personal_google_status**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_status) | **GET** /toolkit/v1/personal-toolkit-configs/{toolkit_id}/google/connection | Personal Google Status
+[**personal_google_toolkit_v1_personal_google_cancel**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_cancel) | **DELETE** /toolkit/v1/workspaces/{handle}/personal/google/attempts/{attempt_id} | Personal Google Cancel
+[**personal_google_toolkit_v1_personal_google_confirm**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_confirm) | **POST** /toolkit/v1/workspaces/{handle}/personal/google/attempts/{attempt_id}/confirm | Personal Google Confirm
+[**personal_google_toolkit_v1_personal_google_connect**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_connect) | **POST** /toolkit/v1/workspaces/{handle}/personal/google/connect | Personal Google Connect
+[**personal_google_toolkit_v1_personal_google_disconnect**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_disconnect) | **DELETE** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/google/connection | Personal Google Disconnect
+[**personal_google_toolkit_v1_personal_google_exchange**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_exchange) | **POST** /toolkit/v1/workspaces/{handle}/personal/google/exchange | Personal Google Exchange
+[**personal_google_toolkit_v1_personal_google_outcome**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_outcome) | **GET** /toolkit/v1/workspaces/{handle}/personal/google/attempts/{attempt_id}/outcome | Personal Google Outcome
+[**personal_google_toolkit_v1_personal_google_preparation**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_preparation) | **GET** /toolkit/v1/workspaces/{handle}/personal/google/preparation | Personal Google Preparation
+[**personal_google_toolkit_v1_personal_google_reconnect**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_reconnect) | **POST** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/google/reconnect | Personal Google Reconnect
+[**personal_google_toolkit_v1_personal_google_reconnect_confirm**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_reconnect_confirm) | **POST** /toolkit/v1/workspaces/{handle}/personal/google/attempts/{attempt_id}/reconnect-confirm | Personal Google Reconnect Confirm
+[**personal_google_toolkit_v1_personal_google_review**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_review) | **GET** /toolkit/v1/workspaces/{handle}/personal/google/attempts/{attempt_id} | Personal Google Review
+[**personal_google_toolkit_v1_personal_google_status**](PersonalGoogleToolkitV1Api.md#personal_google_toolkit_v1_personal_google_status) | **GET** /toolkit/v1/workspaces/{handle}/personal-toolkit-configs/{toolkit_id}/google/connection | Personal Google Status
 
 
 # **personal_google_toolkit_v1_personal_google_cancel**
-> GoogleCancelOutput personal_google_toolkit_v1_personal_google_cancel(attempt_id)
+> GoogleCancelOutput personal_google_toolkit_v1_personal_google_cancel(attempt_id, handle)
 
 Personal Google Cancel
 
@@ -55,10 +55,11 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGoogleToolkitV1Api(api_client)
     attempt_id = 'attempt_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Personal Google Cancel
-        api_response = api_instance.personal_google_toolkit_v1_personal_google_cancel(attempt_id)
+        api_response = api_instance.personal_google_toolkit_v1_personal_google_cancel(attempt_id, handle)
         print("The response of PersonalGoogleToolkitV1Api->personal_google_toolkit_v1_personal_google_cancel:\n")
         pprint(api_response)
     except Exception as e:
@@ -73,6 +74,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **attempt_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -97,7 +99,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_google_toolkit_v1_personal_google_confirm**
-> GooglePublishedOutput personal_google_toolkit_v1_personal_google_confirm(attempt_id, google_confirm_request)
+> GooglePublishedOutput personal_google_toolkit_v1_personal_google_confirm(attempt_id, handle, google_confirm_request)
 
 Personal Google Confirm
 
@@ -135,11 +137,12 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGoogleToolkitV1Api(api_client)
     attempt_id = 'attempt_id_example' # str | 
+    handle = 'handle_example' # str | 
     google_confirm_request = azentspublicclient.GoogleConfirmRequest() # GoogleConfirmRequest | 
 
     try:
         # Personal Google Confirm
-        api_response = api_instance.personal_google_toolkit_v1_personal_google_confirm(attempt_id, google_confirm_request)
+        api_response = api_instance.personal_google_toolkit_v1_personal_google_confirm(attempt_id, handle, google_confirm_request)
         print("The response of PersonalGoogleToolkitV1Api->personal_google_toolkit_v1_personal_google_confirm:\n")
         pprint(api_response)
     except Exception as e:
@@ -154,6 +157,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **attempt_id** | **str**|  | 
+ **handle** | **str**|  | 
  **google_confirm_request** | [**GoogleConfirmRequest**](GoogleConfirmRequest.md)|  | 
 
 ### Return type
@@ -179,7 +183,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_google_toolkit_v1_personal_google_connect**
-> GoogleConnectOutput personal_google_toolkit_v1_personal_google_connect(google_connect_input)
+> GoogleConnectOutput personal_google_toolkit_v1_personal_google_connect(handle, google_connect_input)
 
 Personal Google Connect
 
@@ -216,11 +220,12 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGoogleToolkitV1Api(api_client)
+    handle = 'handle_example' # str | 
     google_connect_input = azentspublicclient.GoogleConnectInput() # GoogleConnectInput | 
 
     try:
         # Personal Google Connect
-        api_response = api_instance.personal_google_toolkit_v1_personal_google_connect(google_connect_input)
+        api_response = api_instance.personal_google_toolkit_v1_personal_google_connect(handle, google_connect_input)
         print("The response of PersonalGoogleToolkitV1Api->personal_google_toolkit_v1_personal_google_connect:\n")
         pprint(api_response)
     except Exception as e:
@@ -234,6 +239,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
  **google_connect_input** | [**GoogleConnectInput**](GoogleConnectInput.md)|  | 
 
 ### Return type
@@ -259,7 +265,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_google_toolkit_v1_personal_google_disconnect**
-> object personal_google_toolkit_v1_personal_google_disconnect(toolkit_id)
+> object personal_google_toolkit_v1_personal_google_disconnect(toolkit_id, handle)
 
 Personal Google Disconnect
 
@@ -295,10 +301,11 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGoogleToolkitV1Api(api_client)
     toolkit_id = 'toolkit_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Personal Google Disconnect
-        api_response = api_instance.personal_google_toolkit_v1_personal_google_disconnect(toolkit_id)
+        api_response = api_instance.personal_google_toolkit_v1_personal_google_disconnect(toolkit_id, handle)
         print("The response of PersonalGoogleToolkitV1Api->personal_google_toolkit_v1_personal_google_disconnect:\n")
         pprint(api_response)
     except Exception as e:
@@ -313,6 +320,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **toolkit_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -337,7 +345,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_google_toolkit_v1_personal_google_exchange**
-> GoogleReview personal_google_toolkit_v1_personal_google_exchange(google_exchange_request)
+> GoogleReview personal_google_toolkit_v1_personal_google_exchange(handle, google_exchange_request)
 
 Personal Google Exchange
 
@@ -374,11 +382,12 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGoogleToolkitV1Api(api_client)
+    handle = 'handle_example' # str | 
     google_exchange_request = azentspublicclient.GoogleExchangeRequest() # GoogleExchangeRequest | 
 
     try:
         # Personal Google Exchange
-        api_response = api_instance.personal_google_toolkit_v1_personal_google_exchange(google_exchange_request)
+        api_response = api_instance.personal_google_toolkit_v1_personal_google_exchange(handle, google_exchange_request)
         print("The response of PersonalGoogleToolkitV1Api->personal_google_toolkit_v1_personal_google_exchange:\n")
         pprint(api_response)
     except Exception as e:
@@ -392,6 +401,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
  **google_exchange_request** | [**GoogleExchangeRequest**](GoogleExchangeRequest.md)|  | 
 
 ### Return type
@@ -417,7 +427,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_google_toolkit_v1_personal_google_outcome**
-> GooglePublishedOutput personal_google_toolkit_v1_personal_google_outcome(attempt_id)
+> GooglePublishedOutput personal_google_toolkit_v1_personal_google_outcome(attempt_id, handle)
 
 Personal Google Outcome
 
@@ -454,10 +464,11 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGoogleToolkitV1Api(api_client)
     attempt_id = 'attempt_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Personal Google Outcome
-        api_response = api_instance.personal_google_toolkit_v1_personal_google_outcome(attempt_id)
+        api_response = api_instance.personal_google_toolkit_v1_personal_google_outcome(attempt_id, handle)
         print("The response of PersonalGoogleToolkitV1Api->personal_google_toolkit_v1_personal_google_outcome:\n")
         pprint(api_response)
     except Exception as e:
@@ -472,6 +483,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **attempt_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -496,7 +508,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_google_toolkit_v1_personal_google_preparation**
-> GooglePreparation personal_google_toolkit_v1_personal_google_preparation()
+> GooglePreparation personal_google_toolkit_v1_personal_google_preparation(handle)
 
 Personal Google Preparation
 
@@ -532,10 +544,11 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGoogleToolkitV1Api(api_client)
+    handle = 'handle_example' # str | 
 
     try:
         # Personal Google Preparation
-        api_response = api_instance.personal_google_toolkit_v1_personal_google_preparation()
+        api_response = api_instance.personal_google_toolkit_v1_personal_google_preparation(handle)
         print("The response of PersonalGoogleToolkitV1Api->personal_google_toolkit_v1_personal_google_preparation:\n")
         pprint(api_response)
     except Exception as e:
@@ -546,7 +559,10 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 ### Parameters
 
-This endpoint does not need any parameter.
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -566,11 +582,12 @@ This endpoint does not need any parameter.
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_google_toolkit_v1_personal_google_reconnect**
-> GoogleConnectOutput personal_google_toolkit_v1_personal_google_reconnect(toolkit_id, google_connect_input)
+> GoogleConnectOutput personal_google_toolkit_v1_personal_google_reconnect(toolkit_id, handle, google_connect_input)
 
 Personal Google Reconnect
 
@@ -608,11 +625,12 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGoogleToolkitV1Api(api_client)
     toolkit_id = 'toolkit_id_example' # str | 
+    handle = 'handle_example' # str | 
     google_connect_input = azentspublicclient.GoogleConnectInput() # GoogleConnectInput | 
 
     try:
         # Personal Google Reconnect
-        api_response = api_instance.personal_google_toolkit_v1_personal_google_reconnect(toolkit_id, google_connect_input)
+        api_response = api_instance.personal_google_toolkit_v1_personal_google_reconnect(toolkit_id, handle, google_connect_input)
         print("The response of PersonalGoogleToolkitV1Api->personal_google_toolkit_v1_personal_google_reconnect:\n")
         pprint(api_response)
     except Exception as e:
@@ -627,6 +645,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **toolkit_id** | **str**|  | 
+ **handle** | **str**|  | 
  **google_connect_input** | [**GoogleConnectInput**](GoogleConnectInput.md)|  | 
 
 ### Return type
@@ -652,7 +671,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_google_toolkit_v1_personal_google_reconnect_confirm**
-> GooglePublishedOutput personal_google_toolkit_v1_personal_google_reconnect_confirm(attempt_id, google_reconnect_confirm_request)
+> GooglePublishedOutput personal_google_toolkit_v1_personal_google_reconnect_confirm(attempt_id, handle, google_reconnect_confirm_request)
 
 Personal Google Reconnect Confirm
 
@@ -690,11 +709,12 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGoogleToolkitV1Api(api_client)
     attempt_id = 'attempt_id_example' # str | 
+    handle = 'handle_example' # str | 
     google_reconnect_confirm_request = azentspublicclient.GoogleReconnectConfirmRequest() # GoogleReconnectConfirmRequest | 
 
     try:
         # Personal Google Reconnect Confirm
-        api_response = api_instance.personal_google_toolkit_v1_personal_google_reconnect_confirm(attempt_id, google_reconnect_confirm_request)
+        api_response = api_instance.personal_google_toolkit_v1_personal_google_reconnect_confirm(attempt_id, handle, google_reconnect_confirm_request)
         print("The response of PersonalGoogleToolkitV1Api->personal_google_toolkit_v1_personal_google_reconnect_confirm:\n")
         pprint(api_response)
     except Exception as e:
@@ -709,6 +729,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **attempt_id** | **str**|  | 
+ **handle** | **str**|  | 
  **google_reconnect_confirm_request** | [**GoogleReconnectConfirmRequest**](GoogleReconnectConfirmRequest.md)|  | 
 
 ### Return type
@@ -734,7 +755,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_google_toolkit_v1_personal_google_review**
-> GoogleReview personal_google_toolkit_v1_personal_google_review(attempt_id)
+> GoogleReview personal_google_toolkit_v1_personal_google_review(attempt_id, handle)
 
 Personal Google Review
 
@@ -771,10 +792,11 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGoogleToolkitV1Api(api_client)
     attempt_id = 'attempt_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Personal Google Review
-        api_response = api_instance.personal_google_toolkit_v1_personal_google_review(attempt_id)
+        api_response = api_instance.personal_google_toolkit_v1_personal_google_review(attempt_id, handle)
         print("The response of PersonalGoogleToolkitV1Api->personal_google_toolkit_v1_personal_google_review:\n")
         pprint(api_response)
     except Exception as e:
@@ -789,6 +811,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **attempt_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 
@@ -813,7 +836,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **personal_google_toolkit_v1_personal_google_status**
-> GoogleConnectionOutput personal_google_toolkit_v1_personal_google_status(toolkit_id)
+> GoogleConnectionOutput personal_google_toolkit_v1_personal_google_status(toolkit_id, handle)
 
 Personal Google Status
 
@@ -850,10 +873,11 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.PersonalGoogleToolkitV1Api(api_client)
     toolkit_id = 'toolkit_id_example' # str | 
+    handle = 'handle_example' # str | 
 
     try:
         # Personal Google Status
-        api_response = api_instance.personal_google_toolkit_v1_personal_google_status(toolkit_id)
+        api_response = api_instance.personal_google_toolkit_v1_personal_google_status(toolkit_id, handle)
         print("The response of PersonalGoogleToolkitV1Api->personal_google_toolkit_v1_personal_google_status:\n")
         pprint(api_response)
     except Exception as e:
@@ -868,6 +892,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **toolkit_id** | **str**|  | 
+ **handle** | **str**|  | 
 
 ### Return type
 

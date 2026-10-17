@@ -70,7 +70,8 @@ class TestPersonalToolkitListResponse(unittest.TestCase):
                         updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         owner = azentspublicclient.models.user_toolkit_owner.UserToolkitOwner(
                             kind = 'user', 
-                            user_id = '', ), 
+                            user_id = '', 
+                            workspace_id = '', ), 
                         access_mode = 'all', 
                         selected_agent_ids = [
                             ''
@@ -115,7 +116,8 @@ class TestPersonalToolkitListResponse(unittest.TestCase):
                         updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         owner = azentspublicclient.models.user_toolkit_owner.UserToolkitOwner(
                             kind = 'user', 
-                            user_id = '', ), 
+                            user_id = '', 
+                            workspace_id = '', ), 
                         access_mode = 'all', 
                         selected_agent_ids = [
                             ''
