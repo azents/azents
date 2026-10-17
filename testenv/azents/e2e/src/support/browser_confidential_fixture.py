@@ -12,6 +12,10 @@ REPLACEMENT_PREFIX = PREFIX + "replacement_"
 FINAL = "BROWSER_CONFIDENTIAL_INPUT_VERIFIED"
 
 
+class OutputDecodeError(ValueError):
+    """Expose only a bounded fixture stage and static reason, never tool output."""
+
+
 @dataclass(frozen=True)
 class _Page:
     task_id: str
@@ -87,6 +91,38 @@ class Call:
 
 def decode_output(call_id: str | None, value: object) -> Observation | None:
     """Decode consumed tool fields at model-request ingress, preserving no secrets."""
+    try:
+        return _decode_output(call_id, value)
+    except ValueError as error:
+        stage = (call_id or "").removeprefix(REPLACEMENT_PREFIX).removeprefix(PREFIX)
+        if (
+            re.fullmatch(
+                r"skill|import|open|observe|oldfill|unchanged|encrypt|poll\d+|"
+                r"fill|account_encrypt|account_poll\d+|account_fill|wait|verify",
+                stage,
+            )
+            is None
+        ):
+            stage = "unknown"
+        allowed_reasons = {
+            "Confidential fixture tool output must contain text",
+            "Confidential fixture import has no absolute result path",
+            "Confidential fixture process identity is unavailable",
+            "Confidential fixture encryption process failed",
+            "Old ciphertext was not rejected by the new process key",
+            "Confidential fixture Browser result is invalid",
+            "Confidential fixture Browser identity is invalid",
+            "Confidential fixture expected a string field",
+        }
+        reason = (
+            str(error)
+            if str(error) in allowed_reasons
+            else "Confidential fixture Browser result is malformed"
+        )
+        raise OutputDecodeError(f"{stage}: {reason}") from None
+
+
+def _decode_output(call_id: str | None, value: object) -> Observation | None:
     if call_id is None or not call_id.startswith(PREFIX):
         return None
     replacement = call_id.startswith(REPLACEMENT_PREFIX)
