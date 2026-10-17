@@ -13,6 +13,7 @@ from azents.core.github_user_oauth import (
     GitHubUserOAuthError,
 )
 from azents.core.github_user_runtime import GitHubUserExecutionContext
+from azents.core.toolkit_ownership import ToolkitOwnerKind
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.github_user_oauth import RDBGitHubUserConnection
@@ -91,7 +92,7 @@ async def _runtime_fixture(
             await session.write_session.execute(
                 sa.update(RDBToolkitConfig)
                 .where(RDBToolkitConfig.id == setup.requester.toolkit_id)
-                .values(owner_agent_id=agent.id)
+                .values(owner_agent_id=agent.id, owner_kind=ToolkitOwnerKind.AGENT)
             )
         else:
             session.write_session.add(

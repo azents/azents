@@ -10,6 +10,7 @@ from sqlalchemy.dialects.postgresql import ENUM, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from azents.core.enums import MCPOAuthConnectionStatus
+from azents.core.toolkit_ownership import PersonalToolkitAccessMode, ToolkitOwnerKind
 from azents.rdb.models.base import RDBModel
 from azents.rdb.types.datetime import TimeZoneDateTime
 
@@ -22,6 +23,20 @@ def _enum_values(enum_cls: type[enum.StrEnum]) -> list[str]:
 mcp_oauth_connection_status_enum = ENUM(
     MCPOAuthConnectionStatus,
     name="mcp_oauth_connection_status",
+    create_type=False,
+    values_callable=_enum_values,
+)
+
+
+personal_toolkit_access_mode_enum = ENUM(
+    PersonalToolkitAccessMode,
+    name="personal_toolkit_access_mode",
+    create_type=False,
+    values_callable=_enum_values,
+)
+toolkit_owner_kind_enum = ENUM(
+    ToolkitOwnerKind,
+    name="toolkit_owner_kind",
     create_type=False,
     values_callable=_enum_values,
 )
@@ -42,14 +57,28 @@ class RDBToolkitConfig(RDBModel):
         init=False,
         default_factory=lambda: uuid7().hex,
     )
-    workspace_id: Mapped[str] = mapped_column(
+    owner_kind: Mapped[ToolkitOwnerKind] = mapped_column(
+        toolkit_owner_kind_enum, nullable=False
+    )
+    workspace_id: Mapped[str | None] = mapped_column(
         sa.String(32),
         sa.ForeignKey("workspaces.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
     )
     owner_agent_id: Mapped[str | None] = mapped_column(
         sa.String(32),
         sa.ForeignKey("agents.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    owner_user_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey(
+            "users.id", ondelete="CASCADE", name="fk_toolkit_configs_owner_user_id"
+        ),
+        nullable=True,
+    )
+    personal_access_mode: Mapped[PersonalToolkitAccessMode | None] = mapped_column(
+        personal_toolkit_access_mode_enum,
         nullable=True,
     )
     toolkit_type: Mapped[str] = mapped_column(sa.String(100), nullable=False)
@@ -94,11 +123,54 @@ class RDBToolkitConfig(RDBModel):
         "ix_toolkit_configs_owner_agent_id",
         "owner_agent_id",
     )
+    IX_OWNER_USER_ID = sa.Index("ix_toolkit_configs_owner_user_id", "owner_user_id")
+    CK_OWNER_SHAPE = sa.CheckConstraint(
+        "(owner_kind = 'workspace' AND workspace_id IS NOT NULL "
+        "AND owner_agent_id IS NULL AND owner_user_id IS NULL "
+        "AND personal_access_mode IS NULL) OR "
+        "(owner_kind = 'agent' AND workspace_id IS NOT NULL "
+        "AND owner_agent_id IS NOT NULL AND owner_user_id IS NULL "
+        "AND personal_access_mode IS NULL) OR "
+        "(owner_kind = 'user' AND workspace_id IS NULL AND owner_agent_id IS NULL "
+        "AND owner_user_id IS NOT NULL AND personal_access_mode IS NOT NULL)",
+        name="ck_toolkit_configs_owner_shape",
+    )
+    UQ_ID_OWNER_USER = sa.UniqueConstraint(
+        "id", "owner_user_id", name="uq_toolkit_configs_id_owner_user"
+    )
 
     __table_args__ = (
         IX_WORKSPACE_ID,
         IX_OWNER_AGENT_ID,
+        IX_OWNER_USER_ID,
+        CK_OWNER_SHAPE,
+        UQ_ID_OWNER_USER,
     )
+
+
+class RDBPersonalToolkitAgent(RDBModel):
+    """Positive Selected-mode membership, independent of shared attachments."""
+
+    __tablename__ = "personal_toolkit_agents"
+
+    toolkit_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        primary_key=True,
+    )
+    owner_user_id: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    agent_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("agents.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    IX_AGENT_ID = sa.Index("ix_personal_toolkit_agents_agent_id", "agent_id")
+    FK_PERSONAL_OWNER = sa.ForeignKeyConstraint(
+        ["toolkit_id", "owner_user_id"],
+        ["toolkit_configs.id", "toolkit_configs.owner_user_id"],
+        ondelete="CASCADE",
+        name="fk_personal_toolkit_agents_owner",
+    )
+    __table_args__ = (IX_AGENT_ID, FK_PERSONAL_OWNER)
 
 
 class RDBAgentToolkit(RDBModel):

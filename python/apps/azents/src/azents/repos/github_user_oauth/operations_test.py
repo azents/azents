@@ -22,6 +22,7 @@ from azents.core.github_user_oauth import (
     GitHubUserRequester,
 )
 from azents.core.system_setting_payload import SystemSettingPayloadResolver
+from azents.core.toolkit_ownership import ToolkitOwnerKind
 from azents.rdb.models.github_user_oauth import (
     RDBGitHubUserAttempt,
     RDBGitHubUserConnection,
@@ -63,8 +64,11 @@ async def _harness(manager: SessionManager[WriteSession]) -> _Harness:
         session.write_session.add(workspace)
         await session.write_session.flush()
         toolkit = RDBToolkitConfig(
+            owner_kind=ToolkitOwnerKind.WORKSPACE,
             workspace_id=workspace.id,
             owner_agent_id=None,
+            owner_user_id=None,
+            personal_access_mode=None,
             toolkit_type="github",
             slug="github",
             name="GitHub",

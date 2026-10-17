@@ -12,6 +12,8 @@ from azents.core.toolkit_errors import (
     DuplicateAgentToolkit,
     NotFound,
 )
+from azents.core.toolkit_ownership import ToolkitOwnerKind
+from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.toolkit import (
     RDBAgentToolkit,
     RDBAgentToolkitNamespaceReservation,
@@ -33,6 +35,16 @@ from .data import (
 )
 
 
+def workspace_shared_toolkit_predicate() -> sa.ColumnElement[bool]:
+    """Identify only explicit Workspace-owned configuration rows."""
+    return sa.and_(
+        RDBToolkitConfig.owner_kind == ToolkitOwnerKind.WORKSPACE,
+        RDBToolkitConfig.workspace_id.is_not(None),
+        RDBToolkitConfig.owner_user_id.is_(None),
+        RDBToolkitConfig.owner_agent_id.is_(None),
+    )
+
+
 def effective_agent_toolkit_relation(*, enabled_only: bool) -> Subquery:
     """Return the canonical persisted Agent-to-Toolkit relation."""
     shared = (
@@ -49,7 +61,7 @@ def effective_agent_toolkit_relation(*, enabled_only: bool) -> Subquery:
             RDBToolkitConfig,
             RDBToolkitConfig.id == RDBAgentToolkit.toolkit_id,
         )
-        .where(RDBToolkitConfig.owner_agent_id.is_(None))
+        .where(workspace_shared_toolkit_predicate())
     )
     owned = sa.select(
         RDBToolkitConfig.owner_agent_id.label("agent_id"),
@@ -59,7 +71,10 @@ def effective_agent_toolkit_relation(*, enabled_only: bool) -> Subquery:
         sa.literal(EffectiveToolkitSource.AGENT_OWNED.value).label("source"),
         sa.literal(1).label("source_order"),
         RDBToolkitConfig.created_at.label("effective_created_at"),
-    ).where(RDBToolkitConfig.owner_agent_id.is_not(None))
+    ).where(
+        RDBToolkitConfig.owner_kind == ToolkitOwnerKind.AGENT,
+        RDBToolkitConfig.owner_agent_id.is_not(None),
+    )
     if enabled_only:
         shared = shared.where(RDBToolkitConfig.enabled.is_(True))
         owned = owned.where(RDBToolkitConfig.enabled.is_(True))
@@ -88,8 +103,15 @@ class ToolkitRepository:
         :return: Created Toolkit
         """
         rdb_toolkit = RDBToolkitConfig(
+            owner_kind=(
+                ToolkitOwnerKind.WORKSPACE
+                if create.owner_agent_id is None
+                else ToolkitOwnerKind.AGENT
+            ),
             workspace_id=create.workspace_id,
             owner_agent_id=create.owner_agent_id,
+            owner_user_id=None,
+            personal_access_mode=None,
             toolkit_type=create.toolkit_type,
             slug=create.slug,
             name=create.name,
@@ -113,7 +135,13 @@ class ToolkitRepository:
         :param toolkit_id: Toolkit ID
         :return: Toolkit or None
         """
-        rdb = await session.read_session.get(RDBToolkitConfig, toolkit_id)
+        rdb = await session.read_session.scalar(
+            sa.select(RDBToolkitConfig).where(
+                RDBToolkitConfig.id == toolkit_id,
+                RDBToolkitConfig.workspace_id.is_not(None),
+                RDBToolkitConfig.owner_user_id.is_(None),
+            )
+        )
         if rdb is None:
             return None
         return self._build(rdb)
@@ -128,7 +156,7 @@ class ToolkitRepository:
             sa.select(RDBToolkitConfig)
             .where(
                 RDBToolkitConfig.id == toolkit_id,
-                RDBToolkitConfig.owner_agent_id.is_(None),
+                workspace_shared_toolkit_predicate(),
             )
             .with_for_update()
             .execution_options(populate_existing=True)
@@ -144,7 +172,7 @@ class ToolkitRepository:
         result = await session.read_session.execute(
             sa.select(RDBToolkitConfig).where(
                 RDBToolkitConfig.id == toolkit_id,
-                RDBToolkitConfig.owner_agent_id.is_(None),
+                workspace_shared_toolkit_predicate(),
             )
         )
         rdb = result.scalar_one_or_none()
@@ -180,7 +208,7 @@ class ToolkitRepository:
             sa.select(RDBToolkitConfig)
             .where(
                 RDBToolkitConfig.workspace_id == workspace_id,
-                RDBToolkitConfig.owner_agent_id.is_(None),
+                workspace_shared_toolkit_predicate(),
             )
             .order_by(RDBToolkitConfig.created_at.desc())
         )
@@ -308,7 +336,11 @@ class ToolkitRepository:
         values["revision"] = RDBToolkitConfig.revision + 1
         result = await session.write_session.execute(
             sa.update(RDBToolkitConfig)
-            .where(RDBToolkitConfig.id == toolkit_id)
+            .where(
+                RDBToolkitConfig.id == toolkit_id,
+                RDBToolkitConfig.workspace_id.is_not(None),
+                RDBToolkitConfig.owner_user_id.is_(None),
+            )
             .values(**values)
             .returning(RDBToolkitConfig)
         )
@@ -324,7 +356,11 @@ class ToolkitRepository:
         :param toolkit_id: Toolkit ID
         """
         await session.write_session.execute(
-            sa.delete(RDBToolkitConfig).where(RDBToolkitConfig.id == toolkit_id)
+            sa.delete(RDBToolkitConfig).where(
+                RDBToolkitConfig.id == toolkit_id,
+                RDBToolkitConfig.workspace_id.is_not(None),
+                RDBToolkitConfig.owner_user_id.is_(None),
+            )
         )
 
     async def update_credentials(
@@ -342,7 +378,11 @@ class ToolkitRepository:
         encrypted = self._encrypt(credentials.model_dump_json())
         stmt = (
             sa.update(RDBToolkitConfig)
-            .where(RDBToolkitConfig.id == toolkit_id)
+            .where(
+                RDBToolkitConfig.id == toolkit_id,
+                RDBToolkitConfig.workspace_id.is_not(None),
+                RDBToolkitConfig.owner_user_id.is_(None),
+            )
             .values(
                 encrypted_credentials=encrypted,
                 revision=RDBToolkitConfig.revision + 1,
@@ -379,7 +419,7 @@ class ToolkitRepository:
                 workspace_user_exists,
                 RDBToolkitConfig.workspace_id == workspace_id,
                 RDBToolkitConfig.enabled == True,  # noqa: E712
-                RDBToolkitConfig.owner_agent_id.is_(None),
+                workspace_shared_toolkit_predicate(),
             )
             .order_by(RDBToolkitConfig.created_at.desc())
         )
@@ -405,6 +445,8 @@ class ToolkitRepository:
 
     def _build(self, rdb: RDBToolkitConfig) -> ToolkitConfig:
         """Convert RDB model to domain model."""
+        if rdb.workspace_id is None or rdb.owner_user_id is not None:
+            raise ValueError("Expected a Workspace or Agent-owned Toolkit")
         return ToolkitConfig(
             id=rdb.id,
             workspace_id=rdb.workspace_id,
@@ -438,6 +480,20 @@ class AgentToolkitRepository:
         :param create: Create data
         :return: Created AgentToolkit or error
         """
+        shared = await session.write_session.scalar(
+            sa.select(RDBToolkitConfig.id)
+            .join(RDBAgent, RDBAgent.workspace_id == RDBToolkitConfig.workspace_id)
+            .where(
+                RDBToolkitConfig.id == create.toolkit_id,
+                workspace_shared_toolkit_predicate(),
+                RDBToolkitConfig.toolkit_type == create.toolkit_type,
+                RDBAgent.id == create.agent_id,
+            )
+        )
+        if shared is None:
+            raise ValueError(
+                "Attachment requires a shared Toolkit in the Agent Workspace"
+            )
         try:
             rdb_agent_toolkit = RDBAgentToolkit(
                 agent_id=create.agent_id,
@@ -474,7 +530,7 @@ class AgentToolkitRepository:
                 RDBToolkitConfig.id == RDBAgentToolkit.toolkit_id,
             )
             .where(RDBAgentToolkit.agent_id == agent_id)
-            .where(RDBToolkitConfig.owner_agent_id.is_(None))
+            .where(workspace_shared_toolkit_predicate())
             .order_by(RDBAgentToolkit.created_at.asc())
         )
         return [self._build(rdb) for rdb in result.scalars().all()]
@@ -487,7 +543,11 @@ class AgentToolkitRepository:
         """Fetch attached Agent IDs in deterministic lock order."""
         result = await session.read_session.execute(
             sa.select(RDBAgentToolkit.agent_id)
-            .where(RDBAgentToolkit.toolkit_id == toolkit_id)
+            .join(RDBToolkitConfig, RDBToolkitConfig.id == RDBAgentToolkit.toolkit_id)
+            .where(
+                RDBAgentToolkit.toolkit_id == toolkit_id,
+                workspace_shared_toolkit_predicate(),
+            )
             .order_by(RDBAgentToolkit.agent_id)
         )
         return list(result.scalars().all())
@@ -509,7 +569,7 @@ class AgentToolkitRepository:
             )
             .where(
                 RDBAgentToolkit.id == agent_toolkit_id,
-                RDBToolkitConfig.owner_agent_id.is_(None),
+                workspace_shared_toolkit_predicate(),
             )
         )
         rdb = result.scalar_one_or_none()
@@ -524,7 +584,14 @@ class AgentToolkitRepository:
         :param agent_toolkit_id: AgentToolkit ID
         """
         await session.write_session.execute(
-            sa.delete(RDBAgentToolkit).where(RDBAgentToolkit.id == agent_toolkit_id)
+            sa.delete(RDBAgentToolkit).where(
+                RDBAgentToolkit.id == agent_toolkit_id,
+                RDBAgentToolkit.toolkit_id.in_(
+                    sa.select(RDBToolkitConfig.id).where(
+                        workspace_shared_toolkit_predicate()
+                    )
+                ),
+            )
         )
 
     def _build(self, rdb: RDBAgentToolkit) -> AgentToolkit:
