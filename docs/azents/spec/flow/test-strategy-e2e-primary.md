@@ -23,6 +23,10 @@ code_paths:
   - typescript/apps/azents-web/src/shared/model-options/image-generation-config.test.mts
   - typescript/apps/azents-web/src/shared/model-options/model-selection.test.mts
   - typescript/apps/azents-web/src/features/toolkits/toolkit-config-projection.test.mts
+  - typescript/apps/azents-web/src/shared/toolkits/github-creation-completion.test.mts
+  - typescript/apps/azents-web/src/features/toolkits/github-user-creation-state.test.mts
+  - typescript/apps/azents-web/src/shared/toolkits/components/GitHubWizard.stories.tsx
+  - typescript/apps/azents-web/src/features/agents/components/AgentRuntimeSettings.stories.tsx
   - .claude/skills/ci-optimization/**
   - scripts/ci/**
   - python/apps/azents/src/azents/conftest.py
@@ -295,6 +299,26 @@ composing the package's exported modules without a browser host. A source
 dependency-boundary check and DOM-free typecheck protect the shared-core
 boundary. This does not replace cross-boundary browser E2E or certify a native
 application or device lifecycle.
+
+The same existing TypeScript job executes azents-web's native Node contracts,
+including production-hook ownership/publication/cancellation and browser-storage
+decoding. Its artifact contains native JUnit, command elapsed time, exit status
+and exact SHA/run/attempt identity, not invented pytest setup/call/teardown phases.
+Analysis requires the artifact whenever the Web Node step is enabled and validates
+the Node runner, finite positive duration and exit status. Missing or conflicting
+execution evidence cannot qualify a performance sample, even with green workflow
+metadata or JUnit.
+
+The GitHub browser journeys retain saved Workspace popup authorization plus new
+Agent same-context publication and actual Close-button cancellation. The Workspace
+new-publication ownership branch uses the production-hook and backend contracts
+rather than repeating the OAuth journey. Runtime browser coverage retains initial
+settings and Session metrics, stopped-state metrics, real lifecycle/storage
+postconditions and mobile interactions without an extra unchanged running-state
+settings/Session round-trip. Colocated confirmation/cancellation story plays
+provide local interaction evidence; until a CI producer executes them, they are
+not replacements for the retained browser checks.
+
 Required repository, service, and Worker integration tests own exact interleavings whose authority is
 PostgreSQL CAS, generation fencing, ownership recovery, transaction rollback, or stale-completion
 ordering. Those tests must exercise production repositories and execution owners with explicit
@@ -344,8 +368,12 @@ Always-on required CI does not depend on external credentials.
   code, CI setup, or production code when one change cannot clear the required
   critical-path threshold. A below-threshold same-SHA measurement returns to
   implementation while another safe candidate remains, then restarts the
-  two-successful-attempt measurement on the new SHA. The cycle cannot claim
-  improvement by removing tests, weakening assertions, bypassing real failure or
+  two-successful-attempt measurement on the new SHA. Review test bodies for
+  duplicate journeys, unnecessary checks and wrong-layer matrices alongside
+  infrastructure costs. Every removed or relocated scenario must map to retained
+  representative E2E or an executed narrower-layer test; render-only stories are
+  not interaction evidence. The cycle cannot claim improvement by dropping
+  behavioral coverage, weakening assertions, bypassing real failure or
   lifecycle boundaries, extending timeouts, or adding sleeps. Adding runners or other
   CI resources requires explicit approval and complete cost accounting.
 - Every enabled E2E lane resolves the immutable snapshots needed by its suite before

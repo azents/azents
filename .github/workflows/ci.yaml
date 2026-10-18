@@ -1005,6 +1005,18 @@ jobs:
         run: cd typescript && pnpm run typecheck
       - name: Session core contracts
         run: cd typescript && pnpm --filter @azents/session-core test
+      - name: Web Node contracts
+        run: |
+          python scripts/ci/run_node_tests.py \
+            --project typescript/apps/azents-web --name typescript-web \
+            --artifact-dir "${RUNNER_TEMP}/web-node-tests" \
+            'src/**/*.test.mts'
+      - name: Publish Web Node test observability
+        if: always()
+        uses: ./.github/actions/ci-test-observability
+        with:
+          name: typescript-web
+          directory: ${{ runner.temp }}/web-node-tests
 
   ci-typescript:
     name: ci-typescript

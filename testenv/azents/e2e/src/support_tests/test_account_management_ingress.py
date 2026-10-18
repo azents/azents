@@ -10,7 +10,6 @@ import requests
 from tests.required.public import test_github_setup_wizard as wizard
 from tests.required.public import test_github_user_toolkit as github
 from tests.required.public import test_user_sessions as sessions
-from tests.web.public import test_github_user_toolkit as browser
 
 
 def _response(payload: object, *, status: int = 200) -> requests.Response:
@@ -56,57 +55,6 @@ def test_generated_candidate_identity_rejects_coercion_without_private_diagnosti
     with pytest.raises(AssertionError) as failure:
         github._response(_response(payload), github._Candidate, label="candidate")
     assert "PRIVATE-OAUTH" not in "".join(traceback.format_exception(failure.value))
-
-
-@pytest.mark.parametrize("phase", ["AUTHORIZING", "REVIEW", "ERROR"])
-@pytest.mark.parametrize("agent_id", [None, "agent-1"])
-def test_creation_storage_matches_current_typescript_producer(
-    phase: str,
-    agent_id: str | None,
-) -> None:
-    payload: dict[str, object] = {
-        "handle": "workspace",
-        "attemptId": "attempt-1",
-        "phase": phase,
-        "returnPath": "/w/workspace/toolkits/new",
-    }
-    if agent_id is not None:
-        payload["agentId"] = agent_id
-        payload["returnPath"] = (
-            "/w/workspace/agents/agent-1/settings/capabilities#agent-toolkits"
-        )
-    result = browser._creation_context(json.dumps(payload))
-    assert result.attempt_id == "attempt-1"
-    assert result.agent_id == agent_id
-    assert result.model_dump(by_alias=True, exclude_unset=True) == payload
-
-
-@pytest.mark.parametrize(
-    "patch",
-    [
-        {"agentId": None},
-        {"agentId": 1},
-        {"attemptId": True},
-        {"attemptId": "invalid.attempt"},
-        {"phase": "UNKNOWN"},
-        {"returnPath": "/w/other/toolkits/new"},
-        {"handle": ""},
-        {"future": "PRIVATE"},
-    ],
-)
-def test_creation_storage_rejects_invalid_owned_fields_and_unknown_extensions(
-    patch: dict[str, object],
-) -> None:
-    payload = {
-        "handle": "workspace",
-        "attemptId": "attempt-1",
-        "phase": "REVIEW",
-        "returnPath": "/w/workspace/toolkits/new",
-        **patch,
-    }
-    with pytest.raises(AssertionError) as failure:
-        browser._creation_context(json.dumps(payload))
-    assert "PRIVATE" not in "".join(traceback.format_exception(failure.value))
 
 
 @pytest.mark.parametrize("payload", [{}, {"session_id": None}, {"session_id": 1}])

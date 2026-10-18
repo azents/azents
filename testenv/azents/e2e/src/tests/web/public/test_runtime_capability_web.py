@@ -688,22 +688,6 @@ def test_runtime_free_add_and_remove_progress(
         )
     )
 
-    browser_driver.get(
-        f"{azents_main_web_url}/w/{workspace.handle}/agents/{agent.id}/settings/runtime"
-    )
-    _assert_visible_text(browser_driver, "System metrics")
-    browser_driver.get(session_url)
-    _open_metrics_tab(browser_driver)
-    _assert_visible_text(browser_driver, "System metrics")
-    _wait(browser_driver).until(
-        ec.visibility_of_element_located(
-            (
-                By.CSS_SELECTOR,
-                "[role='img'][aria-label='Recent one-hour usage trend']",
-            )
-        )
-    )
-
     _wait(browser_driver).until(
         ec.element_to_be_clickable(
             (By.XPATH, "//*[@role='tab' and normalize-space()='Runtime']")

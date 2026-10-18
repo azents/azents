@@ -8,7 +8,11 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from scripts.ci.evidence import decode_test_run, verify_collection
+from scripts.ci.evidence import (
+    decode_native_node_run,
+    decode_test_run,
+    verify_collection,
+)
 from scripts.ci.observability import parse_junit, parse_timings
 from scripts.ci.workflow_report import Run, decode_run, metrics
 
@@ -45,11 +49,23 @@ def analyze(roots: list[Path], cohort: str) -> dict[str, object]:
                 identity = artifact.name.removeprefix("ci-observability-").rsplit(
                     "-", 1
                 )[0]
-                test_run = (
-                    decode_test_run(
-                        json.loads((artifact / "test-run.json").read_text())
-                    )
+                receipt = (
+                    json.loads((artifact / "test-run.json").read_text())
                     if (artifact / "test-run.json").is_file()
+                    else None
+                )
+                native = (
+                    decode_native_node_run(receipt)
+                    if receipt is not None and identity == "typescript-web"
+                    else None
+                )
+                if native is not None:
+                    failed_tests = failed_tests or native.exit_code != 0
+                test_run = (
+                    native.identity
+                    if native is not None
+                    else decode_test_run(receipt)
+                    if receipt is not None
                     else None
                 )
                 if test_run is None:
@@ -60,13 +76,14 @@ def analyze(roots: list[Path], cohort: str) -> dict[str, object]:
                     or test_run.attempt != str(run.attempt)
                     or test_run.name != identity
                 ):
-                    raise ValueError("Pytest evidence workflow identity mismatch")
+                    raise ValueError("Test evidence workflow identity mismatch")
             elif artifact.name.startswith("e2e-observability-"):
                 identity = "e2e-" + artifact.name.removeprefix("e2e-observability-")
             else:
                 continue
             found.add(identity)
-            if not junit.is_file() or not timing.is_file():
+            native_node = identity == "typescript-web"
+            if not junit.is_file() or (not native_node and not timing.is_file()):
                 evidence_complete = False
                 continue
             summary = parse_junit(junit)
@@ -84,8 +101,8 @@ def analyze(roots: list[Path], cohort: str) -> dict[str, object]:
                 case_keys[(coverage_identity, case.node_id)] += 1
                 if case.outcome in {"failed", "error"}:
                     failures[f"{identity}:{case.node_id}"] += 1
-            timing_records = parse_timings(timing)
-            if not timing_records:
+            timing_records = parse_timings(timing) if timing.is_file() else ()
+            if not native_node and not timing_records:
                 evidence_complete = False
             for entry in timing_records:
                 if (
@@ -208,6 +225,13 @@ def expected_test_artifacts(run: Run) -> set[str]:
     }.items():
         if name in names:
             expected.add(artifact)
+    if any(
+        j.name == "ci-typescript-run"
+        and any(s.name == "Web Node contracts" for s in j.steps)
+        for j in run.jobs
+        if j.conclusion != "skipped"
+    ):
+        expected.add("typescript-web")
     return expected
 
 

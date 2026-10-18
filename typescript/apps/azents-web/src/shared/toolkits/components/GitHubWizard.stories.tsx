@@ -281,6 +281,16 @@ export const CandidateMetadataError: Story = {
     canContinue: false,
   },
 };
+export const CandidateCloseWithoutPublication: Story = {
+  ...CandidateInline,
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("fixture-user")).toBeVisible();
+    await userEvent.click(canvas.getByRole("button", { name: "Close" }));
+    await expect(args.onClose).toHaveBeenCalledOnce();
+    await expect(args.onPublish).not.toHaveBeenCalled();
+  },
+};
 export const Features: Story = {
   args: { ...wizardReviewProps, stage: "FEATURES" },
 };

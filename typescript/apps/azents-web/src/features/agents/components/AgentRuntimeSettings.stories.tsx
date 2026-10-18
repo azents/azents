@@ -288,6 +288,53 @@ export const RemovalConfirmation = {
   args: {
     ...Managed.args,
     removeConfirmOpen: true,
+    onRemovalAcknowledgedChange: fn(),
+    onConfirmRemove: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const dialog = within(canvasElement.ownerDocument.body).getByRole(
+      "dialog",
+      {
+        name: "Permanently remove Runtime?",
+      },
+    );
+    const modal = within(dialog);
+    await expect(modal.getByText("This action is irreversible")).toBeVisible();
+    for (const text of ["Active root sessions", "Deleted", "Retained"]) {
+      await expect(modal.getByText(text)).toBeVisible();
+    }
+    await expect(
+      modal.getByRole("button", { name: "Permanently remove Runtime" }),
+    ).toBeDisabled();
+    await userEvent.click(
+      modal.getByRole("checkbox", {
+        name: "I understand that Runtime removal is permanent and may interrupt active work.",
+      }),
+    );
+    await expect(args.onRemovalAcknowledgedChange).toHaveBeenCalledWith(true);
+    await expect(args.onConfirmRemove).not.toHaveBeenCalled();
+  },
+} satisfies Story;
+
+export const RemovalAcknowledged = {
+  args: {
+    ...RemovalConfirmation.args,
+    removalAcknowledged: true,
+    onConfirmRemove: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const dialog = within(canvasElement.ownerDocument.body).getByRole(
+      "dialog",
+      {
+        name: "Permanently remove Runtime?",
+      },
+    );
+    const confirm = within(dialog).getByRole("button", {
+      name: "Permanently remove Runtime",
+    });
+    await expect(confirm).toBeEnabled();
+    await userEvent.click(confirm);
+    await expect(args.onConfirmRemove).toHaveBeenCalledOnce();
   },
 } satisfies Story;
 
@@ -295,6 +342,30 @@ export const RestartConfirmation = {
   args: {
     ...Managed.args,
     restartConfirmOpen: true,
+    onConfirmRestart: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const dialog = within(canvasElement.ownerDocument.body).getByRole(
+      "dialog",
+      {
+        name: "Restart Runtime?",
+      },
+    );
+    const modal = within(dialog);
+    await expect(
+      modal.getByText(
+        "The Runtime will be temporarily unavailable while it restarts.",
+      ),
+    ).toBeVisible();
+    await expect(
+      modal.getByText(
+        "Agent Workspace files and preserved Runtime storage are retained.",
+      ),
+    ).toBeVisible();
+    await userEvent.click(
+      modal.getByRole("button", { name: "Restart Runtime" }),
+    );
+    await expect(args.onConfirmRestart).toHaveBeenCalledOnce();
   },
 } satisfies Story;
 
@@ -302,6 +373,26 @@ export const ResetConfirmation = {
   args: {
     ...Managed.args,
     resetConfirmOpen: true,
+    onConfirmReset: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const dialog = within(canvasElement.ownerDocument.body).getByRole(
+      "dialog",
+      {
+        name: "Reset Runtime state?",
+      },
+    );
+    const modal = within(dialog);
+    await expect(
+      modal.getByText("Agent Workspace data will be deleted"),
+    ).toBeVisible();
+    await expect(
+      modal.getByText(
+        "Reset discards current Runtime workspace files and preserved Runtime state, then prepares an empty Runtime. This cannot be undone.",
+      ),
+    ).toBeVisible();
+    await userEvent.click(modal.getByRole("button", { name: "Reset Runtime" }));
+    await expect(args.onConfirmReset).toHaveBeenCalledOnce();
   },
 } satisfies Story;
 
