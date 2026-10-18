@@ -52,8 +52,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-10-13
-spec_version: 57
+last_verified_at: 2026-10-19
+spec_version: 58
 ---
 
 # Context Compaction
@@ -459,7 +459,24 @@ new durable authority. Task deletion, Session archive, or Binding disconnect doe
 not remove a preserved started cycle from the summary until that cycle
 terminalizes.
 
+## Routine Context Boundary
+
+[Routine judgment](../domain/routine.md) reads canonical Session history but its
+diagnostic observation is excluded from ordinary model input. Judgment-call usage
+does not replace ordinary turn usage, latest normal system-prompt snapshot,
+breakdown or compaction baseline. A no-action check therefore leaves ordinary
+context and usage unchanged.
+
+Admitted Routine trigger and continuation inputs are ordinary model inputs and
+retain normal accounting. Routine Toolkit hooks add incomplete admitted context
+to successful compaction continuity and select the oldest incomplete occurrence
+for idle continuation. They preserve original objectives and admitted identities
+rather than regenerating objectives from judgment.
+
 ## Changelog
+
+- 2026-10-19: Separate Routine judgment context/usage from ordinary inference and
+  preserve admitted incomplete work across compaction.
 
 - **2026-10-13** (spec_version 57) — Record first compaction displacement age and
   describe optional scheduled removal of expired original history.

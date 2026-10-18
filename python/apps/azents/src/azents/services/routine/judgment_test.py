@@ -64,6 +64,7 @@ from azents.testing.provider_native_envelopes import core_native_response
         "profile_failure",
         "stale_context",
         "unexpected_preparation",
+        "input_during_call",
     ],
 )
 async def test_hosted_judgment_dispatch_and_settlement_use_existing_inbox(
@@ -80,9 +81,10 @@ async def test_hosted_judgment_dispatch_and_settlement_use_existing_inbox(
         "profile_failure",
         "stale_context",
         "unexpected_preparation",
+        "input_during_call",
     ],
 ) -> None:
-    act = kind == "action"
+    act = kind in {"action", "input_during_call"}
     open_scopes = 0
 
     @asynccontextmanager
@@ -142,10 +144,15 @@ async def test_hosted_judgment_dispatch_and_settlement_use_existing_inbox(
         )
     wire: list[bytes] = []
     clients: list[httpx2.AsyncClient] = []
+    reached = asyncio.Event()
+    release = asyncio.Event()
 
-    def respond(native_request: httpx2.Request) -> httpx2.Response:
+    async def respond(native_request: httpx2.Request) -> httpx2.Response:
         assert open_scopes == 0
         wire.append(native_request.content)
+        if kind == "input_during_call":
+            reached.set()
+            await release.wait()
         if kind == "provider_failure":
             return httpx2.Response(
                 503,
@@ -275,7 +282,40 @@ async def test_hosted_judgment_dispatch_and_settlement_use_existing_inbox(
             assert check.state.queued_judgment_id is None
             assert check.state.last_action_at is None
         return
-    settled = await call
+    if kind == "input_during_call":
+        async with asyncio.timeout(10), asyncio.TaskGroup() as tasks:
+            running = tasks.create_task(call)
+            await reached.wait()
+            assert not running.done()
+            async with observed_session() as session:
+                later_input = await repo.events.append(
+                    session,
+                    EventCreate(
+                        session_id=scope.session_id,
+                        kind=EventKind.USER_MESSAGE,
+                        payload=UserMessagePayload(
+                            sender_user_id=None,
+                            content="Input received during the held judgment.",
+                        ).model_dump(mode="json"),
+                    ),
+                )
+            assert (
+                await repo.admit_tick(
+                    scope=scope,
+                    now=datetime.datetime.now(datetime.UTC) + ROUTINE_TICK_INTERVAL,
+                )
+                is None
+            )
+            assert not running.done() and len(wire) == 1
+            release.set()
+        settled = running.result()
+        assert settled.admission is not None
+        async with observed_session() as session:
+            retained = await repo.events.get_by_id(session, event_id=later_input.id)
+            assert retained is not None and retained.payload == later_input.payload
+        assert b"Input received during the held judgment." not in wire[0]
+    else:
+        settled = await call
     if kind == "empty":
         assert wire == [] and clients == []
         assert settled.observation is None and settled.admission is None
@@ -312,7 +352,9 @@ async def test_hosted_judgment_dispatch_and_settlement_use_existing_inbox(
     async with observed_session() as session:
         check = await repo.states.get_check(session, scope=scope)
         assert check is not None and check.state.queued_judgment_id is None
-        assert bool(check.state.source_inputs) == (payload.status == "failed")
+        assert bool(check.state.source_inputs) == (
+            payload.status == "failed" or kind == "input_during_call"
+        )
         assert (check.state.last_action_at is not None) == act
         assert (
             await repo.actions.get_by_id(session, action_execution_id=execution.id)

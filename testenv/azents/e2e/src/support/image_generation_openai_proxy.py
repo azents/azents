@@ -27,7 +27,7 @@ from typing import (
 )
 from urllib.parse import parse_qs, urlsplit
 
-from support import browser_confidential_fixture
+from support import browser_confidential_fixture, routine_model_fixture
 
 _PROMPT = "Provider image generation handoff"
 _EXPLICIT_IMAGE_PROMPT = "Provider image generation explicit pin handoff"
@@ -2414,6 +2414,15 @@ class _State:
     catalog_source_variant: ClassVar[_InferenceProfileSourceVariant] = "baseline"
     requests: ClassVar[list[dict[str, object]]] = []
     browser_files_requests: ClassVar[list[dict[str, object]]] = []
+    routine_requests: ClassVar[list[dict[str, object]]] = []
+    routine_runtime_barrier: ClassVar[routine_model_fixture.RuntimeBarrier] = (
+        routine_model_fixture.RuntimeBarrier()
+    )
+    routine_judgment_rounds: ClassVar[dict[tuple[str, ...], int]] = {}
+    routine_judgment_choices: ClassVar[dict[str, bool]] = {}
+    routine_continuations: ClassVar[OrderedDict[str, tuple[_ModelInputItem, ...]]] = (
+        OrderedDict()
+    )
     consolidation_continuations: ClassVar[
         OrderedDict[str, ConsolidationFixtureContinuation]
     ] = OrderedDict()
@@ -2439,6 +2448,13 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         """Return a local journal, deterministic usage, or proxied response."""
+        if self.path == routine_model_fixture.RUNTIME_BARRIER_PATH:
+            self._write_json(200, _State.routine_runtime_barrier.evidence())
+            return
+        if self.path == routine_model_fixture.RUNTIME_BARRIER_PATH + "/wait":
+            released = _State.routine_runtime_barrier.wait()
+            self._write_json(200 if released else 408, {"released": released})
+            return
         if self.path == "/inference-profile/catalog-source":
             with _State.lock:
                 variant = _State.catalog_source_variant
@@ -2474,6 +2490,10 @@ class _Handler(BaseHTTPRequestHandler):
                 journal.clear()
                 if journal is _State.requests:
                     _State.consolidation_continuations.clear()
+                if journal is _State.routine_requests:
+                    _State.routine_continuations.clear()
+                    _State.routine_judgment_rounds.clear()
+                    _State.routine_judgment_choices.clear()
                 if journal is _State.subscription_usage_requests:
                     _State.subscription_usage_sequences.clear()
             if journal is _State.external_channel_progress_requests:
@@ -2486,6 +2506,14 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         """Handle deterministic image, hosted-tool, and OAuth boundaries."""
+        if self.path == routine_model_fixture.RUNTIME_BARRIER_PATH:
+            _State.routine_runtime_barrier.arm()
+            self._write_json(201, _State.routine_runtime_barrier.evidence())
+            return
+        if self.path == routine_model_fixture.RUNTIME_BARRIER_PATH + "/release":
+            _State.routine_runtime_barrier.release()
+            self._write_json(200, _State.routine_runtime_barrier.evidence())
+            return
         if self.path == "/inference-profile/catalog-source":
             try:
                 control = _decode_inference_profile_source_control(self._read_body())
@@ -2595,7 +2623,77 @@ class _Handler(BaseHTTPRequestHandler):
     def _dispatch_model_request(self, request: _ModelRequestInput, body: bytes) -> None:
         """Route one generation-fenced local model request."""
         request = _decode_model_request(request)
+        previous = request.previous_response_id
+        if previous is not None and previous.startswith("resp_routine_e2e_"):
+            with _State.lock:
+                prior = _State.routine_continuations.get(previous)
+            if prior is None or request.input_items is None:
+                self._write_json(
+                    409, {"error": {"message": "Routine fixture context unavailable."}}
+                )
+                return
+            payload = _model_request_egress(request)
+            payload["input"] = [
+                _model_input_item_egress(item)
+                for item in (*prior, *request.input_items)
+            ]
+            request = _decode_model_request(payload)
         user_text = _last_user_text(request)
+        try:
+            routine = routine_model_fixture.decode_request(
+                latest_user=user_text,
+                completed_calls=tuple(item.call_id for item in request.tool_outputs),
+                tool_outputs=tuple(
+                    routine_model_fixture.ToolOutput(item.call_id, item.output_text)
+                    for item in request.tool_outputs
+                ),
+                tool_names=tuple(
+                    item.name for item in request.named_tools if item.name is not None
+                ),
+                title_request=_SESSION_TITLE_SYSTEM_MARKER in request.matching_text,
+                prior_text=request.input_strings,
+                wire_body=body,
+            )
+        except ValueError:
+            self._write_json(
+                400, {"error": {"message": "Invalid Routine fixture context."}}
+            )
+            return
+        if routine is not None:
+            if routine.kind == "judgment" and not routine.title_request:
+                identities = tuple(
+                    sorted(item.routine_id for item in routine.candidates)
+                )
+                with _State.lock:
+                    selected = _State.routine_judgment_choices.get(
+                        request.request_fingerprint
+                    )
+                    if selected is None:
+                        round_number = _State.routine_judgment_rounds.get(identities, 0)
+                        selected = round_number > 0
+                        _State.routine_judgment_rounds[identities] = round_number + 1
+                        _State.routine_judgment_choices[request.request_fingerprint] = (
+                            selected
+                        )
+                routine = replace(routine, select_candidates=selected)
+            if not routine.title_request:
+                with _State.lock:
+                    _State.routine_requests.append(
+                        routine_model_fixture.evidence(routine)
+                    )
+            plan = routine_model_fixture.plan(routine)
+            if isinstance(plan, routine_model_fixture.Call):
+                self._write_function_call_response(
+                    request,
+                    call_id=plan.call_id,
+                    name=plan.name,
+                    arguments=plan.arguments,
+                )
+            else:
+                self._write_text_response(
+                    request, plan.text, response_id=plan.response_id
+                )
+            return
         replacement = (
             user_text.removeprefix(browser_confidential_fixture.REPLACEMENT_PROMPT)
             if user_text is not None
@@ -4332,6 +4430,8 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _journal_for_path(self) -> list[dict[str, object]] | None:
         """Return the journal selected by the current request path."""
+        if self.path == routine_model_fixture.JOURNAL_PATH:
+            return _State.routine_requests
         if self.path == _BROWSER_FILES_JOURNAL_PATH:
             return _State.browser_files_requests
         if self.path == _JOURNAL_PATH:
@@ -5330,6 +5430,15 @@ class _Handler(BaseHTTPRequestHandler):
         output: list[dict[str, object]],
     ) -> dict[str, object]:
         """Build one completed Responses payload."""
+        request = _decode_model_request(request)
+        if response_id.startswith("resp_routine_e2e_"):
+            with _State.lock:
+                _State.routine_continuations[response_id] = (
+                    *(request.input_items or ()),
+                    *(_decode_model_input_item(item) for item in output),
+                )
+                while len(_State.routine_continuations) > 128:
+                    _State.routine_continuations.popitem(last=False)
         response: dict[str, object] = {
             "id": response_id,
             "object": "response",
@@ -5352,6 +5461,14 @@ class _Handler(BaseHTTPRequestHandler):
             },
         }
 
+        if routine_model_fixture.is_judgment(_last_user_text(request)):
+            response["usage"] = {
+                "input_tokens": 99000,
+                "output_tokens": 999,
+                "total_tokens": 99999,
+                "input_tokens_details": {"cached_tokens": 500},
+                "output_tokens_details": {"reasoning_tokens": 0},
+            }
         scenario = inference_profile_scenario(_last_user_text(request))
         if scenario is not None:
             tier = _INFERENCE_PROFILE_TIERS[scenario]

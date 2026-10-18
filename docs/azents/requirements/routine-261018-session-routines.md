@@ -1,6 +1,7 @@
 ---
 title: "Session Routines Requirements"
 created: 2026-10-18
+implemented: 2026-10-19
 tags: [routine, agent, conversation, toolkit, frontend]
 document_role: primary
 document_type: requirements

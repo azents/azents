@@ -86,8 +86,8 @@ code_paths:
   - python/apps/azents/bin/scheduler.sh
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
-last_verified_at: 2026-10-13
-spec_version: 38
+last_verified_at: 2026-10-19
+spec_version: 39
 ---
 
 # Periodic Execution Flow Spec
@@ -576,7 +576,27 @@ The periodic execution flow does not provide:
 - an independently scheduled model-catalog source sync; source collection is part of
   the existing system projection task.
 
+## Routine Source Dispatch
+
+The existing Scheduler also performs bounded source-only
+[Routine admission](../domain/routine.md). It scans eligible active Session owners,
+coalesces source evidence, enqueues an internal judgment action and sends an
+ordinary payload-free Session wake-up. It never calls the judgment model or
+executes Routine work. Code-job leases remain code-job infrastructure, not a
+Routine judgment owner or domain retry contract.
+
+The supported `manual` source contributes candidates at regular eligible checks;
+it is not a manual-run endpoint. Tick cadence and minimum action delay are
+separate 30-minute references. Creation and no-action do not advance the action
+reference, and delayed evidence waits for a later tick rather than an exact-time
+wake-up. Empty source sets and ongoing incomplete work do not create new work.
+Testenv-only exact-aware dispatch delegates to the same service and returns
+admission counts; it does not manufacture judgment or completion.
+
 ## Changelog
+
+- 2026-10-19: Add source-only Routine dispatch through the ordinary Session inbox;
+  retain Scheduled Task and maintenance-job authorities.
 
 - **2026-10-13** (spec_version 38) — Registered independent five-minute compacted
   event cleanup with bounded deletion and default Unlimited policy.

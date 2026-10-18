@@ -569,6 +569,11 @@ def core_prerequisites(
             "ro",
         )
         .with_volume_mapping(
+            str(_IMAGE_GENERATION_PROXY.with_name("routine_model_fixture.py")),
+            "/app/support/routine_model_fixture.py",
+            "ro",
+        )
+        .with_volume_mapping(
             str(_IMAGE_GENERATION_FIXTURE_DIR),
             "/fixtures",
             "ro",

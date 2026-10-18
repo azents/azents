@@ -9,12 +9,17 @@ from fastapi.testclient import TestClient
 
 from azents.api.testenv.scheduler.v1 import mount
 from azents.scheduler.deps import get_scheduler_service
+from azents.scheduler.routine_source_dispatch import get_routine_source_dispatcher
 from azents.scheduler.user_scheduled_task_dispatch import (
     get_user_scheduled_task_dispatcher,
 )
 from azents.services.historical_memory.sampling import (
     HistoricalMemorySamplingReport,
     HistoricalMemorySamplingService,
+)
+from azents.services.routine.source_dispatch import (
+    RoutineSourceDispatcher,
+    RoutineSourceDispatchSummary,
 )
 from azents.services.scheduled_task.service import ScheduledTaskDispatchSummary
 from azents.utils.fastapi.route import as_route_mounter
@@ -30,6 +35,43 @@ def _app(scheduler: object, *, dispatcher: object | None = None) -> FastAPI:
             dispatcher
         )
     return app
+
+
+def test_routine_tick_admits_through_real_service_without_executing_judgment() -> None:
+    """The control selects source time but owns no judgment or execution path."""
+    dispatcher = AsyncMock(spec=RoutineSourceDispatcher)
+    dispatcher.dispatch_once.return_value = RoutineSourceDispatchSummary(
+        checked=2, enqueued=1, unavailable=0, deadline_reached=False
+    )
+    app = _app(SimpleNamespace())
+    app.dependency_overrides[get_routine_source_dispatcher] = lambda: dispatcher
+    client = TestClient(app)
+    before = datetime.datetime.now(datetime.UTC)
+    response = client.post(
+        "/scheduler/v1/routines/dispatch", json={"now": "2099-01-01T09:00:00+09:00"}
+    )
+    after = datetime.datetime.now(datetime.UTC)
+    assert response.status_code == 200
+    assert response.json() == {
+        "now": "2099-01-01T00:00:00Z",
+        "checked": 2,
+        "enqueued": 1,
+        "unavailable": 0,
+        "deadline_reached": False,
+    }
+    dispatcher.dispatch_once.assert_awaited_once()
+    arguments = dispatcher.dispatch_once.call_args.kwargs
+    assert arguments["now"] == datetime.datetime(2099, 1, 1, tzinfo=datetime.UTC)
+    assert (
+        before + datetime.timedelta(seconds=10)
+        <= arguments["deadline"]
+        <= after + datetime.timedelta(seconds=10)
+    )
+    invalid = client.post(
+        "/scheduler/v1/routines/dispatch", json={"now": "2099-01-01T00:00:00"}
+    )
+    assert invalid.status_code == 422
+    dispatcher.dispatch_once.assert_awaited_once()
 
 
 def test_run_triggers_task_and_executes_scheduler_pass() -> None:

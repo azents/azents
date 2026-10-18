@@ -134,8 +134,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/github-setup.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-10-17
-spec_version: 150
+last_verified_at: 2026-10-19
+spec_version: 151
 ---
 
 # Toolkit
@@ -1793,7 +1793,27 @@ retains the canonical Mailbox, cycle, and Task lock order and atomically removes
 an admitted trigger/cycle with its Task. Channel registration and deletion
 notification execute only after the operation returns.
 
+## Routine Toolkit
+
+The automatically connected root Routine Toolkit provides `create_routine`,
+`list_routines`, `inspect_routine`, `update_routine`, `delete_routine`,
+`read_routine_context` and `record_routine_result`. It binds exact current Session
+execution authority. Definitions and retained records use their durable domain
+repositories; check and admitted execution state use existing Session Toolkit
+State with distinct identities and fences. See [Routine domain](routine.md).
+
+Update compares complete prior content before applying separate supplied
+changes. Work completion uses admitted identity, closes only that occurrence,
+and returns canonical stored work on duplicate completion. Tool activity presents
+requested content separately from observed completed output; failure,
+interruption or cancellation does not imply successful mutation. Compaction and
+idle continuation hooks preserve incomplete admitted objectives without
+introducing an independent Routine execution owner.
+
 ## Changelog
+
+- 2026-10-19: Add auto-bound Session Routine tools, independent work context and
+  semantic requested-versus-observed presentation.
 
 - **2026-10-15** (spec_version 149) — Removed the general-purpose environment
   Toolkit and migrated allowlisted encrypted values and exact Agent access into
