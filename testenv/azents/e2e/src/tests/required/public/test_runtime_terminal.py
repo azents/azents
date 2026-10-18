@@ -354,8 +354,8 @@ def _prepare_terminal_session(
     _wait_terminal_projection(
         public_api_client=public_api_client,
         workspace=workspace,
-        predicate=lambda projection: projection.state in {"ready", "active"},
-        message="Terminal did not become ready after Session folder preparation",
+        predicate=lambda projection: projection.can_open_or_attach,
+        message="Terminal did not become openable after Session folder preparation",
         timeout=remaining,
     )
 
