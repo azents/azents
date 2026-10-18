@@ -95,16 +95,13 @@ def test_e2e_lanes_require_exact_current_run_producer_images_without_rebuild() -
     assert "      - ci_docker_build_run\n" in lane
     assert "needs.ci_docker_build_run.result == 'success'" in lane
     assert "ref: ${{ github.event.pull_request.head.sha || github.sha }}" in lane
-    core = _step_block(lane, "Download exact core CI images")
-    web = _step_block(lane, "Download exact Web CI images")
-    for step in (core, web):
-        assert "${{ github.run_id }}-${{ github.run_attempt }}" in step
-        assert "path: ${{ runner.temp }}/e2e-images" in step
-        assert "merge-multiple:" not in step
-        assert "continue-on-error:" not in step
-    assert "{server,runtime-runner,runtime-provider-docker}" in core
-    assert "if: matrix.suite == 'web'" in web
-    assert "{web,admin-web}" in web
+    preparation = _step_block(lane, "Prepare exact images and existing prerequisites")
+    assert "scripts.ci.e2e_images prepare" in preparation
+    assert "GH_TOKEN: ${{ github.token }}" in preparation
+    assert "actions: read" in lane.split("    steps:\n", 1)[0]
+    assert "--root" in preparation and "--evidence" in preparation
+    assert "continue-on-error:" not in preparation
+    assert lane.index("Prepare exact images") < lane.index("Verify and load")
     load = _step_block(lane, "Verify and load exact CI image portfolio")
     assert "scripts.ci.e2e_images load" in load
     assert "--github-env" in load and "--evidence" in load

@@ -413,18 +413,34 @@ Always-on required CI does not depend on external credentials.
   Both producer and consumer check out the tested head SHA rather than the synthetic
   pull-request merge commit.
   Each selected producer saves its inspected immutable Docker image ID, compresses
-  once, hashes the archive and uploads an image-specific artifact bound to repository,
+  once with zstd level 3 and one compression worker, hashes the archive and uploads
+  an image-specific artifact bound to repository,
   tested SHA, run ID and attempt. Consumers validate the entire exact portfolio,
   receipt fields, non-symlink files, archive sizes and SHA256 hashes before loading
-  any image. Loaded IDs and the assigned local tags must match the receipts before
-  environment variables are published. Missing, stale, duplicate, partial, corrupt
+  any image. Two bounded import slots overlap independent archive loads on the same
+  runner, without changing pytest workers or runner allocation. Every started import
+  is drained even on another import's failure. Loaded IDs and the assigned local
+  tags must match all receipts before environment variables are published.
+  Missing, stale, duplicate, partial, corrupt
   or unexpected artifacts fail closed; they never select a local image rebuild.
   Existing fixture health, failure propagation, lifecycle ownership and final drain
   remain authoritative. Prepared-image worker plans explicitly record zero builds.
-  Lane artifacts retain receipts, verification and load durations. Workflow step
-  evidence separately measures export, upload, download, load and archive cleanup,
+  Lane artifacts retain receipts, verification, per-image and total load durations.
+  Before import, one preparation owner overlaps exact same-run artifact downloads
+  through two bounded exact-name GitHub CLI download slots with pulls of the five
+  existing public prerequisite images. Both tasks, every download and every
+  prerequisite pull are joined before the owner returns.
+  Missing downloads or failed pulls fail preparation without retry or fallback.
+  No Selenium or additional image is added to this portfolio; ordinary fixture
+  health/readiness and lifecycle behavior remain authoritative.
+  Workflow step evidence separately measures export, upload, preparation, load and
+  archive cleanup,
   while whole-workflow gate time and runner-seconds include the producer dependency.
-  External prerequisite images still use ordinary Testcontainers pulls.
+  Preparation artifacts retain exact identity, every download/pull status and duration,
+  plus same-clock download, prerequisite-owner and import boundaries to distinguish
+  actual overlap from sums of nested work. They never contain credentials. Local
+  optional snapshot preparation owns the shared public-image inventory while
+  retaining its stdlib-only direct CLI and existing best-effort policy.
 - Snapshot workflow dispatch keeps downstream publication enabled by default for
   compatibility. An explicit `dispatch_downstream: false` manual input builds and
   publishes immutable images without invoking the downstream deployment, allowing

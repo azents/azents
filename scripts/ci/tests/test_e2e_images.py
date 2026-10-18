@@ -1,7 +1,11 @@
 """Image handoff requires the exact portfolio and bytes before Docker admission."""
 
 import json
+import os
+import subprocess
+import sys
 import tempfile
+import threading
 import unittest
 from dataclasses import asdict
 from pathlib import Path
@@ -11,13 +15,17 @@ from scripts.ci.e2e_images import (
     CORE,
     IMAGES,
     Identity,
+    ImageLoad,
     ImageReceipt,
+    _download,
     decode_receipt,
     digest,
     identity,
     load,
+    prepare,
     verify_checkout,
 )
+from testenv.azents.e2e.src.support.e2e_snapshot_images import PREREQUISITE_IMAGES
 
 ENV = {
     "GITHUB_REPOSITORY": "azents/azents",
@@ -34,7 +42,7 @@ def portfolio(root: Path, selected: tuple[str, ...]) -> None:
     for image in selected:
         directory = root / f"ci-e2e-image-{image}-100-2"
         directory.mkdir()
-        archive = directory / "image.tar.gz"
+        archive = directory / "image.tar.zst"
         archive.write_bytes(image.encode())
         receipt = ImageReceipt(
             OWNER, image, IMAGE_ID, digest(archive), archive.stat().st_size, 1.0
@@ -78,6 +86,26 @@ class ImageHandoffTest(unittest.TestCase):
             ):
                 with self.assertRaises(ValueError):
                     identity()
+
+    def test_snapshot_cli_runs_without_pythonpath_from_any_directory(self):
+        root = Path(__file__).resolve().parents[3]
+        script = root / "testenv/azents/e2e/src/support/e2e_snapshot_images.py"
+        environment = {
+            key: value for key, value in os.environ.items() if key != "PYTHONPATH"
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            for cwd in (root, Path(tmp)):
+                result = subprocess.run(
+                    [sys.executable, str(script), "--help"],
+                    env=environment,
+                    cwd=cwd,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("--artifact-dir", result.stdout)
+                self.assertIn("--github-env", result.stdout)
 
     def test_required_and_web_admit_the_whole_exact_portfolio(self):
         for suite, selected in (("required", CORE), ("web", tuple(IMAGES))):
@@ -139,7 +167,7 @@ class ImageHandoffTest(unittest.TestCase):
                     case "wrong_repo":
                         receipt["identity"]["repository"] = "foreign/repository"
                     case "corrupt_bytes":
-                        (last / "image.tar.gz").write_bytes(b"corrupt")
+                        (last / "image.tar.zst").write_bytes(b"corrupt")
                     case "wrong_size":
                         receipt["archive_bytes"] += 1
                     case "unsafe_image":
@@ -150,8 +178,8 @@ class ImageHandoffTest(unittest.TestCase):
                         receipt["future"] = True
                     case "symlink":
                         target = Path(tmp) / "elsewhere"
-                        (last / "image.tar.gz").rename(target)
-                        (last / "image.tar.gz").symlink_to(target)
+                        (last / "image.tar.zst").rename(target)
+                        (last / "image.tar.zst").symlink_to(target)
                     case "unexpected_root_file":
                         (root / "unexpected.txt").write_text("unexpected")
                 if scenario != "missing":
@@ -216,3 +244,156 @@ class ImageHandoffTest(unittest.TestCase):
         for invalid in (None, True, 0, -1, float("nan"), float("inf")):
             with self.subTest(value=invalid), self.assertRaises(ValueError):
                 decode_receipt({**receipt, "export_seconds": invalid})
+
+    def test_preparation_overlaps_download_and_pulls_but_joins_every_outcome(self):
+        for scenario in ("passed", "download_failure", "pull_failure"):
+            for suite, selected in (("required", CORE), ("web", tuple(IMAGES))):
+                with self.subTest(scenario=scenario, suite=suite):
+                    self._check_preparation(scenario, suite, selected)
+
+    def _check_preparation(self, scenario, suite, selected):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "images"
+            evidence = Path(tmp) / "evidence"
+            download_started = threading.Event()
+            pull_started = threading.Event()
+            pulls_finished = set()
+            lock = threading.Lock()
+            commands = []
+
+            def run(command, **_kwargs):
+                with lock:
+                    commands.append(command)
+                if command[0] == "gh":
+                    download_started.set()
+                    self.assertTrue(pull_started.wait(5))
+                    self.assertEqual(command[1:4], ["run", "download", "100"])
+                    self.assertIn("azents/azents", command)
+                    self.assertIn("-100-2", command[command.index("--name") + 1])
+                    status = int(scenario == "download_failure")
+                else:
+                    self.assertEqual(command[:2], ("docker", "pull"))
+                    pull_started.set()
+                    self.assertTrue(download_started.wait(5))
+                    with lock:
+                        pulls_finished.add(command[2])
+                    status = int(
+                        scenario == "pull_failure" and command[2] == "postgres:18"
+                    )
+                return subprocess.CompletedProcess(command, status, "", "")
+
+            with (
+                patch.dict("os.environ", ENV),
+                patch(
+                    "scripts.ci.e2e_images.subprocess.run", side_effect=run
+                ) as docker,
+            ):
+                if scenario == "passed":
+                    prepare(root, suite, evidence)
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "preparation failed"):
+                        prepare(root, suite, evidence)
+                self.assertEqual(pulls_finished, set(PREREQUISITE_IMAGES))
+                receipt = json.loads(
+                    (evidence / "ci-image-preparation.json").read_text()
+                )
+                self.assertEqual(receipt["identity"], asdict(OWNER))
+                self.assertEqual(
+                    {x["image"] for x in receipt["prerequisite_pulls"]},
+                    set(PREREQUISITE_IMAGES),
+                )
+                self.assertEqual(
+                    {x["image"] for x in receipt["downloads"]},
+                    set(selected),
+                )
+                self.assertLess(
+                    max(
+                        min(x["started_at_monotonic"] for x in receipt["downloads"]),
+                        receipt["prerequisite_window"]["started_at_monotonic"],
+                    ),
+                    min(
+                        max(x["finished_at_monotonic"] for x in receipt["downloads"]),
+                        receipt["prerequisite_window"]["finished_at_monotonic"],
+                    ),
+                )
+                self.assertTrue(
+                    all(
+                        tuple(command[:3]) != ("docker", "image", "load")
+                        for command in commands
+                    )
+                )
+                count = docker.call_count
+                with self.assertRaises(FileExistsError):
+                    prepare(root, suite, evidence)
+                self.assertEqual(docker.call_count, count)
+
+    def test_exact_download_requests_overlap_in_two_owned_slots(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lock = threading.Lock()
+            both_started = threading.Event()
+            names = []
+            active = 0
+            peak = 0
+
+            def run(command, **_kwargs):
+                nonlocal active, peak
+                with lock:
+                    names.append(command[command.index("--name") + 1])
+                    active += 1
+                    peak = max(peak, active)
+                    if len(names) >= 2:
+                        both_started.set()
+                self.assertTrue(both_started.wait(5), "downloads did not overlap")
+                with lock:
+                    active -= 1
+                return subprocess.CompletedProcess(command, 0)
+
+            with patch("scripts.ci.e2e_images.subprocess.run", side_effect=run):
+                results = _download(Path(tmp), CORE, OWNER)
+            self.assertEqual(peak, 2)
+            self.assertEqual(
+                sorted(names),
+                sorted(f"ci-e2e-image-{image}-100-2" for image in CORE),
+            )
+            self.assertTrue(all(item.completed for item in results))
+            self.assertTrue(
+                all(
+                    item.finished_at_monotonic > item.started_at_monotonic
+                    for item in results
+                )
+            )
+
+    def test_complete_validation_precedes_two_slot_import_and_environment_publication(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "images"
+            portfolio(root, tuple(IMAGES))
+            env = Path(tmp) / "env"
+            evidence = Path(tmp) / "evidence"
+            lock = threading.Lock()
+            both_started = threading.Event()
+            started = set()
+            finished = set()
+
+            def import_image(archive, receipt):
+                self.assertTrue(archive.is_file())
+                self.assertFalse(env.exists())
+                with lock:
+                    started.add(receipt.image)
+                    if len(started) >= 2:
+                        both_started.set()
+                self.assertTrue(both_started.wait(5), "imports did not overlap")
+                with lock:
+                    finished.add(receipt.image)
+                return ImageLoad(receipt.image, 1.0, 1.0, 2.0)
+
+            with (
+                patch.dict("os.environ", ENV),
+                patch("scripts.ci.e2e_images._load_image", side_effect=import_image),
+            ):
+                load(root, "web", env, evidence)
+            self.assertEqual(finished, set(IMAGES))
+            self.assertEqual(len(env.read_text().splitlines()), len(IMAGES))
+            receipt = json.loads((evidence / "ci-image-handoff.json").read_text())
+            self.assertEqual({x["image"] for x in receipt["image_loads"]}, set(IMAGES))

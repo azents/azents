@@ -7,10 +7,17 @@ import os
 import re
 import subprocess
 import time
+from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from scripts.ci.workflow_report import integer, object_value, text
+from testenv.azents.e2e.src.support.e2e_snapshot_images import (
+    PREREQUISITE_IMAGES,
+    PrerequisiteImagePull,
+    prepare_prerequisite_images,
+)
 
 IMAGES = {
     "azents-server": "AZENTS_E2E_SERVER_IMAGE",
@@ -20,6 +27,7 @@ IMAGES = {
     "azents-admin-web": "AZENTS_E2E_ADMIN_WEB_IMAGE",
 }
 CORE = tuple(IMAGES)[:3]
+ARCHIVE_NAME = "image.tar.zst"
 
 
 @dataclass(frozen=True)
@@ -38,6 +46,120 @@ class ImageReceipt:
     archive_sha256: str
     archive_bytes: int
     export_seconds: float
+
+
+@dataclass(frozen=True)
+class ImageDownload:
+    image: str
+    completed: bool
+    duration_seconds: float
+    started_at_monotonic: float
+    finished_at_monotonic: float
+
+
+@dataclass(frozen=True)
+class ImageLoad:
+    image: str
+    duration_seconds: float
+    started_at_monotonic: float
+    finished_at_monotonic: float
+
+
+@dataclass(frozen=True)
+class PrerequisitePreparation:
+    pulls: tuple[PrerequisiteImagePull, ...]
+    started_at_monotonic: float
+    finished_at_monotonic: float
+
+
+def _download_one(root: Path, image: str, owner: Identity) -> ImageDownload:
+    name = f"ci-e2e-image-{image}-{owner.run_id}-{owner.attempt}"
+    started = time.monotonic()
+    result = subprocess.run(
+        [
+            "gh",
+            "run",
+            "download",
+            str(owner.run_id),
+            "--repo",
+            owner.repository,
+            "--name",
+            name,
+            "--dir",
+            str(root / name),
+        ],
+        check=False,
+    )
+    finished = time.monotonic()
+    return ImageDownload(
+        image, result.returncode == 0, finished - started, started, finished
+    )
+
+
+def _download(
+    root: Path, selected: tuple[str, ...], owner: Identity
+) -> tuple[ImageDownload, ...]:
+    # gh downloads a multi-name request serially. Separate exact-name requests
+    # retain two bounded I/O slots and explicit ownership of every result.
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(_download_one, root, image, owner) for image in selected
+        ]
+    return tuple(future.result() for future in futures)
+
+
+def _pull_command(
+    command: Sequence[str], input_text: str | None
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(command, input=input_text, text=True, check=False)
+
+
+def _prerequisites() -> PrerequisitePreparation:
+    started = time.monotonic()
+    pulls = prepare_prerequisite_images(command_runner=_pull_command)
+    return PrerequisitePreparation(pulls, started, time.monotonic())
+
+
+def prepare(root: Path, suite: str, evidence: Path) -> None:
+    """Own and join exact downloads and existing prerequisite pulls in one step."""
+    owner = identity()
+    verify_checkout(owner)
+    selected = CORE if suite == "required" else tuple(IMAGES)
+    root.mkdir(parents=True, exist_ok=False)
+    started = time.monotonic()
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        downloads = executor.submit(_download, root, selected, owner)
+        prerequisites = executor.submit(_prerequisites)
+    downloaded = downloads.result()
+    prerequisite = prerequisites.result()
+    pulled = prerequisite.pulls
+    evidence.mkdir(parents=True, exist_ok=True)
+    with (evidence / "ci-image-preparation.json").open("x") as output:
+        json.dump(
+            {
+                "identity": asdict(owner),
+                "suite": suite,
+                "duration_seconds": time.monotonic() - started,
+                "downloads": [asdict(item) for item in downloaded],
+                "prerequisite_pulls": [asdict(item) for item in pulled],
+                "prerequisite_window": {
+                    "started_at_monotonic": prerequisite.started_at_monotonic,
+                    "finished_at_monotonic": prerequisite.finished_at_monotonic,
+                },
+            },
+            output,
+            indent=2,
+        )
+        output.write("\n")
+    if (
+        {item.image for item in downloaded} != set(selected)
+        or len(downloaded) != len(selected)
+        or not all(item.completed for item in downloaded)
+        or {item.image for item in pulled} != set(PREREQUISITE_IMAGES)
+        or len(pulled) != len(PREREQUISITE_IMAGES)
+        or not all(item.completed for item in pulled)
+    ):
+        raise RuntimeError("Exact image download or prerequisite preparation failed")
 
 
 def identity() -> Identity:
@@ -132,7 +254,7 @@ def export(image: str, directory: Path) -> ImageReceipt:
     directory.mkdir(parents=True, exist_ok=False)
     started = time.monotonic()
     image_id = inspect(f"{image}:ci")
-    archive = directory / "image.tar.gz"
+    archive = directory / ARCHIVE_NAME
     with archive.open("xb") as output:
         save = subprocess.Popen(
             ["docker", "image", "save", image_id], stdout=subprocess.PIPE
@@ -140,7 +262,10 @@ def export(image: str, directory: Path) -> ImageReceipt:
         assert save.stdout is not None
         try:
             compressed = subprocess.run(
-                ["gzip", "-1"], stdin=save.stdout, stdout=output, check=False
+                ["zstd", "-3", "-T1", "--stdout"],
+                stdin=save.stdout,
+                stdout=output,
+                check=False,
             )
         finally:
             save.stdout.close()
@@ -161,6 +286,19 @@ def export(image: str, directory: Path) -> ImageReceipt:
     return receipt
 
 
+def _load_image(archive: Path, receipt: ImageReceipt) -> ImageLoad:
+    started = time.monotonic()
+    subprocess.run(["docker", "image", "load", "--input", str(archive)], check=True)
+    tag = f"{receipt.image}:ci"
+    if inspect(receipt.image_id) != receipt.image_id:
+        raise ValueError("Loaded CI Docker image identity mismatch")
+    subprocess.run(["docker", "image", "tag", receipt.image_id, tag], check=True)
+    if inspect(tag) != receipt.image_id:
+        raise ValueError("Tagged CI Docker image identity mismatch")
+    finished = time.monotonic()
+    return ImageLoad(receipt.image, finished - started, started, finished)
+
+
 def load(root: Path, suite: str, environment: Path, evidence: Path) -> None:
     """Validate the entire exact portfolio before admitting any image to Docker."""
     owner = identity()
@@ -177,14 +315,14 @@ def load(root: Path, suite: str, environment: Path, evidence: Path) -> None:
             or not directory.is_dir()
             or set(p.name for p in directory.iterdir())
             != {
-                "image.tar.gz",
+                ARCHIVE_NAME,
                 "receipt.json",
             }
         ):
             raise ValueError("Unexpected CI image artifact content")
         receipt = decode_receipt(json.loads((directory / "receipt.json").read_text()))
         expected_name = f"ci-e2e-image-{receipt.image}-{owner.run_id}-{owner.attempt}"
-        archive = directory / "image.tar.gz"
+        archive = directory / ARCHIVE_NAME
         if (
             directory.name != expected_name
             or receipt.identity != owner
@@ -202,17 +340,16 @@ def load(root: Path, suite: str, environment: Path, evidence: Path) -> None:
         raise ValueError("CI image portfolio is incomplete or unexpected")
     verification_seconds = time.monotonic() - verification_started
     started = time.monotonic()
-    exports = []
-    for image in selected:
-        archive, receipt = receipts[image]
-        subprocess.run(["docker", "image", "load", "--input", str(archive)], check=True)
-        tag = f"{image}:ci"
-        if inspect(receipt.image_id) != receipt.image_id:
-            raise ValueError("Loaded CI Docker image identity mismatch")
-        subprocess.run(["docker", "image", "tag", receipt.image_id, tag], check=True)
-        if inspect(tag) != receipt.image_id:
-            raise ValueError("Tagged CI Docker image identity mismatch")
-        exports.append(f"{IMAGES[image]}={tag}\n")
+    # Complete validation above precedes every import. Leaving the owner drains
+    # both import slots even when one fails; no partial portfolio publishes env.
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        loaded = tuple(
+            executor.map(
+                _load_image,
+                [receipts[image][0] for image in selected],
+                [receipts[image][1] for image in selected],
+            )
+        )
     evidence.mkdir(parents=True, exist_ok=True)
     (evidence / "ci-image-handoff.json").write_text(
         json.dumps(
@@ -222,13 +359,14 @@ def load(root: Path, suite: str, environment: Path, evidence: Path) -> None:
                 "images": [asdict(receipts[name][1]) for name in selected],
                 "verification_seconds": verification_seconds,
                 "load_seconds": time.monotonic() - started,
+                "image_loads": [asdict(item) for item in loaded],
             },
             indent=2,
         )
         + "\n"
     )
     with environment.open("a") as output:
-        output.writelines(exports)
+        output.writelines(f"{IMAGES[image]}={image}:ci\n" for image in selected)
 
 
 def main() -> int:
@@ -237,6 +375,10 @@ def main() -> int:
     producer = commands.add_parser("export")
     producer.add_argument("--image", choices=IMAGES, required=True)
     producer.add_argument("--directory", type=Path, required=True)
+    preparation = commands.add_parser("prepare")
+    preparation.add_argument("--root", type=Path, required=True)
+    preparation.add_argument("--suite", choices=["required", "web"], required=True)
+    preparation.add_argument("--evidence", type=Path, required=True)
     consumer = commands.add_parser("load")
     consumer.add_argument("--root", type=Path, required=True)
     consumer.add_argument("--suite", choices=["required", "web"], required=True)
@@ -245,6 +387,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.operation == "export":
         export(args.image, args.directory)
+    elif args.operation == "prepare":
+        prepare(args.root, args.suite, args.evidence)
     else:
         load(args.root, args.suite, args.github_env, args.evidence)
     return 0
