@@ -25,6 +25,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/toolkits/toolkit-config-projection.test.mts
   - .claude/skills/ci-optimization/**
   - scripts/ci/**
+  - python/apps/azents/src/azents/conftest.py
+  - python/apps/azents/src/azents/testing/transaction_fixture.py
   - .github/actions/ci-test-observability/**
   - .claude/skills/technical-feature-design/SKILL.md
   - .claude/skills/ship-feature/SKILL.md
@@ -49,7 +51,7 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-10-16
+last_verified_at: 2026-10-18
 spec_version: 87
 ---
 
@@ -707,6 +709,26 @@ Always-on required CI does not depend on external credentials.
   The observer binds its performance clock and output path at startup so application
   clock/environment mocks cannot consume mock values or redirect hook evidence.
   Existing E2E image/browser diagnostics and the E2E duration gate remain separate.
+- Backend unit/integration pytest uses two processes inside the same existing CI
+  job and runner. File-level distribution retains complete modules on one worker;
+  each worker creates its own database/container and temporary-file fixtures.
+  Each function-owned database transaction rolls back at test exit, while ORM
+  contexts commit or roll back their own SQLAlchemy-managed savepoint. Explicit
+  context commits, rollbacks, failures and cancellation cannot commit the outer
+  test transaction. Other Python matrix projects and E2E lanes keep their existing
+  execution model; no tests or assertions are excluded.
+- Distributed test phases are recorded once by the controller. Each worker writes
+  only safe fixture receipts to its own raw file. After worker and fixture teardown,
+  the controller validates and merges these records into the usual timing evidence,
+  retaining raw worker files in the artifact. Native command timing includes worker
+  startup, repeated collection, teardown and this merge; additional worker/container
+  preparation and memory are part of the measured cost. Phase totals aggregate
+  per-test durations and can exceed elapsed wall time when intervals overlap.
+- Worker restart is disabled explicitly. An unexpected worker death aborts the
+  controller with a nonzero result before xdist redistributes the unfinished file;
+  neither worker recreation nor automatic replay masks a crash. Ordinary assertion
+  failures retain their normal reports and failing exit. Partial worker receipts
+  remain diagnostic evidence, not a complete or successful test sample.
 - Same-repository pull requests receive one sticky CI observability comment combining
   safe pytest counts, failed node IDs, phase/fixture timing and all CI job/step
   wall-clock durations, including TypeScript lint/typecheck/tests and Docker builds.

@@ -252,10 +252,15 @@ jobs:
           uv run ty check --error-on-warning
       - name: Pytest
         run: |
+          pytest_execution=()
+          if [ "${{ matrix.project }}" = 'python/apps/azents' ]; then
+            # Reuse the same runner/job; keep whole modules on one isolated worker.
+            pytest_execution=(-n 2 --dist loadfile --max-worker-restart=0)
+          fi
           python scripts/ci/run_pytest.py \
             --project "${{ matrix.project }}" \
             --name "${{ matrix.observation }}" \
-            --artifact-dir "${RUNNER_TEMP}/ci-tests" -- -vv
+            --artifact-dir "${RUNNER_TEMP}/ci-tests" -- -vv "${pytest_execution[@]}"
       - name: Verify OpenAPI spec drift
         if: matrix.project == 'python/apps/azents'
         run: |

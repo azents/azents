@@ -20,6 +20,7 @@ from scripts.ci.evidence import (
     verify_collection,
 )
 from scripts.ci.history import append, decode_analysis, decode_record
+from scripts.ci.observability import merge_worker_fixture_timings
 from scripts.ci.workflow_report import decode_run, metrics, render
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -355,6 +356,44 @@ class WorkflowReportTest(unittest.TestCase):
             analysis.write_text(json.dumps({"cohort": "baseline", "records": [record]}))
             with self.assertRaises(ValueError):
                 append(analysis, history, "main")
+
+    def test_worker_merge_retains_raw_receipts_and_rejects_test_phases(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            worker = root / "fixture-timings-gw0.jsonl"
+            row = {
+                "record_type": "fixture",
+                "fixture": "resource",
+                "scope": "session",
+                "node_id": "",
+                "phase": "teardown",
+                "duration_seconds": 0.25,
+                "outcome": "completed",
+            }
+            worker.write_text(json.dumps(row) + "\n")
+            before = worker.read_bytes()
+            merge_worker_fixture_timings(root)
+            self.assertEqual(worker.read_bytes(), before)
+            self.assertEqual(
+                json.loads((root / "pytest-timings.jsonl").read_text()), row
+            )
+            worker.write_text(
+                json.dumps(
+                    {
+                        "record_type": "test_phase",
+                        "node_id": "test_x",
+                        "phase": "call",
+                        "duration_seconds": 0.1,
+                        "outcome": "passed",
+                    }
+                )
+                + "\n"
+            )
+            with self.assertRaisesRegex(ValueError, "only fixture"):
+                merge_worker_fixture_timings(root)
+            self.assertEqual(
+                json.loads((root / "pytest-timings.jsonl").read_text()), row
+            )
 
     def test_wrapper_rejects_reused_results(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

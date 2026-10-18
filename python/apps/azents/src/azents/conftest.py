@@ -1,6 +1,7 @@
 """Test fixture settings."""
 
-from contextlib import AsyncExitStack, asynccontextmanager
+import copy
+from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Generator
 
 import pytest
@@ -8,11 +9,8 @@ import pytest_asyncio
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from docker.errors import DockerException, ImageNotFound
-from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
-    AsyncSession,
-    AsyncTransaction,
     create_async_engine,
 )
 from testcontainers.core.docker_client import (
@@ -27,7 +25,50 @@ from testcontainers.redis import (
 
 from azents.consts import PROJECT_ROOT
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
+from azents.rdb.session_capabilities import WriteSession
+from azents.testing.transaction_fixture import rollback_session_manager
+
+
+@dataclass(frozen=True)
+class _PublicAPIContract:
+    openapi: dict[str, Any]
+    literal_route_paths: dict[str, str]
+
+
+@pytest.fixture(scope="session")
+def _full_public_api_contract_source() -> _PublicAPIContract:
+    """Compile real production schema and literal route resolution once."""
+    # Focused non-HTTP suites must not import the entire application graph.
+    from azents.app import create_dummy_public_app  # noqa: PLC0415
+
+    app = create_dummy_public_app()
+    paths = {name: str(app.url_path_for(name)) for name in ("receive_slack_event",)}
+    return _PublicAPIContract(app.openapi(), paths)
+
+
+@pytest.fixture(scope="session")
+def _full_public_openapi_source(
+    _full_public_api_contract_source: _PublicAPIContract,
+) -> dict[str, Any]:
+    """Retain source evidence without keeping a shared mutable application."""
+    return _full_public_api_contract_source.openapi
+
+
+@pytest.fixture
+def full_public_openapi(
+    _full_public_openapi_source: dict[str, Any],
+) -> dict[str, Any]:
+    """Give every schema assertion a deeply independent mutable copy."""
+    return copy.deepcopy(_full_public_openapi_source)
+
+
+@pytest.fixture
+def full_public_literal_route_paths(
+    _full_public_api_contract_source: _PublicAPIContract,
+) -> dict[str, str]:
+    """Give literal-route assertions independent actual URL resolution evidence."""
+    return dict(_full_public_api_contract_source.literal_route_paths)
+
 
 #
 # Docker
@@ -118,42 +159,10 @@ async def rdb_session_manager(
     """SessionManager fixture with auto-commit/rollback and test rollback.
 
     This mirrors the production session manager's auto-commit/rollback behavior,
-    but wraps each test in a savepoint so the full test transaction rolls back.
+    Each ORM context owns a savepoint inside one outer test transaction.
     """
-    async with rdb_engine.connect() as connection:
-
-        @asynccontextmanager
-        async def session_manager() -> AsyncGenerator[WriteSession, None]:
-            async with AsyncExitStack() as stack:
-                async_session = await stack.enter_async_context(
-                    AsyncSession(bind=connection, expire_on_commit=False)
-                )
-                nested: AsyncTransaction = await connection.begin_nested()
-
-                @event.listens_for(async_session.sync_session, "after_transaction_end")
-                def end_savepoint(
-                    _session: Any,  # noqa: ANN401
-                    _transaction: Any,  # noqa: ANN401
-                ) -> None:
-                    # Use Any because sync_session transaction internals are private
-                    # types.
-                    nonlocal nested
-                    if not nested.is_active:
-                        nested = connection.begin_nested()
-
-                try:
-                    yield ReadWriteSession(async_session)
-                except Exception:
-                    await async_session.rollback()
-                    raise
-                else:
-                    await async_session.commit()
-
-        tx = await connection.begin()
-        try:
-            yield session_manager
-        finally:
-            await tx.rollback()
+    async with rollback_session_manager(rdb_engine) as session_manager:
+        yield session_manager
 
 
 @pytest_asyncio.fixture(scope="function")

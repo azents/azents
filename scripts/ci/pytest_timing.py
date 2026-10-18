@@ -2,12 +2,14 @@
 
 import json
 import os
+import re
 from collections.abc import Generator
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from time import perf_counter
 
 import pytest
+from scripts.ci.observability import merge_worker_fixture_timings
 
 _ARTIFACT_DIR_ENV = "AZENTS_CI_ARTIFACT_DIR"
 _PYTEST_TIMINGS_FILENAME = "pytest-timings.jsonl"
@@ -51,13 +53,14 @@ class FixtureTeardownState:
 class TimingObservabilityPlugin:
     """Observe pytest using startup-bound evidence and performance-clock authority."""
 
-    def __init__(self, artifact_path: Path) -> None:
+    def __init__(self, artifact_path: Path, *, record_test_phases: bool) -> None:
         self.artifact_path = artifact_path
+        self.record_test_phases = record_test_phases
         self.fixture_teardown_states: dict[int, FixtureTeardownState] = {}
 
     def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
         """Record every test setup, call, and teardown phase."""
-        if report.when is None:
+        if not self.record_test_phases or report.when is None:
             return
         _append_timing(
             TestPhaseTiming(
@@ -69,6 +72,20 @@ class TimingObservabilityPlugin:
             ),
             self.artifact_path,
         )
+
+    def pytest_unconfigure(self) -> None:
+        """Merge after workers and fixture teardown finish, inside pytest wall time."""
+        if self.record_test_phases:
+            merge_worker_fixture_timings(self.artifact_path.parent)
+
+    @pytest.hookimpl(optionalhook=True, tryfirst=True)
+    def pytest_testnodedown(self, node: object, error: object | None) -> None:
+        """Abort on worker death before xdist can redistribute its unfinished file."""
+        if self.record_test_phases and error is not None:
+            pytest.exit(
+                "A pytest worker crashed; aborting without worker restart or replay",
+                returncode=1,
+            )
 
     @pytest.hookimpl(wrapper=True)
     def pytest_fixture_setup(
@@ -150,8 +167,14 @@ def pytest_configure(config: pytest.Config) -> None:
     """Enable the same observer for unit, migration, support, and E2E tests."""
     path = timing_path()
     if path is not None:
+        worker = os.environ.get("PYTEST_XDIST_WORKER")
+        if worker is not None:
+            if re.fullmatch(r"gw[0-9]+", worker) is None:
+                raise ValueError("Invalid pytest worker identity for timing evidence")
+            path = path.with_name(f"fixture-timings-{worker}.jsonl")
         config.pluginmanager.register(
-            TimingObservabilityPlugin(path), "azents-ci-timing-observability"
+            TimingObservabilityPlugin(path, record_test_phases=worker is None),
+            "azents-ci-timing-observability",
         )
 
 

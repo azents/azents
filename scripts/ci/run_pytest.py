@@ -27,7 +27,7 @@ def main() -> int:
             "test-run.json",
             "lane-duration-seconds.txt",
         )
-    ):
+    ) or any(artifacts.glob("fixture-timings-gw*.jsonl")):
         raise ValueError("CI evidence directory already contains a pytest execution")
     environment = dict(os.environ)
     environment["AZENTS_CI_ARTIFACT_DIR"] = str(artifacts)
@@ -50,6 +50,7 @@ def main() -> int:
     ]
     started = time.monotonic()
     result = subprocess.run(command, cwd=args.project, env=environment, check=False)
+    # The subprocess includes worker startup, teardown and timing-evidence merging.
     duration = time.monotonic() - started
     (artifacts / "lane-duration-seconds.txt").write_text(f"{duration:.6f}\n")
     (artifacts / "test-run.json").write_text(

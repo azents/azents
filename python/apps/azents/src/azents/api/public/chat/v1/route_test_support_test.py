@@ -1,5 +1,6 @@
 """Focused apps retain exact production Chat operation and schema contracts."""
 
+import pytest
 from fastapi import FastAPI
 
 from azents.api.public.chat.v1 import mount
@@ -14,6 +15,9 @@ def test_focused_chat_paths_match_complete_production_router() -> None:
     for path in (
         "/sessions/{session_id}/model-profile",
         "/sessions/{session_id}/inputs",
+        "/agents/{agent_id}/sessions",
+        "/agents/{agent_id}/sessions/{session_id}",
+        "/sessions/{session_id}/history",
     ):
         focused = focused_chat_app(path).openapi()
         mounted_path = "/chat/v1" + path
@@ -29,3 +33,12 @@ def test_focused_chat_apps_do_not_share_dependency_overrides_or_openapi_cache() 
     assert first is not second
     assert first.dependency_overrides is not second.dependency_overrides
     assert first.openapi() is not second.openapi()
+
+
+def test_focused_chat_app_checks_every_selected_path() -> None:
+    with pytest.raises(AssertionError, match="At least one"):
+        focused_chat_app()
+    with pytest.raises(AssertionError, match="missing"):
+        focused_chat_app(
+            "/sessions/{session_id}/history", "/missing-production-chat-path"
+        )

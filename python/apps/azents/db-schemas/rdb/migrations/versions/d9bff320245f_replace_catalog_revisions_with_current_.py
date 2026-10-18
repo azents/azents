@@ -73,7 +73,8 @@ def _sync_columns() -> list[sa.Column[Any]]:
 
 
 def _table(bind: Connection, name: str) -> sa.Table:
-    return sa.Table(name, sa.MetaData(), autoload_with=bind)
+    # Data transforms use this table's columns, never inferred joins or related DDL.
+    return sa.Table(name, sa.MetaData(), autoload_with=bind, resolve_fks=False)
 
 
 def _hash_producer_version(value: object) -> bool:

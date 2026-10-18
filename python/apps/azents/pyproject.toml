@@ -86,6 +86,7 @@ dev = [
     "types-croniter>=6.0.0",
     "pytest-alembic>=0.12.1",
     "pynacl>=1.6.2",
+    "pytest-xdist>=3.8.0",
 ]
 
 [tool.uv]
