@@ -27,7 +27,6 @@ import {
   TextInput,
   Tooltip,
   UnstyledButton,
-  useMantineColorScheme,
 } from "@mantine/core";
 import {
   IconAlertCircle,
@@ -51,14 +50,13 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useCallback, useState } from "react";
 import { AgentAvatar } from "@/shared/agent-session/AgentAvatar";
+import { createReactContainer } from "@/shared/lib/createReactContainer";
 import { formatLocalizedDate } from "@/shared/lib/date-format";
-import { useColorMode } from "@/shared/providers/color-mode";
-import { useLocale } from "@/shared/providers/locale";
 import { isAutoArchiveDueSoon } from "../auto-archive-urgency";
+import { useAgentFocusedSidebar } from "../containers/useAgentFocusedSidebar";
 import styles from "./AgentFocusedShell.module.css";
+import type { AgentFocusedSidebarViewProps } from "../containers/useAgentFocusedSidebar";
 import type { ColorModePreference } from "@/shared/lib/color-mode";
 import type { SupportedLocale } from "@/shared/lib/locale";
 import type {
@@ -73,7 +71,7 @@ export interface AgentFocusedSidebarUser {
 
 export type AgentSessionListScope = "team" | "user";
 
-interface AgentFocusedSidebarProps {
+export interface AgentFocusedSidebarProps {
   handle: string;
   agent: AgentResponse;
   currentUser: AgentFocusedSidebarUser | null;
@@ -199,13 +197,18 @@ function ColorModeMenuItems({
   );
 }
 
-export function AgentFocusedSidebar({
+export const AgentFocusedSidebar = createReactContainer(
+  "AgentFocusedSidebar",
+  useAgentFocusedSidebar,
+  AgentFocusedSidebarView,
+);
+
+export function AgentFocusedSidebarView({
   handle,
   agent,
   currentUser,
   adminAccessUrl,
   loggingOut,
-  onLogout,
   sessionListScope = "team",
   onSessionListScopeChange,
   sessions = [],
@@ -224,84 +227,36 @@ export function AgentFocusedSidebar({
   onSetSessionPinned,
   onNavigate,
   nowMs = Date.now(),
-}: AgentFocusedSidebarProps): React.ReactElement {
+  pathname,
+  mode,
+  preference,
+  locale,
+  editingSession,
+  editingTitle,
+  setEditingTitle,
+  archiveTarget,
+  setArchiveTarget,
+  handleSelectColorMode,
+  handleLogout,
+  handleOpenRename,
+  handleCloseRename,
+  handleSubmitRename,
+  handleClearTitle,
+  handleConfirmArchive,
+}: AgentFocusedSidebarViewProps): React.ReactElement {
   const t = useTranslations("workspace.agents.detail");
   const tAppBar = useTranslations("appBar");
   const tCommon = useTranslations("common");
   const tWorkspaceSidebar = useTranslations("workspace.sidebar");
   const tPersonalTools = useTranslations("account.personalTools");
-  const pathname = usePathname();
   const workspacePath = `/w/${handle}`;
   const basePath = `${workspacePath}/agents/${agent.id}`;
   const sessionsDirectoryHref = `${basePath}/sessions`;
   const settingsHref = `${basePath}/settings`;
   const isAgentDirectoryActive = pathname === sessionsDirectoryHref;
-  const { mode, preference, setColorMode } = useColorMode();
-  const { locale } = useLocale();
-  const { setColorScheme } = useMantineColorScheme();
-  const [editingSession, setEditingSession] =
-    useState<AgentSessionResponse | null>(null);
-  const [editingTitle, setEditingTitle] = useState("");
-  const [archiveTarget, setArchiveTarget] =
-    useState<AgentSessionResponse | null>(null);
-
-  const handleSelectColorMode = useCallback(
-    (newPreference: ColorModePreference): void => {
-      setColorMode(newPreference);
-      if (newPreference === "system") {
-        setColorScheme("auto");
-      } else {
-        setColorScheme(newPreference);
-      }
-    },
-    [setColorMode, setColorScheme],
-  );
-
-  const handleLogout = useCallback((): void => {
-    onLogout();
-  }, [onLogout]);
-
   const userName =
     currentUser?.name.trim() || currentUser?.email || tAppBar("account");
   const userEmail = currentUser?.email ?? null;
-
-  const handleOpenRename = useCallback(
-    (session: AgentSessionResponse): void => {
-      setEditingSession(session);
-      setEditingTitle(session.title ?? "");
-    },
-    [],
-  );
-
-  const handleCloseRename = useCallback((): void => {
-    setEditingSession(null);
-    setEditingTitle("");
-  }, []);
-
-  const handleSubmitRename = useCallback(async (): Promise<void> => {
-    if (!editingSession || !onRenameSession) {
-      return;
-    }
-    const title = editingTitle.trim();
-    await onRenameSession(editingSession.id, title);
-    handleCloseRename();
-  }, [editingSession, editingTitle, handleCloseRename, onRenameSession]);
-
-  const handleClearTitle = useCallback(async (): Promise<void> => {
-    if (!editingSession || !onRenameSession) {
-      return;
-    }
-    await onRenameSession(editingSession.id, null);
-    handleCloseRename();
-  }, [editingSession, handleCloseRename, onRenameSession]);
-
-  const handleConfirmArchive = useCallback((): void => {
-    if (archiveTarget === null) {
-      return;
-    }
-    onArchiveSession?.(archiveTarget.id);
-    setArchiveTarget(null);
-  }, [archiveTarget, onArchiveSession]);
 
   const renameBusy =
     editingSession !== null && renamingSessionId === editingSession.id;

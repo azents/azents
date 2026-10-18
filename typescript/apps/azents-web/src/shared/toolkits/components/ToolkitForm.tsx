@@ -568,7 +568,8 @@ export function ToolkitForm({
                 (currentToolSlug === "notion" ||
                   currentToolSlug === "sentry" ||
                   (currentToolSlug === "mcp" &&
-                    form.getValues().config.auth_type === "oauth2")) && (
+                    configProjection.type === "mcp" &&
+                    configProjection.config.auth_type === "oauth2")) && (
                   <Alert color="blue">{setup("oauthNext")}</Alert>
                 )}
               {currentToolSlug !== "shell" && currentToolSlug !== "google" && (

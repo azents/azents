@@ -1,4 +1,5 @@
 import { TRPCError } from "@trpc/server";
+import { z } from "zod/v4";
 /**
  * API error utilities
  *
@@ -8,14 +9,33 @@ import { TRPCError } from "@trpc/server";
 import type { Client } from "@azents/admin-client";
 
 type TRPCErrorCode = ConstructorParameters<typeof TRPCError>[0]["code"];
+const validationMessageSchema = z.object({ message: z.string() });
+const validationDetailSchema = z.object({ msg: z.string() });
+
+/** Project only validated messages; malformed array entries carry no message. */
+function validationMessages(
+  entries: unknown[],
+  field: "message" | "msg",
+): string {
+  const messages = entries.flatMap((entry) => {
+    if (field === "message") {
+      const result = validationMessageSchema.safeParse(entry);
+      return result.success ? [result.data.message] : [];
+    }
+    const result = validationDetailSchema.safeParse(entry);
+    return result.success ? [result.data.msg] : [];
+  });
+  return messages.filter(Boolean).join(", ") || "The input is invalid.";
+}
 
 /** API server HTTP error (including status code and response body) */
 export class ApiError extends Error {
-  constructor(
-    public readonly status: number,
-    public readonly body: unknown,
-  ) {
+  public readonly status: number;
+  public readonly body: unknown;
+  constructor(status: number, body: unknown) {
     super(extractDetail(body));
+    this.status = status;
+    this.body = body;
     this.name = "ApiError";
   }
 }
@@ -24,12 +44,7 @@ export class ApiError extends Error {
 function extractDetail(error: unknown): string {
   // FastAPI validation error (array body: [{code, message, ...}])
   if (Array.isArray(error)) {
-    return (
-      error
-        .map((d: { message?: string }) => d.message)
-        .filter(Boolean)
-        .join(", ") || "The input is invalid."
-    );
+    return validationMessages(error, "message");
   }
   if (typeof error === "object" && error !== null && "detail" in error) {
     const { detail } = error;
@@ -38,12 +53,7 @@ function extractDetail(error: unknown): string {
     }
     // FastAPI validation error ({detail: [{msg, ...}]})
     if (Array.isArray(detail)) {
-      return (
-        detail
-          .map((d: { msg?: string }) => d.msg)
-          .filter(Boolean)
-          .join(", ") || "The input is invalid."
-      );
+      return validationMessages(detail, "msg");
     }
     // Serialize structured detail objects as JSON so downstream code can parse them
     if (typeof detail === "object" && detail !== null) {

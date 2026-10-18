@@ -1,18 +1,9 @@
-"""add user toolkit ownership and access policy
-
-Revision ID: 716e7468e1f5
-Revises: f79f6654c302
-Create Date: 2026-10-17 07:41:29.909870
-
-"""
-
 from typing import Sequence
 
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-# revision identifiers, used by Alembic.
 revision: str = "716e7468e1f5"
 down_revision: str | Sequence[str] | None = "f79f6654c302"
 branch_labels: str | Sequence[str] | None = None

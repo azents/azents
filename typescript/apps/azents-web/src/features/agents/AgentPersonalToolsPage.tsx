@@ -1,7 +1,5 @@
 "use client";
 
-import { personalToolsSetupPath } from "@/features/personal-tools/navigation";
-import { PersonalAccessPage } from "@/features/personal-tools/PersonalAccessPage";
 import { AgentSettingsLayout } from "./components/AgentSettingsLayout";
 import type { AgentResponse } from "@azents/public-client";
 
@@ -9,10 +7,12 @@ export function AgentPersonalToolsPage({
   handle,
   agent,
   originSessionId,
+  children,
 }: {
   handle: string;
   agent: AgentResponse;
   originSessionId?: string;
+  children: React.ReactNode;
 }): React.ReactElement {
   return (
     <AgentSettingsLayout
@@ -21,19 +21,7 @@ export function AgentPersonalToolsPage({
       backTarget="agent"
       originSessionId={originSessionId}
     >
-      <PersonalAccessPage
-        key={`${handle}:${agent.id}`}
-        type="agent"
-        handle={handle}
-        agentId={agent.id}
-        agentName={agent.name}
-        originSessionId={originSessionId}
-        setupHref={personalToolsSetupPath({
-          handle,
-          agentId: agent.id,
-          sessionId: originSessionId,
-        })}
-      />
+      {children}
     </AgentSettingsLayout>
   );
 }

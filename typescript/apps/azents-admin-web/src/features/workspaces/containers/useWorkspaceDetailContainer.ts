@@ -10,6 +10,7 @@ import {
   workspaceToFormData,
 } from "../types";
 import type { WorkspaceDetailState, WorkspaceFormData } from "../types";
+import type { UseFormReturnType } from "@mantine/form";
 
 export interface WorkspaceDetailContainerProps {
   workspaceHandle: string | null;
@@ -18,9 +19,13 @@ export interface WorkspaceDetailContainerProps {
   onCancel: () => void;
 }
 
-export type WorkspaceDetailComponentProps = ReturnType<
-  typeof useWorkspaceDetailContainer
->;
+export interface WorkspaceDetailComponentProps {
+  state: WorkspaceDetailState;
+  form: UseFormReturnType<WorkspaceFormData>;
+  isDirty: boolean;
+  onSubmit: (data: WorkspaceFormData) => void;
+  onCancel: () => void;
+}
 
 const EMPTY_FORM: WorkspaceFormData = {
   name: "",
@@ -35,7 +40,7 @@ const EMPTY_FORM: WorkspaceFormData = {
  */
 export function useWorkspaceDetailContainer(
   props: WorkspaceDetailContainerProps,
-) {
+): WorkspaceDetailComponentProps {
   const { workspaceHandle, isCreateMode, onSaved, onCancel } = props;
   const utils = trpc.useUtils();
 

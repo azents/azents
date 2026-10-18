@@ -1,8 +1,8 @@
 import { TRPCError } from "@trpc/server";
 import { notFound } from "next/navigation";
-import { AgentPersonalToolsPage } from "@/features/agents/AgentPersonalToolsPage";
 import { parseOriginSession } from "@/features/personal-tools/navigation";
 import { trpc } from "@/trpc/server";
+import { PersonalToolsComposition } from "./PersonalToolsComposition";
 
 export default async function Page({
   params,
@@ -35,7 +35,7 @@ export default async function Page({
       }
     }
     return (
-      <AgentPersonalToolsPage
+      <PersonalToolsComposition
         handle={handle}
         agent={agent}
         originSessionId={authorizedSessionId ?? void 0}

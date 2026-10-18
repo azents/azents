@@ -11,6 +11,37 @@ from azents_runtime_provider_docker.docker_api import (
 )
 
 
+@pytest.mark.parametrize(
+    ("networks", "exists"),
+    [
+        ([{"Name": "runtime-network", "extension": {"future": None}}], True),
+        ([{"Name": "runtime-network-other"}], False),
+        ([{}, {"Name": None}, {"Name": 123}, "invalid"], False),
+        ([], False),
+    ],
+)
+async def test_network_names_are_decoded_before_exact_match(
+    networks: list[object], exists: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    docker = MagicMock()
+    docker.networks.list = AsyncMock(return_value=networks)
+    docker.networks.create = AsyncMock()
+    adapter = AioDockerApi()
+    monkeypatch.setattr(adapter, "_get_docker", AsyncMock(return_value=docker))
+    await adapter.ensure_network("runtime-network")
+    docker.networks.list.assert_awaited_once_with(filters={"name": ["runtime-network"]})
+    if exists:
+        docker.networks.create.assert_not_awaited()
+    else:
+        docker.networks.create.assert_awaited_once_with(
+            {
+                "Name": "runtime-network",
+                "Driver": "bridge",
+                "Labels": {"managed-by": "azents-runtime-provider-docker"},
+            }
+        )
+
+
 @pytest.mark.parametrize("name", ["azents-runtime-first", "azents-runtime-second"])
 async def test_create_preserves_runtime_hostname_across_container_replacement(
     name: str, monkeypatch: pytest.MonkeyPatch

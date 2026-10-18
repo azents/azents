@@ -14,8 +14,6 @@ import {
   Title,
 } from "@mantine/core";
 import dayjs from "dayjs";
-import { useConfig } from "@/config/client";
-import { getPublicRoutePath } from "@/shared/lib/auth-policy";
 import type { WorkspaceRuntimeProfileAdminComponentProps } from "../containers/useWorkspaceRuntimeProfileAdminContainer";
 
 function DetailField({
@@ -45,10 +43,8 @@ function DetailField({
 
 export function WorkspaceRuntimeProfileAdminView({
   state,
+  workspacesPath,
 }: WorkspaceRuntimeProfileAdminComponentProps): React.ReactElement {
-  const { publicBaseUrl } = useConfig();
-  const workspacesPath = getPublicRoutePath(publicBaseUrl, "/workspaces");
-
   switch (state.type) {
     case "LOADING":
       return (

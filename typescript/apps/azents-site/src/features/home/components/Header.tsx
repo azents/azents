@@ -13,11 +13,19 @@ import {
 import { IconBrandGithub } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { AppLogo } from "@/shared/components/AppLogo";
-import { trackCtaClick } from "@/shared/lib/analytics";
 import { SITE_LINKS } from "@/shared/lib/links";
+import { useHeader } from "../containers/useHeader";
 import { LocaleSwitcher } from "./LocaleSwitcher";
+import type { HeaderViewProps } from "../containers/useHeader";
 
 export function Header(): React.ReactElement {
+  return <HeaderView {...useHeader()} />;
+}
+
+export function HeaderView({
+  onGithub,
+  onMobileGithub,
+}: HeaderViewProps): React.ReactElement {
   const t = useTranslations("nav");
 
   return (
@@ -44,13 +52,7 @@ export function Header(): React.ReactElement {
               component="a"
               href={SITE_LINKS.github}
               leftSection={<IconBrandGithub size={18} />}
-              onClick={() =>
-                trackCtaClick({
-                  ctaId: "header_github",
-                  ctaLocation: "header",
-                  destinationUrl: SITE_LINKS.github,
-                })
-              }
+              onClick={onGithub}
               radius="md"
               size="sm"
               target="_blank"
@@ -63,13 +65,7 @@ export function Header(): React.ReactElement {
               <ActionIcon
                 component="a"
                 href={SITE_LINKS.github}
-                onClick={() =>
-                  trackCtaClick({
-                    ctaId: "header_mobile_github",
-                    ctaLocation: "header_mobile",
-                    destinationUrl: SITE_LINKS.github,
-                  })
-                }
+                onClick={onMobileGithub}
                 radius="md"
                 size="lg"
                 target="_blank"

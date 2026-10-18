@@ -15,32 +15,27 @@ import {
   TextInput,
   Title,
 } from "@mantine/core";
-import { useForm } from "@mantine/form";
 import { IconCopy, IconLinkPlus, IconTrash } from "@tabler/icons-react";
 import dayjs from "dayjs";
+import { createReactContainer } from "@/shared/lib/createReactContainer";
+import { useSignupTokenCreateForm } from "../containers/useSignupTokenCreateForm";
+import type { SignupTokenCreateFormViewProps } from "../containers/useSignupTokenCreateForm";
 import type { SignupTokensPageContentProps } from "../containers/useSignupTokensPageContainer";
 import type { SignupTokenListState } from "../types";
 import type { SignupTokenResponse } from "@azents/admin-client";
 
-function SignupTokenCreateForm({
-  createState,
-  onCreateToken,
-}: {
-  createState: SignupTokensPageContentProps["createState"];
-  onCreateToken: (email: string) => void;
-}): React.ReactElement {
-  const form = useForm({
-    mode: "controlled",
-    initialValues: { email: "" },
-    validate: {
-      email: (value) => (value.trim().includes("@") ? null : "Enter an email."),
-    },
-  });
-  const creating = createState.type === "CREATING";
+const SignupTokenCreateForm = createReactContainer(
+  "SignupTokenCreateForm",
+  useSignupTokenCreateForm,
+  SignupTokenCreateFormView,
+);
 
-  function handleSubmit(values: typeof form.values): void {
-    onCreateToken(values.email.trim());
-  }
+function SignupTokenCreateFormView({
+  createState,
+  form,
+  handleSubmit,
+}: SignupTokenCreateFormViewProps): React.ReactElement {
+  const creating = createState.type === "CREATING";
 
   return (
     <Paper withBorder p="md">
