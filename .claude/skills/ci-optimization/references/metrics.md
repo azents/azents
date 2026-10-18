@@ -37,6 +37,16 @@ multiplicity, the Required/Web boundary, general pytest producer identity, all
 enabled lane jobs, and each lane's original metrics. Redistribution is not a
 coverage reduction or by itself evidence of a causal performance improvement.
 
+For a convention-backed test-layer correction, baseline and candidate E2E multisets
+may legitimately differ. Preserve both raw multisets and report every removed or
+relocated scenario/check with its retained representative E2E journey or exact
+unit/integration/component/Storybook replacement and executed evidence. Keep this
+scope correction distinct from scheduling-only comparisons. The two final unchanged-SHA
+attempts must still have identical enabled jobs and testcase multisets, including the
+replacement test producers. Missing replacement artifacts cannot establish preserved
+behavioral coverage. Do not modify the gate, ignore missing producers, or simply divide
+aggregate call work by worker count to hide a failure.
+
 ## Metric scopes
 
 - **Whole-CI gate completion elapsed:** workflow `createdAt` to last completion among
@@ -56,8 +66,10 @@ coverage reduction or by itself evidence of a causal performance improvement.
   Nested fixture/setup durations overlap; never sum them twice. Native non-pytest
   reports remain native; job/step data does not imply per-case timing exists.
 
-Current CI observation does not change branch protection, gate success conditions,
-E2E duration thresholds, test selections, assertions, retry policy or runner count.
+Observation alone does not authorize changing test selections or assertions. Verified
+test-design corrections follow the Skill's test-layer mapping and validation contract.
+They do not change branch protection, gate success conditions, E2E duration thresholds,
+retry policy or runner count.
 Other workflows such as iOS are collected/analyzed separately; release/deploy workflows
 are excluded from autonomous experiments without explicit authorization.
 
@@ -65,7 +77,8 @@ are excluded from autonomous experiments without explicit authorization.
 
 Rank demonstrated reliability failures, then dependency-critical net savings, confidence,
 runner cost and risk. Read slow tests and actual fixture lifecycle. Identify removed
-work without dropping assertions, isolated state, abrupt restarts or real recovery.
+work while preserving behavioral assertions at the appropriate test layer, isolated
+state, abrupt restarts and real recovery.
 Record every candidate's evidence, phases, scope, mechanism, estimated saving/overhead,
 compatibility and concrete remaining blocker.
 

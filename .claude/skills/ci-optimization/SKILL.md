@@ -1,6 +1,6 @@
 ---
 name: ci-optimization
-description: Improve Azents general CI reliability, unit/integration/pytest and E2E test runtime, lint/typecheck/build performance, and runner cost using verified artifacts and repeated same-SHA measurements. Use for manual or scheduled CI optimization, slow pytest diagnosis, flaky CI, or general CI observability analysis; includes E2E as a subset.
+description: Improve Azents general CI reliability, unit/integration/pytest and E2E test runtime, test-design and test-layer correctness, lint/typecheck/build performance, and runner cost using verified artifacts and repeated same-SHA measurements. Use for manual or scheduled CI optimization, slow or redundant tests, E2E convention violations, flaky CI, or general CI observability analysis; includes E2E as a subset.
 ---
 
 # CI Optimization
@@ -43,8 +43,9 @@ python -m scripts.ci.analyze --samples-root /absolute/session/ci/experiment \
 Preserve complete metadata/artifacts before rerunning a workflow. Artifacts must match
 head SHA, run and attempt; later-attempt artifacts must not be attached to earlier
 attempts. Reject duplicate attempts and mixed-SHA experiment samples. Compare identical
-enabled jobs, test selections, assertions and lifecycle boundaries, not historical case
-counts when main legitimately moved exhaustive cases into unit tests.
+enabled jobs, behavioral obligations and lifecycle boundaries. Testcase counts and
+assertion locations may change when a verified test-layer correction moves exhaustive
+checks to narrower tests; record that mapping rather than requiring historical counts.
 For dynamically planned E2E lanes, compare the full testcase multiset within Required
 and Web separately, retaining multiplicity and enabled lane jobs. Numbered lane
 redistribution does not change coverage; keep original per-lane metrics and do not
@@ -57,6 +58,31 @@ runners retain native diagnostics plus workflow job/step time; do not label job 
 as test-call duration or claim unavailable per-case metrics exist.
 
 Read [references/metrics.md](references/metrics.md) for metric and artifact contracts.
+
+## Review the tests themselves
+
+Slow tests can be incorrectly designed. Inspect their bodies and applicable testing
+conventions before treating their cost as necessary or optimizing only fixtures,
+images, scheduling, polling, workers or runners. Test code is an optimization target.
+
+- Check for redundant assertions, repeated setup or journeys, obsolete checks, and
+  waits for states that are not the behavior's actual completion authority.
+- Apply `.claude/conventions/testenv/e2e-core-flows-only.md` and owning instructions:
+  E2E proves representative assembled-product outcomes. Exhaustive condition matrices,
+  internal branches, validation permutations, copy, confirmation/error dialogs and
+  responsive UI interactions belong in unit, integration, component or Storybook tests
+  unless the specific check requires a real cross-process/browser/provider boundary.
+- Trace existing narrower coverage. Add missing executable assertions before moving
+  or removing redundant E2E work; a render-only story is not interaction evidence.
+  Retain representative E2E coverage of every affected feature's critical outcome,
+  authorization, isolation, abrupt failure and recovery boundaries.
+- Record old scenario/check -> retained E2E journey or exact narrower test, why that
+  layer proves the behavior, and actual validation. Do not equate fewer E2E cases with
+  weaker coverage, but do not claim preserved coverage from a proposed mapping alone.
+- Rank grounded test-design/convention fixes alongside infrastructure candidates.
+  Do not preserve a poorly placed test just to keep its count or body unchanged.
+  Measure real CI after the correction; deleted runtime alone is not proof of a net
+  coverage-preserving improvement.
 
 ## Model and rank
 
@@ -90,10 +116,12 @@ Keep fixes at the narrowest layer that removes proven waste while retaining beha
 4. Independent read-only `code-review`, then `spec-review` and matching Living Spec.
 5. `ship-pr` for PR creation/monitoring; request `hardtack` when verification is ready.
 
-Never delete tests, weaken assertions, skip recovery, alter the covered state matrix,
-replace abrupt failure with graceful cleanup, write product state directly through SQL,
-add fixed sleeps/retries, increase timeouts, or count changed tests as a speed gain.
-Local timing proves a mechanism, not whole-CI causal improvement.
+Preserve required behavioral coverage, not an arbitrary number of tests. Remove or
+relocate redundant/mis-layered checks only with the verified mapping above; never
+silently drop assertions, covered states, authorization or recovery obligations to
+make CI green. Do not replace abrupt failure with graceful cleanup, write product
+state directly through SQL, add fixed sleeps/retries, increase timeouts or relax
+existing gates. Local timing proves a mechanism, not whole-CI causal improvement.
 
 ## Repeat and accept
 
