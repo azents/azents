@@ -5,12 +5,15 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from itertools import product
 from pathlib import Path
 from unittest.mock import patch
 
 from scripts.ci.analyze import analyze, expected_test_artifacts
-from scripts.ci.evidence import decode_native_node_run, file_hashes
+from scripts.ci.component_portfolio import STORIES
+from scripts.ci.evidence import decode_native_run, file_hashes
 from scripts.ci.run_node_tests import main
+from scripts.ci.tests.test_component_observability import component_junit
 from scripts.ci.tests.test_observability import job, sample
 from scripts.ci.workflow_report import decode_run, object_value, sequence
 
@@ -63,41 +66,52 @@ class NodeObservabilityTest(unittest.TestCase):
                     self.assertEqual(run.call_count, 1)
 
     def test_enabled_node_step_requires_native_artifact_without_pytest_phases(self):
-        for scenario in (
-            "missing_artifact",
-            "passed",
-            "junit_failure",
-            "native_failure",
-            "missing_receipt",
-            "missing_status",
-            "missing_duration",
-            "wrong_runner",
-            "invalid_duration",
-            "stale_sha",
-            "stale_run",
-            "stale_attempt",
+        for (producer_name, step_name, runner), scenario in product(
+            (
+                ("typescript-web", "Web Node contracts", "node"),
+                (
+                    "typescript-web-components",
+                    "Web component contracts",
+                    "vitest-browser",
+                ),
+            ),
+            (
+                "missing_artifact",
+                "passed",
+                "junit_failure",
+                "native_failure",
+                "missing_receipt",
+                "missing_status",
+                "missing_duration",
+                "wrong_runner",
+                "invalid_duration",
+                "stale_sha",
+                "stale_run",
+                "stale_attempt",
+                "partial_portfolio",
+            ),
         ):
+            if scenario == "partial_portfolio" and runner == "node":
+                continue
             available = scenario != "missing_artifact"
             fails = scenario == "junit_failure"
-            with self.subTest(scenario=scenario):
+            with self.subTest(producer=producer_name, scenario=scenario):
                 with tempfile.TemporaryDirectory() as tmp:
                     root = Path(tmp)
                     raw = sample()
                     producer = job("ci-typescript-run", "00:00:10", "00:00:50")
-                    object_value(sequence(producer["steps"])[0])["name"] = (
-                        "Web Node contracts"
-                    )
+                    object_value(sequence(producer["steps"])[0])["name"] = step_name
                     raw["jobs"] = [
                         producer,
                         job("ci-typescript", "00:00:50", "00:00:55"),
                     ]
                     self.assertEqual(
-                        expected_test_artifacts(decode_run(raw)), {"typescript-web"}
+                        expected_test_artifacts(decode_run(raw)), {producer_name}
                     )
                     (root / "run.json").write_text(json.dumps(raw))
                     artifacts = root / "artifacts"
                     artifacts.mkdir()
-                    name = "ci-observability-typescript-web-1"
+                    name = f"ci-observability-{producer_name}-1"
                     inventory = []
                     if available:
                         artifact = artifacts / name
@@ -105,16 +119,22 @@ class NodeObservabilityTest(unittest.TestCase):
                         failure = (
                             "<failure>synthetic failure</failure>" if fails else ""
                         )
-                        (artifact / "junit.xml").write_text(
+                        xml = (
                             '<testsuite><testcase name="native hook" time="0.1">'
                             f"{failure}</testcase></testsuite>"
                         )
+                        if (
+                            runner == "vitest-browser"
+                            and scenario != "partial_portfolio"
+                        ):
+                            xml = component_junit(failure)
+                        (artifact / "junit.xml").write_text(xml)
                         receipt = {
-                            "name": "typescript-web",
+                            "name": producer_name,
                             "head_sha": "a" * 40,
                             "run_id": "100",
                             "attempt": "1",
-                            "runner": "node",
+                            "runner": runner,
                             "exit_code": 1 if scenario == "native_failure" else 0,
                             "duration_seconds": 0.25,
                         }
@@ -179,12 +199,23 @@ class NodeObservabilityTest(unittest.TestCase):
                     ]
                     self.assertEqual(
                         record["test_evidence_complete"],
-                        available and scenario != "missing_receipt",
+                        available
+                        and scenario not in {"missing_receipt", "partial_portfolio"},
                     )
                     self.assertEqual(
                         record["performance_eligible"], scenario == "passed"
                     )
-                    self.assertEqual(record["test_cases"], 1 if available else 0)
+                    self.assertEqual(
+                        record["test_cases"],
+                        (
+                            sum(len(names) for names in STORIES.values())
+                            if runner == "vitest-browser"
+                            and scenario != "partial_portfolio"
+                            else 1
+                        )
+                        if available
+                        else 0,
+                    )
                     self.assertEqual(result["slow_calls"], [])
 
     def test_native_receipt_rejects_missing_or_invalid_execution_fields(self):
@@ -201,7 +232,7 @@ class NodeObservabilityTest(unittest.TestCase):
             with self.subTest(missing=field):
                 incomplete = {k: v for k, v in receipt.items() if k != field}
                 with self.assertRaises(KeyError):
-                    decode_native_node_run(incomplete)
+                    decode_native_run(incomplete, "node")
         for field, value in (
             ("runner", "pytest"),
             ("exit_code", None),
@@ -216,4 +247,4 @@ class NodeObservabilityTest(unittest.TestCase):
         ):
             with self.subTest(field=field, value=value):
                 with self.assertRaises(ValueError):
-                    decode_native_node_run({**receipt, field: value})
+                    decode_native_run({**receipt, field: value}, "node")

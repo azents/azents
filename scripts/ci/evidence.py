@@ -47,20 +47,20 @@ def decode_test_run(value: object) -> TestRunIdentity:
 
 
 @dataclass(frozen=True)
-class NativeNodeRun:
+class NativeTestRun:
     identity: TestRunIdentity
     exit_code: int
     duration_seconds: float
 
 
-def decode_native_node_run(value: object) -> NativeNodeRun:
+def decode_native_run(value: object, runner: str) -> NativeTestRun:
     """Require the native execution receipt, not only its workflow identity."""
     raw = object_value(value)
-    if text(raw["runner"]) != "node":
-        raise ValueError("Native Node evidence runner mismatch")
+    if text(raw["runner"]) != runner:
+        raise ValueError("Native test evidence runner mismatch")
     status = raw["exit_code"]
     if isinstance(status, bool) or not isinstance(status, int):
-        raise ValueError("Native Node exit code must be an integer")
+        raise ValueError("Native test exit code must be an integer")
     duration = raw["duration_seconds"]
     if (
         isinstance(duration, bool)
@@ -68,8 +68,8 @@ def decode_native_node_run(value: object) -> NativeNodeRun:
         or not math.isfinite(duration)
         or duration <= 0
     ):
-        raise ValueError("Native Node duration must be finite and positive")
-    return NativeNodeRun(
+        raise ValueError("Native test duration must be finite and positive")
+    return NativeTestRun(
         identity=decode_test_run(raw),
         exit_code=status,
         duration_seconds=float(duration),

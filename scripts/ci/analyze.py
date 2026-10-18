@@ -8,13 +8,19 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from scripts.ci.component_portfolio import portfolio_complete
 from scripts.ci.evidence import (
-    decode_native_node_run,
+    decode_native_run,
     decode_test_run,
     verify_collection,
 )
 from scripts.ci.observability import parse_junit, parse_timings
 from scripts.ci.workflow_report import Run, decode_run, metrics
+
+NATIVE_RUNNERS = {
+    "typescript-web": "node",
+    "typescript-web-components": "vitest-browser",
+}
 
 
 def analyze(roots: list[Path], cohort: str) -> dict[str, object]:
@@ -55,8 +61,8 @@ def analyze(roots: list[Path], cohort: str) -> dict[str, object]:
                     else None
                 )
                 native = (
-                    decode_native_node_run(receipt)
-                    if receipt is not None and identity == "typescript-web"
+                    decode_native_run(receipt, NATIVE_RUNNERS[identity])
+                    if receipt is not None and identity in NATIVE_RUNNERS
                     else None
                 )
                 if native is not None:
@@ -82,13 +88,22 @@ def analyze(roots: list[Path], cohort: str) -> dict[str, object]:
             else:
                 continue
             found.add(identity)
-            native_node = identity == "typescript-web"
-            if not junit.is_file() or (not native_node and not timing.is_file()):
+            native_runner = identity in NATIVE_RUNNERS
+            if not junit.is_file() or (not native_runner and not timing.is_file()):
                 evidence_complete = False
                 continue
             summary = parse_junit(junit)
             if summary.tests == 0:
                 evidence_complete = False
+            if identity == "typescript-web-components" and not portfolio_complete(
+                summary
+            ):
+                evidence_complete = False
+            if (
+                identity == "typescript-web-components"
+                and summary.passed != summary.tests
+            ):
+                failed_tests = True
             failed_tests = failed_tests or bool(summary.failures or summary.errors)
             # The planner may rebalance numbered lanes without changing coverage.
             lane_scope, _, lane_number = identity.rpartition("-")
@@ -102,7 +117,7 @@ def analyze(roots: list[Path], cohort: str) -> dict[str, object]:
                 if case.outcome in {"failed", "error"}:
                     failures[f"{identity}:{case.node_id}"] += 1
             timing_records = parse_timings(timing) if timing.is_file() else ()
-            if not native_node and not timing_records:
+            if not native_runner and not timing_records:
                 evidence_complete = False
             for entry in timing_records:
                 if (
@@ -225,13 +240,16 @@ def expected_test_artifacts(run: Run) -> set[str]:
     }.items():
         if name in names:
             expected.add(artifact)
-    if any(
-        j.name == "ci-typescript-run"
-        and any(s.name == "Web Node contracts" for s in j.steps)
-        for j in run.jobs
-        if j.conclusion != "skipped"
-    ):
-        expected.add("typescript-web")
+    for step, artifact in {
+        "Web Node contracts": "typescript-web",
+        "Web component contracts": "typescript-web-components",
+    }.items():
+        if any(
+            j.name == "ci-typescript-run" and any(s.name == step for s in j.steps)
+            for j in run.jobs
+            if j.conclusion != "skipped"
+        ):
+            expected.add(artifact)
     return expected
 
 

@@ -180,6 +180,7 @@ const noop = (): void => {};
 
 const meta = {
   component: AgentRuntimeSettings,
+  tags: ["ci-contract"],
   decorators: [
     (Story) => (
       <StorybookCanvas maxWidth={rem(980)}>
@@ -255,7 +256,7 @@ export const BrowserOptIn = {
   },
   play: async ({ canvasElement, args }) => {
     const toggle = within(canvasElement).getByRole("switch", {
-      name: "Session browser",
+      name: /^Session browser\b/,
     });
     await expect(toggle).not.toBeChecked();
     await userEvent.click(toggle);
@@ -270,7 +271,7 @@ export const BrowserEnabled = {
   },
   play: async ({ canvasElement }) => {
     await expect(
-      within(canvasElement).getByRole("switch", { name: "Session browser" }),
+      within(canvasElement).getByRole("switch", { name: /^Session browser\b/ }),
     ).toBeChecked();
   },
 } satisfies Story;
@@ -279,7 +280,7 @@ export const BrowserUpdating = {
   args: { ...Managed.args, isUpdatingBrowser: true },
   play: async ({ canvasElement }) => {
     await expect(
-      within(canvasElement).getByRole("switch", { name: "Session browser" }),
+      within(canvasElement).getByRole("switch", { name: /^Session browser\b/ }),
     ).toBeDisabled();
   },
 } satisfies Story;

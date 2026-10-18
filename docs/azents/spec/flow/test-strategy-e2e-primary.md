@@ -27,6 +27,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/toolkits/github-user-creation-state.test.mts
   - typescript/apps/azents-web/src/shared/toolkits/components/GitHubWizard.stories.tsx
   - typescript/apps/azents-web/src/features/agents/components/AgentRuntimeSettings.stories.tsx
+  - typescript/apps/azents-web/src/features/chat/components/ChatSessionView.stories.tsx
+  - typescript/apps/azents-web/.storybook/**
   - .claude/skills/ci-optimization/**
   - scripts/ci/**
   - python/apps/azents/src/azents/conftest.py
@@ -55,7 +57,7 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-10-18
+last_verified_at: 2026-10-19
 spec_version: 87
 ---
 
@@ -326,6 +328,15 @@ the Node runner, finite positive duration and exit status. Missing or conflictin
 execution evidence cannot qualify a performance sample, even with green workflow
 metadata or JUnit.
 
+That job also runs the explicit Runtime Settings, GitHub Wizard and Chat Session
+View component portfolio through Storybook's Vitest Chromium integration, with one
+browser worker. The story catalog remains available independently; only this
+portfolio is CI contract evidence. Interaction obligations use actual story plays,
+not names or render-only success. Native JUnit, finite command duration, exit status
+and exact SHA/run/attempt identity are required under the `vitest-browser` runner.
+Missing, empty, skipped or failed component results fail the producer, and missing
+native evidence cannot qualify analysis. No synthetic pytest phases are emitted.
+
 The GitHub browser journeys retain saved Workspace popup authorization plus new
 Agent same-context publication and actual Close-button cancellation. The Workspace
 new-publication ownership branch uses the production-hook and backend contracts
@@ -393,50 +404,27 @@ Always-on required CI does not depend on external credentials.
   behavioral coverage, weakening assertions, bypassing real failure or
   lifecycle boundaries, extending timeouts, or adding sleeps. Adding runners or other
   CI resources requires explicit approval and complete cost accounting.
-- Every enabled E2E lane resolves the immutable snapshots needed by its suite before
-  selecting a local Buildx fallback. Required lanes resolve Server, Runtime Runner,
-  and Docker Runtime Provider. Web lanes additionally resolve Main Web and Admin Web.
-  An image whose complete Docker build inputs are unchanged may reuse the pull request
-  base, the direct `main` predecessor, or a compatible first-parent ancestor.
-  A same-repository pull request, `main` push, or explicit workflow dispatch may
-  additionally reuse an already-published snapshot tagged for the exact current
-  commit SHA. For unchanged inputs, the lane tries a content-compatible exact-current
-  snapshot before the predecessor and ancestor candidates, allowing a completed
-  current publication to replace a cancelled predecessor publication without adding
-  a workflow dependency. Snapshot availability is never a workflow dependency or wait condition:
-  a missing, late, cancelled, or failed publication immediately preserves the
-  existing local Buildx/cache build path. Snapshot pulls run in parallel. The direct
-  snapshot attempt starts immediately after checkout and overlaps uv installation,
-  Python setup, dependency synchronization, and plan download. A durable status
-  handoff joins the attempt before ancestor fallback and Buildx selection; an
-  abnormal exit or nonzero result fails the preparation step rather than silently
-  bypassing fallback decisions. The direct attempt also best-effort pre-pulls the
-  exact public fixture images already required by the lane, overlapping their network
-  transfer without replacing the ordinary Testcontainers pull fallback. Lane
-  observability records snapshot sources, selected commit SHAs, fallback state, and
-  snapshot and prerequisite image timings. When the overlapping direct pull appends
-  to an existing snapshot setup status artifact without a new current SHA, it retains
-  that artifact's current SHA rather than discarding the earlier attempt's evidence.
-  For pull requests
-  where only `python/apps/azents`
-  runtime content changes while the Server Dockerfile, Docker context rules,
-  dependency manifest and lock, and installed shared libraries remain identical, the
-  lane may pull a dependency-compatible predecessor or bounded ancestor Server
-  snapshot as a source-overlay base. It removes the complete predecessor application
-  directory before copying the current-worktree application directory, so changed and
-  deleted source both match the tested revision. The overlay build neither imports nor
-  exports the full-image remote cache. Dependency, lockfile, Dockerfile,
-  Docker-context, or installed shared-library changes still use the full
-  current-worktree Server build, as does any unavailable or incompatible overlay
-  base. Snapshot and image-build artifacts distinguish final-image pulls,
-  source-overlay-base pulls, full builds, and source-overlay builds.
-  A changed Server dependency set still performs a complete current-worktree image
-  build inside the lane. That full build uses Docker's local BuildKit cache rather
-  than importing the slower remote E2E cache; source-overlay builds continue to use
-  the pulled dependency-compatible snapshot without remote cache. Image timing
-  evidence identifies the full-build path as `docker-local:default`, and lane
-  diagnostics capture disk usage for both the named remote-cache builder and the
-  default builder.
+- Enabled E2E lanes consume the exact images built and smoke-tested by the existing
+  Docker build matrix in the same workflow attempt. The Docker matrix is enabled
+  whenever either E2E suite is enabled, including test-only changes. Consumers wait
+  for its success; no extra job, matrix entry, registry publication, snapshot wait,
+  or fallback rebuild is introduced. Required lanes consume Server, Runtime Runner,
+  and Docker Runtime Provider; Web additionally consumes Main Web and Admin Web.
+  Both producer and consumer check out the tested head SHA rather than the synthetic
+  pull-request merge commit.
+  Each selected producer saves its inspected immutable Docker image ID, compresses
+  once, hashes the archive and uploads an image-specific artifact bound to repository,
+  tested SHA, run ID and attempt. Consumers validate the entire exact portfolio,
+  receipt fields, non-symlink files, archive sizes and SHA256 hashes before loading
+  any image. Loaded IDs and the assigned local tags must match the receipts before
+  environment variables are published. Missing, stale, duplicate, partial, corrupt
+  or unexpected artifacts fail closed; they never select a local image rebuild.
+  Existing fixture health, failure propagation, lifecycle ownership and final drain
+  remain authoritative. Prepared-image worker plans explicitly record zero builds.
+  Lane artifacts retain receipts, verification and load durations. Workflow step
+  evidence separately measures export, upload, download, load and archive cleanup,
+  while whole-workflow gate time and runner-seconds include the producer dependency.
+  External prerequisite images still use ordinary Testcontainers pulls.
 - Snapshot workflow dispatch keeps downstream publication enabled by default for
   compatibility. An explicit `dispatch_downstream: false` manual input builds and
   publishes immutable images without invoking the downstream deployment, allowing
@@ -445,14 +433,9 @@ Always-on required CI does not depend on external credentials.
   zstd-compressed layers to reduce transfer volume for isolated branch measurements.
   Main-ref publication and any downstream-dispatched publication retain the default
   gzip-compatible registry output.
-- CI workflow dispatch keeps automatic image-change detection by default. The
-  changed-scope filter compares the checked-out commit with its first parent, so
-  Server, Runtime Runner, and Docker Runtime Provider changes cannot reuse an
-  incompatible predecessor snapshot merely because the dispatch ref names the
-  checked-out branch. Its opt-in `force_current_snapshots: true` diagnostic treats
-  all required images as changed so an already-published exact-current-SHA set and
-  the unchanged local fallback can be measured repeatedly without altering pull
-  request or `main` push behavior.
+- CI workflow dispatch compares changed scopes with the checked-out commit's first
+  parent and enables the complete quality scope. Its E2E images come from the same
+  run's Docker producers, exactly as on pull requests and main pushes.
 - Python lint/type/unit and other deterministic checks.
 - Testenv support tests run `uv run pytest -vv ./src/support_tests` for behavior that
   requires no server, network listener, container, product image, browser, Runtime
@@ -563,26 +546,11 @@ Always-on required CI does not depend on external credentials.
   groups retain one team-primary journey. Barrier state is reset around every
   barrier-backed journey. The interrupted-child scenario blocks on that observable
   barrier instead of a wall-clock sleep.
-- Required and Web lanes reuse the preceding immutable snapshot for every suite image
-  whose complete build inputs are unchanged. Required lanes select Server, Runtime
-  Runner, and Docker Runtime Provider images. Web lanes additionally select Main Web
-  and Admin Web images; any changed or unavailable image is built from the tested
-  worktree.
-  Pull requests use the base-main SHA, main pushes use the previous main SHA, and
-  manually dispatched measurements use the checked-out commit's first parent.
-  Same-repository pull requests also try an already-published snapshot for the exact
-  pull request head commit SHA for each changed image before building it locally.
-  The direct predecessor is the fast path. When an unchanged image's exact tag is
-  unavailable, the lane fetches bounded first-parent history and may reuse the nearest
-  available immutable ancestor only when `git diff` proves that image's complete
-  build-input paths are identical to the direct predecessor. Directly prepared images
-  remain selected while unresolved images continue the ancestor lookup, and artifacts
-  retain both direct and fallback pull evidence. Authentication, history fetch,
-  compatibility, availability, pull, or local-tag failure falls back to the existing
-  current-worktree BuildKit build for the affected image. Changed image components
-  without an exact-current snapshot build the current worktree. Manual Snapshot
-  runs on non-main refs publish immutable unique, SHA, and run tags without moving
-  the shared `dev-main` tag; main-ref runs continue publishing `dev-main`.
+- Local snapshot preparation remains an explicit developer tool, separate from
+  gated CI image handoff. It can resolve compatible exact-current, predecessor or
+  bounded first-parent images and build changed or unavailable images from the
+  current worktree. Manual Snapshot runs on non-main refs publish immutable unique,
+  SHA and run tags without moving `dev-main`; main-ref runs continue publishing it.
 - Discord Single/Multi journeys use the public APIs and the deterministic provider
   fake; they do not create product rows directly. Focused fake contract tests cover
   signed interaction relay, Gateway lifecycle outcomes, nonce convergence, controlled
@@ -621,18 +589,13 @@ Always-on required CI does not depend on external credentials.
   provider-native External Channel progress, Runtime Profile precedence/application/
   recreation, and the existing deterministic product journeys. Runtime Provider
   scenarios that were outside required CI are not retained.
-- Worktree-built Server, Runtime Runner, Docker Runtime Provider, Main Web, and
-  Admin Web E2E images import image-specific BuildKit GitHub Actions cache scopes.
-  Independent images for the selected CI suite build concurrently inside each lane;
-  focused local runs retain lazy per-image builds unless they explicitly select a CI
-  image-build profile.
-  Gated E2E lanes import without exporting. The existing Snapshot workflow build
-  matrix exports the same per-image scopes while publishing immutable images, so
-  cache refresh remains outside the required E2E critical path without adding a
-  runner. E2E artifacts include safe per-image build timing metadata and Buildx cache
-  disk usage, but never cache credentials or cache URLs. Testcontainers-managed
-  Selenium remains an external image pull rather than an Actions-cached Docker
-  archive.
+- Local runs without prepared images retain lazy per-image builds, or concurrent
+  selected-image preparation when explicitly choosing a CI image-build profile.
+  Explicit local Buildx configuration can import image-specific Actions cache
+  scopes; the Snapshot build matrix refreshes those scopes during publication.
+  Gated E2E consumes prepared same-run images instead of invoking this build path.
+  Artifacts never contain cache credentials or cache URLs. Testcontainers-managed
+  Selenium remains an external image pull rather than a workflow image archive.
 - Session working-folder coverage uses public API and the focused Docker Runtime Provider without
   direct product-database writes. Runtime-free roots prove nullable `none` bindings with no folder
   setup; managed roots prove `pending` to `bound` using current Runner evidence; permanent removal

@@ -13,6 +13,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 const meta = {
   title: "Toolkits/GitHub Wizard",
   component: GitHubWizard,
+  tags: ["ci-contract"],
   decorators: [
     (Story) => (
       <StorybookCanvas maxWidth={rem(980)}>
