@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.14"
 
 [options]
@@ -484,7 +484,7 @@ requires-dist = [
     { name = "fastapi", extras = ["standard"], specifier = "==0.141.1" },
     { name = "githubkit", extras = ["auth-app"], specifier = "==0.16.1" },
     { name = "google-analytics-admin", specifier = "==0.30.2" },
-    { name = "google-analytics-data", specifier = "==0.23.2" },
+    { name = "google-analytics-data", specifier = "==0.23.3" },
     { name = "google-auth", specifier = "==2.57.1" },
     { name = "google-cloud-container", specifier = "==2.67.0" },
     { name = "google-genai", specifier = "==2.25.0" },
@@ -1344,7 +1344,7 @@ wheels = [
 
 [[package]]
 name = "google-analytics-data"
-version = "0.23.2"
+version = "0.23.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "google-api-core", extra = ["grpc"] },
@@ -1353,9 +1353,9 @@ dependencies = [
     { name = "proto-plus" },
     { name = "protobuf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d0/64/f9e597917bcc798a223bedc82bebf4f4610d07eed7861274310490a0946c/google_analytics_data-0.23.2.tar.gz", hash = "sha256:9b34dea480e4ebe1eae3e6dee44c09e7ca84e99c008ab0546ae9be7a67aee999", size = 240564, upload-time = "2026-09-24T23:20:01.302Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ab/7a/e2622558ec6ef445dff4261df60fb9b058a6a875738451114bd1921a19ca/google_analytics_data-0.23.3.tar.gz", hash = "sha256:18005e33c72b7eb69e631a6da4d5e160122b7c1ea7deef09bdead5069f0be6b2", size = 240557, upload-time = "2026-10-01T18:14:17.11Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/11/e0/8688834a897071c2f9bdc823c710e5dbe001d6d04f83a2fdee56202ce49f/google_analytics_data-0.23.2-py3-none-any.whl", hash = "sha256:94db2dd419859a2a51cf039ec53a3414ee9cb63c541ada3fe6fa7481ff47a4d9", size = 205168, upload-time = "2026-09-24T23:19:34.92Z" },
+    { url = "https://files.pythonhosted.org/packages/c2/20/0afdbe14e02ff35967321774b9adc485cb9afed662f21010e29249f21fc0/google_analytics_data-0.23.3-py3-none-any.whl", hash = "sha256:753850f9bd22963e1c7a93e6c8579480f2543fa312178489d35d9fc453b719dd", size = 205169, upload-time = "2026-10-01T18:07:21.259Z" },
 ]
 
 [[package]]
