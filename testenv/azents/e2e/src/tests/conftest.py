@@ -3,6 +3,7 @@
 import base64
 import dataclasses
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -48,6 +49,7 @@ from support.browser_artifact_safety import sanitize_browser_artifact
 from support.consts import E2E_GENERAL_FILE_MAXIMUM_BYTES, REPOSITORY_ROOT
 from support.container_logs import (
     ContainerLogs,
+    FailureLogTail,
     emit_container_logs,
     read_container_logs,
 )
@@ -287,7 +289,7 @@ def pytest_runtest_makereport(
     if report.when == "call":
         item.stash[_BROWSER_CALL_REPORT] = report
         if report.failed:
-            _emit_active_server_logs(item.config)
+            _emit_active_server_logs(item.config, node_id=item.nodeid)
     return report
 
 
@@ -1564,26 +1566,41 @@ def _unregister_server_log_capture(server_name: str) -> None:
     _SERVER_LOG_CAPTURES.pop(server_name, None)
 
 
-def _emit_active_server_logs(config: pytest.Config) -> None:
-    """Write all active server logs directly to the pytest terminal."""
+def _emit_active_server_logs(config: pytest.Config, *, node_id: str) -> None:
+    """Preserve worker-owned failure logs as well as terminal diagnostics."""
     terminal_reporter = config.pluginmanager.get_plugin("terminalreporter")
     if terminal_reporter is None:
         original_stdout = sys.__stdout__
 
-        def write_line(line: str) -> None:
+        def terminal_write_line(line: str) -> None:
             if original_stdout is not None:
                 original_stdout.write(f"{line}\n")
 
     else:
-        write_line = terminal_reporter.write_line
-    for server_name, capture in _SERVER_LOG_CAPTURES.items():
-        emit_container_logs(
-            capture.container,
-            server_name=server_name,
-            write_line=write_line,
-        )
-    for line in _runtime_container_diagnostics():
-        write_line(line)
+        terminal_write_line = terminal_reporter.write_line
+    artifact = os.environ.get("AZENTS_E2E_ARTIFACT_DIR")
+    tail = FailureLogTail()
+
+    def write_line(line: str) -> None:
+        tail.append(line)
+        terminal_write_line(line)
+
+    try:
+        for server_name, capture in _SERVER_LOG_CAPTURES.items():
+            emit_container_logs(
+                capture.container,
+                server_name=server_name,
+                write_line=write_line,
+            )
+        for line in _runtime_container_diagnostics():
+            write_line(line)
+    finally:
+        if artifact is not None:
+            name = hashlib.sha256(node_id.encode()).hexdigest()
+            tail.save(
+                Path(artifact) / "server-failures" / f"{name}.log",
+                node_id=node_id,
+            )
 
 
 def _runtime_container_diagnostics() -> tuple[str, ...]:

@@ -802,6 +802,12 @@ Always-on required CI does not depend on external credentials.
   Long details are bounded with full evidence linked in artifacts. Missing results
   remain unavailable rather than passing. Only the reporting job has PR write access;
   forks publish artifacts/job summaries but remain read-only and never post comments.
+- Failed E2E calls also retain a bounded active-server diagnostic tail under the
+  current worker's existing artifact directory, keyed by a hash of the testcase
+  identity. This remains available when xdist workers have no terminal reporter,
+  including API-only Browser failures without Selenium screenshots. Existing
+  terminal diagnostics remain complete. Diagnostic filesystem errors are warnings
+  and do not replace the original test failure or trigger retries.
 - Whole-CI gate-completion elapsed time spans workflow creation to the last configured
   gate, including dependency scheduling and queues. Maximum job wall, aggregate
   runner job-seconds and E2E max-lane wall are distinct metrics. Reporting overhead is
