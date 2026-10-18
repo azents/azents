@@ -1,0 +1,93 @@
+{
+  "title": "Routines",
+  "description": "Inspect ongoing objectives and recorded work in this session. Definitions are managed through the Agent.",
+  "inventory": "Session Routines",
+  "empty": "No Routines in this session. Ask the Agent to set up conditional checking for an ongoing objective.",
+  "selectRoutine": "Select a Routine to inspect its objective and work records.",
+  "loading": "Loading Routines…",
+  "unavailable": "Routine information is unavailable",
+  "refresh": "Refresh",
+  "back": "Back to Routines",
+  "objective": "Objective",
+  "sources": "Current sources",
+  "manualSource": "Regular checking at eligible ticks",
+  "noSources": "No sources configured; not selected for automatic checking.",
+  "latestExecution": "Latest occurrence",
+  "notExecuted": "Not yet executed",
+  "admittedAt": "Queued",
+  "startedAt": "Started",
+  "completedAt": "Ended",
+  "records": "Work records ({count})",
+  "noRecords": "No completed work has been recorded yet.",
+  "result": "Recorded result",
+  "nextHint": "Next-check hint",
+  "notification": "Notification choice",
+  "notifyYes": "Notification requested",
+  "notifyNo": "No notification requested",
+  "message": "Notification message",
+  "delivery": "Observed delivery",
+  "outcomes": {
+    "finished": "Objective finished",
+    "failed": "Objective failed"
+  },
+  "phases": {
+    "admitted": "Queued",
+    "started": "Work incomplete",
+    "completed": "Work recorded",
+    "cancelled": "Cancelled"
+  },
+  "deliveryStates": {
+    "not_requested": "Not requested",
+    "unobserved": "Delivery not observed",
+    "delivered": "Delivered",
+    "failed": "Delivery failed"
+  },
+  "input": {
+    "trigger": "Routine work",
+    "continuation": "Continue Routine work",
+    "unavailable": "The admitted Routine context is unavailable."
+  },
+  "tool": {
+    "routineTitle": "Title",
+    "requested": "Requested work",
+    "observedResult": "Observed result",
+    "previousContent": "Existing content supplied for comparison",
+    "requestedChanges": "Requested changes",
+    "noChanges": "No content changes requested.",
+    "argumentsPending": "Arguments are not available yet.",
+    "sessionInventory": "Read the current Session inventory.",
+    "recordLimit": "Up to {count} work records",
+    "emptyInventory": "No Routines returned.",
+    "notFound": "The Routine was not found or is unavailable.",
+    "admittedContext": "Original admitted context",
+    "sourceEvents": "Admitted source events",
+    "previousWork": "Previous work supplied with this context",
+    "newCompletion": "This occurrence was completed and its result saved.",
+    "existingCompletion": "This occurrence was already complete. Its saved result was returned without repeating notification.",
+    "resultPending": "Waiting for a completed result.",
+    "noObservedResult": "No completed result was observed. Requested content is not an actual result."
+  },
+  "judgment": {
+    "label": "Routine",
+    "unavailable": "Judgment details are unavailable.",
+    "considered": "Considered Routines",
+    "selected": "Selected for work",
+    "noAction": "No work selected",
+    "noDecision": "No valid decision",
+    "model": "Model snapshot",
+    "unknown": "Unavailable",
+    "usageUnavailable": "Call usage is unavailable.",
+    "callUsage": "Judgment-call usage",
+    "tokens": "Total {total} · Input {prompt} · Output {completion}",
+    "cached": "Cache read",
+    "cacheCreated": "Cache write",
+    "reasoning": "Reasoning tokens",
+    "cost": "Recorded cost",
+    "separateUsage": "This call only; ordinary turn usage is unchanged.",
+    "states": {
+      "completed": "Judgment completed",
+      "failed": "Judgment failed",
+      "cancelled": "Judgment cancelled"
+    }
+  }
+}

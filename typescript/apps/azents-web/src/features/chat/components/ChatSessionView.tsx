@@ -30,6 +30,7 @@ import {
   IconGripVertical,
   IconHome,
   IconPlugConnected,
+  IconRepeat,
   IconRobot,
   IconSettings,
   IconTerminal2,
@@ -85,6 +86,7 @@ function ChatSessionContent({
 }: ChatSessionViewContainerOutput): React.ReactElement {
   const t = useTranslations("chat");
   const tAgentDetail = useTranslations("workspace.agents.detail");
+  const tRoutines = useTranslations("routines");
   const panelItems: SessionPanelItem[] = [
     {
       id: "files",
@@ -124,6 +126,11 @@ function ChatSessionContent({
       id: "scheduled-tasks",
       label: tAgentDetail("tabs.scheduledTasks"),
       icon: <IconCalendarClock size={rem(16)} />,
+    },
+    {
+      id: "routines",
+      label: tRoutines("title"),
+      icon: <IconRepeat size={rem(16)} />,
     },
     {
       id: "runtime",

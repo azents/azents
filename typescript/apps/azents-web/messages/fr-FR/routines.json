@@ -1,0 +1,93 @@
+{
+  "title": "Routines",
+  "description": "Consultez les objectifs continus et les travaux enregistrés dans cette session. Demandez à l’Agent de gérer les définitions.",
+  "inventory": "Routines de la session",
+  "empty": "Cette session ne contient aucune routine. Demandez à l’Agent de vérifier régulièrement un objectif et d’intervenir si nécessaire.",
+  "selectRoutine": "Sélectionnez une routine pour consulter son objectif et ses travaux.",
+  "loading": "Chargement des routines…",
+  "unavailable": "Les informations de la routine sont indisponibles",
+  "refresh": "Actualiser",
+  "back": "Retour aux routines",
+  "objective": "Objectif",
+  "sources": "Sources actuelles",
+  "manualSource": "Vérification régulière aux échéances admissibles",
+  "noSources": "Aucune source configurée ; la routine n’est pas sélectionnée pour une vérification automatique.",
+  "latestExecution": "Dernière exécution",
+  "notExecuted": "Pas encore exécutée",
+  "admittedAt": "Mise en attente",
+  "startedAt": "Début",
+  "completedAt": "Fin",
+  "records": "Travaux enregistrés ({count})",
+  "noRecords": "Aucun travail terminé n’a encore été enregistré.",
+  "result": "Résultat enregistré",
+  "nextHint": "Indication pour la prochaine vérification",
+  "notification": "Choix de notification",
+  "notifyYes": "Notification demandée",
+  "notifyNo": "Aucune notification demandée",
+  "message": "Message de notification",
+  "delivery": "État d’envoi observé",
+  "outcomes": {
+    "finished": "Objectif atteint",
+    "failed": "Objectif non atteint"
+  },
+  "phases": {
+    "admitted": "En attente",
+    "started": "Travail inachevé",
+    "completed": "Travail enregistré",
+    "cancelled": "Annulée"
+  },
+  "deliveryStates": {
+    "not_requested": "Non demandé",
+    "unobserved": "Envoi non observé",
+    "delivered": "Envoyé",
+    "failed": "Échec de l’envoi"
+  },
+  "input": {
+    "trigger": "Travail d’une routine",
+    "continuation": "Poursuivre le travail des routines",
+    "unavailable": "Le contexte de la routine admise est indisponible."
+  },
+  "tool": {
+    "routineTitle": "Titre",
+    "requested": "Travail demandé",
+    "observedResult": "Résultat observé",
+    "previousContent": "Contenu existant fourni pour comparaison",
+    "requestedChanges": "Modifications demandées",
+    "noChanges": "Aucune modification du contenu demandée.",
+    "argumentsPending": "Les arguments ne sont pas encore disponibles.",
+    "sessionInventory": "Consulter les routines de la session actuelle.",
+    "recordLimit": "Jusqu’à {count} travaux enregistrés",
+    "emptyInventory": "Aucune routine renvoyée.",
+    "notFound": "La routine est introuvable ou indisponible.",
+    "admittedContext": "Contexte initial lors de l’admission",
+    "sourceEvents": "Événements sources admis",
+    "previousWork": "Travail précédent fourni avec ce contexte",
+    "newCompletion": "Cette occurrence a été terminée et son résultat enregistré.",
+    "existingCompletion": "Cette occurrence était déjà terminée. Le résultat enregistré a été renvoyé sans nouvelle notification.",
+    "resultPending": "En attente d’un résultat terminé.",
+    "noObservedResult": "Aucun résultat terminé n’a été observé. Le contenu demandé n’est pas un résultat effectif."
+  },
+  "judgment": {
+    "label": "Routine",
+    "unavailable": "Les détails de la décision sont indisponibles.",
+    "considered": "Routines examinées",
+    "selected": "Sélectionnée pour un travail",
+    "noAction": "Aucun travail sélectionné",
+    "noDecision": "Aucune décision valide",
+    "model": "Modèle lors de l’appel",
+    "unknown": "Indisponible",
+    "usageUnavailable": "L’utilisation de cet appel est indisponible.",
+    "callUsage": "Utilisation de l’appel de décision",
+    "tokens": "Total {total} · Entrée {prompt} · Sortie {completion}",
+    "cached": "Lecture du cache",
+    "cacheCreated": "Écriture du cache",
+    "reasoning": "Jetons de raisonnement",
+    "cost": "Coût enregistré",
+    "separateUsage": "Cet appel uniquement ; l’utilisation du tour ordinaire reste inchangée.",
+    "states": {
+      "completed": "Décision terminée",
+      "failed": "Échec de la décision",
+      "cancelled": "Décision annulée"
+    }
+  }
+}

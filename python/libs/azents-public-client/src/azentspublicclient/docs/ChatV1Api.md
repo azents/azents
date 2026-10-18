@@ -30,6 +30,7 @@ Method | HTTP request | Description
 [**chat_v1_get_agent_session_context**](ChatV1Api.md#chat_v1_get_agent_session_context) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/context | Get Agent Session Context
 [**chat_v1_get_agent_session_model_availability**](ChatV1Api.md#chat_v1_get_agent_session_model_availability) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/model-availability | Get Agent Session Model Availability
 [**chat_v1_get_agent_session_project_defaults**](ChatV1Api.md#chat_v1_get_agent_session_project_defaults) | **GET** /chat/v1/agents/{agent_id}/session-project-defaults | Get Agent Session Project Defaults
+[**chat_v1_get_agent_session_routine**](ChatV1Api.md#chat_v1_get_agent_session_routine) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/routines/{slug} | Get Agent Session Routine
 [**chat_v1_get_agent_session_sidebar**](ChatV1Api.md#chat_v1_get_agent_session_sidebar) | **GET** /chat/v1/agents/{agent_id}/sessions/sidebar | Get Agent Session Sidebar
 [**chat_v1_get_agent_workspace**](ChatV1Api.md#chat_v1_get_agent_workspace) | **GET** /chat/v1/agents/{agent_id}/workspace | Get Agent Workspace
 [**chat_v1_get_agent_workspace_repository_type**](ChatV1Api.md#chat_v1_get_agent_workspace_repository_type) | **GET** /chat/v1/agents/{agent_id}/workspace/repository-type | Get Agent Workspace Repository Type
@@ -40,6 +41,7 @@ Method | HTTP request | Description
 [**chat_v1_issue_ws_ticket**](ChatV1Api.md#chat_v1_issue_ws_ticket) | **POST** /chat/v1/ticket | Issue Ws Ticket
 [**chat_v1_list_agent_project_presets**](ChatV1Api.md#chat_v1_list_agent_project_presets) | **GET** /chat/v1/agents/{agent_id}/project-presets | List Agent Project Presets
 [**chat_v1_list_agent_projects**](ChatV1Api.md#chat_v1_list_agent_projects) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects | List Agent Projects
+[**chat_v1_list_agent_session_routines**](ChatV1Api.md#chat_v1_list_agent_session_routines) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/routines | List Agent Session Routines
 [**chat_v1_list_agent_sessions**](ChatV1Api.md#chat_v1_list_agent_sessions) | **GET** /chat/v1/agents/{agent_id}/sessions | List Agent Sessions
 [**chat_v1_list_agent_user_sessions**](ChatV1Api.md#chat_v1_list_agent_user_sessions) | **GET** /chat/v1/agents/{agent_id}/user-sessions | List Agent User Sessions
 [**chat_v1_list_history_events**](ChatV1Api.md#chat_v1_list_history_events) | **GET** /chat/v1/sessions/{session_id}/history | List History Events
@@ -2182,6 +2184,89 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
+# **chat_v1_get_agent_session_routine**
+> RoutineDetailResponse chat_v1_get_agent_session_routine(agent_id, session_id, slug)
+
+Get Agent Session Routine
+
+Read current content, latest occurrence and retained work without mutation.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.routine_detail_response import RoutineDetailResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ChatV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    session_id = 'session_id_example' # str | 
+    slug = 'slug_example' # str | 
+
+    try:
+        # Get Agent Session Routine
+        api_response = api_instance.chat_v1_get_agent_session_routine(agent_id, session_id, slug)
+        print("The response of ChatV1Api->chat_v1_get_agent_session_routine:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ChatV1Api->chat_v1_get_agent_session_routine: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **session_id** | **str**|  | 
+ **slug** | **str**|  | 
+
+### Return type
+
+[**RoutineDetailResponse**](RoutineDetailResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
 # **chat_v1_get_agent_session_sidebar**
 > AgentSessionSidebarResponse chat_v1_get_agent_session_sidebar(agent_id)
 
@@ -2961,6 +3046,87 @@ Name | Type | Description  | Notes
 ### Return type
 
 [**SessionWorkspaceProjectListResponse**](SessionWorkspaceProjectListResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **chat_v1_list_agent_session_routines**
+> RoutineListResponse chat_v1_list_agent_session_routines(agent_id, session_id)
+
+List Agent Session Routines
+
+Read Routine definitions from the exact authorized Session.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.routine_list_response import RoutineListResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ChatV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    session_id = 'session_id_example' # str | 
+
+    try:
+        # List Agent Session Routines
+        api_response = api_instance.chat_v1_list_agent_session_routines(agent_id, session_id)
+        print("The response of ChatV1Api->chat_v1_list_agent_session_routines:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ChatV1Api->chat_v1_list_agent_session_routines: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **session_id** | **str**|  | 
+
+### Return type
+
+[**RoutineListResponse**](RoutineListResponse.md)
 
 ### Authorization
 

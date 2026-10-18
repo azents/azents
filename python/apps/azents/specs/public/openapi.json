@@ -3855,6 +3855,129 @@
         }
       }
     },
+    "/chat/v1/agents/{agent_id}/sessions/{session_id}/routines": {
+      "get": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "List Agent Session Routines",
+        "description": "Read Routine definitions from the exact authorized Session.",
+        "operationId": "chat_v1_list_agent_session_routines",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutineListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/v1/agents/{agent_id}/sessions/{session_id}/routines/{slug}": {
+      "get": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Get Agent Session Routine",
+        "description": "Read current content, latest occurrence and retained work without mutation.",
+        "operationId": "chat_v1_get_agent_session_routine",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutineDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chat/v1/agents/{agent_id}/team-primary-session": {
       "get": {
         "tags": [
@@ -37247,6 +37370,22 @@
         ],
         "title": "ManagedWorkTask"
       },
+      "ManualRoutineSource": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "manual",
+            "title": "Type"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "ManualRoutineSource",
+        "description": "Candidate input at eligible checks without a manual user action."
+      },
       "MeResponse": {
         "properties": {
           "email": {
@@ -40676,6 +40815,292 @@
         ],
         "title": "ResponseModeRequest",
         "description": "Required full-value response-mode request."
+      },
+      "RoutineContent": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "objective": {
+            "type": "string",
+            "title": "Objective"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/ManualRoutineSource"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "title",
+          "objective",
+          "sources"
+        ],
+        "title": "RoutineContent",
+        "description": "Exactly comparable editable content with no implicit text rewriting."
+      },
+      "RoutineDefinitionResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "content": {
+            "$ref": "#/components/schemas/RoutineContent"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "slug",
+          "content",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "RoutineDefinitionResponse",
+        "description": "Current definition content for read-only Session inspection."
+      },
+      "RoutineDeliveryStatus": {
+        "type": "string",
+        "enum": [
+          "not_requested",
+          "unobserved",
+          "delivered",
+          "failed"
+        ],
+        "title": "RoutineDeliveryStatus",
+        "description": "Observed publication outcome, never a retry queue."
+      },
+      "RoutineDetailResponse": {
+        "properties": {
+          "routine": {
+            "$ref": "#/components/schemas/RoutineDefinitionResponse"
+          },
+          "execution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoutineExecutionResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "records": {
+            "items": {
+              "$ref": "#/components/schemas/RoutineWorkRecordResponse"
+            },
+            "type": "array",
+            "title": "Records"
+          }
+        },
+        "type": "object",
+        "required": [
+          "routine",
+          "execution",
+          "records"
+        ],
+        "title": "RoutineDetailResponse",
+        "description": "Current content, most recent occurrence and retained execution records."
+      },
+      "RoutineExecutionResponse": {
+        "properties": {
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "admitted",
+              "started",
+              "completed",
+              "cancelled"
+            ],
+            "title": "Phase"
+          },
+          "admitted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Admitted At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "execution_id",
+          "phase",
+          "admitted_at",
+          "started_at",
+          "completed_at"
+        ],
+        "title": "RoutineExecutionResponse",
+        "description": "Most recent occurrence timing and status, not execution authority."
+      },
+      "RoutineListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RoutineDefinitionResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "RoutineListResponse",
+        "description": "Bounded inventory for one exact authorized Session."
+      },
+      "RoutineObjectiveOutcome": {
+        "type": "string",
+        "enum": [
+          "finished",
+          "failed"
+        ],
+        "title": "RoutineObjectiveOutcome",
+        "description": "Objective achievement, distinct from recording or message delivery."
+      },
+      "RoutineWorkRecordResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "routine_id": {
+            "type": "string",
+            "title": "Routine Id"
+          },
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "completed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Completed At"
+          },
+          "work": {
+            "$ref": "#/components/schemas/RoutineWorkResult"
+          },
+          "delivery_status": {
+            "$ref": "#/components/schemas/RoutineDeliveryStatus"
+          },
+          "delivery_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivery Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "routine_id",
+          "execution_id",
+          "started_at",
+          "completed_at",
+          "work",
+          "delivery_status",
+          "delivery_error"
+        ],
+        "title": "RoutineWorkRecordResponse",
+        "description": "Objective outcome, recorded work and notification evidence stay distinct."
+      },
+      "RoutineWorkResult": {
+        "properties": {
+          "objective_outcome": {
+            "$ref": "#/components/schemas/RoutineObjectiveOutcome"
+          },
+          "result": {
+            "type": "string",
+            "title": "Result"
+          },
+          "next_hint": {
+            "type": "string",
+            "title": "Next Hint"
+          },
+          "notify": {
+            "type": "boolean",
+            "title": "Notify"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "objective_outcome",
+          "result",
+          "next_hint",
+          "notify",
+          "message"
+        ],
+        "title": "RoutineWorkResult",
+        "description": "One completed objective and independently chosen user notification."
       },
       "RunnerSystemMetricAvailability": {
         "type": "string",

@@ -26,6 +26,7 @@ import {
   applyProviderToolCallItem,
   providerToolCallFromPayload,
 } from "@azents/session-core/providerToolCallProjection";
+import { routineEventMessage } from "@azents/session-core/routinePresentation";
 import {
   applyFunctionCallItem,
   applyFunctionCallOutput,
@@ -989,6 +990,15 @@ function mapEvents(
   return items.reduce<ChatMessage[]>((messages, event) => {
     const payload = event.payload;
     switch (event.kind) {
+      case "routine_judgment":
+      case "routine_trigger":
+      case "routine_continuation":
+      case "routine_notification": {
+        const routine = routineEventMessage(event);
+        return routine === null
+          ? messages
+          : upsertMessageByMergeKey(messages, routine);
+      }
       case "user_message": {
         const content = contentText(payload.content);
         const attachments = [

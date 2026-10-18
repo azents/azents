@@ -12,6 +12,7 @@ void test("standalone session views refresh their own projections", () => {
   assert.deepEqual(sessionPanelInvalidationPlan("subagents"), ["subagents"]);
   assert.deepEqual(sessionPanelInvalidationPlan("channels"), ["channels"]);
   assert.deepEqual(sessionPanelInvalidationPlan("terminal"), ["terminal"]);
+  assert.deepEqual(sessionPanelInvalidationPlan("routines"), ["routines"]);
 });
 
 void test("container-owned views delegate refresh to their owning container", () => {

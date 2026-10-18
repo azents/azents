@@ -93,6 +93,8 @@ function categoryLabel(
       return t("categoryGit");
     case "schedule":
       return t("categorySchedule");
+    case "routine":
+      return t("categoryRoutine");
     case "web-service":
       return t("categoryWebService");
     case "channel":

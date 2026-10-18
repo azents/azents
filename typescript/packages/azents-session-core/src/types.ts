@@ -1,6 +1,10 @@
 /** Host-independent Session wire and presentation types. */
 
 import type {
+  RoutineInputContext,
+  RoutineJudgmentMessage,
+} from "./routinePresentation.ts";
+import type {
   ActionExecutionProjectionResponse,
   AppliedInferenceProfile,
   ChatEventResponse,
@@ -810,6 +814,9 @@ export interface ChatMessage {
     | "external_channel_continuation"
     | "goal_updated"
     | "goal_briefing"
+    | "routine_judgment"
+    | "routine_trigger"
+    | "routine_continuation"
     | "skill_loaded";
   content: string | null;
   toolCalls?: ActiveToolCall[];
@@ -833,6 +840,10 @@ export interface ChatMessage {
   inferenceProfile?: RequestedInferenceProfile | AppliedInferenceProfile | null;
   /** failed-run recovery metadata for terminal failed-run errors */
   failedRunFailure?: FailedRunFailureMetadata | null;
+  /** Passive judgment has call-owned usage, never ordinary message usage. */
+  routineJudgment?: RoutineJudgmentMessage | null;
+  /** Immutable ordinary work context, distinct from a passive judgment. */
+  routineInput?: RoutineInputContext | null;
 }
 
 /** WebSocket connection status */

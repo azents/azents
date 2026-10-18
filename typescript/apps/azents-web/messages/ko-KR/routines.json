@@ -1,0 +1,93 @@
+{
+  "title": "루틴",
+  "description": "이 세션의 지속적인 목표와 작업 기록을 확인합니다. 루틴 관리는 Agent에게 요청하세요.",
+  "inventory": "세션 루틴",
+  "empty": "이 세션에 루틴이 없습니다. 지속적으로 살펴볼 목표를 Agent에게 알려 조건부 확인을 요청하세요.",
+  "selectRoutine": "루틴을 선택하면 목표와 작업 기록을 확인할 수 있습니다.",
+  "loading": "루틴을 불러오는 중…",
+  "unavailable": "루틴 정보를 불러올 수 없습니다",
+  "refresh": "새로고침",
+  "back": "루틴 목록으로",
+  "objective": "목표",
+  "sources": "현재 소스",
+  "manualSource": "실행 가능한 주기에 정기 확인",
+  "noSources": "설정된 소스가 없어 자동 확인 대상으로 선택되지 않습니다.",
+  "latestExecution": "최근 실행",
+  "notExecuted": "아직 실행되지 않음",
+  "admittedAt": "대기 시작",
+  "startedAt": "작업 시작",
+  "completedAt": "종료",
+  "records": "작업 기록 ({count}개)",
+  "noRecords": "완료된 작업 기록이 아직 없습니다.",
+  "result": "기록된 결과",
+  "nextHint": "다음 확인을 위한 힌트",
+  "notification": "알림 선택",
+  "notifyYes": "알림 요청함",
+  "notifyNo": "알림 요청하지 않음",
+  "message": "알림 메시지",
+  "delivery": "확인된 전송 상태",
+  "outcomes": {
+    "finished": "목표 달성",
+    "failed": "목표 달성 실패"
+  },
+  "phases": {
+    "admitted": "대기 중",
+    "started": "작업 미완료",
+    "completed": "작업 기록됨",
+    "cancelled": "취소됨"
+  },
+  "deliveryStates": {
+    "not_requested": "전송 요청 없음",
+    "unobserved": "전송 결과 미확인",
+    "delivered": "전송 완료",
+    "failed": "전송 실패"
+  },
+  "input": {
+    "trigger": "루틴 작업",
+    "continuation": "루틴 작업 이어서 진행",
+    "unavailable": "실행 대상으로 확정된 루틴 문맥을 불러올 수 없습니다."
+  },
+  "tool": {
+    "routineTitle": "제목",
+    "requested": "요청한 작업",
+    "observedResult": "확인된 결과",
+    "previousContent": "비교 기준으로 전달한 기존 내용",
+    "requestedChanges": "요청한 변경 사항",
+    "noChanges": "요청한 내용 변경이 없습니다.",
+    "argumentsPending": "인자가 아직 준비되지 않았습니다.",
+    "sessionInventory": "현재 세션의 루틴 목록 조회",
+    "recordLimit": "작업 기록 최대 {count}개",
+    "emptyInventory": "반환된 루틴이 없습니다.",
+    "notFound": "루틴이 없거나 조회할 수 없습니다.",
+    "admittedContext": "실행 확정 당시의 원본 문맥",
+    "sourceEvents": "확정된 소스 이벤트",
+    "previousWork": "이 문맥에 포함된 이전 작업",
+    "newCompletion": "이 실행 항목을 완료하고 결과를 저장했습니다.",
+    "existingCompletion": "이미 완료된 항목입니다. 알림을 반복하지 않고 저장된 결과를 반환했습니다.",
+    "resultPending": "완료된 결과를 기다리는 중입니다.",
+    "noObservedResult": "완료된 결과가 확인되지 않았습니다. 요청한 내용이 실제 결과를 뜻하지는 않습니다."
+  },
+  "judgment": {
+    "label": "루틴",
+    "unavailable": "판단 상세를 불러올 수 없습니다.",
+    "considered": "판단 대상 루틴",
+    "selected": "작업 대상으로 선택됨",
+    "noAction": "작업 대상으로 선택되지 않음",
+    "noDecision": "유효한 판단 결과 없음",
+    "model": "호출 당시 모델",
+    "unknown": "정보 없음",
+    "usageUnavailable": "호출 사용량 정보가 없습니다.",
+    "callUsage": "판단 호출 사용량",
+    "tokens": "전체 {total} · 입력 {prompt} · 출력 {completion}",
+    "cached": "캐시 읽기",
+    "cacheCreated": "캐시 쓰기",
+    "reasoning": "추론 토큰",
+    "cost": "기록된 비용",
+    "separateUsage": "이 판단 호출의 사용량이며, 일반 턴 사용량은 변경하지 않습니다.",
+    "states": {
+      "completed": "판단 완료",
+      "failed": "판단 실패",
+      "cancelled": "판단 취소됨"
+    }
+  }
+}

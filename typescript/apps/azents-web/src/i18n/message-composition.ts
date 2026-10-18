@@ -20,6 +20,7 @@ export const MESSAGE_NAMESPACES = [
   "metadata",
   "oauth",
   "oauthCallback",
+  "routines",
   "runtimeLifecycle",
   "runtimeMetrics",
   "runtimeWeb",

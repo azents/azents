@@ -347,6 +347,50 @@ void test("groups all Scheduled Task tools with Schedule activity", () => {
   }
 });
 
+void test("groups Routine tools separately without borrowing foreign Toolkit identity", () => {
+  for (const name of [
+    "create_routine",
+    "list_routines",
+    "inspect_routine",
+    "update_routine",
+    "delete_routine",
+    "read_routine_context",
+    "record_routine_result",
+  ]) {
+    const tool = clientToolMessage("tool-message", "call-1", name, {
+      toolkit_config_id: "routine",
+      toolkit_type: "routine",
+      toolkit_slug: "routine",
+      toolkit_name: "Routines",
+    });
+    const events = [
+      event("call-1", "client_tool_call", {
+        call_id: "call-1",
+        name,
+        arguments: "{}",
+      }),
+    ];
+    const items = projectChatPresentationItems(events, [tool]);
+    assert.deepEqual(activityAt(items, 0).events[0]?.category, {
+      key: "routine",
+      label: "routine",
+    });
+    for (const call of tool.toolCalls ?? []) {
+      call.toolkitSource = {
+        toolkit_config_id: "foreign",
+        toolkit_type: "custom",
+        toolkit_slug: "foreign",
+        toolkit_name: "Foreign tools",
+      };
+    }
+    const foreign = projectChatPresentationItems(events, [tool]);
+    assert.deepEqual(activityAt(foreign, 0).events[0]?.category, {
+      key: "toolkit:foreign",
+      label: "Foreign tools",
+    });
+  }
+});
+
 void test("categorizes source-less history, web service, channel, and discovery tools", () => {
   const categories = {
     memory: [

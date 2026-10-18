@@ -211,6 +211,12 @@ export function useChatSessionViewContainer(
             limit: 300,
           });
           return;
+        case "routines":
+          await Promise.all([
+            utils.routine.list.invalidate({ agentId: agent.id, sessionId }),
+            utils.routine.detail.invalidate({ agentId: agent.id, sessionId }),
+          ]);
+          return;
         case "subagents":
           await utils.chat.getSubagentTree.invalidate({
             agentId: agent.id,
@@ -234,6 +240,8 @@ export function useChatSessionViewContainer(
       utils.chat.getAgentSessionContext,
       utils.chat.getSubagentTree,
       utils.externalChannel.listSessionChannels,
+      utils.routine.list,
+      utils.routine.detail,
       utils.terminal.projection,
     ],
   );

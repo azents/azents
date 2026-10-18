@@ -158,6 +158,7 @@ from azents.services.project_browser_manifest import (
     ProjectBrowserManifestService,
     ProjectBrowserSessionNotFound,
 )
+from azents.services.routine.inspection import RoutineInspectionService
 from azents.services.session_git_worktree import (
     GitRefPreviewAccessDenied,
     GitRefPreviewAgentNotFound,
@@ -259,6 +260,11 @@ from .data import (
     PrepareSessionWorkingFolderRequest,
     ProjectBrowserManifestPreviewRequest,
     ProjectBrowserManifestResponse,
+    RoutineDefinitionResponse,
+    RoutineDetailResponse,
+    RoutineExecutionResponse,
+    RoutineListResponse,
+    RoutineWorkRecordResponse,
     SessionContextResponse,
     SessionWorkspaceProjectListResponse,
     SessionWorkspaceProjectRegisterRequest,
@@ -1715,6 +1721,57 @@ async def get_agent_session_context(
                 raise HTTPException(status_code=404, detail="Session not found.")
             case _:
                 assert_never(error)
+
+
+@router.get("/agents/{agent_id}/sessions/{session_id}/routines")
+async def list_agent_session_routines(
+    agent_id: str,
+    session_id: str,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    service: Annotated[RoutineInspectionService, Depends()],
+) -> RoutineListResponse:
+    """Read Routine definitions from the exact authorized Session."""
+    _validate_session_id(session_id)
+    result = await service.list_for_session(
+        agent_id=agent_id, session_id=session_id, user_id=current_user.user_id
+    )
+    if isinstance(result, Failure):
+        raise HTTPException(status_code=404, detail="Session not found.")
+    return RoutineListResponse(
+        items=[
+            RoutineDefinitionResponse.from_domain(item) for item in result.value.items
+        ]
+    )
+
+
+@router.get("/agents/{agent_id}/sessions/{session_id}/routines/{slug}")
+async def get_agent_session_routine(
+    agent_id: str,
+    session_id: str,
+    slug: str,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    service: Annotated[RoutineInspectionService, Depends()],
+) -> RoutineDetailResponse:
+    """Read current content, latest occurrence and retained work without mutation."""
+    _validate_session_id(session_id)
+    result = await service.detail(
+        agent_id=agent_id,
+        session_id=session_id,
+        user_id=current_user.user_id,
+        slug=slug,
+    )
+    if isinstance(result, Failure):
+        raise HTTPException(status_code=404, detail="Routine or Session not found.")
+    detail = result.value
+    return RoutineDetailResponse(
+        routine=RoutineDefinitionResponse.from_domain(detail.definition),
+        execution=None
+        if detail.execution is None
+        else RoutineExecutionResponse.from_domain(detail.execution),
+        records=[
+            RoutineWorkRecordResponse.from_domain(item) for item in detail.records
+        ],
+    )
 
 
 @router.get("/agents/{agent_id}/team-primary-session")

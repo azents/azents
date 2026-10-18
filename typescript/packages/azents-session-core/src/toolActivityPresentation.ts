@@ -1,4 +1,5 @@
 import { toolCallForDisplay } from "./delegatedToolPresentation.ts";
+import { isRoutineToolCall } from "./routinePresentation.ts";
 import type {
   ActiveToolCall,
   ChatMessage,
@@ -223,6 +224,9 @@ function messageHasAttachments(message: ChatMessage | null): boolean {
 function activityCategoryForTool(call: ToolActivityCall): ActivityCategory {
   if (call.type === "client") {
     call = { ...call, toolCall: toolCallForDisplay(call.toolCall) };
+  }
+  if (call.type === "client" && isRoutineToolCall(call.toolCall)) {
+    return { key: "routine", label: "routine" };
   }
   if (
     call.type === "client" &&

@@ -399,6 +399,56 @@ export const GoalBriefing = {
   },
 } satisfies Story;
 
+export const RoutineJudgment = {
+  args: {
+    message: createChatMessage({
+      id: "routine-judgment",
+      role: "routine_judgment",
+      content: null,
+      routineJudgment: {
+        provider: "openai",
+        model: "saved-model",
+        observation: {
+          type: "AVAILABLE",
+          judgmentId: "judgment-1",
+          status: "completed",
+          items: [
+            {
+              routineId: "routine-1",
+              slug: "traffic",
+              title: "Traffic anomalies",
+              act: false,
+            },
+          ],
+          error: null,
+          callUsage: null,
+        },
+      },
+    }),
+  },
+} satisfies Story;
+
+export const AdmittedRoutineWork = {
+  args: {
+    message: createChatMessage({
+      id: "routine-trigger",
+      role: "routine_trigger",
+      content: "Check the originally admitted traffic objective.",
+      routineInput: {
+        content: "Check the originally admitted traffic objective.",
+        executions: [
+          {
+            routineId: "routine-1",
+            executionId: "occurrence-1",
+            slug: "traffic",
+            title: "Traffic anomalies",
+          },
+        ],
+      },
+    }),
+  },
+} satisfies Story;
+
 export const MarkdownGoalBriefing = {
   args: {
     message: createChatMessage({

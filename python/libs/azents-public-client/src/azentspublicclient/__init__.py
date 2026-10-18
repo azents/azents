@@ -407,6 +407,7 @@ __all__ = [
     "ManagedWork",
     "ManagedWorkSource",
     "ManagedWorkTask",
+    "ManualRoutineSource",
     "MeResponse",
     "MemoryCreateRequest",
     "MemoryListResponse",
@@ -507,6 +508,15 @@ __all__ = [
     "ResponseChatV1ReadAgentWorkspacePath",
     "ResponseLlmProviderIntegrationV1GetSubscriptionUsage",
     "ResponseModeRequest",
+    "RoutineContent",
+    "RoutineDefinitionResponse",
+    "RoutineDeliveryStatus",
+    "RoutineDetailResponse",
+    "RoutineExecutionResponse",
+    "RoutineListResponse",
+    "RoutineObjectiveOutcome",
+    "RoutineWorkRecordResponse",
+    "RoutineWorkResult",
     "RunnerSystemMetricAvailability",
     "RunnerSystemMetricsScope",
     "RuntimeBrowserReasonCode",
@@ -1085,6 +1095,7 @@ from azentspublicclient.models.managed_slack_management_handoff import ManagedSl
 from azentspublicclient.models.managed_work import ManagedWork as ManagedWork
 from azentspublicclient.models.managed_work_source import ManagedWorkSource as ManagedWorkSource
 from azentspublicclient.models.managed_work_task import ManagedWorkTask as ManagedWorkTask
+from azentspublicclient.models.manual_routine_source import ManualRoutineSource as ManualRoutineSource
 from azentspublicclient.models.me_response import MeResponse as MeResponse
 from azentspublicclient.models.memory_create_request import MemoryCreateRequest as MemoryCreateRequest
 from azentspublicclient.models.memory_list_response import MemoryListResponse as MemoryListResponse
@@ -1185,6 +1196,15 @@ from azentspublicclient.models.reset_agent_runtime_request import ResetAgentRunt
 from azentspublicclient.models.response_chat_v1_read_agent_workspace_path import ResponseChatV1ReadAgentWorkspacePath as ResponseChatV1ReadAgentWorkspacePath
 from azentspublicclient.models.response_llm_provider_integration_v1_get_subscription_usage import ResponseLlmProviderIntegrationV1GetSubscriptionUsage as ResponseLlmProviderIntegrationV1GetSubscriptionUsage
 from azentspublicclient.models.response_mode_request import ResponseModeRequest as ResponseModeRequest
+from azentspublicclient.models.routine_content import RoutineContent as RoutineContent
+from azentspublicclient.models.routine_definition_response import RoutineDefinitionResponse as RoutineDefinitionResponse
+from azentspublicclient.models.routine_delivery_status import RoutineDeliveryStatus as RoutineDeliveryStatus
+from azentspublicclient.models.routine_detail_response import RoutineDetailResponse as RoutineDetailResponse
+from azentspublicclient.models.routine_execution_response import RoutineExecutionResponse as RoutineExecutionResponse
+from azentspublicclient.models.routine_list_response import RoutineListResponse as RoutineListResponse
+from azentspublicclient.models.routine_objective_outcome import RoutineObjectiveOutcome as RoutineObjectiveOutcome
+from azentspublicclient.models.routine_work_record_response import RoutineWorkRecordResponse as RoutineWorkRecordResponse
+from azentspublicclient.models.routine_work_result import RoutineWorkResult as RoutineWorkResult
 from azentspublicclient.models.runner_system_metric_availability import RunnerSystemMetricAvailability as RunnerSystemMetricAvailability
 from azentspublicclient.models.runner_system_metrics_scope import RunnerSystemMetricsScope as RunnerSystemMetricsScope
 from azentspublicclient.models.runtime_browser_reason_code import RuntimeBrowserReasonCode as RuntimeBrowserReasonCode
