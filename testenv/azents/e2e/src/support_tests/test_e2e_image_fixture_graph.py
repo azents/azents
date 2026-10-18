@@ -3,7 +3,7 @@
 import inspect
 import json
 import threading
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from os import PathLike
 from typing import Self
 from unittest.mock import Mock
@@ -177,7 +177,7 @@ def test_actual_fixture_graph_orders_backend_before_full_join_and_drains(
         "e2e_images, s3_credentials\n"
         "from tests.web.conftest import web_suite_substrate\n"
     )
-    pytester.makepyfile("def test_browser_free_web_body():\n    assert True\n")
+    pytester.makepyfile("def test_web_consumer(e2e_images):\n    assert e2e_images\n")
     result = pytester.runpytest_inprocess(
         "-q",
         "-p",
@@ -277,6 +277,124 @@ def test_backend_dependency_closure_never_reaches_full_image_view() -> None:
         "server_e2e_images",
     } <= visited
     assert "azents_runtime_provider_docker_container" in dependencies("e2e_images")
+
+
+class BrowserFreeGraph(FixtureGraph):
+    """Keep an unused Web image blocked until a real browser-free test body."""
+
+    @pytest.fixture(scope="session")
+    def azents_runtime_provider_docker_container(
+        self,
+        server_e2e_images: dict[str, str],
+        azents_runtime_runner_image: str,
+        azents_runtime_provider_docker_image: str,
+    ) -> Generator[DockerContainer, None, None]:
+        assert set(server_e2e_images) == {"azents-server"}
+        assert azents_runtime_runner_image == "current-azents-runtime-runner"
+        assert azents_runtime_provider_docker_image == (
+            "current-azents-runtime-provider-docker"
+        )
+        self.events.append("backend-ready")
+        yield FakeContainer("provider", self.events, self.failure)
+        self.events.append("provider-finalized")
+
+    @pytest.fixture
+    def release_unused_image(self) -> Callable[[], None]:
+        def release() -> None:
+            assert not self.preparation.futures["azents-web"].done()
+            self.events.append("browser-free-body")
+            self.release_web.set()
+
+        return release
+
+
+@pytest.mark.parametrize("failure", ["success", "web_failure", "admin_failure"])
+def test_browser_free_body_overlaps_images_without_dropping_failure_ownership(
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    release_web = threading.Event()
+    events: list[str] = []
+    supplied = {
+        image.cache_repository: f"current-{image.cache_repository}"
+        for image in e2e_conftest._CORE_E2E_IMAGE_BUILDS
+    }
+
+    def web() -> str:
+        assert release_web.wait(5)
+        events.append("web-build-finished")
+        if failure == "web_failure":
+            raise ValueError("Web build failure")
+        return "current-web"
+
+    def admin() -> str:
+        if failure == "admin_failure":
+            raise ValueError("Admin Web build failure")
+        return "current-admin"
+
+    preparation = E2EImagePreparation(
+        supplied, {"azents-web": web, "azents-admin-web": admin}
+    )
+    plugin = BrowserFreeGraph(preparation, release_web, events, failure)
+    monkeypatch.setattr(
+        e2e_conftest,
+        "DockerContainer",
+        lambda *args, **kwargs: FakeContainer("infra", events, failure),
+    )
+    monkeypatch.setattr(
+        e2e_conftest,
+        "PostgresContainer",
+        lambda *args, **kwargs: FakeContainer("postgres", events, failure),
+    )
+    monkeypatch.setattr(e2e_conftest, "_initialize_testcontainers_reaper", lambda: None)
+    monkeypatch.setattr(e2e_conftest, "_wait_for_fixture_health", Mock())
+    monkeypatch.setattr(
+        e2e_conftest, "_e2e_image_preparation", lambda profile: preparation
+    )
+    monkeypatch.setenv("AZENTS_E2E_ARTIFACT_DIR", str(pytester.path / "artifacts"))
+    pytester.makeconftest(
+        "from tests.conftest import core_prerequisites, server_e2e_images, "
+        "azents_runtime_runner_image, azents_runtime_provider_docker_image, "
+        "s3_credentials\n"
+        "from tests.web.conftest import web_suite_substrate\n"
+    )
+    pytester.makepyfile(
+        "def test_browser_free_body(release_unused_image):\n"
+        "    release_unused_image()\n"
+    )
+    result = pytester.runpytest_inprocess(
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        f"--confcutdir={pytester.path}",
+        plugins=[plugin],
+    )
+    result.assert_outcomes(passed=1, errors=0 if failure == "success" else 1)
+    assert preparation.closed
+    assert all(
+        future.done() and not future.cancelled()
+        for future in preparation.futures.values()
+    )
+    assert events.index("backend-ready") < events.index("browser-free-body")
+    assert events.index("browser-free-body") < events.index("web-build-finished")
+    assert events.index("web-build-finished") < min(
+        index for index, event in enumerate(events) if event.startswith("stop:")
+    )
+    assert (
+        len(
+            [
+                report
+                for report in plugin.reports
+                if report.when == "call" and report.passed
+            ]
+        )
+        == 1
+    )
+    if failure != "success":
+        assert any(
+            report.when == "teardown" and report.failed for report in plugin.reports
+        )
 
 
 class ServerFirstGraph(FixtureGraph):

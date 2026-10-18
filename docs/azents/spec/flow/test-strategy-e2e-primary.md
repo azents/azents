@@ -122,6 +122,23 @@ The journey retains its real invalid-cookie navigation, 20-second readiness
 deadline and login URL assertion. Docker-free tests protect the single-command
 observation boundary; actual browser E2E remains the product evidence.
 
+## Browser Consumer and Navigation Lifetimes
+
+The native Browser journey finishes real GUI input before opening its fresh raw
+reconnection/revocation observer. The GUI consumes and acknowledges its own
+frames during those interactions; an unrelated raw receiver is not left idle
+with a filling queue. The fresh observer still proves a different attachment to
+the same native target and must receive the actual logout authorization close.
+Keepalive failure is not revocation evidence. Default ping/queue limits, the
+revocation deadline, fresh-login preservation and stale-target rejection remain.
+
+Runtime Web authentication/history journeys observe the current final document
+with one synchronous script: exact destination, complete document, expected
+visible ready marker. Only the specific WebDriver navigation-abort observation
+means not-ready during document replacement; unrelated errors propagate. Click,
+back, forward and login actions are never replayed. Both cookie modes, blocked
+Next assets, fragment/history assertions and existing deadlines remain.
+
 ## Direct File Transfer Evidence
 
 Required file smoke tests retain the pre-transfer upload/auth/size, Exchange
@@ -506,9 +523,15 @@ Always-on required CI does not depend on external credentials.
   the ready Server image allows migration and core services to start while
   Runtime Runner, Docker Runtime Provider, and selected Main/Admin Web images
   continue building. Runtime consumers join their specific already-submitted image
-  only when needed; a partial Server-ready view never triggers a duplicate build. The full selected-image join
-  explicitly follows Runtime Provider readiness; every Web test body is gated on
-  that full join, including tests that do not otherwise consume an Admin image.
+  only when needed; a partial Server-ready view never triggers a duplicate build.
+  The full selected-image join explicitly follows Runtime Provider readiness and
+  gates actual Main/Admin Web image consumers. Browser API-only encryption and
+  capture journeys require the backend/Runtime substrate but can execute while
+  unused Main/Admin Web images prepare. Those images remain selected, submitted,
+  failure-owned and drained; neither early nor late image failure can produce a
+  successful lane. Deterministic fixture-graph tests prove browser-free body
+  execution before a blocked Web image finishes, failure propagation at final
+  drain, and the unchanged full gate for actual Web consumers.
   Real dependencies remain ordered: the OpenAI proxy starts only after the
   deterministic model service is healthy, migration waits for the Server image,
   PostgreSQL and storage, and product services still wait for migration. The

@@ -12,6 +12,9 @@ def web_suite_browser_start(selenium_container_start: object) -> None:
 @pytest.fixture(autouse=True)
 def web_suite_substrate(
     azents_runtime_provider_docker_container: DockerContainer,
-    e2e_images: dict[str, str],
 ) -> None:
-    """Require ready backend substrate and every selected image before Web bodies."""
+    """Require the backend; actual Web image consumers join the full image gate.
+
+    Browser API-only journeys may run while unused Web images prepare. The shared
+    preparation owner still drains every selected image and propagates failures.
+    """
