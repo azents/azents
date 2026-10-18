@@ -384,6 +384,16 @@ async def test_failed_completion_does_not_publish_projection_or_secret(
     operation: str,
 ) -> None:
     fixture = await _seed(rdb_session_manager)
+    if operation == "identity":
+        async with rdb_session_manager() as session:
+            await RuntimeWebGatewayRepository().synchronize_configuration(
+                session,
+                desired=RuntimeWebDesiredConfiguration(
+                    enabled=True,
+                    mode=RuntimeWebAuthMode.SHARED_COOKIE,
+                    fingerprint="c" * 64,
+                ),
+            )
     sessions = _TrackedSessions(_RejectCompletion(rdb_session_manager))
     urls = _AfterCommitUrls(sessions)
     with pytest.raises(RuntimeError, match="Database completion rejected"):

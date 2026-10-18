@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.14"
 
 [options]
@@ -524,6 +524,7 @@ dev = [
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-alembic", specifier = ">=0.12.1" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
+    { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff", specifier = ">=0.16.4" },
     { name = "testcontainers", extras = ["postgres", "redis"], specifier = ">=4.15.0" },
     { name = "ty", specifier = ">=0.0.74" },

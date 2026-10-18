@@ -35,6 +35,7 @@ from azents.services.runtime_terminal.invalidation import (
 )
 from azents.services.system_user_role.service import SystemUserRoleService
 from azents.services.user import UserService
+from azents.testing.user_fixture_cleanup import cleanup_committed_users
 
 
 def _make_role_service(
@@ -323,8 +324,9 @@ class TestSystemUserRoleService:
                 )
         finally:
             async with session_manager() as session:
-                await user_repo.delete(session, revoked_user.id)
-                await user_repo.delete(session, deleted_user.id)
+                await cleanup_committed_users(
+                    session, (revoked_user.id, deleted_user.id)
+                )
 
 
 async def test_ordinary_grant_does_not_inherit_final_admin_gate(
@@ -509,8 +511,7 @@ async def test_completed_grant_is_removed_by_following_disable_sweep(
             with suppress(asyncio.CancelledError):
                 await task
         async with manager() as session:
-            await UserRepository().delete(session, target.id)
-            await UserRepository().delete(session, survivor.id)
+            await cleanup_committed_users(session, (target.id, survivor.id))
 
 
 async def test_disabled_legacy_role_does_not_satisfy_final_admin_count(

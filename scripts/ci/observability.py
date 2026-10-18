@@ -304,6 +304,19 @@ def parse_timings(path: Path) -> tuple[TimingRecord, ...]:
     return tuple(records)
 
 
+def merge_worker_fixture_timings(artifacts: Path) -> None:
+    """Append isolated worker fixture receipts to controller phase evidence."""
+    workers = sorted(artifacts.glob("fixture-timings-gw*.jsonl"))
+    if not workers:
+        return
+    records = [record for worker in workers for record in parse_timings(worker)]
+    if any(record["record_type"] != "fixture" for record in records):
+        raise ValueError("Worker evidence must contain only fixture timings")
+    with (artifacts / "pytest-timings.jsonl").open("a", encoding="utf-8") as output:
+        for record in records:
+            output.write(json.dumps(record, sort_keys=True) + "\n")
+
+
 def parse_image_build_timings(path: Path) -> tuple[ImageBuildTiming, ...]:
     """Parse safe image build timings produced by E2E fixtures."""
     return tuple(
@@ -390,6 +403,8 @@ def _render_timing_summary(records: tuple[TimingRecord, ...]) -> list[str]:
     lines = [
         "<details>",
         "<summary>Detailed timing</summary>",
+        "",
+        "Phase totals sum per-test durations; parallel intervals can overlap.",
         "",
         "| Test phase | Total | Count |",
         "| --- | ---: | ---: |",

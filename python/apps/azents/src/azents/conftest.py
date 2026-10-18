@@ -1,7 +1,6 @@
 """Test fixture settings."""
 
 import copy
-from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Generator
 
@@ -10,11 +9,8 @@ import pytest_asyncio
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from docker.errors import DockerException, ImageNotFound
-from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
-    AsyncSession,
-    AsyncTransaction,
     create_async_engine,
 )
 from testcontainers.core.docker_client import (
@@ -29,7 +25,8 @@ from testcontainers.redis import (
 
 from azents.consts import PROJECT_ROOT
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
+from azents.rdb.session_capabilities import WriteSession
+from azents.testing.transaction_fixture import rollback_session_manager
 
 
 @dataclass(frozen=True)
@@ -162,42 +159,10 @@ async def rdb_session_manager(
     """SessionManager fixture with auto-commit/rollback and test rollback.
 
     This mirrors the production session manager's auto-commit/rollback behavior,
-    but wraps each test in a savepoint so the full test transaction rolls back.
+    Each ORM context owns a savepoint inside one outer test transaction.
     """
-    async with rdb_engine.connect() as connection:
-
-        @asynccontextmanager
-        async def session_manager() -> AsyncGenerator[WriteSession, None]:
-            async with AsyncExitStack() as stack:
-                async_session = await stack.enter_async_context(
-                    AsyncSession(bind=connection, expire_on_commit=False)
-                )
-                nested: AsyncTransaction = await connection.begin_nested()
-
-                @event.listens_for(async_session.sync_session, "after_transaction_end")
-                def end_savepoint(
-                    _session: Any,  # noqa: ANN401
-                    _transaction: Any,  # noqa: ANN401
-                ) -> None:
-                    # Use Any because sync_session transaction internals are private
-                    # types.
-                    nonlocal nested
-                    if not nested.is_active:
-                        nested = connection.begin_nested()
-
-                try:
-                    yield ReadWriteSession(async_session)
-                except Exception:
-                    await async_session.rollback()
-                    raise
-                else:
-                    await async_session.commit()
-
-        tx = await connection.begin()
-        try:
-            yield session_manager
-        finally:
-            await tx.rollback()
+    async with rollback_session_manager(rdb_engine) as session_manager:
+        yield session_manager
 
 
 @pytest_asyncio.fixture(scope="function")

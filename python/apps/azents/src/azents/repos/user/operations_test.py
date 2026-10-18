@@ -35,6 +35,7 @@ from azents.services.runtime_terminal.invalidation import (
     NoopRuntimeTerminalInvalidationPublisher,
 )
 from azents.services.user import UserService
+from azents.testing.user_fixture_cleanup import cleanup_committed_users
 
 
 class _PersistenceFailure(RuntimeError):
@@ -129,6 +130,12 @@ class _Accounts:
             )
 
 
+async def _cleanup_accounts(data: _Accounts) -> None:
+    """Remove only owned account rows and their deliberately non-FK lifecycle jobs."""
+    async with data.sessions() as session:
+        await cleanup_committed_users(session, data.ids)
+
+
 @pytest_asyncio.fixture
 async def accounts(
     rdb_engine: AsyncEngine, latest_db_schema: None
@@ -154,9 +161,33 @@ async def accounts(
     try:
         yield data
     finally:
-        async with sessions() as session:
-            for user_id in data.ids:
-                await UserRepository().delete(session, user_id)
+        await _cleanup_accounts(data)
+
+
+async def test_account_fixture_cleanup_preserves_foreign_lifecycle_jobs(
+    accounts: _Accounts,
+) -> None:
+    owned = await accounts.seed(administrator=False)
+    foreign = await accounts.seed(administrator=False)
+    async with accounts.sessions() as session:
+        repository = OwnerLifecycleRepository()
+        owned_job = await repository.create_or_get_account_purge(
+            session, user_id=owned.user_id
+        )
+        foreign_job = await repository.create_or_get_account_purge(
+            session, user_id=foreign.user_id
+        )
+    await _cleanup_accounts(dataclasses.replace(accounts, ids=[owned.user_id]))
+    async with accounts.sessions() as session:
+        assert (
+            await session.read_session.get(RDBOwnerLifecycleJob, owned_job.id) is None
+        )
+        assert (
+            await session.read_session.get(RDBOwnerLifecycleJob, foreign_job.id)
+            is not None
+        )
+        assert await UserRepository().get(session, owned.user_id) is None
+        assert await UserRepository().get(session, foreign.user_id) is not None
 
 
 @dataclasses.dataclass
