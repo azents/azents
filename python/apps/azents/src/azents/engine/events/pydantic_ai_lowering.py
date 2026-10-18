@@ -33,6 +33,7 @@ from pydantic_ai.native_tools import (
     ImageGenerationTool,
     WebSearchTool,
 )
+from pydantic_ai.output import OutputObjectDefinition
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.tools import ToolDefinition
 
@@ -92,6 +93,7 @@ from azents.engine.events.types import (
     OutputTextPart,
     ProviderToolCallPayload,
     ReasoningPayload,
+    RoutineJudgmentPayload,
     ScheduledTaskContinuationPayload,
     ScheduledTaskResultPayload,
     ScheduledTaskTriggerPayload,
@@ -101,6 +103,7 @@ from azents.engine.events.types import (
     UserMessagePayload,
     build_native_compat_key,
 )
+from azents.engine.providers.bedrock_output import lower_bedrock_structured_parameters
 from azents.engine.providers.model_profiles import protocol_for_provider
 from azents.engine.providers.xai_web_search import xai_web_search_declaration
 from azents.engine.run.types import BuiltinToolSpec
@@ -214,6 +217,44 @@ class PydanticAILowerer:
         )
         self.file_capabilities = FilePartLoweringCapabilities()
 
+    def lower_structured(
+        self,
+        transcript: Sequence[ModelTranscriptMessage],
+        *,
+        model: str,
+        native_replay_context: str | None,
+        system_prompt: str,
+        output: OutputObjectDefinition,
+    ) -> PydanticAIRequest:
+        """Lower canonical history with schema output and no executable tools."""
+        if self.tools or self.hosted_tools:
+            raise ValueError(
+                "Structured observation must not declare executable tools."
+            )
+        parameters = prepare_effective_model_parameters(
+            ModelRequestParameters(output_mode="native", output_object=output)
+        )
+        dialect = self._request_dialect()
+        authored = normalize_effective_model_request(
+            dialect=dialect,
+            options=self._settings(),
+            parameters=parameters,
+            native_tools=None,
+        )
+        if authored.function_tools or authored.builtin_tools:
+            raise ValueError(
+                "Structured observation must not declare executable tools."
+            )
+        if not authored.structured_response:
+            raise ValueError("Structured observation output schema was overridden.")
+        return self._lower_request(
+            transcript,
+            model=model,
+            native_replay_context=native_replay_context,
+            system_prompt=system_prompt,
+            parameters=parameters,
+        )
+
     def lower(
         self,
         transcript: Sequence[ModelTranscriptMessage],
@@ -223,14 +264,39 @@ class PydanticAILowerer:
         system_prompt: str | None = None,
     ) -> PydanticAIRequest:
         """Build explicit model messages without another execution graph."""
+        return self._lower_request(
+            transcript,
+            model=model,
+            native_replay_context=native_replay_context,
+            system_prompt=system_prompt,
+            parameters=self._parameters(),
+        )
+
+    def _lower_request(
+        self,
+        transcript: Sequence[ModelTranscriptMessage],
+        *,
+        model: str,
+        native_replay_context: str | None,
+        system_prompt: str | None,
+        parameters: ModelRequestParameters,
+    ) -> PydanticAIRequest:
+        """Resolve final-request input support before lowering canonical history."""
         if model != self.model:
             raise ValueError("Lowerer model identity differs from the selected model")
         settings = self._settings()
-        parameters = prepare_effective_model_parameters(self._parameters())
+        parameters = prepare_effective_model_parameters(parameters)
+        effective_parameters = (
+            prepare_effective_model_parameters(
+                lower_bedrock_structured_parameters(parameters)
+            )
+            if self._request_dialect() == "bedrock"
+            else parameters
+        )
         effective = normalize_effective_model_request(
             dialect=self._request_dialect(),
             options=settings,
-            parameters=parameters,
+            parameters=effective_parameters,
             native_tools=None,
         )
         if (
@@ -495,6 +561,8 @@ class PydanticAILowerer:
 
     def _canonical(self, event: ModelTranscriptMessage) -> ModelMessage | None:
         payload = event.payload
+        if isinstance(payload, RoutineJudgmentPayload):
+            return None
         if isinstance(payload, UserMessagePayload):
             if event.kind == EventKind.GOAL_CONTINUATION:
                 return self._prompt(

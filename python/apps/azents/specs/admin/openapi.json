@@ -5786,6 +5786,7 @@
           "scheduled_task_trigger",
           "scheduled_task_continuation",
           "scheduled_task_result",
+          "routine_judgment",
           "goal_updated",
           "action_message",
           "agent_message",

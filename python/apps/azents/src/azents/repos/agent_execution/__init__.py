@@ -28,6 +28,7 @@ from azents.engine.events.types import (
     AgentRunState,
     Event,
     EventPayload,
+    RoutineJudgmentPayload,
     TurnMarkerPayload,
     UserMessagePayload,
     upgrade_persisted_active_tool_call,
@@ -89,7 +90,9 @@ def _validate_payload(
 def _serialize_payload(payload: EventPayload) -> dict[str, JSONValue]:
     """Serialize an event while preserving explicit nullable profile efforts."""
     serialized = _JSON_OBJECT_ADAPTER.validate_python(
-        payload.model_dump(mode="json", exclude_none=True)
+        payload.model_dump(
+            mode="json", exclude_none=not isinstance(payload, RoutineJudgmentPayload)
+        )
     )
     if (
         isinstance(payload, (TurnMarkerPayload, UserMessagePayload))

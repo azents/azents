@@ -10,6 +10,7 @@ from typing import ClassVar
 
 from openai.types.responses.response_includable import ResponseIncludable
 from pydantic import BaseModel, ConfigDict
+from pydantic_ai.output import OutputObjectDefinition
 
 from azents.core.enums import EventKind, LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
@@ -73,6 +74,7 @@ from azents.engine.events.types import (
     OutputTextPart,
     ProviderToolCallPayload,
     ReasoningPayload,
+    RoutineJudgmentPayload,
     RunMarkerPayload,
     ScheduledTaskContinuationPayload,
     ScheduledTaskResultPayload,
@@ -296,6 +298,58 @@ class ResponsesRequestLowerer:
             schema_version=self.schema_version,
         )
 
+    def lower_structured(
+        self,
+        transcript: Sequence[ModelTranscriptMessage],
+        *,
+        model: str,
+        native_replay_context: str | None,
+        system_prompt: str,
+        output: OutputObjectDefinition,
+    ) -> NativeModelRequest:
+        """Retain canonical Responses history with a tool-free output schema."""
+        if self._tools or self._hosted_tools:
+            raise ValueError(
+                "Structured observation must not declare executable tools."
+            )
+        if output.name is None:
+            raise ValueError("Structured observation requires a schema name.")
+        output_format: dict[str, object] = {
+            "type": "json_schema",
+            "name": output.name,
+            "schema": output.json_schema,
+        }
+        if output.strict is not None:
+            output_format["strict"] = output.strict
+        if output.description is not None:
+            output_format["description"] = output.description
+        kwargs = {**self._lower_model_kwargs(), "text": {"format": output_format}}
+        controls = {
+            key: value
+            for key, value in kwargs.items()
+            if key not in self._credential_kwargs
+        }
+        effective = normalize_effective_model_request(
+            dialect="native_responses",
+            options=controls,
+            parameters=None,
+            native_tools=[],
+        )
+        if effective.function_tools or effective.builtin_tools:
+            raise ValueError(
+                "Structured observation must not declare executable tools."
+            )
+        if not effective.structured_response:
+            raise ValueError("Structured observation output schema was overridden.")
+        return self._lower_request(
+            transcript,
+            model=model,
+            native_replay_context=native_replay_context,
+            system_prompt=system_prompt,
+            kwargs=kwargs,
+            replay_custom_history=self._historical_plaintext_custom_supported,
+        )
+
     def lower(
         self,
         transcript: Sequence[ModelTranscriptMessage],
@@ -305,10 +359,29 @@ class ResponsesRequestLowerer:
         system_prompt: str | None = None,
     ) -> NativeModelRequest:
         """Convert Event transcript to a provider-native Responses request."""
+        return self._lower_request(
+            transcript,
+            model=model,
+            native_replay_context=native_replay_context,
+            system_prompt=system_prompt,
+            kwargs=self._lower_model_kwargs(),
+            replay_custom_history=False,
+        )
+
+    def _lower_request(
+        self,
+        transcript: Sequence[ModelTranscriptMessage],
+        *,
+        model: str,
+        native_replay_context: str | None,
+        system_prompt: str | None,
+        kwargs: dict[str, object],
+        replay_custom_history: bool,
+    ) -> NativeModelRequest:
+        """Lower canonical history using the final output mode's support context."""
         if model != self.model:
             raise ValueError("Lowerer model identity differs from the selected model")
         input_items: list[dict[str, object]] = []
-        kwargs = self._lower_model_kwargs()
         context = self._resolve_support_context(kwargs, tools=self._tools)
         hosted = _lower_hosted_tools(
             self._hosted_tools,
@@ -396,6 +469,7 @@ class ResponsesRequestLowerer:
             lowered = self._lower_event(
                 event,
                 replayable_plaintext_custom_call_ids=replayable_plaintext_custom_call_ids,
+                replay_custom_history=replay_custom_history,
             )
             if lowered is not None:
                 input_items.append(lowered)
@@ -630,6 +704,7 @@ class ResponsesRequestLowerer:
         event: ModelTranscriptMessage,
         *,
         replayable_plaintext_custom_call_ids: set[str],
+        replay_custom_history: bool,
     ) -> dict[str, object] | None:
         """Lower one Event to native input item."""
         if event.kind == EventKind.GOAL_CONTINUATION and isinstance(
@@ -730,7 +805,9 @@ class ResponsesRequestLowerer:
                 arguments=args,
                 wire_dialect="plaintext_custom",
             ):
-                if not self._declares_plaintext_custom_tool(name):
+                if not (
+                    replay_custom_history or self._declares_plaintext_custom_tool(name)
+                ):
                     return _historical_custom_tool_call_projection(name)
                 return {
                     "type": "custom_tool_call",
@@ -779,7 +856,7 @@ class ResponsesRequestLowerer:
                     "role": "user",
                     "content": format_plain_system_reminder(text),
                 }
-            case RunMarkerPayload():
+            case RunMarkerPayload() | RoutineJudgmentPayload():
                 return None
             case ReasoningPayload():
                 return None

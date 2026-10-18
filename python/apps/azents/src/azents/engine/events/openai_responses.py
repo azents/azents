@@ -73,6 +73,7 @@ from openai.types.responses.response_text_config_param import ResponseTextConfig
 from openai.types.responses.tool_param import ToolParam
 from openai.types.shared_params.reasoning import Reasoning
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic_ai.output import OutputObjectDefinition
 from websockets.exceptions import InvalidStatus, WebSocketException
 
 from azents.core.chatgpt_oauth import CHATGPT_OAUTH_BACKEND_BASE_URL
@@ -99,6 +100,7 @@ from azents.engine.events.protocols import (
     CompletedAdapterOutput,
     ContentDeltaProjection,
     FunctionCallDeltaProjection,
+    NativeModelRequest,
     NormalizedAdapterOutput,
     ReasoningDeltaProjection,
     StreamProjection,
@@ -342,6 +344,25 @@ class OpenAIResponsesLowerer:
         )
         self.compat_key = self._lowerer.compat_key
 
+    def lower_structured(
+        self,
+        transcript: Sequence[ModelTranscriptMessage],
+        *,
+        model: str,
+        native_replay_context: str | None,
+        system_prompt: str,
+        output: OutputObjectDefinition,
+    ) -> OpenAIResponsesRequest:
+        """Expose schema-only canonical lowering through the official SDK envelope."""
+        native = self._lowerer.lower_structured(
+            transcript,
+            model=model,
+            native_replay_context=native_replay_context,
+            system_prompt=system_prompt,
+            output=output,
+        )
+        return self._from_native(native)
+
     def lower(
         self,
         transcript: Sequence[ModelTranscriptMessage],
@@ -357,6 +378,10 @@ class OpenAIResponsesLowerer:
             native_replay_context=native_replay_context,
             system_prompt=system_prompt,
         )
+        return self._from_native(native)
+
+    def _from_native(self, native: NativeModelRequest) -> OpenAIResponsesRequest:
+        """Retain the same option validation for ordinary and Structured requests."""
         self.compat_key = self._lowerer.compat_key
         self.schema_version = self._lowerer.schema_version
         unknown = set(native.kwargs) - (
@@ -379,7 +404,7 @@ class OpenAIResponsesLowerer:
             input=native.input,
             tools=native.tools,
             options=options,
-            native_replay_context=native_replay_context,
+            native_replay_context=native.native_replay_context,
         )
 
 

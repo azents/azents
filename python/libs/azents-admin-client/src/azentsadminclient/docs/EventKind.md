@@ -16,6 +16,8 @@ Event transcript event kind.
 
 * `SCHEDULED_TASK_RESULT` (value: `'scheduled_task_result'`)
 
+* `ROUTINE_JUDGMENT` (value: `'routine_judgment'`)
+
 * `GOAL_UPDATED` (value: `'goal_updated'`)
 
 * `ACTION_MESSAGE` (value: `'action_message'`)
