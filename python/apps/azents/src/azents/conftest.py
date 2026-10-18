@@ -1,6 +1,8 @@
 """Test fixture settings."""
 
+import copy
 from contextlib import AsyncExitStack, asynccontextmanager
+from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Generator
 
 import pytest
@@ -28,6 +30,48 @@ from testcontainers.redis import (
 from azents.consts import PROJECT_ROOT
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
+
+
+@dataclass(frozen=True)
+class _PublicAPIContract:
+    openapi: dict[str, Any]
+    literal_route_paths: dict[str, str]
+
+
+@pytest.fixture(scope="session")
+def _full_public_api_contract_source() -> _PublicAPIContract:
+    """Compile real production schema and literal route resolution once."""
+    # Focused non-HTTP suites must not import the entire application graph.
+    from azents.app import create_dummy_public_app  # noqa: PLC0415
+
+    app = create_dummy_public_app()
+    paths = {name: str(app.url_path_for(name)) for name in ("receive_slack_event",)}
+    return _PublicAPIContract(app.openapi(), paths)
+
+
+@pytest.fixture(scope="session")
+def _full_public_openapi_source(
+    _full_public_api_contract_source: _PublicAPIContract,
+) -> dict[str, Any]:
+    """Retain source evidence without keeping a shared mutable application."""
+    return _full_public_api_contract_source.openapi
+
+
+@pytest.fixture
+def full_public_openapi(
+    _full_public_openapi_source: dict[str, Any],
+) -> dict[str, Any]:
+    """Give every schema assertion a deeply independent mutable copy."""
+    return copy.deepcopy(_full_public_openapi_source)
+
+
+@pytest.fixture
+def full_public_literal_route_paths(
+    _full_public_api_contract_source: _PublicAPIContract,
+) -> dict[str, str]:
+    """Give literal-route assertions independent actual URL resolution evidence."""
+    return dict(_full_public_api_contract_source.literal_route_paths)
+
 
 #
 # Docker

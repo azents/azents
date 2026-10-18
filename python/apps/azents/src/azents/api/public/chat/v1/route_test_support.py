@@ -7,14 +7,18 @@ from azents.api.public.chat.v1 import router
 from azents.utils.fastapi.route import generate_short_operation_id
 
 
-def focused_chat_app(path: str) -> FastAPI:
-    """Retain every method of the selected production path and its dependencies."""
+def focused_chat_app(*paths: str) -> FastAPI:
+    """Retain every method of selected production paths and their dependencies."""
+    assert paths, "At least one production Chat path must be selected"
     routes = [
         route
         for route in router.routes
-        if isinstance(route, APIRoute) and route.path == path
+        if isinstance(route, APIRoute) and route.path in paths
     ]
-    assert routes, f"The production Chat route is missing: {path}"
+    for path in paths:
+        assert any(route.path == path for route in routes), (
+            f"The production Chat route is missing: {path}"
+        )
     focused = APIRouter()
     focused.routes.extend(routes)
     app = FastAPI(generate_unique_id_function=generate_short_operation_id)

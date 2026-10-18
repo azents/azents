@@ -14,6 +14,7 @@ import pytest
 import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config as AlembicConfig
+from alembic.script import ScriptDirectory
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import DBAPIError
 from testcontainers.postgres import PostgresContainer
@@ -160,6 +161,37 @@ def database(
 def upgraded(database: _Database) -> _Database:
     command.upgrade(database.config, _CUTOVER)
     return database
+
+
+def test_cutover_table_reflection_keeps_columns_without_loading_related_tables(
+    database: _Database,
+) -> None:
+    """Keep real database types and rows without reflecting the connected graph."""
+    revision = ScriptDirectory.from_config(database.config).get_revision(_CUTOVER)
+    assert revision is not None
+    with database.engine.connect() as connection:
+        table = revision.module._table(connection, "llm_catalog_entries")
+        complete = sa.Table(
+            "llm_catalog_entries", sa.MetaData(), autoload_with=connection
+        )
+        assert set(table.metadata.tables) == {"llm_catalog_entries"}
+        assert len(complete.metadata.tables) > 1
+        assert list(table.c.keys()) == list(complete.c.keys())
+        assert [
+            str(column.type.compile(dialect=connection.dialect)) for column in table.c
+        ] == [
+            str(column.type.compile(dialect=connection.dialect))
+            for column in complete.c
+        ]
+        assert [column.name for column in table.primary_key] == [
+            column.name for column in complete.primary_key
+        ]
+        assert (
+            connection.execute(table.select().order_by(table.c.id)).mappings().all()
+            == connection.execute(complete.select().order_by(complete.c.id))
+            .mappings()
+            .all()
+        )
 
 
 def _payload() -> CatalogSourcePayload:

@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from fastapi import APIRouter, FastAPI, params
 
 from azents.api.admin import mount as mount_admin
-from azents.app import create_dummy_public_app
+from azents.api.public.chat.v1.route_test_support import focused_chat_app
 from azents.core.auth.deps import CurrentUser, get_current_user
 from azents.core.config import (
     AuthConfig,
@@ -492,7 +492,11 @@ async def test_internal_execution_is_absent_from_authorized_public_routes(
             internal.archive_retention_days_snapshot = 30
             internal.archive_policy_revision = 1
         user_id = user.id
-    app = create_dummy_public_app()
+    app = focused_chat_app(
+        "/agents/{agent_id}/sessions",
+        "/agents/{agent_id}/sessions/{session_id}",
+        "/sessions/{session_id}/history",
+    )
     app.dependency_overrides[get_current_user] = lambda: CurrentUser(
         user_id=user_id, session_id="a" * 32, elevated=False
     )

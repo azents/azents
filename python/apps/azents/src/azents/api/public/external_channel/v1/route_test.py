@@ -9,7 +9,6 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from azents.app import create_dummy_public_app
 from azents.services.external_channel.discord_http import (
     DiscordHTTPAdmissionResult,
     DiscordHTTPIngressService,
@@ -451,11 +450,10 @@ def test_oversized_body_is_rejected_before_service_admission() -> None:
 
 def test_callback_is_mounted_but_excluded_from_public_openapi(
     full_public_openapi: dict[str, Any],
+    full_public_literal_route_paths: dict[str, str],
 ) -> None:
     """Keep provider reachability outside generated authenticated clients."""
-    app = create_dummy_public_app()
-
-    assert str(app.url_path_for("receive_slack_event")) == (
+    assert full_public_literal_route_paths["receive_slack_event"] == (
         "/external-channel/v1/slack/events"
     )
     assert "/external-channel/v1/slack/events" not in full_public_openapi["paths"]
