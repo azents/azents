@@ -203,8 +203,16 @@ def plan_suites(
         for index, lane_files in enumerate(lanes, start=1):
             lane_name = f"{suite.name}-{index}"
             plan_path = output_dir / f"{lane_name}.txt"
+            execution_order = (
+                sorted(
+                    lane_files,
+                    key=lambda path: (-_file_weight(path, timings), path.as_posix()),
+                )
+                if suite.name == "web"
+                else sorted(lane_files)
+            )
             plan_path.write_text(
-                "".join(f"{path.as_posix()}\n" for path in sorted(lane_files)),
+                "".join(f"{path.as_posix()}\n" for path in execution_order),
                 encoding="utf-8",
             )
             matrix.append(

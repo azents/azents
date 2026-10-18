@@ -89,7 +89,7 @@ def merge_worker_image_timings(
             )
             if (
                 not startup.completed
-                or startup.readiness_scope != "core"
+                or startup.readiness_scope != "server"
                 or not startup.tasks
                 or any(task.outcome != "success" for task in startup.tasks.values())
                 or not fixtures

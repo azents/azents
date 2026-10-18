@@ -475,21 +475,25 @@ Always-on required CI does not depend on external credentials.
 - E2E image preparation and the independent PostgreSQL, RustFS, Valkey, deterministic
   model, GitHub validation, and Slack provider prerequisites start concurrently within
   one session-owned preparation lifetime. Selected image builds are submitted once;
-  ready Server, Runtime Runner and Docker Runtime Provider images allow migration,
-  core services and the independent Runtime backend substrate to prepare while
-  selected Main/Admin Web images continue building. The full selected-image join
+  the ready Server image allows migration and core services to start while
+  Runtime Runner, Docker Runtime Provider, and selected Main/Admin Web images
+  continue building. Runtime consumers join their specific already-submitted image
+  only when needed; a partial Server-ready view never triggers a duplicate build. The full selected-image join
   explicitly follows Runtime Provider readiness; every Web test body is gated on
   that full join, including tests that do not otherwise consume an Admin image.
   Real dependencies remain ordered: the OpenAI proxy starts only after the
-  deterministic model service is healthy, migration waits for core images,
+  deterministic model service is healthy, migration waits for the Server image,
   PostgreSQL and storage, and product services still wait for migration. The
   session owner drains all selected builds before prerequisite teardown and
   surfaces unreported build failures even when a downstream setup failed before
   joining the full image view. Planned tags are not image readiness, and failed
   or cancelled builds are not rebuilt as a successful lazy fallback.
   Existing health checks and failure propagation remain authoritative.
-  `core-prerequisite-timings.json` identifies core readiness separately from the
-  image-owner lifetime and records same-clock readiness boundaries for backend,
+  `core-prerequisite-timings.json` labels readiness as `infrastructure` until the
+  Server image is actually ready, then as `server`, separately from the complete
+  image-owner lifetime. The default local profile keeps lazy image preparation;
+  a failed lazy Server build cannot publish Server readiness. Same-clock markers
+  identify actual Server readiness and readiness boundaries for backend,
   full-image join and final drain. Per-image timing records retain actual
   monotonic start/end boundaries. Durations or nested fixture sums alone do not
   establish within-run overlap.
@@ -608,7 +612,11 @@ Always-on required CI does not depend on external credentials.
 - Web Surface E2E runs from `src/tests/web/` in its own suite lane.
   That existing job uses two pytest workers with complete-file distribution and
   independent database, network, service, browser, Runtime, and temporary fixtures.
-  Required-suite lanes remain serial. Worker restart is disabled, and the shared
+  Web plan files retain descending existing measured call weights (or declared
+  source fallback) with path tie-breaking. The standard file scheduler keeps this
+  plan order with `--no-loadscope-reorder` rather than re-sorting by testcase count;
+  collection order within each file is unchanged. Required-suite lane files remain
+  alphabetic and their execution remains serial. Worker restart is disabled, and the shared
   observer aborts unexpected worker death before unfinished tests are redistributed.
   Controller-only setup/call/teardown reports retain each testcase once. Automatic
   and explicitly reported fixture receipts share each worker's raw timing file;

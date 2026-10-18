@@ -655,7 +655,9 @@ jobs:
           cd testenv/azents/e2e
           parallel_args=()
           if [ "$AZENTS_E2E_IMAGE_BUILD_PROFILE" = 'web' ]; then
-            parallel_args=(-n 2 --dist loadfile --max-worker-restart=0)
+            parallel_args=(
+              -n 2 --dist loadfile --no-loadscope-reorder --max-worker-restart=0
+            )
           fi
           SECONDS=0
           set +e

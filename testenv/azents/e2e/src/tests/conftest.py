@@ -172,7 +172,7 @@ class _CoreServiceContainers:
 class _CorePrerequisites:
     """Hold independently prepared images and infrastructure services."""
 
-    core_e2e_images: dict[str, str]
+    server_e2e_images: dict[str, str]
     image_preparation: _E2EImagePreparation
     readiness_timings: dict[str, float]
     postgres: PostgresContainer
@@ -440,7 +440,11 @@ def _write_core_prerequisite_observability(
                 {
                     "completed": completed,
                     "wall_seconds": round(wall_seconds, 3),
-                    "readiness_scope": "core",
+                    "readiness_scope": (
+                        "server"
+                        if "server_image_ready_at_monotonic" in readiness_timings
+                        else "infrastructure"
+                    ),
                     "readiness_timings": {
                         name: round(timestamp, 6)
                         for name, timestamp in sorted(readiness_timings.items())
@@ -702,14 +706,19 @@ def core_prerequisites(
                     raise BaseExceptionGroup(
                         "E2E infrastructure preparation failed", infrastructure_errors
                     )
-            core_images = image_preparation.join(
-                image.cache_repository
-                for image in _CORE_E2E_IMAGE_BUILDS
-                if image.cache_repository in image_preparation.selected_images
+            server_images = image_preparation.join(
+                [_SERVER_IMAGE_BUILD.cache_repository]
+                if _SERVER_IMAGE_BUILD.cache_repository
+                in image_preparation.selected_images
+                else []
             )
             readiness_timings["core_prerequisites_ready_at_monotonic"] = (
                 time.monotonic()
             )
+            if server_images:
+                readiness_timings["server_image_ready_at_monotonic"] = (
+                    readiness_timings["core_prerequisites_ready_at_monotonic"]
+                )
             completed = True
             _write_core_prerequisite_observability(
                 completed=True,
@@ -718,7 +727,7 @@ def core_prerequisites(
                 readiness_timings=readiness_timings,
             )
             yield _CorePrerequisites(
-                core_e2e_images=core_images,
+                server_e2e_images=server_images,
                 image_preparation=image_preparation,
                 readiness_timings=readiness_timings,
                 postgres=postgres,
@@ -734,7 +743,10 @@ def core_prerequisites(
             if image_preparation is not None and image_preparation.closed:
                 readiness_timings["image_owner_drained_at_monotonic"] = time.monotonic()
             readiness_finished_at = readiness_timings.get(
-                "core_prerequisites_ready_at_monotonic", time.monotonic()
+                "server_image_ready_at_monotonic",
+                readiness_timings.get(
+                    "core_prerequisites_ready_at_monotonic", time.monotonic()
+                ),
             )
             _write_core_prerequisite_observability(
                 completed=completed,
@@ -1039,9 +1051,9 @@ def _e2e_image_preparation(profile: str | None) -> _E2EImagePreparation:
 
 
 @pytest.fixture(scope="session")
-def core_e2e_images(core_prerequisites: _CorePrerequisites) -> dict[str, str]:
-    """Return core-ready images without waiting for selected Web builds."""
-    return core_prerequisites.core_e2e_images
+def server_e2e_images(core_prerequisites: _CorePrerequisites) -> dict[str, str]:
+    """Start backend consumers once their Server image and infrastructure are ready."""
+    return core_prerequisites.server_e2e_images
 
 
 @pytest.fixture(scope="session")
@@ -1079,8 +1091,14 @@ def _resolve_e2e_image(
 
 
 @pytest.fixture(scope="session")
-def azents_server_image(core_e2e_images: dict[str, str]) -> str:
-    return _resolve_e2e_image(_SERVER_IMAGE_BUILD, core_e2e_images)
+def azents_server_image(
+    server_e2e_images: dict[str, str], core_prerequisites: _CorePrerequisites
+) -> str:
+    image = _resolve_e2e_image(_SERVER_IMAGE_BUILD, server_e2e_images)
+    core_prerequisites.readiness_timings.setdefault(
+        "server_image_ready_at_monotonic", time.monotonic()
+    )
+    return image
 
 
 @pytest.fixture(scope="session")
@@ -1096,13 +1114,26 @@ def azents_admin_web_image(e2e_images: dict[str, str]) -> str:
 
 
 @pytest.fixture(scope="session")
-def azents_runtime_runner_image(core_e2e_images: dict[str, str]) -> str:
-    return _resolve_e2e_image(_RUNTIME_RUNNER_IMAGE_BUILD, core_e2e_images)
+def azents_runtime_runner_image(core_prerequisites: _CorePrerequisites) -> str:
+    return _join_e2e_image(_RUNTIME_RUNNER_IMAGE_BUILD, core_prerequisites)
 
 
 @pytest.fixture(scope="session")
-def azents_runtime_provider_docker_image(core_e2e_images: dict[str, str]) -> str:
-    return _resolve_e2e_image(_RUNTIME_PROVIDER_DOCKER_IMAGE_BUILD, core_e2e_images)
+def azents_runtime_provider_docker_image(core_prerequisites: _CorePrerequisites) -> str:
+    return _join_e2e_image(_RUNTIME_PROVIDER_DOCKER_IMAGE_BUILD, core_prerequisites)
+
+
+def _join_e2e_image(
+    image_build: _E2EImageBuild, prerequisites: _CorePrerequisites
+) -> str:
+    """Join the already-submitted image only when its actual consumer needs it."""
+    preparation = prerequisites.image_preparation
+    ready = preparation.join(
+        [image_build.cache_repository]
+        if image_build.cache_repository in preparation.selected_images
+        else []
+    )
+    return _resolve_e2e_image(image_build, ready)
 
 
 def _build_e2e_image(

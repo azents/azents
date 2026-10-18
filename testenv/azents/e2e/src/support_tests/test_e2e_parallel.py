@@ -24,7 +24,7 @@ def _startup() -> dict[str, object]:
         "wall_seconds": 1.0,
         "task_seconds": 1.0,
         "overlap_seconds": 0.0,
-        "readiness_scope": "core",
+        "readiness_scope": "server",
         "readiness_timings": {},
         "tasks": {"synthetic": {"duration_seconds": 1.0, "outcome": "success"}},
     }
@@ -263,6 +263,7 @@ def _run_parallel(project: Path, evidence: Path) -> subprocess.CompletedProcess[
             "2",
             "--dist",
             "loadfile",
+            "--no-loadscope-reorder",
             "--max-worker-restart=0",
         ],
         env=environment,
@@ -400,3 +401,60 @@ def test_green_cases_require_complete_worker_evidence_at_process_exit(
     if lost_receipt:
         assert "Incomplete E2E worker image/startup evidence" in result.stderr
         assert not (evidence / "image-build-timings.jsonl").exists()
+
+
+def test_loadfile_keeps_plan_order_and_each_complete_file_on_one_worker(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    project.joinpath("conftest.py").write_text(
+        "import json,os\nfrom pathlib import Path\nimport pytest\n"
+        "@pytest.fixture(scope='session',autouse=True)\ndef receipts():\n"
+        "    root=Path(os.environ['AZENTS_E2E_ARTIFACT_DIR'])\n"
+        "    (root/'image-build-plan.json').write_text(json.dumps({'images':[]}))\n"
+        "    (root/'core-prerequisite-timings.json').write_text("
+        f"json.dumps({_startup()!r}))\n"
+        "@pytest.fixture\ndef owned():\n    return True\n"
+    )
+    counts = {"a_long": 1, "b_long": 1, "c_short": 4, "d_short": 4}
+    for file, count in counts.items():
+        project.joinpath(f"test_{file}.py").write_text(
+            "".join(
+                f"def test_{index}(owned):\n    assert owned\n"
+                for index in range(count)
+            )
+        )
+    evidence = tmp_path / "evidence"
+    result = _run_parallel(project, evidence)
+    assert result.returncode == 0, result.stdout + result.stderr
+    file_workers: dict[str, set[str]] = {}
+    orders: dict[str, list[str]] = {}
+    for worker in ("gw0", "gw1"):
+        records = [
+            json.loads(line)
+            for line in (evidence / f"fixture-timings-{worker}.jsonl")
+            .read_text()
+            .splitlines()
+        ]
+        nodes = [
+            record["node_id"]
+            for record in records
+            if record["fixture"] == "owned" and record["phase"] == "setup"
+        ]
+        for node in nodes:
+            file = node.split("::", 1)[0]
+            file_workers.setdefault(file, set()).add(worker)
+            orders.setdefault(file, []).append(node)
+        assert nodes
+        assert Path(nodes[0].split("::", 1)[0]).name in {
+            "test_a_long.py",
+            "test_b_long.py",
+        }
+    assert set().union(*file_workers.values()) == {"gw0", "gw1"}
+    assert all(len(workers) == 1 for workers in file_workers.values())
+    for file, nodes in orders.items():
+        count = counts[Path(file).stem.removeprefix("test_")]
+        assert [node.split("::", 1)[1] for node in nodes] == [
+            f"test_{index}" for index in range(count)
+        ]
