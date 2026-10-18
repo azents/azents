@@ -79,6 +79,7 @@ def _operations(manager: SessionManager[WriteSession]) -> RoutineOperations:
         session_manager=manager,
         read_session_manager=manager,
         definitions=RoutineDefinitionRepository(),
+        records=RoutineWorkRecordRepository(),
     )
 
 

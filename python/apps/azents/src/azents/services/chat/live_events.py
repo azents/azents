@@ -422,6 +422,11 @@ def _mailbox_item_requested_profile(
 
 def mailbox_item_is_publicly_presentable(mailbox_item: MailboxItem) -> bool:
     """Return whether a pending mailbox item has a public chat presentation."""
+    if mailbox_item.kind in {
+        MailboxItemKind.ROUTINE_TRIGGER,
+        MailboxItemKind.ROUTINE_CONTINUATION,
+    }:
+        return False
     if mailbox_item.kind is MailboxItemKind.TURN_ACTION_CONTINUATION:
         return False
     return not (
@@ -432,6 +437,7 @@ def mailbox_item_is_publicly_presentable(mailbox_item: MailboxItem) -> bool:
             "create_session_working_folder",
             "agent_create_git_worktree",
             "agent_remove_git_worktree",
+            "routine_judgment",
         }
     )
 
@@ -440,6 +446,11 @@ def mailbox_item_to_pending_projection(
     mailbox_item: MailboxItem,
 ) -> PendingMailboxEnvelope:
     """Project a durable typed MailboxItem into a safe public envelope."""
+    if mailbox_item.kind in {
+        MailboxItemKind.ROUTINE_TRIGGER,
+        MailboxItemKind.ROUTINE_CONTINUATION,
+    }:
+        raise ValueError("Routine control input is presented after FIFO promotion.")
     if mailbox_item.kind is MailboxItemKind.TURN_ACTION_CONTINUATION:
         raise ValueError("TurnAction continuation is not publicly presentable")
     if not mailbox_item_is_publicly_presentable(mailbox_item):
@@ -677,6 +688,10 @@ def _event_kind_for_mailbox_item(kind: MailboxItemKind) -> EventKind:
             return EventKind.SCHEDULED_TASK_TRIGGER
         case MailboxItemKind.SCHEDULED_TASK_CONTINUATION:
             return EventKind.SCHEDULED_TASK_CONTINUATION
+        case MailboxItemKind.ROUTINE_TRIGGER:
+            return EventKind.ROUTINE_TRIGGER
+        case MailboxItemKind.ROUTINE_CONTINUATION:
+            return EventKind.ROUTINE_CONTINUATION
         case MailboxItemKind.ACTION_MESSAGE:
             return EventKind.ACTION_MESSAGE
         case MailboxItemKind.AGENT_MESSAGE:

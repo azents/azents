@@ -58,15 +58,21 @@ from azents.repos.file_lifecycle_cleanup_operations import (
     FileLifecycleCleanupOperations,
 )
 from azents.repos.lifecycle_target import LifecycleTargetRepository
-from azents.repos.lifecycle_target_test import seed_internal_session
+from azents.repos.lifecycle_target_test import lifecycle_pipeline, seed_internal_session
 from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_file.data import ModelFile
+from azents.repos.routine.lifecycle_participant import (
+    RoutineLifecycleParticipantRepository,
+)
 from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleRepository
 from azents.repos.scheduled_task_lifecycle_participant import (
     ScheduledTaskLifecycleParticipantRepository,
 )
 from azents.repos.session_lifecycle_finalizer import (
     SessionLifecycleFinalizerRepository,
+)
+from azents.repos.session_lifecycle_operations import (
+    SessionLifecycleOperationsRepository,
 )
 from azents.repos.session_lifecycle_purge_operations import (
     SessionLifecyclePurgeOperations,
@@ -76,6 +82,7 @@ from azents.services.archived_session_retention_test import _create_archived_roo
 from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,
 )
+from azents.testing.routine import make_test_routine_lifecycle
 from azents.testing.types import require_instance
 
 T = TypeVar("T")
@@ -755,6 +762,13 @@ class _ScheduledTaskLifecycleService:
         self.allows_active_runs = allows_active_runs
         self.calls: list[str] = []
 
+    async def has_started_work(
+        self, session: ReadSession, *, session_ids: Sequence[str]
+    ) -> bool:
+        """Baseline fixtures have no retained Routine obligations."""
+        del session, session_ids
+        return False
+
     async def archive_allows_active_runs(
         self,
         session: ReadSession,
@@ -1034,6 +1048,15 @@ def _build_service(
                 SessionLifecycleFinalizerRepository,
             ),
             lifecycle_operations=lifecycle_operations,
+            routine_participant=_typed_fake(
+                _ScheduledTaskLifecycleService(), RoutineLifecycleParticipantRepository
+            ),
+            transition_operations=_typed_fake(
+                _ScheduledTaskLifecycleService(
+                    allows_active_runs=scheduled_allows_active_runs
+                ),
+                SessionLifecycleOperationsRepository,
+            ),
             external_participant=_typed_fake(
                 external_channel_lifecycle_service,
                 ExternalChannelLifecycleParticipantRepository,
@@ -1754,6 +1777,10 @@ async def test_native_purge_preparation_rolls_back_owner_fence_on_stop_failure(
         exchange_file_repository=ExchangeFileRepository(),
         lifecycle_finalizer_repository=SessionLifecycleFinalizerRepository(),
         lifecycle_operations=lifecycle_operations,
+        routine_participant=RoutineLifecycleParticipantRepository(
+            make_test_routine_lifecycle()
+        ),
+        transition_operations=lifecycle_pipeline(),
         scheduled_participant=ScheduledTaskLifecycleParticipantRepository(
             ScheduledTaskLifecycleRepository()
         ),
@@ -1830,6 +1857,10 @@ async def test_native_finalization_failure_restores_deleted_root_and_job_state(
             fake_finalizer, SessionLifecycleFinalizerRepository
         ),
         lifecycle_operations=lifecycle_operations,
+        routine_participant=RoutineLifecycleParticipantRepository(
+            make_test_routine_lifecycle()
+        ),
+        transition_operations=lifecycle_pipeline(),
         scheduled_participant=ScheduledTaskLifecycleParticipantRepository(
             ScheduledTaskLifecycleRepository()
         ),
@@ -1882,6 +1913,7 @@ async def test_native_shared_purge_deletes_singleton_without_conversation_tree(
             session_ids=(internal_id,),
             retention=policy,
             end_reason=None,
+            preserved_running_session_ids=(),
         )
         await targets.schedule_archive_purge(
             session,
@@ -1908,6 +1940,10 @@ async def test_native_shared_purge_deletes_singleton_without_conversation_tree(
         exchange_file_repository=ExchangeFileRepository(),
         lifecycle_finalizer_repository=SessionLifecycleFinalizerRepository(),
         lifecycle_operations=checkpoints,
+        routine_participant=RoutineLifecycleParticipantRepository(
+            make_test_routine_lifecycle()
+        ),
+        transition_operations=lifecycle_pipeline(),
         scheduled_participant=ScheduledTaskLifecycleParticipantRepository(
             ScheduledTaskLifecycleRepository()
         ),

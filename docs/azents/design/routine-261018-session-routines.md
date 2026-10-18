@@ -14,10 +14,11 @@ snapshot_id: routine-261018
 - Decisions: [routine-261018/ADR](../adr/routine-261018-session-routines.md).
 - Current-system baseline: `f045c138934aedb935baa538af93afc4489762d8`.
 - Mode: Collaborative; the requester owns material decisions and Design approval.
-- Revision 1 is approved; the requester separately authorized implementation as
-  recorded below. At design approval, no implementation, migration, live provider
-  call or product execution had been performed. Implementation progress and
-  verification belong in the implementation plan until final spec promotion.
+- Revision 2 incorporates the requester's direct instruction to execute judgment
+  through an internal inbox action in the ordinary Run loop. The requester
+  authorized this design update and continued implementation without another
+  approval request. Other approved product contracts remain unchanged.
+  Implementation progress and verification belong in the implementation plan.
 
 ## Current Behavior and Gap
 
@@ -52,13 +53,15 @@ ADR. The principal retained Specs are
 
 ## Design Authority
 
-- Design revision: `1`
+- Design revision: `2`
+- Retired mechanism: `M3` (revision 1 independent overlapping judgment ownership),
+  replaced by `M12` under ADR-D4. The retired ID is not reused.
 
 | ID | Material mechanism | Authority | Classification |
 | --- | --- | --- | --- |
 | M1 | Session-owned definitions, Manual sources, management and exact-content updates | REQ-1 through REQ-3, REQ-12 | required |
 | M2 | Bounded tick/source admission, Session action-delay reference, joint candidate collection | REQ-3 through REQ-6; periodic execution Spec | derived |
-| M3 | Independently owned, overlapping, tool-free Structured judgment on canonical Session context | REQ-7, REQ-11; ADR-D1 | decided |
+| M12 | Typed internal inbox action invoking full-context tool-free Structured judgment inside the ordinary Run loop and owner lifecycle | REQ-7, REQ-11, REQ-16; ADR-D4 | decided |
 | M4 | Scheduled-style Toolkit State, ordinary inbox/Agent execution, per-item completion and incomplete continuation | REQ-8 through REQ-11; ADR-D2; Scheduled Task and Agent execution Specs | decided |
 | M5 | Independent work recording and optional one-attempt notification without terminalizing ordinary Run/Channel Work | REQ-9, REQ-13, REQ-14; ADR-D2; External Channel delivery Spec | derived |
 | M6 | Session Primary authority, unambiguous backfill, current-destination authorization | REQ-14; existing External Channel ownership/lifecycle boundaries | derived |
@@ -66,7 +69,7 @@ ADR. The principal retained Specs are
 | M8 | Read-only Routine inspection, low-emphasis judgment history, localized semantic tool activity | REQ-15 through REQ-17 | required |
 | M9 | Latest 100 per-Routine work records, deletion/late-completion rules, ordinary judgment-history retention | REQ-12, REQ-13, REQ-16 | required |
 | M10 | Scheduled-style archive, preserved started work, no restore resurrection, fenced purge participation | REQ-18; ADR-D2; conversation and Scheduled Task lifecycle Specs | derived |
-| M11 | Existing Session authorization, mutation fences, Stop, shutdown/handover and DB-only transaction boundaries | fixed constraints; ADR-D1, ADR-D2; existing Specs and repository conventions | existing |
+| M11 | Existing Session authorization, mutation fences, Stop, shutdown/handover and DB-only transaction boundaries | fixed constraints; ADR-D2, ADR-D4; existing Specs and repository conventions | existing |
 
 No new notification destination selector, user-facing priority, generic tool-group
 framework, definition version history, delivery retry, or background permission
@@ -82,14 +85,14 @@ References in this table are qualified by `routine-261018`.
 | REQ-1 | M1, M8, M11 | Session isolation, limit, tools, read-only UI E2E |
 | REQ-2 | M1 | Bundled guidance and fixed-output versus conditional-output examples |
 | REQ-3 | M1, M2 | Manual candidate collection and unavailable-source rejection |
-| REQ-4 | M2, M3 | Controlled-clock action/no-action and early-trigger matrix |
-| REQ-5 | M2, M3 | Objective/previous-record timing input and sub-tick guidance |
-| REQ-6 | M2, M4 | Joint candidates, no-candidate no-call, incomplete exclusion |
-| REQ-7 | M3 | Captured canonical history, schema, zero executable tools |
+| REQ-4 | M2, M12 | Controlled-clock action/no-action and early-trigger matrix |
+| REQ-5 | M2, M12 | Objective/previous-record timing input and sub-tick guidance |
+| REQ-6 | M2, M4, M12 | Joint candidates, no-candidate no-call, incomplete exclusion |
+| REQ-7 | M12 | Captured canonical history, schema, zero executable tools |
 | REQ-8 | M4 | Actual ordinary inbox and Agent/tool execution |
 | REQ-9 | M4, M5 | Silent/notifying/failed objective completion and delivery separation |
 | REQ-10 | M4 | Partial completion and ordered incomplete continuation |
-| REQ-11 | M3, M4, M11 | Invalid judgment, Stop, worker replacement and failed investigation |
+| REQ-11 | M12, M4, M11 | Invalid judgment, Stop, worker replacement and failed investigation |
 | REQ-12 | M1, M4, M9 | Exact-content conflict and admitted-objective preservation |
 | REQ-13 | M5, M9 | Record trimming, deletion, late completion without resurrection |
 | REQ-14 | M5, M6 | Primary, no Primary, disconnect and ambiguous backfill |
@@ -103,7 +106,9 @@ References in this table are qualified by `routine-261018`.
 ```mermaid
 flowchart TD
     Tick[Scheduler tick or supported source signal] --> Admit[Bounded Session check admission]
-    Admit --> Judgment[Worker-side read-only judgment operation]
+    Admit --> CheckAction[Typed internal inbox action]
+    CheckAction --> RunLoop[Existing Session Run loop and action boundary]
+    RunLoop --> Judgment[Structured no-tools judgment operation]
     History[Canonical Session context] --> Judgment
     Definitions[Session Routine definitions and latest records] --> Judgment
     Judgment --> Observation[Dedicated Session judgment observation]
@@ -119,10 +124,13 @@ flowchart TD
 
 The Scheduler performs bounded database admission and wake publication. It does
 not assemble a tool catalog, invoke a provider, wait for a model, or run an Agent.
-Use the existing Worker-side application task execution facilities for judgment
-without placing it behind the foreground Run's completion. This is a separate
-model operation, not a second ordinary SessionRunner and not a new deployment
-role.
+The dispatcher enqueues an internal judgment action. The existing Session Run
+loop consumes it through ordinary FIFO/action processing, before a subsequent
+ordinary model step when applicable. Current model/tool work may delay this
+boundary; judgment does not require concurrent execution. Reuse the normal
+Session/Run owner and generic action execution/recovery infrastructure. Do not add
+a background JobRuntime handler, discovery loop, judgment owner lease, heartbeat
+or second SessionRunner.
 
 Repository operations own transaction lifetimes. Services receive detached typed
 results; all provider, broker, Runtime, file, and model I/O occurs after the
@@ -130,10 +138,12 @@ corresponding database scope closes. PostgreSQL remains authoritative; optional
 broker/Redis behavior cannot be the only source of pending or active work.
 
 Routine-domain persistence owns definitions and retained work records. Session
-Toolkit State owns recoverable in-progress judgment/admission and active Routine
-execution state. Existing Session events own judgment observations and ordinary
-tool history. Session lifecycle owns permanent removal. No one of these stores
-is reconstructed from a frontend activity row.
+Toolkit State retains source-input and tick/action-delay bookkeeping and active
+admitted Routine execution state. The ordinary inbox/action execution path owns
+judgment execution; Toolkit State does not duplicate its lifecycle. Existing
+Session events own judgment observations and ordinary tool history. Session
+lifecycle owns permanent removal. No authority is reconstructed from a frontend
+activity row.
 
 ### Definition and Record Data
 
@@ -187,15 +197,18 @@ checking. Manual contributes candidate input at an eligible check without user
 interaction. Empty candidate sets do not call a model. Several candidates go
 into one Structured judgment request, not one request per Routine.
 
-Use Scheduled-style database claims and mutation fences to prevent duplicate
-check processing or selection by competing dispatchers/workers. Durable pending
-state remains discoverable after a lost broker wake. Claims describe ownership,
-not semantic freshness. No age-based judgment discard, conversation-revision
-comparison, or new immediate model-retry loop is introduced.
+Use the existing Scheduler and Session/action mutation fences to prevent duplicate
+tick admission or judgment processing. Queue one typed internal judgment action,
+coalescing further source input while that action remains pending. Durable inbox
+and generic action execution state supply the existing lost-wake and Worker
+recovery path. Do not create a separate pending-judgment owner or lease store.
+No age-based judgment discard, conversation-revision comparison, or new immediate
+model-retry loop is introduced.
 
 ### Canonical Context and Model Operation
 
-Resolve the existing Session model selection, credentials, execution settings,
+At the ordinary inbox/action execution boundary, resolve the existing Session
+model selection, credentials, execution settings,
 canonical model-input head and transcript, prompt fragments and historical
 context. Reuse the normal input/lowering semantics; do not flatten conversation
 into the standalone helper's single text argument and claim equivalence.
@@ -217,15 +230,19 @@ or silent alternate judgment model configuration.
 Capture the actual context used by this operation, not the foreground Run's tool
 projection or usage values. New conversation events during the call do not
 invalidate it. At admission, still check live Session authority, deletion,
-incomplete-work exclusion, the action-delay contract, and the executing claim.
+incomplete-work exclusion, the action-delay contract, and the ordinary
+Session/Run action owner.
 These are ownership and eligibility checks rather than a second semantic
 judgment. A lost owner may not append a result or admit work.
 
-The operation runs concurrently with a foreground Run and must not change that
-Run's phase, selected model, cancellation state, input cursor, normal turn usage,
-normal prompt-analysis snapshot, or compaction baseline merely by recording its
-observation. Observe existing Session stop/lifecycle fences before admitting
-selected work. An old judgment operation must not undo an intervening Stop.
+The operation executes inside the existing Run loop, not beside it. Its host Run
+follows normal phase, FIFO cursor, Stop and shutdown/handover rules; the judgment
+handler does not create a second lifecycle or replace the selected ordinary
+model. Context preparation does not dispatch ordinary turn lifecycle hooks.
+Merely recording judgment must not update ordinary turn usage,
+prompt-analysis snapshots or compaction baselines. Observe the existing owner
+and stop/lifecycle fences before admitting selected work. A superseded or stopped
+action cannot append judgment or undo Stop.
 
 ### Judgment Result and Call-Specific Usage
 
@@ -235,8 +252,10 @@ immutable admitted context, active Toolkit State and typed inbox input through
 completed database operations. Advance last-action time only for an admitted
 action decision. Publish ordinary wake signals after commit.
 
-No-action writes the observation but no ordinary AgentRun or executable inbox
-input. Provider failure or invalid Structured output records failure, retains
+No-action writes the observation but no selected-work inbox input or ordinary
+assistant inference. It does not create another Run beyond the ordinary host
+lifecycle processing the action. Provider failure or invalid Structured output
+records failure, retains
 candidate input, leaves last-action time unchanged, and becomes eligible for
 another judgment at the next tick. Failure is not a synthetic no-action success.
 
@@ -245,8 +264,10 @@ identities, Structured outcome or failure, provider/model attribution, and
 available normalized usage and cost provenance. Missing usage remains unknown,
 not zero. It does not contain a fabricated foreground Run ID.
 
-Do not emit `turn_marker`, `turn_complete`, `RunComplete`, an ordinary assistant
-message, or ordinary prompt-analysis replacement for judgment. Its usage appears
+The judgment handler does not emit `turn_marker`, `turn_complete`, a synthetic
+`RunComplete`, an ordinary assistant message, or ordinary prompt-analysis
+replacement. The host Run can complete through its normal lifecycle when no
+other work remains; that is not judgment-call usage. Its usage appears
 inside judgment details only. Ordinary Web context indicators, context inspector,
 compaction input-token estimates and semantic history lowering retain ordinary
 execution provenance. Passive observations do not advance conversation-activity
@@ -446,10 +467,11 @@ migration. No downgrade is executed by this Design.
 
 | Existing surface | Authority | Replacement or retained boundary | Removal boundary | Absence/retention verification |
 | --- | --- | --- | --- | --- |
-| Text-only structured helper as proposed judgment implementation | REQ-7, M3 | Shared canonical input/lowering with a purpose-owned Structured operation | Remove any implementation-time Routine adapter that flattens history; retain other helper callers | Captured request includes canonical conversation, not one flattened prompt |
+| Unactivated judgment-specific pending snapshot/owner lease, handover/discovery and outcome-claim machinery | ADR-D4, REQ-7, M12 | Internal ordinary inbox action and existing Session/Run/action execution authority; retain source-input and delay bookkeeping | Remove the unmerged separate execution types, operations and obsolete concurrency/lease tests in phase 3; no compatibility path or new deployment role | No judgment JobRuntime registration, separate Worker scanner, owner token/lease state or dedicated execution table; normal FIFO/Stop/handover tests |
+| Text-only structured helper as proposed judgment implementation | REQ-7, M12 | Shared canonical input/lowering with a purpose-owned Structured operation | Remove any implementation-time Routine adapter that flattens history; retain other helper callers | Captured request includes canonical conversation, not one flattened prompt |
 | Scheduled Run-terminalizing result path for Routine completion | REQ-9, ADR-D2, M4/M5 | Per-Routine completion on retained Scheduled-style execution infrastructure | Do not connect Routine results to terminal Scheduled submission | Partial completion keeps other work alive; Scheduled tests still pass |
 | Ordinary turn/output admission for judgment observations | REQ-16, ADR-D3, M7 | Dedicated observation append | Judgment does not create turn markers or replace prompt snapshots | Live/reload usage, inspector and compaction regression tests |
-| Exhaustive event/continuation/presentation unions | M3/M4/M7/M8 | Explicit Routine variants in affected consumers | Replace closed old dispatch units where needed; no metadata fallback | Type checks and named per-variant tests |
+| Exhaustive event/continuation/presentation unions | M12/M4/M7/M8 | Explicit Routine variants in affected consumers | Replace closed old dispatch units where needed; no metadata fallback | Type checks and named per-variant tests |
 | Existing connected Bindings | REQ-14, M6 | Retain rows; add Primary designation | No connection-removal authority | Before/after cardinality and identity preflight assertions |
 | Scheduled dispatcher, tools, result and ordinary Run protocol | unchanged Specs, ADR-D2 | Retained behavior | None authorized | Existing Scheduled/Goal/Channel regression suites |
 
@@ -489,7 +511,7 @@ assertions must observe product surfaces rather than a test-only success flag.
 | E2 | Manual source supplies candidates without clicks; no unsupported source exposed |
 | E3 | 30-minute action delay and independent tick cadence; no-action does not move reference; creation is not an immediate check |
 | E4 | Joint candidates, empty no-call, ongoing incomplete exclusion and later input preservation |
-| E5 | Hold ordinary model/tool execution open while judgment completes; capture same conversation basis and zero executable tools |
+| E5 | Hold ordinary model/tool work open, enqueue judgment action and verify it runs at the normal inbox boundary with canonical context and zero executable tools; no independent overlap owner |
 | E6 | Append a user message during held judgment; valid output is not discarded or rejudged |
 | E7 | Valid partial Structured selection, duplicate/foreign IDs and invalid output; failed judgment waits for next tick |
 | E8 | Initial full contexts; ordinary tools run; objectives are not regenerated by judgment |
@@ -536,19 +558,20 @@ this design phase.
 ### Authority Audit
 
 Forward coverage: every REQ-1 through REQ-18 maps to mechanisms and an E2E or
-bundled-guidance check above. Reverse coverage: M1 through M11 cite confirmed
+bundled-guidance check above. Reverse coverage: M1, M2, M4 through M12 cite confirmed
 Requirements, accepted ADRs, unchanged Specs or mandatory repository boundaries.
 No new generic permission, delivery retry, configuration mode, source type or
 version history is used to fill a gap. No authoritative existing product behavior
-is removed. Review remains valid only for revision 1 and the exact authority set.
+is removed. Revision 2 retires M3 under requester-directed ADR-D4. Review remains
+valid only for revision 2 and the exact current authority set.
 
 ### Feasibility Evidence and Conditions
 
 | Mechanisms / Requirements | Assessment | Evidence and remaining verification |
 | --- | --- | --- |
 | M1 / REQ-1..3,12 | feasible at design level | Existing Session-scoped tool/repository pattern and exact mutation ownership; new Routine schema/tool tests still required |
-| M2 / REQ-3..6 | feasible at design level | Scheduler bounded dispatch, DB claims, Mailbox/recovery-wake pattern; controlled-clock and concurrency E2E required |
-| M3 / REQ-7,11 | conditional implementation validation | Canonical lowerers and provider adapters exist; standalone schema support exists but full-context no-tool schema path must be added and tested across dialects; no live call proof claimed |
+| M2 / REQ-3..6 | feasible at design level | Scheduler bounded dispatch and ordinary Mailbox/action admission and recovery-wake pattern; controlled-clock and duplicate-admission tests required |
+| M12 / REQ-7,11,16 | feasible with integration verification | Existing internal action registry, atomic FIFO/action execution promotion and Run-loop operation processing are inspected. Phase 2 supplies canonical Structured/no-tools calls. Internal neutral-action integration, normal owner/Stop/handover and no-action/no-ordinary-inference tests remain required; no live call proof claimed |
 | M4 / REQ-8..11 | feasible at design level | Scheduled Toolkit State, bind-run and normal idle-continuation paths inspected; new Routine variant and Stop tests required |
 | M5 / REQ-9,13,14 | conditional implementation validation | Canonical-before-effect delivery primitives exist; Routine-specific independent completion/effect composition is new and must not terminalize Run/Work |
 | M6 / REQ-14 | conditional deployment preflight | Current model lacks Primary and Session-binding uniqueness; creation paths create Session then Binding; actual connected-data cardinality audit has not run |
@@ -557,8 +580,9 @@ is removed. Review remains valid only for revision 1 and the exact authority set
 | M9 / REQ-13,16 | feasible at design level | Existing owner repositories and Session event lifecycle; deterministic trim/deletion/late-completion tests required |
 | M10/M11 / REQ-11,18, constraints | feasible at design level | Scheduled lifecycle participant, archived continuation exception and purge verification patterns inspected; Routine integration is not implemented |
 
-No production data audit, model invocation, migration, benchmark or E2E execution
-has established implemented feasibility. Conditions are explicit implementation
+The implementation plans retain completed foundation/provider-contract evidence.
+No production data audit or live execution establishes end-to-end feasibility of
+the revised inbox integration. Conditions are explicit implementation
 and rollout gates, not permission to change approved behavior. If a supported
 model cannot meet the request contract, actual data requires a different Primary
 policy, or a new material ownership/recovery mechanism is necessary, return that
@@ -581,15 +605,20 @@ mode, fallback or user-visible control.
 
 ## Design Approval
 
-- Mode: Collaborative.
+- Mode: Collaborative; requester-directed revision and continued implementation.
 - Decision owner: requester.
 - Approved on: 2026-10-18 (KST).
-- Approved Design revision: `1`.
-- Approved authority IDs: `M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11`.
-- Approved scope: Session-owned Routines; bounded admission and overlapping
-  tool-free Structured judgment; Scheduled-style execution and Toolkit State;
+- Approved Design revision: `2`.
+- Approved authority IDs: `M1, M2, M4, M5, M6, M7, M8, M9, M10, M11, M12`.
+- Approved scope: revision 1's unchanged product baseline plus the explicit
+  replacement of independent overlapping judgment with an internal inbox action
+  executed by the existing Run loop; full-context tool-free Structured judgment;
+  Scheduled-style execution and Toolkit State;
   independent per-Routine completion and notification; Session Primary;
   judgment observations with isolated usage; read-only inspection and semantic
   tool activity; bounded records, archive/restore and purge integration.
-- The requester also explicitly authorized implementation on 2026-10-18 (KST).
+- The requester explicitly directed the ownership change and authorized updating
+  Design and continuing implementation without another approval request on
+  2026-10-18 (KST). This is scoped authorization for ADR-D4/M12, not a blanket
+  delegation to invent unrelated material mechanisms.
 - No implemented date or verified implementation is recorded.

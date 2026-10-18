@@ -10,16 +10,29 @@ from fastapi import Depends
 from pydantic import TypeAdapter
 
 from azents.core.action_execution_data import ActionExecution, ActionExecutionCreate
-from azents.core.enums import ActionExecutionStatus, AgentRunStatus, EventKind
+from azents.core.enums import (
+    ActionExecutionStatus,
+    AgentRunStatus,
+    AgentSessionStatus,
+    EventKind,
+    MailboxItemKind,
+)
 from azents.core.json_value import JSONValue
 from azents.core.mailbox_data import (
     MailboxItem,
+    RoutineMailboxPayload,
     ScheduledTaskContinuationMailboxPayload,
     ScheduledTaskTriggerMailboxPayload,
 )
+from azents.core.routine import RoutineScope
+from azents.core.routine_execution import RoutineExecutionState
+from azents.core.routine_presentation import (
+    render_routine_execution_input,
+    routine_execution_ref,
+)
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.skill_projection import SkillProjectionItem, resolve_active_skill
-from azents.engine.events.types import AgentMessagePayload, Event
+from azents.engine.events.types import AgentMessagePayload, Event, RoutineInputPayload
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
@@ -33,6 +46,7 @@ from azents.repos.goal.store import (
     get_goal_state_store,
 )
 from azents.repos.mailbox import MailboxRepository
+from azents.repos.routine.execution import RoutineExecutionRepository
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.session_execution.ownership import fence_owned_session_mutation
@@ -40,6 +54,7 @@ from azents.repos.skill_state import SkillStateRepository
 
 logger = logging.getLogger(__name__)
 _AGENT_MESSAGE_ADAPTER = TypeAdapter(AgentMessagePayload)
+_JSON_OBJECT_ADAPTER = TypeAdapter[dict[str, JSONValue]](dict[str, JSONValue])
 
 
 class MailboxPromotionConflict(enum.StrEnum):
@@ -160,6 +175,9 @@ class MailboxPromotionRepository:
     scheduled_task_cycle_repository: Annotated[
         ScheduledTaskCycleRepository, Depends(ScheduledTaskCycleRepository)
     ]
+    routine_execution_repository: Annotated[
+        RoutineExecutionRepository, Depends(RoutineExecutionRepository)
+    ]
 
     async def promote(self, plan: MailboxPromotionPlan) -> MailboxPromotionResult:
         """Validate authority and atomically promote one prepared FIFO head."""
@@ -243,6 +261,45 @@ class MailboxPromotionRepository:
                 run_id=plan.active_run_id,
             ):
                 prepared_events = []
+            if isinstance(buffer.payload, RoutineMailboxPayload):
+                bound = await self._bind_routine_input(
+                    session,
+                    scope=RoutineScope(
+                        workspace_id=agent_session.workspace_id,
+                        agent_id=agent_session.agent_id,
+                        session_id=plan.session_id,
+                    ),
+                    buffer=buffer,
+                    run_id=plan.active_run_id,
+                    session_status=agent_session.status,
+                )
+                if not bound:
+                    prepared_events = []
+                else:
+                    content = render_routine_execution_input(
+                        bound,
+                        continuation=buffer.kind
+                        is MailboxItemKind.ROUTINE_CONTINUATION,
+                    )
+                    payload = RoutineInputPayload(
+                        executions=tuple(routine_execution_ref(item) for item in bound),
+                        content=content,
+                    )
+                    prepared_events = [
+                        dataclasses.replace(
+                            event,
+                            payload=_JSON_OBJECT_ADAPTER.validate_python(
+                                payload.model_dump(mode="json")
+                            ),
+                        )
+                        if event.kind
+                        in {
+                            EventKind.ROUTINE_TRIGGER,
+                            EventKind.ROUTINE_CONTINUATION,
+                        }
+                        else event
+                        for event in prepared_events
+                    ]
             if plan.skill_revalidation is not None:
                 state = await self.skill_state_repository.load_in_session(
                     session,
@@ -349,6 +406,37 @@ class MailboxPromotionRepository:
                 handled_failure=handled_failure,
                 deferred=False,
             )
+
+    async def _bind_routine_input(
+        self,
+        session: WriteSession,
+        *,
+        scope: RoutineScope,
+        buffer: MailboxItem,
+        run_id: str | None,
+        session_status: AgentSessionStatus,
+    ) -> tuple[RoutineExecutionState, ...]:
+        """Start/rebind only exact occurrences under the common consuming Run."""
+        if run_id is None:
+            raise ValueError("Routine input requires a consuming AgentRun.")
+        run = await self.run_repository.lock_by_id(session, run_id)
+        if (
+            run is None
+            or run.session_id != scope.session_id
+            or run.status not in {AgentRunStatus.PENDING, AgentRunStatus.RUNNING}
+        ):
+            raise ValueError("Routine input consuming AgentRun is not active.")
+        if not isinstance(buffer.payload, RoutineMailboxPayload):
+            raise ValueError("Routine mailbox payload is malformed.")
+        return await self.routine_execution_repository.bind_input(
+            session,
+            scope=scope,
+            refs=buffer.payload.executions,
+            run_id=run_id,
+            continuation=buffer.kind is MailboxItemKind.ROUTINE_CONTINUATION,
+            session_status=session_status,
+            now=datetime.datetime.now(datetime.UTC),
+        )
 
     async def _bind_scheduled_input(
         self,

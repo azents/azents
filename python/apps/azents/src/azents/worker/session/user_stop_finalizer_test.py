@@ -242,6 +242,7 @@ async def _finalizer(
         db.sessions,
         db.transcripts,
         db.stop.tool_result_repository,
+        db.stop.routines,
         db,
         trace,
     )

@@ -1798,7 +1798,7 @@ class TestEventExecutionRepositories:
             session_id=agent_session.id,
             run_id=completed.id,
             continue_running=True,
-            allow_archived_scheduled_continuation=False,
+            allow_archived_work_continuation=False,
         )
 
         rdb_agent_session = await rdb_session.read_session.get(
@@ -1819,7 +1819,7 @@ class TestEventExecutionRepositories:
             session_id=agent_session.id,
             run_id=completed.id,
             continue_running=True,
-            allow_archived_scheduled_continuation=True,
+            allow_archived_work_continuation=True,
         )
 
         await rdb_session.write_session.refresh(rdb_agent_session)

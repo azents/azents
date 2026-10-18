@@ -29,6 +29,7 @@ from azents.repos.mailbox import MailboxRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.session_execution_record import SessionExecutionRecordRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
+from azents.testing.routine import make_test_routine_authority
 
 
 async def test_residual_reads_close_their_sessions_before_returning() -> None:
@@ -166,6 +167,7 @@ async def test_residual_mutation_and_idle_read_finish_before_returning(
     monkeypatch.setattr(SessionExecutionRecordRepository, "get_by_id", get_common_owner)
     eligibility = await IdleContinuationRepository(
         session_manager=session_manager,
+        routine_authority=make_test_routine_authority(),
         agent_session_repository=AgentSessionRepository(),
         agent_run_repository=AsyncMock(spec=AgentRunRepository),
         mailbox_repository=AsyncMock(spec=MailboxRepository),

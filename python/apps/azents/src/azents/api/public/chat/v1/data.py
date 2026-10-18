@@ -79,9 +79,9 @@ from azents.core.session_workspace_project import SessionWorkspaceProject
 from azents.engine.events.action_messages import (
     ActionMessagePayload,
     ChatAction,
+    ChatProjectionAction,
     CommandAction,
     CreateGitWorktreeAction,
-    PersistedChatAction,
 )
 from azents.engine.events.types import Event, UserMessagePayload, public_event_payload
 from azents.engine.tools.todo import TodoItemSnapshot, TodoStateSnapshot
@@ -129,7 +129,7 @@ from azents.services.session_git_worktree import (
 )
 
 _CHAT_ACTION_ADAPTER = TypeAdapter(ChatAction)
-_PERSISTED_CHAT_ACTION_ADAPTER = TypeAdapter(PersistedChatAction)
+_CHAT_PROJECTION_ACTION_ADAPTER = TypeAdapter(ChatProjectionAction)
 
 
 class ChatUploadPrepareRequest(BaseModel):
@@ -811,7 +811,7 @@ class ActionExecutionResponse(BaseModel):
         description="Human sender User ID, or null when unavailable",
     )
     action_type: str = Field(description="Action discriminator")
-    action: PersistedChatAction = Field(description="Durable action payload")
+    action: ChatProjectionAction = Field(description="Visible durable action payload")
     result: dict[str, JSONValue] | None = Field(
         default=None,
         description="Action-specific structured result",
@@ -845,7 +845,7 @@ class ActionExecutionResponse(BaseModel):
             source_mailbox_item_id=execution.mailbox_item_id,
             sender_user_id=execution.sender_user_id,
             action_type=execution.action_type,
-            action=_PERSISTED_CHAT_ACTION_ADAPTER.validate_python(execution.action),
+            action=_CHAT_PROJECTION_ACTION_ADAPTER.validate_python(execution.action),
             result=execution.result,
             status=execution.status.value,
             owner_generation=execution.owner_generation,

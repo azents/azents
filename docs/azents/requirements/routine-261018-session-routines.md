@@ -180,6 +180,12 @@ Agent loop, but cannot perform work through tools.
 **Acceptance criteria**
 
 - No callable tools are injected into the judgment operation.
+- Checking follows ordinary Session work ordering and its existing cancellation
+  and recovery behavior. A busy Session need not run a second concurrent
+  execution owner merely to perform judgment.
+- Judgment does not require a separate background execution lifecycle. A
+  no-action judgment does not require an ordinary assistant-model turn solely
+  to announce that outcome.
 - The final input supplies candidate Routine context, events, latest work
   records, and the action/no-action decision request.
 - Decisions use Structured output rather than free-form text markers.
@@ -439,3 +445,10 @@ The requester additionally confirmed on 2026-10-18 (KST) that judgment-call usag
 belongs to the judgment call and must not update ordinary Run turn usage or the
 current execution-context display because the call inputs differ. Recorded in
 REQ-16; no new overall cost-accounting policy was requested.
+
+The requester revised the judgment ownership direction on 2026-10-18 (KST):
+checking follows ordinary Session work ordering and execution lifecycle rather
+than independent background execution. The requester directly authorized the
+corresponding design update and continued implementation without an additional
+approval request. Recorded in REQ-7; tool-free Structured output and call-specific
+usage isolation remain unchanged.

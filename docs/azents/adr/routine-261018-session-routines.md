@@ -326,3 +326,70 @@ path is relative to the named Web chat feature.
   correct ordinary execution provenance.
 - Verify that judgment recording neither emits normal Run completion nor
   overwrites the normal system-prompt snapshot or conversation recency.
+
+### D4. Execute judgment as an internal inbox action in the ordinary Run loop
+
+- Reference: `routine-261018/ADR-D4`
+- Accepted by: requester, 2026-10-18 (KST), with direct design-update and continued
+  implementation authorization; no additional approval request was required.
+- Requirements: `routine-261018/REQ-4`, `REQ-6`, `REQ-7`, `REQ-11`, `REQ-16`.
+- Supersedes: ADR-D1's independent ownership and overlapping execution choice.
+  ADR-D1's rejection of semantic freshness invalidation remains applicable.
+
+**Decision**
+
+Admit a typed internal judgment action to the ordinary Session inbox. The existing
+Run loop consumes it at its normal FIFO/action-processing boundary and invokes
+only the dedicated full-context Structured/no-tools judgment operation. A busy
+ordinary model/tool operation may delay this boundary; simultaneous judgment is
+no longer required. The action is internal, not a new public composer action,
+Agent function tool, or separate runnable Routine job.
+
+Reuse the existing Session/Run owner, action execution, Stop, shutdown/handover
+and recovery boundaries. Do not register a Routine judgment background JobRuntime
+handler, independent Worker discovery loop, judgment-specific owner lease,
+heartbeat, retry loop or execution table. Source-input bookkeeping and tick/action
+delay continuity may remain in Toolkit State, but are not a second execution
+lifecycle or cancellation authority.
+
+Capture candidates and canonical model context at the action's execution
+boundary. Retain the dedicated judgment observation and call-specific usage from
+ADR-D3. The handler does not generate an ordinary assistant turn, normal model
+turn marker, prompt-analysis replacement or compaction baseline merely to record
+judgment. Its host Run still follows the existing Run loop lifecycle; an idle
+Session may use that normal lifecycle to process the inbox action. A no-action
+result alone does not force ordinary assistant inference or an extra Run.
+
+On action selection, preserve immutable admitted contexts and continue through
+the ordinary FIFO/Agent execution path. Per-item result, notification, Primary,
+retention and lifecycle contracts from ADR-D2/D3 are unchanged. Revalidate the
+ordinary current owner and live admission eligibility at commit. Conversation
+advancement is not a separate reason to discard or repeat a valid judgment.
+
+**Evidence and feasibility**
+
+- `services/turn_action.py::TurnActionCapabilityRegistry` has a closed internal
+  action policy and preparation registry.
+- `repos/mailbox/promotion.py::MailboxPromotionRepository` commits FIFO consumption
+  and generic action execution creation under the normal Session owner fence.
+- `worker/run/executor.py::_process_operation_actions` executes promoted actions
+  at the ordinary input boundary before model dispatch, without a second Runner.
+- Existing internal working-folder and managed-worktree actions are not public
+  composer actions. Routine judgment must likewise use an internal typed variant.
+- The phase 2 canonical lowerers, judgment call and separate observation contracts
+  can be retained; their provider operation does not own a background lifecycle.
+
+**Alternatives and consequences**
+
+- Independent overlapping judgment with its own lease/recovery state was selected
+  in ADR-D1 but is now rejected: it adds execution-lifecycle complexity that the
+  requester explicitly removed.
+- Ordinary free-form Agent inference deciding action is not selected. The
+  dedicated Structured/no-tools judgment and separate usage contract remain.
+- Tests must hold ordinary work open, enqueue the action and verify normal FIFO
+  ordering rather than proving overlap. They must also cover no-action without
+  ordinary inference, normal Stop/handover fencing, candidate/context capture,
+  partial selected execution and unchanged ordinary usage/prompt provenance.
+- Remove unactivated judgment-specific claim/pending execution machinery and its
+  obsolete tests during the current implementation phase. Preserve source input,
+  admitted execution state, provider-contract tests and all unrelated behavior.

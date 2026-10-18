@@ -1,6 +1,7 @@
 """Separate repository-owned database stages for User Stop finalization."""
 
 import dataclasses
+import datetime
 from typing import Annotated
 
 from fastapi import Depends
@@ -23,6 +24,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.engine_tool_result_operation import (
     EngineToolResultOperationRepository,
 )
+from azents.repos.routine.stop import RoutineStopRepository
 from azents.repos.user_stop_data import (
     UserStopCancelledCallsInput,
     UserStopDurableEvents,
@@ -71,6 +73,7 @@ class UserStopOperationRepository:
         EngineToolResultOperationRepository,
         Depends(get_user_stop_tool_result_repository),
     ]
+    routines: Annotated[RoutineStopRepository, Depends()]
 
     async def append_partial_events(self, input: UserStopPartialInput) -> None:
         """Admit eligible live partials once, skipping an empty database action."""
@@ -191,6 +194,11 @@ class UserStopOperationRepository:
                 session,
                 session_id=input.session_id,
                 owner_generation=input.owner_generation,
+            )
+            await self.routines.cancel_session(
+                session,
+                session_id=input.session_id,
+                now=datetime.datetime.now(datetime.UTC),
             )
             await self.agent_session_repository.clear_stop_request(
                 session, session_id=input.session_id

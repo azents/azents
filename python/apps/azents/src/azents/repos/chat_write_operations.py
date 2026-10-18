@@ -38,6 +38,7 @@ from azents.core.inference_profile import (
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.core.routine import RoutineScope
 from azents.engine.events.types import FileOutputPart, SystemErrorPayload
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
@@ -63,6 +64,7 @@ from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
 from azents.repos.mailbox.admission_data import MailboxEnqueue
 from azents.repos.message import MessageRepository
+from azents.repos.routine.execution import RoutineExecutionRepository
 from azents.repos.session_model_profile.repository import (
     SessionModelProfileRepository,
 )
@@ -122,6 +124,7 @@ class ChatWriteOperationsRepository:
     active_profile_repository: Annotated[
         ActiveProfileAdmissionRepository, Depends(ActiveProfileAdmissionRepository)
     ]
+    routine_execution_repository: Annotated[RoutineExecutionRepository, Depends()]
     session_manager: Annotated[
         SessionManager[WriteSession], Depends(get_session_manager)
     ]
@@ -480,6 +483,16 @@ class ChatWriteOperationsRepository:
                     session,
                     run_id=retry_run.id,
                     event_ids=original_input_event_ids,
+                )
+                await self.routine_execution_repository.bind_retry(
+                    session,
+                    scope=RoutineScope(
+                        workspace_id=locked.workspace_id,
+                        agent_id=locked.agent_id,
+                        session_id=session_id,
+                    ),
+                    source=original_run,
+                    target=retry_run,
                 )
                 await self.agent_session_repository.mark_running(session, session_id)
 

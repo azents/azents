@@ -23,6 +23,7 @@ from azents.engine.events.action_messages import (
     GoalAction,
     OperationAction,
     PublicTurnAction,
+    RoutineJudgmentAction,
     SkillAction,
     TurnAction,
 )
@@ -202,6 +203,8 @@ class TurnActionCapabilityRegistry:
                 return _AGENT_CREATE_GIT_WORKTREE_POLICY
             case AgentRemoveGitWorktreeAction():
                 return _AGENT_REMOVE_GIT_WORKTREE_POLICY
+            case RoutineJudgmentAction():
+                return _ROUTINE_JUDGMENT_POLICY
             case _:
                 assert_never(action)
 
@@ -320,6 +323,7 @@ class TurnActionCapabilityRegistry:
                 | CreateSessionWorkingFolderAction()
                 | AgentCreateGitWorktreeAction()
                 | AgentRemoveGitWorktreeAction()
+                | RoutineJudgmentAction()
             ):
                 return TurnActionPreparationResult(
                     events=[],
@@ -569,6 +573,17 @@ _AGENT_CREATE_GIT_WORKTREE_POLICY = TurnActionPolicy(
 _AGENT_REMOVE_GIT_WORKTREE_POLICY = TurnActionPolicy(
     action_type="agent_remove_git_worktree",
     owner="workspace",
+    visibility="internal",
+    message_policy="none",
+    message_max_length=None,
+    attachment_policy="unsupported",
+    admission_profile_required=False,
+    preparation_inference_required=False,
+    operation=True,
+)
+_ROUTINE_JUDGMENT_POLICY = TurnActionPolicy(
+    action_type="routine_judgment",
+    owner="routine",
     visibility="internal",
     message_policy="none",
     message_max_length=None,

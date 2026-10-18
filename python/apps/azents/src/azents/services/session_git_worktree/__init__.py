@@ -18,6 +18,7 @@ from azents.core.action_execution_data import (
     ActionExecution,
     ActionExecutionEvent,
     ActionExecutionProjection,
+    OperationActionExecutionResult,
 )
 from azents.core.enums import (
     ActionExecutionEventKind,
@@ -214,15 +215,6 @@ GitWorktreeCleanupRequestError = (
     | GitWorktreeCleanupSubagentReadOnly
     | GitWorktreeCleanupNotFound
 )
-
-
-@dataclasses.dataclass(frozen=True)
-class GitWorktreeActionExecutionResult:
-    """Result of executing one create_git_worktree TurnAction."""
-
-    completed: bool
-    context_invalidated: bool
-    complete_run: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -540,7 +532,7 @@ class SessionGitWorktreeService:
         owner_generation: int,
         on_projection_updated: ActionExecutionProjectionCallback | None = None,
         on_history_event_appended: ActionExecutionHistoryEventCallback | None = None,
-    ) -> GitWorktreeActionExecutionResult:
+    ) -> OperationActionExecutionResult:
         """Execute one worker-owned create_git_worktree TurnAction."""
         try:
             return await self._execute_git_worktree_action(
@@ -575,7 +567,7 @@ class SessionGitWorktreeService:
         predecessor_run_id: str,
         on_projection_updated: ActionExecutionProjectionCallback | None = None,
         on_history_event_appended: ActionExecutionHistoryEventCallback | None = None,
-    ) -> GitWorktreeActionExecutionResult:
+    ) -> OperationActionExecutionResult:
         """Execute one admitted Agent create bridge through the shared lifecycle."""
         try:
             return await self._execute_agent_create_git_worktree_action(
@@ -611,7 +603,7 @@ class SessionGitWorktreeService:
         predecessor_run_id: str,
         on_projection_updated: ActionExecutionProjectionCallback | None = None,
         on_history_event_appended: ActionExecutionHistoryEventCallback | None = None,
-    ) -> GitWorktreeActionExecutionResult:
+    ) -> OperationActionExecutionResult:
         """Execute one admitted Agent removal while preserving its Git branch."""
         try:
             return await self._execute_agent_remove_git_worktree_action(
@@ -652,7 +644,7 @@ class SessionGitWorktreeService:
         owner_generation: int,
         on_projection_updated: ActionExecutionProjectionCallback | None = None,
         on_history_event_appended: ActionExecutionHistoryEventCallback | None = None,
-    ) -> GitWorktreeActionExecutionResult:
+    ) -> OperationActionExecutionResult:
         """Execute one manual orphan-worktree cleanup TurnAction."""
         del action
         try:
@@ -700,7 +692,7 @@ class SessionGitWorktreeService:
         owner_generation: int,
         on_projection_updated: ActionExecutionProjectionCallback | None = None,
         on_history_event_appended: ActionExecutionHistoryEventCallback | None = None,
-    ) -> GitWorktreeActionExecutionResult:
+    ) -> OperationActionExecutionResult:
         """Materialize the stored Session working folder through the Runner."""
         del action
         try:
@@ -733,7 +725,7 @@ class SessionGitWorktreeService:
         owner_generation: int,
         on_projection_updated: ActionExecutionProjectionCallback | None,
         on_history_event_appended: ActionExecutionHistoryEventCallback | None,
-    ) -> GitWorktreeActionExecutionResult:
+    ) -> OperationActionExecutionResult:
         """Run one current-binding folder setup action."""
         if execution.session_id != session_id:
             raise ValueError("ActionExecution belongs to another session")
@@ -754,7 +746,7 @@ class SessionGitWorktreeService:
                 on_projection_updated=on_projection_updated,
                 on_history_event_appended=on_history_event_appended,
             )
-            return GitWorktreeActionExecutionResult(
+            return OperationActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
                 complete_run=False,
@@ -794,7 +786,7 @@ class SessionGitWorktreeService:
                 on_projection_updated=on_projection_updated,
                 on_history_event_appended=on_history_event_appended,
             )
-            return GitWorktreeActionExecutionResult(
+            return OperationActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
                 complete_run=False,
@@ -810,7 +802,7 @@ class SessionGitWorktreeService:
                 on_projection_updated=on_projection_updated,
                 on_history_event_appended=on_history_event_appended,
             )
-            return GitWorktreeActionExecutionResult(
+            return OperationActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
                 complete_run=False,
@@ -823,7 +815,7 @@ class SessionGitWorktreeService:
                 on_projection_updated=on_projection_updated,
                 on_history_event_appended=on_history_event_appended,
             )
-            return GitWorktreeActionExecutionResult(
+            return OperationActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
                 complete_run=False,
@@ -847,7 +839,7 @@ class SessionGitWorktreeService:
                 on_projection_updated=on_projection_updated,
                 on_history_event_appended=on_history_event_appended,
             )
-            return GitWorktreeActionExecutionResult(
+            return OperationActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
                 complete_run=False,
@@ -859,7 +851,7 @@ class SessionGitWorktreeService:
                 on_projection_updated=on_projection_updated,
                 on_history_event_appended=on_history_event_appended,
             )
-            return GitWorktreeActionExecutionResult(
+            return OperationActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
                 complete_run=False,
@@ -871,7 +863,7 @@ class SessionGitWorktreeService:
                 on_projection_updated=on_projection_updated,
                 on_history_event_appended=on_history_event_appended,
             )
-            return GitWorktreeActionExecutionResult(
+            return OperationActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
                 complete_run=False,
@@ -902,7 +894,7 @@ class SessionGitWorktreeService:
             cancellation_summary=None,
             on_history_event_appended=on_history_event_appended,
         )
-        return GitWorktreeActionExecutionResult(
+        return OperationActionExecutionResult(
             completed=True,
             context_invalidated=False,
             complete_run=False,
@@ -972,7 +964,7 @@ class SessionGitWorktreeService:
         owner_generation: int,
         on_projection_updated: ActionExecutionProjectionCallback | None,
         on_history_event_appended: ActionExecutionHistoryEventCallback | None,
-    ) -> GitWorktreeActionExecutionResult:
+    ) -> OperationActionExecutionResult:
         """Discover and force-remove orphan worktrees from the current Runtime."""
         if execution.session_id != session_id:
             raise ValueError("ActionExecution belongs to another session")
@@ -1035,7 +1027,7 @@ class SessionGitWorktreeService:
                 on_projection_updated=on_projection_updated,
                 on_history_event_appended=on_history_event_appended,
             )
-            return GitWorktreeActionExecutionResult(
+            return OperationActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
                 complete_run=False,
@@ -1071,7 +1063,7 @@ class SessionGitWorktreeService:
                 on_projection_updated=on_projection_updated,
                 on_history_event_appended=on_history_event_appended,
             )
-            return GitWorktreeActionExecutionResult(
+            return OperationActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
                 complete_run=False,
@@ -1095,7 +1087,7 @@ class SessionGitWorktreeService:
                 on_projection_updated=on_projection_updated,
                 on_history_event_appended=on_history_event_appended,
             )
-            return GitWorktreeActionExecutionResult(
+            return OperationActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
                 complete_run=False,
@@ -1116,7 +1108,7 @@ class SessionGitWorktreeService:
                 on_projection_updated=on_projection_updated,
                 on_history_event_appended=on_history_event_appended,
             )
-            return GitWorktreeActionExecutionResult(
+            return OperationActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
                 complete_run=False,
@@ -1167,7 +1159,7 @@ class SessionGitWorktreeService:
                 on_projection_updated=on_projection_updated,
                 on_history_event_appended=on_history_event_appended,
             )
-            return GitWorktreeActionExecutionResult(
+            return OperationActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
                 complete_run=False,
@@ -1198,7 +1190,7 @@ class SessionGitWorktreeService:
                 on_projection_updated=on_projection_updated,
                 on_history_event_appended=on_history_event_appended,
             )
-            return GitWorktreeActionExecutionResult(
+            return OperationActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
                 complete_run=False,
@@ -1506,7 +1498,7 @@ class SessionGitWorktreeService:
                 cancellation_summary=None,
                 on_history_event_appended=on_history_event_appended,
             )
-        return GitWorktreeActionExecutionResult(
+        return OperationActionExecutionResult(
             completed=True,
             context_invalidated=False,
             complete_run=False,
@@ -1724,7 +1716,7 @@ class SessionGitWorktreeService:
         predecessor_run_id: str,
         on_projection_updated: ActionExecutionProjectionCallback | None,
         on_history_event_appended: ActionExecutionHistoryEventCallback | None,
-    ) -> GitWorktreeActionExecutionResult:
+    ) -> OperationActionExecutionResult:
         """Execute one exact managed-worktree removal without deleting its branch."""
         if execution.session_id != session_id:
             raise ValueError("ActionExecution belongs to another session")
@@ -2227,7 +2219,7 @@ class SessionGitWorktreeService:
         predecessor_run_id: str,
         on_projection_updated: ActionExecutionProjectionCallback | None,
         on_history_event_appended: ActionExecutionHistoryEventCallback | None,
-    ) -> GitWorktreeActionExecutionResult:
+    ) -> OperationActionExecutionResult:
         """Execute one pinned Agent create request and end its predecessor Run."""
         if execution.session_id != session_id:
             raise ValueError("ActionExecution belongs to another session")
@@ -2571,7 +2563,7 @@ class SessionGitWorktreeService:
         owner_generation: int,
         on_projection_updated: ActionExecutionProjectionCallback | None,
         on_history_event_appended: ActionExecutionHistoryEventCallback | None,
-    ) -> GitWorktreeActionExecutionResult:
+    ) -> OperationActionExecutionResult:
         """Run the operation after the current worker admitted it."""
         if execution.session_id != session_id:
             raise ValueError("ActionExecution belongs to another session")
@@ -2597,7 +2589,7 @@ class SessionGitWorktreeService:
                 on_projection_updated=on_projection_updated,
                 on_history_event_appended=on_history_event_appended,
             )
-            return GitWorktreeActionExecutionResult(
+            return OperationActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
                 complete_run=False,
@@ -2638,7 +2630,7 @@ class SessionGitWorktreeService:
                 on_projection_updated=on_projection_updated,
                 on_history_event_appended=on_history_event_appended,
             )
-            return GitWorktreeActionExecutionResult(
+            return OperationActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
                 complete_run=False,
@@ -2659,7 +2651,7 @@ class SessionGitWorktreeService:
                 on_projection_updated=on_projection_updated,
                 on_history_event_appended=on_history_event_appended,
             )
-            return GitWorktreeActionExecutionResult(
+            return OperationActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
                 complete_run=False,
@@ -2686,7 +2678,7 @@ class SessionGitWorktreeService:
                 on_projection_updated=on_projection_updated,
                 on_history_event_appended=on_history_event_appended,
             )
-            return GitWorktreeActionExecutionResult(
+            return OperationActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
                 complete_run=False,
@@ -2713,7 +2705,7 @@ class SessionGitWorktreeService:
                 on_projection_updated=on_projection_updated,
                 on_history_event_appended=on_history_event_appended,
             )
-            return GitWorktreeActionExecutionResult(
+            return OperationActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
                 complete_run=False,
@@ -2732,7 +2724,7 @@ class SessionGitWorktreeService:
                 on_projection_updated=on_projection_updated,
                 on_history_event_appended=on_history_event_appended,
             )
-            return GitWorktreeActionExecutionResult(
+            return OperationActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
                 complete_run=False,
@@ -2754,7 +2746,7 @@ class SessionGitWorktreeService:
                 on_history_event_appended=on_history_event_appended,
             )
             if create_result is None:
-                return GitWorktreeActionExecutionResult(
+                return OperationActionExecutionResult(
                     completed=True,
                     context_invalidated=False,
                     complete_run=False,
@@ -2768,7 +2760,7 @@ class SessionGitWorktreeService:
             on_projection_updated=on_projection_updated,
             on_history_event_appended=on_history_event_appended,
         ):
-            return GitWorktreeActionExecutionResult(
+            return OperationActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
                 complete_run=False,
@@ -2782,7 +2774,7 @@ class SessionGitWorktreeService:
             on_projection_updated=on_projection_updated,
             on_history_event_appended=on_history_event_appended,
         ):
-            return GitWorktreeActionExecutionResult(
+            return OperationActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
                 complete_run=False,
@@ -2813,7 +2805,7 @@ class SessionGitWorktreeService:
             cancellation_summary=None,
             on_history_event_appended=on_history_event_appended,
         )
-        return GitWorktreeActionExecutionResult(
+        return OperationActionExecutionResult(
             completed=True,
             context_invalidated=True,
             complete_run=False,
@@ -4411,18 +4403,18 @@ class _CreateWorktreeSuccess:
     base_commit: str
 
 
-def _bridge_create_terminal_result() -> GitWorktreeActionExecutionResult:
+def _bridge_create_terminal_result() -> OperationActionExecutionResult:
     """Return the terminal fresh-Run outcome for an Agent create bridge."""
-    return GitWorktreeActionExecutionResult(
+    return OperationActionExecutionResult(
         completed=True,
         context_invalidated=False,
         complete_run=True,
     )
 
 
-def _bridge_remove_terminal_result() -> GitWorktreeActionExecutionResult:
+def _bridge_remove_terminal_result() -> OperationActionExecutionResult:
     """Return the terminal fresh-Run outcome for an Agent removal bridge."""
-    return GitWorktreeActionExecutionResult(
+    return OperationActionExecutionResult(
         completed=True,
         context_invalidated=False,
         complete_run=True,

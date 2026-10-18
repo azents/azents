@@ -71,6 +71,9 @@ from azents.repos.lifecycle_target_test import lifecycle_pipeline
 from azents.repos.model_candidate_health import ModelCandidateHealthRepository
 from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_operation_completion import ModelOperationCompletionRepository
+from azents.repos.routine.lifecycle_participant import (
+    RoutineLifecycleParticipantRepository,
+)
 from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleRepository
 from azents.repos.scheduled_task_lifecycle_participant import (
     ScheduledTaskLifecycleParticipantRepository,
@@ -91,6 +94,7 @@ from azents.services.archived_session_purge_test import _build_service
 from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,
 )
+from azents.testing.routine import make_test_routine_lifecycle
 
 
 @dataclasses.dataclass(frozen=True)
@@ -222,6 +226,10 @@ def _purger(manager: SessionManager[WriteSession]) -> ArchivedSessionPurgeServic
         exchange_file_repository=ExchangeFileRepository(),
         lifecycle_finalizer_repository=SessionLifecycleFinalizerRepository(),
         lifecycle_operations=checkpoints,
+        routine_participant=RoutineLifecycleParticipantRepository(
+            make_test_routine_lifecycle()
+        ),
+        transition_operations=lifecycle_pipeline(),
         scheduled_participant=ScheduledTaskLifecycleParticipantRepository(
             ScheduledTaskLifecycleRepository()
         ),

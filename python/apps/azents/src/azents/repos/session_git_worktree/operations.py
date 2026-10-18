@@ -1502,13 +1502,24 @@ class SessionGitWorktreeOperationsRepository:
             return allocation
 
     async def list_live_actions(self, *, session_id: str) -> list[ActionExecution]:
-        """Complete the list live actions database operation."""
+        """Read only operations owned by the worktree domain."""
         async with self.read_session_manager() as session:
             executions = await self.action_execution_repository.list_by_session_id(
                 session,
                 session_id=session_id,
             )
-            return executions
+            return [
+                execution
+                for execution in executions
+                if execution.action_type
+                in {
+                    "create_git_worktree",
+                    "cleanup_orphan_git_worktrees",
+                    "create_session_working_folder",
+                    "agent_create_git_worktree",
+                    "agent_remove_git_worktree",
+                }
+            ]
 
     async def record_removal_projection_failure(
         self,

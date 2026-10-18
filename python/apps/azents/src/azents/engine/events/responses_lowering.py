@@ -74,7 +74,9 @@ from azents.engine.events.types import (
     OutputTextPart,
     ProviderToolCallPayload,
     ReasoningPayload,
+    RoutineInputPayload,
     RoutineJudgmentPayload,
+    RoutineNotificationPayload,
     RunMarkerPayload,
     ScheduledTaskContinuationPayload,
     ScheduledTaskResultPayload,
@@ -727,12 +729,16 @@ class ResponsesRequestLowerer:
             }
         if isinstance(
             event.payload,
-            ScheduledTaskTriggerPayload | ScheduledTaskContinuationPayload,
+            RoutineInputPayload
+            | ScheduledTaskTriggerPayload
+            | ScheduledTaskContinuationPayload,
         ):
             return {
                 "role": "user",
                 "content": event.payload.content,
             }
+        if isinstance(event.payload, RoutineNotificationPayload):
+            return {"role": "assistant", "content": event.payload.content}
         if isinstance(event.payload, ScheduledTaskResultPayload):
             return {
                 "role": "assistant",

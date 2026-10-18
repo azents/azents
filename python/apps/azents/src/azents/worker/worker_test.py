@@ -1946,6 +1946,7 @@ async def test_boundary_poll_broadcasts_mailbox_item_taxonomy_actions(
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
         mark_context_invalidated=lambda: None,
+        routine_host=None,
         dispatch_event=dispatch_event,
     )
 

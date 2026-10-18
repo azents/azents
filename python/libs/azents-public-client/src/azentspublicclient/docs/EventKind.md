@@ -18,7 +18,13 @@ Event transcript event kind.
 
 * `ROUTINE_JUDGMENT` (value: `'routine_judgment'`)
 
+* `ROUTINE_TRIGGER` (value: `'routine_trigger'`)
+
+* `ROUTINE_CONTINUATION` (value: `'routine_continuation'`)
+
 * `GOAL_UPDATED` (value: `'goal_updated'`)
+
+* `ROUTINE_NOTIFICATION` (value: `'routine_notification'`)
 
 * `ACTION_MESSAGE` (value: `'action_message'`)
 

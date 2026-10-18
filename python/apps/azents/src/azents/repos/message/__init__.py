@@ -37,6 +37,9 @@ from azents.engine.events.types import (
     OutputTextPart,
     ProviderToolCallPayload,
     ReasoningPayload,
+    RoutineInputPayload,
+    RoutineJudgmentPayload,
+    RoutineNotificationPayload,
     RunMarkerPayload,
     ScheduledTaskContinuationPayload,
     ScheduledTaskResultPayload,
@@ -216,6 +219,12 @@ def _validate_payload(row: RDBEvent) -> EventPayload:
             return ScheduledTaskContinuationPayload.model_validate(row.payload)
         case EventKind.SCHEDULED_TASK_RESULT:
             return ScheduledTaskResultPayload.model_validate(row.payload)
+        case EventKind.ROUTINE_NOTIFICATION:
+            return RoutineNotificationPayload.model_validate(row.payload)
+        case EventKind.ROUTINE_JUDGMENT:
+            return RoutineJudgmentPayload.model_validate(row.payload)
+        case EventKind.ROUTINE_TRIGGER | EventKind.ROUTINE_CONTINUATION:
+            return RoutineInputPayload.model_validate(row.payload)
         case _:
             raise ValueError("Unsupported event kind")
 
@@ -348,6 +357,20 @@ def _to_chat_message(row: RDBEvent) -> ChatMessage | None:
                         else {}
                     ),
                 },
+                created_at=row.created_at,
+            )
+        case RoutineNotificationPayload():
+            return ChatMessage(
+                id=row.id,
+                session_id=row.session_id,
+                role=MessageRole.ASSISTANT,
+                content=payload.content,
+                tool_calls=None,
+                tool_call_id=None,
+                attachments=[],
+                reasoning_summary=None,
+                usage=None,
+                metadata=None,
                 created_at=row.created_at,
             )
         case AssistantMessagePayload():

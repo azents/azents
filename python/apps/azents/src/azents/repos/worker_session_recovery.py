@@ -17,6 +17,7 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession
+from azents.repos.routine.preserved import archived_routine_execution_allowed
 from azents.repos.worker_session_data import StuckWorkerSession
 
 
@@ -36,10 +37,20 @@ class WorkerSessionRecoveryQueryRepository:
             sa.select(RDBAgentSession.id, RDBAgentSession.agent_id)
             .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
             .where(
-                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                sa.or_(
+                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                    archived_routine_execution_allowed(),
+                ),
                 RDBAgentSession.run_state == AgentSessionRunState.RUNNING,
                 RDBAgentSession.run_heartbeat_at < cutoff,
-                RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
+                sa.or_(
+                    RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
+                    sa.and_(
+                        RDBAgent.lifecycle_status
+                        == AgentLifecycleStatus.DECOMMISSIONING,
+                        archived_routine_execution_allowed(),
+                    ),
+                ),
             )
             .order_by(RDBAgentSession.run_heartbeat_at)
             .limit(limit)

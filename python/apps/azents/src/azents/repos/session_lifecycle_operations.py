@@ -20,6 +20,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.external_channel.lifecycle import ExternalChannelLifecycleRepository
 from azents.repos.lifecycle_target import LifecycleTargetRepository
+from azents.repos.routine.lifecycle import RoutineLifecycleRepository
 from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleRepository
 
 
@@ -47,6 +48,7 @@ class SessionLifecycleOperationsRepository:
         ScheduledTaskLifecycleRepository,
         Depends(ScheduledTaskLifecycleRepository.create),
     ]
+    routine_repository: Annotated[RoutineLifecycleRepository, Depends()]
 
     @staticmethod
     def require_context(context: SessionLifecycleTransitionContext) -> None:
@@ -67,10 +69,20 @@ class SessionLifecycleOperationsRepository:
         session_ids: Sequence[str],
         running_session_ids: Sequence[str],
     ) -> bool:
-        """Retain Scheduled active-cycle archive eligibility."""
-        return await self.scheduled_task_repository.archive_allows_active_runs(
-            session, session_ids=session_ids, running_session_ids=running_session_ids
-        )
+        """Keep per-Session Scheduled or exact Routine-only archive eligibility."""
+        if not set(running_session_ids).issubset(session_ids):
+            return False
+        for session_id in session_ids:
+            running = (session_id,) if session_id in running_session_ids else ()
+            if await self.scheduled_task_repository.archive_allows_active_runs(
+                session, session_ids=(session_id,), running_session_ids=running
+            ):
+                continue
+            if not await self.routine_repository.archive_allows_active_runs(
+                session, session_ids=(session_id,), running_session_ids=running
+            ):
+                return False
+        return True
 
     async def archive(
         self,
@@ -101,10 +113,17 @@ class SessionLifecycleOperationsRepository:
                     now=datetime.datetime.now(datetime.UTC),
                 )
                 plans += result.cleanup_plans
+            if participant.key == "session.routine":
+                await self.routine_repository.terminate_session_tree(
+                    session, session_ids=context.subtree_session_ids
+                )
         await self.agent_session_repository.archive_conversation_resources(
             session,
             root_session_id=context.root_session_id,
             session_ids=list(context.subtree_session_ids),
+        )
+        preserved_ids = await self.routine_repository.preserved_running_session_ids(
+            session, session_ids=context.subtree_session_ids
         )
         await self.lifecycle_target_repository.archive_status(
             session,
@@ -112,6 +131,7 @@ class SessionLifecycleOperationsRepository:
             session_ids=context.subtree_session_ids,
             retention=retention,
             end_reason=None,
+            preserved_running_session_ids=preserved_ids,
         )
         await self.lifecycle_target_repository.schedule_archive_purge(
             session,
@@ -159,6 +179,10 @@ class SessionLifecycleOperationsRepository:
                 )
             if participant.key == "session.external-channel":
                 await self.external_channel_repository.validate_restore_session_tree(
+                    session, session_ids=context.subtree_session_ids
+                )
+            if participant.key == "session.routine":
+                await self.routine_repository.validate_restore_session_tree(
                     session, session_ids=context.subtree_session_ids
                 )
         await self.agent_session_repository.restore_tree(

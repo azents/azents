@@ -16,7 +16,11 @@ from azcommon.uuid import uuid7
 
 import azents.worker.run.executor as run_executor_module
 from azents.broker.types import SessionWakeUp
-from azents.core.action_execution_data import ActionExecution, ActionExecutionProjection
+from azents.core.action_execution_data import (
+    ActionExecution,
+    ActionExecutionProjection,
+    OperationActionExecutionResult,
+)
 from azents.core.agent import (
     AgentModelSelection,
     SelectableModelCandidate,
@@ -209,8 +213,8 @@ from azents.services.mailbox import (
     TurnEffect,
 )
 from azents.services.oauth_runtime_clients import create_runtime_oauth_client_factories
+from azents.services.routine.judgment import RoutineJudgmentService
 from azents.services.session_git_worktree import (
-    GitWorktreeActionExecutionResult,
     SessionGitWorktreeService,
 )
 from azents.services.turn_action import TurnActionCapabilityRegistry
@@ -1385,7 +1389,7 @@ class _SessionGitWorktreeService:
         owner_generation: int,
         on_projection_updated: object,
         on_history_event_appended: object,
-    ) -> GitWorktreeActionExecutionResult:
+    ) -> OperationActionExecutionResult:
         """Record one admitted operation."""
         del (
             agent_id,
@@ -1396,7 +1400,7 @@ class _SessionGitWorktreeService:
             on_history_event_appended,
         )
         self.executed_execution_ids.append(execution.id)
-        return GitWorktreeActionExecutionResult(
+        return OperationActionExecutionResult(
             completed=True,
             context_invalidated=True,
             complete_run=False,
@@ -1413,7 +1417,7 @@ class _SessionGitWorktreeService:
         predecessor_run_id: str,
         on_projection_updated: object,
         on_history_event_appended: object,
-    ) -> GitWorktreeActionExecutionResult:
+    ) -> OperationActionExecutionResult:
         """Record one admitted Agent bridge operation."""
         del (
             agent_id,
@@ -1425,7 +1429,7 @@ class _SessionGitWorktreeService:
         )
         self.executed_execution_ids.append(execution.id)
         self.executed_predecessor_run_ids.append(predecessor_run_id)
-        return GitWorktreeActionExecutionResult(
+        return OperationActionExecutionResult(
             completed=True,
             context_invalidated=False,
             complete_run=True,
@@ -1442,7 +1446,7 @@ class _SessionGitWorktreeService:
         predecessor_run_id: str,
         on_projection_updated: object,
         on_history_event_appended: object,
-    ) -> GitWorktreeActionExecutionResult:
+    ) -> OperationActionExecutionResult:
         """Record one admitted Agent removal bridge operation."""
         del (
             agent_id,
@@ -1454,7 +1458,7 @@ class _SessionGitWorktreeService:
         )
         self.executed_execution_ids.append(execution.id)
         self.executed_predecessor_run_ids.append(predecessor_run_id)
-        return GitWorktreeActionExecutionResult(
+        return OperationActionExecutionResult(
             completed=True,
             context_invalidated=False,
             complete_run=True,
@@ -2090,6 +2094,7 @@ def _executor(
             skill_store=Mock(), vfs_projection_service=None
         ),
         session_git_worktree_service=worktree_service,
+        routine_judgment_service=Mock(spec=RoutineJudgmentService),
     )
     return _TestRunExecutor(
         broker=Mock(spec=run_executor_module.SessionBroker),
@@ -2173,6 +2178,7 @@ def _executor(
             spec=run_executor_module.ScheduledToolkitProvider,
             channel_service=_ScheduledChannelService(),
         ),
+        routine_toolkit_provider=Mock(spec=run_executor_module.RoutineToolkitProvider),
         external_channel_toolkit_provider=Mock(
             spec=run_executor_module.ExternalChannelToolkitProvider
         ),
@@ -4559,6 +4565,7 @@ async def test_agent_create_operation_uses_active_processing_run_as_predecessor(
         active_run_id="processing-run-001",
         execution=execution,
         action=action,
+        routine_judgment=None,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
     )
@@ -4583,6 +4590,7 @@ async def test_agent_create_operation_requires_active_processing_run() -> None:
             active_run_id=None,
             execution=execution,
             action=action,
+            routine_judgment=None,
             owner_generation=1,
             tool_admission_barrier=ToolAdmissionBarrier(),
         )
@@ -4607,6 +4615,7 @@ async def test_agent_remove_operation_uses_active_processing_run_as_predecessor(
         active_run_id="processing-remove-run-001",
         execution=execution,
         action=action,
+        routine_judgment=None,
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
     )
@@ -4633,6 +4642,7 @@ async def test_operation_admission_closed_by_shutdown_is_cancelled() -> None:
         active_run_id=None,
         execution=execution,
         action=action,
+        routine_judgment=None,
         owner_generation=1,
         tool_admission_barrier=barrier,
     )
@@ -4665,6 +4675,7 @@ async def test_operation_admission_rejects_stale_owner_before_side_effect() -> N
             active_run_id=None,
             execution=execution,
             action=action,
+            routine_judgment=None,
             owner_generation=1,
             tool_admission_barrier=ToolAdmissionBarrier(),
         )
@@ -4688,6 +4699,7 @@ async def test_operation_owner_generation_mismatch_is_cancelled() -> None:
         active_run_id=None,
         execution=execution,
         action=action,
+        routine_judgment=None,
         owner_generation=3,
         tool_admission_barrier=ToolAdmissionBarrier(),
     )
@@ -4748,6 +4760,7 @@ async def test_boundary_poll_processes_turn_actions(
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
         mark_context_invalidated=lambda: None,
+        routine_host=None,
         dispatch_event=_noop_dispatch_event,
     )
 
@@ -4825,6 +4838,7 @@ async def test_boundary_poll_stops_after_context_invalidating_action(
         owner_generation=1,
         tool_admission_barrier=ToolAdmissionBarrier(),
         mark_context_invalidated=mark_context_invalidated,
+        routine_host=None,
         dispatch_event=_noop_dispatch_event,
     )
 
@@ -5023,6 +5037,7 @@ async def test_poll_run_inputs_consumes_external_channel_batch_under_one_lease(
         initial_turn_eligible=False,
         poll_fn=None,
         process_actions=False,
+        routine_host=None,
         dispatch_event=_noop_dispatch_event,
     )
 
@@ -5124,6 +5139,7 @@ async def test_poll_run_inputs_defers_append_after_empty_read_to_next_wake(
         initial_turn_eligible=False,
         poll_fn=None,
         process_actions=False,
+        routine_host=None,
         dispatch_event=_noop_dispatch_event,
     )
     second = await executor.poll_run_inputs(
@@ -5137,6 +5153,7 @@ async def test_poll_run_inputs_defers_append_after_empty_read_to_next_wake(
         initial_turn_eligible=False,
         poll_fn=None,
         process_actions=False,
+        routine_host=None,
         dispatch_event=_noop_dispatch_event,
     )
 
@@ -5263,6 +5280,7 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
         initial_turn_eligible=False,
         poll_fn=None,
         process_actions=True,
+        routine_host=None,
         dispatch_event=_noop_dispatch_event,
     )
 
@@ -5356,6 +5374,7 @@ async def test_poll_run_inputs_stops_fifo_after_bridge_action_completion(
         initial_turn_eligible=True,
         poll_fn=queued_poll,
         process_actions=True,
+        routine_host=None,
         dispatch_event=_noop_dispatch_event,
     )
 
@@ -5431,6 +5450,7 @@ async def test_poll_run_inputs_completes_predecessor_without_promoting_continuat
         initial_turn_eligible=True,
         poll_fn=queued_poll,
         process_actions=True,
+        routine_host=None,
         dispatch_event=_noop_dispatch_event,
     )
 
@@ -5539,6 +5559,7 @@ async def test_poll_run_inputs_consumes_mixed_eligible_boundary(
         initial_turn_eligible=False,
         poll_fn=None,
         process_actions=False,
+        routine_host=None,
         dispatch_event=_noop_dispatch_event,
     )
 
@@ -5637,6 +5658,7 @@ async def test_poll_run_inputs_publishes_acknowledgment_after_promotion_commit(
         initial_turn_eligible=True,
         poll_fn=None,
         process_actions=False,
+        routine_host=None,
         dispatch_event=dispatch_event,
     )
 
@@ -5717,6 +5739,7 @@ async def test_poll_run_inputs_completes_run_after_terminal_preparation_failure(
         initial_turn_eligible=False,
         poll_fn=None,
         process_actions=False,
+        routine_host=None,
         dispatch_event=_noop_dispatch_event,
     )
 

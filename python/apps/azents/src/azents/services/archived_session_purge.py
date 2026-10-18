@@ -230,9 +230,9 @@ class ArchivedSessionPurgeService:
             return preparation.terminal
         session_ids = preparation.session_ids
         active = preparation.active
-        preserve_scheduled = preparation.preserve_scheduled
+        preserve_started_work = preparation.preserve_started_work
 
-        if not preserve_scheduled:
+        if not preserve_started_work:
             for session_id in session_ids:
                 await self.broker.send_message(SessionStopSignal(session_id=session_id))
         if active:
@@ -241,7 +241,7 @@ class ArchivedSessionPurgeService:
                 lease_owner=lease_owner,
                 attempt_count=job.attempt_count,
                 error_kind="ActiveAgentRun",
-                error_summary="Subtree AgentRun is still active after purge fencing.",
+                error_summary="Session execution or preserved work is incomplete.",
                 error_participant_key=None,
                 error_phase=ArchivedSessionPurgeParticipantPhase.PENDING,
             )
@@ -287,7 +287,11 @@ class ArchivedSessionPurgeService:
             participant: SessionLifecycleParticipantDefinition,
         ) -> dict[str, object] | None:
             match participant.key:
-                case "session.scheduled-task" | "session.external-channel":
+                case (
+                    "session.scheduled-task"
+                    | "session.external-channel"
+                    | "session.routine"
+                ):
                     return await self.operations.cleanup_participant(
                         participant, context=context
                     )
@@ -344,6 +348,7 @@ class ArchivedSessionPurgeService:
             if participant.key in {
                 "session.scheduled-task",
                 "session.external-channel",
+                "session.routine",
             }:
                 return await self.operations.verify_participant(
                     participant, context=context

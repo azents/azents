@@ -24,6 +24,7 @@ from azents.core.vfs import (
     make_vfs_projection,
     make_vfs_source_revision,
 )
+from azents.engine.tools.routine import RoutineToolkitProvider
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository
@@ -299,6 +300,13 @@ class _ScheduledReleaseProvider(ToolkitProvider[Any]):
         raise AssertionError("Scheduled Toolkit resolution is not used by VFS tests.")
 
 
+class _RoutineReleaseProvider(_ScheduledReleaseProvider):
+    """Use the real root provider's release identity without resolving it."""
+
+    slug = RoutineToolkitProvider.slug
+    vfs_resource_root = RoutineToolkitProvider.vfs_resource_root
+
+
 class _BlockingReleaseVfsCatalog(ReleaseVfsCatalog):
     """Pause projection construction outside its owner-bound DB scopes."""
 
@@ -407,9 +415,34 @@ async def test_preview_includes_platform_skill_creator_without_attachments() -> 
     assert projection.find("azents://skills/azents/skill-creator/SKILL.md")
 
 
-async def test_preview_includes_required_scheduled_skill_without_attachment() -> None:
-    """Root preview projects the required Scheduled release source."""
-    provider = _ScheduledReleaseProvider()
+@pytest.mark.parametrize(
+    ("provider_type", "skill", "guidance"),
+    [
+        (
+            _ScheduledReleaseProvider,
+            "scheduled-task",
+            ("Do not normalize it to `Z`",),
+        ),
+        (
+            _RoutineReleaseProvider,
+            "routines",
+            (
+                "record_routine_result",
+                "Choose by the output obligation",
+                "Produce a traffic-analysis report every hour",
+                "Check traffic every hour and tell me if anything is unusual",
+                "fixed 30-minute ticks",
+            ),
+        ),
+    ],
+)
+async def test_preview_includes_required_work_skill_without_attachment(
+    provider_type: type[ToolkitProvider[Any]],
+    skill: str,
+    guidance: tuple[str, ...],
+) -> None:
+    """Root preview projects required work guidance without stored attachment."""
+    provider = provider_type()
     service = VfsProjectionService(
         operations=_VfsTestOperations(
             primitives=VfsProjectionOperations(
@@ -422,19 +455,18 @@ async def test_preview_includes_required_scheduled_skill_without_attachment() ->
         ),
         toolkit_registry={},
         catalog=ReleaseVfsCatalog(),
-        required_provider_sources={"scheduled": provider},
+        required_provider_sources={provider.slug: provider},
     )
-
     projection = await service.build_preview(
         agent_id="agent-1",
         workspace_id="workspace-1",
     )
-
-    entry = projection.find("azents://skills/scheduled/scheduled-task/SKILL.md")
+    entry = projection.find(f"azents://skills/{provider.slug}/{skill}/SKILL.md")
     assert entry is not None
     body = entry.decode_body().decode()
-    assert "name: scheduled-task" in body
-    assert "Do not normalize it to `Z`" in body
+    assert f"name: {skill}" in body
+    for required in guidance:
+        assert required in body
 
 
 async def test_preview_includes_effective_agent_owned_provider_source() -> None:

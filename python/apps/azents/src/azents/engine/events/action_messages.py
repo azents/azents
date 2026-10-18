@@ -72,6 +72,15 @@ class CreateSessionWorkingFolderAction(BaseModel):
     type: Literal["create_session_working_folder"] = "create_session_working_folder"
 
 
+class RoutineJudgmentAction(BaseModel):
+    """Execute one durable checking opportunity at the ordinary inbox boundary."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    type: Literal["routine_judgment"] = "routine_judgment"
+    judgment_id: str = Field(min_length=1)
+
+
 class AgentCreateGitWorktreeAction(BaseModel):
     """Create a managed worktree from an admission-pinned Session Project."""
 
@@ -124,8 +133,9 @@ OperationAction = (
     | CreateSessionWorkingFolderAction
     | AgentCreateGitWorktreeAction
     | AgentRemoveGitWorktreeAction
+    | RoutineJudgmentAction
 )
-PersistedChatAction = Annotated[
+ChatProjectionActionPayload = (
     CommandAction
     | GoalAction
     | SkillAction
@@ -133,7 +143,14 @@ PersistedChatAction = Annotated[
     | CleanupOrphanGitWorktreesAction
     | CreateSessionWorkingFolderAction
     | AgentCreateGitWorktreeAction
-    | AgentRemoveGitWorktreeAction,
+    | AgentRemoveGitWorktreeAction
+)
+ChatProjectionAction = Annotated[
+    ChatProjectionActionPayload,
+    Field(discriminator="type"),
+]
+PersistedChatAction = Annotated[
+    ChatProjectionActionPayload | RoutineJudgmentAction,
     Field(discriminator="type"),
 ]
 TurnAction = Annotated[

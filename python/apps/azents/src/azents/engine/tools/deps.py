@@ -20,6 +20,7 @@ from azents.engine.tools.google_analytics import GoogleAnalyticsToolkitProvider
 from azents.engine.tools.kubernetes import KubernetesToolkitProvider
 from azents.engine.tools.mcp import McpToolkitProvider
 from azents.engine.tools.notion import NotionToolkitProvider
+from azents.engine.tools.routine import RoutineToolkitProvider
 from azents.engine.tools.runtime_web import RuntimeWebToolkitProvider
 from azents.engine.tools.scheduled import ScheduledToolkitProvider
 from azents.engine.tools.sentry import SentryToolkitProvider
@@ -36,6 +37,8 @@ from azents.repos.goal.store import (
     get_goal_state_store as get_repository_goal_state_store,
 )
 from azents.repos.memory_vfs.repository import MemoryVfsRepository
+from azents.repos.routine.completion import RoutineCompletionRepository
+from azents.repos.routine.operations import RoutineOperations
 from azents.repos.scheduled_task.tool_operations import (
     ScheduledTaskToolOperationRepository,
 )
@@ -65,6 +68,7 @@ from azents.services.github_platform_system_setting.runtime import (
 from azents.services.github_user_oauth.runtime import GitHubUserRuntimeService
 from azents.services.google_oauth.runtime import GoogleRuntimeService
 from azents.services.memory_vfs import MemoryVfsReadBackend
+from azents.services.routine.notification import RoutineNotificationService
 from azents.services.runtime_web.service import (
     RuntimeWebService,
     get_runtime_web_service,
@@ -167,6 +171,17 @@ async def get_release_vfs_catalog(
     return await appctx.get_variable(f"{__name__}.release_vfs_catalog", create)
 
 
+def get_routine_toolkit_provider(
+    operations: Annotated[RoutineOperations, Depends()],
+    completion: Annotated[RoutineCompletionRepository, Depends()],
+    notifications: Annotated[RoutineNotificationService, Depends()],
+) -> RoutineToolkitProvider:
+    """Wire exact root Routine operations and immediate post-commit delivery."""
+    return RoutineToolkitProvider(
+        operations=operations, completion=completion, notifications=notifications
+    )
+
+
 def get_scheduled_toolkit_provider(
     operations: Annotated[
         ScheduledTaskToolOperationRepository,
@@ -200,6 +215,9 @@ def get_vfs_projection_service(
     scheduled_toolkit_provider: Annotated[
         ScheduledToolkitProvider, Depends(get_scheduled_toolkit_provider)
     ],
+    routine_toolkit_provider: Annotated[
+        RoutineToolkitProvider, Depends(get_routine_toolkit_provider)
+    ],
 ) -> VfsProjectionService:
     """Wire detached VFS projection behavior to completed database operations."""
     return VfsProjectionService(
@@ -207,7 +225,8 @@ def get_vfs_projection_service(
         toolkit_registry=toolkit_registry,
         catalog=catalog,
         required_provider_sources={
-            scheduled_toolkit_provider.slug: scheduled_toolkit_provider
+            scheduled_toolkit_provider.slug: scheduled_toolkit_provider,
+            routine_toolkit_provider.slug: routine_toolkit_provider,
         },
     )
 

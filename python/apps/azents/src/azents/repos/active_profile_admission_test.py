@@ -48,6 +48,7 @@ from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_selectable_model_options,
 )
+from azents.testing.routine import make_test_routine_execution
 
 
 def _agent() -> Agent:
@@ -300,6 +301,7 @@ async def test_public_new_admission_compiles_after_scope_and_rechecks_authority(
             )
     elif route == "edit":
         operations = ChatWriteOperationsRepository(
+            routine_execution_repository=make_test_routine_execution(),
             agent_repository=agents,
             agent_session_repository=sessions,
             workspace_user_repository=membership,

@@ -7,6 +7,7 @@ from typing import Annotated
 from fastapi import Depends
 
 from azents.core.enums import (
+    AgentRunStatus,
     AgentSessionStatus,
     MailboxItemKind,
     MailboxSchedulingMode,
@@ -15,7 +16,11 @@ from azents.core.mailbox_data import (
     MailboxEnvelopePayload,
     MailboxItem,
     MailboxItemCreate,
+    RoutineContinuationMailboxPayload,
 )
+from azents.core.routine import RoutineScope
+from azents.core.routine_execution import RoutineExecutionRef
+from azents.core.routine_presentation import routine_execution_ref
 from azents.core.session_execution_data import SessionExecutionRecord
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.rdb.deps import get_session_manager
@@ -24,6 +29,7 @@ from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
+from azents.repos.routine.authority import RoutineExecutionAuthorityRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.session_execution.ownership import (
     fence_owned_session_mutation,
@@ -41,6 +47,7 @@ class IdleBoundaryEligibility:
 
     eligible: bool
     archived_cycle_id: str | None
+    archived_routine_refs: tuple[RoutineExecutionRef, ...] | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -97,6 +104,7 @@ class IdleContinuationRepository:
         ScheduledTaskCycleRepository,
         Depends(ScheduledTaskCycleRepository),
     ]
+    routine_authority: Annotated[RoutineExecutionAuthorityRepository, Depends()]
 
     async def get_eligibility(
         self,
@@ -150,6 +158,19 @@ class IdleContinuationRepository:
                         for candidate in inputs
                         if candidate.scheduled_cycle_id == eligibility.archived_cycle_id
                     ]
+                elif eligibility.archived_routine_refs is not None:
+                    accepted = [
+                        candidate
+                        for candidate in inputs
+                        if candidate.kind is MailboxItemKind.ROUTINE_CONTINUATION
+                        and isinstance(
+                            candidate.payload, RoutineContinuationMailboxPayload
+                        )
+                        and all(
+                            ref in eligibility.archived_routine_refs
+                            for ref in candidate.payload.executions
+                        )
+                    ]
                 admissions = [
                     await self._enqueue(session, candidate) for candidate in accepted
                 ]
@@ -159,8 +180,9 @@ class IdleContinuationRepository:
                     session_id=session_id,
                     run_id=run_id,
                     continue_running=bool(accepted),
-                    allow_archived_scheduled_continuation=(
+                    allow_archived_work_continuation=(
                         eligibility.archived_cycle_id is not None
+                        or eligibility.archived_routine_refs is not None
                     ),
                 )
                 if not consumed:
@@ -191,28 +213,51 @@ class IdleContinuationRepository:
             session, session_id
         )
         if conversation is None:
-            return IdleBoundaryEligibility(False, None)
+            return IdleBoundaryEligibility(False, None, None)
         archived_cycle_id: str | None = None
+        archived_routine_refs: tuple[RoutineExecutionRef, ...] | None = None
         if locked.status is not AgentSessionStatus.ACTIVE:
             if locked.status is not AgentSessionStatus.ARCHIVED:
-                return IdleBoundaryEligibility(False, None)
+                return IdleBoundaryEligibility(False, None, None)
             run = await self.agent_run_repository.get_by_id(session, run_id)
             cycle_id = None if run is None else run.scheduled_task_cycle_id
             if cycle_id is None:
-                return IdleBoundaryEligibility(False, None)
-            cycle = await self.scheduled_task_cycle_repository.get_started(
-                session,
-                agent_id=locked.agent_id,
-                session_id=session_id,
-                cycle_id=cycle_id,
-            )
-            if cycle is None or cycle.state.current_run_id != run_id:
-                return IdleBoundaryEligibility(False, None)
-            archived_cycle_id = cycle_id
+                if run is None or run.status is not AgentRunStatus.COMPLETED:
+                    return IdleBoundaryEligibility(False, None, None)
+                scope = RoutineScope(
+                    workspace_id=locked.workspace_id,
+                    agent_id=locked.agent_id,
+                    session_id=session_id,
+                )
+                preserved = [
+                    item.state
+                    for item in await self.routine_authority.states.list_executions(
+                        session, scope=scope
+                    )
+                    if item.state.phase in {"started", "completed"}
+                    and item.state.current_run_id == run_id
+                ]
+                if not preserved:
+                    return IdleBoundaryEligibility(False, None, None)
+                archived_routine_refs = tuple(
+                    routine_execution_ref(state)
+                    for state in preserved
+                    if state.phase == "started"
+                )
+            else:
+                cycle = await self.scheduled_task_cycle_repository.get_started(
+                    session,
+                    agent_id=locked.agent_id,
+                    session_id=session_id,
+                    cycle_id=cycle_id,
+                )
+                if cycle is None or cycle.state.current_run_id != run_id:
+                    return IdleBoundaryEligibility(False, None, None)
+                archived_cycle_id = cycle_id
         if conversation.pending_idle_continuation_run_id != run_id:
-            return IdleBoundaryEligibility(False, None)
+            return IdleBoundaryEligibility(False, None, None)
         if conversation.pending_command_id is not None:
-            return IdleBoundaryEligibility(False, None)
+            return IdleBoundaryEligibility(False, None, None)
         pending_wake_input = (
             await self.mailbox_repository.has_by_session_id_and_scheduling_mode(
                 session,
@@ -221,14 +266,14 @@ class IdleContinuationRepository:
             )
         )
         if pending_wake_input:
-            return IdleBoundaryEligibility(False, None)
+            return IdleBoundaryEligibility(False, None, None)
         active_run = await self.agent_run_repository.get_active_by_session_id(
             session,
             session_id=session_id,
         )
         if active_run is not None:
-            return IdleBoundaryEligibility(False, None)
-        return IdleBoundaryEligibility(True, archived_cycle_id)
+            return IdleBoundaryEligibility(False, None, None)
+        return IdleBoundaryEligibility(True, archived_cycle_id, archived_routine_refs)
 
     async def _enqueue(
         self,

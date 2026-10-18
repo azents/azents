@@ -13,7 +13,7 @@ from azents.repos.agent_session.repository_test import _create_agent, _create_wo
 from azents.testing.committed_fixture_cleanup import committed_fixture_graph
 
 
-async def test_cleanup_follows_composite_fk_referencing_non_primary_status(
+async def test_cleanup_collects_fk_graph_and_logical_purge_audit_rows(
     rdb_engine: AsyncEngine, latest_db_schema: None
 ) -> None:
     """A committed profile graph is collected without discarding its FK status."""
@@ -37,6 +37,24 @@ async def test_cleanup_follows_composite_fk_referencing_non_primary_status(
                     title=None,
                 ),
             )
+            job_id = uuid4().hex
+            await raw.execute(
+                sa.insert(metadata.tables["archived_session_purge_jobs"]).values(
+                    id=job_id,
+                    root_session_id=conversation.id,
+                    eligible_at=sa.func.now(),
+                    policy_revision=1,
+                )
+            )
+            await raw.execute(
+                sa.insert(
+                    metadata.tables["archived_session_purge_participant_executions"]
+                ).values(
+                    purge_job_id=job_id,
+                    participant_key="session.routine",
+                    policy_version=1,
+                )
+            )
             await raw.commit()
         async with rdb_engine.connect() as connection:
             assert (
@@ -48,6 +66,20 @@ async def test_cleanup_follows_composite_fk_referencing_non_primary_status(
                 == conversation.id
             )
     async with rdb_engine.connect() as connection:
+        jobs = metadata.tables["archived_session_purge_jobs"]
+        executions = metadata.tables["archived_session_purge_participant_executions"]
+        assert (
+            await connection.scalar(sa.select(jobs.c.id).where(jobs.c.id == job_id))
+            is None
+        )
+        assert (
+            await connection.scalar(
+                sa.select(executions.c.purge_job_id).where(
+                    executions.c.purge_job_id == job_id
+                )
+            )
+            is None
+        )
         assert (
             await connection.scalar(
                 sa.select(metadata.tables["workspaces"].c.id).where(

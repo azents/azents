@@ -74,6 +74,7 @@ from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
 )
+from azents.testing.routine import make_test_routine_lifecycle
 from azents.testing.types import require_instance
 
 from . import (
@@ -229,6 +230,7 @@ def _make_chat_service(**kwargs: Any) -> ChatSessionService:  # noqa: ANN401
         retention_repository=database["archived_session_retention_repository"],
         external_channel_repository=ExternalChannelLifecycleRepository(),
         scheduled_task_repository=scheduled.repository,
+        routine_repository=make_test_routine_lifecycle(),
     )
     operations = ChatOperationsRepository(
         **database,

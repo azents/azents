@@ -67,6 +67,7 @@ from azents.engine.tools.dynamic_worktree import (
     DynamicWorktreeToolkitProvider,
 )
 from azents.engine.tools.goal import GoalStateStore, GoalToolkitProvider
+from azents.engine.tools.routine import RoutineToolkit, RoutineToolkitProvider
 from azents.engine.tools.runtime_web import RuntimeWebToolkit, RuntimeWebToolkitProvider
 from azents.engine.tools.scheduled import ScheduledToolkit, ScheduledToolkitProvider
 from azents.engine.tools.subagent import SubagentToolkitProvider
@@ -465,6 +466,7 @@ async def _resolve_failing_registered_toolkit(
         "agent-1",
         _make_toolkit_context(),
         execution_owner=SessionExecutionOwner("session-1", 1),
+        routine_toolkit_provider=None,
         execution_mode=ToolkitExecutionMode.ROOT,
         toolkit_registry={"test": provider},
         web_url="https://example.test",
@@ -516,6 +518,7 @@ async def test_registered_toolkit_missing_namespace_fails_before_resolution() ->
             "agent-1",
             _make_toolkit_context(),
             execution_owner=SessionExecutionOwner("session-1", 1),
+            routine_toolkit_provider=None,
             execution_mode=ToolkitExecutionMode.ROOT,
             toolkit_registry={"test": provider},
             web_url="https://example.test",
@@ -1684,6 +1687,7 @@ class TestResolveAgentTools:
             "agent-1",
             _make_toolkit_context(),
             execution_owner=SessionExecutionOwner("session-1", 1),
+            routine_toolkit_provider=None,
             execution_mode=execution_mode,
             toolkit_registry={},
             web_url="https://example.test",
@@ -1724,6 +1728,7 @@ class TestResolveAgentTools:
             "agent-1",
             _make_toolkit_context(),
             execution_owner=SessionExecutionOwner("session-1", 1),
+            routine_toolkit_provider=None,
             execution_mode=execution_mode,
             toolkit_registry={},
             web_url="https://example.test",
@@ -1785,6 +1790,7 @@ class TestResolveAgentTools:
             "agent-1",
             _make_toolkit_context(),
             execution_owner=SessionExecutionOwner("session-1", 1),
+            routine_toolkit_provider=None,
             execution_mode=ToolkitExecutionMode.ROOT,
             toolkit_registry={},
             web_url="https://example.test",
@@ -1837,6 +1843,7 @@ class TestResolveAgentTools:
             "agent-1",
             _make_toolkit_context(),
             execution_owner=SessionExecutionOwner("session-1", 1),
+            routine_toolkit_provider=None,
             execution_mode=ToolkitExecutionMode.ROOT,
             toolkit_registry={},
             web_url="https://example.test",
@@ -1876,6 +1883,7 @@ class TestResolveAgentTools:
             "agent-1",
             _make_toolkit_context(),
             execution_owner=SessionExecutionOwner("session-1", 1),
+            routine_toolkit_provider=None,
             execution_mode=ToolkitExecutionMode.ROOT,
             toolkit_registry={},
             web_url="https://example.test",
@@ -1920,6 +1928,7 @@ class TestResolveAgentTools:
             "agent-1",
             _make_toolkit_context(),
             execution_owner=SessionExecutionOwner("session-1", 1),
+            routine_toolkit_provider=None,
             execution_mode=ToolkitExecutionMode.SUBAGENT,
             toolkit_registry={},
             web_url="https://example.test",
@@ -1956,15 +1965,26 @@ class TestResolveAgentTools:
             "claude_rules",
         ]
 
-    async def test_scheduled_toolkit_is_unprefixed_and_root_only(self) -> None:
-        """Scheduled auto-binding needs no attachment, config, or credentials."""
+    @pytest.mark.parametrize("kind", ["scheduled", "routine"])
+    async def test_work_toolkit_is_unprefixed_and_root_only(self, kind: str) -> None:
+        """Root work auto-binding needs no attachment, config, or credentials."""
         session = _resolution_session()
-        provider = _make_scheduled_provider()
+        provider = _make_scheduled_provider() if kind == "scheduled" else None
+        routine = (
+            RoutineToolkitProvider(
+                operations=AsyncMock(),
+                completion=AsyncMock(),
+                notifications=AsyncMock(),
+            )
+            if kind == "routine"
+            else None
+        )
 
         root = await resolve_agent_tools(
             "agent-1",
             _make_toolkit_context(),
             execution_owner=SessionExecutionOwner("session-1", 1),
+            routine_toolkit_provider=routine,
             execution_mode=ToolkitExecutionMode.ROOT,
             toolkit_registry={},
             web_url="https://example.test",
@@ -1991,6 +2011,7 @@ class TestResolveAgentTools:
             "agent-1",
             _make_toolkit_context(),
             execution_owner=SessionExecutionOwner("session-1", 1),
+            routine_toolkit_provider=routine,
             execution_mode=ToolkitExecutionMode.SUBAGENT,
             toolkit_registry={},
             web_url="https://example.test",
@@ -2016,13 +2037,15 @@ class TestResolveAgentTools:
         assert [binding.slug for binding in root] == [
             "readable_storage",
             "runtime",
-            "scheduled",
+            kind,
         ]
         assert root[2].use_prefix is False
         assert root[2].toolkit_type is None
         assert root[2].toolkit_config_id is None
         assert root[2].source_revision is not None
-        assert isinstance(root[2].toolkit, ScheduledToolkit)
+        assert isinstance(
+            root[2].toolkit, ScheduledToolkit if kind == "scheduled" else RoutineToolkit
+        )
         assert root[2].toolkit.runtime_context_store is not None
         assert subagent == []
 

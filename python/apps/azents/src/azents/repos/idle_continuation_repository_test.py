@@ -26,6 +26,7 @@ from azents.repos.idle_continuation import (
 )
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
+from azents.testing.routine import make_test_routine_authority
 
 
 async def test_failed_boundary_consume_rolls_back_new_admissions(
@@ -101,6 +102,7 @@ async def test_failed_boundary_consume_rolls_back_new_admissions(
     mailbox_repository.create_idempotent.side_effect = create_idempotent
     repository = IdleContinuationRepository(
         session_manager=session_manager,
+        routine_authority=make_test_routine_authority(),
         agent_session_repository=agent_session_repository,
         agent_run_repository=agent_run_repository,
         mailbox_repository=mailbox_repository,

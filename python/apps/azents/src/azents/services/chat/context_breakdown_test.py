@@ -2,6 +2,8 @@
 
 import datetime
 
+import pytest
+
 from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     EventKind,
@@ -9,10 +11,12 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelResourceType,
 )
+from azents.core.routine_execution import RoutineExecutionRef
 from azents.engine.events.external_channel_rendering import (
     render_external_channel_message,
 )
 from azents.engine.events.provider_tool_rendering import render_provider_tool_semantic
+from azents.engine.events.routine_judgment_test import _observation
 from azents.engine.events.types import (
     Event,
     ExternalChannelMessagePayload,
@@ -21,6 +25,7 @@ from azents.engine.events.types import (
     ProviderToolCallPayload,
     ProviderToolReference,
     ProviderToolSemanticContent,
+    RoutineInputPayload,
     SystemPromptAnalysisPayload,
     SystemPromptFragmentPayload,
     build_native_compat_key,
@@ -220,3 +225,47 @@ def test_context_projection_uses_session_prompt_snapshot() -> None:
     assert context.system_prompt is not None
     assert context.system_prompt.final_prompt is not None
     assert context.system_prompt.final_prompt.content == "latest prompt"
+
+
+@pytest.mark.parametrize(
+    "kind", [EventKind.ROUTINE_TRIGGER, EventKind.ROUTINE_CONTINUATION]
+)
+def test_context_counts_ordinary_routine_input_without_judgment_usage(
+    kind: EventKind,
+) -> None:
+    """Admitted work counts as user context; judgment remains a passive observation."""
+    now = datetime.datetime.now(datetime.UTC)
+    content = "Original objective, source events, previous result and next-check hint."
+    ordinary = Event(
+        id="3" * 32,
+        session_id="session-1",
+        kind=kind,
+        payload=RoutineInputPayload(
+            executions=(
+                RoutineExecutionRef(
+                    routine_id="routine-a",
+                    execution_id="occurrence-a",
+                    slug="routine-a",
+                    title="Traffic anomalies",
+                ),
+            ),
+            content=content,
+        ),
+        created_at=now,
+    )
+    observation = _observation().model_copy(update={"session_id": "session-1"})
+    agent_session = AgentSession.model_construct(
+        id="session-1",
+        agent_id="agent-1",
+        created_at=now,
+        updated_at=now,
+    )
+    context = _build_context(agent_session, [ordinary, observation], None)
+    assert len(context.breakdown) == 1
+    assert context.breakdown[0].key == "user"
+    assert context.breakdown[0].tokens == len(content)
+    assert context.breakdown[0].percent == 100.0
+    assert context.usage is None
+    assert context.stats.total_cost_usd is None
+    assert context.stats.turn_markers == 0
+    assert _build_breakdown([observation], None) == []

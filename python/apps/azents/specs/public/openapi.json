@@ -24102,7 +24102,7 @@
               }
             ],
             "title": "Action",
-            "description": "Durable action payload",
+            "description": "Visible durable action payload",
             "discriminator": {
               "propertyName": "type",
               "mapping": {
@@ -30872,7 +30872,10 @@
           "scheduled_task_continuation",
           "scheduled_task_result",
           "routine_judgment",
+          "routine_trigger",
+          "routine_continuation",
           "goal_updated",
+          "routine_notification",
           "action_message",
           "agent_message",
           "external_channel_message",

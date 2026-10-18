@@ -39,10 +39,16 @@ from azents.repos.external_channel_lifecycle_participant import (
 from azents.repos.hierarchy_contention import retry_hierarchy_operation
 from azents.repos.lifecycle_target import LifecycleTargetRepository
 from azents.repos.model_file import ModelFileRepository
+from azents.repos.routine.lifecycle_participant import (
+    RoutineLifecycleParticipantRepository,
+)
 from azents.repos.scheduled_task_lifecycle_participant import (
     ScheduledTaskLifecycleParticipantRepository,
 )
 from azents.repos.session_lifecycle_finalizer import SessionLifecycleFinalizerRepository
+from azents.repos.session_lifecycle_operations import (
+    SessionLifecycleOperationsRepository,
+)
 from azents.repos.session_lifecycle_purge_operations import (
     SessionLifecyclePurgeOperations,
 )
@@ -90,6 +96,8 @@ class ArchivedSessionPurgeOperations:
         ExternalChannelLifecycleParticipantRepository,
         Depends(ExternalChannelLifecycleParticipantRepository),
     ]
+    routine_participant: Annotated[RoutineLifecycleParticipantRepository, Depends()]
+    transition_operations: Annotated[SessionLifecycleOperationsRepository, Depends()]
 
     async def cancel_invalid_jobs(self, *, now: datetime.datetime) -> int:
         """Complete bounded stale unstarted job reconciliation."""
@@ -152,7 +160,7 @@ class ArchivedSessionPurgeOperations:
                     ),
                     session_ids=(),
                     active=False,
-                    preserve_scheduled=False,
+                    preserve_started_work=False,
                 )
             root_session = next(
                 (item for item in sessions if item.id == job.root_session_id),
@@ -164,20 +172,15 @@ class ArchivedSessionPurgeOperations:
             ):
                 raise RuntimeError("Purge root session is no longer archived")
             session_ids = [item.id for item in sessions]
-            fenced_count = (
-                await self.lifecycle_target_repository.fence_purge_owner_generations(
-                    session,
-                    session_ids=session_ids,
-                )
-            )
-            if fenced_count != len(session_ids):
-                raise RuntimeError("Purge root tree ownership fence is incomplete")
             active = await self.agent_run_repository.has_active_for_session_ids(
                 session,
                 session_ids=session_ids,
             )
-            scheduled_lifecycle = self.scheduled_participant
-            preserve_scheduled = (
+            active = active or await self.routine_participant.has_started_work(
+                session, session_ids=session_ids
+            )
+            scheduled_lifecycle = self.transition_operations
+            preserve_started_work = (
                 active
                 and await scheduled_lifecycle.archive_allows_active_runs(
                     session,
@@ -189,7 +192,14 @@ class ArchivedSessionPurgeOperations:
                     ],
                 )
             )
-            if not preserve_scheduled:
+            if not preserve_started_work:
+                targets = self.lifecycle_target_repository
+                fenced_count = await targets.fence_purge_owner_generations(
+                    session,
+                    session_ids=session_ids,
+                )
+                if fenced_count != len(session_ids):
+                    raise RuntimeError("Purge root tree ownership fence is incomplete")
                 for session_id in session_ids:
                     await self.lifecycle_target_repository.request_stop(
                         session,
@@ -202,7 +212,7 @@ class ArchivedSessionPurgeOperations:
             terminal=None,
             session_ids=tuple(session_ids),
             active=active,
-            preserve_scheduled=preserve_scheduled,
+            preserve_started_work=preserve_started_work,
         )
 
     async def prepare_files(
@@ -342,6 +352,24 @@ class ArchivedSessionPurgeOperations:
                     job_id=job.id,
                 )
             )
+            routine_execution = next(
+                (
+                    execution
+                    for execution in participant_executions
+                    if execution.participant_key == "session.routine"
+                ),
+                None,
+            )
+            if routine_execution is not None:
+                routine_participant = (
+                    self.lifecycle_operations.registry.require_policy_version(
+                        key=routine_execution.participant_key,
+                        policy_version=routine_execution.policy_version,
+                    )
+                )
+                await self.routine_participant.finalize_purge_participant(
+                    session, routine_participant, context
+                )
             scheduled_task_execution = next(
                 (
                     execution
@@ -424,6 +452,18 @@ class ArchivedSessionPurgeOperations:
         context: SessionLifecyclePurgeContext,
     ) -> dict[str, object] | None:
         """Complete one DB participant preparation with detached safe summary."""
+        if participant.key == "session.routine":
+            async with self.session_manager() as session:
+                routine_summary = (
+                    await self.routine_participant.prepare_purge_participant(
+                        session, participant, context
+                    )
+                )
+            return (
+                None
+                if routine_summary is None
+                else self.routine_participant.summary_dict(routine_summary)
+            )
         if participant.key == "session.scheduled-task":
             async with self.session_manager() as session:
                 summary = await self.scheduled_participant.prepare_purge_participant(
@@ -453,6 +493,18 @@ class ArchivedSessionPurgeOperations:
         context: SessionLifecyclePurgeContext,
     ) -> dict[str, object] | None:
         """Complete one cleanup database participant operation."""
+        if participant.key == "session.routine":
+            async with self.session_manager() as session:
+                routine_summary = (
+                    await self.routine_participant.cleanup_purge_participant(
+                        session, participant, context
+                    )
+                )
+            return (
+                None
+                if routine_summary is None
+                else self.routine_participant.summary_dict(routine_summary)
+            )
         if participant.key == "session.scheduled-task":
             async with self.session_manager() as session:
                 scheduled_summary = (
@@ -480,6 +532,18 @@ class ArchivedSessionPurgeOperations:
         context: SessionLifecyclePurgeContext,
     ) -> dict[str, object] | None:
         """Complete one verify database participant operation."""
+        if participant.key == "session.routine":
+            async with self.session_manager() as session:
+                routine_summary = (
+                    await self.routine_participant.verify_purge_participant(
+                        session, participant, context
+                    )
+                )
+            return (
+                None
+                if routine_summary is None
+                else self.routine_participant.summary_dict(routine_summary)
+            )
         if participant.key == "session.scheduled-task":
             async with self.session_manager() as session:
                 scheduled_summary = (
