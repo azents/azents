@@ -103,7 +103,7 @@ async def rdb_engine(
     postgres_container: PostgresContainer,
 ) -> AsyncGenerator[AsyncEngine, None]:
     """SQLAlchemy async engine fixture."""
-    engine = create_async_engine(postgres_container.get_connection_url(), echo=True)
+    engine = create_async_engine(postgres_container.get_connection_url())
     try:
         yield engine
     finally:
