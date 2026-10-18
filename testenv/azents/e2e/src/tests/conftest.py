@@ -56,6 +56,7 @@ from support.docker_fixture_observations import (
     decode_docker_network_address,
 )
 from support.e2e_image_preparation import E2EImagePreparation as _E2EImagePreparation
+from support.e2e_parallel import record_worker_image_plan
 from support.gateway_image import prepare_gateway_image, run_gateway_image_command
 from support.google_provider_fake import HOSTS as GOOGLE_FIXTURE_HOSTS
 from support.google_provider_fixture import (
@@ -1033,6 +1034,7 @@ def _e2e_image_preparation(profile: str | None) -> _E2EImagePreparation:
         build_operations[image_build.cache_repository] = partial(
             _build_prepared_e2e_image, image_build, image_tag
         )
+    record_worker_image_plan(list(build_operations))
     return _E2EImagePreparation(images, build_operations)
 
 

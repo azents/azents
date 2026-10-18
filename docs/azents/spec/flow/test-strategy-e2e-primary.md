@@ -606,6 +606,23 @@ Always-on required CI does not depend on external credentials.
   resize, replay, Ctrl-C, termination, and production rate limits retain their
   existing contracts.
 - Web Surface E2E runs from `src/tests/web/` in its own suite lane.
+  That existing job uses two pytest workers with complete-file distribution and
+  independent database, network, service, browser, Runtime, and temporary fixtures.
+  Required-suite lanes remain serial. Worker restart is disabled, and the shared
+  observer aborts unexpected worker death before unfinished tests are redistributed.
+  Controller-only setup/call/teardown reports retain each testcase once. Automatic
+  and explicitly reported fixture receipts share each worker's raw timing file;
+  the controller validates and merges them after teardown.
+  E2E-only startup, image, and browser-failure diagnostics are isolated under
+  `workers/gwN/` within the existing lane artifact. Successful execution requires
+  every configured worker's completed startup and raw fixture evidence, plus image
+  receipts matching that worker's pre-build plan. Prepared images permit an explicit
+  zero-local-build plan. Validated image receipts are published atomically into the
+  existing aggregate file without replacing prior evidence; raw sources are retained.
+  Native duration includes both workers' startup, collection, cleanup, and evidence
+  merging. Fixture work can overlap and is not additive elapsed time. The same
+  runner/job/matrix/image producers are retained; duplicate fixture processes raise
+  concurrent CPU and memory use within that runner's allocation.
 - Required Brave Search journeys admit the five independent success Sessions before
   waiting for their persisted terminal run markers and idle projections. Every
   created Session is registered for draining before input admission; definite
@@ -658,17 +675,6 @@ Always-on required CI does not depend on external credentials.
   malformed programmatic probes fail before application content. The fixture uses
   only generated clients, UI, Runtime Terminal, and public/admin APIs; it never
   writes product state directly to PostgreSQL.
-- When the Runtime Web Gateway file is selected, Web-suite setup starts its same
-  two mode-specific Public/Main Web pairs and Runtime Control relay in one owned
-  background preparation. Independent earlier Web tests remain serial while those
-  processes reach their existing readiness checks. The module fixture joins that
-  exact result before gateway tests execute. The suite joins startup failures even
-  when no test consumes the result, drains preparation before cleanup, and closes
-  every owned container at the original gateway-module teardown boundary, with
-  suite-owned fallback cleanup if the result is never consumed. The raw background fixture timing is
-  retained separately from the foreground join; it overlaps test work rather than
-  adding serial elapsed time. Container/image producers and CI runners are unchanged,
-  while earlier process lifetime can increase concurrent setup CPU and memory use.
 - Runtime Web heavy-load verification is disposable evidence, not a recurring
   regression-test catalog. A feature, release, or incident that requires fresh load
   evidence raises the bounded environment values on the same lightweight journey,

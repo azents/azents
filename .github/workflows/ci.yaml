@@ -653,6 +653,10 @@ jobs:
           mkdir -p "$report_dir"
           mapfile -t test_files < "e2e-plan/${{ matrix.plan_file }}"
           cd testenv/azents/e2e
+          parallel_args=()
+          if [ "$AZENTS_E2E_IMAGE_BUILD_PROFILE" = 'web' ]; then
+            parallel_args=(-n 2 --dist loadfile --max-worker-restart=0)
+          fi
           SECONDS=0
           set +e
           AZENTS_E2E_ARTIFACT_DIR="$report_dir" \
@@ -660,10 +664,11 @@ jobs:
             PYTHONPATH="$GITHUB_WORKSPACE" \
             AZENTS_E2E_DOCKER_BUILDER="${{ steps.buildx.outputs.name }}" \
             AZENTS_E2E_DOCKER_GHA_CACHE_SCOPE_PREFIX="azents-e2e-v1" \
-            uv run pytest -p scripts.ci.pytest_timing -vv \
+            uv run pytest -p scripts.ci.pytest_timing -p support.e2e_parallel -vv \
             --junitxml="$report_dir/junit.xml" \
             --durations=30 \
             --durations-min=0.25 \
+            "${parallel_args[@]}" \
             "${test_files[@]}"
           pytest_status=$?
           set -e

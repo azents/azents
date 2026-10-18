@@ -165,13 +165,9 @@ class TimingObservabilityPlugin:
 
 def pytest_configure(config: pytest.Config) -> None:
     """Enable the same observer for unit, migration, support, and E2E tests."""
-    path = timing_path()
+    path = _fixture_timing_path()
     if path is not None:
         worker = os.environ.get("PYTEST_XDIST_WORKER")
-        if worker is not None:
-            if re.fullmatch(r"gw[0-9]+", worker) is None:
-                raise ValueError("Invalid pytest worker identity for timing evidence")
-            path = path.with_name(f"fixture-timings-{worker}.jsonl")
         config.pluginmanager.register(
             TimingObservabilityPlugin(path, record_test_phases=worker is None),
             "azents-ci-timing-observability",
@@ -237,7 +233,7 @@ def record_fixture_phase(
             duration_seconds=duration_seconds,
             outcome=outcome,
         ),
-        timing_path(),
+        _fixture_timing_path(),
     )
 
 
@@ -254,6 +250,17 @@ def timing_path() -> Path | None:
         if artifact_dir is not None
         else None
     )
+
+
+def _fixture_timing_path() -> Path | None:
+    """Keep explicit fixture receipts under the same owner as automatic ones."""
+    path = timing_path()
+    worker = os.environ.get("PYTEST_XDIST_WORKER")
+    if path is None or worker is None:
+        return path
+    if re.fullmatch(r"gw[0-9]+", worker) is None:
+        raise ValueError("Invalid pytest worker identity for timing evidence")
+    return path.with_name(f"fixture-timings-{worker}.jsonl")
 
 
 def _append_timing(timing: TestPhaseTiming | FixtureTiming, path: Path | None) -> None:
