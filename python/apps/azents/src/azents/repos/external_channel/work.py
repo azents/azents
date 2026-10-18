@@ -87,6 +87,7 @@ from azents.repos.external_channel.work_state import (
 from azents.repos.scheduled_task.lifecycle import (
     ScheduledTaskLifecycleRepository,
 )
+from azents.repos.session_primary_channel import SessionPrimaryChannelRepository
 
 INITIAL_PROGRESS_CLAIM_ATTEMPTS = 3
 
@@ -2335,6 +2336,11 @@ async def terminate_binding_with_plans(
     emit_leave_presence: bool,
 ) -> tuple[ProviderEffectPlan, ...]:
     """Commit one binding termination and capture bounded cleanup plans."""
+    await SessionPrimaryChannelRepository().clear_for_binding(
+        session,
+        session_id=binding.agent_session_id,
+        binding_id=binding.id,
+    )
     if binding.disconnected_at is not None:
         return ()
     route = await session.write_session.get(

@@ -12,6 +12,7 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.hierarchy_contention import retry_hierarchy_operation
 
 
 @dataclasses.dataclass(frozen=True)
@@ -33,6 +34,7 @@ class ExternalChannelConnectionRevocationOperations:
         ExternalChannelRepository, Depends(ExternalChannelRepository.create)
     ]
 
+    @retry_hierarchy_operation
     async def apply(
         self,
         *,

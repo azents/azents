@@ -85,6 +85,18 @@ class RDBAgentSession(RDBModel):
         name="fk_session_lifecycle_root",
         ondelete="RESTRICT",
     )
+    FK_PRIMARY_CHANNEL_BINDING = sa.ForeignKeyConstraint(
+        ["primary_channel_binding_id"],
+        ["external_channel_bindings.id"],
+        name="fk_agent_sessions_primary_channel_binding",
+        ondelete="SET NULL",
+        use_alter=True,
+    )
+    IX_PRIMARY_CHANNEL_BINDING = sa.Index(
+        "ix_agent_sessions_primary_channel_binding",
+        "primary_channel_binding_id",
+        postgresql_where=sa.text("primary_channel_binding_id IS NOT NULL"),
+    )
     UQ_LIFECYCLE_IDENTITY = sa.UniqueConstraint(
         "id", "agent_id", "status", name="uq_session_lifecycle_identity"
     )
@@ -177,6 +189,12 @@ class RDBAgentSession(RDBModel):
     lifecycle_root_session_id: Mapped[str | None] = mapped_column(
         sa.String(32),
         nullable=True,
+    )
+    primary_channel_binding_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        init=False,
+        nullable=True,
+        default=None,
     )
     conversation: Mapped[RDBConversation | None] = relationship(
         init=False,
@@ -371,6 +389,8 @@ class RDBAgentSession(RDBModel):
 
     __table_args__ = (
         FK_LIFECYCLE_ROOT,
+        FK_PRIMARY_CHANNEL_BINDING,
+        IX_PRIMARY_CHANNEL_BINDING,
         UQ_LIFECYCLE_IDENTITY,
         IX_LIFECYCLE_ROOT,
         CK_CURRENT_INFERENCE_STATE,

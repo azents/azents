@@ -53,7 +53,9 @@ async def _wait_for_blocked(engine: AsyncEngine, holder_pid: int) -> None:
             ),
             {"holder": holder_pid},
         ):
-            pass
+            # A new waiter backend can appear after this observer's first sample.
+            # Refresh PostgreSQL's transaction-local activity snapshot, not a timer.
+            await observer.execute(sa.text("SELECT pg_stat_clear_snapshot()"))
 
 
 @pytest.mark.parametrize("held", ["user", "auth", "attempt"])
