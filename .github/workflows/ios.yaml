@@ -43,6 +43,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ios-app-builds-${{ env.CI_HEAD_SHA }}
+          overwrite: true
           path: swift/.build/artifacts/
           if-no-files-found: error
           include-hidden-files: true
@@ -52,6 +53,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ios-diagnostics-${{ env.CI_HEAD_SHA }}
+          overwrite: true
           path: |
             swift/.build/*.log
             swift/.build/*.xcresult

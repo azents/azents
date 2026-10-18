@@ -250,6 +250,11 @@ class WorkflowReportTest(unittest.TestCase):
         self.assertIn(f"ref: {expression}", workflow)
         self.assertIn("name: ios-app-builds-${{ env.CI_HEAD_SHA }}", workflow)
         self.assertIn("name: ios-diagnostics-${{ env.CI_HEAD_SHA }}", workflow)
+        for name in ("ios-app-builds", "ios-diagnostics"):
+            self.assertIn(
+                f"name: {name}-${{{{ env.CI_HEAD_SHA }}}}\n          overwrite: true",
+                workflow,
+            )
         for event in ("pull_request", "push"):
             with self.subTest(event=event):
                 raw = sample()

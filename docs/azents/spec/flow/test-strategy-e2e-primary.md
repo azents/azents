@@ -810,6 +810,8 @@ Always-on required CI does not depend on external credentials.
   The iOS workflow checks out the pull request head (or main/manual SHA) and uses
   that same tested SHA in app-build and native diagnostic artifact names. A
   synthetic PR merge SHA is not substituted for the collector's head identity.
+  Same-name native artifacts are explicitly replaced on a workflow repeat;
+  complete immutable first-attempt evidence must be collected before repeating.
   Re-ingesting an identical workflow/run/attempt from another local collection
   directory is idempotent and retains the first stored source locator. Every
   other stored field, including opaque measurement/evidence extensions, must
