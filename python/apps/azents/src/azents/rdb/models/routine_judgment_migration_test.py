@@ -34,6 +34,9 @@ def test_judgment_migration_retains_observation_without_a_run(
         command.upgrade(database.config, "854782c43687")
         observation = _observation()
         with database.engine.begin() as connection:
+            assert connection.scalar(
+                sa.text("SELECT enum_range(NULL::event_kind)::text[]")
+            ) == [kind.value for kind in EventKind]
             connection.execute(
                 sa.text(
                     "INSERT INTO events(id,session_id,kind,payload,provider,model) "

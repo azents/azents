@@ -140,3 +140,18 @@ Review corrections checkpoint, 2026-10-18 KST:
   actionable findings. Root's 1570-test validation is the integration evidence;
   the reviewer remained read-only. Generated Python client template tests also
   passed (16 tests). Design delta: None.
+
+Publication and CI checkpoint, 2026-10-18 KST:
+
+- [PR #2329](https://github.com/azents/azents/pull/2329) opened at `447f3ea7c`
+  after a conflict-free rebase onto `ab7834c36`; all commit hooks passed. The
+  post-rebase focused historical-fixture/judgment/DB selection passed 25 tests.
+- Phase 1 CI is fully green. Phase 2 CI's dedicated migration-DDL comparison
+  exposed enum ordering drift: the new label was appended in PostgreSQL but
+  declared before `goal_updated` in ORM metadata. Corrected the unmerged enum
+  migration with an explicit `BEFORE 'goal_updated'` position and added a complete
+  `enum_range` order assertion to the real PostgreSQL migration test.
+- Root ran the complete dedicated `migration_tests` suite, including the exact
+  CI DDL comparison: 50 passed in 57.50s. Focused judgment migration/persistence:
+  2 passed in 6.89s. The existing dependency/cyclic-FK warnings remain unchanged.
+  No runtime or generated schema contract changed; Design delta: None.

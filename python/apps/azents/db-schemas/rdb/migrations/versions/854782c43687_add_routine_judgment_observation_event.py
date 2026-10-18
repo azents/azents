@@ -12,7 +12,9 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     """Register the typed Session observation in the existing event stream."""
-    op.execute("ALTER TYPE event_kind ADD VALUE 'routine_judgment'")
+    op.execute(
+        "ALTER TYPE event_kind ADD VALUE 'routine_judgment' BEFORE 'goal_updated'"
+    )
 
 
 def downgrade() -> None:
