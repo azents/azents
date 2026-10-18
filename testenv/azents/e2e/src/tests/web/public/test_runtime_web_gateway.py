@@ -2306,6 +2306,32 @@ def _assert_redis_capacity_fallback(
         assert websocket.recv(timeout=10) == "echo:after-redis-recovery"
 
 
+def _current_application_ready(driver: WebDriver, destination: str) -> bool:
+    """Observe the final visible document without retaining a navigating element."""
+    try:
+        return (
+            driver.execute_script(
+                """
+                const ready = document.getElementById('ready');
+                return location.href === arguments[0]
+                  && document.readyState === 'complete'
+                  && ready !== null
+                  && ready.textContent.trim() === 'Runtime Web E2E ready'
+                  && ready.checkVisibility({
+                    visibilityProperty: true,
+                    opacityProperty: true,
+                  });
+                """,
+                destination,
+            )
+            is True
+        )
+    except WebDriverException as error:
+        if error.msg is None or not error.msg.startswith("aborted by navigation:"):
+            raise
+        return False
+
+
 @pytest.mark.parametrize("auth_mode", ["shared_cookie", "separate_domain"])
 def test_runtime_web_authentication_without_next_assets(
     runtime_web_application: _RuntimeWebApplication,
@@ -2360,7 +2386,7 @@ def test_runtime_web_authentication_without_next_assets(
                 WebDriverWait(driver, 30).until(ec.url_to_be(previous_url))
                 driver.forward()
                 WebDriverWait(driver, 60).until(
-                    ec.visibility_of_element_located((By.ID, "ready"))
+                    lambda current: _current_application_ready(current, destination)
                 )
                 assert driver.current_url == destination
                 # Main Web login must carry the inherited browser fragment too.
@@ -2372,7 +2398,7 @@ def test_runtime_web_authentication_without_next_assets(
                 WebDriverWait(driver, 30).until(ec.url_contains("/login"))
                 _submit_password_login(driver, email=workspace.email)
                 WebDriverWait(driver, 60).until(
-                    ec.visibility_of_element_located((By.ID, "ready"))
+                    lambda current: _current_application_ready(current, destination)
                 )
                 assert driver.current_url == destination
                 # Repeat with normal asset loading and only Runtime identity absent.
@@ -2394,14 +2420,14 @@ def test_runtime_web_authentication_without_next_assets(
                 )
                 driver.find_element(By.ID, "history-service-link").click()
                 WebDriverWait(driver, 60).until(
-                    ec.visibility_of_element_located((By.ID, "ready"))
+                    lambda current: _current_application_ready(current, destination)
                 )
                 assert driver.current_url == destination
                 driver.back()
                 WebDriverWait(driver, 30).until(ec.url_to_be(previous_url))
                 driver.forward()
                 WebDriverWait(driver, 60).until(
-                    ec.visibility_of_element_located((By.ID, "ready"))
+                    lambda current: _current_application_ready(current, destination)
                 )
                 assert driver.current_url == destination
             finally:

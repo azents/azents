@@ -18,7 +18,7 @@ _OWNER = "azents"
 _SERVER_SOURCE_OVERLAY_ELIGIBLE_ENV = "AZENTS_E2E_SERVER_SOURCE_OVERLAY_ELIGIBLE"
 _SERVER_SOURCE_OVERLAY_BASE_ENV = "AZENTS_E2E_SERVER_SOURCE_OVERLAY_BASE"
 _IMAGE_BUILD_PROFILE_ENV = "AZENTS_E2E_IMAGE_BUILD_PROFILE"
-_PREREQUISITE_IMAGES = (
+PREREQUISITE_IMAGES = (
     "postgres:18",
     "rustfs/rustfs:1.0.0-alpha.90",
     "valkey/valkey:9-alpine",
@@ -220,14 +220,14 @@ def prepare_prerequisite_images(
     command_runner: CommandRunner,
 ) -> tuple[PrerequisiteImagePull, ...]:
     """Best-effort pre-pull fixture images concurrently with snapshot images."""
-    with ThreadPoolExecutor(max_workers=len(_PREREQUISITE_IMAGES)) as executor:
+    with ThreadPoolExecutor(max_workers=len(PREREQUISITE_IMAGES)) as executor:
         return tuple(
             executor.map(
                 lambda image: _pull_prerequisite_image(
                     image,
                     command_runner=command_runner,
                 ),
-                _PREREQUISITE_IMAGES,
+                PREREQUISITE_IMAGES,
             )
         )
 

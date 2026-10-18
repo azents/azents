@@ -57,6 +57,12 @@ content-matched Web image E2E. Each suite directory contains one `suite.toml`; a
 tests below that directory share one execution profile. The planner may split one
 suite into timing-balanced lanes, but a lane is not a separate profile.
 
+The existing Web lane runs two isolated pytest workers with `--dist loadfile` and
+`--max-worker-restart=0`; Required lanes remain serial. Web worker diagnostics live
+under `workers/gwN/` in the same lane artifact. The shared CI observer retains
+controller testcase phases and validated raw/merged worker fixture receipts; the
+E2E parallel plugin isolates startup/browser diagnostics and merges image receipts.
+
 Each executed lane uploads JUnit XML, pytest output, slow-test timing, and Docker diagnostics even when pytest fails. Failed browser tests also capture a screenshot and page HTML when the browser session is available. General CI observability also captures Python unit/integration, migration, support and Helm pytest results through `scripts/ci/`, plus every workflow job/step wall. Same-repository pull requests receive one sticky CI observability comment combining those results with E2E. Fork pull requests remain read-only and do not publish the comment. The E2E duration gate and planner remain E2E-specific.
 
 Tests under `src/support_tests/` must not start an HTTP/WebSocket server, open a network

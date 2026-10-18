@@ -37,6 +37,7 @@ from azentspublicclient.models.secrets import Secrets
 from azentspublicclient.models.toolkit_config_create_request import (
     ToolkitConfigCreateRequest,
 )
+from selenium.common.exceptions import StaleElementReferenceException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
@@ -102,15 +103,21 @@ def _login_main_web(
 
 def _assert_visible_text(driver: WebDriver, text: str) -> None:
     """Wait for exact visible text."""
-    _wait(driver).until(
-        lambda current_driver: any(
+    _wait(driver).until(lambda current_driver: _visible_text(current_driver, text))
+
+
+def _visible_text(driver: WebDriver, text: str) -> bool:
+    """Observe the current DOM without retaining nodes across polling passes."""
+    try:
+        return any(
             element.is_displayed()
-            for element in current_driver.find_elements(
+            for element in driver.find_elements(
                 By.XPATH,
                 f"//*[normalize-space()={text!r}]",
             )
         )
-    )
+    except StaleElementReferenceException:
+        return False
 
 
 def _click_button(driver: WebDriver, text: str) -> None:

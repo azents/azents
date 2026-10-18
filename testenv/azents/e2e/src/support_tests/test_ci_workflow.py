@@ -86,23 +86,75 @@ def test_workflow_dispatch_detects_changes_from_first_parent() -> None:
     assert "base: ${{ steps.change_base.outputs.base }}" in filter_step
 
 
-def test_web_lane_prefetches_all_snapshots_and_skips_unused_buildx() -> None:
-    """Web E2E reuses every unchanged image and builds only on fallback."""
+def test_e2e_lanes_require_exact_current_run_producer_images_without_rebuild() -> None:
+    """The existing Docker portfolio is handed off with no snapshot/build fallback."""
     workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
-    base_step = _step_block(workflow, "Resolve E2E snapshot base")
-    prefetch_step = _step_block(
-        workflow,
-        "Start direct E2E snapshot image preparation",
-    )
-    buildx_step = _step_block(workflow, "Setup Docker Buildx")
-    runtime_step = _step_block(workflow, "Expose GitHub Actions runtime")
+    lane = workflow.split("  ci_e2e_run:\n", 1)[1].split("\n  ci_e2e_aggregate:\n", 1)[
+        0
+    ]
+    assert "      - ci_docker_build_run\n" in lane
+    assert "needs.ci_docker_build_run.result == 'success'" in lane
+    assert "ref: ${{ github.event.pull_request.head.sha || github.sha }}" in lane
+    preparation = _step_block(lane, "Prepare exact images and existing prerequisites")
+    assert "scripts.ci.e2e_images prepare" in preparation
+    assert "GH_TOKEN: ${{ github.token }}" in preparation
+    assert "actions: read" in lane.split("    steps:\n", 1)[0]
+    assert "--root" in preparation and "--evidence" in preparation
+    assert "continue-on-error:" not in preparation
+    assert lane.index("Prepare exact images") < lane.index("Verify and load")
+    load = _step_block(lane, "Verify and load exact CI image portfolio")
+    assert "scripts.ci.e2e_images load" in load
+    assert "--github-env" in load and "--evidence" in load
+    assert "continue-on-error:" not in load
+    assert lane.index("Verify and load") < lane.index("Run E2E lane")
+    assert "e2e_snapshot_images.py" not in lane
+    assert "Setup Docker Buildx" not in lane
+    assert "AZENTS_E2E_DOCKER_BUILDER" not in lane
 
-    assert "if: matrix.suite == 'required'" not in base_step
-    assert "AZENTS_E2E_WEB_IMAGE_CHANGED:" in prefetch_step
-    assert "AZENTS_E2E_ADMIN_WEB_IMAGE_CHANGED:" in prefetch_step
-    assert "AZENTS_E2E_IMAGE_BUILD_PROFILE: ${{ matrix.suite }}" in prefetch_step
-    assert "matrix.suite == 'web'" not in buildx_step
-    assert "matrix.suite == 'web'" not in runtime_step
+
+def test_exact_image_export_uses_existing_build_jobs_and_counts_all_overhead() -> None:
+    workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
+    producer = workflow.split("  ci_docker_build_run:\n", 1)[1].split(
+        "\n  ci-docker-build:\n", 1
+    )[0]
+    assert producer.count("          - name: azents-") == 8
+    assert "runs-on: ubuntu-latest" in producer
+    assert "needs.changes.outputs.python_e2e == 'true'" in producer
+    assert "needs.changes.outputs.web_e2e == 'true'" in producer
+    assert "ref: ${{ github.event.pull_request.head.sha || github.sha }}" in producer
+    assert producer.index("Build ${{ matrix.name }}") < producer.index(
+        "Export exact E2E image"
+    )
+    assert producer.index("Smoke ${{ matrix.name }}") < producer.index(
+        "Export exact E2E image"
+    )
+    export = _step_block(producer, "Export exact E2E image")
+    publish = _step_block(producer, "Publish exact E2E image")
+    assert "scripts.ci.e2e_images export" in export
+    assert "continue-on-error:" not in export
+    assert "${{ github.run_id }}-${{ github.run_attempt }}" in publish
+    assert "compression-level: 0" in publish
+    assert "retention-days: 1" in publish
+    assert "if-no-files-found: error" in publish
+    assert "continue-on-error:" not in publish
+
+
+def test_component_contracts_publish_in_existing_typescript_job() -> None:
+    workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
+    job = workflow.split("  ci_typescript_run:\n", 1)[1].split(
+        "\n  ci-typescript:\n", 1
+    )[0]
+    assert "runs-on: ubuntu-latest" in job
+    assert "matrix:" not in job
+    browser = _step_block(job, "Install component browser")
+    assert "playwright install --with-deps chromium" in browser
+    run = _step_block(job, "Web component contracts")
+    assert "scripts.ci.run_component_tests" in run
+    assert "continue-on-error:" not in run
+    publish = _step_block(job, "Publish Web component test observability")
+    assert "if: always()" in publish
+    assert "name: typescript-web-components" in publish
+    assert "directory: ${{ runner.temp }}/web-component-tests" in publish
 
 
 def test_duration_gate_compares_base_once_without_retry() -> None:

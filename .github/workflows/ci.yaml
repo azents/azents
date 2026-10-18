@@ -6,12 +6,6 @@ on:
     branches:
       - main
   workflow_dispatch:
-    inputs:
-      force_current_snapshots:
-        description: Exercise exact-current-SHA E2E image selection
-        required: false
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -34,12 +28,6 @@ jobs:
       python: ${{ github.event_name != 'pull_request' || steps.filter.outputs.python == 'true' }}
       python_e2e: ${{ github.event_name != 'pull_request' || steps.filter.outputs['python-e2e'] == 'true' }}
       web_e2e: ${{ github.event_name != 'pull_request' || steps.filter.outputs['web-e2e'] == 'true' }}
-      e2e_server_image: ${{ steps.filter.outputs['e2e-server-image'] == 'true' }}
-      e2e_server_source_overlay: ${{ steps.filter.outputs['e2e-server-image'] == 'true' && steps.filter.outputs['e2e-server-image-dependencies'] != 'true' }}
-      e2e_runtime_runner_image: ${{ steps.filter.outputs['e2e-runtime-runner-image'] == 'true' }}
-      e2e_runtime_provider_docker_image: ${{ steps.filter.outputs['e2e-runtime-provider-docker-image'] == 'true' }}
-      e2e_web_image: ${{ steps.filter.outputs['e2e-web-image'] == 'true' }}
-      e2e_admin_web_image: ${{ steps.filter.outputs['e2e-admin-web-image'] == 'true' }}
       typescript: ${{ github.event_name != 'pull_request' || steps.filter.outputs.typescript == 'true' }}
       helm: ${{ github.event_name != 'pull_request' || steps.filter.outputs.helm == 'true' }}
       docker: ${{ github.event_name != 'pull_request' || steps.filter.outputs.docker == 'true' }}
@@ -111,38 +99,6 @@ jobs:
               - 'python/libs/azents-public-client/**'
               - 'python/libs/azents-runtime-control/**'
               - 'testenv/azents/**'
-              - 'typescript/**'
-            e2e-server-image:
-              - '.dockerignore'
-              - 'azents.Dockerfile'
-              - 'azents-e2e-server-overlay.Dockerfile'
-              - 'python/apps/azents/**'
-              - 'python/libs/az-common/**'
-              - 'python/libs/azents-runtime-control/**'
-            e2e-server-image-dependencies:
-              - '.dockerignore'
-              - 'azents.Dockerfile'
-              - 'python/apps/azents/pyproject.toml'
-              - 'python/apps/azents/uv.lock'
-              - 'python/libs/az-common/**'
-              - 'python/libs/azents-runtime-control/**'
-            e2e-runtime-runner-image:
-              - '.dockerignore'
-              - 'python/apps/azents-runtime-runner/**'
-              - 'python/libs/azents-runtime-control/**'
-            e2e-runtime-provider-docker-image:
-              - '.dockerignore'
-              - 'python/apps/azents-runtime-provider-docker/**'
-              - 'python/libs/azents-runtime-control/**'
-            e2e-web-image:
-              - '.dockerignore'
-              - 'azents-web.Dockerfile'
-              - 'python/apps/azents/specs/**'
-              - 'typescript/**'
-            e2e-admin-web-image:
-              - '.dockerignore'
-              - 'azents-admin-web.Dockerfile'
-              - 'python/apps/azents/specs/**'
               - 'typescript/**'
             typescript:
               - '.github/actions/**'
@@ -470,83 +426,24 @@ jobs:
       - changes
       - ci_testenv_support_run
       - ci_e2e_plan
-    if: needs.ci_e2e_plan.result == 'success'
+      - ci_docker_build_run
+    if: >-
+      needs.ci_e2e_plan.result == 'success'
+      && needs.ci_docker_build_run.result == 'success'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.ci_e2e_plan.outputs.matrix) }}
     runs-on: ubuntu-latest
     timeout-minutes: ${{ matrix.timeout_minutes }}
+    permissions:
+      actions: read
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 2
-      - name: Resolve E2E snapshot base
-        id: snapshot_base
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PUSH_BASE_SHA: ${{ github.event.before }}
-        run: |
-          base_sha=''
-          current_snapshot_sha=''
-          case "$GITHUB_EVENT_NAME" in
-            pull_request)
-              base_sha="$PR_BASE_SHA"
-              if [ "$PR_HEAD_REPOSITORY" = "$GITHUB_REPOSITORY" ]; then
-                current_snapshot_sha="$PR_HEAD_SHA"
-              fi
-              ;;
-            push)
-              if [ "$GITHUB_REF" = 'refs/heads/main' ]; then
-                base_sha="$PUSH_BASE_SHA"
-                current_snapshot_sha="$GITHUB_SHA"
-              fi
-              ;;
-            workflow_dispatch)
-              base_sha="$(git rev-parse HEAD^)"
-              current_snapshot_sha="$GITHUB_SHA"
-              ;;
-          esac
-          if [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]] \
-            && [ "$base_sha" != '0000000000000000000000000000000000000000' ]; then
-            printf 'base_sha=%s\n' "$base_sha" >> "$GITHUB_OUTPUT"
-          else
-            printf 'base_sha=\n' >> "$GITHUB_OUTPUT"
-          fi
-          printf 'current_snapshot_sha=%s\n' "$current_snapshot_sha" \
-            >> "$GITHUB_OUTPUT"
-      - name: Start direct E2E snapshot image preparation
-        if: steps.snapshot_base.outputs.base_sha != ''
-        env:
-          AZENTS_E2E_BASE_SHA: ${{ steps.snapshot_base.outputs.base_sha }}
-          AZENTS_E2E_CURRENT_SHA: ${{ steps.snapshot_base.outputs.current_snapshot_sha }}
-          AZENTS_E2E_SERVER_IMAGE_CHANGED: ${{ inputs.force_current_snapshots || needs.changes.outputs.e2e_server_image }}
-          AZENTS_E2E_SERVER_SOURCE_OVERLAY_ELIGIBLE: ${{ !inputs.force_current_snapshots && needs.changes.outputs.e2e_server_source_overlay }}
-          AZENTS_E2E_RUNTIME_RUNNER_IMAGE_CHANGED: ${{ inputs.force_current_snapshots || needs.changes.outputs.e2e_runtime_runner_image }}
-          AZENTS_E2E_RUNTIME_PROVIDER_DOCKER_IMAGE_CHANGED: ${{ inputs.force_current_snapshots || needs.changes.outputs.e2e_runtime_provider_docker_image }}
-          AZENTS_E2E_WEB_IMAGE_CHANGED: ${{ inputs.force_current_snapshots || needs.changes.outputs.e2e_web_image }}
-          AZENTS_E2E_ADMIN_WEB_IMAGE_CHANGED: ${{ inputs.force_current_snapshots || needs.changes.outputs.e2e_admin_web_image }}
-          AZENTS_E2E_IMAGE_BUILD_PROFILE: ${{ matrix.suite }}
-          GHCR_TOKEN: ${{ github.token }}
-        run: |
-          report_dir="${RUNNER_TEMP}/e2e-observability/${{ matrix.lane }}"
-          state_dir="${RUNNER_TEMP}/e2e-snapshot-prefetch/${{ matrix.lane }}"
-          rm -rf "$state_dir"
-          mkdir -p "$report_dir" "$state_dir"
-          STATE_DIR="$state_dir" REPORT_DIR="$report_dir" nohup bash -c '
-            set +e
-            python testenv/azents/e2e/src/support/e2e_snapshot_images.py \
-              --artifact-dir "$REPORT_DIR" \
-              --github-env "$STATE_DIR/github-env" \
-              --github-output "$STATE_DIR/github-output" \
-              > "$STATE_DIR/prefetch.log" 2>&1
-            status=$?
-            printf "%s\n" "$status" > "$STATE_DIR/status.tmp"
-            mv "$STATE_DIR/status.tmp" "$STATE_DIR/status"
-          ' </dev/null >/dev/null 2>&1 &
-          printf '%s\n' "$!" > "$state_dir/pid"
       - name: Install uv
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       - name: Setup Python
@@ -562,88 +459,25 @@ jobs:
         with:
           name: e2e-plan
           path: e2e-plan
-      - name: Finish direct E2E snapshot image preparation
-        id: snapshot_images_direct
-        if: steps.snapshot_base.outputs.base_sha != ''
-        run: |
-          state_dir="${RUNNER_TEMP}/e2e-snapshot-prefetch/${{ matrix.lane }}"
-          status_path="$state_dir/status"
-          pid="$(cat "$state_dir/pid")"
-          while [ ! -f "$status_path" ]; do
-            if ! kill -0 "$pid" 2>/dev/null; then
-              cat "$state_dir/prefetch.log" 2>/dev/null || true
-              echo "::error::Direct E2E snapshot preparation exited without status"
-              exit 1
-            fi
-            sleep 0.2
-          done
-          cat "$state_dir/prefetch.log"
-          status="$(cat "$status_path")"
-          if [ "$status" != '0' ]; then
-            echo "::error::Direct E2E snapshot preparation failed"
-            exit "$status"
-          fi
-          cat "$state_dir/github-env" >> "$GITHUB_ENV"
-          cat "$state_dir/github-output" >> "$GITHUB_OUTPUT"
-      - name: Resolve compatible E2E snapshot ancestors
-        id: snapshot_ancestors
-        if: >-
-          steps.snapshot_base.outputs.base_sha != ''
-          && steps.snapshot_images_direct.outputs.fallback_required == 'true'
+      - name: Prepare exact images and existing prerequisites
         env:
-          AZENTS_E2E_BASE_SHA: ${{ steps.snapshot_base.outputs.base_sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          candidate_shas=''
-          if git fetch \
-            --no-tags \
-            --filter=blob:none \
-            --depth=10 \
-            origin \
-            "$AZENTS_E2E_BASE_SHA"; then
-            candidate_shas="$(
-              git rev-list \
-                --first-parent \
-                --max-count=9 \
-                "$AZENTS_E2E_BASE_SHA" \
-                | tail -n +2 \
-                | paste -sd, -
-            )"
-          else
-            echo "::warning::Unable to fetch compatible E2E snapshot ancestors"
-          fi
-          printf 'candidate_shas=%s\n' "$candidate_shas" >> "$GITHUB_OUTPUT"
-      - name: Prepare compatible ancestor E2E snapshot images
-        id: snapshot_images_fallback
-        if: steps.snapshot_ancestors.outputs.candidate_shas != ''
-        env:
-          AZENTS_E2E_BASE_SHA: ${{ steps.snapshot_base.outputs.base_sha }}
-          AZENTS_E2E_BASE_SHA_CANDIDATES: ${{ steps.snapshot_ancestors.outputs.candidate_shas }}
-          AZENTS_E2E_SERVER_IMAGE_CHANGED: ${{ needs.changes.outputs.e2e_server_image }}
-          AZENTS_E2E_SERVER_SOURCE_OVERLAY_ELIGIBLE: ${{ needs.changes.outputs.e2e_server_source_overlay }}
-          AZENTS_E2E_RUNTIME_RUNNER_IMAGE_CHANGED: ${{ needs.changes.outputs.e2e_runtime_runner_image }}
-          AZENTS_E2E_RUNTIME_PROVIDER_DOCKER_IMAGE_CHANGED: ${{ needs.changes.outputs.e2e_runtime_provider_docker_image }}
-          AZENTS_E2E_WEB_IMAGE_CHANGED: ${{ needs.changes.outputs.e2e_web_image }}
-          AZENTS_E2E_ADMIN_WEB_IMAGE_CHANGED: ${{ needs.changes.outputs.e2e_admin_web_image }}
-          AZENTS_E2E_IMAGE_BUILD_PROFILE: ${{ matrix.suite }}
-          GHCR_TOKEN: ${{ github.token }}
+          python -m scripts.ci.e2e_images prepare \
+            --root "${RUNNER_TEMP}/e2e-images" \
+            --suite "${{ matrix.suite }}" \
+            --evidence "${RUNNER_TEMP}/e2e-observability/${{ matrix.lane }}"
+      - name: Verify and load exact CI image portfolio
         run: |
-          report_dir="${RUNNER_TEMP}/e2e-observability/${{ matrix.lane }}"
-          python testenv/azents/e2e/src/support/e2e_snapshot_images.py \
-            --artifact-dir "$report_dir" \
+          python -m scripts.ci.e2e_images load \
+            --root "${RUNNER_TEMP}/e2e-images" \
+            --suite "${{ matrix.suite }}" \
             --github-env "$GITHUB_ENV" \
-            --github-output "$GITHUB_OUTPUT" \
-            --append-observability
-      - name: Setup Docker Buildx
-        if: >-
-          steps.snapshot_images_direct.outputs.all_images_prepared != 'true'
-          && steps.snapshot_images_fallback.outputs.all_images_prepared != 'true'
-        id: buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - name: Expose GitHub Actions runtime
-        if: >-
-          steps.snapshot_images_direct.outputs.all_images_prepared != 'true'
-          && steps.snapshot_images_fallback.outputs.all_images_prepared != 'true'
-        uses: ./.github/actions/expose-github-runtime
+            --evidence "${RUNNER_TEMP}/e2e-observability/${{ matrix.lane }}"
+      - name: Clean image transfer archives
+        if: always()
+        run: |
+          rm -rf "${RUNNER_TEMP}/e2e-images"
       - name: Run E2E lane
         env:
           AZENTS_E2E_IMAGE_BUILD_PROFILE: ${{ matrix.suite }}
@@ -653,17 +487,22 @@ jobs:
           mkdir -p "$report_dir"
           mapfile -t test_files < "e2e-plan/${{ matrix.plan_file }}"
           cd testenv/azents/e2e
+          parallel_args=()
+          if [ "$AZENTS_E2E_IMAGE_BUILD_PROFILE" = 'web' ]; then
+            parallel_args=(
+              -n 2 --dist loadfile --no-loadscope-reorder --max-worker-restart=0
+            )
+          fi
           SECONDS=0
           set +e
           AZENTS_E2E_ARTIFACT_DIR="$report_dir" \
             AZENTS_CI_ARTIFACT_DIR="$report_dir" \
             PYTHONPATH="$GITHUB_WORKSPACE" \
-            AZENTS_E2E_DOCKER_BUILDER="${{ steps.buildx.outputs.name }}" \
-            AZENTS_E2E_DOCKER_GHA_CACHE_SCOPE_PREFIX="azents-e2e-v1" \
-            uv run pytest -p scripts.ci.pytest_timing -vv \
+            uv run pytest -p scripts.ci.pytest_timing -p support.e2e_parallel -vv \
             --junitxml="$report_dir/junit.xml" \
             --durations=30 \
             --durations-min=0.25 \
+            "${parallel_args[@]}" \
             "${test_files[@]}"
           pytest_status=$?
           set -e
@@ -677,7 +516,6 @@ jobs:
           timeout 30s docker ps -a --no-trunc > "$report_dir/docker-ps.txt" 2>&1 || true
           timeout 30s docker stats --all --no-stream > "$report_dir/docker-stats.txt" 2>&1 || true
           timeout 30s docker system df > "$report_dir/docker-system-df.txt" 2>&1 || true
-          timeout 30s docker buildx du --builder "${{ steps.buildx.outputs.name }}" > "$report_dir/docker-buildx-du.txt" 2>&1 || true
           timeout 30s docker buildx du --builder default > "$report_dir/docker-buildx-du-default.txt" 2>&1 || true
           python scripts/ci/observability.py summarize \
             --lane "${{ matrix.lane }}" \
@@ -978,6 +816,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -998,6 +838,31 @@ jobs:
         run: cd typescript && pnpm run typecheck
       - name: Session core contracts
         run: cd typescript && pnpm --filter @azents/session-core test
+      - name: Web Node contracts
+        run: |
+          python scripts/ci/run_node_tests.py \
+            --project typescript/apps/azents-web --name typescript-web \
+            --artifact-dir "${RUNNER_TEMP}/web-node-tests" \
+            'src/**/*.test.mts'
+      - name: Publish Web Node test observability
+        if: always()
+        uses: ./.github/actions/ci-test-observability
+        with:
+          name: typescript-web
+          directory: ${{ runner.temp }}/web-node-tests
+      - name: Install component browser
+        run: cd typescript && pnpm --filter @azents/web exec playwright install --with-deps chromium
+      - name: Web component contracts
+        run: |
+          python -m scripts.ci.run_component_tests \
+            --project typescript/apps/azents-web \
+            --artifact-dir "${RUNNER_TEMP}/web-component-tests"
+      - name: Publish Web component test observability
+        if: always()
+        uses: ./.github/actions/ci-test-observability
+        with:
+          name: typescript-web-components
+          directory: ${{ runner.temp }}/web-component-tests
 
   ci-typescript:
     name: ci-typescript
@@ -1094,7 +959,10 @@ jobs:
   ci_docker_build_run:
     name: ci-docker-build-run
     needs: changes
-    if: needs.changes.outputs.docker == 'true'
+    if: >-
+      needs.changes.outputs.docker == 'true'
+      || needs.changes.outputs.python_e2e == 'true'
+      || needs.changes.outputs.web_e2e == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -1135,6 +1003,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Prepare empty Next.js cache context
@@ -1173,6 +1043,26 @@ jobs:
               ;;
           esac
 
+      - name: Export exact E2E image
+        if: >-
+          (needs.changes.outputs.python_e2e == 'true' || needs.changes.outputs.web_e2e == 'true')
+          && contains(fromJSON('["azents-server","azents-runtime-runner","azents-runtime-provider-docker","azents-web","azents-admin-web"]'), matrix.name)
+        run: |
+          python -m scripts.ci.e2e_images export \
+            --image "${{ matrix.name }}" \
+            --directory "${RUNNER_TEMP}/e2e-image"
+      - name: Publish exact E2E image
+        if: >-
+          (needs.changes.outputs.python_e2e == 'true' || needs.changes.outputs.web_e2e == 'true')
+          && contains(fromJSON('["azents-server","azents-runtime-runner","azents-runtime-provider-docker","azents-web","azents-admin-web"]'), matrix.name)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ci-e2e-image-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/e2e-image
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+
   ci-docker-build:
     name: ci-docker-build
     needs:
@@ -1184,7 +1074,7 @@ jobs:
       - name: Gate Docker build result
         run: |
           changes_result='${{ needs.changes.result }}'
-          changed='${{ needs.changes.outputs.docker }}'
+          changed='${{ needs.changes.outputs.docker == 'true' || needs.changes.outputs.python_e2e == 'true' || needs.changes.outputs.web_e2e == 'true' }}'
           result='${{ needs.ci_docker_build_run.result }}'
           if [ "$changes_result" != 'success' ]; then
             echo "changes job failed or was skipped: $changes_result"

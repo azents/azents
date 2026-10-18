@@ -860,6 +860,23 @@ def test_session_browser_engine_native_input_dialog_and_reconnect(
     finally:
         socket.close()
 
+    # The GUI is the active frame consumer during its own input journey.
+    # Open the raw revocation observer afterwards so it keeps reading and ACKing
+    # instead of filling its receive queue during unrelated Selenium operations.
+    driver = request.getfixturevalue("browser_driver")
+    assert isinstance(driver, WebDriver)
+    _verify_live_panel(
+        driver=driver,
+        web_url=azents_main_web_url,
+        public_url=azents_public_server_url,
+        resource_path=resource_path,
+        token=workspace.token,
+        email=workspace.email,
+        handle=workspace.handle,
+        agent_id=workspace.agent_id,
+        session_id=workspace.session_id,
+        target=target,
+    )
     reconnected = BrowserSocket.open(
         public_url=azents_public_server_url,
         token=workspace.token,
@@ -872,22 +889,6 @@ def test_session_browser_engine_native_input_dialog_and_reconnect(
         assert reconnected.status.attachment_id != first_attachment
         assert reconnected.frame is not None
         assert reconnected.frame.target == target
-        # Native Runtime setup can exceed Selenium's unused-session lifetime.
-        # Create the Web session only when the first Web interaction is ready.
-        driver = request.getfixturevalue("browser_driver")
-        assert isinstance(driver, WebDriver)
-        _verify_live_panel(
-            driver=driver,
-            web_url=azents_main_web_url,
-            public_url=azents_public_server_url,
-            resource_path=resource_path,
-            token=workspace.token,
-            email=workspace.email,
-            handle=workspace.handle,
-            agent_id=workspace.agent_id,
-            session_id=workspace.session_id,
-            target=target,
-        )
         logout = requests.post(
             f"{azents_public_server_url}/auth/v1/logout",
             headers=headers,

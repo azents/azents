@@ -34,6 +34,42 @@ void test("only nonsecret exact creation context is persisted", () => {
     );
   }
 });
+void test("actual creation storage validates every phase and exact Workspace/Agent target", () => {
+  for (const scope of [
+    { handle: "workspace" },
+    { handle: "workspace", agentId: "agent-1" },
+  ]) {
+    for (const phase of ["AUTHORIZING", "REVIEW", "ERROR"]) {
+      const context = {
+        ...scope,
+        attemptId: "attempt-1",
+        phase,
+        returnPath: creationReturnPath(scope),
+      };
+      assert.deepEqual(
+        deserializeGitHubUserCreation(JSON.stringify(context)),
+        context,
+      );
+      for (const invalid of [
+        { agentId: null },
+        { agentId: 1 },
+        { attemptId: true },
+        { attemptId: "invalid.attempt" },
+        { phase: "UNKNOWN" },
+        { returnPath: "/w/other/toolkits/new" },
+        { handle: "" },
+        { future: "private-sentinel" },
+      ]) {
+        assert.equal(
+          deserializeGitHubUserCreation(
+            JSON.stringify({ ...context, ...invalid }),
+          ),
+          null,
+        );
+      }
+    }
+  }
+});
 void test("Personal GitHub creation resumes only its account target and exact return", () => {
   const context = {
     owner: "user",

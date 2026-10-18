@@ -394,6 +394,7 @@ function InteractiveSession(
 
 const meta = {
   component: ChatSessionView,
+  tags: ["ci-contract"],
   render: (props) => <InteractiveSession {...props} />,
   decorators: [
     (Story) => (

@@ -99,6 +99,63 @@ def test_plan_suites_uses_declared_source_fallback_weight(tmp_path: Path) -> Non
     assert "test_b.py" in second_lane
 
 
+@pytest.mark.parametrize("cached", [False, True])
+def test_web_plan_starts_expensive_files_without_changing_required_order(
+    tmp_path: Path, cached: bool
+) -> None:
+    tests_root = tmp_path / "tests"
+    suites = {
+        name: _write_suite(tests_root, name, lanes=1) for name in ("required", "web")
+    }
+    for suite in suites.values():
+        for name, fallback in (("a", 1), ("b", 10), ("c", 5)):
+            (suite / f"test_{name}.py").write_text(
+                f"E2E_PLANNER_FALLBACK_WEIGHT = {fallback}\n"
+                "def test_first():\n    pass\n"
+                "def test_second():\n    pass\n"
+            )
+    timings = tmp_path / "timings.jsonl"
+    timings.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "record_type": "test_phase",
+                    "phase": "call",
+                    "node_id": f"{suites['web'] / f'test_{name}.py'}::test_first",
+                    "duration_seconds": duration,
+                }
+            )
+            for name, duration in (("a", 4), ("b", 1), ("c", 9))
+        )
+        + "\n"
+    )
+    output = tmp_path / "plan"
+    plan_suites(
+        tests_root=tests_root,
+        enabled_suites={"required", "web"},
+        timings_path=timings if cached else None,
+        output_dir=output,
+    )
+    web = (output / "web-1.txt").read_text().splitlines()
+    required = (output / "required-1.txt").read_text().splitlines()
+    expected = ["c", "a", "b"] if cached else ["b", "c", "a"]
+    assert web == [str(suites["web"] / f"test_{name}.py") for name in expected]
+    assert required == [
+        str(suites["required"] / f"test_{name}.py") for name in ("a", "b", "c")
+    ]
+    coverage = json.loads((output / "coverage.json").read_text())
+    assert sorted(web) == coverage["web"]
+    assert sorted(required) == coverage["required"]
+    before = (output / "web-1.txt").read_text()
+    plan_suites(
+        tests_root=tests_root,
+        enabled_suites={"required", "web"},
+        timings_path=timings if cached else None,
+        output_dir=output,
+    )
+    assert (output / "web-1.txt").read_text() == before
+
+
 def test_plan_suites_rejects_non_finite_source_fallback_weight(
     tmp_path: Path,
 ) -> None:

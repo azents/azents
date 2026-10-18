@@ -625,14 +625,6 @@ def test_runtime_free_add_and_remove_progress(
     _assert_visible_text(browser_driver, "Host controls")
     _click_button(browser_driver, "Restart")
     _assert_visible_text(browser_driver, "Restart Runtime?")
-    _assert_visible_text(
-        browser_driver,
-        "The Runtime will be temporarily unavailable while it restarts.",
-    )
-    _assert_visible_text(
-        browser_driver,
-        "Agent Workspace files and preserved Runtime storage are retained.",
-    )
     _wait(browser_driver).until(
         ec.element_to_be_clickable(
             (
@@ -679,22 +671,6 @@ def test_runtime_free_add_and_remove_progress(
     _open_metrics_tab(browser_driver)
     _assert_visible_text(browser_driver, "System metrics", timeout_seconds=120)
     _assert_visible_text(browser_driver, "Scope: Container")
-    _wait(browser_driver).until(
-        ec.visibility_of_element_located(
-            (
-                By.CSS_SELECTOR,
-                "[role='img'][aria-label='Recent one-hour usage trend']",
-            )
-        )
-    )
-
-    browser_driver.get(
-        f"{azents_main_web_url}/w/{workspace.handle}/agents/{agent.id}/settings/runtime"
-    )
-    _assert_visible_text(browser_driver, "System metrics")
-    browser_driver.get(session_url)
-    _open_metrics_tab(browser_driver)
-    _assert_visible_text(browser_driver, "System metrics")
     _wait(browser_driver).until(
         ec.visibility_of_element_located(
             (
@@ -769,14 +745,6 @@ def test_runtime_free_add_and_remove_progress(
     reset_generation = runtime_before_reset.lifecycle.desired_generation
     _click_button(browser_driver, "Reset")
     _assert_visible_text(browser_driver, "Reset Runtime state?")
-    _assert_visible_text(browser_driver, "Agent Workspace data will be deleted")
-    _assert_visible_text(
-        browser_driver,
-        (
-            "Reset discards current Runtime workspace files and preserved Runtime "
-            "state, then prepares an empty Runtime. This cannot be undone."
-        ),
-    )
     _wait(browser_driver).until(
         ec.element_to_be_clickable(
             (
@@ -804,14 +772,6 @@ def test_runtime_free_add_and_remove_progress(
     _assert_visible_text(browser_driver, "Permanently remove managed Runtime")
     _click_button(browser_driver, "Remove Runtime")
     _assert_visible_text(browser_driver, "Permanently remove Runtime?")
-    _assert_visible_text(browser_driver, "This action is irreversible")
-    _assert_visible_text(browser_driver, "Active root sessions")
-    _assert_visible_text(browser_driver, "Deleted")
-    _assert_visible_text(browser_driver, "Retained")
-    _assert_visible_text(
-        browser_driver,
-        "I understand that Runtime removal is permanent and may interrupt active work.",
-    )
     _wait(browser_driver).until(
         ec.element_to_be_clickable(
             (

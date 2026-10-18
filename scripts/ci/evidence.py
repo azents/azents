@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import math
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -42,6 +43,36 @@ def decode_test_run(value: object) -> TestRunIdentity:
         run_id=text(raw["run_id"]),
         attempt=text(raw["attempt"]),
         name=text(raw["name"]),
+    )
+
+
+@dataclass(frozen=True)
+class NativeTestRun:
+    identity: TestRunIdentity
+    exit_code: int
+    duration_seconds: float
+
+
+def decode_native_run(value: object, runner: str) -> NativeTestRun:
+    """Require the native execution receipt, not only its workflow identity."""
+    raw = object_value(value)
+    if text(raw["runner"]) != runner:
+        raise ValueError("Native test evidence runner mismatch")
+    status = raw["exit_code"]
+    if isinstance(status, bool) or not isinstance(status, int):
+        raise ValueError("Native test exit code must be an integer")
+    duration = raw["duration_seconds"]
+    if (
+        isinstance(duration, bool)
+        or not isinstance(duration, int | float)
+        or not math.isfinite(duration)
+        or duration <= 0
+    ):
+        raise ValueError("Native test duration must be finite and positive")
+    return NativeTestRun(
+        identity=decode_test_run(raw),
+        exit_code=status,
+        duration_seconds=float(duration),
     )
 
 

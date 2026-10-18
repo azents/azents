@@ -13,6 +13,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 const meta = {
   title: "Toolkits/GitHub Wizard",
   component: GitHubWizard,
+  tags: ["ci-contract"],
   decorators: [
     (Story) => (
       <StorybookCanvas maxWidth={rem(980)}>
@@ -279,6 +280,16 @@ export const CandidateMetadataError: Story = {
       app: { type: "ERROR", message: "App information could not be loaded." },
     },
     canContinue: false,
+  },
+};
+export const CandidateCloseWithoutPublication: Story = {
+  ...CandidateInline,
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("fixture-user")).toBeVisible();
+    await userEvent.click(canvas.getByRole("button", { name: "Close" }));
+    await expect(args.onClose).toHaveBeenCalledOnce();
+    await expect(args.onPublish).not.toHaveBeenCalled();
   },
 };
 export const Features: Story = {
