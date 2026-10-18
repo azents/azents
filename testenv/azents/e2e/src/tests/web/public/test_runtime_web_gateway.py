@@ -69,6 +69,7 @@ from websockets.asyncio.client import connect as async_connect
 from websockets.sync.client import connect
 from websockets.typing import Origin
 
+from support.background_fixture import BackgroundFixture
 from support.observations import (
     BrowserTransportObservation,
     decode_browser_transport,
@@ -931,8 +932,9 @@ def _runtime_web_stack(
                     future.result()
 
 
-@pytest.fixture(scope="module")
-def runtime_web_stack_factory(
+@contextmanager
+def _prepare_runtime_web_stack_factory(
+    *,
     container_network: Network,
     postgres_container: PostgresContainer,
     azents_server_image: str,
@@ -1087,6 +1089,18 @@ def runtime_web_stack_factory(
             ]
             for future in stop_futures:
                 future.result()
+
+
+@pytest.fixture(scope="module")
+def runtime_web_stack_factory(
+    runtime_web_surfaces_start: BackgroundFixture[_RuntimeWebStackFactory] | None,
+) -> Generator[_RuntimeWebStackFactory, None, None]:
+    """Join exactly the auth surfaces owned by this selected Web suite."""
+    assert runtime_web_surfaces_start is not None
+    try:
+        yield runtime_web_surfaces_start.future.result()
+    finally:
+        runtime_web_surfaces_start.close()
 
 
 def _create_workspace(

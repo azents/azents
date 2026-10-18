@@ -598,6 +598,13 @@ Always-on required CI does not depend on external credentials.
   denial, Runner capability mismatch, responsive presentation, and Web wiring remain
   in deterministic backend, protocol, component, and story coverage rather than
   independent full-stack journeys.
+  Preparation waits for the current `can_open_or_attach` authority, including an
+  ended Terminal whose final metadata remains retained. The fixture client batches
+  cumulative output ACKs at 128 KiB, at logical output completion, or within a
+  50-millisecond receive deadline. This stays below the live 256 KiB output window
+  and avoids treating each small PTY chunk as a separate control message. Input,
+  resize, replay, Ctrl-C, termination, and production rate limits retain their
+  existing contracts.
 - Web Surface E2E runs from `src/tests/web/` in its own suite lane.
 - Required Brave Search journeys admit the five independent success Sessions before
   waiting for their persisted terminal run markers and idle projections. Every
@@ -651,6 +658,17 @@ Always-on required CI does not depend on external credentials.
   malformed programmatic probes fail before application content. The fixture uses
   only generated clients, UI, Runtime Terminal, and public/admin APIs; it never
   writes product state directly to PostgreSQL.
+- When the Runtime Web Gateway file is selected, Web-suite setup starts its same
+  two mode-specific Public/Main Web pairs and Runtime Control relay in one owned
+  background preparation. Independent earlier Web tests remain serial while those
+  processes reach their existing readiness checks. The module fixture joins that
+  exact result before gateway tests execute. The suite joins startup failures even
+  when no test consumes the result, drains preparation before cleanup, and closes
+  every owned container at the original gateway-module teardown boundary, with
+  suite-owned fallback cleanup if the result is never consumed. The raw background fixture timing is
+  retained separately from the foreground join; it overlaps test work rather than
+  adding serial elapsed time. Container/image producers and CI runners are unchanged,
+  while earlier process lifetime can increase concurrent setup CPU and memory use.
 - Runtime Web heavy-load verification is disposable evidence, not a recurring
   regression-test catalog. A feature, release, or incident that requires fresh load
   evidence raises the bounded environment values on the same lightweight journey,

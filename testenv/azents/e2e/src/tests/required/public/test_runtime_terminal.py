@@ -58,6 +58,7 @@ from websockets.sync.client import connect as ws_connect
 from websockets.typing import Origin, Subprotocol
 
 from support.runtime_profiles import create_workspace_runtime_profile
+from support.terminal_output_ack import TerminalOutputAcknowledgements
 from support.utils import (
     authenticate_user,
     model_selection_from_first_candidate,
@@ -543,6 +544,9 @@ class _TerminalSocket:
         self.resize_sequence = 0
         self.output_sequence = output_sequence
         self.output = bytearray()
+        self.output_acks = TerminalOutputAcknowledgements(
+            output_sequence, time.monotonic
+        )
 
     @classmethod
     def connect(
@@ -588,14 +592,16 @@ class _TerminalSocket:
         accepted: _AcceptedTerminal | None = None
         replay_maximum = 0
         output_sequence = 0
+        replay_acks = TerminalOutputAcknowledgements(0, time.monotonic)
         while True:
             message = connection.recv(timeout=20)
             if isinstance(message, bytes):
                 decoded = _decode_output_frame(message)
                 output_sequence = max(output_sequence, decoded.sequence)
-                if decoded.data:
+                acknowledge = replay_acks.observe(decoded.sequence, len(decoded.data))
+                if acknowledge is not None:
                     connection.send(
-                        json.dumps({"type": "output_ack", "sequence": decoded.sequence})
+                        json.dumps({"type": "output_ack", "sequence": acknowledge})
                     )
                 continue
             control = _control(message)
@@ -627,6 +633,7 @@ class _TerminalSocket:
 
     def close(self) -> None:
         """Close the browser attachment without terminating the PTY."""
+        self._flush_output_ack()
         self.connection.close()
 
     def send(self, data: bytes) -> None:
@@ -650,6 +657,7 @@ class _TerminalSocket:
 
     def terminate(self) -> _ExitControl:
         """Terminate the live PTY and return its exit control."""
+        self._flush_output_ack()
         self.connection.send(json.dumps({"type": "terminate"}))
         control = self.wait_for_control("exit", timeout=30)
         assert isinstance(control, _ExitControl)
@@ -662,9 +670,7 @@ class _TerminalSocket:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:
-                message = self.connection.recv(
-                    timeout=max(0.1, deadline - time.monotonic())
-                )
+                message = self._receive(timeout=max(0.1, deadline - time.monotonic()))
             except ConnectionClosed as exc:
                 raise AssertionError(
                     f"Terminal closed before {control_type!r}: {exc!r}"
@@ -684,9 +690,7 @@ class _TerminalSocket:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:
-                message = self.connection.recv(
-                    timeout=max(0.1, deadline - time.monotonic())
-                )
+                message = self._receive(timeout=max(0.1, deadline - time.monotonic()))
             except ConnectionClosed:
                 return None
             if isinstance(message, bytes):
@@ -703,10 +707,9 @@ class _TerminalSocket:
         start = len(self.output)
         while time.monotonic() < deadline:
             if marker in self.output[start:]:
+                self._flush_output_ack()
                 return bytes(self.output[start:])
-            message = self.connection.recv(
-                timeout=max(0.1, deadline - time.monotonic())
-            )
+            message = self._receive(timeout=max(0.1, deadline - time.monotonic()))
             if isinstance(message, bytes):
                 self._accept_output(message)
                 continue
@@ -739,12 +742,43 @@ class _TerminalSocket:
         )
         self.output_sequence = decoded.sequence
         self.output.extend(decoded.data)
+        sequence = self.output_acks.observe(decoded.sequence, len(decoded.data))
+        if sequence is not None:
+            self._send_output_ack(sequence)
+
+    def _send_output_ack(self, sequence: int) -> None:
         try:
             self.connection.send(
-                json.dumps({"type": "output_ack", "sequence": decoded.sequence})
+                json.dumps({"type": "output_ack", "sequence": sequence})
             )
         except ConnectionClosed:
             return
+
+    def _flush_output_ack(self) -> None:
+        sequence = self.output_acks.flush()
+        if sequence is not None:
+            self._send_output_ack(sequence)
+
+    def _receive(self, *, timeout: float) -> str | bytes:
+        """Flush cumulative ACKs while waiting, without delaying input or sleeping."""
+        deadline = time.monotonic() + timeout
+        while True:
+            now = time.monotonic()
+            ack_deadline = self.output_acks.deadline
+            if ack_deadline is not None and now >= ack_deadline:
+                self._flush_output_ack()
+                continue
+            remaining = deadline - now
+            if remaining <= 0:
+                raise TimeoutError("Terminal receive deadline expired")
+            if ack_deadline is not None:
+                remaining = min(remaining, ack_deadline - now)
+            try:
+                return self.connection.recv(timeout=remaining)
+            except TimeoutError:
+                if ack_deadline is None or time.monotonic() < ack_deadline:
+                    raise
+                self._flush_output_ack()
 
 
 def _control(message: str) -> _TerminalControl:

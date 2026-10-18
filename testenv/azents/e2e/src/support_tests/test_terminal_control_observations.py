@@ -100,15 +100,19 @@ def test_fake_wire_handshake_preserves_replay_and_binary_acknowledgements(
 ) -> None:
     connection = Mock(spec=ClientConnection)
     frame = terminal._FRAME_HEADER.pack(1, 2, 1) + b"replay"
+    final_frame = terminal._FRAME_HEADER.pack(1, 2, 2) + b"tail"
     connection.recv.side_effect = [
-        json.dumps(_ACCEPTED),
-        json.dumps(_CONTROLS[1]),
+        json.dumps({**_ACCEPTED, "replay_max_sequence": 2}),
+        json.dumps(
+            {"type": "replay_begin", "minimum_sequence": 0, "maximum_sequence": 2}
+        ),
         json.dumps(_CONTROLS[2]),
         json.dumps(_CONTROLS[4]),
         json.dumps(_CONTROLS[5]),
         json.dumps(_CONTROLS[9]),
         frame,
-        json.dumps(_CONTROLS[3]),
+        final_frame,
+        json.dumps({"type": "replay_end", "maximum_sequence": 2}),
     ]
     monkeypatch.setattr(terminal, "ws_connect", Mock(return_value=connection))
     issued = Mock(status=RuntimeTerminalTicketStatus.ISSUED, ticket="fixture-ticket")
@@ -124,12 +128,14 @@ def test_fake_wire_handshake_preserves_replay_and_binary_acknowledgements(
     assert socket.accepted.terminal_id == "terminal-1"
     assert socket.accepted.attachment_generation == 1
     assert socket.accepted.working_directory == "/fixture/session"
-    assert socket.output_sequence == 1
+    assert socket.output_sequence == 2
+    assert socket.accepted.replay_maximum_sequence == 2
+    assert terminal._decode_output_frame(frame).data == b"replay"
+    assert terminal._decode_output_frame(final_frame).data == b"tail"
     sends = [json.loads(call.args[0]) for call in connection.send.call_args_list]
     assert sends == [
         {"type": "attach", "columns": 80, "rows": 24, "last_output_sequence": None},
-        {"type": "output_ack", "sequence": 1},
-        {"type": "output_ack", "sequence": 1},
+        {"type": "output_ack", "sequence": 2},
     ]
 
 
