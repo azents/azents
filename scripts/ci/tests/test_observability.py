@@ -183,6 +183,7 @@ class WorkflowReportTest(unittest.TestCase):
             record = metrics(decode_run(sample()))
             record["cohort"] = "baseline"
             record["extension"] = {"opaque": [None, True, {"future": "value"}]}
+            record["source"] = "/first/verified-collection"
             analysis = root / "analysis.json"
             history = root / "history.jsonl"
             analysis.write_text(json.dumps({"cohort": "baseline", "records": [record]}))
@@ -190,6 +191,10 @@ class WorkflowReportTest(unittest.TestCase):
             stored = json.loads(history.read_text())
             self.assertEqual(stored, {**record, "cohort": "main"})
             self.assertEqual(append(analysis, history, "main"), 1)
+            record["source"] = "/another/verified-collection"
+            analysis.write_text(json.dumps({"cohort": "baseline", "records": [record]}))
+            self.assertEqual(append(analysis, history, "main"), 1)
+            self.assertEqual(json.loads(history.read_text()), stored)
             without_cohort = {k: v for k, v in record.items() if k != "cohort"}
             analysis.write_text(
                 json.dumps({"cohort": "baseline", "records": [without_cohort]})
@@ -200,6 +205,76 @@ class WorkflowReportTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Conflicting evidence"):
                 append(analysis, history, "main")
             self.assertEqual(json.loads(history.read_text()), stored)
+
+    def test_recollected_source_never_hides_changed_measurements(self) -> None:
+        for field, value in (
+            ("head_sha", "b" * 40),
+            ("workflow_conclusion", "failure"),
+            ("gate_completion_elapsed_seconds", 99),
+            ("runner_job_seconds", 999),
+            ("performance_eligible", False),
+            ("test_evidence_complete", False),
+            ("test_cases", 0),
+            ("enabled_scope", ["different-job"]),
+            ("extension", {"changed": True}),
+        ):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                record = metrics(decode_run(sample()))
+                record.update(
+                    source="/first",
+                    test_cases=1,
+                    test_evidence_complete=True,
+                    extension={"original": True},
+                )
+                analysis = root / "analysis.json"
+                history = root / "history.jsonl"
+                analysis.write_text(
+                    json.dumps({"cohort": "baseline", "records": [record]})
+                )
+                append(analysis, history, "main")
+                original = history.read_bytes()
+                changed = {**record, "source": "/second", field: value}
+                analysis.write_text(
+                    json.dumps({"cohort": "baseline", "records": [changed]})
+                )
+                with self.assertRaisesRegex(ValueError, "Conflicting evidence"):
+                    append(analysis, history, "main")
+                self.assertEqual(history.read_bytes(), original)
+
+    def test_ios_checkout_and_native_artifacts_share_tested_head_identity(self) -> None:
+        root = Path(__file__).resolve().parents[3]
+        workflow = (root / ".github/workflows/ios.yaml").read_text()
+        expression = "${{ github.event.pull_request.head.sha || github.sha }}"
+        self.assertIn(f"CI_HEAD_SHA: {expression}", workflow)
+        self.assertIn(f"ref: {expression}", workflow)
+        self.assertIn("name: ios-app-builds-${{ env.CI_HEAD_SHA }}", workflow)
+        self.assertIn("name: ios-diagnostics-${{ env.CI_HEAD_SHA }}", workflow)
+        for event in ("pull_request", "push"):
+            with self.subTest(event=event):
+                raw = sample()
+                raw["event"] = event
+                raw["workflowName"] = "iOS"
+                raw["jobs"] = [job("ios-quality-build", "00:00:10", "00:00:50")]
+                run = decode_run(raw)
+                inventory = [
+                    {
+                        "artifacts": [
+                            {
+                                "id": index,
+                                "name": f"ios-diagnostics-{sha}",
+                                "created_at": "2026-10-15T00:00:49Z",
+                                "expired": False,
+                                "workflow_run": {"id": 100, "head_sha": "a" * 40},
+                            }
+                            for index, sha in enumerate(("a" * 40, "b" * 40), 1)
+                        ],
+                    }
+                ]
+                selected = artifacts_for_run(inventory, run)
+                self.assertEqual(
+                    [x.name for x in selected], [f"ios-diagnostics-{'a' * 40}"]
+                )
 
     def test_typed_provenance_decoders_preserve_extensibility_and_identity(
         self,

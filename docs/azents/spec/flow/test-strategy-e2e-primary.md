@@ -39,6 +39,7 @@ code_paths:
   - .claude/skills/ship-feature/SKILL.md
   - .github/actions/expose-github-runtime/**
   - .github/workflows/ci.yaml
+  - .github/workflows/ios.yaml
   - typescript/packages/azents-session-core/**
   - .github/workflows/e2e-duration-recheck.yaml
   - .github/workflows/snapshot.yaml
@@ -806,6 +807,13 @@ Always-on required CI does not depend on external credentials.
   runner job-seconds and E2E max-lane wall are distinct metrics. Reporting overhead is
   named separately. The `ci-optimization` Skill and shared collection/analysis/chart
   tools cover general CI; iOS/native diagnostics are analyzed as a separate workflow.
+  The iOS workflow checks out the pull request head (or main/manual SHA) and uses
+  that same tested SHA in app-build and native diagnostic artifact names. A
+  synthetic PR merge SHA is not substituted for the collector's head identity.
+  Re-ingesting an identical workflow/run/attempt from another local collection
+  directory is idempotent and retains the first stored source locator. Every
+  other stored field, including opaque measurement/evidence extensions, must
+  still match exactly; conflicting data fails without changing history.
   Same-SHA experiments require identical enabled scope, complete test evidence and
   two successful complete attempts. Testcase multisets are compared across numbered
   lanes within Required and Web separately because the planner may rebalance lane
