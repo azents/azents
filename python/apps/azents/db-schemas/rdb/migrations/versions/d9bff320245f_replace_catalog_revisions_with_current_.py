@@ -3,6 +3,7 @@
 import copy
 import json
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import sqlalchemy as sa
@@ -44,6 +45,68 @@ _OBSOLETE_METADATA = frozenset(
         "genai_prices_version",
     }
 )
+
+
+@dataclass(frozen=True)
+class _SelectedIdentity:
+    provider: LLMProvider
+    model: str
+    integration_id: str
+
+
+def _selected_identity(value: dict[str, object]) -> _SelectedIdentity:
+    """Decode only legacy consumed fields, without closing historical extensions."""
+    provider = LLMProvider(value["provider"])
+    model = value["model_identifier"]
+    integration_id = value["llm_provider_integration_id"]
+    if not isinstance(model, str) or not isinstance(integration_id, str):
+        raise ValueError("Stored selected model has an invalid exact identity.")
+    return _SelectedIdentity(provider, model, integration_id)
+
+
+@dataclass(frozen=True)
+class _CandidateToInitialize:
+    value: object
+    pending: bool
+
+
+@dataclass(frozen=True)
+class _OperationToInitialize:
+    terminal: bool
+    pending_ordinals: frozenset[object]
+    candidates: tuple[object, ...]
+
+
+def _candidate_to_initialize(
+    value: object, pending_ordinals: frozenset[object]
+) -> _CandidateToInitialize:
+    return _CandidateToInitialize(
+        value, isinstance(value, dict) and value.get("ordinal") in pending_ordinals
+    )
+
+
+def _operation_to_initialize(value: dict[str, object]) -> _OperationToInitialize:
+    """Project legacy status/ordinal decisions while retaining raw candidate data."""
+    outcomes = value.get("outcomes")
+    if not isinstance(outcomes, list):
+        raise ValueError("Stored model operation has invalid outcomes.")
+    if value.get("terminal_reason") is not None or any(
+        isinstance(item, dict) and item.get("status") == "succeeded"
+        for item in outcomes
+    ):
+        return _OperationToInitialize(True, frozenset(), ())
+    pending = {
+        item["candidate_ordinal"]
+        for item in outcomes
+        if isinstance(item, dict) and item.get("status") == "pending"
+    }
+    candidates = value["candidates"]
+    assert isinstance(candidates, list)
+    return _OperationToInitialize(
+        False,
+        frozenset(pending),
+        tuple(candidates),
+    )
 
 
 def _sync_columns() -> list[sa.Column[Any]]:
@@ -304,28 +367,24 @@ def _initialize_selected_prices(
             if value["pricing"] is not None:
                 ModelPricingDefinition.model_validate(value["pricing"])
             return value
-        provider = LLMProvider(value["provider"])
-        model = value["model_identifier"]
-        integration_id = value["llm_provider_integration_id"]
-        if not isinstance(model, str) or not isinstance(integration_id, str):
-            raise ValueError("Stored selected model has an invalid exact identity.")
-        integration = integrations.get(integration_id)
+        identity = _selected_identity(value)
+        integration = integrations.get(identity.integration_id)
         price = unavailable
         if (
             integration is not None
-            and integration["provider"] == provider.value
+            and integration["provider"] == identity.provider.value
             and integration["workspace_id"] == workspace_id
         ):
             for catalog in catalogs:
                 scoped = (
                     catalog["scope"] == "integration"
-                    and catalog["provider_integration_id"] == integration_id
-                    if provider in INTEGRATION_SCOPED_CATALOG_PROVIDERS
+                    and catalog["provider_integration_id"] == identity.integration_id
+                    if identity.provider in INTEGRATION_SCOPED_CATALOG_PROVIDERS
                     else catalog["scope"] == "system"
-                    and catalog["provider"] == provider.value
+                    and catalog["provider"] == identity.provider.value
                 )
                 if scoped:
-                    price = prices.get((catalog["id"], model), unavailable)
+                    price = prices.get((catalog["id"], identity.model), unavailable)
                     break
         return {**value, "pricing": copy.deepcopy(price)}
 
@@ -339,25 +398,15 @@ def _initialize_selected_prices(
         ):
             return selected(value, workspace_id)
         if "operation_id" in value and isinstance(value.get("candidates"), list):
-            outcomes = value.get("outcomes")
-            if not isinstance(outcomes, list):
-                raise ValueError("Stored model operation has invalid outcomes.")
-            if value.get("terminal_reason") is not None or any(
-                isinstance(item, dict) and item.get("status") == "succeeded"
-                for item in outcomes
-            ):
+            operation = _operation_to_initialize(value)
+            if operation.terminal:
                 return value
-            pending = {
-                item["candidate_ordinal"]
-                for item in outcomes
-                if isinstance(item, dict) and item.get("status") == "pending"
-            }
-            candidates = [
-                transform(item, workspace_id)
-                if isinstance(item, dict) and item.get("ordinal") in pending
-                else item
-                for item in value["candidates"]
-            ]
+            candidates = []
+            for candidate in operation.candidates:
+                item = _candidate_to_initialize(candidate, operation.pending_ordinals)
+                candidates.append(
+                    transform(item.value, workspace_id) if item.pending else item.value
+                )
             return {**value, "candidates": candidates}
         return {key: transform(item, workspace_id) for key, item in value.items()}
 
