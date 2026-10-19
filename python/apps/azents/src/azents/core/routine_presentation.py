@@ -28,7 +28,7 @@ def replace_routine_compaction_snapshot(
     snapshot = (
         ROUTINE_COMPACTION_HEADING
         + "\n\n"
-        + render_routine_execution_input(incomplete, continuation=True)
+        + render_routine_execution_input(incomplete, continuation=False)
     )
     return f"{base}\n\n{snapshot}" if base else snapshot
 

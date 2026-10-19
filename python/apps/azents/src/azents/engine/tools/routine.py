@@ -168,7 +168,7 @@ class RoutineToolkit(Toolkit[RoutineToolkitConfig]):
             or context.run_id != authority.run_id
         ):
             return None
-        states = await self.completion.list_started(
+        states = await self.completion.list_for_compaction(
             scope=self.scope, authority=authority
         )
         summary = replace_routine_compaction_snapshot(context.summary, states)
