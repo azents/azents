@@ -1,25 +1,22 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { trpc } from "@/trpc/client";
+import { useRoutinePanelNavigation } from "./useRoutinePanelNavigation";
 import type { RoutineDetailState, SessionRoutinesState } from "../types";
+import type { RoutinePanelNavigation } from "./useRoutinePanelNavigation";
 import type { AgentResponse } from "@azents/public-client";
-import type { RefObject } from "react";
 
 export interface SessionRoutinesContainerProps {
   agent: AgentResponse;
   sessionId: string;
 }
 
-export interface SessionRoutinesContainerOutput {
+export interface SessionRoutinesContainerOutput extends RoutinePanelNavigation {
   state: SessionRoutinesState;
   detail: RoutineDetailState;
   selectedSlug: string | null;
   selectedTitle: string | null;
-  detailHeading: RefObject<HTMLHeadingElement | null>;
-  onSelect: (slug: string, trigger: HTMLElement) => void;
-  onBack: () => void;
-  onRefresh: () => void;
 }
 
 export function useSessionRoutinesContainer({
@@ -31,8 +28,6 @@ export function useSessionRoutinesContainer({
     sessionId: string;
     slug: string;
   } | null>(null);
-  const trigger = useRef<HTMLElement | null>(null);
-  const detailHeading = useRef<HTMLHeadingElement | null>(null);
   const input = { agentId: agent.id, sessionId };
   const inventory = trpc.routine.list.useQuery(input);
   const selected =
@@ -59,31 +54,29 @@ export function useSessionRoutinesContainer({
           ? { type: "ERROR", message: detailQuery.error.message }
           : { type: "LOADED", data: detailQuery.data };
 
-  useEffect(() => {
-    if (selectedSlug !== null) {
-      detailHeading.current?.focus();
-    } else if (trigger.current?.isConnected) {
-      trigger.current.focus();
-      trigger.current = null;
-    }
-  }, [selectedSlug]);
+  const navigation = useRoutinePanelNavigation({
+    selectedSlug,
+    onSelect: (slug) => setSelection({ sessionId, slug }),
+    onBack: () => setSelection(null),
+    onRefresh: async () => {
+      await Promise.all([
+        utils.routine.list.invalidate(input, {}, { throwOnError: true }),
+        utils.routine.detail.invalidate(
+          input,
+          {},
+          {
+            throwOnError: true,
+          },
+        ),
+      ]);
+    },
+  });
 
   return {
     state,
     detail,
     selectedSlug,
     selectedTitle: selected?.content.title ?? null,
-    detailHeading,
-    onSelect: (slug, element) => {
-      trigger.current = element;
-      setSelection({ sessionId, slug });
-    },
-    onBack: () => setSelection(null),
-    onRefresh: () => {
-      void Promise.all([
-        utils.routine.list.invalidate(input),
-        utils.routine.detail.invalidate(input),
-      ]);
-    },
+    ...navigation,
   };
 }

@@ -30,6 +30,10 @@ Do not promise arbitrary per-Routine schedules or exact hourly execution.
 
 - Use `create_routine` with the user's intended title, objective, and supported
   sources. Preserve exact content; do not silently trim, rewrite, or truncate it.
+- New definitions use a readable title-derived slug, without a UUID or automatic
+  collision suffix. A duplicate slug in the same Session is rejected rather than
+  replaced. Read the inventory and distinguish the intended objective before
+  creating another definition; title edits preserve the existing slug.
 - Use `sources=[{"type":"manual"}]` for the supported regular-check candidate
   source. Here `manual` is a source type, not a Run button or a requirement for a
   human to trigger each check. An empty source list makes no automatic candidate.

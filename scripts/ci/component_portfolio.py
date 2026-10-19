@@ -3,6 +3,43 @@
 from scripts.ci.observability import JUnitSummary
 
 STORIES = {
+    "src/features/session-routines/components/SessionRoutines.stories.tsx": (
+        "Inventory",
+        "Loading",
+        "Empty",
+        "Unavailable",
+        "Detail Loading",
+        "Detail Unavailable",
+        "Not Executed",
+        "Incomplete Work",
+        "Silent Result",
+        "Failed Objective And Delivery",
+        "Long Content",
+        "Keyboard Selection",
+        "Pull To Refresh",
+        "Pull Cancellation",
+        "Scrolled Gesture",
+        "Refresh Failure",
+        "Upward Gesture",
+        "Refresh In Progress",
+        "Navigation Context",
+    ),
+    "src/features/chat/components/RoutineJudgmentDisclosure.stories.tsx": (
+        "Collapsed",
+        "Expansion",
+        "Failure Unknown Usage",
+        "Cancelled",
+        "Unavailable",
+        "Long Titles",
+    ),
+    "src/features/chat/components/ToolCallCard.stories.tsx": (
+        "Routine Created",
+        "Routine Update",
+        "Routine Rejected Update",
+        "Routine Cancelled Update",
+        "Routine Objective And Delivery Failure",
+        "Routine Existing Completion",
+    ),
     "src/features/agents/components/AgentRuntimeSettings.stories.tsx": (
         "Runtime Free",
         "Managed",

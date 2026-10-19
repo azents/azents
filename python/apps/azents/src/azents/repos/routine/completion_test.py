@@ -272,12 +272,13 @@ async def test_deleted_definition_context_can_finish_without_recreating_records(
     assert recording.created and recording.record is None
     assert recording.state.phase == "completed"
     assert recording.state.delivery_status is RoutineDeliveryStatus.UNOBSERVED
-    assert (
-        await _operations(rdb_session_manager).inspect(
-            scope=f.scope, slug=f.definitions[0].slug, record_limit=100
-        )
-        is None
+    assert replacement.slug == f.definitions[0].slug
+    inspection = await _operations(rdb_session_manager).inspect(
+        scope=f.scope, slug=replacement.slug, record_limit=100
     )
+    assert inspection is not None
+    assert inspection.definition == replacement
+    assert inspection.records == ()
     async with rdb_session_manager() as session:
         assert (
             await f.repository.records.list_recent(

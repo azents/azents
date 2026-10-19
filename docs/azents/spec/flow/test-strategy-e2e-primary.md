@@ -28,6 +28,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/toolkits/components/GitHubWizard.stories.tsx
   - typescript/apps/azents-web/src/features/agents/components/AgentRuntimeSettings.stories.tsx
   - typescript/apps/azents-web/src/features/chat/components/ChatSessionView.stories.tsx
+  - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.stories.tsx
   - typescript/apps/azents-web/.storybook/**
   - .claude/skills/ci-optimization/**
   - scripts/ci/**
@@ -328,8 +329,8 @@ the Node runner, finite positive duration and exit status. Missing or conflictin
 execution evidence cannot qualify a performance sample, even with green workflow
 metadata or JUnit.
 
-That job also runs the explicit Runtime Settings, GitHub Wizard and Chat Session
-View component portfolio through Storybook's Vitest Chromium integration, with one
+That job also runs the explicit Runtime Settings, GitHub Wizard, Chat Session
+View and Routine tool-card component portfolio through Storybook's Vitest Chromium integration, with one
 browser worker. The story catalog remains available independently; only this
 portfolio is CI contract evidence. Interaction obligations use actual story plays,
 not names or render-only success. Native JUnit, finite command duration, exit status

@@ -1,4 +1,4 @@
-import { rem } from "@mantine/core";
+import { Box, rem } from "@mantine/core";
 import { expect, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { RoutineJudgmentDisclosure } from "./RoutineJudgmentDisclosure";
@@ -78,29 +78,36 @@ export const Collapsed: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByText("Routine")).toBeVisible();
-    await expect(canvas.getByText("Judgment completed")).not.toBeVisible();
-    await expect(canvas.getByText("Judgment-call usage")).not.toBeVisible();
+    await expect(
+      canvas.queryByText("Judgment completed"),
+    ).not.toBeInTheDocument();
+    await expect(
+      canvas.getByRole("button", { name: "Routine" }),
+    ).toHaveAttribute("aria-expanded", "false");
   },
 };
 export const Expansion: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    const summary = canvasElement.querySelector("summary");
-    if (summary === null) {
-      throw new Error("Missing Routine disclosure");
-    }
-    await userEvent.click(summary);
-    await expect(canvas.getByText("Judgment completed")).toBeVisible();
-    await expect(canvas.getByText("Selected for work")).toBeVisible();
-    await expect(canvas.getByText("No work selected")).toBeVisible();
+    const summary = canvas.getByRole("button", { name: "Routine" });
+    summary.focus();
+    await userEvent.keyboard("{Enter}");
+    await expect(await canvas.findByText("Judgment completed")).toBeVisible();
+    await expect(summary).toHaveAttribute("aria-expanded", "true");
+    await expect(
+      canvas.getByRole("img", { name: "Selected for work" }),
+    ).toBeVisible();
+    await expect(
+      canvas.getByRole("img", { name: "No work selected" }),
+    ).toBeVisible();
+    await expect(
+      canvas.queryByText("Selected for work"),
+    ).not.toBeInTheDocument();
     await expect(
       canvas.getByText("Total 99,999 · Input 99,000 · Output 999"),
     ).toBeVisible();
-    await expect(
-      canvas.getByText("This call only; ordinary turn usage is unchanged."),
-    ).toBeVisible();
     await userEvent.click(summary);
-    await expect(canvas.getByText("Judgment completed")).not.toBeVisible();
+    await expect(summary).toHaveAttribute("aria-expanded", "false");
   },
 };
 export const FailureUnknownUsage: Story = {
@@ -108,9 +115,11 @@ export const FailureUnknownUsage: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByText("Routine"));
-    await expect(canvas.getByText("Judgment failed")).toBeVisible();
+    await expect(await canvas.findByText("Judgment failed")).toBeVisible();
     await expect(canvas.getByText("Call usage is unavailable.")).toBeVisible();
-    await expect(canvas.getByText("No valid decision")).toBeVisible();
+    await expect(
+      canvas.getByRole("img", { name: "No valid decision" }),
+    ).toBeVisible();
     await expect(
       canvas.queryByText("No work selected"),
     ).not.toBeInTheDocument();
@@ -137,6 +146,14 @@ export const Cancelled: Story = {
       },
     },
   },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: "Routine" }));
+    await expect(await canvas.findByText("Judgment cancelled")).toBeVisible();
+    await expect(
+      canvas.getByRole("img", { name: "No valid decision" }),
+    ).toBeVisible();
+  },
 };
 export const Unavailable: Story = {
   args: {
@@ -150,7 +167,7 @@ export const Unavailable: Story = {
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByText("Routine"));
     await expect(
-      canvas.getByText("Judgment details are unavailable."),
+      await canvas.findByText("Judgment details are unavailable."),
     ).toBeVisible();
     await expect(
       canvas.queryByText("No work selected"),
@@ -158,6 +175,13 @@ export const Unavailable: Story = {
   },
 };
 export const LongTitles: Story = {
+  decorators: [
+    (Story) => (
+      <Box w={rem(320)}>
+        <Story />
+      </Box>
+    ),
+  ],
   args: {
     judgment: {
       ...completed,
@@ -180,5 +204,14 @@ export const LongTitles: Story = {
         ],
       },
     },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: "Routine" }));
+    await expect(
+      await canvas.findByRole("img", { name: "No work selected" }),
+    ).toBeVisible();
+    const list = canvas.getByRole("list", { name: "Considered Routines" });
+    await expect(list.scrollWidth).toBeLessThanOrEqual(list.clientWidth);
   },
 };

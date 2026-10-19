@@ -32,12 +32,8 @@ export function isRoutineToolCall(
     return false;
   }
   const source = call.toolkitSource;
-  return (
-    source != null &&
-    "toolkit_slug" in source &&
-    source.toolkit_slug === "routine" &&
-    source.toolkit_type === "routine"
-  );
+  // Auto-bound builtins have no DB-attached Toolkit source snapshot.
+  return source == null;
 }
 
 export interface RoutineCallUsage {

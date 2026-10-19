@@ -142,7 +142,7 @@ async def test_definition_exact_update_preserves_other_content(
         scope = await _subject(session)
     operations = _operations(rdb_session_manager)
     created = await operations.create(scope=scope, content=_content(), owner=None)
-    assert created.slug.startswith("routine-")
+    assert created.slug == "release-news"
     updated = await operations.update(
         scope=scope,
         slug=created.slug,
@@ -156,6 +156,52 @@ async def test_definition_exact_update_preserves_other_content(
     assert updated.id == created.id
     assert updated.slug == created.slug
     assert await operations.get(scope=scope, slug=created.slug) == updated
+
+
+async def test_existing_stored_slug_remains_addressable_after_title_update(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    async with rdb_session_manager() as session:
+        scope = await _subject(session)
+    operations = _operations(rdb_session_manager)
+    created = await operations.create(scope=scope, content=_content(), owner=None)
+    stored_slug = f"routine-{uuid7().hex}"
+    async with rdb_session_manager() as session:
+        row = await operations.definitions.lock(session, scope=scope, slug=created.slug)
+        row.slug = stored_slug
+        await session.write_session.flush()
+    existing = await operations.get(scope=scope, slug=stored_slug)
+    assert existing is not None
+    updated = await operations.update(
+        scope=scope,
+        slug=stored_slug,
+        expected=existing.content,
+        changes={"title": "Updated release news"},
+        owner=None,
+    )
+    assert updated.slug == stored_slug
+    assert updated.id == created.id
+
+
+async def test_duplicate_slug_is_rejected_without_overwriting(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    async with rdb_session_manager() as session:
+        scope = await _subject(session)
+        other = await _subject(session)
+    operations = _operations(rdb_session_manager)
+    await operations.create(scope=scope, content=_content(), owner=None)
+    with pytest.raises(
+        ValueError, match="Routine slug 'release-news' already exists in this Session."
+    ):
+        await operations.create(scope=scope, content=_content(), owner=None)
+    definitions = await operations.list_routines(scope=scope)
+    assert len(definitions) == 1
+    assert definitions[0].slug == "release-news"
+    assert definitions[0].content == _content()
+    separate = await operations.create(scope=other, content=_content(), owner=None)
+    assert separate.slug == "release-news"
+    assert separate.id != definitions[0].id
 
 
 async def test_mismatched_prior_content_does_not_mutate_database(
@@ -208,8 +254,9 @@ async def test_session_limit_does_not_create_twenty_first_definition(
     async with rdb_session_manager() as session:
         scope = await _subject(session)
     operations = _operations(rdb_session_manager)
-    for _ in range(20):
-        await operations.create(scope=scope, content=_content(), owner=None)
+    for index in range(20):
+        content = _content().model_copy(update={"title": f"Release news {index}"})
+        await operations.create(scope=scope, content=content, owner=None)
     with pytest.raises(RoutineLimitReached):
         await operations.create(scope=scope, content=_content(), owner=None)
     assert len(await operations.list_routines(scope=scope)) == 20

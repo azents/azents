@@ -56,7 +56,7 @@ class ComponentObservabilityTest(unittest.TestCase):
                     self.assertNotIn("--", command)
                     self.assertIn("--reporter=junit", command)
                     self.assertEqual(
-                        sum(p.endswith(".stories.tsx") for p in command), 3
+                        sum(p.endswith(".stories.tsx") for p in command), len(STORIES)
                     )
                     if current_scenario != "missing":
                         outcome = {
