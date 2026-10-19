@@ -14,7 +14,7 @@ from scripts.ci.component_portfolio import STORIES
 from scripts.ci.evidence import decode_native_run, file_hashes
 from scripts.ci.run_node_tests import main
 from scripts.ci.tests.test_component_observability import component_junit
-from scripts.ci.tests.test_observability import job, sample
+from scripts.ci.tests.test_observability import job, sample, stamp_archive
 from scripts.ci.workflow_report import decode_run, object_value, sequence
 
 
@@ -159,6 +159,7 @@ class NodeObservabilityTest(unittest.TestCase):
                             {
                                 "id": 1,
                                 "name": name,
+                                "digest": stamp_archive(root, name, 1),
                                 "created_at": "2026-10-15T00:00:49Z",
                                 "expired": False,
                                 "workflow_run": {"id": 100, "head_sha": "a" * 40},
