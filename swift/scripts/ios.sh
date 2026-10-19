@@ -7,6 +7,7 @@ APP_ROOT="$SWIFT_ROOT/apps/azents-ios"
 BUILD_ROOT="$SWIFT_ROOT/.build"
 TOOLS_ROOT="$SWIFT_ROOT/.tools"
 source "$SWIFT_ROOT/toolchain.sh"
+source "$SWIFT_ROOT/scripts/simulator-diagnostics.sh"
 
 require_macos() {
   if [ "$(uname -s)" != Darwin ]; then
@@ -81,7 +82,7 @@ lint_sources() {
 
 test_app() (
   mkdir -p "$BUILD_ROOT"
-  runtime_id="$(xcrun simctl list runtimes --json | python3 -c '
+  runtime_id="$(simulator_stage list-runtimes xcrun simctl list runtimes --json | python3 -c '
 import json, sys
 version = sys.argv[1]
 matches = [r["identifier"] for r in json.load(sys.stdin)["runtimes"]
@@ -91,13 +92,12 @@ if len(matches) != 1:
     sys.exit(f"Expected one available iOS runtime {version}; found {matches}")
 print(matches[0])
 ' "$SIMULATOR_RUNTIME_VERSION")"
-  simulator_id="$(xcrun simctl create Azents-CI "$SIMULATOR_DEVICE_TYPE" "$runtime_id")"
+  simulator_id="$(simulator_stage create xcrun simctl create Azents-CI "$SIMULATOR_DEVICE_TYPE" "$runtime_id")"
   trap 'xcrun simctl shutdown "$simulator_id" >/dev/null 2>&1 || true
         xcrun simctl delete "$simulator_id" >/dev/null 2>&1 || true' EXIT
-  xcrun simctl boot "$simulator_id"
-  xcrun simctl bootstatus "$simulator_id" -b
   rm -rf "$BUILD_ROOT/UITests.xcresult"
-  xcodebuild test \
+  # XCTest owns simulator startup and proves readiness by launching the real app.
+  simulator_stage test xcodebuild test \
     -project "$APP_ROOT/Azents.xcodeproj" -scheme Azents -configuration Debug \
     -destination "platform=iOS Simulator,id=$simulator_id" \
     -derivedDataPath "$BUILD_ROOT/DerivedData" \

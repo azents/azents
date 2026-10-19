@@ -88,9 +88,15 @@ def append(analysis_path: Path, history: Path, cohort: str) -> int:
         ):
             raise ValueError("Non-main CI attempt cannot enter main trend history")
         selected = record.for_cohort(cohort)
-        if selected.key in by_key and by_key[selected.key].report != selected.report:
-            # Compare the complete stored evidence, including opaque metrics, exactly.
-            raise ValueError("Conflicting evidence for an existing CI attempt")
+        if selected.key in by_key:
+            stored = by_key[selected.key]
+            # The local collection directory is a locator, not run evidence.
+            # Keep the first locator while comparing every other opaque field.
+            original = {k: v for k, v in stored.report.items() if k != "source"}
+            incoming = {k: v for k, v in selected.report.items() if k != "source"}
+            if original != incoming:
+                raise ValueError("Conflicting evidence for an existing CI attempt")
+            continue
         by_key[selected.key] = selected
     history.parent.mkdir(parents=True, exist_ok=True)
     ordered = sorted(by_key.values(), key=lambda row: row.order)

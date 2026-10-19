@@ -2168,6 +2168,79 @@ async def test_relay_late_response_to_closed_source_is_ignored(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("other_stream", [False, True])
+@pytest.mark.parametrize("phase", ["runner", "capacity"])
+async def test_cancelled_binding_release_still_returns_owner_capacity(
+    monkeypatch: pytest.MonkeyPatch,
+    other_stream: bool,
+    phase: str,
+) -> None:
+    data_plane, _lifecycle = _local_data_plane()
+    accepted = RuntimeStreamAcceptedRunnerSession(
+        owner=_owner(),
+        runner_boot_id="runner-boot",
+        profile=APPROVED_SESSION_PROFILE,
+        connected_at=datetime.now(UTC),
+    )
+    runner = await data_plane.register_runner(accepted)
+    source = await data_plane.register_source(
+        session_id="gateway-session", peer_boot_id="gateway-boot", owner=None
+    )
+    for stream_id in range(1, 3 if other_stream else 2):
+        await data_plane.handle(
+            source,
+            _open_envelope(
+                session_id="gateway-session",
+                peer_boot_id="gateway-boot",
+                stream_id=stream_id,
+            ),
+        )
+    started = asyncio.Event()
+    release = asyncio.Event()
+    original_release = runner.release
+
+    async def gated_release(*, source_session_id: str, source_stream_id: int) -> None:
+        started.set()
+        await release.wait()
+        await original_release(
+            source_session_id=source_session_id,
+            source_stream_id=source_stream_id,
+        )
+
+    if phase == "runner":
+        monkeypatch.setattr(runner, "release", gated_release)
+    else:
+        broker = data_plane.brokers[_owner()]
+        original_capacity_release = broker.release
+
+        async def gated_capacity_release(key: BrokerStreamKey) -> bool:
+            started.set()
+            await release.wait()
+            return await original_capacity_release(key)
+
+        monkeypatch.setattr(broker, "release", gated_capacity_release)
+    key = BrokerStreamKey(source_session_id="gateway-session", stream_id=1)
+    closing = asyncio.create_task(data_plane._release(key))
+    await started.wait()
+    assert key not in data_plane.bindings
+    closing.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await closing
+    expected_active = int(other_stream)
+    assert data_plane.resources.snapshot().active_streams == expected_active
+    snapshot = (await data_plane.capacity_registry.snapshots())[0]
+    assert snapshot.active_streams == expected_active
+    await data_plane._release(key)
+    assert (await data_plane.capacity_registry.snapshots())[0].active_streams == (
+        expected_active
+    )
+    await data_plane.unregister_source(source)
+    await data_plane.unregister_runner(accepted)
+    await data_plane.close()
+
+
+@pytest.mark.asyncio
 async def test_owner_capacity_tracks_buffer_until_runner_queue_dequeue() -> None:
     data_plane, _lifecycle = _local_data_plane()
     owner = _owner()

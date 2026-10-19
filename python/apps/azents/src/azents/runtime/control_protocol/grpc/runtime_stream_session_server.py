@@ -2485,15 +2485,18 @@ class RuntimeStreamControlDataPlane:
         if binding is None:
             return
         self.resources.close_stream()
-        if runner is not None:
-            await runner.release(
-                source_session_id=key.source_session_id,
-                source_stream_id=key.stream_id,
-            )
-        if guard is not None and guard is not caller:
-            await asyncio.gather(guard, return_exceptions=True)
-        if broker is not None:
-            await broker.release(key)
+        async with contextlib.AsyncExitStack() as cleanup:
+            if broker is not None:
+                cleanup.push_async_callback(broker.release, key)
+            if guard is not None and guard is not caller:
+                cleanup.push_async_callback(
+                    asyncio.gather, guard, return_exceptions=True
+                )
+            if runner is not None:
+                await runner.release(
+                    source_session_id=key.source_session_id,
+                    source_stream_id=key.stream_id,
+                )
         async with self.binding_changed:
             self.binding_changed.notify_all()
 

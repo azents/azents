@@ -114,7 +114,7 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-10-05
+last_verified_at: 2026-10-19
 spec_version: 70
 ---
 
@@ -526,8 +526,13 @@ durable queue content.
    context-only history do not promote visibility.
 11. A newly created exact trigger row clears that same Binding's awaiting-input marker,
     if present, while preserving the active Work cycle, title, tasks, and history. The
-    transaction then prepares the current progress projection and admits the Session
-    input wake. Context-only creation, another Binding's input, provisioning or setup
+    transaction first conditionally admits the Session input wake, then mutates
+    Channel Work state and prepares its progress projection. This retains the
+    Session-row-before-Toolkit-State write order used by owned Session mutations
+    and avoids an inverted lock dependency while active Work and ingress overlap.
+    Cursor conflict or any later finalization failure still rolls back wake admission,
+    mailbox rows and Work changes together; wake dispatch remains post-commit.
+    Context-only creation, another Binding's input, provisioning or setup
     activity, failed items, and duplicate trigger rows do not resume or re-project the
     awaiting Work. A duplicate trigger may reuse its existing mailbox item only for
     post-commit wake redispatch, allowing recovery from a prior dispatch failure

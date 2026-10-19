@@ -1,10 +1,40 @@
 """Container-log capture helpers for E2E diagnostics."""
 
 import logging
+from collections import deque
 from collections.abc import Callable
+from pathlib import Path
 from typing import Protocol
 
 logger = logging.getLogger(__name__)
+_FAILURE_LOG_CHARACTERS = 1_048_576
+
+
+class FailureLogTail:
+    """Retain a bounded diagnostic tail independently of pytest's terminal."""
+
+    def __init__(self) -> None:
+        self.lines: deque[str] = deque()
+        self.characters = 0
+
+    def append(self, line: str) -> None:
+        text = (line + "\n")[-_FAILURE_LOG_CHARACTERS:]
+        self.lines.append(text)
+        self.characters += len(text)
+        while self.characters > _FAILURE_LOG_CHARACTERS:
+            self.characters -= len(self.lines.popleft())
+
+    def save(self, path: Path, *, node_id: str) -> None:
+        """Persist the tail without replacing the original test failure."""
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                f"Test: {node_id}\nBounded active-server diagnostic tail:\n"
+                + "".join(self.lines),
+                encoding="utf-8",
+            )
+        except OSError:
+            logger.warning("Failed to persist E2E server diagnostics", exc_info=True)
 
 
 class ContainerLogs(Protocol):

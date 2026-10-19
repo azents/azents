@@ -71,6 +71,7 @@ code_paths:
   - python/apps/azents/src/azents/services/runtime_web/**
   - python/apps/azents/src/azents/api/public/runtime_web/**
   - python/apps/azents/src/azents/runtime_web_gateway/**
+  - python/apps/azents/src/azents/runtime/control_protocol/grpc/runtime_stream_session_server*
   - python/apps/azents/bin/runtime-web-gateway.sh
   - python/apps/azents/src/azents/runtime/**
   - python/apps/azents/src/azents/worker/health.py
@@ -355,6 +356,7 @@ public binding or decrementing the process stream gauge is not cleanup completio
 The original caller identity is retained when cleanup runs in a shielded task,
 so a Browser guard releasing its own stream cannot cancel or await itself.
 Repeated release remains idempotent and cannot release a replacement stream.
+Broker capacity release is a cleanup callback even if an earlier release fails.
 
 Hop credit translation uses per-stream consumed-byte deltas. A fresh Runner
 session never inherits the historical absolute total of a still-live Gateway

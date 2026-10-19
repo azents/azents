@@ -6,9 +6,12 @@ description: Improve Azents general CI reliability, unit/integration/pytest and 
 # CI Optimization
 
 Own the complete loop across general CI, not only numbered E2E lanes. Inspect
-`.github/workflows/ci.yaml`, other quality/test workflows (including iOS), configured
-required checks and their dependency graphs before selecting a candidate. Release,
-publication and deployment effects are not optimization experiments unless authorized.
+the Linux `.github/workflows/ci.yaml`, configured required checks and their dependency
+graphs before selecting a candidate. Keep iOS as a separate quality workflow: report
+its failures honestly, but exclude it from speed statistics, daily charts and the
+two-attempt measurement requirement. Do not repeat iOS merely to obtain timing
+samples or make its timing pair a prerequisite for Linux measurement completion.
+Release, publication and deployment effects are not experiments unless authorized.
 
 ## Start safely
 
@@ -52,10 +55,11 @@ redistribution does not change coverage; keep original per-lane metrics and do n
 attribute planner-driven timing differences to a candidate mechanism.
 
 Include Python matrix unit/integration pytest, migrations, Docker-free support tests,
-Helm tests, E2E/Web, and TypeScript/Swift tests and all lint/typecheck/build steps. The
+Helm tests, E2E/Web, TypeScript tests and all Linux lint/typecheck/build steps. The
 shared pytest plugin records safe setup/call/teardown and fixture metadata. Other
 runners retain native diagnostics plus workflow job/step time; do not label job duration
-as test-call duration or claim unavailable per-case metrics exist.
+as test-call duration or claim unavailable per-case metrics exist. Native iOS evidence
+remains quality/debugging evidence, not a recurring performance cohort.
 
 Read [references/metrics.md](references/metrics.md) for metric and artifact contracts.
 
@@ -125,12 +129,12 @@ existing gates. Local timing proves a mechanism, not whole-CI causal improvement
 
 ## Repeat and accept
 
-After first complete CI success, preserve metadata/artifacts and repeat complete CI
+After first complete Linux CI success, preserve metadata/artifacts and repeat that CI
 on the unchanged SHA. Require at least two complete successful same-SHA attempts and
 the same enabled test/job scope, with no hidden failures or missing evidence. A green
 status linking another SHA is not successful verification of this PR.
 
-Compare baseline and experiment separately. Report each attempt's SHA, run/attempt,
+Compare Linux CI baseline and experiment separately. Report each attempt's SHA, run/attempt,
 gate completion, jobs/steps, test-phase mechanism and all overhead. Report mean and
 median, absolute/percentage change and resource costs. Classify accepted,
 reliability-accepted, inconclusive or rejected. Do not claim success from one run.
@@ -151,6 +155,8 @@ inconclusive or active feasible work may remain open. Never merge without approv
   --history /absolute/session/ci-main-history.jsonl --cohort main`.
   The tool rejects non-main sources, conflicting attempts and experiment relabeling.
   Keep baseline/experiment and independent workflows/runner classes separate.
+  Preserve historical iOS evidence, but do not append it to the Linux benchmark or
+  generate native speed charts for recurring reports.
 - Render only the latest 30 KST calendar dates including report date:
 
   ```bash

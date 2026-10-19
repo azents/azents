@@ -39,6 +39,9 @@ code_paths:
   - .claude/skills/ship-feature/SKILL.md
   - .github/actions/expose-github-runtime/**
   - .github/workflows/ci.yaml
+  - .github/workflows/ios.yaml
+  - swift/scripts/ios.sh
+  - swift/scripts/simulator-diagnostics.sh
   - typescript/packages/azents-session-core/**
   - .github/workflows/e2e-duration-recheck.yaml
   - .github/workflows/snapshot.yaml
@@ -801,11 +804,38 @@ Always-on required CI does not depend on external credentials.
   Long details are bounded with full evidence linked in artifacts. Missing results
   remain unavailable rather than passing. Only the reporting job has PR write access;
   forks publish artifacts/job summaries but remain read-only and never post comments.
+- Failed E2E calls also retain a bounded active-server diagnostic tail under the
+  current worker's existing artifact directory, keyed by a hash of the testcase
+  identity. This remains available when xdist workers have no terminal reporter,
+  including API-only Browser failures without Selenium screenshots. Existing
+  terminal diagnostics remain complete. Diagnostic filesystem errors are warnings
+  and do not replace the original test failure or trigger retries.
 - Whole-CI gate-completion elapsed time spans workflow creation to the last configured
   gate, including dependency scheduling and queues. Maximum job wall, aggregate
   runner job-seconds and E2E max-lane wall are distinct metrics. Reporting overhead is
   named separately. The `ci-optimization` Skill and shared collection/analysis/chart
-  tools cover general CI; iOS/native diagnostics are analyzed as a separate workflow.
+  tools measure the Linux general CI workflow. iOS remains a separate quality
+  workflow, excluded from speed statistics, daily charts and the same-SHA
+  two-attempt measurement requirement. Its timing pair is not a prerequisite for
+  Linux measurement completion; native failures remain explicit quality results.
+  The iOS workflow checks out the pull request head (or main/manual SHA) and uses
+  that same tested SHA in app-build and native diagnostic artifact names. A
+  synthetic PR merge SHA is not substituted for the collector's head identity.
+  Same-name native artifacts are explicitly replaced on a workflow repeat;
+  complete immutable first-attempt evidence must be collected before repeating.
+  CoreSimulator runtime listing, device creation and native XCTest execution record
+  timestamped start/end markers and original command exit status in
+  `simulator-setup.log`, included by the existing always-upload diagnostic path.
+  A stalled preparation command leaves a start marker before test logs exist.
+  Command stdout remains unchanged for JSON/identifier consumers. The selected
+  fresh simulator ID is passed directly to `xcodebuild test`, which owns startup
+  and proves readiness through real app launch and UI assertions. A separate
+  blocking `simctl bootstatus` preflight does not gate entry into XCTest.
+  Native test/build checks, cleanup and the existing job deadline remain unchanged.
+  Re-ingesting an identical workflow/run/attempt from another local collection
+  directory is idempotent and retains the first stored source locator. Every
+  other stored field, including opaque measurement/evidence extensions, must
+  still match exactly; conflicting data fails without changing history.
   Same-SHA experiments require identical enabled scope, complete test evidence and
   two successful complete attempts. Testcase multisets are compared across numbered
   lanes within Required and Web separately because the planner may rebalance lane
