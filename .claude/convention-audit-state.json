@@ -1,6 +1,6 @@
 {
   "change_checkpoint": {
-    "checked_at": "2026-10-17T22:25:51Z",
+    "checked_at": "2026-10-18T22:23:55Z",
     "checked_ruleset_revisions": [
       "1a20f0b0040f5867251874f2f51afde1051e59c29a1aea59650e93daeb66ce9d",
       "27090dfbb643163110b41d91462c4d2455bb024416896d88067d8bdb05b520f5",
@@ -8,7 +8,7 @@
       "ce4ed60d01f8f4493abdc5e541c07f524f0511ffeab06c8e6fca47ed03366709",
       "dee40c24e2143112ee9589d8a267ff5294a635bdc89b2dfd91e79cd31396b1b7"
     ],
-    "checked_through_commit": "fdf8a20bdf1891b9b28bda5291dd75310bc336d8"
+    "checked_through_commit": "c5d609939de422967e28a666494826bddb6c911a"
   },
   "ranges": {
     ".::bucket-1-of-8": {
@@ -636,6 +636,11 @@
       "checked_ruleset_revision": "03a79b1cb3b0cd3fab3981885c9ee35e3094d6ee83a993eda8955c559bc5a525",
       "checked_through_commit": "25517e3d8c60dc0d8029f9bac5f4a7ebda1be51d"
     },
+    "scripts/**::bucket-1-of-8": {
+      "checked_at": "2026-10-18T22:23:55Z",
+      "checked_ruleset_revision": "dee40c24e2143112ee9589d8a267ff5294a635bdc89b2dfd91e79cd31396b1b7",
+      "checked_through_commit": "c5d609939de422967e28a666494826bddb6c911a"
+    },
     "scripts/**::bucket-2-of-8": {
       "checked_at": "2026-10-16T22:18:44Z",
       "checked_ruleset_revision": "dee40c24e2143112ee9589d8a267ff5294a635bdc89b2dfd91e79cd31396b1b7",
@@ -822,34 +827,34 @@
       "checked_through_commit": "fdf8a20bdf1891b9b28bda5291dd75310bc336d8"
     },
     "typescript/apps/azents-site/**::bucket-2-of-8": {
-      "checked_at": "2026-09-13T22:34:20Z",
-      "checked_ruleset_revision": "a85886eaaa1c36360d324bb41257013fa109c1ee287de0ba3be2d26c09927678",
-      "checked_through_commit": "97d1dfa5201b1e725a587db417ac41dcce966d98"
+      "checked_at": "2026-10-18T22:23:55Z",
+      "checked_ruleset_revision": "b28dd359ab885a353fe9a3a84a088c980974ede0e4b31af189a66feac8a11c58",
+      "checked_through_commit": "c5d609939de422967e28a666494826bddb6c911a"
     },
     "typescript/apps/azents-site/**::bucket-3-of-8": {
-      "checked_at": "2026-09-13T22:34:20Z",
-      "checked_ruleset_revision": "a85886eaaa1c36360d324bb41257013fa109c1ee287de0ba3be2d26c09927678",
-      "checked_through_commit": "97d1dfa5201b1e725a587db417ac41dcce966d98"
+      "checked_at": "2026-10-18T22:23:55Z",
+      "checked_ruleset_revision": "b28dd359ab885a353fe9a3a84a088c980974ede0e4b31af189a66feac8a11c58",
+      "checked_through_commit": "c5d609939de422967e28a666494826bddb6c911a"
     },
     "typescript/apps/azents-site/**::bucket-4-of-8": {
-      "checked_at": "2026-09-13T22:34:20Z",
-      "checked_ruleset_revision": "a85886eaaa1c36360d324bb41257013fa109c1ee287de0ba3be2d26c09927678",
-      "checked_through_commit": "97d1dfa5201b1e725a587db417ac41dcce966d98"
+      "checked_at": "2026-10-18T22:23:55Z",
+      "checked_ruleset_revision": "b28dd359ab885a353fe9a3a84a088c980974ede0e4b31af189a66feac8a11c58",
+      "checked_through_commit": "c5d609939de422967e28a666494826bddb6c911a"
     },
     "typescript/apps/azents-site/**::bucket-5-of-8": {
-      "checked_at": "2026-09-14T22:41:18Z",
-      "checked_ruleset_revision": "193cd524af5bf589eeab7744b06e813623015ce64d6d503b684ddbbbf9bbced2",
-      "checked_through_commit": "a2010266036d42a52044bf11e33cf0572159e0a0"
+      "checked_at": "2026-10-18T22:23:55Z",
+      "checked_ruleset_revision": "b28dd359ab885a353fe9a3a84a088c980974ede0e4b31af189a66feac8a11c58",
+      "checked_through_commit": "c5d609939de422967e28a666494826bddb6c911a"
     },
     "typescript/apps/azents-site/**::bucket-6-of-8": {
-      "checked_at": "2026-09-14T22:41:18Z",
-      "checked_ruleset_revision": "193cd524af5bf589eeab7744b06e813623015ce64d6d503b684ddbbbf9bbced2",
-      "checked_through_commit": "a2010266036d42a52044bf11e33cf0572159e0a0"
+      "checked_at": "2026-10-18T22:23:55Z",
+      "checked_ruleset_revision": "b28dd359ab885a353fe9a3a84a088c980974ede0e4b31af189a66feac8a11c58",
+      "checked_through_commit": "c5d609939de422967e28a666494826bddb6c911a"
     },
     "typescript/apps/azents-site/**::bucket-7-of-8": {
-      "checked_at": "2026-09-14T22:41:18Z",
-      "checked_ruleset_revision": "193cd524af5bf589eeab7744b06e813623015ce64d6d503b684ddbbbf9bbced2",
-      "checked_through_commit": "a2010266036d42a52044bf11e33cf0572159e0a0"
+      "checked_at": "2026-10-18T22:23:55Z",
+      "checked_ruleset_revision": "b28dd359ab885a353fe9a3a84a088c980974ede0e4b31af189a66feac8a11c58",
+      "checked_through_commit": "c5d609939de422967e28a666494826bddb6c911a"
     },
     "typescript/apps/azents-site/**::bucket-8-of-8": {
       "checked_at": "2026-09-14T22:41:18Z",
@@ -1294,41 +1299,6 @@
       ".claude/conventions/infra/module-separation-by-role.md",
       ".claude/conventions/infra/resource-naming-prefix.md",
       ".claude/conventions/infra/snake-case-vs-camel-case.md"
-    ],
-    "a85886eaaa1c36360d324bb41257013fa109c1ee287de0ba3be2d26c09927678": [
-      ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
-      ".claude/conventions/global/comments-and-docstrings-in-english.md",
-      ".claude/conventions/global/decode-json-into-typed-payloads.md",
-      ".claude/conventions/global/dependency-updates-without-overrides.md",
-      ".claude/conventions/global/deterministic-test-synchronization.md",
-      ".claude/conventions/global/diagrams-in-mermaid.md",
-      ".claude/conventions/global/patch-null-means-set-null.md",
-      ".claude/conventions/global/prefer-supported-external-service-sdks.md",
-      ".claude/conventions/global/redis-optional-no-ha.md",
-      ".claude/conventions/global/runner-reported-agent-workspace.md",
-      ".claude/conventions/global/stacked-pr-rebase-script.md",
-      ".claude/conventions/global/user-facing-text-in-english.md",
-      ".claude/conventions/global/worktree-rebase-origin-main.md",
-      ".claude/conventions/typescript/adt-state-types.md",
-      ".claude/conventions/typescript/apps-depend-on-packages-only.md",
-      ".claude/conventions/typescript/avoid-type-assertions.md",
-      ".claude/conventions/typescript/browser-persistence-hooks.md",
-      ".claude/conventions/typescript/container-component-pattern.md",
-      ".claude/conventions/typescript/cookie-based-locale.md",
-      ".claude/conventions/typescript/explicit-return-types.md",
-      ".claude/conventions/typescript/mantine-tokens-no-hardcoded.md",
-      ".claude/conventions/typescript/natural-technical-term-localization.md",
-      ".claude/conventions/typescript/no-direct-process-env.md",
-      ".claude/conventions/typescript/no-edit-generated.md",
-      ".claude/conventions/typescript/no-index-files.md",
-      ".claude/conventions/typescript/no-reverse-layer-imports.md",
-      ".claude/conventions/typescript/page-tsx-thin-entrypoint.md",
-      ".claude/conventions/typescript/pure-ui-stories.md",
-      ".claude/conventions/typescript/server-component-by-default.md",
-      ".claude/conventions/typescript/storybook-provider-structure.md",
-      ".claude/conventions/typescript/trpc-cache-invalidation.md",
-      ".claude/conventions/typescript/use-generated-public-client.md",
-      ".claude/conventions/typescript/user-relevant-status-copy.md"
     ],
     "b28dd359ab885a353fe9a3a84a088c980974ede0e4b31af189a66feac8a11c58": [
       ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
