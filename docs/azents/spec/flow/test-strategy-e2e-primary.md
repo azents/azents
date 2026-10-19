@@ -814,7 +814,10 @@ Always-on required CI does not depend on external credentials.
   gate, including dependency scheduling and queues. Maximum job wall, aggregate
   runner job-seconds and E2E max-lane wall are distinct metrics. Reporting overhead is
   named separately. The `ci-optimization` Skill and shared collection/analysis/chart
-  tools cover general CI; iOS/native diagnostics are analyzed as a separate workflow.
+  tools measure the Linux general CI workflow. iOS remains a separate quality
+  workflow, excluded from speed statistics, daily charts and the same-SHA
+  two-attempt measurement requirement. Its timing pair is not a prerequisite for
+  Linux measurement completion; native failures remain explicit quality results.
   The iOS workflow checks out the pull request head (or main/manual SHA) and uses
   that same tested SHA in app-build and native diagnostic artifact names. A
   synthetic PR merge SHA is not substituted for the collector's head identity.

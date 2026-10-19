@@ -49,9 +49,9 @@ aggregate call work by worker count to hide a failure.
 
 ## Metric scopes
 
-- **Whole-CI gate completion elapsed:** workflow `createdAt` to last completion among
-  configured gates: pre-commit, Python, E2E, TypeScript, Helm, Docker and iOS where
-  present. This includes dependency scheduling/queue time and is not a reconstructed
+- **Whole-CI gate completion elapsed:** Linux CI workflow `createdAt` to last completion
+  among configured gates: pre-commit, Python, E2E, TypeScript, Helm and Docker.
+  This includes dependency scheduling/queue time and is not a reconstructed
   causal DAG length. Report actual workflow completion separately when available.
 - **Job wall:** `completedAt - startedAt`, not queue time; include matrix and setup,
   test, artifact, cleanup costs. Report steps using the same boundary.
@@ -70,8 +70,12 @@ Observation alone does not authorize changing test selections or assertions. Ver
 test-design corrections follow the Skill's test-layer mapping and validation contract.
 They do not change branch protection, gate success conditions, E2E duration thresholds,
 retry policy or runner count.
-Other workflows such as iOS are collected/analyzed separately; release/deploy workflows
-are excluded from autonomous experiments without explicit authorization.
+Keep iOS as a separate quality workflow. Preserve native diagnostics when investigating
+failures, but exclude its durations from CI speed statistics, recurring charts and
+the two-success timing acceptance requirement. Do not repeat iOS for measurement or
+make a native timing pair a prerequisite for Linux measurement completion. Report
+red native quality checks independently rather than hiding them as success.
+Release/deploy workflows are excluded from experiments without explicit authorization.
 
 ## Profile and budget
 
@@ -89,14 +93,14 @@ costs. New resource usage requires explicit approval. Default acceptance is at l
 30 seconds or 5 percent net whole-CI completion improvement; grounded reliability value
 may justify below-threshold work. Existing failing duration policy remains E2E-specific.
 
-Require two successful complete attempts at the final unchanged SHA. Preserve each
+Require two successful complete Linux CI attempts at the final unchanged SHA. Preserve each
 attempt before rerun. Analyze baseline and experiment separately and report sample count,
 mean/median, every attempt, absolute/percentage change and all failure evidence. Missing
 new unit-test artifacts makes general-CI acceptance inconclusive even if E2E passed.
 
 ## Daily history and charts
 
-Append deduplicated real main records, keyed by workflow/run/attempt. Preserve full raw
+Append deduplicated real main Linux CI records, keyed by workflow/run/attempt. Preserve full raw
 history; display exactly 30 KST calendar dates ending at report date. Plot daily
 mean/median/min–max/sample count and lower-is-faster. Failed/unverified/missing dates
 remain gaps; do not interpolate. Mixed enabled scopes are descriptive trends, not causal
