@@ -3,6 +3,7 @@ import { CompactionIndicator } from "./CompactionIndicator";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const meta = {
+  tags: ["ci-contract"],
   component: CompactionIndicator,
   decorators: [
     (Story) => (

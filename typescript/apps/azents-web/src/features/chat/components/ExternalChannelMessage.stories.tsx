@@ -19,6 +19,7 @@ const baseSource = {
 };
 
 const meta = {
+  tags: ["ci-contract"],
   component: ExternalChannelMessage,
   decorators: [
     (Story) => (
@@ -46,7 +47,7 @@ export const Expanded = {
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
     await expect(toggle).toHaveFocus();
     await expect(
-      canvas.getByRole("link", { name: /open original message/i }),
+      await canvas.findByRole("link", { name: /open original message/i }),
     ).toHaveAttribute("rel", "noopener noreferrer");
   },
 } satisfies Story;

@@ -6,6 +6,10 @@ spec_type: domain
 domain: conversation
 owner: "@Hardtack"
 code_paths:
+  - typescript/apps/azents-web/src/features/chat/components/ChatTimelineItem.tsx
+  - typescript/apps/azents-web/src/features/chat/components/ChatDetailPanel.tsx
+  - typescript/apps/azents-web/src/features/chat/components/ActivityRow.tsx
+  - typescript/apps/azents-web/src/features/chat/components/ActivityEventList.tsx
   - python/apps/azents/src/azents/repos/session_primary_channel.py
   - python/apps/azents/src/azents/repos/subagent_tool_operations.py
   - python/apps/azents/src/azents/repos/hierarchy_contention.py
@@ -198,7 +202,7 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
 last_verified_at: 2026-10-19
-spec_version: 195
+spec_version: 196
 ---
 
 # Conversation & Events
@@ -1210,6 +1214,23 @@ Channel send; other calls without a message are Channel progress update. Running
 states use the corresponding in-progress localized labels. `download_external_file`
 keeps its distinct Download icon. This presentation does not rename either tool or
 change its execution contract.
+
+Chat transcript items delegate outer spacing to `ChatTimelineItem`: compact activity/disclosure
+rows use the same small item gap, while message bodies and conversation boundaries use the
+standard message gap. Routine judgment/work/continuation, Scheduled Task and agent-mailbox
+inputs, external-channel messages, activity-group headers, continuation controls, and cleanup
+disclosures share `ActivityRow` typography, icon slots, detail inset, and keyboard disclosure.
+Human messages retain their right-aligned blue bubble, shared with pending and optimistic
+input. Dashed compaction boundaries, interruption rules, authorization alerts, and recovery
+cards retain their semantic treatments inside the common timeline frame.
+
+Run-group interiors use `ActivityEventList` to dispatch reasoning, Skill, client/provider tools,
+and control events without adding another transcript-item gap. `ChatDetailPanel` owns common
+border, radius, padding, width, and optional bounded scrolling for disclosure bodies, including
+reasoning, Skill and tool details. Content-specific code, diff, media, checklist, raw-data and
+failure renderers remain inside this surface. Activity summaries retain failed-event counts
+even when the category list overflows. Cleanup disclosure controls expose status in their
+accessible name and associate phase/count/progress summaries as an accessible description.
 
 Reasoning, Skill, client-tool, provider-tool, and non-interactive control events use one canonical
 Activity-row grid for vertical padding, disclosure-chevron space, icon size, text baseline, status, and

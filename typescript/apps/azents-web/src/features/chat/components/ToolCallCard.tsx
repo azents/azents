@@ -46,9 +46,10 @@ import {
   activityRowIconSize,
 } from "./activityRowPresentation";
 import { ChatCodeBlock } from "./ChatCodeBlock";
+import { ChatDetailPanel } from "./ChatDetailPanel";
 import { FileAttachmentList } from "./FileAttachmentList";
 import { RoutineToolDetails } from "./RoutineToolDetails";
-import { SkillContentPanel } from "./SkillContentPanel";
+import { SkillContentBody } from "./SkillContentPanel";
 import { ToolCallStatusIcon } from "./ToolCallStatusIcon";
 import { ToolFailureOutput } from "./ToolFailureOutput";
 import { ToolInputContent } from "./ToolInputContent";
@@ -751,7 +752,7 @@ function presentationDetail(
     case "todo":
       return <TodoChecklistDetail detail={presentation.detail} t={t} />;
     case "skill":
-      return <SkillContentPanel content={presentation.detail.content} />;
+      return <SkillContentBody content={presentation.detail.content} />;
     case "runtimeWeb":
       return (
         <Stack gap="xs">
@@ -866,7 +867,7 @@ export function GenericToolCallCard({
           </ActionIcon>
         }
         ariaLabel={ariaLabel}
-        detail={detail}
+        detail={detail ? <ChatDetailPanel>{detail}</ChatDetailPanel> : null}
         icon={<IconTool size={activityRowIconSize} />}
         primary={toolCall.name}
         status={
@@ -965,7 +966,17 @@ export function StandardSpecializedToolCallCard({
           </ActionIcon>
         }
         ariaLabel={ariaLabel}
-        detail={detail}
+        detail={
+          detail ? (
+            <ChatDetailPanel
+              maxHeight={
+                presentation.detail?.type === "skill" ? rem(360) : null
+              }
+            >
+              {detail}
+            </ChatDetailPanel>
+          ) : null
+        }
         icon={presentationIcon(presentation)}
         primary={action}
         qualifier={qualifier}

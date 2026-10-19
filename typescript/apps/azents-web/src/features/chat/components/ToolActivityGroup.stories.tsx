@@ -1,6 +1,6 @@
 import { Button, Stack } from "@mantine/core";
 import { useState } from "react";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { createChatMessage } from "../story-fixtures";
 import { ToolActivityGroup } from "./ToolActivityGroup";
@@ -186,6 +186,7 @@ function LiveActivityGroupTrackingDemo(): React.ReactElement {
 }
 
 const meta = {
+  tags: ["ci-contract"],
   component: ToolActivityGroup,
   decorators: [
     (Story) => (
@@ -204,8 +205,8 @@ export const CollapsedWithAttention = {
   args: { activity },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByText("Failed 1")).toBeVisible();
-    await expect(canvas.getAllByLabelText("Done")[0]).toBeVisible();
+    await expect(canvas.getByText(/Failed 1/)).toBeVisible();
+    await expect(canvas.getAllByLabelText("Completed")[0]).toBeVisible();
   },
 } satisfies Story;
 
@@ -240,7 +241,7 @@ export const BuiltinToolCategories = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     for (const label of ["Memory", "Web service", "Channel", "Explore"]) {
-      await expect(canvas.getByText(label, { exact: true })).toBeVisible();
+      await expect(canvas.getByText(new RegExp(label))).toBeVisible();
     }
   },
 } satisfies Story;
@@ -277,7 +278,7 @@ export const RestoredReasoningAndActivityDetails = {
     ).toBeVisible();
     await expect(canvas.getByText("ToolCallCard.tsx")).toBeVisible();
     await expect(
-      canvas.getByText(
+      await canvas.findByText(
         "/workspace/agent/.azents/worktrees/chat-activity-implementation/azents/typescript/apps/azents-web/src/features/chat/components/activityRowPresentation.ts",
       ),
     ).toBeVisible();
@@ -305,9 +306,11 @@ export const TracksLiveGroupDisclosure = {
     if (initialGroup === null) {
       throw new Error("Initial activity group was not rendered");
     }
-    await expect(
-      within(initialGroup).queryByText("Preparing the activity presentation"),
-    ).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        within(initialGroup).queryByText("Preparing the activity presentation"),
+      ).not.toBeInTheDocument(),
+    );
     await expect(
       await canvas.findByText("Next live activity details"),
     ).toBeVisible();

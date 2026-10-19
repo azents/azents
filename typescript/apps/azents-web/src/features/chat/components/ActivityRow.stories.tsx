@@ -49,6 +49,7 @@ function CanonicalActivityRows(): React.ReactElement {
 }
 
 const meta = {
+  tags: ["ci-contract"],
   component: CanonicalActivityRows,
   decorators: [
     (Story) => (

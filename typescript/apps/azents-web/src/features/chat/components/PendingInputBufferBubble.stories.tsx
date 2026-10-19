@@ -3,6 +3,7 @@ import { PendingInputBufferBubble } from "./PendingInputBufferBubble";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const meta = {
+  tags: ["ci-contract"],
   title: "chat/PendingInputBufferBubble",
   component: PendingInputBufferBubble,
   args: {

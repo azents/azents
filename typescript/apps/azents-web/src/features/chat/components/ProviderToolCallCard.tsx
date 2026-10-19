@@ -23,6 +23,7 @@ import {
   activityRowBorder,
   activityRowIconSize,
 } from "./activityRowPresentation";
+import { ChatDetailPanel } from "./ChatDetailPanel";
 import { FileAttachmentList } from "./FileAttachmentList";
 import { providerWebSearchPresentation } from "./providerWebSearchPresentation";
 import { ToolCallStatusIcon } from "./ToolCallStatusIcon";
@@ -222,7 +223,7 @@ export function ProviderToolCallCard({
             </ActionIcon>
           }
           ariaLabel={ariaLabel}
-          detail={detail}
+          detail={detail ? <ChatDetailPanel>{detail}</ChatDetailPanel> : null}
           icon={
             webSearch !== null ? (
               <IconWorld size={activityRowIconSize} />

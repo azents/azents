@@ -12,6 +12,7 @@ import { IconLock } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isRecord } from "@/shared/lib/unknown-value";
+import { ChatTimelineItem } from "./ChatTimelineItem";
 
 interface AuthorizationRequestBubbleProps {
   toolkitName: string;
@@ -101,32 +102,28 @@ export function AuthorizationRequestBubble({
   }
 
   return (
-    <Group
-      align="flex-start"
-      gap="sm"
-      justify="flex-start"
-      wrap="nowrap"
-      mb="md"
-    >
-      <Alert
-        icon={<IconLock size={18} />}
-        title={t("authorizationRequired")}
-        color="yellow"
-        variant="light"
-        maw="100%"
-      >
-        <Text size="sm" mb="sm">
-          {t("authorizationRequestMessage", { toolkitName })}
-        </Text>
-        <Button
-          size="sm"
-          variant="filled"
-          onClick={() => void handleClick()}
-          loading={isOpening}
+    <ChatTimelineItem>
+      <Group align="flex-start" gap="sm" justify="flex-start" wrap="nowrap">
+        <Alert
+          icon={<IconLock size={18} />}
+          title={t("authorizationRequired")}
+          color="yellow"
+          variant="light"
+          maw="100%"
         >
-          {t("authorizeButton")}
-        </Button>
-      </Alert>
-    </Group>
+          <Text size="sm" mb="sm">
+            {t("authorizationRequestMessage", { toolkitName })}
+          </Text>
+          <Button
+            size="sm"
+            variant="filled"
+            onClick={() => void handleClick()}
+            loading={isOpening}
+          >
+            {t("authorizeButton")}
+          </Button>
+        </Alert>
+      </Group>
+    </ChatTimelineItem>
   );
 }

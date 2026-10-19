@@ -1,8 +1,6 @@
 import {
   Badge,
-  Box,
   Button,
-  Collapse,
   Group,
   Paper,
   rem,
@@ -10,12 +8,7 @@ import {
   Stack,
   Text,
 } from "@mantine/core";
-import {
-  IconAlertTriangle,
-  IconChevronRight,
-  IconClock,
-  IconRefresh,
-} from "@tabler/icons-react";
+import { IconAlertTriangle, IconClock, IconRefresh } from "@tabler/icons-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useMemo } from "react";
 import { createReactContainer } from "@/shared/lib/createReactContainer";
@@ -23,11 +16,10 @@ import {
   useAttemptHistory,
   useRunRetryCard,
 } from "../containers/useRunRetryCard";
+import { ActivityRow } from "./ActivityRow";
+import { ChatDetailPanel } from "./ChatDetailPanel";
 import inlineControlClasses from "./ChatInlineControl.module.css";
-import {
-  chatChevronTransition,
-  chatCollapseTransitionProps,
-} from "./collapsiblePresentation";
+import { ChatTimelineItem } from "./ChatTimelineItem";
 import type { RunRetryCardProps } from "../containers/useRunRetryCard";
 import type { FailedRunAttemptSummary } from "@azents/session-core/types";
 
@@ -71,46 +63,14 @@ export function AttemptHistoryView({
   }
 
   return (
-    <Stack gap={rem(6)}>
-      <Group
-        gap={rem(6)}
-        wrap="nowrap"
-        role="button"
-        tabIndex={0}
-        className={inlineControlClasses.root}
-        style={{ cursor: "pointer", userSelect: "none" }}
-        onClick={toggle}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            toggle();
-          }
-        }}
-      >
-        <IconChevronRight
-          aria-hidden="true"
-          size={14}
-          stroke={1.8}
-          color="var(--mantine-color-dimmed)"
-          style={{
-            transform: opened ? "rotate(90deg)" : "none",
-            transition: chatChevronTransition,
-          }}
-        />
-        <Text
-          size="xs"
-          fw={600}
-          c="dimmed"
-          className={inlineControlClasses.label}
-        >
-          {t("failedRunRecovery.history", { count: sortedAttempts.length })}
-        </Text>
-      </Group>
-      <Collapse
-        expanded={opened}
-        keepMounted={false}
-        {...chatCollapseTransitionProps}
-      >
+    <ActivityRow
+      ariaLabel={t("failedRunRecovery.history", {
+        count: sortedAttempts.length,
+      })}
+      primary={t("failedRunRecovery.history", { count: sortedAttempts.length })}
+      icon={<IconClock size={14} />}
+      disclosure={{ opened, onToggle: toggle }}
+      detail={
         <ScrollArea.Autosize mah={rem(280)} scrollbars="y">
           <Stack gap="xs">
             {sortedAttempts.map((attempt) => (
@@ -145,8 +105,8 @@ export function AttemptHistoryView({
             ))}
           </Stack>
         </ScrollArea.Autosize>
-      </Collapse>
-    </Stack>
+      }
+    />
   );
 }
 
@@ -179,14 +139,8 @@ export function RunRetryCardView({
     : rawMessage;
 
   return (
-    <Box mb="md" w="100%" style={{ minWidth: 0 }}>
-      <Paper
-        withBorder
-        radius="lg"
-        p="sm"
-        bg="var(--mantine-color-body)"
-        style={{ maxWidth: rem(680), overflow: "hidden" }}
-      >
+    <ChatTimelineItem>
+      <ChatDetailPanel>
         <Stack gap="sm">
           <Group gap="xs" align="flex-start" wrap="nowrap">
             <IconAlertTriangle
@@ -257,8 +211,8 @@ export function RunRetryCardView({
             </Group>
           )}
         </Stack>
-      </Paper>
-    </Box>
+      </ChatDetailPanel>
+    </ChatTimelineItem>
   );
 }
 

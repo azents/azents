@@ -11,7 +11,6 @@ import {
   ActionIcon,
   Box,
   Group,
-  Paper,
   rem,
   Stack,
   Text,
@@ -35,8 +34,11 @@ import {
   type CurrentWorkspaceProfile,
   humanSenderPresentation,
 } from "../senderPresentation";
+import { ActivityRow } from "./ActivityRow";
 import { AgentMessageDisclosure } from "./AgentMessageDisclosure";
-import inlineControlClasses from "./ChatInlineControl.module.css";
+import { ChatDetailPanel } from "./ChatDetailPanel";
+import { ChatHumanMessageBody } from "./ChatHumanMessageBody";
+import { chatHumanMessageMaxWidth, ChatTimelineItem } from "./ChatTimelineItem";
 import { ExternalChannelMessage } from "./ExternalChannelMessage";
 import { FileAttachmentList } from "./FileAttachmentList";
 import { InputBufferBubbleFrame } from "./InputBufferBubbleFrame";
@@ -205,65 +207,52 @@ function UserTextMessage({
   }
 
   return (
-    <Group
-      align="flex-start"
-      gap="sm"
-      justify="flex-end"
-      wrap="nowrap"
-      mb="md"
-      w="100%"
-      style={{ minWidth: 0 }}
-    >
-      <Box maw="75%" style={{ minWidth: 0 }}>
-        <MessageMetadataSurface>
-          <Text size="xs" c="dimmed" ta="right" mb={rem(4)}>
-            {senderLabel}
-          </Text>
-          {message.attachments && message.attachments.length > 0 && (
-            <FileAttachmentList
-              files={message.attachments}
-              presentation="compact"
-            />
-          )}
-
-          {hasContent && (
-            <Paper
-              px="sm"
-              py="2xs"
-              radius="lg"
-              bg="blue.6"
-              c="white"
-              style={{
-                width: "fit-content",
-                maxWidth: "100%",
-                minWidth: 0,
-                overflowWrap: "anywhere",
-                borderTopRightRadius: rem(4),
-                marginLeft: "auto",
-              }}
-            >
-              <TextMessageContent message={message} />
-            </Paper>
-          )}
-
-          {message.status !== "partial" &&
-            (message.content !== null || message.inferenceProfile) && (
-              <MessageActionRow
-                content={message.content}
-                createdAt={message.createdAt}
-                align="user"
-                inferenceProfile={message.inferenceProfile}
-                additionalActions={
-                  <>
-                    {additionalActions}
-                    {editAction}
-                  </>
-                }
+    <ChatTimelineItem>
+      <Group
+        align="flex-start"
+        gap="sm"
+        justify="flex-end"
+        wrap="nowrap"
+        w="100%"
+        style={{ minWidth: 0 }}
+      >
+        <Box maw={chatHumanMessageMaxWidth} style={{ minWidth: 0 }}>
+          <MessageMetadataSurface>
+            <Text size="xs" c="dimmed" ta="right" mb={rem(4)}>
+              {senderLabel}
+            </Text>
+            {message.attachments && message.attachments.length > 0 && (
+              <FileAttachmentList
+                files={message.attachments}
+                presentation="compact"
               />
             )}
-        </MessageMetadataSurface>
-      </Box>
-    </Group>
+
+            {hasContent && (
+              <ChatHumanMessageBody>
+                <TextMessageContent message={message} />
+              </ChatHumanMessageBody>
+            )}
+
+            {message.status !== "partial" &&
+              (message.content !== null || message.inferenceProfile) && (
+                <MessageActionRow
+                  content={message.content}
+                  createdAt={message.createdAt}
+                  align="user"
+                  inferenceProfile={message.inferenceProfile}
+                  additionalActions={
+                    <>
+                      {additionalActions}
+                      {editAction}
+                    </>
+                  }
+                />
+              )}
+          </MessageMetadataSurface>
+        </Box>
+      </Group>
+    </ChatTimelineItem>
   );
 }
 
@@ -316,7 +305,7 @@ function AssistantTextMessage({
   hasContent,
 }: Pick<TextMessageProps, "message" | "hasContent">): React.ReactElement {
   return (
-    <Box mb="md" w="100%" style={{ minWidth: 0 }}>
+    <ChatTimelineItem>
       <Box style={{ maxWidth: "100%", minWidth: 0, overflowWrap: "anywhere" }}>
         <MessageMetadataSurface>
           {hasContent && <TextMessageContent message={message} />}
@@ -334,7 +323,7 @@ function AssistantTextMessage({
           )}
         </MessageMetadataSurface>
       </Box>
-    </Box>
+    </ChatTimelineItem>
   );
 }
 
@@ -348,20 +337,10 @@ function InlineControlMessage({
   actions?: React.ReactNode;
 }): React.ReactElement {
   return (
-    <Box mb="md">
-      <Group
-        gap={rem(6)}
-        c="dimmed"
-        wrap="nowrap"
-        className={inlineControlClasses.root}
-      >
-        {icon}
-        <Text size="xs" className={inlineControlClasses.label}>
-          {label}
-        </Text>
-      </Group>
+    <ChatTimelineItem kind="activity">
+      <ActivityRow ariaLabel={label} icon={icon} primary={label} />
       {actions}
-    </Box>
+    </ChatTimelineItem>
   );
 }
 
@@ -369,13 +348,15 @@ function InterruptedControlMessage(): React.ReactElement {
   const t = useTranslations("chat");
 
   return (
-    <Group gap="sm" c="dimmed" mb="md" w="100%" wrap="nowrap">
-      <Box h={rem(1)} bg="var(--mantine-color-default-border)" flex={1} />
-      <Text size="xs" fw={600}>
-        {t("interruptedIndicator")}
-      </Text>
-      <Box h={rem(1)} bg="var(--mantine-color-default-border)" flex={1} />
-    </Group>
+    <ChatTimelineItem kind="boundary">
+      <Group gap="sm" c="dimmed" w="100%" wrap="nowrap">
+        <Box h={rem(1)} bg="var(--mantine-color-default-border)" flex={1} />
+        <Text size="xs" fw={600}>
+          {t("interruptedIndicator")}
+        </Text>
+        <Box h={rem(1)} bg="var(--mantine-color-default-border)" flex={1} />
+      </Group>
+    </ChatTimelineItem>
   );
 }
 
@@ -393,14 +374,8 @@ function GoalBriefingCard({
   );
 
   return (
-    <Box mb="md" w="100%" style={{ minWidth: 0 }}>
-      <Paper
-        withBorder
-        radius="lg"
-        p="sm"
-        bg="var(--mantine-color-body)"
-        style={{ maxWidth: rem(520) }}
-      >
+    <ChatTimelineItem>
+      <ChatDetailPanel>
         <Stack gap="sm">
           <Group gap="xs" wrap="nowrap">
             <IconCheck
@@ -449,8 +424,8 @@ function GoalBriefingCard({
             </Box>
           </Group>
         </Stack>
-      </Paper>
-    </Box>
+      </ChatDetailPanel>
+    </ChatTimelineItem>
   );
 }
 
@@ -475,19 +450,13 @@ function ErrorTextMessage({
   }
 
   return (
-    <Box mb="md" w="100%" style={{ minWidth: 0 }}>
+    <ChatTimelineItem>
       <MessageMetadataSurface>
-        <Paper
-          withBorder
-          radius="md"
-          p="xs"
-          bg="var(--mantine-color-body)"
-          style={{ maxWidth: rem(680), overflow: "hidden" }}
-        >
+        <ChatDetailPanel>
           <Box className={classes.errorMessageText}>
             <MarkdownContent>{message.content ?? ""}</MarkdownContent>
           </Box>
-        </Paper>
+        </ChatDetailPanel>
 
         {message.content && (
           <MessageActionRow
@@ -497,7 +466,7 @@ function ErrorTextMessage({
           />
         )}
       </MessageMetadataSurface>
-    </Box>
+    </ChatTimelineItem>
   );
 }
 
@@ -507,7 +476,7 @@ function AssistantToolCallMessage({
   message: ChatMessage;
 }): React.ReactElement {
   return (
-    <Box mb="md" w="100%" style={{ minWidth: 0 }}>
+    <ChatTimelineItem>
       <Box style={{ maxWidth: "100%", minWidth: 0 }}>
         {message.toolCalls?.map((tc) => (
           <ToolCallCardContainer key={tc.id} toolCall={tc} />
@@ -519,7 +488,7 @@ function AssistantToolCallMessage({
           <FileAttachmentList files={message.attachments} />
         )}
       </Box>
-    </Box>
+    </ChatTimelineItem>
   );
 }
 
@@ -613,9 +582,9 @@ export const MessageBubble = memo(function MessageBubble({
 
   if (message.role === "routine_judgment") {
     return (
-      <Box opacity={messageOpacity}>
+      <ChatTimelineItem kind="activity" opacity={messageOpacity}>
         <RoutineJudgmentDisclosure judgment={message.routineJudgment ?? null} />
-      </Box>
+      </ChatTimelineItem>
     );
   }
 

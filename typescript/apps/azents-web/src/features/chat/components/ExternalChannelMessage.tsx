@@ -5,31 +5,26 @@ import {
   Badge,
   Box,
   Button,
-  Collapse,
   CopyButton,
   Group,
   Modal,
-  Paper,
   rem,
   SimpleGrid,
   Stack,
   Text,
-  UnstyledButton,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import {
   IconBrandDiscord,
   IconBrandSlack,
   IconCheck,
-  IconChevronRight,
   IconCopy,
   IconExternalLink,
 } from "@tabler/icons-react";
 import { useLocale, useTranslations } from "next-intl";
-import {
-  chatChevronTransition,
-  chatCollapseTransitionProps,
-} from "./collapsiblePresentation";
+import { ActivityRow } from "./ActivityRow";
+import { ChatDetailPanel } from "./ChatDetailPanel";
+import { ChatTimelineItem } from "./ChatTimelineItem";
 import { MarkdownContent } from "./MarkdownContent";
 import type { ExternalChannelMessagePresentation } from "../externalChannelMessage";
 
@@ -143,61 +138,29 @@ export function ExternalChannelMessage({
   const sourceLabel = `${source.senderDisplayName} · ${source.resourceLabel}`;
 
   return (
-    <Box mb="md" w="100%" style={{ minWidth: 0 }}>
-      <Stack gap={rem(6)} maw={rem(760)}>
-        <UnstyledButton
-          type="button"
-          onClick={toggle}
-          aria-expanded={opened}
-          aria-label={
-            opened
-              ? t("externalMessage.collapse", { source: sourceLabel })
-              : t("externalMessage.expand", { source: sourceLabel })
-          }
-          py={rem(2)}
-          style={{ borderRadius: "var(--mantine-radius-sm)" }}
-        >
-          <Group gap={rem(6)} c="dimmed" wrap="nowrap">
-            <IconChevronRight
-              aria-hidden="true"
-              size={14}
-              stroke={1.8}
-              style={{
-                flexShrink: 0,
-                transform: opened ? "rotate(90deg)" : "none",
-                transition: chatChevronTransition,
-              }}
-            />
-            <ProviderIcon provider={source.provider} />
-            <Text size="xs" fw={600} style={{ flexShrink: 0 }}>
-              {source.senderDisplayName}:
-            </Text>
-            <Text size="xs" truncate style={{ minWidth: 0 }}>
-              {summaryPreview(source.body)}
-            </Text>
-            <Badge
-              size="xs"
-              variant="light"
-              color={statusColor(source)}
-              style={{ flexShrink: 0 }}
-            >
-              {sourceStatusLabel(source, t)}
-            </Badge>
-          </Group>
-        </UnstyledButton>
-
-        <Collapse
-          expanded={opened}
-          keepMounted={false}
-          {...chatCollapseTransitionProps}
-        >
-          <Paper
-            withBorder
-            radius="md"
-            p="sm"
-            bg="var(--mantine-color-body)"
-            style={{ minWidth: 0, overflow: "hidden" }}
+    <ChatTimelineItem kind="activity">
+      <ActivityRow
+        disclosure={{ opened, onToggle: toggle }}
+        ariaLabel={
+          opened
+            ? t("externalMessage.collapse", { source: sourceLabel })
+            : t("externalMessage.expand", { source: sourceLabel })
+        }
+        icon={<ProviderIcon provider={source.provider} />}
+        primary={`${source.senderDisplayName}:`}
+        subject={summaryPreview(source.body)}
+        status={
+          <Badge
+            size="xs"
+            variant="light"
+            color={statusColor(source)}
+            style={{ flexShrink: 0 }}
           >
+            {sourceStatusLabel(source, t)}
+          </Badge>
+        }
+        detail={
+          <ChatDetailPanel>
             <Stack gap="sm">
               <Box style={{ overflowWrap: "anywhere" }}>
                 <MarkdownContent>{source.body}</MarkdownContent>
@@ -240,10 +203,10 @@ export function ExternalChannelMessage({
                 {t("externalMessage.details")}
               </Button>
             </Stack>
-          </Paper>
-        </Collapse>
-        {actions}
-      </Stack>
+          </ChatDetailPanel>
+        }
+      />
+      {actions}
 
       <Modal
         opened={detailsOpened}
@@ -293,6 +256,6 @@ export function ExternalChannelMessage({
           ))}
         </SimpleGrid>
       </Modal>
-    </Box>
+    </ChatTimelineItem>
   );
 }

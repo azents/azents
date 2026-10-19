@@ -13,6 +13,7 @@ import { MessageBubble } from "./MessageBubble";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const meta = {
+  tags: ["ci-contract"],
   component: MessageBubble,
   decorators: [
     (Story) => (
