@@ -6,6 +6,9 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [external-channel, agent, conversation]
 code_paths:
+  - python/apps/azents/src/azents/repos/session_primary_channel.py
+  - python/apps/azents/src/azents/repos/hierarchy_contention.py
+  - python/apps/azents/src/azents/repos/routine/primary_contention_test.py
   - python/apps/azents/src/azents/core/exchange_file_errors.py
   - python/apps/azents/src/azents/core/external_channel_access.py
   - python/apps/azents/src/azents/core/external_channel_conversation_data.py
@@ -63,8 +66,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-10-05
-spec_version: 50
+last_verified_at: 2026-10-18
+spec_version: 51
 ---
 
 # External Channel Lifecycle
@@ -80,6 +83,18 @@ outside active database transactions. Single-connection disconnect retains two
 separate durable stages: beginning DISCONNECTING, then completing lifecycle cleanup
 and terminal state. A second-stage failure does not undo the first committed stage.
 Provider terminal controls run only after both stages finish successfully.
+
+Binding termination atomically clears that Binding's Session Primary reference.
+Because archive locks Session before Binding while terminal management can already
+hold Binding before clearing Primary, the completed Binding disconnect, Multi
+route removal, Multi connection disconnect, both Single connection disconnect
+stages, Multi channel-default replace/clear, parent participation-setting mutation
+and provider revocation operations use the existing confirmed-transaction-abort
+recovery boundary. A database-confirmed deadlock or serialization abort retries
+only the complete DB-only owner operation after its scope closes. Unknown commit,
+authority failure and cancellation do not replay; provider effects remain outside
+this boundary. Single disconnect retains its earlier committed stage and cleanup
+plans while retrying only the aborted second stage.
 
 Disconnecting a connected binding terminally sets `disconnected_at`, ends active
 Channel Work, and captures one leave-presence plan plus Activity Tracker cleanup plans
@@ -389,6 +404,10 @@ started cycles, removes residual Task/trigger/cycle state, and verifies absence
 before finalization.
 
 ## Changelog
+
+- **2026-10-18** (spec_version 51) — Added atomic Primary clearing to Binding
+  termination and included the affected completed terminal database owners in
+  confirmed-abort contention recovery, retaining one-attempt provider effects.
 
 - **2026-10-05** (spec_version 50) — Moved External Channel and Scheduled
   lifecycle participant DB composition below services while preserving atomic

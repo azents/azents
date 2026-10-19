@@ -6,6 +6,7 @@ spec_type: domain
 domain: conversation
 owner: "@Hardtack"
 code_paths:
+  - python/apps/azents/src/azents/repos/session_primary_channel.py
   - python/apps/azents/src/azents/repos/subagent_tool_operations.py
   - python/apps/azents/src/azents/repos/hierarchy_contention.py
   - python/apps/azents/src/azents/repos/idle_continuation.py
@@ -196,8 +197,8 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
-last_verified_at: 2026-10-16
-spec_version: 193
+last_verified_at: 2026-10-18
+spec_version: 194
 ---
 
 # Conversation & Events
@@ -408,6 +409,17 @@ Mailbox admission inputs and results have canonical detached definitions in
 Session-ID order, whereas idle-continuation composition retains its no-wake
 semantics. Larger input-acceptance atomic groups retain the shared in-session
 primitive until their complete owning compositions are migrated.
+
+The common Session has a nullable `primary_channel_binding_id`, distinct from a
+Conversation's team-primary kind. A channel-created Session designates its
+originating connected Binding in the connection owner transaction. Exact Binding
+disconnect clears that reference atomically; physical Binding deletion clears it
+through the foreign key. Primary resolution revalidates Session, Agent, route,
+connection and resource ownership. An invalid retained reference is an error,
+not permission to choose another destination. Existing-Binding backfill preserves
+connections, designates only an unambiguous connected owner and rejects multiple
+or incompatible candidates before mutation. Primary does not impose one Binding
+per Session and does not add a public mutation interface.
 
 Only one team primary session may exist per agent in the current product state. Additional active
 non-primary team sessions may exist under the same agent with `primary_kind = null`.
@@ -1677,6 +1689,10 @@ identify trigger and continuation work with dedicated Scheduled Task
 presentations.
 
 ## 13. Changelog
+
+- **2026-10-18** (spec_version 194) — Added nullable Session Primary Binding
+  authority, atomic origin/disconnect integration and guarded existing-data
+  backfill without restricting the Session's Binding count.
 
 - **2026-10-15** (spec_version 189) — Moved pure Session/tool/mailbox
   projection ownership to the shared Session core package without changing

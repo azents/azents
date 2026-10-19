@@ -59,6 +59,7 @@ from azents.repos.external_channel.management_operation_data import (
     ManagedConnectionDisconnectResult,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.hierarchy_contention import retry_hierarchy_operation
 from azents.repos.workspace_user import WorkspaceUserRepository
 
 
@@ -189,6 +190,7 @@ class ExternalChannelManagementOperationRepository:
         if not owned:
             raise ExternalChannelManagementNotFound(block_id)
 
+    @retry_hierarchy_operation
     async def disconnect_binding(
         self,
         *,
@@ -634,6 +636,7 @@ class ExternalChannelManagementOperationRepository:
             raise ExternalChannelManagementNotFound(route_id)
         return route
 
+    @retry_hierarchy_operation
     async def remove_multi_route(
         self,
         *,
@@ -668,6 +671,7 @@ class ExternalChannelManagementOperationRepository:
             await session.write_session.commit()
         return removal
 
+    @retry_hierarchy_operation
     async def disconnect_multi_connection(
         self,
         *,
@@ -721,6 +725,29 @@ class ExternalChannelManagementOperationRepository:
             admin=True,
         )
         now = datetime.datetime.now(datetime.UTC)
+        cleanup_plans = await self._begin_connection_disconnect(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            connection_id=connection_id,
+            now=now,
+        )
+        connection = await self._complete_connection_disconnect(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            connection_id=connection_id,
+        )
+        return ManagedConnectionDisconnectResult(connection, cleanup_plans)
+
+    @retry_hierarchy_operation
+    async def _begin_connection_disconnect(
+        self,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        connection_id: str,
+        now: datetime.datetime,
+    ) -> tuple[ProviderEffectPlan, ...]:
+        """Commit first-stage plans before separately recoverable terminal cleanup."""
         async with self.session_manager() as session:
             cleanup_plans = await self.repository.begin_connection_disconnect(
                 session,
@@ -732,6 +759,17 @@ class ExternalChannelManagementOperationRepository:
             if cleanup_plans is None:
                 raise ExternalChannelManagementNotFound(connection_id)
             await session.write_session.commit()
+        return cleanup_plans
+
+    @retry_hierarchy_operation
+    async def _complete_connection_disconnect(
+        self,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        connection_id: str,
+    ) -> ManagedConnection:
+        """Retry only the aborted terminal transaction, not prior committed plans."""
         async with self.session_manager() as session:
             disconnected = await self.lifecycle_repository.disconnect_single_connection(
                 session,
@@ -751,8 +789,9 @@ class ExternalChannelManagementOperationRepository:
             if connection is None:
                 raise ExternalChannelManagementNotFound(connection_id)
             await session.write_session.commit()
-        return ManagedConnectionDisconnectResult(connection, cleanup_plans)
+        return connection
 
+    @retry_hierarchy_operation
     async def replace_multi_channel_default(
         self,
         *,
@@ -791,6 +830,7 @@ class ExternalChannelManagementOperationRepository:
             await session.write_session.commit()
         return transition
 
+    @retry_hierarchy_operation
     async def clear_multi_channel_default(
         self,
         *,

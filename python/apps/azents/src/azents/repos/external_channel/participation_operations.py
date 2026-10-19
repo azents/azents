@@ -58,6 +58,7 @@ from azents.repos.external_channel.data import (
 )
 from azents.repos.external_channel.management import ExternalChannelManagementRepository
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.hierarchy_contention import retry_hierarchy_operation
 from azents.repos.workspace import WorkspaceRepository
 
 
@@ -530,6 +531,7 @@ class ExternalChannelParticipationOperations:
             ),
         )
 
+    @retry_hierarchy_operation
     async def mutate_parent_settings(
         self,
         *,

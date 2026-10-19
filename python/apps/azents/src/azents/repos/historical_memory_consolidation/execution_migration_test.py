@@ -3,6 +3,7 @@
 import asyncio
 import datetime
 import json
+from dataclasses import dataclass
 
 import pytest
 import sqlalchemy as sa
@@ -14,15 +15,11 @@ from testcontainers.postgres import PostgresContainer
 from uuid6 import uuid7
 
 from azents.consts import PROJECT_ROOT
-from azents.core.agent_session_data import AgentSessionCreate
-from azents.core.enums import AgentSessionProductMode
 from azents.core.historical_memory_legacy_audit import (
     MemoryLegacyCostMethod,
     MemoryLegacyRecordedOutcome,
 )
 from azents.core.workspace import WorkspaceCreate
-from azents.rdb.models.agent_runtime import RDBAgentRuntime
-from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.historical_memory_legacy_audit import (
     RDBMemoryLegacyJob,
@@ -34,18 +31,28 @@ from azents.rdb.session_capabilities import (
     WriteSession,
     create_read_write_session_manager,
 )
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.session_execution.repository_test import _ExecutionSubject
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
 from azents.testing.historical_agent_fixture import create_historical_agent
 
 
+@dataclass(frozen=True)
+class _HistoricalSession:
+    id: str
+    workspace_id: str
+
+
+@dataclass(frozen=True)
+class _HistoricalSubject:
+    agent_session: _HistoricalSession
+    agent_id: str
+
+
 async def _create_predecessor_execution_subject(
     session: WriteSession, *, handle: str
-) -> _ExecutionSubject:
-    """Keep this seed at the historical schema being tested, not current Agent ORM."""
+) -> _HistoricalSubject:
+    """Seed only the Session columns present at the tested predecessor revision."""
     created_workspace = await WorkspaceRepository().create(
         session, WorkspaceCreate(name="Migration test", handle=handle)
     )
@@ -55,26 +62,26 @@ async def _create_predecessor_execution_subject(
     agent_id = await create_historical_agent(
         session, workspace_id=workspace_id, name=handle
     )
-    runtime = RDBAgentRuntime(workspace_id=workspace_id, agent_id=agent_id)
-    runtime.workspace_path = "/workspace/agent"
-    session.write_session.add(runtime)
-    await session.write_session.flush()
-    repository = AgentSessionRepository()
-    created = await repository.create(
-        session,
-        AgentSessionCreate(
-            workspace_id=workspace_id,
-            product_mode=AgentSessionProductMode.TEAM,
-            associated_user_id=None,
-            agent_id=agent_id,
-            title=None,
-        ),
+    session_id = uuid7().hex
+    await session.write_session.execute(
+        sa.text("""
+            INSERT INTO agent_sessions(id, workspace_id, agent_id, status, start_reason)
+            VALUES (:id, :workspace, :agent, 'active', 'initial')
+        """),
+        {"id": session_id, "workspace": workspace_id, "agent": agent_id},
     )
-    agent_session = await session.read_session.get(RDBAgentSession, created.id)
-    assert agent_session is not None
-    await repository.mark_running(session, created.id)
-    await session.write_session.refresh(agent_session)
-    return _ExecutionSubject(agent_session=agent_session, agent_id=agent_id)
+    await session.write_session.execute(
+        sa.text("""
+            INSERT INTO conversations(session_id, agent_id, session_status, handle,
+                                      session_kind, product_mode)
+            VALUES (:id, :agent, 'active', :handle, 'root', 'team')
+        """),
+        {"id": session_id, "agent": agent_id, "handle": handle},
+    )
+    return _HistoricalSubject(
+        agent_session=_HistoricalSession(id=session_id, workspace_id=workspace_id),
+        agent_id=agent_id,
+    )
 
 
 async def test_migration_keeps_current_pending_sources_saved_and_common_audit(

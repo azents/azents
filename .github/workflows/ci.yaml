@@ -478,6 +478,24 @@ jobs:
         if: always()
         run: |
           rm -rf "${RUNNER_TEMP}/e2e-images"
+      - name: Capture E2E runner capacity
+        run: |
+          report_dir="${RUNNER_TEMP}/e2e-observability/${{ matrix.lane }}"
+          mkdir -p "$report_dir"
+          capture_runner_observation() {
+            local output="$1"
+            shift
+            if "$@" > "$output" 2>&1; then
+              return 0
+            fi
+            printf '\nObservation unavailable: %s\n' "$*" >> "$output" || true
+            printf '::warning::Runner observation unavailable: %s\n' "$*"
+          }
+          capture_runner_observation "$report_dir/runner-cpu.json" lscpu --json
+          capture_runner_observation "$report_dir/runner-memory-before.txt" free --bytes
+          for resource in cpu memory io; do
+            capture_runner_observation "$report_dir/runner-pressure-${resource}-before.txt" cat "/proc/pressure/${resource}"
+          done
       - name: Run E2E lane
         env:
           AZENTS_E2E_IMAGE_BUILD_PROFILE: ${{ matrix.suite }}
@@ -489,8 +507,9 @@ jobs:
           cd testenv/azents/e2e
           parallel_args=()
           if [ "$AZENTS_E2E_IMAGE_BUILD_PROFILE" = 'web' ]; then
+            # Each worker owns a full product stack; avoid in-runner contention.
             parallel_args=(
-              -n 2 --dist loadfile --no-loadscope-reorder --max-worker-restart=0
+              -n 1 --dist loadfile --no-loadscope-reorder --max-worker-restart=0
             )
           fi
           SECONDS=0
@@ -513,6 +532,19 @@ jobs:
         run: |
           report_dir="${RUNNER_TEMP}/e2e-observability/${{ matrix.lane }}"
           mkdir -p "$report_dir"
+          capture_runner_observation() {
+            local output="$1"
+            shift
+            if "$@" > "$output" 2>&1; then
+              return 0
+            fi
+            printf '\nObservation unavailable: %s\n' "$*" >> "$output" || true
+            printf '::warning::Runner observation unavailable: %s\n' "$*"
+          }
+          capture_runner_observation "$report_dir/runner-memory-after.txt" free --bytes
+          for resource in cpu memory io; do
+            capture_runner_observation "$report_dir/runner-pressure-${resource}-after.txt" cat "/proc/pressure/${resource}"
+          done
           timeout 30s docker ps -a --no-trunc > "$report_dir/docker-ps.txt" 2>&1 || true
           timeout 30s docker stats --all --no-stream > "$report_dir/docker-stats.txt" 2>&1 || true
           timeout 30s docker system df > "$report_dir/docker-system-df.txt" 2>&1 || true

@@ -2446,6 +2446,28 @@ class RuntimeStreamControlDataPlane:
         return release
 
     async def _release(self, key: BrokerStreamKey) -> None:
+        """Finish existing stream cleanup before propagating caller cancellation."""
+        cleanup = asyncio.create_task(
+            self._release_stream(key, caller=asyncio.current_task()),
+            name="runtime-stream-release",
+        )
+        cancellation: asyncio.CancelledError | None = None
+        while True:
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError as error:
+                if cleanup.cancelled():
+                    raise
+                if cancellation is None:
+                    cancellation = error
+            else:
+                if cancellation is not None:
+                    raise cancellation
+                return
+
+    async def _release_stream(
+        self, key: BrokerStreamKey, *, caller: asyncio.Task[object] | None
+    ) -> None:
         async with self.lock:
             binding = self.bindings.pop(key, None)
             broker = None if binding is None else binding.broker
@@ -2458,7 +2480,7 @@ class RuntimeStreamControlDataPlane:
                 self.source_tombstone_set.add(key)
         guard = self.browser_guards.pop(key, None)
         self.browser_fresh_until.pop(key, None)
-        if guard is not None and guard is not asyncio.current_task():
+        if guard is not None and guard is not caller:
             guard.cancel()
         if binding is None:
             return
@@ -2468,7 +2490,7 @@ class RuntimeStreamControlDataPlane:
                 source_session_id=key.source_session_id,
                 source_stream_id=key.stream_id,
             )
-        if guard is not None and guard is not asyncio.current_task():
+        if guard is not None and guard is not caller:
             await asyncio.gather(guard, return_exceptions=True)
         if broker is not None:
             await broker.release(key)

@@ -52,6 +52,17 @@ _EXPECTED_TRANSACTION_OWNERS = {
         "replace_after_quota",
     },
     "session_execution_file.py": {"write", "atomic_patch"},
+    "external_channel/management_operations.py": {
+        "disconnect_binding",
+        "remove_multi_route",
+        "disconnect_multi_connection",
+        "_complete_connection_disconnect",
+        "_begin_connection_disconnect",
+        "replace_multi_channel_default",
+        "clear_multi_channel_default",
+    },
+    "external_channel/connection_revocation_operations.py": {"apply"},
+    "external_channel/participation_operations.py": {"mutate_parent_settings"},
 }
 
 
@@ -72,7 +83,7 @@ def test_hierarchy_retry_is_limited_to_complete_owning_operation_closure() -> No
                     node.name
                 )
     assert observed == _EXPECTED_TRANSACTION_OWNERS
-    assert sum(len(entries) for entries in observed.values()) == 38
+    assert sum(len(entries) for entries in observed.values()) == 47
 
 
 def test_inventoried_nonwaiting_acquisition_surfaces_are_removed() -> None:

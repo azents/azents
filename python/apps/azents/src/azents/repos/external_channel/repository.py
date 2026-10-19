@@ -71,6 +71,7 @@ from azents.repos.external_channel.work_state import (
     ExternalChannelWorkStateStore,
 )
 from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleRepository
+from azents.repos.session_primary_channel import SessionPrimaryChannelRepository
 
 from .data import (
     DiscordGatewayTypingTarget,
@@ -3361,10 +3362,20 @@ class ExternalChannelRepository:
                     "External Channel resource already has an active binding "
                     "for another Agent Session."
                 )
+            await SessionPrimaryChannelRepository().set_origin_primary(
+                session,
+                session_id=existing.agent_session_id,
+                binding_id=existing.id,
+            )
             return existing
         rdb = RDBExternalChannelBinding(**create.model_dump())
         session.write_session.add(rdb)
         await session.write_session.flush()
+        await SessionPrimaryChannelRepository().set_origin_primary(
+            session,
+            session_id=rdb.agent_session_id,
+            binding_id=rdb.id,
+        )
         return ExternalChannelBinding.model_validate(rdb)
 
     async def _validate_binding_owners(
