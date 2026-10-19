@@ -40,6 +40,8 @@ code_paths:
   - .github/actions/expose-github-runtime/**
   - .github/workflows/ci.yaml
   - .github/workflows/ios.yaml
+  - swift/scripts/ios.sh
+  - swift/scripts/simulator-diagnostics.sh
   - typescript/packages/azents-session-core/**
   - .github/workflows/e2e-duration-recheck.yaml
   - .github/workflows/snapshot.yaml
@@ -818,6 +820,12 @@ Always-on required CI does not depend on external credentials.
   synthetic PR merge SHA is not substituted for the collector's head identity.
   Same-name native artifacts are explicitly replaced on a workflow repeat;
   complete immutable first-attempt evidence must be collected before repeating.
+  CoreSimulator runtime listing, device creation, boot and boot readiness record
+  timestamped start/end markers and original command exit status in
+  `simulator-setup.log`, included by the existing always-upload diagnostic path.
+  A stalled preparation command leaves a start marker before test logs exist.
+  Command stdout remains unchanged for JSON/identifier consumers; command order,
+  native test/build checks and the existing job deadline remain unchanged.
   Re-ingesting an identical workflow/run/attempt from another local collection
   directory is idempotent and retains the first stored source locator. Every
   other stored field, including opaque measurement/evidence extensions, must
