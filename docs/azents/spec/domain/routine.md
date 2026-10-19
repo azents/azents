@@ -152,9 +152,14 @@ or other-Session fallback. Inspection does not mutate, pause, trigger or configu
 Routines and does not expose internal execution-owner identity.
 
 The supporting `?page=routines` panel keeps Chat mounted and provides inventory,
-objective/source/occurrence details and collapsed work records. There are no
-management controls. Transcript judgment is a collapsed `Routine` disclosure,
-separate from normal tool activity, with durable/reloaded considered candidates,
+objective/source/occurrence details and collapsed work records. Its compact list
+shows titles and objective previews; narrow layouts use a back-icon/title header
+and preserve list scroll and focus on return. Pull-to-refresh works from the
+scroll top, with a keyboard-accessible refresh icon as an alternative. There are
+no management controls. Transcript judgment uses the shared activity-row
+disclosure, initially collapsed, with a read-only checked/unchecked/unknown
+candidate checklist and compact per-call metadata. It is separate from normal
+tool activity, with durable/reloaded considered candidates,
 decisions, status, model and per-call usage. Invalid/missing evidence is diagnostic
 or unavailable. Routine tool details separate requested inputs from actual
 completed output: failed/rejected/cancelled/interrupted calls cannot imply a

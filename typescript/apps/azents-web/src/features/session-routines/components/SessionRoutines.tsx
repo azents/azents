@@ -1,19 +1,26 @@
 "use client";
 
 import {
+  ActionIcon,
   Alert,
   Badge,
   Box,
-  Button,
   Divider,
   Group,
   Loader,
+  rem,
   ScrollArea,
   Stack,
   Text,
   Title,
   UnstyledButton,
 } from "@mantine/core";
+import {
+  IconArrowDown,
+  IconArrowLeft,
+  IconChevronRight,
+  IconRefresh,
+} from "@tabler/icons-react";
 import { useFormatter, useTranslations } from "next-intl";
 import classes from "./SessionRoutines.module.css";
 import type { SessionRoutinesContainerOutput } from "../containers/useSessionRoutinesContainer";
@@ -234,29 +241,68 @@ export function SessionRoutines({
   selectedSlug,
   selectedTitle,
   detailHeading,
+  viewportRef,
+  refreshState,
   onSelect,
   onBack,
   onRefresh,
 }: SessionRoutinesContainerOutput): React.ReactElement {
   const t = useTranslations("routines");
   return (
-    <ScrollArea flex={1} mih={0} type="auto">
-      <Stack p="md" gap="md" className={classes.root}>
-        <Group justify="space-between" align="flex-start" wrap="nowrap">
-          <Box style={{ minWidth: 0 }}>
-            <Title order={3}>{t("title")}</Title>
-            <Text size="sm" c="dimmed">
-              {t("description")}
-            </Text>
-          </Box>
-          <Button
-            variant="subtle"
-            size="compact-sm"
-            onClick={onRefresh}
-            style={{ flexShrink: 0 }}
+    <ScrollArea
+      flex={1}
+      mih={0}
+      type="auto"
+      viewportRef={viewportRef}
+      viewportProps={{
+        role: "region",
+        "aria-label": t("inventory"),
+        style: { overscrollBehaviorY: "contain" },
+      }}
+    >
+      <Stack p="sm" gap="sm" className={classes.root}>
+        {refreshState.type !== "IDLE" && (
+          <Group
+            gap="xs"
+            justify="center"
+            role={refreshState.type === "ERROR" ? "alert" : "status"}
           >
-            {t("refresh")}
-          </Button>
+            {refreshState.type === "REFRESHING" ? (
+              <Loader size="xs" />
+            ) : (
+              <IconArrowDown size={rem(14)} />
+            )}
+            <Text size="xs" c="dimmed">
+              {refreshState.type === "ERROR"
+                ? t("refreshError")
+                : refreshState.type === "REFRESHING"
+                  ? t("refreshing")
+                  : refreshState.ready
+                    ? t("releaseRefresh")
+                    : t("pullRefresh")}
+            </Text>
+          </Group>
+        )}
+        <Group
+          className={classes.intro}
+          data-detail={selectedSlug !== null}
+          justify="space-between"
+          align="flex-start"
+          wrap="nowrap"
+        >
+          <Text size="xs" c="dimmed">
+            {t("description")}
+          </Text>
+          <ActionIcon
+            variant="subtle"
+            size="sm"
+            aria-label={t("refresh")}
+            className={classes.refresh}
+            loading={refreshState.type === "REFRESHING"}
+            onClick={() => void onRefresh()}
+          >
+            <IconRefresh size={rem(14)} />
+          </ActionIcon>
         </Group>
         {state.type === "LOADING" ? (
           <Group role="status">
@@ -276,7 +322,7 @@ export function SessionRoutines({
             <Stack
               component="nav"
               aria-label={t("inventory")}
-              gap="xs"
+              gap={0}
               className={classes.listPane}
             >
               {state.items.map((item) => (
@@ -286,36 +332,61 @@ export function SessionRoutines({
                   aria-pressed={selectedSlug === item.slug}
                   onClick={(event) => onSelect(item.slug, event.currentTarget)}
                 >
-                  <Text size="sm" fw={500} className={classes.prose}>
-                    {item.content.title}
-                  </Text>
-                  <Text size="xs" c="dimmed" className={classes.prose}>
-                    {item.slug}
-                  </Text>
+                  <Group gap="xs" wrap="nowrap">
+                    <Box miw={0} flex={1}>
+                      <Text size="sm" fw={500} lineClamp={2}>
+                        {item.content.title}
+                      </Text>
+                      <Text size="xs" c="dimmed" lineClamp={2} mt={rem(2)}>
+                        {item.content.objective}
+                      </Text>
+                    </Box>
+                    <IconChevronRight
+                      aria-hidden="true"
+                      size={rem(16)}
+                      style={{ flexShrink: 0 }}
+                    />
+                  </Group>
                 </UnstyledButton>
               ))}
             </Stack>
-            <Stack gap="md" className={classes.detailPane}>
+            <Stack gap="sm" className={classes.detailPane}>
               {selectedSlug !== null && (
-                <>
-                  <Button
+                <Group
+                  component="header"
+                  gap="xs"
+                  wrap="nowrap"
+                  className={classes.detailHeader}
+                >
+                  <ActionIcon
                     hiddenFrom="sm"
                     variant="subtle"
-                    size="compact-sm"
+                    aria-label={t("back")}
                     onClick={onBack}
-                    style={{ alignSelf: "flex-start" }}
                   >
-                    {t("back")}
-                  </Button>
+                    <IconArrowLeft size={rem(18)} />
+                  </ActionIcon>
                   <Title
-                    order={4}
+                    order={5}
                     ref={detailHeading}
                     tabIndex={-1}
                     className={classes.prose}
                   >
                     {selectedTitle}
                   </Title>
-                </>
+                  <ActionIcon
+                    hiddenFrom="sm"
+                    variant="subtle"
+                    size="sm"
+                    aria-label={t("refresh")}
+                    className={classes.refresh}
+                    loading={refreshState.type === "REFRESHING"}
+                    onClick={() => void onRefresh()}
+                    ml="auto"
+                  >
+                    <IconRefresh size={rem(14)} />
+                  </ActionIcon>
+                </Group>
               )}
               <DetailState state={detail} />
             </Stack>
