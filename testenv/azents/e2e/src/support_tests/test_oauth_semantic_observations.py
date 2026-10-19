@@ -1,10 +1,13 @@
 """Docker-free regressions for OAuth, semantic and Team Session observations."""
 
+import json
+
 import pytest
 import requests
 from azentspublicclient.models.session_context_response import SessionContextResponse
 from pydantic import ValidationError
 
+from tests.required.public import external_account_linking_scenarios as linking
 from tests.required.public.external_account_linking_scenarios import (
     _decode_settings_view,
     _error_code,
@@ -16,6 +19,7 @@ from tests.required.public.external_account_linking_scenarios import (
     _ProviderAvailabilityList,
     _RequestCounts,
     _SettingsView,
+    _slack_setup_confirmation,
 )
 from tests.required.public.test_provider_tool_semantic_transcript import (
     _compaction_request,
@@ -60,12 +64,73 @@ def test_oauth_response_projections_preserve_declared_fields_and_extensions() ->
     assert _LinkList.model_validate({"items": [link.model_dump()]}).items == [link]
     assert _decode_settings_view({}) is None
     view = _SettingsView.model_validate(
-        {"view_hash": "hash", "action_ids": ["model"], "link_paths": ["/account"]}
+        {
+            "view_hash": "hash",
+            "private_metadata": None,
+            "action_ids": ["model"],
+            "link_paths": ["/account"],
+        }
     )
     assert view.action_ids == ["model"] and view.link_paths == ["/account"]
     counts = _RequestCounts.model_validate({"request_counts": {"history": 2}})
     assert counts.request_counts["history"] == 2
     assert counts.request_counts.get("missing", 0) == 0
+
+
+@pytest.mark.parametrize("metadata", [None, "unavailable", "signed-current-view"])
+def test_setup_wait_rejects_fresh_nonconfirmation_settings(
+    monkeypatch: pytest.MonkeyPatch, metadata: str | None
+) -> None:
+    view = _SettingsView(
+        view_hash="fresh",
+        private_metadata=metadata,
+        action_ids=[],
+        link_paths=[],
+    )
+    monkeypatch.setattr(linking, "_transient_slack_view", lambda *args, **kwargs: view)
+    assert _slack_setup_confirmation("http://invalid.test", after_hash="old") is None
+
+
+def test_setup_wait_accepts_only_the_completed_presentation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    completed = _SettingsView(
+        view_hash="fresh", private_metadata="completed", action_ids=[], link_paths=[]
+    )
+    observations: list[tuple[str, str, str | None]] = []
+
+    def transient(
+        fake_url: str, *, scope: str, after_hash: str | None
+    ) -> _SettingsView:
+        observations.append((fake_url, scope, after_hash))
+        return completed
+
+    monkeypatch.setattr(linking, "_transient_slack_view", transient)
+    assert (
+        _slack_setup_confirmation("http://invalid.test", after_hash="old") == completed
+    )
+    assert observations == [("http://invalid.test", "settings", "old")]
+
+
+@pytest.mark.parametrize("absent", [True, False])
+def test_setup_wait_does_not_reuse_absent_or_stale_completion(
+    monkeypatch: pytest.MonkeyPatch, *, absent: bool
+) -> None:
+    payload: dict[str, object] = (
+        {}
+        if absent
+        else {
+            "view_hash": "old",
+            "private_metadata": "completed",
+            "action_ids": [],
+            "link_paths": [],
+        }
+    )
+    response = requests.Response()
+    response.status_code = 200
+    response._content = json.dumps(payload).encode()
+    monkeypatch.setattr(linking.requests, "get", lambda *args, **kwargs: response)
+    assert _slack_setup_confirmation("http://invalid.test", after_hash="old") is None
 
 
 @pytest.mark.parametrize("value", [True, "3", None, [], {}])

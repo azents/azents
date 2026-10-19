@@ -96,6 +96,7 @@ class _RequestCounts(ExtensionObservation):
 
 class _SettingsView(ExtensionObservation):
     view_hash: StrictStr
+    private_metadata: StrictStr | None
     action_ids: list[StrictStr]
     link_paths: list[StrictStr]
 
@@ -420,6 +421,14 @@ def _session_binding(
     return None
 
 
+def _slack_setup_confirmation(
+    fake_url: str, *, after_hash: str | None
+) -> _SettingsView | None:
+    """Observe completed setup presentation before opening another settings modal."""
+    view = _transient_slack_view(fake_url, scope="settings", after_hash=after_hash)
+    return view if view is not None and view.private_metadata == "completed" else None
+
+
 def _seed_connected_slack_channel(
     *,
     public_api_client: azentspublicclient.ApiClient,
@@ -492,6 +501,10 @@ def _seed_connected_slack_channel(
         message="Slack setup modal was not rendered",
     )
     assert setup_view is not None
+    previous_settings = _transient_slack_view(fake_url, scope="settings")
+    previous_hash = (
+        previous_settings.view_hash if previous_settings is not None else None
+    )
     external_scenarios._submit_slack_setup_location(
         callback_url=callback_url,
         app_id=_SLACK_APP_ID,
@@ -510,6 +523,13 @@ def _seed_connected_slack_channel(
         message="Slack setup did not create a Session Binding",
     )
     assert isinstance(binding, _SessionBinding)
+    # Binding persistence precedes replay/control I/O and the setup confirmation.
+    wait_until(
+        lambda: _slack_setup_confirmation(fake_url, after_hash=previous_hash),
+        timeout=15,
+        interval=0.2,
+        message="Slack setup confirmation was not rendered",
+    )
     return binding
 
 
