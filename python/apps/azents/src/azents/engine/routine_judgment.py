@@ -1,6 +1,7 @@
 """Purpose-owned canonical-context Routine judgment without ordinary Run effects."""
 
 import dataclasses
+import datetime
 from collections.abc import Sequence
 
 from pydantic import ValidationError
@@ -15,6 +16,7 @@ from azents.core.routine_judgment import (
     RoutineJudgmentConsidered,
     RoutineJudgmentDecision,
     render_judgment_input,
+    validate_judgment_candidates,
 )
 from azents.engine.events.file_parts import ModelFileResolver
 from azents.engine.events.model_messages import (
@@ -80,6 +82,7 @@ def prepare_routine_judgment_request(
     transcript: Sequence[ModelTranscriptMessage],
     system_prompt: str,
     candidates: tuple[RoutineJudgmentCandidate, ...],
+    current_time: datetime.datetime,
     session_id: str,
     native_replay_context: str | None,
     model_file_resolver: ModelFileResolver | None,
@@ -89,7 +92,7 @@ def prepare_routine_judgment_request(
         EventKind.USER_MESSAGE,
         UserMessagePayload(
             sender_user_id=None,
-            content=render_judgment_input(candidates),
+            content=render_judgment_input(candidates, current_time=current_time),
         ),
     )
     messages = [*transcript, final_input]
@@ -198,7 +201,7 @@ async def call_routine_judgment(
             "Routine judgment requires its own Session model-call identity."
         )
     # Validate the candidate set before spending any provider call.
-    render_judgment_input(candidates)
+    validate_judgment_candidates(candidates)
     completed: NormalizedAdapterOutput[TransientModelMessage]
     if isinstance(request, OpenAIResponsesRequest):
         if selection.provider not in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:

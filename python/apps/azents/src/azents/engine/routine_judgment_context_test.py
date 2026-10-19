@@ -8,7 +8,7 @@ from pydantic_ai.messages import ModelMessagesTypeAdapter
 from azents.core.agent import AgentModelSelection, SelectableModelCandidate
 from azents.core.enums import LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
-from azents.core.routine_judgment_test import candidate
+from azents.core.routine_judgment_test import JUDGMENT_TIME, candidate
 from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.core.tools import (
     PreparedDynamicPrompt,
@@ -108,6 +108,7 @@ async def test_canonical_context_does_not_enter_ordinary_turn(
         model_selection=selection,
         transcript=transcript,
         candidates=(candidate(),),
+        current_time=JUDGMENT_TIME,
         context=TurnContext(
             workspace_id="workspace",
             model="fixture",
@@ -136,6 +137,8 @@ async def test_canonical_context_does_not_enter_ordinary_turn(
     assert "Ordinary Agent policy." in prompt
     assert "Current Session static guidance." in prompt
     assert "Current Session continuity" in prompt
+    assert "Current time: 2026-10-19T09:58:00+00:00" in encoded
+    assert "requested interval has not elapsed, set act=false" in encoded
 
 
 async def test_foreign_context_rejected_before_toolkit_or_model_work() -> None:
@@ -147,6 +150,7 @@ async def test_foreign_context_rejected_before_toolkit_or_model_work() -> None:
             model_selection=selection,
             transcript=history(),
             candidates=(candidate(),),
+            current_time=JUDGMENT_TIME,
             context=TurnContext(
                 workspace_id="other-workspace",
                 model="fixture",

@@ -10,7 +10,9 @@ SETUP = "ROUTINE_E2E_SETUP"
 READY = "ROUTINE_E2E_READY"
 MARKER = "ROUTINE_E2E"
 JOURNAL_PATH = "/v1/_routine_requests"
-JUDGMENT_PREFIX = "Judge the supplied Session Routine candidates together."
+JUDGMENT_PREFIX = (
+    "Decide whether to start work now for each Session\nRoutine candidate."
+)
 CONTEXT_MARKER = "Admitted contexts:\n"
 RUNTIME_PROOF = "ROUTINE_E2E_RUNTIME_PROOF"
 UPDATE_PREFIX = "ROUTINE_E2E_UPDATE "

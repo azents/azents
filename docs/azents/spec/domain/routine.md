@@ -88,7 +88,17 @@ input during the call remains available and does not invalidate or repeat an
 otherwise valid decision; later source evidence is retained separately.
 
 Judgment uses canonical Session history, the selected model/profile and supported
-Structured response output, with no executable tools. Each considered ID may
+Structured response output, with no executable tools.
+Judge input includes an explicit timezone-aware current time normalized to UTC,
+alongside each candidate's objective, source evidence, last recorded execution
+start time, latest result and next-check hint. The instruction first evaluates
+when another check is called for: an unelapsed requested interval means no action
+unless the objective or new input warrants an earlier check. `act` selects whether
+to start investigation, not whether to notify the user. A due check does not
+require an already-known finding; notification is decided after work. These are
+model instructions, not a deterministic per-Routine scheduling gate.
+
+Each considered ID may
 occur once and must belong to the captured set. Missing, foreign or duplicate
 identities, invalid/incomplete native output and unavailable saved capability
 produce failure evidence, never synthetic no-action success. A failed check waits

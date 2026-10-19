@@ -100,26 +100,48 @@ class RoutineJudgmentConsidered(BaseModel):
     title: str
 
 
-JUDGMENT_INSTRUCTIONS = """Judge the supplied Session Routine candidates together.
-Use the Session conversation and each candidate's stored objective, source input,
-last execution time, latest work result, and next-check hint to decide whether
-this occurrence needs action now. Periodic preferences belong to the objective;
-do not confuse a checking opportunity with a mandatory output obligation.
-Return exactly one Structured decision for each supplied routine_id. Set act to
-true only when work is needed. Do not create a new objective, execute tools,
-write a user notification, or generate a free-form decision explanation.
+JUDGMENT_INSTRUCTIONS = """Decide whether to start work now for each Session
+Routine candidate.
+
+Use its objective, source input, last execution time, latest result,
+and next-check hint, together with relevant Session context.
+
+First evaluate when the objective calls for another check. If its
+requested interval has not elapsed, set act=false unless the objective
+or new input specifically warrants an earlier check. A checking
+opportunity alone is not a reason to repeat the work.
+
+Set act=true when work is due or otherwise warranted by the objective.
+This authorizes investigation, not a user notification. Do not require
+a known finding before starting a due check; notification is decided
+separately after the work.
+
+Return exactly one decision per supplied routine_id. Do not perform
+work, invoke tools, send messages, or return an explanation.
 """
 
 
-def render_judgment_input(candidates: tuple[RoutineJudgmentCandidate, ...]) -> str:
-    """Render only the final request; canonical conversation stays structured."""
+def validate_judgment_candidates(
+    candidates: tuple[RoutineJudgmentCandidate, ...],
+) -> None:
+    """Reject empty or repeated candidate identities before provider I/O."""
     if not candidates:
         raise ValueError("Empty Routine candidates do not require a model call.")
     ids = [candidate.routine_id for candidate in candidates]
     if len(ids) != len(set(ids)):
         raise ValueError("Routine judgment input contains duplicate candidates.")
+
+
+def render_judgment_input(
+    candidates: tuple[RoutineJudgmentCandidate, ...], *, current_time: datetime.datetime
+) -> str:
+    """Render the explicit judgment time; canonical history stays structured."""
+    validate_judgment_candidates(candidates)
+    if current_time.tzinfo is None or current_time.utcoffset() is None:
+        raise ValueError("Routine judgment current time must be timezone-aware.")
     return (
         JUDGMENT_INSTRUCTIONS
+        + f"\nCurrent time: {current_time.astimezone(datetime.UTC).isoformat()}\n"
         + "\nCandidates:\n["
         + ",\n".join(candidate.model_dump_json() for candidate in candidates)
         + "]"
