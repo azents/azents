@@ -6,7 +6,7 @@ import json
 import pytest
 from azcommon.uuid import uuid7
 from pydantic import ValidationError
-from pydantic_ai.messages import ModelMessagesTypeAdapter
+from pydantic_ai.messages import ModelRequest, SystemPromptPart, UserPromptPart
 from pydantic_ai.output import OutputObjectDefinition
 
 from azents.core.enums import EventKind, LLMModelDeveloper, LLMProvider
@@ -148,7 +148,15 @@ def test_pydantic_structured_judgment_retains_history_without_executable_tools(
         native_replay_context="same-canonical-context",
         output=_schema(),
     )
-    rendered = ModelMessagesTypeAdapter.dump_json(request.messages).decode()
+    contents = [
+        str(part.content)
+        for message in request.messages
+        if isinstance(message, ModelRequest)
+        for part in message.parts
+        if isinstance(part, (SystemPromptPart, UserPromptPart))
+    ]
+    assert len(request.messages) == len(contents) == 3
+    rendered = "\n".join(contents)
     assert "Keep watching traffic." in rendered
     assert "Only alert on anomalies." in rendered
     assert "Ordinary Session system context" in rendered
