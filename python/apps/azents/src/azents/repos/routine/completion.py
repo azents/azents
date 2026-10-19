@@ -186,6 +186,22 @@ class RoutineCompletionRepository:
                 and item.state.current_run_id == authority.run_id
             )
 
+    async def list_for_compaction(
+        self, *, scope: RoutineScope, authority: SessionResourceAuthority
+    ) -> tuple[RoutineExecutionState, ...]:
+        """Read started Session obligations without rebinding execution authority."""
+        _require_root_authority(scope, authority)
+        async with self.read_session_manager() as session:
+            await self.execution_authority.require_execution_scope(
+                session, scope=scope, run_id=authority.run_id
+            )
+            await self._require_run(session, authority=authority)
+            return tuple(
+                item.state
+                for item in await self.states.list_executions(session, scope=scope)
+                if item.state.phase == "started"
+            )
+
     async def complete(
         self,
         *,

@@ -90,3 +90,17 @@ def test_compaction_snapshot_replaces_only_its_owned_section() -> None:
     assert "Current Routine Obligations" not in removed
     assert "Stored objective" not in removed
     assert "User context." in removed and "Preserve this." in removed
+
+
+def test_compaction_keeps_every_objective_in_deterministic_order() -> None:
+    first = _item("first", objective="First full objective", previous=None)
+    second = _item(
+        "second",
+        objective="Second full objective",
+        previous=datetime.datetime(2026, 10, 17, tzinfo=datetime.UTC),
+    )
+    rendered = replace_routine_compaction_snapshot("User context.", (second, first))
+    assert "First full objective" in rendered and "Second full objective" in rendered
+    assert rendered.count('"objective"') == 2
+    assert rendered.index("occurrence-first") < rendered.index("occurrence-second")
+    assert replace_routine_compaction_snapshot(rendered, (first, second)) == rendered

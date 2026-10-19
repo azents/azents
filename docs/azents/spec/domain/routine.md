@@ -105,6 +105,13 @@ oldest incomplete occurrence, supplies its full context and references remaining
 identities; `read_routine_context` reads only admitted identities in the authorized
 Session.
 
+Compaction preserves all started, unfinished Routine occurrences in the exact
+Session, including work associated with earlier Runs. Each entry contains its
+immutable objective, source/prior context and occurrence identity in deterministic
+order. Registered future definitions, unstarted admissions and terminal work are
+not added. This read-only snapshot does not rebind a host Run or grant context,
+completion or idle-continuation authority for another Run's work.
+
 `record_routine_result` requires the admitted, started, current-owner identity.
 Its `work` contains `objective_outcome` (`finished` or `failed`), nonblank `result`
 and `next_hint`, independent `notify`, and nullable `message`. A notifying result

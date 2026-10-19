@@ -1,5 +1,6 @@
 """Routine hooks reuse normal idle admission and subsequent Run promotion."""
 
+import dataclasses
 import datetime
 from unittest.mock import AsyncMock
 
@@ -8,6 +9,7 @@ import sqlalchemy as sa
 
 from azents.core.enums import AgentRunStatus, EventKind, MailboxItemKind
 from azents.core.mailbox_data import RoutineContinuationMailboxPayload
+from azents.core.routine import RoutineObjectiveOutcome, RoutineUnavailable
 from azents.core.routine_presentation import routine_execution_ref
 from azents.engine.events.types import RoutineInputPayload
 from azents.engine.hooks.types import (
@@ -25,8 +27,9 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.idle_continuation import IdleContinuationRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.promotion import MailboxPromotionEvent, MailboxPromotionPlan
-from azents.repos.routine.completion_test import fixture
+from azents.repos.routine.completion_test import fixture, work
 from azents.repos.routine.lifecycle_test import _archive, _attach_routine_input
+from azents.repos.routine.persistence_test import _operations
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.session_execution import SessionExecutionRepository
 from azents.repos.toolkit_state import ToolkitStateRepository
@@ -213,7 +216,7 @@ async def test_compaction_hook_preserves_exact_admitted_context_without_mutation
     result = await toolkit._on_compaction_summary(context)
     assert result is not None
     assert result.summary.startswith(context.summary)
-    assert result.summary.count('"objective"') == 1
+    assert result.summary.count('"objective"') == len(f.states)
     for original in f.states:
         assert routine_execution_ref(original).execution_id in result.summary
         current = await f.repository.context(
@@ -223,3 +226,115 @@ async def test_compaction_hook_preserves_exact_admitted_context_without_mutation
             execution_id=original.context.execution_id,
         )
         assert current == original
+    repeated_context = dataclasses.replace(context, summary=result.summary)
+    assert await toolkit._on_compaction_summary(repeated_context) is None
+    foreign_context = dataclasses.replace(context, session_id="another-session")
+    assert await toolkit._on_compaction_summary(foreign_context) is None
+    for original in f.states:
+        await f.repository.complete(
+            scope=f.scope,
+            authority=f.authority,
+            slug=original.context.candidate.slug,
+            execution_id=original.context.execution_id,
+            work=work(notify=False, outcome=RoutineObjectiveOutcome.FINISHED),
+            now=datetime.datetime.now(datetime.UTC),
+        )
+    cleared = await toolkit._on_compaction_summary(repeated_context)
+    assert cleared is not None
+    assert cleared.summary == context.summary
+
+
+async def test_compaction_includes_prior_run_work_without_granting_execution_authority(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    f = await fixture(rdb_session_manager)
+    for definition in f.definitions:
+        await _operations(rdb_session_manager).update(
+            scope=f.scope,
+            slug=definition.slug,
+            expected=definition.content,
+            changes={
+                "objective": "Replacement definition, not the admitted objective."
+            },
+            owner=f.authority.execution_owner,
+        )
+    foreign = await fixture(rdb_session_manager)
+    async with rdb_session_manager() as session:
+        previous = await session.write_session.get(RDBAgentRun, f.authority.run_id)
+        assert previous is not None
+        previous.status = AgentRunStatus.COMPLETED
+        current = await f.repository.runs.create(
+            session,
+            AgentRunCreate(
+                session_id=f.scope.session_id,
+                scheduled_task_cycle_id=None,
+                parent_agent_run_id=None,
+            ),
+        )
+    current_fixture = dataclasses.replace(
+        f,
+        authority=dataclasses.replace(
+            f.authority, run_id=current.id, run_index=current.run_index
+        ),
+    )
+    toolkit = _toolkit(rdb_session_manager, current_fixture)
+    toolkit.bind_execution_owner(current_fixture.authority.execution_owner)
+    await toolkit.update_context(_context(current_fixture, AsyncMock()))
+    context = CompactionSummaryHookContext(
+        workspace_id=f.scope.workspace_id,
+        agent_id=f.scope.agent_id,
+        session_id=f.scope.session_id,
+        run_id=current.id,
+        compaction_id="compaction-next-run",
+        reason=None,
+        covered_until_event_id="event-a",
+        summary="Current ordinary work.\n\n## Other Work\n\nKeep this.",
+        continuity_history="",
+    )
+    result = await toolkit._on_compaction_summary(context)
+    assert result is not None
+    assert result.summary.count('"objective"') == len(f.states)
+    assert "Replacement definition" not in result.summary
+    for definition in foreign.definitions:
+        assert definition.id not in result.summary
+    for original in f.states:
+        assert original.context.execution_id in result.summary
+        assert original.context.candidate.content.objective in result.summary
+        with pytest.raises(ValueError, match="not available to this Run"):
+            await f.repository.context(
+                scope=f.scope,
+                authority=current_fixture.authority,
+                slug=original.context.candidate.slug,
+                execution_id=original.context.execution_id,
+            )
+        with pytest.raises(RoutineUnavailable):
+            await f.repository.complete(
+                scope=f.scope,
+                authority=current_fixture.authority,
+                slug=original.context.candidate.slug,
+                execution_id=original.context.execution_id,
+                work=work(notify=False, outcome=RoutineObjectiveOutcome.FINISHED),
+                now=datetime.datetime.now(datetime.UTC),
+            )
+    assert "## Other Work\n\nKeep this." in result.summary
+    assert (
+        await toolkit._on_session_idle(
+            SessionIdleHookContext(
+                workspace_id=f.scope.workspace_id,
+                agent_id=f.scope.agent_id,
+                session_id=f.scope.session_id,
+                run_id=current.id,
+                reason="completed",
+            )
+        )
+        is None
+    )
+    async with rdb_session_manager() as session:
+        for original in f.states:
+            saved = await f.repository.states.get_occurrence(
+                session,
+                scope=f.scope,
+                slug=original.context.candidate.slug,
+                execution_id=original.context.execution_id,
+            )
+            assert saved is not None and saved.state == original

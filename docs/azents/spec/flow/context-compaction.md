@@ -43,6 +43,9 @@ code_paths:
   - python/apps/azents/src/azents/core/session_execution_data.py
   - python/apps/azents/src/azents/repos/model_operation_completion.py
   - python/apps/azents/src/azents/engine/tools/scheduled.py
+  - python/apps/azents/src/azents/engine/tools/routine.py
+  - python/apps/azents/src/azents/core/routine_presentation.py
+  - python/apps/azents/src/azents/repos/routine/completion.py
   - python/apps/azents/src/azents/repos/scheduled_task_cycle/**
   - python/apps/azents/src/azents/repos/model_candidate_health/**
   - python/apps/azents/src/azents/repos/scheduled_task/presentation.py
@@ -468,10 +471,17 @@ breakdown or compaction baseline. A no-action check therefore leaves ordinary
 context and usage unchanged.
 
 Admitted Routine trigger and continuation inputs are ordinary model inputs and
-retain normal accounting. Routine Toolkit hooks add incomplete admitted context
-to successful compaction continuity and select the oldest incomplete occurrence
-for idle continuation. They preserve original objectives and admitted identities
-rather than regenerating objectives from judgment.
+retain normal accounting. The Routine compaction hook adds every started,
+unfinished occurrence in the exact Session, including earlier Run work. Each
+occurrence retains its full immutable objective, source/prior context and identity
+in deterministic order. It replaces its owned section, removes stale entries and
+leaves other summary sections intact. Future registered definitions, unstarted
+admissions and completed/cancelled work are excluded. Snapshot visibility does not
+change execution ownership or permit completing another Run's occurrence.
+
+Ordinary idle continuation remains separate: it selects the oldest eligible
+incomplete occurrence, supplies one full context and references the remaining
+identities. Neither path regenerates objectives from judgment.
 
 ## Changelog
 

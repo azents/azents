@@ -348,6 +348,9 @@ async def test_completion_rejects_stale_or_stopped_execution_authority(
             work=work(notify=False, outcome=RoutineObjectiveOutcome.FINISHED),
             now=NOW,
         )
+    if reason != "different_occurrence":
+        with pytest.raises(error):
+            await f.repository.list_for_compaction(scope=f.scope, authority=authority)
     async with rdb_session_manager() as session:
         state = await f.repository.states.get_execution(
             session, scope=f.scope, routine_id=f.definitions[0].id
@@ -371,6 +374,39 @@ class FailingCompletionState(RoutineStateRepository):
         expected_version: int | None,
     ) -> RoutineStateRecord[RoutineExecutionState]:
         raise RuntimeError("Synthetic state save failure")
+
+
+@pytest.mark.parametrize("phase", ["admitted", "completed", "cancelled"])
+async def test_compaction_snapshot_only_lists_started_work(
+    rdb_session_manager: SessionManager[WriteSession], phase: str
+) -> None:
+    f = await fixture(rdb_session_manager)
+    original = f.states[0]
+    values = original.model_dump()
+    values["phase"] = phase
+    if phase == "admitted":
+        values.update(current_run_id=None, started_at=None)
+    else:
+        values["completed_at"] = NOW
+        if phase == "completed":
+            values.update(
+                work=work(
+                    notify=False, outcome=RoutineObjectiveOutcome.FINISHED
+                ).model_dump(),
+                delivery_status=RoutineDeliveryStatus.NOT_REQUESTED,
+            )
+    changed = RoutineExecutionState.model_validate(values)
+    async with rdb_session_manager() as session:
+        record = await f.repository.states.get_execution(
+            session, scope=f.scope, routine_id=f.definitions[0].id
+        )
+        assert record is not None
+        await f.repository.states.save_execution(
+            session, scope=f.scope, state=changed, expected_version=record.version
+        )
+    assert await f.repository.list_for_compaction(
+        scope=f.scope, authority=f.authority
+    ) == (f.states[1],)
 
 
 async def test_pre_start_admission_is_not_completion_authority(
