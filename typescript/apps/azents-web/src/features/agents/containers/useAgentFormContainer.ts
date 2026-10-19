@@ -219,6 +219,9 @@ export function useAgentFormContainer(
 
   const onSubmit = useCallback(
     (values: AgentFormValues): void => {
+      if (typeof values.routine_check_interval_minutes !== "number") {
+        return;
+      }
       setMutationState({ type: "SUBMITTING" });
       const modelParameters = buildModelParameters(values);
       const selectableModelOptions = selectableModelOptionInputsFromFormValues(
@@ -236,6 +239,7 @@ export function useAgentFormContainer(
         updateMutation.mutate({
           handle,
           agentId,
+          routine_check_interval_minutes: values.routine_check_interval_minutes,
           name: values.name,
           description: values.description ?? null,
           selectable_model_options: selectableModelOptions,
@@ -258,6 +262,7 @@ export function useAgentFormContainer(
       } else {
         createMutation.mutate({
           handle,
+          routine_check_interval_minutes: values.routine_check_interval_minutes,
           name: values.name,
           description: values.description,
           selectable_model_options: selectableModelOptions,

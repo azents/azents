@@ -251,6 +251,7 @@ class TestAgentCrud:
         assert created.description == "test agent"
         assert created.type == AgentType.PUBLIC
         assert created.enabled is True
+        assert created.routine_check_interval_minutes == 30
 
         fetched = agent_api.agent_v1_get_agent(
             agent_id=created.id, handle=handle, _headers=headers
@@ -258,6 +259,24 @@ class TestAgentCrud:
         assert fetched.id == created.id
         assert fetched.name == "My Agent"
         assert fetched.system_prompt == "You are a helper."
+        assert fetched.routine_check_interval_minutes == 30
+        configured = agent_api.agent_v1_update_agent(
+            agent_id=created.id,
+            handle=handle,
+            agent_update_request=AgentUpdateRequest(routine_check_interval_minutes=5),
+            _headers=headers,
+        )
+        assert configured.routine_check_interval_minutes == 5
+        agent_api.agent_v1_update_agent(
+            agent_id=created.id,
+            handle=handle,
+            agent_update_request=AgentUpdateRequest(description="Interval retained"),
+            _headers=headers,
+        )
+        reloaded = agent_api.agent_v1_get_agent(
+            agent_id=created.id, handle=handle, _headers=headers
+        )
+        assert reloaded.routine_check_interval_minutes == 5
 
     def test_list_agents(
         self,
@@ -449,7 +468,9 @@ class TestAgentAdminPermission:
             agent_api.agent_v1_update_agent(
                 agent_id=agent_id,
                 handle=handle,
-                agent_update_request=AgentUpdateRequest(name="Hacked"),
+                agent_update_request=AgentUpdateRequest(
+                    name="Hacked", routine_check_interval_minutes=1
+                ),
                 _headers={"Authorization": f"Bearer {member_token}"},
             )
         assert exc_info.value.status == 403  # t create API clientt t t t

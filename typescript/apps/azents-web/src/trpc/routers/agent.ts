@@ -161,6 +161,8 @@ export const agentRouter = router({
           body: {
             name: input.name,
             selectable_model_options: input.selectable_model_options,
+            routine_check_interval_minutes:
+              input.routine_check_interval_minutes,
             main_model_label: input.main_model_label,
             lightweight_model_label: input.lightweight_model_label,
             description: input.description ?? null,
@@ -201,6 +203,8 @@ export const agentRouter = router({
           body: {
             name: input.name,
             description: input.description,
+            routine_check_interval_minutes:
+              input.routine_check_interval_minutes,
             ...("selectable_model_options" in input
               ? { selectable_model_options: input.selectable_model_options }
               : {}),

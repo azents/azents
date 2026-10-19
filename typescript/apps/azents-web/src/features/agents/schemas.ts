@@ -57,6 +57,9 @@ export const agentFormSchema = z
     tool_search_enabled: z.boolean(),
     max_turns: z.number().int().positive().nullable().optional(),
     auto_archive_ttl_days: z.number().int().positive(),
+    routine_check_interval_minutes: z
+      .union([z.number().int().min(1).max(1440), z.literal("")])
+      .refine((value) => value !== "", "Enter a whole number from 1 to 1440"),
     subagent_max_subagents: z.number().int().min(0),
     subagent_max_depth: z.number().int().min(0),
   })
@@ -113,4 +116,4 @@ export const agentFormSchema = z
     }
   });
 
-export type AgentFormValues = z.infer<typeof agentFormSchema>;
+export type AgentFormValues = z.input<typeof agentFormSchema>;

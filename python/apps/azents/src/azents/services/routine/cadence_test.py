@@ -4,6 +4,7 @@ import datetime
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+import sqlalchemy as sa
 from azcommon import di
 
 from azents.broker.types import SessionBroker
@@ -12,6 +13,7 @@ from azents.core.routine_execution import RoutineCheckState
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.events.action_messages import RoutineJudgmentAction
 from azents.job_runtime.types import JobOutcome
+from azents.rdb.models.agent import RDBAgent
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.routine.judgment_inbox_test import (
@@ -150,13 +152,21 @@ async def test_next_check_preserves_discovery_and_requests_remaining_due_work(
         assert state is not None and state.state.queued_judgment_id is not None
 
 
+@pytest.mark.parametrize("interval_minutes", [5, 30, 60])
 async def test_consecutive_no_action_judgments_schedule_from_each_completion(
     rdb_session_manager: SessionManager[WriteSession],
+    interval_minutes: int,
 ) -> None:
     repo = repository(rdb_session_manager)
     scope = await subject(rdb_session_manager)
     sources = RoutineSourceRepository(session_manager=rdb_session_manager)
     owner = SessionExecutionOwner(session_id=scope.session_id, owner_generation=0)
+    async with rdb_session_manager() as session:
+        await session.write_session.execute(
+            sa.update(RDBAgent)
+            .where(RDBAgent.id == scope.agent_id)
+            .values(routine_check_interval_minutes=interval_minutes)
+        )
     due = NOW
     for latency in [7, 90, 3]:
         admitted = await repo.admit_tick(scope=scope, now=due)
@@ -182,7 +192,7 @@ async def test_consecutive_no_action_judgments_schedule_from_each_completion(
             model="synthetic",
             now=completed,
         )
-        due = completed + ROUTINE_TICK_INTERVAL
+        due = completed + datetime.timedelta(minutes=interval_minutes)
         assert await sources.next_check_at(now=completed) == due
         assert (
             await sources.list_due_scopes(
