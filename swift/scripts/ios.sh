@@ -95,10 +95,9 @@ print(matches[0])
   simulator_id="$(simulator_stage create xcrun simctl create Azents-CI "$SIMULATOR_DEVICE_TYPE" "$runtime_id")"
   trap 'xcrun simctl shutdown "$simulator_id" >/dev/null 2>&1 || true
         xcrun simctl delete "$simulator_id" >/dev/null 2>&1 || true' EXIT
-  simulator_stage boot xcrun simctl boot "$simulator_id"
-  simulator_stage bootstatus xcrun simctl bootstatus "$simulator_id" -b
   rm -rf "$BUILD_ROOT/UITests.xcresult"
-  xcodebuild test \
+  # XCTest owns simulator startup and proves readiness by launching the real app.
+  simulator_stage test xcodebuild test \
     -project "$APP_ROOT/Azents.xcodeproj" -scheme Azents -configuration Debug \
     -destination "platform=iOS Simulator,id=$simulator_id" \
     -derivedDataPath "$BUILD_ROOT/DerivedData" \

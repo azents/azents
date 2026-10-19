@@ -79,7 +79,36 @@ class SimulatorDiagnosticsTest(unittest.TestCase):
                 process.communicate(timeout=10)
             self.assertNotIn("event=end", (root / "simulator-setup.log").read_text())
 
-    def test_existing_ios_command_order_and_diagnostic_upload_are_preserved(
+    def test_native_test_failure_through_tee_stops_before_build(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    'set -euo pipefail; source "$1"; '
+                    "simulator_stage test bash -c "
+                    """'printf "test failed\\n"; exit 37' """
+                    '| tee "$BUILD_ROOT/test.log"; '
+                    'touch "$BUILD_ROOT/build-started"',
+                    "test",
+                    str(HELPER),
+                ],
+                env={**os.environ, "BUILD_ROOT": tmp},
+                capture_output=True,
+                check=False,
+                text=True,
+                timeout=10,
+            )
+            self.assertEqual(result.returncode, 37)
+            root = Path(tmp)
+            self.assertEqual((root / "test.log").read_text(), "test failed\n")
+            self.assertFalse((root / "build-started").exists())
+            self.assertIn(
+                "stage=test event=end exit_code=37",
+                (root / "simulator-setup.log").read_text(),
+            )
+
+    def test_native_test_owns_startup_and_diagnostic_upload_is_preserved(
         self,
     ) -> None:
         script = (ROOT / "swift/scripts/ios.sh").read_text()
@@ -88,12 +117,17 @@ class SimulatorDiagnosticsTest(unittest.TestCase):
             for stage, command in (
                 ("list-runtimes", "list runtimes --json"),
                 ("create", "create Azents-CI"),
-                ("boot", 'boot "$simulator_id"'),
-                ("bootstatus", 'bootstatus "$simulator_id" -b'),
             )
         ]
         self.assertEqual(positions, sorted(positions))
-        self.assertLess(positions[-1], script.index("xcodebuild test"))
+        self.assertLess(
+            positions[-1], script.index("simulator_stage test xcodebuild test")
+        )
+        self.assertNotIn("simctl boot", script)
+        self.assertIn('-destination "platform=iOS Simulator,id=$simulator_id"', script)
+        self.assertIn('-resultBundlePath "$BUILD_ROOT/UITests.xcresult"', script)
+        self.assertIn('xcrun simctl shutdown "$simulator_id"', script)
+        self.assertIn('xcrun simctl delete "$simulator_id"', script)
         workflow = (ROOT / ".github/workflows/ios.yaml").read_text()
         self.assertIn("timeout-minutes: 30", workflow)
         self.assertIn("swift/.build/*.log", workflow)

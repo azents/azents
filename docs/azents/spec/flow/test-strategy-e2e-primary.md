@@ -820,12 +820,15 @@ Always-on required CI does not depend on external credentials.
   synthetic PR merge SHA is not substituted for the collector's head identity.
   Same-name native artifacts are explicitly replaced on a workflow repeat;
   complete immutable first-attempt evidence must be collected before repeating.
-  CoreSimulator runtime listing, device creation, boot and boot readiness record
+  CoreSimulator runtime listing, device creation and native XCTest execution record
   timestamped start/end markers and original command exit status in
   `simulator-setup.log`, included by the existing always-upload diagnostic path.
   A stalled preparation command leaves a start marker before test logs exist.
-  Command stdout remains unchanged for JSON/identifier consumers; command order,
-  native test/build checks and the existing job deadline remain unchanged.
+  Command stdout remains unchanged for JSON/identifier consumers. The selected
+  fresh simulator ID is passed directly to `xcodebuild test`, which owns startup
+  and proves readiness through real app launch and UI assertions. A separate
+  blocking `simctl bootstatus` preflight does not gate entry into XCTest.
+  Native test/build checks, cleanup and the existing job deadline remain unchanged.
   Re-ingesting an identical workflow/run/attempt from another local collection
   directory is idempotent and retains the first stored source locator. Every
   other stored field, including opaque measurement/evidence extensions, must
